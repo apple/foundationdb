@@ -1,0 +1,4 @@
+Using cluster file `tcf/separatecoordinator.cluster'.
+
+Could not communicate with a quorum of coordination servers:
+  127.0.0.1:4991  (unreachable)

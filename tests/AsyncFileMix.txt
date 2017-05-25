@@ -1,0 +1,15 @@
+testTitle=AsyncFileReadWriteTest (Uncached)
+testName=AsyncFileRead
+testDuration=10.0
+runSetup=true
+clearAfterTest=false
+numParallelReads=1000
+readSize=4096
+unbufferedIO=true
+uncachedIO=true
+fileName=aftest.bin
+fileSize=10000000
+useDB=false
+sequential=false
+unbatched=true
+writeFraction=0.999

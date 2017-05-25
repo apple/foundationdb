@@ -1,0 +1,8 @@
+testTitle=CycleTestWithKills
+    testName=Cycle
+    transactionsPerSecond=2500.0
+    testDuration=30.0
+    expectedRate=0
+
+    testName=Attrition
+    testDuration=30.0

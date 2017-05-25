@@ -1,0 +1,58 @@
+#!/bin/bash
+#
+# foundationdb		Start up the FoundationDB server daemon
+#
+# chkconfig: 2345 85 15
+# description: FoundationDB Process Monitor
+# processname: fdbmonitor
+# config: /etc/foundationdb/foundationdb.conf
+# pidfile: /var/run/fdbmonitor.pid
+
+. /etc/rc.d/init.d/functions
+
+start()
+{
+    echo -n $"Starting FoundationDB: "
+    eval daemon /usr/lib/foundationdb/fdbmonitor --conffile /etc/foundationdb/foundationdb.conf --lockfile /var/run/fdbmonitor.pid --daemonize
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && touch /var/lock/subsys/foundationdb
+}
+
+stop()
+{
+    echo -n $"Stopping FoundationDB: "
+    killproc -p /var/run/fdbmonitor.pid -d 300 /usr/lib/foundationdb/fdbmonitor
+    RETVAL=$?
+    echo
+    [ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/foundationdb
+}
+
+restart() {
+    stop
+    start
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart|reload|force-reload)
+        restart
+        ;;
+    condrestart)
+        [ -f /var/lock/subsys/foundationdb ] && restart || :
+        ;;
+    status)
+        status /usr/lib/foundationdb/fdbmonitor
+        RETVAL=$?
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|status|restart|reload|force-reload|condrestart}"
+        RETVAL=1
+esac
+
+exit $RETVAL

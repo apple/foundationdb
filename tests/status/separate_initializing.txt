@@ -1,0 +1,37 @@
+Using cluster file `tcf/separatecoordinator.cluster'.
+
+Configuration:
+  Redundancy mode        - single
+  Storage engine         - memory
+  Coordinators           - 1
+
+Cluster:
+  FoundationDB processes - 1
+  Machines               - 1
+  Memory availability    - 12.9 GB per process on machine with least available
+  Server time            - 11/21/14 10:18:59
+
+Data:
+  Replication health     - (Re)initializing automatic data distribution.
+  Moving data            - unknown (initializing)
+  Sum of key-value sizes - 0 MB
+  Disk space used        - 0 MB
+
+Operating space:
+  Storage server         - 1.0 GB free on most full server
+  Log server             - 1.0 GB free on most full server
+
+Workload:
+  Read rate              - 2 Hz
+  Write rate             - 0 Hz
+  Transactions started   - 2 Hz
+  Transactions committed - 0 Hz
+  Conflict rate          - 0 Hz
+
+Process performance details:
+  127.0.0.1:4444         (  1% cpu; 22% machine; 0.000 Gbps; 72% disk IO; 0.1 GB / 12.9 GB RAM  )
+
+Coordination servers:
+  127.0.0.1:4991  (reachable)
+
+Client time: 11/21/14 10:18:59

@@ -1,0 +1,6 @@
+{
+  global:
+    fdb_*;
+  local:
+    *;
+};

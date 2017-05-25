@@ -1,0 +1,39 @@
+Using cluster file `/home/ajb/fdb.cluster'.
+
+Unable to retrieve all status information.
+
+Configuration:
+  Redundancy mode        - unknown
+  Storage engine         - unknown
+  Coordinators           - 1
+
+Cluster:
+  FoundationDB processes - 1
+  Machines               - 1
+  Memory availability    - 16.8 GB per process on machine with least available
+  Server time            - 11/21/14 13:10:44
+
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 1 MB
+  Disk space used        - 10 MB
+
+Operating space:
+  Storage server         - 1.0 GB free on most full server
+  Log server             - 1.0 GB free on most full server
+
+Workload:
+  Read rate              - 2 Hz
+  Write rate             - 0 Hz
+  Transactions started   - 2 Hz
+  Transactions committed - 0 Hz
+  Conflict rate          - 0 Hz
+
+Process performance details:
+  10.0.3.1:9191          (  1% cpu; 10% machine; 0.000 Gbps; 76% disk IO; 0.2 GB / 16.8 GB RAM  )
+
+Coordination servers:
+  10.0.3.1:9191  (reachable)
+
+Client time: 11/21/14 13:10:44

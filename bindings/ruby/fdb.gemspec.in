@@ -1,0 +1,22 @@
+# -*- mode: ruby; -*-
+
+Gem::Specification.new do |s|
+  s.name = 'fdb'
+  s.version = 'VERSION'
+  s.date = Time.new.strftime '%Y-%m-%d'
+  s.summary = "Ruby bindings for the FoundationDB database"
+  s.description = <<-EOF
+Ruby bindings for the FoundationDB database.
+
+Complete documentation of the FoundationDB Ruby API can be found at:
+https://foundationdb.org/documentation/api-ruby.html.
+EOF
+  s.authors = ["FoundationDB"]
+  s.email = 'fdbopensource@apple.com'
+  s.files = ["LICENSE", "lib/fdb.rb", "lib/fdbdirectory.rb", "lib/fdbimpl.rb", "lib/fdblocality.rb", "lib/fdboptions.rb", "lib/fdbsubspace.rb", "lib/fdbtuple.rb"]
+  s.homepage = 'http://foundationdb.org'
+  s.license = 'Apache v2'
+  s.add_dependency('ffi', '>= 1.1.5')
+  s.required_ruby_version = '>= 1.9.3'
+  s.requirements << 'These bindings require the FoundationDB client. The client can be obtained from https://files.foundationdb.org/fdb-c/.'
+end

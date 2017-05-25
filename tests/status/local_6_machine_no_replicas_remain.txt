@@ -1,0 +1,40 @@
+Using cluster file `/home/ajb/fdb.cluster'.
+
+Configuration:
+  Redundancy mode        - triple
+  Storage engine         - memory
+  Coordinators           - 1
+
+Cluster:
+  FoundationDB processes - 3
+  Machines               - 3
+  Memory availability    - 18.8 GB per process on machine with least available
+  Fault Tolerance        - 0 machines
+  Server time            - 12/08/14 08:44:00
+
+Data:
+  Replication health     - UNHEALTHY: No replicas remain of some data
+  Moving data            - 0.198 GB
+  Sum of key-value sizes - 259 MB
+  Disk space used        - 2.469 GB
+
+Operating space:
+  Storage server         - 0.7 GB free on most full server
+  Log server             - 1.0 GB free on most full server
+
+Workload:
+  Read rate              - 9600 Hz
+  Write rate             - 51 Hz
+  Transactions started   - 12 Hz
+  Transactions committed - 3 Hz
+  Conflict rate          - 0 Hz
+
+Process performance details:
+  10.0.3.1:9191          ( 36% cpu;  8% machine; 0.000 Gbps; 93% disk IO; 0.4 GB / 18.8 GB RAM  )
+  10.0.3.1:9192          ( 15% cpu;  8% machine; 0.000 Gbps; 91% disk IO; 0.3 GB / 18.8 GB RAM  )
+  10.0.3.1:9193          (  6% cpu;  8% machine; 0.000 Gbps; 92% disk IO; 0.3 GB / 18.8 GB RAM  )
+
+Coordination servers:
+  10.0.3.1:9191  (reachable)
+
+Client time: 12/08/14 08:44:00

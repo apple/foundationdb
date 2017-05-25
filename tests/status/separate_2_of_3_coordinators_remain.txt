@@ -1,0 +1,46 @@
+Using cluster file `fdb.cluster'.
+
+Could not communicate with all of the coordination servers.
+  The database will remain operational as long as we
+  can connect to a quorum of servers, however the fault
+  tolerance of the system is reduced as long as the
+  servers remain disconnected.
+
+  127.0.0.1:4701  (reachable)
+  127.0.0.1:4703  (reachable)
+  127.0.0.1:4704  (unreachable)
+
+Configuration:
+  Redundancy mode        - single
+  Storage engine         - memory
+  Coordinators           - 3
+
+Cluster:
+  FoundationDB processes - 2
+  Machines               - 1
+  Memory availability    - 10.1 GB per process on machine with least available
+  Fault Tolerance        - 0 machines
+  Server time            - 12/05/14 14:18:12
+
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 0 MB
+  Disk space used        - 1 MB
+
+Operating space:
+  Storage server         - 1.0 GB free on most full server
+  Log server             - 1.0 GB free on most full server
+
+Workload:
+  Read rate              - 2 Hz
+  Write rate             - 0 Hz
+  Transactions started   - 2 Hz
+  Transactions committed - 0 Hz
+  Conflict rate          - 0 Hz
+
+Process performance details:
+  127.0.0.1:4701         (  1% cpu;  2% machine; 0.000 Gbps; 48% disk IO; 0.0 GB / 10.1 GB RAM  )
+  127.0.0.1:4703         (  1% cpu;  2% machine; 0.000 Gbps; 48% disk IO; 0.0 GB / 10.1 GB RAM  )
+
+Client time: 12/05/14 14:18:10

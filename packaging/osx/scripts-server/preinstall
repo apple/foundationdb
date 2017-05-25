@@ -1,0 +1,9 @@
+#!/bin/bash
+
+if [ -f /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist ]; then
+   /bin/launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist || :
+fi
+
+if [ -f /usr/local/etc/foundationdb/foundationdb.conf ]; then
+   mv /usr/local/etc/foundationdb/foundationdb.conf /usr/local/etc/foundationdb/foundationdb.conf.old
+fi

@@ -1,0 +1,23 @@
+#!/bin/sh -e
+
+# summary of how this script can be called:
+#        * <new-preinst> `install'
+#        * <new-preinst> `install' <old-version>
+#        * <new-preinst> `upgrade' <old-version>
+#        * <old-preinst> `abort-upgrade' <new-version>
+#
+# for details, see http://www.debian.org/doc/debian-policy/ or
+# the debian-policy package
+
+if [ "$1" = upgrade ]; then
+    invoke-rc.d foundationdb stop || :
+    # old versions could leave this behind
+    rm -f /usr/lib/foundationdb/argparse.pyc
+fi
+
+if dpkg-query -s foundationdb >/dev/null 2>&1 ; then
+    echo "Old package foundationdb must be fully purged from the system."
+    echo "This will erase your database(s)."
+    echo "Please run 'dpkg -P foundationdb' and then retry installation."
+    exit 1
+fi

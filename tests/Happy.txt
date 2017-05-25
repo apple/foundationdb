@@ -1,0 +1,6 @@
+testTitle=Unclogged
+    testName=Cycle
+    transactionsPerSecond=3500.0
+    testDuration=2.0
+    expectedRate=0.80
+    startDelay=0

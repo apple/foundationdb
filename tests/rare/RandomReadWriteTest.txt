@@ -1,0 +1,4 @@
+testTitle=RandomReadWriteTest
+testName=ReadWrite
+testDuration=30.0
+transactionsPerSecond=1000.0

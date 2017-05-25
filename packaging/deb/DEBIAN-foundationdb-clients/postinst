@@ -1,0 +1,25 @@
+#!/bin/sh -e
+
+# summary of how this script can be called:
+#        * <postinst> `configure' <most-recently-configured-version>
+#        * <old-postinst> `abort-upgrade' <new version>
+#        * <conflictor's-postinst> `abort-remove' `in-favour' <package>
+#          <new-version>
+#        * <postinst> `abort-remove'
+#        * <deconfigured's-postinst> `abort-deconfigure' `in-favour'
+#          <failed-install-package> <version> `removing'
+#          <conflicting-package> <version>
+# for details, see http://www.debian.org/doc/debian-policy/ or
+# the debian-policy package
+
+if [ "$1" = configure ]; then
+    ldconfig
+
+    if [ "$2" = "" ]; then
+        getent group foundationdb >/dev/null || addgroup --system foundationdb
+        getent passwd foundationdb >/dev/null || adduser --system --disabled-login --ingroup foundationdb --no-create-home --home /var/lib/foundationdb --gecos "FoundationDB" --shell /bin/false foundationdb
+
+        chown foundationdb:foundationdb /etc/foundationdb
+        chmod 775 /etc/foundationdb
+    fi
+fi

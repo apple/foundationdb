@@ -1,0 +1,138 @@
+Name: foundationdb
+Version: FDBVERSION
+Release: FDBRELEASE
+Group: Applications/Databases
+License: FoundationDB Community License Agreement (https://foundationdb.org/license)
+URL: https://foundationdb.org
+Packager: FoundationDB <fdbdist@apple.com>
+BuildArch: x86_64
+Summary: Ordered key-value store with full ACID transactions
+Vendor: FoundationDB
+
+%description
+FoundationDB is a scalable, fault-tolerant, ordered key-value store
+with full ACID transactions.
+
+%package server
+Summary: FoundationDB server
+Requires: foundationdb-clients = %{version}-%{release}
+Conflicts: foundationdb < 0.1.4
+ifdef(`RHEL6', `Requires(post): chkconfig >= 0.9, /sbin/service')
+Requires(pre): /usr/sbin/useradd, /usr/sbin/groupadd, /usr/bin/getent
+
+%package clients
+Summary: FoundationDB clients and library
+Conflicts: foundationdb < 0.1.4
+Requires(pre): /usr/sbin/useradd, /usr/sbin/groupadd, /usr/bin/getent
+
+%description server
+FoundationDB is a scalable, fault-tolerant, ordered key-value store
+with full ACID transactions.
+
+This package contains the server.
+
+%description clients
+FoundationDB is a scalable, fault-tolerant, ordered key-value store
+with full ACID transactions.
+
+This package contains client utilities and libraries.
+
+%prep
+rm -rf %{buildroot}
+mkdir -p %{buildroot}
+tar -xzf %{_sourcedir}/install-files.tar.gz -C %{buildroot}
+ifdef(`RHEL6', `rm -r %{buildroot}/lib/systemd', `rm -r %{buildroot}/etc/rc.d')
+ifdef(`RHEL6', `', `rm %{buildroot}/usr/lib/foundationdb/argparse.py')
+
+%pre server
+# This should be ensured by the foundationdb-clients package, but it can't hurt...
+getent group foundationdb >/dev/null || groupadd -r foundationdb >/dev/null
+getent passwd foundationdb >/dev/null || useradd -c "FoundationDB" -g foundationdb -s /bin/false -r -d /var/lib/foundationdb foundationdb >/dev/null
+
+if [ $1 -gt 1 ]; then
+    # old versions could leave this behind
+    rm -f /usr/lib/foundationdb/argparse.pyc
+fi
+
+CURRENTVER=$(rpm -q --queryformat %%{VERSION} foundationdb-server) || :
+if [ "$CURRENTVER" = "0.1.5" ] || [ "$CURRENTVER" = "0.1.4" ]; then
+    mv /etc/foundationdb/foundationdb.conf /etc/foundationdb/foundationdb.conf.rpmsave
+fi
+exit 0
+
+%post server
+if [ $1 -eq 1 ]; then
+    if [ ! -f /etc/foundationdb/fdb.cluster ]; then
+        description=$(LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8)
+        random_str=$(LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8)
+        echo $description:$random_str@127.0.0.1:4500 > /etc/foundationdb/fdb.cluster
+	    chown foundationdb:foundationdb /etc/foundationdb/fdb.cluster
+        chmod 0664 /etc/foundationdb/fdb.cluster
+        NEWDB=1
+    fi
+
+ifdef(`RHEL6', `
+    /sbin/chkconfig --add foundationdb >/dev/null 2>&1
+    /sbin/service foundationdb start >/dev/null 2>&1
+', `
+    /usr/bin/systemctl enable foundationdb >/dev/null 2>&1
+    /usr/bin/systemctl start foundationdb >/dev/null 2>&1
+')
+
+    if [ "$NEWDB" != "" ]; then
+        /usr/bin/fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure new single memory" --timeout 20 >/dev/null 2>&1
+    fi
+else
+ifdef(`RHEL6', `/sbin/service foundationdb condrestart >/dev/null 2>&1', `/usr/bin/systemctl condrestart foundationdb >/dev/null 2>&1')
+fi
+exit 0
+
+%preun server
+if [ $1 -eq 0 ]; then
+ifdef(`RHEL6', `
+    /sbin/service foundationdb stop >/dev/null 2>&1
+    /sbin/chkconfig --del foundationdb >/dev/null 2>&1
+', `
+    /usr/bin/systemctl stop foundationdb >/dev/null 2>&1
+    /usr/bin/systemctl disable foundationdb >/dev/null 2>&1
+')
+fi
+exit 0
+
+%pre clients
+getent group foundationdb >/dev/null || groupadd -r foundationdb >/dev/null
+getent passwd foundationdb >/dev/null || useradd -c "FoundationDB" -g foundationdb -s /bin/false -r -d /var/lib/foundationdb foundationdb >/dev/null
+exit 0
+
+%post clients
+# older versions of this package failed to correctly clean up their .pyc files, which is "very bad"
+rm -rf /usr/lib64/python2.6/fdb
+exit 0
+
+%files server
+%defattr(-,root,root)
+%doc /usr/share/doc/foundationdb-server
+%config(noreplace) /etc/foundationdb/foundationdb.conf
+%attr(0700,foundationdb,foundationdb) /var/lib/foundationdb
+%attr(0700,foundationdb,foundationdb) /var/log/foundationdb
+# RPM init scripts should not be marked config (according to http://fedoraproject.org/wiki/Packaging:SysVInitScript#Initscript_packaging)
+ifdef(`RHEL6', `/etc/rc.d/init.d/foundationdb', `/lib/systemd/system/foundationdb.service')
+/usr/sbin/*
+/usr/lib/foundationdb/fdbmonitor
+ifdef(`RHEL6', `/usr/lib/foundationdb/argparse.py')
+/usr/lib/foundationdb/make_public.py
+
+%files clients
+%defattr(-,root,root)
+%doc /usr/share/doc/foundationdb-clients
+%attr(0775,foundationdb,foundationdb) %dir /etc/foundationdb
+%dir /usr/lib/foundationdb
+/usr/lib/foundationdb/backup_agent/backup_agent
+/usr/bin/dr_agent
+/usr/bin/fdbcli
+/usr/bin/fdbdr
+/usr/bin/fdbbackup
+/usr/bin/fdbrestore
+/usr/bin/fdbblob
+/usr/lib64/libfdb_c.so
+/usr/include/*

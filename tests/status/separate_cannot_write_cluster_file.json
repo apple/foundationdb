@@ -1,0 +1,288 @@
+{
+    "client" : {
+        "cluster_file" : {
+            "path" : "/home/fdb/buildbot/network/mmikhail/foundation/fdb_windows.cluster.txt",
+            "up_to_date" : false
+        },
+        "coordinators" : {
+            "coordinators" : [
+                {
+                    "address" : "127.0.0.1:4701",
+                    "reachable" : true
+                },
+                {
+                    "address" : "127.0.0.1:4703",
+                    "reachable" : true
+                },
+                {
+                    "address" : "127.0.0.1:4704",
+                    "reachable" : true
+                }
+            ],
+            "quorum_reachable" : true
+        },
+        "database_status" : {
+            "available" : true,
+            "healthy" : false
+        },
+        "messages" : [
+            {
+                "description" : "Cluster file is not up to date.\nIt contains the connection string: local:JC3yLTxBro2bWVFjstWIVc6Ou67ZY8Qx@127.0.0.1:4701,127.0.0.1:4703,127.0.0.1:4704\nThe original connection string is: local:cmYEATJrtGOP985SAXQ04kmGJxxguHVj@127.0.0.1:4701,127.0.0.1:4703\nThis must mean that file permissions or other platform issues have prevented the file from being updated. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.",
+                "name" : "inconsistent_cluster_file"
+            }
+        ],
+        "timestamp" : 1417820553
+    },
+    "cluster" : {
+        "cluster_controller_timestamp" : 1417820553,
+        "configuration" : {
+            "coordinators_count" : 2,
+            "excluded_servers" : [
+            ],
+            "redundancy" : {
+                "factor" : "single"
+            },
+            "storage_engine" : "memory"
+        },
+        "data" : {
+            "average_partition_size_bytes" : 400000,
+            "least_operating_space_bytes_log_server" : 973710239,
+            "least_operating_space_bytes_storage_server" : 973735456,
+            "moving_data" : {
+                "in_flight_bytes" : 0,
+                "in_queue_bytes" : 0
+            },
+            "partitions_count" : 2,
+            "state" : {
+                "healthy" : true,
+                "name" : "healthy"
+            },
+            "total_disk_used_bytes" : 655360,
+            "total_kv_size_bytes" : 0
+        },
+        "fault_tolerance" : {
+            "max_machine_failures_without_losing_availability" : 0,
+            "max_machine_failures_without_losing_data" : 0
+        },
+        "latency_probe" : {
+            "commit_seconds" : 0.022355079650878906,
+            "read_seconds" : 0,
+            "transaction_start_seconds" : 0.00080132484436035145
+        },
+        "machines" : {
+            "6344abf1813eb05b" : {
+                "address" : "127.0.0.1",
+                "cpu" : {
+                    "logical_core_utilization" : 0.023857390859126883
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "committed_bytes" : 3602726912,
+                    "free_bytes" : 21724098560,
+                    "total_bytes" : 25326825472
+                },
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.32377100000000003
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.32377100000000003
+                    },
+                    "tcp_segments_retransmitted" : {
+                        "hz" : 0
+                    }
+                }
+            }
+        },
+        "messages" : [
+            {
+                "description" : "Some clients of this cluster have issues.",
+                "issues" : [
+                    {
+                        "description" : "Unable to update cluster file.",
+                        "name" : "unable_to_write_cluster_file"
+                    }
+                ],
+                "name" : "client_issues"
+            }
+        ],
+        "processes" : {
+            "30210322045c7141" : {
+                "address" : "127.0.0.1:4704",
+                "command_line" : "/home/mmikhail/foundation/foundation/bin/fdbserver -C /home/mmikhail/fdb.cluster -p auto:4704",
+                "cpu" : {
+                    "usage_cores" : 0.0088003999999999999
+                },
+                "disk" : {
+                    "busy" : 0.51440000000000008
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "available_bytes" : 7351444821,
+                    "used_bytes" : 110129152
+                },
+                "messages" : [
+                ],
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.025433600000000001
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.064441600000000002
+                    }
+                },
+                "roles" : [
+                    {
+                        "id" : "dbdf66eb78a4eb33",
+                        "role" : "cluster_controller"
+                    },
+                    {
+                        "id" : "00e48601e43045c9",
+                        "role" : "proxy"
+                    },
+                    {
+                        "id" : "0df71fd71bbc14ee",
+                        "role" : "storage"
+                    }
+                ],
+                "version" : "3.0.0-PRERELEASE"
+            },
+            "572147aafee06801" : {
+                "address" : "127.0.0.1:4703",
+                "command_line" : "/home/mmikhail/foundation/foundation/bin/fdbserver -C /home/mmikhail/fdb.cluster -p auto:4703",
+                "cpu" : {
+                    "usage_cores" : 0.015201321610572888
+                },
+                "disk" : {
+                    "busy" : 0.51440411523292184
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "available_bytes" : 7351444821,
+                    "used_bytes" : 110268416
+                },
+                "messages" : [
+                ],
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.072749400000000006
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.0331667
+                    }
+                },
+                "roles" : [
+                    {
+                        "id" : "a8ee759c36cdf2ff",
+                        "role" : "master"
+                    },
+                    {
+                        "id" : "07b3f5362cfec06b",
+                        "role" : "proxy"
+                    },
+                    {
+                        "id" : "bb25c74aca56ccf7",
+                        "role" : "log"
+                    },
+                    {
+                        "id" : "2c1ab78010e01b00",
+                        "role" : "storage"
+                    }
+                ],
+                "version" : "3.0.0-PRERELEASE"
+            },
+            "ae6da3ed01c24689" : {
+                "address" : "127.0.0.1:4701",
+                "command_line" : "/home/mmikhail/foundation/foundation/bin/fdbserver -C /home/mmikhail/fdb.cluster -p auto:4701",
+                "cpu" : {
+                    "usage_cores" : 0.0080006640053120418
+                },
+                "disk" : {
+                    "busy" : 0.51520412163297302
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "available_bytes" : 7351552682,
+                    "used_bytes" : 110161920
+                },
+                "messages" : [
+                ],
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.029769800000000003
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.030294600000000001
+                    }
+                },
+                "roles" : [
+                    {
+                        "id" : "361d515d63a595ad",
+                        "role" : "proxy"
+                    },
+                    {
+                        "id" : "4022c037e26868ae",
+                        "role" : "storage"
+                    },
+                    {
+                        "id" : "a50b36548df23ef1",
+                        "role" : "resolver"
+                    }
+                ],
+                "version" : "3.0.0-PRERELEASE"
+            }
+        },
+        "qos" : {
+            "performance_limited_by" : {
+                "description" : "The database is not being saturated by the workload.",
+                "name" : "workload"
+            },
+            "worst_queue_bytes_log_server" : 1412,
+            "worst_queue_bytes_storage_server" : 0
+        },
+        "recovery_state" : {
+            "description" : "Recovery complete.",
+            "name" : "fully_recovered"
+        },
+        "workload" : {
+            "bytes" : {
+                "written" : {
+                    "counter" : 556,
+                    "hz" : 0,
+                    "roughness" : 0
+                }
+            },
+            "operations" : {
+                "reads" : {
+                    "hz" : 1.6955199999999999
+                },
+                "writes" : {
+                    "counter" : 13,
+                    "hz" : 0,
+                    "roughness" : 0
+                }
+            },
+            "transactions" : {
+                "committed" : {
+                    "counter" : 10,
+                    "hz" : 0,
+                    "roughness" : 0
+                },
+                "conflicted" : {
+                    "counter" : 0,
+                    "hz" : 0,
+                    "roughness" : 0
+                },
+                "started" : {
+                    "counter" : 1738,
+                    "hz" : 1.9999099999999999,
+                    "roughness" : 2.0674723679301619
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,14 @@
+Package: foundationdb-server
+Version: VERSION-RELEASE
+Section: database
+Priority: optional
+Architecture: amd64
+Conflicts: foundationdb (<< 0.1.4)
+Depends: foundationdb-clients (= VERSION-RELEASE), adduser, libc6 (>= 2.11), python (>= 2.6)
+Maintainer: FoundationDB <fdbdist@apple.com>
+Homepage: https://foundationdb.org
+Description: FoundationDB server
+ FoundationDB is a scalable, fault-tolerant, ordered key-value store
+ with full ACID transactions.
+ .
+ This package contains the server.

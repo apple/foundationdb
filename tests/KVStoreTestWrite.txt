@@ -1,0 +1,15 @@
+testTitle=RandomWriteSaturation
+testName=KVStoreTest
+testDuration=20.0
+saturation=true
+operationsPerSecond=10000
+commitFraction=0.0001
+setFraction=1.0
+nodeCount=20000000
+keyBytes=16
+valueBytes=96
+filename=bttest
+setup=false
+clear=false
+count=false
+useDB=false

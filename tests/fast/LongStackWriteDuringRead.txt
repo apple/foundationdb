@@ -1,0 +1,6 @@
+testTitle=WriteDuringReadTest
+    testName=WriteDuringRead
+	numOps=10000
+	rarelyCommit=true
+    testDuration=30
+    StderrSeverity=30

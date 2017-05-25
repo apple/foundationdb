@@ -1,0 +1,37 @@
+Using cluster file `separatecoordinator.cluster'.
+
+Unable to locate a cluster controller within 2 seconds.  Check that there are
+server processes running.
+
+Configuration:
+  Redundancy mode        - unknown
+  Storage engine         - unknown
+  Coordinators           - unknown
+
+Cluster:
+  FoundationDB processes - unknown
+  Machines               - 
+  Machines               - unknown
+
+Data:
+  Replication health     - unknown
+  Moving data            - unknown
+  Sum of key-value sizes - unknown
+  Disk space used        - unknown
+
+Operating space:
+  Unable to retrieve operating space status
+
+Workload:
+  Read rate              - unknown
+  Write rate             - unknown
+  Transactions started   - unknown
+  Transactions committed - unknown
+  Conflict rate          - unknown
+
+Process performance details:
+
+Coordination servers:
+  127.0.0.1:4991  (reachable)
+
+Client time: 11/21/14 11:39:09

@@ -1,0 +1,205 @@
+{
+    "client" : {
+        "cluster_file" : {
+            "path" : "fdb.cluster",
+            "up_to_date" : true
+        },
+        "coordinators" : {
+            "coordinators" : [
+                {
+                    "address" : "127.0.0.1:4701",
+                    "reachable" : true
+                },
+                {
+                    "address" : "127.0.0.1:4703",
+                    "reachable" : true
+                },
+                {
+                    "address" : "127.0.0.1:4704",
+                    "reachable" : true
+                }
+            ],
+            "quorum_reachable" : true
+        },
+        "database_status" : {
+            "available" : false,
+            "healthy" : false
+        },
+        "messages" : [
+        ],
+        "timestamp" : 1417807727
+    },
+    "cluster" : {
+        "cluster_controller_timestamp" : 1417807734,
+        "configuration" : {
+            "coordinators_count" : 3,
+            "excluded_servers" : [
+            ]
+        },
+        "fault_tolerance" : {
+            "max_machine_failures_without_losing_availability" : 0,
+            "max_machine_failures_without_losing_data" : 0
+        },
+        "machines" : {
+            "6344abf1813eb05b" : {
+                "address" : "127.0.0.1",
+                "cpu" : {
+                    "logical_core_utilization" : 0.0077364618916951344
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "committed_bytes" : 3623792640,
+                    "free_bytes" : 21703032832,
+                    "total_bytes" : 25326825472
+                },
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.148784
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.148784
+                    },
+                    "tcp_segments_retransmitted" : {
+                        "hz" : 0
+                    }
+                }
+            }
+        },
+        "messages" : [
+            {
+                "description" : "Unable to read database configuration.",
+                "name" : "unreadable_configuration"
+            },
+            {
+                "description" : "Unable to start transaction after 5 seconds.",
+                "name" : "transaction_start_timeout"
+            },
+            {
+                "description" : "Unable to commit after 5 seconds.",
+                "name" : "commit_timeout"
+            },
+            {
+                "description" : "Unable to retrieve all status information.",
+                "name" : "status_incomplete",
+                "reasons" : [
+                    {
+                        "description" : "Unknown mutations, conflicts, and transactions state."
+                    },
+                    {
+                        "description" : "Unknown read and performance state."
+                    }
+                ]
+            }
+        ],
+        "processes" : {
+            "2026891e8dabce63" : {
+                "address" : "127.0.0.1:4704",
+                "command_line" : "/home/mmikhail/foundation/foundation/bin/fdbserver -C /home/mmikhail/fdb.cluster -p auto:4704",
+                "cpu" : {
+                    "usage_cores" : 0.0024000240002400022
+                },
+                "disk" : {
+                    "busy" : 0.47040470404704049
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "available_bytes" : 7342294357,
+                    "used_bytes" : 107872256
+                },
+                "messages" : [
+                ],
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.016502600000000003
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.0069280699999999997
+                    }
+                },
+                "roles" : [
+                ],
+                "version" : "3.0.0-PRERELEASE"
+            },
+            "6adc669296f76053" : {
+                "address" : "127.0.0.1:4701",
+                "command_line" : "/home/mmikhail/foundation/foundation/bin/fdbserver -C /home/mmikhail/fdb.cluster -p auto:4701",
+                "cpu" : {
+                    "usage_cores" : 0.0032002256018048149
+                },
+                "disk" : {
+                    "busy" : 0.47040376323010585
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "available_bytes" : 7342294357,
+                    "used_bytes" : 108109824
+                },
+                "messages" : [
+                ],
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.0177281
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.007824059999999999
+                    }
+                },
+                "roles" : [
+                    {
+                        "id" : "e5a5d06728e43299",
+                        "role" : "master"
+                    },
+                    {
+                        "id" : "ae9fe51db979dfd1",
+                        "role" : "proxy"
+                    }
+                ],
+                "version" : "3.0.0-PRERELEASE"
+            },
+            "b665f042703c66ef" : {
+                "address" : "127.0.0.1:4703",
+                "command_line" : "/home/mmikhail/foundation/foundation/bin/fdbserver -C /home/mmikhail/fdb.cluster -p auto:4703",
+                "cpu" : {
+                    "usage_cores" : 0.0040003919992160014
+                },
+                "disk" : {
+                    "busy" : 0.47039905920188158
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "available_bytes" : 7342294357,
+                    "used_bytes" : 107868160
+                },
+                "messages" : [
+                ],
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.011848000000000001
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.031326400000000004
+                    }
+                },
+                "roles" : [
+                    {
+                        "id" : "79238fa67cf1a34b",
+                        "role" : "cluster_controller"
+                    }
+                ],
+                "version" : "3.0.0-PRERELEASE"
+            }
+        },
+        "recovery_state" : {
+            "description" : "The coordinator(s) have no record of this database. Either the coordinator addresses are incorrect, the coordination state on those machines is missing, or no database has been created.",
+            "name" : "configuration_never_created"
+        },
+        "workload" : {
+            "operations" : {
+            }
+        }
+    }
+}

@@ -1,0 +1,5 @@
+testTitle=WorkerErrorsTest
+testName=WorkerErrors
+runSetup=false
+clearAfterTest=false
+useDB=false

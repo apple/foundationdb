@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.foundationdb.fdbmonitor</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/local/libexec/fdbmonitor</string>
+      <string>--conffile</string>
+      <string>/usr/local/etc/foundationdb/foundationdb.conf</string>
+      <string>--lockfile</string>
+      <string>/var/run/FoundationDB.pid</string>
+    </array>
+    <key>KeepAlive</key>
+    <true/>
+  </dict>
+</plist>

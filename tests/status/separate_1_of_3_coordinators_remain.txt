@@ -1,0 +1,6 @@
+Using cluster file `/home/ajb/fdb.cluster'.
+
+Could not communicate with a quorum of coordination servers:
+  10.0.3.1:9191  (unreachable)
+  10.0.3.1:9192  (unreachable)
+  10.0.3.1:9193  (reachable)

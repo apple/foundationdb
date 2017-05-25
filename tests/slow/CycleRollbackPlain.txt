@@ -1,0 +1,8 @@
+testTitle=UncloggedRollbackCycleTest
+    testName=Cycle
+    transactionsPerSecond=5000.0
+    testDuration=30.0
+    expectedRate=.05
+
+    testName=Rollback
+    testDuration=30.0

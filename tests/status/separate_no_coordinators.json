@@ -1,0 +1,31 @@
+{
+    "client" : {
+        "cluster_file" : {
+            "path" : "tcf/separatecoordinator.cluster",
+            "up_to_date" : true
+        },
+        "coordinators" : {
+            "coordinators" : [
+                {
+                    "address" : "127.0.0.1:4991",
+                    "reachable" : false
+                }
+            ],
+            "quorum_reachable" : false
+        },
+        "database_status" : {
+            "available" : false,
+            "healthy" : false
+        },
+        "messages" : [
+            {
+                "description" : "Unable to locate a cluster controller within 2 seconds.  Check that there are server processes running.",
+                "name" : "no_cluster_controller"
+            }
+        ],
+        "timestamp" : 1416582780
+    },
+    "cluster" : {
+    }
+}
+

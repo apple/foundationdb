@@ -1,0 +1,9 @@
+Using cluster file `fdb.cluster'.
+
+The coordinator(s) have no record of this database. Either the coordinator
+addresses are incorrect, the coordination state on those machines is missing, or
+no database has been created.
+
+  127.0.0.1:4701  (reachable)
+  127.0.0.1:4703  (reachable)
+  127.0.0.1:4704  (reachable)

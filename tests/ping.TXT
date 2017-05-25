@@ -1,0 +1,4 @@
+testTitle=Ping
+    testName=Ping
+    logging=true
+    startDelay=0.0

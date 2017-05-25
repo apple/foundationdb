@@ -1,0 +1,49 @@
+Using cluster file `/home/ajb/fdb.cluster'.
+
+Could not communicate with all of the coordination servers.
+  The database will remain operational as long as we
+  can connect to a quorum of servers, however the fault
+  tolerance of the system is reduced as long as the
+  servers remain disconnected.
+
+  10.0.3.1:9191  (unreachable)
+  10.0.3.1:9192  (reachable)
+  10.0.3.1:9193  (reachable)
+
+Configuration:
+  Redundancy mode        - triple
+  Storage engine         - memory
+  Coordinators           - 3
+  Exclusions             - 3 (type `exclude' for details)
+
+Cluster:
+  FoundationDB processes - 5 (less 2 excluded; 0 with errors)
+  Machines               - 5 (less 2 excluded)
+  Memory availability    - 16.7 GB per process on machine with least available
+  Server time            - 11/21/14 14:52:56
+
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 4 MB
+  Disk space used        - 84 MB
+
+Operating space:
+  Storage server         - 1.0 GB free on most full server
+  Log server             - 1.0 GB free on most full server
+
+Workload:
+  Read rate              - 2 Hz
+  Write rate             - 0 Hz
+  Transactions started   - 2 Hz
+  Transactions committed - 0 Hz
+  Conflict rate          - 0 Hz
+
+Process performance details:
+  10.0.3.1:9192          (  2% cpu; 11% machine; 0.000 Gbps; 80% disk IO; 0.1 GB / 16.7 GB RAM  )
+  10.0.3.1:12345         (  1% cpu; 11% machine; 0.000 Gbps; 82% disk IO; 0.1 GB / 16.7 GB RAM  )
+  10.0.3.1:123450        (invalid IP address or port)
+  10.0.3.1:123451        (invalid IP address or port)
+  1234.0.3.1:9195        (invalid IP address or port)
+
+Client time: 11/21/14 14:52:55

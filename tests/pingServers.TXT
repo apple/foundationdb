@@ -1,0 +1,4 @@
+testTitle=PingServers
+    testName=Ping
+    logging=true
+    pingWorkers=true

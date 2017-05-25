@@ -1,0 +1,194 @@
+{
+    "client" : {
+        "cluster_file" : {
+            "path" : "/home/ajb/fdb.cluster",
+            "up_to_date" : true
+        },
+        "coordinators" : {
+            "coordinators" : [
+                {
+                    "address" : "10.0.3.1:9191",
+                    "reachable" : true
+                }
+            ],
+            "quorum_reachable" : true
+        },
+        "database_status" : {
+            "available" : false,
+            "healthy" : false
+        },
+        "messages" : [
+        ],
+        "timestamp" : 1416593444
+    },
+    "cluster" : {
+        "cluster_controller_timestamp" : 1416593444,
+        "configuration" : {
+            "coordinators_count" : 1,
+            "excluded_servers" : [
+            ]
+        },
+        "data" : {
+            "average_partition_size_bytes" : 476680,
+            "least_operating_space_bytes_log_server" : 971398119,
+            "least_operating_space_bytes_storage_server" : 970126655,
+            "moving_data" : {
+                "in_flight_bytes" : 0,
+                "in_queue_bytes" : 0
+            },
+            "partitions_count" : 2,
+            "state" : {
+                "healthy" : true,
+                "name" : "healthy"
+            },
+            "total_disk_used_bytes" : 10313728,
+            "total_kv_size_bytes" : 727245
+        },
+        "latency_probe" : {
+            "commit_seconds" : 0.020310640335083008,
+            "read_seconds" : 0,
+            "transaction_start_seconds" : 0.0019199848175048828
+        },
+        "machines" : {
+            "0000000000000001" : {
+                "address" : "10.0.3.1",
+                "cpu" : {
+                    "logical_core_utilization" : 0.10494446922256913
+                },
+                "excluded" : false,
+                "machine_id" : "0000000000000001",
+                "memory" : {
+                    "committed_bytes" : 7422345216,
+                    "free_bytes" : 17904480256,
+                    "total_bytes" : 25326825472
+                },
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.013550600000000001
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.00487047
+                    },
+                    "tcp_segments_retransmitted" : {
+                        "hz" : 0
+                    }
+                }
+            }
+        },
+        "messages" : [
+            {
+                "description" : "Unable to retrieve all status information.",
+                "name" : "status_incomplete",
+                "reasons" : [
+                    {
+                        "description" : "Too many configuration parameters set."
+                    }
+                ]
+            }
+        ],
+        "processes" : {
+            "5bd6999cb3c40a07" : {
+                "address" : "10.0.3.1:9191",
+                "command_line" : "f/bin/fdbserver -p 10.0.3.1:9191 -C fdb.cluster -L logs -i 1",
+                "cpu" : {
+                    "usage_cores" : 0.0088007232101249399
+                },
+                "disk" : {
+                    "busy" : 0.7552105729480213
+                },
+                "excluded" : false,
+                "machine_id" : "0000000000000001",
+                "memory" : {
+                    "available_bytes" : 18076311552,
+                    "used_bytes" : 171831296
+                },
+                "messages" : [
+                ],
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.0047936699999999999
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.0039504600000000003
+                    }
+                },
+                "roles" : [
+                    {
+                        "id" : "f902808315519df7",
+                        "role" : "master"
+                    },
+                    {
+                        "id" : "50a71b1deb4793ef",
+                        "role" : "cluster_controller"
+                    },
+                    {
+                        "id" : "242e27cd68b21c05",
+                        "role" : "proxy"
+                    },
+                    {
+                        "id" : "faf07cf91f0ab29d",
+                        "role" : "log"
+                    },
+                    {
+                        "id" : "2cef6a06a06e5268",
+                        "role" : "storage"
+                    },
+                    {
+                        "id" : "95151068a152f33d",
+                        "role" : "resolver"
+                    }
+                ],
+                "version" : "3.0.0-PRERELEASE"
+            }
+        },
+        "qos" : {
+            "performance_limited_by" : {
+                "description" : "The database is not being saturated by the workload.",
+                "name" : "workload"
+            },
+            "worst_queue_bytes_log_server" : 338,
+            "worst_queue_bytes_storage_server" : 0
+        },
+        "recovery_state" : {
+            "description" : "Recovery complete.",
+            "name" : "fully_recovered"
+        },
+        "workload" : {
+            "bytes" : {
+                "written" : {
+                    "counter" : 113,
+                    "hz" : 0,
+                    "roughness" : 0
+                }
+            },
+            "operations" : {
+                "reads" : {
+                    "hz" : 1.88957
+                },
+                "writes" : {
+                    "counter" : 3,
+                    "hz" : 0,
+                    "roughness" : 0
+                }
+            },
+            "transactions" : {
+                "committed" : {
+                    "counter" : 9,
+                    "hz" : 0,
+                    "roughness" : 0
+                },
+                "conflicted" : {
+                    "counter" : 0,
+                    "hz" : 0,
+                    "roughness" : 0
+                },
+                "started" : {
+                    "counter" : 151,
+                    "hz" : 1.9999799999999999,
+                    "roughness" : 3.1210399999999998
+                }
+            }
+        }
+    }
+}
+

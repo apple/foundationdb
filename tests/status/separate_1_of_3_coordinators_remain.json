@@ -1,0 +1,37 @@
+{
+    "client" : {
+        "cluster_file" : {
+            "path" : "/home/ajb/fdb.cluster",
+            "up_to_date" : true
+        },
+        "coordinators" : {
+            "coordinators" : [
+                {
+                    "address" : "10.0.3.1:9191",
+                    "reachable" : false
+                },
+                {
+                    "address" : "10.0.3.1:9192",
+                    "reachable" : false
+                },
+                {
+                    "address" : "10.0.3.1:9193",
+                    "reachable" : true
+                }
+            ],
+            "quorum_reachable" : false
+        },
+        "database_status" : {
+            "available" : false,
+            "healthy" : false
+        },
+        "messages" : [
+            {
+                "description" : "Unable to reach a quorum of coordinators.",
+                "name" : "quorum_not_reachable"
+            }
+        ],
+        "timestamp" : 1416599695
+    }
+}
+

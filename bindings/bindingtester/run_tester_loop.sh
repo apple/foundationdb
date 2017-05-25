@@ -1,0 +1,51 @@
+#!/bin/bash
+
+LOGGING_LEVEL=WARNING
+
+function run() {
+	echo "Running $1 api"
+	./bindingtester.py $1 --test-name api --cluster-file fdb.cluster --compare --num-ops 1000 --logging-level $LOGGING_LEVEL
+	echo "Running $1 concurrent api"
+	./bindingtester.py $1 --test-name api --cluster-file fdb.cluster --num-ops 1000 --concurrency 5 --logging-level $LOGGING_LEVEL
+	echo "Running $1 directory"
+	./bindingtester.py $1 --test-name directory --cluster-file fdb.cluster --compare --num-ops 1000 --logging-level $LOGGING_LEVEL
+	echo "Running $1 directory hca"
+	./bindingtester.py $1 --test-name directory_hca --cluster-file fdb.cluster --num-ops 100 --concurrency 5 --logging-level $LOGGING_LEVEL
+}
+
+function scripted() {
+	echo "Running $1 scripted"
+	./bindingtester.py $1 --test-name scripted --cluster-file fdb.cluster --logging-level $LOGGING_LEVEL
+}
+
+function run_scripted() {
+	scripted python
+	scripted python3
+	scripted ruby
+	scripted java
+	scripted java_async
+	scripted java_completable
+	scripted java_completable_async
+	scripted node
+	scripted go
+	scripted flow
+}
+
+run_scripted
+
+i=1
+while `true`; do
+	echo "Pass $i"
+	i=$((i+1))
+	run python
+	run python3
+	run ruby
+	run java
+	run java_async
+	run java_completable
+	run java_completable_async
+	run node
+	#run streamline
+	run go
+	run flow
+done

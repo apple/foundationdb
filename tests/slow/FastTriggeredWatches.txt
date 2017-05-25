@@ -1,0 +1,4 @@
+testTitle=FastTriggeredWatchesTest
+    testName=FastTriggeredWatches
+simEnableConnectionFailures=false
+timeout=700

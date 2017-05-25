@@ -1,0 +1,60 @@
+Using cluster file `/home/fdb/buildbot/network/mmikhail/foundation/fdb_windows.cluster.txt'.
+
+Cluster file is not up to date.
+
+It contains the connection string:
+local:JC3yLTxBro2bWVFjstWIVc6Ou67ZY8Qx@127.0.0.1:4701,127.0.0.1:4703,127.0.0.1:4
+704
+
+The original connection string is:
+local:cmYEATJrtGOP985SAXQ04kmGJxxguHVj@127.0.0.1:4701,127.0.0.1:4703
+
+This must mean that file permissions or other platform issues have prevented
+the file from being updated. To change coordinators without manual intervention,
+the cluster file and its containing folder must be writable by all servers and
+clients. If a majority of the coordinators referenced by the old connection
+string are lost, the database will stop working until the correct cluster file
+is distributed to all processes.
+
+1 client(s) reported: Unable to update cluster file.
+
+Configuration:
+  Redundancy mode        - single
+  Storage engine         - memory
+  Coordinators           - 2
+
+Cluster:
+  FoundationDB processes - 3
+  Machines               - 1
+  Memory availability    - 6.8 GB per process on machine with least available
+  Fault Tolerance        - 0 machines
+  Server time            - 12/05/14 18:02:33
+
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 0 MB
+  Disk space used        - 1 MB
+
+Operating space:
+  Storage server         - 1.0 GB free on most full server
+  Log server             - 1.0 GB free on most full server
+
+Workload:
+  Read rate              - 2 Hz
+  Write rate             - 0 Hz
+  Transactions started   - 2 Hz
+  Transactions committed - 0 Hz
+  Conflict rate          - 0 Hz
+
+Process performance details:
+  127.0.0.1:4701         (  1% cpu;  2% machine; 0.000 Gbps; 52% disk IO; 0.1 GB / 6.8 GB RAM  )
+  127.0.0.1:4703         (  2% cpu;  2% machine; 0.000 Gbps; 51% disk IO; 0.1 GB / 6.8 GB RAM  )
+  127.0.0.1:4704         (  1% cpu;  2% machine; 0.000 Gbps; 51% disk IO; 0.1 GB / 6.8 GB RAM  )
+
+Coordination servers:
+  127.0.0.1:4701  (reachable)
+  127.0.0.1:4703  (reachable)
+  127.0.0.1:4704  (reachable)
+
+Client time: 12/05/14 18:02:33

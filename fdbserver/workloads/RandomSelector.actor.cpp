@@ -1,0 +1,477 @@
+/*
+ * RandomSelector.actor.cpp
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "flow/actorcompiler.h"
+#include "fdbclient/NativeAPI.h"
+#include "fdbserver/TesterInterface.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "workloads.h"
+
+struct RandomSelectorWorkload : TestWorkload {
+	int minOperationsPerTransaction,maxOperationsPerTransaction,maxKeySpace,maxOffset,minInitialAmount,maxInitialAmount;
+	double testDuration;
+	bool fail;
+
+	vector<Future<Void>> clients;
+	PerfIntCounter transactions, retries;
+
+	RandomSelectorWorkload(WorkloadContext const& wcx)
+		: TestWorkload(wcx), transactions("Transactions"), retries("Retries") {
+		
+		minOperationsPerTransaction = getOption( options, LiteralStringRef("minOperationsPerTransaction"), 10 );
+		maxOperationsPerTransaction = getOption( options, LiteralStringRef("minOperationsPerTransaction"), 50 );
+		maxKeySpace = getOption( options, LiteralStringRef("maxKeySpace"), 20 );
+		maxOffset = getOption( options, LiteralStringRef("maxOffset"), 5 );
+		minInitialAmount = getOption( options, LiteralStringRef("minInitialAmount"), 5 );
+		maxInitialAmount = getOption( options, LiteralStringRef("maxInitialAmount"), 10 );
+		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
+		fail = false;
+	}
+
+	virtual std::string description() { return "RandomSelector"; }
+
+	virtual Future<Void> setup( Database const& cx ) { 
+		return randomSelectorSetup( cx->clone(), this );
+	}
+
+	virtual Future<Void> start( Database const& cx ) { 
+		clients.push_back(
+			timeout(
+			randomSelectorClient( cx->clone(), this), testDuration, Void()) );
+		return delay(testDuration);
+	}
+
+	virtual Future<bool> check( Database const& cx ) { 
+		clients.clear();
+		return !fail;
+	}
+
+	virtual void getMetrics( vector<PerfMetric>& m ) {
+		m.push_back( transactions.getMetric() );
+		m.push_back( retries.getMetric() );
+	}
+
+	ACTOR Future<Void> randomSelectorSetup( Database cx, RandomSelectorWorkload* self ) {
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "randomSelector");
+		state Value myValue = StringRef(format("%d", g_random->randomInt( 0, 10000000 ) ) );
+		state Transaction tr(cx);
+		state std::string clientID;
+
+		clientID = format("%08d",self->clientId);
+		loop {
+			try {
+				for(int i = 0; i < self->maxOffset; i++){
+					tr.set(StringRef(clientID + "a/" + format( "%010d", i ) ),myValue);
+					tr.set(StringRef(clientID + "c/" + format( "%010d", i ) ),myValue);
+					tr.set(StringRef(clientID + "e/" + format( "%010d", i ) ),myValue);
+				}
+				Void _ = wait( tr.commit() );
+				break;
+			} catch (Error& e) {
+				Void _ = wait( tr.onError(e) );
+				tr.reset();
+			}
+		}
+		
+		return Void();
+	}
+
+	ACTOR Future<Void> randomSelectorClient( 
+		Database cx, RandomSelectorWorkload *self) {
+		state int i;
+		state int j;
+		state std::string clientID;
+		state std::string myKeyA;
+		state std::string myKeyB;
+		state std::string myValue;
+		state std::string myRandomIDKey;
+		state bool onEqualA;
+		state bool onEqualB;
+		state int offsetA;
+		state int offsetB;
+		state int randomLimit;
+		state int randomByteLimit;
+		state bool reverse;
+		state Error error;
+
+		clientID = format("%08d",self->clientId);
+
+		loop {
+			state Transaction tr(cx);
+			
+			loop {
+				try {
+					tr.clear(KeyRangeRef(StringRef(clientID + "b/"),StringRef(clientID + "c/")));
+					tr.clear(KeyRangeRef(StringRef(clientID + "d/"),StringRef(clientID + "e/")));
+					for(i = 0; i < g_random->randomInt(self->minInitialAmount,self->maxInitialAmount+1); i++){
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
+						tr.set(StringRef(clientID + "b/" + myKeyA),myValue);
+						tr.set(StringRef(clientID + "d/" + myKeyA),myValue);
+						//TraceEvent("RYOWInit").detail("Key",myKeyA).detail("Value",myValue);
+					}
+					Void _ = wait( tr.commit() );
+					break;
+				} catch (Error& e) {
+					Void _ = wait( tr.onError(e) );
+				}
+			}
+			
+			state ReadYourWritesTransaction trRYOW(cx);
+
+			try {
+				for(i = 0; i < g_random->randomInt(self->minOperationsPerTransaction,self->maxOperationsPerTransaction+1); i++) {
+					j = g_random->randomInt(0,13);
+					if( j < 3 ) {
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
+						
+						//TraceEvent("RYOWset").detail("Key",myKeyA).detail("Value",myValue);
+						trRYOW.set(StringRef(clientID + "b/" + myKeyA),myValue);
+						
+						loop {
+							try { 
+								tr.set(StringRef(clientID + "d/" + myKeyA),myValue);
+								Void _ = wait( tr.commit() );
+								break;
+							} catch (Error& e) {
+								Void _ = wait( tr.onError(e) );
+							}
+						}
+					} else if( j < 4 ) {
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+						//TraceEvent("RYOWclear").detail("Key",myKeyA);
+						trRYOW.clear(StringRef(clientID + "b/" + myKeyA));
+								
+						loop {
+							try {
+								tr.clear(StringRef(clientID + "d/" + myKeyA));
+								Void _ = wait( tr.commit() );
+								break;
+							} catch (Error& e) {
+								Void _ = wait( tr.onError(e) );
+							}
+						}
+							
+					} else if( j < 5 ) {
+						int a = g_random->randomInt( 1, self->maxKeySpace+1 );
+						int b = g_random->randomInt( 1, self->maxKeySpace+1 );
+						myKeyA = format( "%010d", std::min(a,b) - 1 );
+						myKeyB = format( "%010d", std::max(a,b) );
+
+						//TraceEvent("RYOWclearRange").detail("KeyA",myKeyA).detail("KeyB",myKeyB);
+						trRYOW.clear( KeyRangeRef( StringRef(clientID + "b/" + myKeyA), StringRef(clientID + "b/" + myKeyB) ) );
+								
+						loop {
+							try {
+								tr.clear( KeyRangeRef( StringRef(clientID + "d/" + myKeyA), StringRef(clientID + "d/" + myKeyB) ) );
+								Void _ = wait( tr.commit() );
+								break;
+							} catch (Error& e) {
+								Void _ = wait( tr.onError(e) );
+							}
+						}
+					} else if( j < 6 ) {
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+
+						state Optional<Value> getTest1;
+					
+						Optional<Value> getTest = wait(trRYOW.get(StringRef(clientID + "b/" + myKeyA)));
+						getTest1 = getTest;
+
+						loop {
+							try {
+								Optional<Value> getTest2 = wait(tr.get(StringRef(clientID + "d/" + myKeyA)));
+
+								if( ( getTest1.present() && ( !getTest2.present() || getTest1.get() != getTest2.get() ) ) || 
+									( !getTest1.present() && getTest2.present() ) ) {
+									TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The get results did not match").detail("KeyA",myKeyA).detail("RYOW",getTest1.present() ? printable(getTest1.get()) : "Not Present").detail("Regular",getTest2.present() ? printable(getTest2.get()) : "Not Present");
+									self->fail = true;
+								}
+
+								tr.reset();
+								break;
+							} catch (Error &e) {
+								Void _ = wait( tr.onError(e) );
+								tr.reset();
+							}
+						}
+					} 
+					else if( j < 7 ) {
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+						myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
+						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
+						//TraceEvent("RYOWadd").detail("Key",myKeyA).detail("Value", "\\x01");
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::AddValue);
+								
+						loop {
+							try {
+								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AddValue);
+								Void _ = wait( tr.commit() );
+								break;
+							} catch (Error& e) {
+								error = e;
+								Void _ = wait( tr.onError(e) );
+								if(error.code() == error_code_commit_unknown_result) {
+									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
+									if (thing.present()) break;
+								}
+							}
+						}
+					}
+					//else if( j < 8 ) {
+					//	myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+					//	myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
+					//	myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
+					//	//TraceEvent("RYOWappendIfFits").detail("Key",myKeyA).detail("Value", myValue);
+					//	trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::AppendIfFits);
+					//			
+					//	loop {
+					//		try {
+					//			tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+					//			tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AppendIfFits);
+					//			Void _ = wait( tr.commit() );
+					//			break;
+					//		} catch (Error& e) {
+					//			error = e;
+					//			Void _ = wait( tr.onError(e) );
+					//			if(error.code() == error_code_commit_unknown_result) {
+					//				Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
+					//				if (thing.present()) break;
+					//			}
+					//		}
+					//	}
+					//}
+					else if( j < 8 ) {
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+						myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
+						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
+						//TraceEvent("RYOWand").detail("Key",myKeyA).detail("Value", myValue);
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::And);
+								
+						loop {
+							try {
+								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::And);
+								Void _ = wait( tr.commit() );
+								break;
+							} catch (Error& e) {
+								error = e;
+								Void _ = wait( tr.onError(e) );
+								if(error.code() == error_code_commit_unknown_result) {
+									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
+									if (thing.present()) break;
+								}
+							}
+						}
+					}
+					else if( j < 9 ) {
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+						myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
+						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
+						//TraceEvent("RYOWor").detail("Key",myKeyA).detail("Value", myValue);
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Or);
+								
+						loop {
+							try {
+								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Or);
+								Void _ = wait( tr.commit() );
+								break;
+							} catch (Error& e) {
+								error = e;
+								Void _ = wait( tr.onError(e) );
+								if(error.code() == error_code_commit_unknown_result) {
+									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
+									if (thing.present()) break;
+								}
+							}
+						}
+					}
+					else if( j < 10 ) {
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+						myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
+						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
+						//TraceEvent("RYOWxor").detail("Key",myKeyA).detail("Value", myValue);
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Xor);
+								
+						loop {
+							try {
+								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Xor);
+								Void _ = wait( tr.commit() );
+								break;
+							} catch (Error& e) {
+								error = e;
+								Void _ = wait( tr.onError(e) );
+								if(error.code() == error_code_commit_unknown_result) {
+									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
+									if (thing.present()) break;
+								}
+							}
+						}
+					}
+					else if (j < 11) {
+						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
+						myValue = format("%d", g_random->randomInt(0, 10000000));
+						//TraceEvent("RYOWmax").detail("Key",myKeyA).detail("Value", myValue);
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Max);
+
+						loop{
+							try {
+								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Max);
+								Void _ = wait(tr.commit());
+								break;
+							}
+							catch (Error& e) {
+								error = e;
+								Void _ = wait(tr.onError(e));
+								if (error.code() == error_code_commit_unknown_result) {
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									if (thing.present()) break;
+								}
+							}
+						}
+					}
+					else if (j < 12) {
+						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
+						myValue = format("%d", g_random->randomInt(0, 10000000));
+						//TraceEvent("RYOWmin").detail("Key",myKeyA).detail("Value", myValue);
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::Min);
+
+						loop{
+							try {
+								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::Min);
+								Void _ = wait(tr.commit());
+								break;
+							}
+							catch (Error& e) {
+								error = e;
+								Void _ = wait(tr.onError(e));
+								if (error.code() == error_code_commit_unknown_result) {
+									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									if (thing.present()) break;
+								}
+							}
+						}
+					}
+					else {
+						int a = g_random->randomInt( 1, self->maxKeySpace+1 );
+						int b = g_random->randomInt( 1, self->maxKeySpace+1 );
+						myKeyA = format( "%010d", std::min(a,b) - 1 );
+						myKeyB = format( "%010d", std::max(a,b) );
+						onEqualA = g_random->randomInt( 0, 2 ) != 0;
+						onEqualB = g_random->randomInt( 0, 2 ) != 0;
+						offsetA = g_random->randomInt( -1*self->maxOffset/2, self->maxOffset/2 );
+						offsetB =  g_random->randomInt( -1*self->maxOffset/2, self->maxOffset/2 );
+						randomLimit = g_random->randomInt( 0, 2*self->maxOffset+self->maxKeySpace );
+						randomByteLimit = g_random->randomInt( 0, (self->maxOffset+self->maxKeySpace)*512);
+						reverse = g_random->random01() > 0.5 ? false : true;
+
+						//TraceEvent("RYOWgetRange").detail("KeyA", myKeyA).detail("KeyB", myKeyB).detail("onEqualA",onEqualA).detail("onEqualB",onEqualB).detail("offsetA",offsetA).detail("offsetB",offsetB).detail("randomLimit",randomLimit).detail("randomByteLimit", randomByteLimit).detail("reverse", reverse);
+
+						state Standalone<RangeResultRef> getRangeTest1;
+						Standalone<RangeResultRef> getRangeTest = wait( trRYOW.getRange(KeySelectorRef(StringRef(clientID + "b/" + myKeyA),onEqualA,offsetA),KeySelectorRef(StringRef(clientID + "b/" + myKeyB),onEqualB,offsetB),randomLimit,false,reverse) );
+						getRangeTest1 = getRangeTest;
+						
+						loop {
+							try {
+								Standalone<RangeResultRef> getRangeTest2 = wait( tr.getRange(KeySelectorRef(StringRef(clientID + "d/" + myKeyA),onEqualA,offsetA),KeySelectorRef(StringRef(clientID + "d/" + myKeyB),onEqualB,offsetB),randomLimit,false,reverse) );
+
+								bool fail = false;
+								if( getRangeTest1.size() != getRangeTest2.size() ) {
+									TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The getRange results did not match sizes").detail("size1", getRangeTest1.size()).detail("size2",getRangeTest2.size()).detail("limit",randomLimit).detail("byteLimit", randomByteLimit).detail("bytes1", getRangeTest1.expectedSize()).detail("bytes2", getRangeTest2.expectedSize()).detail("reverse", reverse);
+									fail = true;
+									self->fail=true;
+								}
+								for(int k = 0; k < std::min(getRangeTest1.size(),getRangeTest2.size()); k++) {
+									if(getRangeTest1[k].value != getRangeTest2[k].value)  {
+										std::string keyA = printable(getRangeTest1[k].key);
+										std::string valueA = printable(getRangeTest1[k].value);
+										std::string keyB = printable(getRangeTest2[k].key);
+										std::string valueB = printable(getRangeTest2[k].value);
+										TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The getRange results did not match contents").detail("KeyA",keyA).detail("ValueA",valueA).detail("KeyB",keyB).detail("ValueB",valueB).detail("reverse", reverse);
+										fail = true;
+										self->fail=true;
+									}
+								}
+								if(fail) {
+									std::string outStr1 = "";
+									for(int k = 0; k < getRangeTest1.size(); k++) {
+										outStr1 = outStr1 + printable(getRangeTest1[k].key) + " " + format("%d", getRangeTest1[k].value.size()) + " ";
+									}
+
+									std::string outStr2 = "";
+									for(int k = 0; k < getRangeTest2.size(); k++) {
+										outStr2 = outStr2 + printable(getRangeTest2[k].key) + " " + format("%d", getRangeTest2[k].value.size()) + " ";
+									}
+
+									TraceEvent("RanSelTestLog").detail("RYOW",outStr1).detail("normal",outStr2);
+								}
+								
+
+								tr.reset();
+								break;
+							} catch (Error &e) {
+								Void _ = wait( tr.onError(e) );
+							}
+						}
+					}
+				}
+				
+				Void _ = wait( trRYOW.commit() );
+							
+				++self->transactions;
+
+				state Transaction finalTransaction(cx);
+
+				loop {
+					try {
+						state Standalone<RangeResultRef> finalTest1 = wait( finalTransaction.getRange(KeyRangeRef(StringRef(clientID + "b/"),StringRef(clientID + "c/")),self->maxKeySpace ) );
+						Standalone<RangeResultRef> finalTest2 = wait(finalTransaction.getRange(KeyRangeRef(StringRef(clientID + "d/"),StringRef(clientID + "e/")),self->maxKeySpace ) );
+
+						if( finalTest1.size() != finalTest2.size() ) {
+							TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The final results did not match sizes");
+							self->fail=true;
+						}
+						for(int k = 0; k < finalTest1.size(); k++)
+							if(finalTest1[k].value != finalTest2[k].value) {
+								TraceEvent(SevError, "RanSelTestFailure").detail("Reason", "The final results did not match contents").detail("KeyA",printable(finalTest1[k].key)).detail("ValueA",printable(finalTest1[k].value)).detail("KeyB",printable(finalTest2[k].key)).detail("ValueB",printable(finalTest2[k].value)).detail("reverse", reverse);
+								self->fail=true;
+							}
+						break;
+					} catch (Error &e) {
+						Void _ = wait( finalTransaction.onError(e) );
+					}
+				}
+			} catch (Error& e) {
+				Void _ = wait( trRYOW.onError(e) );
+				++self->retries;
+			}
+		}
+	}
+};
+
+WorkloadFactory<RandomSelectorWorkload> RandomSelectorWorkloadFactory("RandomSelector");

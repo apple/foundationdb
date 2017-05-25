@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<installer-gui-script minSpecVersion="1">
+  <pkg-ref id="FoundationDB"/>
+  <background file="logo.png" mime-type="image/png" alignment="bottomleft" scaling="tofit"/>
+  <title>FoundationDB</title>
+  <allowed-os-versions>
+    <os-version min="10.7"/>
+  </allowed-os-versions>
+  <!-- <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/> -->
+  <options customize="always" require-scripts="false" rootVolumeOnly="true"/>
+  <choices-outline>
+    <!-- <line choice="default"> -->
+    <!--   <line choice="FoundationDB"/> -->
+    <!-- </line> -->
+    <line choice="clients"/>
+    <line choice="server"/>
+  </choices-outline>
+  <!-- <choice id="default"/> -->
+  <!-- <choice id="FoundationDB" visible="true"> -->
+  <!--   <pkg-ref id="FoundationDB-clients"/> -->
+  <!--   <pkg-ref id="FoundationDB-server"/> -->
+  <!-- </choice> -->
+  <choice id="clients" visible="true" enabled="true" title="FoundationDB Clients" description="FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions. This package contains client utilities and libraries.
+">
+    <pkg-ref id="FoundationDB-clients"/>
+  </choice>
+  <choice id="server" visible="true" enabled="choices.clients.selected" selected="choices.server.enabled &amp;&amp; choices.server.selected" title="FoundationDB Server" description="FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions. This package contains the server.
+">
+    <pkg-ref id="FoundationDB-server"/>
+  </choice>
+  <pkg-ref id="FoundationDB-clients" onConclusion="none">FoundationDB-clients.pkg</pkg-ref>
+  <pkg-ref id="FoundationDB-server" onConclusion="none">FoundationDB-server.pkg</pkg-ref>
+  <conclusion mime-type="application/rtf" file="conclusion.rtf"/>
+</installer-gui-script>

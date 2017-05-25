@@ -1,0 +1,6 @@
+testTitle=TraceEventMetrics
+testName=UnitTests
+startDelay=0
+useDB=false
+maxTestCases=0
+testsMatching=fdbserver/metrics/TraceEvents

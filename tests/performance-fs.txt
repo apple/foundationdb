@@ -1,0 +1,6 @@
+testTitle=PerformanceProbeFS
+    testName=Performance
+    probeWorkload=FileSystem
+    fileCount=100000
+    discardEdgeMeasurements=true
+    testDuration=5

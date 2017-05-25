@@ -1,0 +1,5 @@
+#!/bin/bash
+
+/usr/bin/python -m compileall /Library/Python/2.7/site-packages/fdb
+
+exit 0

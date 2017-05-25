@@ -1,0 +1,187 @@
+{
+    "client" : {
+        "cluster_file" : {
+            "path" : "tcf/separatecoordinator.cluster",
+            "up_to_date" : true
+        },
+        "coordinators" : {
+            "coordinators" : [
+                {
+                    "address" : "127.0.0.1:4991",
+                    "reachable" : true
+                }
+            ],
+            "quorum_reachable" : true
+        },
+        "database_status" : {
+            "available" : false,
+            "healthy" : false
+        },
+        "messages" : [
+        ],
+        "timestamp" : 1416583106
+    },
+    "cluster" : {
+        "cluster_controller_timestamp" : 1416583113,
+        "configuration" : {
+            "coordinators_count" : 1,
+            "excluded_servers" : [
+            ]
+        },
+        "data" : {
+            "average_partition_size_bytes" : 400000,
+            "least_operating_space_bytes_log_server" : 973727006,
+            "least_operating_space_bytes_storage_server" : 973737848,
+            "moving_data" : {
+                "in_flight_bytes" : 0,
+                "in_queue_bytes" : 0
+            },
+            "partitions_count" : 2,
+            "state" : {
+                "healthy" : true,
+                "name" : "healthy"
+            },
+            "total_disk_used_bytes" : 229376,
+            "total_kv_size_bytes" : 0
+        },
+        "machines" : {
+            "6344abf1813eb05b" : {
+                "address" : "127.0.0.1",
+                "cpu" : {
+                    "logical_core_utilization" : 0.19001250012500129
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "committed_bytes" : 11662782464,
+                    "free_bytes" : 13664043008,
+                    "total_bytes" : 25326825472
+                },
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.11700000000000001
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.11700000000000001
+                    },
+                    "tcp_segments_retransmitted" : {
+                        "hz" : 0
+                    }
+                }
+            }
+        },
+        "messages" : [
+            {
+                "description" : "Unable to read database configuration.",
+                "name" : "unreadable_configuration"
+            },
+            {
+                "description" : "Unable to start transaction after 5 seconds.",
+                "name" : "transaction_start_timeout"
+            },
+            {
+                "description" : "Unable to commit after 5 seconds.",
+                "name" : "commit_timeout"
+            }
+        ],
+        "processes" : {
+            "6f3ff325713a266b" : {
+                "address" : "127.0.0.1:4444",
+                "command_line" : "bin/fdbserver -C separatecoordinator.cluster -p auto:4444",
+                "cpu" : {
+                    "usage_cores" : 0.0024002240022400223
+                },
+                "disk" : {
+                    "busy" : 0.6888068880688808
+                },
+                "excluded" : false,
+                "machine_id" : "6344abf1813eb05b",
+                "memory" : {
+                    "available_bytes" : 13772464128,
+                    "used_bytes" : 108421120
+                },
+                "messages" : [
+                ],
+                "network" : {
+                    "megabits_received" : {
+                        "hz" : 0.0046752499999999997
+                    },
+                    "megabits_sent" : {
+                        "hz" : 0.0151585
+                    }
+                },
+                "roles" : [
+                    {
+                        "id" : "1b9f7089f46fca7f",
+                        "role" : "master"
+                    },
+                    {
+                        "id" : "03e40165b1fa8a57",
+                        "role" : "cluster_controller"
+                    },
+                    {
+                        "id" : "20beaadaa554dee3",
+                        "role" : "proxy"
+                    },
+                    {
+                        "id" : "f0a33233db8e5f67",
+                        "role" : "log"
+                    }
+                ],
+                "version" : "3.0.0-PRERELEASE"
+            }
+        },
+        "qos" : {
+            "performance_limited_by" : {
+                "description" : "The database is not being saturated by the workload.",
+                "name" : "workload"
+            },
+            "worst_queue_bytes_log_server" : 1483,
+            "worst_queue_bytes_storage_server" : 6862
+        },
+        "recovery_state" : {
+            "description" : "Recruiting new transaction servers.",
+            "name" : "recruiting_transaction_servers",
+            "required_logs" : 3,
+            "required_proxies" : 1,
+            "required_resolvers" : 1
+        },
+        "workload" : {
+            "bytes" : {
+                "written" : {
+                    "counter" : 1133,
+                    "hz" : 0,
+                    "roughness" : 0
+                }
+            },
+            "operations" : {
+                "reads" : {
+                    "hz" : 1.37781
+                },
+                "writes" : {
+                    "counter" : 25,
+                    "hz" : 0,
+                    "roughness" : 0
+                }
+            },
+            "transactions" : {
+                "committed" : {
+                    "counter" : 6,
+                    "hz" : 0,
+                    "roughness" : 0
+                },
+                "conflicted" : {
+                    "counter" : 1,
+                    "hz" : 0,
+                    "roughness" : 0
+                },
+                "started" : {
+                    "counter" : 126,
+                    "hz" : 1.9999899999999999,
+                    "roughness" : 3.2801
+                }
+            }
+        }
+    }
+}
+

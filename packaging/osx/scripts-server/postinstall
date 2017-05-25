@@ -1,0 +1,23 @@
+#!/bin/bash
+
+if [ ! -f /usr/local/etc/foundationdb/fdb.cluster ]; then
+    description=`LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8`
+    random_str=`LC_CTYPE=C tr -dc A-Za-z0-9 < /dev/urandom | head -c 8`
+    echo $description:$random_str@127.0.0.1:4689 > /usr/local/etc/foundationdb/fdb.cluster
+    chmod 0664 /etc/foundationdb/fdb.cluster
+    NEWDB=1
+fi
+
+if [ -f /usr/local/etc/foundationdb/foundationdb.conf.old ]; then
+    mv /usr/local/etc/foundationdb/foundationdb.conf.old /usr/local/etc/foundationdb/foundationdb.conf
+else
+    mv /usr/local/etc/foundationdb/foundationdb.conf.new /usr/local/etc/foundationdb/foundationdb.conf
+fi
+
+/bin/launchctl load -w /Library/LaunchDaemons/com.foundationdb.fdbmonitor.plist
+
+if [ "$NEWDB" != "" ]; then
+    /usr/local/bin/fdbcli --exec "configure new single memory" --timeout 20
+fi
+
+exit 0
