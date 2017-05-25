@@ -182,7 +182,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		// The actor final boolean argument is a hack to prevent the second part of this function from happening
 		// Fix Me
-		NOT_IN_CLEAN;
 		if (exitAfterInclude) return Void();
 
 		std::vector<NetworkAddress> coordinators = wait( getCoordinators(cx) );

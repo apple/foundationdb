@@ -93,9 +93,8 @@ public:
 		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>>	zoneId;
-		bool dead;
 
-		MachineInfo() : machineProcess(0), dead(false) {}
+		MachineInfo() : machineProcess(0) {}
 	};
 
 	template <class Func>
