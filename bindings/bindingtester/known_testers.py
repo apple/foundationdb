@@ -64,5 +64,5 @@ testers = {
     'java_completable' :       Tester('java', _java_completable_cmd + 'StackTester', 2040, 500, MAX_API_VERSION),
     'java_completable_async' : Tester('java', _java_completable_cmd + 'AsyncStackTester', 2040, 500, MAX_API_VERSION),
     'go' :                     Tester('go', _absolute_path('go/bin/_stacktester'), 63, 200, MAX_API_VERSION),
-    'flow' :                   Tester('flow', _absolute_path('flow/bin/fdb_flow_tester'), 63, 200, MAX_API_VERSION),
+    'flow' :                   Tester('flow', _absolute_path('flow/bin/fdb_flow_tester'), 63, 500, MAX_API_VERSION),
 }
