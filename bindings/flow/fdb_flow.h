@@ -52,7 +52,7 @@ namespace FDB {
 			fdb_cluster_destroy( c );
 		}
 
-		Reference<DatabaseContext> createDatabase( Standalone<StringRef> dbName );
+		Reference<DatabaseContext> createDatabase();
 
 	private:
 		explicit Cluster( FDBCluster* c ) : c(c) {}

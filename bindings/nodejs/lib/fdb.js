@@ -41,16 +41,13 @@ module.exports = {
 	apiVersion: function(version) {
 		if(selectedApiVersion.value && version !== selectedApiVersion.value)
 			throw new Error('Cannot select multiple different FDB API versions');
-		if(version < 14)
-			throw new RangeError('FDB API versions before 14 are not supported');
+		if(version < 500)
+			throw new RangeError('FDB API versions before 500 are not supported');
 		if(version > 500)
 			throw new RangeError('Latest known FDB API version is 500');
 
 		if(!selectedApiVersion.value) {
 			fdb.apiVersion(version);
-
-			if(version < 23)
-				Cluster.prototype.createDatabase = Cluster.prototype.openDatabase;
 
 			fdbModule.FDBError = this.FDBError;
 			fdbModule.KeySelector = KeySelector;
@@ -67,7 +64,6 @@ module.exports = {
 			fdbModule.streamingMode = fdb.streamingMode;
 
 			var dbCache = {};
-			var clusterCache = {};
 
 			var doInit = function() {
 				fdb.startNetwork();
@@ -75,7 +71,6 @@ module.exports = {
 				process.on('exit', function() {
 					//Clearing out the caches makes memory debugging a little easier
 					dbCache = null;
-					clusterCache = null;
 
 					fdb.stopNetwork();
 				});
@@ -92,71 +87,23 @@ module.exports = {
 				if(!clusterFile)
 					clusterFile = '';
 
-				var cluster = new Cluster(fdb.createCluster(clusterFile));
-
-				if(version < 23)
-					return future.resolve(cluster)(cb);
-				else
-					return cluster;
+				return new Cluster(fdb.createCluster(clusterFile));
 			};
 
-			fdbModule.open = function(clusterFile, databaseName, cb) {
-				if(!databaseName)
-					databaseName = 'DB';
-
+			fdbModule.open = function(clusterFile, cb) {
 				if(clusterFile)
 					fdb.options.setClusterFile(clusterFile);
 
 				this.init();
 
-				var finish = function(err, database) {
-					if(version >= 23) //err will be undefined if version >= 23
-						return database;
-					else if(err)
-						return future.reject(err)(cb);
-					else
-						return future.resolve(database)(cb);
-				};
-
-				var updateDatabaseCacheAndFinish = function(err, database) {
-					if(!err)
-						dbCache[[clusterFile, databaseName]] = database;
-
-					return finish(err, database);
-				};
-
-				var getDatabase = function(cluster) {
-					var database = dbCache[[clusterFile, databaseName]];
-					if(database)
-						return finish(undefined, database);
-					else {
-						database = cluster.openDatabase(databaseName);
-						if(version >= 23)
-							return updateDatabaseCacheAndFinish(undefined, database);
-						else
-							return database(updateDatabaseCacheAndFinish);
-					}
-				};
-
-				var updateClusterCacheAndGetDatabase = function(err, cluster) {
-					if(err)
-						finish(err);
-					else {
-						clusterCache[clusterFile] = cluster;
-						return getDatabase(cluster);
-					}
-				};
-
-				var cluster = clusterCache[clusterFile];
-				if(cluster)
-					return getDatabase(cluster);
-				else {
-					cluster = fdbModule.createCluster(clusterFile);
-					if(version >= 23)
-						return updateClusterCacheAndGetDatabase(undefined, cluster);
-					else
-						return cluster(updateClusterCacheAndGetDatabase);
+				var database = dbCache[clusterFile];
+				if(!database) {
+					var cluster = fdbModule.createCluster(clusterFile);
+					database = cluster.openDatabase();
+					dbCache[clusterFile] = database;
 				}
+
+				return database;
 			};
 		}
 
