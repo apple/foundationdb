@@ -1661,7 +1661,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 		// Connect to the default cluster/database, and create a transaction
 		auto cluster = fdb->createCluster(clusterFilename);
-		Reference<DatabaseContext> db = cluster->createDatabase(LiteralStringRef("DB"));
+		Reference<DatabaseContext> db = cluster->createDatabase();
 
 		Reference<FlowTesterData> data = Reference<FlowTesterData>(new FlowTesterData(fdb));
 		Void _ = wait(runTest(data, db, prefix));
@@ -1685,13 +1685,13 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(410);
+		API *fdb = FDB::API::selectAPIVersion(500);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
 
 		auto c = fdb->createCluster(std::string());
-		auto db = c->createDatabase(LiteralStringRef("DB"));
+		auto db = c->createDatabase();
 		state Reference<Transaction> tr(new Transaction(db));
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();

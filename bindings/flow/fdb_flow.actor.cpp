@@ -33,9 +33,9 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API *fdb = FDB::API::selectAPIVersion(400);
+	API *fdb = FDB::API::selectAPIVersion(500);
 	auto c = fdb->createCluster( std::string() );
-	auto db = c->createDatabase( LiteralStringRef("DB") );
+	auto db = c->createDatabase();
 	state Reference<Transaction> tr( new Transaction(db) );
 
 	// tr->setVersion(1);
@@ -77,7 +77,7 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API *fdb = FDB::API::selectAPIVersion(400);
+	API *fdb = FDB::API::selectAPIVersion(500);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 
@@ -144,7 +144,7 @@ namespace FDB {
 			throw api_version_already_set();
 		}
 
-		if(apiVersion < 200 || apiVersion > FDB_API_VERSION) {
+		if(apiVersion < 500 || apiVersion > FDB_API_VERSION) {
 			throw api_version_not_supported();
 		}
 
@@ -183,8 +183,9 @@ namespace FDB {
 		return Reference<Cluster>( new Cluster(c) );
 	}
 
-	Reference<DatabaseContext> Cluster::createDatabase( Standalone<StringRef> dbName ) {
-		CFuture f( fdb_cluster_create_database( c, dbName.begin(), dbName.size() ) );
+	Reference<DatabaseContext> Cluster::createDatabase() {
+		const char *dbName = "DB";
+		CFuture f( fdb_cluster_create_database( c, (uint8_t*)dbName, (int)strlen(dbName) ) );
 		f.blockUntilReady();
 
 		FDBDatabase* db;
