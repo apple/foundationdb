@@ -738,7 +738,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Efficiently creates a new {@code Tuple} from a {@link Stream} of objects. The
 	 *  elements must follow the type guidelines from {@link Tuple#addObject(Object) add},
-	 *  and so can only be {@link String}s, {@code byte[]}s, {@link Number}s, or {@code null}s.
+	 *  and so can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
+	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
 	 *
 	 * @param items the {@link Stream} of items from which to create the {@code Tuple}.
 	 *
