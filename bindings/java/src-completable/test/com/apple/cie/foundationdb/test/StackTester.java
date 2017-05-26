@@ -209,7 +209,7 @@ public class StackTester {
 				inst.tr.options().setNextWriteNoWriteConflictRange();
 			}
 			else if(op == StackOperation.RESET) {
-				inst.setTransaction(inst.tr.reset());
+				inst.context.newTransaction();
 			}
 			else if(op == StackOperation.CANCEL) {
 				inst.tr.cancel();

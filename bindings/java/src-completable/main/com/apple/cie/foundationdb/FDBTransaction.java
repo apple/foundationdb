@@ -507,20 +507,6 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	}
 
 	@Override
-	public Transaction reset() {
-		pointerReadLock.lock();
-		try {
-			Transaction_reset(getPtr());
-			return transfer();
-		} finally {
-			pointerReadLock.unlock();
-			if(!transactionOwner) {
-				dispose();
-			}
-		}
-	}
-
-	@Override
 	public void cancel() {
 		pointerReadLock.lock();
 		try {

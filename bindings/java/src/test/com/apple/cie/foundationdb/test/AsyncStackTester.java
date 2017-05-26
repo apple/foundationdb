@@ -242,7 +242,7 @@ public class AsyncStackTester {
 			return ReadyFuture.DONE;
 		}
 		else if(op == StackOperation.RESET) {
-			inst.setTransaction(inst.tr.reset());
+			inst.context.newTransaction();
 			return ReadyFuture.DONE;
 		}
 		else if(op == StackOperation.CANCEL) {

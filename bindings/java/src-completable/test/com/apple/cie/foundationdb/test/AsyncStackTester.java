@@ -243,7 +243,7 @@ public class AsyncStackTester {
 			return CompletableFuture.completedFuture(null);
 		}
 		else if(op == StackOperation.RESET) {
-			inst.setTransaction(inst.tr.reset());
+			inst.context.newTransaction();
 			return CompletableFuture.completedFuture(null);
 		}
 		else if(op == StackOperation.CANCEL) {
@@ -608,7 +608,7 @@ public class AsyncStackTester {
 				return inst.tr.commit().thenComposeAsync(new Function<Void, CompletableFuture<Void>>() {
 					@Override
 					public CompletableFuture<Void> apply(Void o) {
-						inst.setTransaction(inst.tr.reset());
+						inst.tr = inst.context.newTransaction();
 						return logStack(inst, prefix, saved);
 					}
 				});
@@ -617,7 +617,7 @@ public class AsyncStackTester {
 		return inst.tr.commit().thenApplyAsync(new Function<Void, Void>() {
 			@Override
 			public Void apply(Void a) {
-				inst.setTransaction(inst.tr.reset());
+				inst.tr = inst.context.newTransaction();
 				return null;
 			}
 		});

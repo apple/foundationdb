@@ -85,7 +85,7 @@ public class SerialInsertion {
 						tr.set(buf.array(), value);
 					}
 					tr.commit().get();
-					tr = tr.reset();
+					tr = db.createTransaction();
 					done += i;
 				} catch(RuntimeException e) {
 					tr = tr.onError(e).get();

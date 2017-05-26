@@ -46,7 +46,7 @@ class ApiTest(Test):
 
         self.has_version = False
         self.can_set_version = True
-        self.is_committed = True
+        self.can_get_commit_version = False
         self.can_use_key_selectors = True
 
         self.generated_keys = []
@@ -185,6 +185,7 @@ class ApiTest(Test):
             if args.concurrency == 1 and (op in database_mutations):
                 self.wait_for_reads(instructions)
                 test_util.blocking_commit(instructions)
+                self.can_get_commit_version = False
                 self.add_stack_items(1)
 
             if op in resets or op == 'NEW_TRANSACTION':
@@ -195,7 +196,7 @@ class ApiTest(Test):
 
             if op == 'NEW_TRANSACTION':
                 instructions.append(op)
-                self.is_committed = False
+                self.can_get_commit_version = True
                 self.can_set_version = True
                 self.can_use_key_selectors = True
 
@@ -208,7 +209,7 @@ class ApiTest(Test):
                     self.wait_for_reads(instructions)
 
                 instructions.append('NEW_TRANSACTION')
-                self.is_committed = False
+                self.can_get_commit_version = True
                 self.can_set_version = True
                 self.can_use_key_selectors = True
                 self.add_strings(1)
@@ -368,8 +369,8 @@ class ApiTest(Test):
                     if args.concurrency == 1:
                         self.wait_for_reads(instructions)
                     test_util.blocking_commit(instructions)
+                    self.can_get_commit_version = False
                     self.add_stack_items(1)
-                    self.is_committed = True
                     self.can_set_version = True
                     self.can_use_key_selectors = True
                 else:
@@ -378,20 +379,33 @@ class ApiTest(Test):
 
             elif op == 'RESET':
                 instructions.append(op)
-                self.is_committed = False
+                self.can_get_commit_version = False
                 self.can_set_version = True
                 self.can_use_key_selectors = True
 
             elif op == 'CANCEL':
                 instructions.append(op)
-                self.is_committed = False
                 self.can_set_version = False
 
             elif op == 'GET_COMMITTED_VERSION':
-                if self.is_committed:
+                if self.can_get_commit_version:
+                    do_commit = random.random() < 0.5
+
+                    if do_commit:
+                        instructions.append('COMMIT')
+                        instructions.append('WAIT_FUTURE')
+                        self.add_stack_items(1)
+
                     instructions.append(op)
+
                     self.has_version = True
                     self.add_strings(1)
+
+                    if do_commit:
+                        instructions.append('RESET')
+                        self.can_get_commit_version = False
+                        self.can_set_version = True
+                        self.can_use_key_selectors = True
 
             elif op == 'TUPLE_PACK' or op == 'TUPLE_RANGE':
                 tup = self.random.random_tuple(10)
