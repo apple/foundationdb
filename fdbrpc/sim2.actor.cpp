@@ -1097,7 +1097,7 @@ public:
 					// Add non-test processes (ie. datahall is not be set for test processes)
 					if (processInfo->startingClass != ProcessClass::TesterClass) {
 						// Add machine processes to dead group if dead or specified kill machine
-						if (processInfo->failed || machineRec.second.dead || (machineRec.second.zoneId == zoneId))
+						if (processInfo->failed || (machineRec.second.zoneId == zoneId))
 							processesDead.push_back(processInfo);
 						else
 							processesLeft.push_back(processInfo);
@@ -1112,7 +1112,6 @@ public:
 			}
 			else if ((kt == KillInstantly) || (kt == InjectFaults)) {
 				TraceEvent("DeadMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalZones", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
-				machines[zoneId].dead = true;
 			}
 			else {
 				TraceEvent("ClearMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalZones", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
@@ -1173,7 +1172,7 @@ public:
 					// Add non-test processes (ie. datahall is not be set for test processes)
 					if (processInfo->startingClass != ProcessClass::TesterClass) {
 						// Add processes from dead machines and datacenter machines to dead group
-						if (processInfo->failed || machineRec.second.dead || (datacenterZones.find(machineRec.second.zoneId) != datacenterZones.end()))
+						if (processInfo->failed || (datacenterZones.find(machineRec.second.zoneId) != datacenterZones.end()))
 							processesDead.push_back(processInfo);
 						else
 							processesLeft.push_back(processInfo);
@@ -1245,7 +1244,6 @@ public:
 		for( auto process : machine.processes ) {
 			ASSERT( process->failed );
 		}
-		machine.dead = true;
 		if( machine.machineProcess ) {
 			 killProcess_internal( machine.machineProcess, KillInstantly );
 		}

@@ -183,7 +183,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	public CompletableFuture<Long> getReadVersion() {
 		pointerReadLock.lock();
 		try {
-			return new FutureVersion( Transaction_getReadVersion(getPtr()));
+			return new FutureVersion( Transaction_getReadVersion(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -200,7 +200,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	private CompletableFuture<byte[]> get_internal(byte[] key, boolean isSnapshot) {
 		pointerReadLock.lock();
 		try {
-			return new FutureResult( Transaction_get(getPtr(), key, isSnapshot));
+			return new FutureResult( Transaction_get(getPtr(), key, isSnapshot), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -218,7 +218,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		pointerReadLock.lock();
 		try {
 			return new FutureKey( Transaction_getKey(getPtr(),
-					selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot));
+					selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -313,7 +313,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 			return new FutureResults(Transaction_getRange(
 					getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
 					end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
-					streamingMode, iteration, isSnapshot, reverse));
+					streamingMode, iteration, isSnapshot, reverse), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -442,7 +442,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	public CompletableFuture<Void> commit() {
 		pointerReadLock.lock();
 		try {
-			return new FutureVoid(Transaction_commit(getPtr()));
+			return new FutureVoid(Transaction_commit(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -462,7 +462,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	public CompletableFuture<byte[]> getVersionstamp() {
 		pointerReadLock.lock();
 		try {
-			return new FutureKey(Transaction_getVersionstamp(getPtr()));
+			return new FutureKey(Transaction_getVersionstamp(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -472,7 +472,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	public CompletableFuture<Void> watch(byte[] key) throws FDBException {
 		pointerReadLock.lock();
 		try {
-			return new FutureVoid(Transaction_watch(getPtr(), key));
+			return new FutureVoid(Transaction_watch(getPtr(), key), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -490,7 +490,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		}
 		pointerReadLock.lock();
 		try {
-			CompletableFuture<Void> f = new FutureVoid(Transaction_onError(getPtr(), ((FDBException)e).getCode()));
+			CompletableFuture<Void> f = new FutureVoid(Transaction_onError(getPtr(), ((FDBException)e).getCode()), executor);
 			final Transaction tr = transfer();
 			return f.thenApply(v -> tr)
 				.whenComplete((v, t) -> {
@@ -533,7 +533,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	public CompletableFuture<String[]> getAddressesForKey(byte[] key) {
 		pointerReadLock.lock();
 		try {
-			return new FutureStrings(Transaction_getKeyLocations(getPtr(), key));
+			return new FutureStrings(Transaction_getKeyLocations(getPtr(), key), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}

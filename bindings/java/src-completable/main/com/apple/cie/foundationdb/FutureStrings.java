@@ -20,11 +20,12 @@
 
 package com.apple.cie.foundationdb;
 
+import java.util.concurrent.Executor;
 
 class FutureStrings extends NativeFuture<String[]> {
-	FutureStrings(long cPtr) {
+	FutureStrings(long cPtr, Executor executor) {
 		super(cPtr);
-		registerMarshalCallback();
+		registerMarshalCallback(executor);
 	}
 
 	@Override

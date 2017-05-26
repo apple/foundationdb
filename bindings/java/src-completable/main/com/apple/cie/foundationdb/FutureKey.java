@@ -20,12 +20,12 @@
 
 package com.apple.cie.foundationdb;
 
-
+import java.util.concurrent.Executor;
 
 class FutureKey extends NativeFuture<byte[]> {
-	FutureKey(long cPtr) {
+	FutureKey(long cPtr, Executor executor) {
 		super(cPtr);
-		registerMarshalCallback();
+		registerMarshalCallback(executor);
 	}
 
 	@Override

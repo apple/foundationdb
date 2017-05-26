@@ -20,11 +20,12 @@
 
 package com.apple.cie.foundationdb;
 
+import java.util.concurrent.Executor;
 
 class FutureVersion extends NativeFuture<Long> {
-	FutureVersion(long cPtr) {
+	FutureVersion(long cPtr, Executor executor) {
 		super(cPtr);
-		registerMarshalCallback();
+		registerMarshalCallback(executor);
 	}
 
 	@Override

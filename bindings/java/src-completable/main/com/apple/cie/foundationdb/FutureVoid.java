@@ -20,11 +20,12 @@
 
 package com.apple.cie.foundationdb;
 
+import java.util.concurrent.Executor;
 
 class FutureVoid extends NativeFuture<Void> {
-	FutureVoid(long cPtr) {
+	FutureVoid(long cPtr, Executor executor) {
 		super(cPtr);
-		registerMarshalCallback();
+		registerMarshalCallback(executor);
 	}
 
 	@Override
