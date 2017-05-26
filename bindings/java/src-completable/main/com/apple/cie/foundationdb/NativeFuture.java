@@ -21,6 +21,7 @@
 package com.apple.cie.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 
 abstract class NativeFuture<T> extends CompletableFuture<T> {
 	protected final long cPtr;
@@ -35,13 +36,8 @@ abstract class NativeFuture<T> extends CompletableFuture<T> {
 	// constructor of this class because a quickly completing future can  
 	// lead to a race where the marshalWhenDone tries to run on an
 	// unconstructed subclass.
-	protected void registerMarshalCallback() {
-		Future_registerCallback(cPtr, new Runnable() {
-			@Override
-			public void run() {
-				NativeFuture.this.marshalWhenDone();
-			}
-		});
+	protected void registerMarshalCallback(Executor executor) {
+		Future_registerCallback(cPtr, () -> executor.execute(this::marshalWhenDone));
 	}
 
 	private void marshalWhenDone() {

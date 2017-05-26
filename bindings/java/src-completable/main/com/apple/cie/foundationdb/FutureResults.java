@@ -20,11 +20,12 @@
 
 package com.apple.cie.foundationdb;
 
+import java.util.concurrent.Executor;
 
 class FutureResults extends NativeFuture<RangeResultInfo> {
-	FutureResults(long cPtr) {
+	FutureResults(long cPtr, Executor executor) {
 		super(cPtr);
-		registerMarshalCallback();
+		registerMarshalCallback(executor);
 	}
 
 	@Override

@@ -28,7 +28,7 @@ class FutureDatabase extends NativeFuture<Database> {
 	FutureDatabase(long cPtr, Executor executor) {
 		super(cPtr);
 		this.executor = executor;
-		registerMarshalCallback();
+		registerMarshalCallback(executor);
 	}
 
 	@Override

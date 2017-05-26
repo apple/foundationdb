@@ -28,7 +28,7 @@ class FutureCluster extends NativeFuture<Cluster> {
 	protected FutureCluster(long cPtr, Executor executor) {
 		super(cPtr);
 		this.executor = executor;
-		registerMarshalCallback();
+		registerMarshalCallback(executor);
 	}
 
 	@Override
