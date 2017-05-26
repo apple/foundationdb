@@ -368,10 +368,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			ASSERT(idx != startIndex || safeCount > (g_simulator.desiredCoordinators-1)/2);
 		}
 
-		// The actor final boolean argument is a hack to prevent the second part of this function from happening
-		// Fix Me
-		NOT_IN_CLEAN;
-
 		state std::vector<ISimulator::ProcessInfo*>	killProcesses;
 
 		killProcesses = self->getProcesses(toKill);
