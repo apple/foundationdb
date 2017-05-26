@@ -70,8 +70,8 @@ import com.apple.cie.foundationdb.tuple.Tuple;
  * Note: All keys with a first byte of {@code 0xff} are reserved for internal use.<br>
  * <br>
  * Note: Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
- *  option. This is because the Java bindings disallow use of {@code Transaction} objects after either
- *  {@link #reset()} or {@link #onError} is called.
+ *  option. This is because the Java bindings disallow use of {@code Transaction} objects after {@link #onError}
+ *  is called.
  */
 public interface Transaction extends Cancellable, Disposable, ReadTransaction, TransactionContext {
 
@@ -307,18 +307,6 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	public PartialFuture<Transaction> onError(Exception e);
 
 	/**
-	 * Resets a {@code Transaction} to its initial state after creation and returns it as a
-	 *  new object. The current {@code Transaction} object is invalidated and will throw errors when used.
-	 *  This clears all information about mutations, conflict information built from {@code get}s,
-	 *  and the read version. This does not clear any options set on this {@code Transaction} via
-	 *  a {@link TransactionOptions} object.
-	 *
-	 * @return a new {@code Transaction} object with reset state.
-
-	 */
-	public Transaction reset();
-
-	/**
 	 * Cancels the {@code Transaction}. All pending and any future uses of the
 	 *  {@code Transaction} will throw an {@link RuntimeException}.
 	 */
@@ -347,7 +335,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * commit, then the watch will be set with that exception. A transaction whose 
 	 * commit result is unknown will set all of its watches with the
 	 * {@code commit_unknown_result} exception. If an uncommitted transaction is 
-	 * reset or destroyed, then any watches it created will be set with the 
+	 * reset via {@link #onError} or destroyed, then any watches it created will be set with the
 	 * {@code transaction_cancelled} exception.<br>
 	 * <br>
 	 * By default, each database connection can have no more than 10,000 watches

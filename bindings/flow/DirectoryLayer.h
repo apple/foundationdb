@@ -58,7 +58,7 @@ namespace FDB {
 		static const StringRef HIGH_CONTENTION_KEY;
 		static const StringRef LAYER_KEY;
 		static const StringRef VERSION_KEY;
-		static const uint64_t SUB_DIR_KEY;
+		static const int64_t SUB_DIR_KEY;
 		static const uint32_t VERSION[3];
 		static const StringRef DEFAULT_NODE_SUBSPACE_PREFIX;
 

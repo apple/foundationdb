@@ -44,7 +44,7 @@ public class TestApp {
 			tr.set("apple".getBytes(), "crunchy".getBytes());
 			System.out.println("Attmepting to commit apple/crunchy...");
 			tr.commit().get(); // FIXME: this is not an ok use of the API
-			tr = tr.reset();
+			tr = db.createTransaction();
 
 			long topTime = 0, blockTime = 0, getTime = 0, bottomTime = 0;
 

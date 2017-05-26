@@ -98,7 +98,7 @@ public class RangeTest {
 			System.out.println("Transaction was cancelled correctly");
 		}
 
-		tr = tr.reset();
+		tr = db.createTransaction();
 		version = tr.getReadVersion().get();
 		System.out.println("DB version: " + version);
 

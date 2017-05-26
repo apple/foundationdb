@@ -96,10 +96,14 @@ abstract class Context implements Runnable {
 		}
 	}
 
-	public void newTransaction() {
+	public Transaction newTransaction() {
+		Transaction tr = db.createTransaction();
+
 		synchronized(Context.transactionMap) {
-			Context.transactionMap.put(this.trName, db.createTransaction());
+			Context.transactionMap.put(this.trName, tr);
 		}
+
+		return tr;
 	}
 
 	public void switchTransaction(byte[] trName) {

@@ -45,8 +45,8 @@ Handle<Value> Cluster::OpenDatabase(const Arguments &args) {
 
 	Cluster *clusterPtr = ObjectWrap::Unwrap<Cluster>(args.Holder());
 
-	std::string dbName = *String::AsciiValue(args[0]->ToString());
-	FDBFuture *f = fdb_cluster_create_database(clusterPtr->cluster, (uint8_t*)dbName.c_str(), (int)strlen(dbName.c_str()));
+	const char *dbName = "DB";
+	FDBFuture *f = fdb_cluster_create_database(clusterPtr->cluster, (uint8_t*)dbName, (int)strlen(dbName));
 
 	fdb_error_t errorCode = fdb_future_block_until_ready(f);
 

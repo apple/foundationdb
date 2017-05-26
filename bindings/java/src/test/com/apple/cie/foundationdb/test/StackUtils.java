@@ -20,6 +20,7 @@
 
 package com.apple.cie.foundationdb.test;
 
+import java.math.BigInteger;
 import java.util.List;
 
 import com.apple.cie.foundationdb.FDBException;
@@ -90,6 +91,14 @@ public class StackUtils {
 
 	static Number getNumber(Object object) {
 		return ((Number)object);
+	}
+
+	static BigInteger getBigInteger(Object object) {
+		if (object instanceof BigInteger) {
+			return (BigInteger)object;
+		} else {
+			return BigInteger.valueOf(((Number)object).longValue());
+		}
 	}
 
 	static boolean getBoolean(Object o) {

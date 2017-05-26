@@ -306,6 +306,40 @@ TUPLE_RANGE
     structure) to the tuple range method. Pushes the begin and end elements of
     the returned range onto the stack.
 
+TUPLE_SORT
+
+    Pops the top item off of the stack as N. Pops the next N items off of the
+    stack as packed tuples (i.e., byte strings), unpacks them, sorts the tuples,
+    repacks them into byte strings, and then pushes these packed tuples onto
+    the stack so that the final top of the stack now has the greatest
+    element. If the binding has some kind of tuple comparison function, it should
+    use that to sort. Otherwise, it should sort them lexicographically by
+    their byte representation. The choice of function should not affect final sort order.
+
+ENCODE_FLOAT
+
+    Pops the top item off of the stack. This will be a byte-string of length 4
+    containing the IEEE 754 encoding of a float in big-endian order.
+    This is then converted into a float and pushed onto the stack.
+
+ENCODE_DOUBLE
+
+    Pops the top item off of the stack. This will be a byte-string of length 8
+    containing the IEEE 754 encoding of a double in big-endian order.
+    This is then converted into a double and pushed onto the stack.
+
+DECODE_FLOAT
+
+    Pops the top item off of the stack. This will be a single-precision float.
+    This is converted into a (4 byte) byte-string of its IEEE 754 representation
+    in big-endian order, and pushed onto the stack.
+
+DECODE_DOUBLE
+
+    Pops the top item off of the stack. This will be a double-precision float.
+    This is converted into a (8 byte) byte-string its IEEE 754 representation
+    in big-endian order, and pushed onto the stack.
+
 
 Thread Operations
 -----------------

@@ -44,37 +44,37 @@ public class TestApp {
 			tr.set("apple".getBytes(), "crunchy".getBytes());
 			System.out.println("Attempting to commit apple/crunchy...");
 			tr.commit().get(); // FIXME: this is not an ok use of the API
-            tr = tr.reset();
+			tr = db.createTransaction();
 
 			long topTime = 0, getTime = 0, bottomTime = 0;
 
 			for(int i = 0; i < 1000; i++) {
-                long a = System.currentTimeMillis();
+				long a = System.currentTimeMillis();
 
-                final byte[] key = ("apple" + i).getBytes();
-                tr = db.createTransaction();
-                CompletableFuture<byte[]> future = tr.get(key);
+				final byte[] key = ("apple" + i).getBytes();
+				tr = db.createTransaction();
+				CompletableFuture<byte[]> future = tr.get(key);
 
-                long b = System.currentTimeMillis();
+				long b = System.currentTimeMillis();
 
-                future.get();
+				future.get();
 
-                long c = System.currentTimeMillis();
+				long c = System.currentTimeMillis();
 
-                tr.set(key, ("Apple" + i).getBytes());
-                final CompletableFuture<Void> commit = tr.commit();
+				tr.set(key, ("Apple" + i).getBytes());
+				final CompletableFuture<Void> commit = tr.commit();
 
-                long d = System.currentTimeMillis();
+				long d = System.currentTimeMillis();
 
-                commit.whenCompleteAsync((v, error) -> {
-                    if(error != null) {
-                        error.printStackTrace();
-                    }
+				commit.whenCompleteAsync((v, error) -> {
+					if(error != null) {
+						error.printStackTrace();
+					}
 				});
 
-                topTime += b - a;
-                getTime += c - b;
-                bottomTime += d - c;
+				topTime += b - a;
+				getTime += c - b;
+				bottomTime += d - c;
 			}
 
 			System.out.println(" Top:    " + topTime);

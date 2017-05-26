@@ -620,10 +620,48 @@ function processOperation(context, inst, cb) {
 			});
 		})(promiseCb);
 	}
+	else if(inst.op === 'TUPLE_SORT') {
+		inst.pop()
+		.then(function(numParams) {
+			return inst.pop({count: numParams})
+			.then(function(params) {
+				var tuples = [];
+				for(var i = 0; i < params.length; ++i)
+					tuples.push(fdb.tuple.unpack(params[i]));
+				tuples.sort(fdb.tuple.compare);
+				for(var i = 0; i < tuples.length; ++i)
+					inst.push(fdb.tuple.pack(tuples[i]));
+			});
+		})(promiseCb);
+	}
 	else if(inst.op === 'SUB') {
 		inst.pop({count: 2})
 		.then(function(params) {
 			inst.push(params[0] - params[1]);
+		})(promiseCb);
+	}
+	else if(inst.op === 'ENCODE_FLOAT') {
+		inst.pop()
+		.then(function(fBytes) {
+			inst.push(fdb.tuple.Float.fromBytes(fBytes));
+		})(promiseCb);
+	}
+	else if(inst.op === 'ENCODE_DOUBLE') {
+		inst.pop()
+		.then(function(dBytes) {
+			inst.push(fdb.tuple.Double.fromBytes(dBytes));
+		})(promiseCb);
+	}
+	else if(inst.op === 'DECODE_FLOAT') {
+		inst.pop()
+		.then(function(fVal) {
+			inst.push(fVal.toBytes());
+		})(promiseCb);
+	}
+	else if(inst.op === 'DECODE_DOUBLE') {
+		inst.pop()
+		.then(function(dVal) {
+			inst.push(dVal.toBytes());
 		})(promiseCb);
 	}
 	else if(inst.op === 'CONCAT') {

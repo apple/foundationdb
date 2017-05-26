@@ -49,6 +49,12 @@ namespace FDB {
 			return pack(t);
 		}
 
+		Key packNested(Tuple const& item) const {
+			Tuple t;
+			t.appendNested(item);
+			return pack(t);
+		}
+
 		Key pack(StringRef const& item, bool utf8=false) const {
 			Tuple t;
 			t.append(item, utf8);
@@ -62,6 +68,12 @@ namespace FDB {
 		Subspace get(T const& item) const {
 			Tuple t;
 			t.append(item);
+			return get(t);
+		}
+
+		Subspace getNested(Tuple const& item) const {
+			Tuple t;
+			t.appendNested(item);
 			return get(t);
 		}
 

@@ -393,6 +393,27 @@ class Tester
           (FDB::Tuple.range arr).each do |x|
             inst.push(x)
           end
+        when "TUPLE_SORT"
+            arr = []
+            inst.wait_and_pop.times do |i|
+                arr.push(FDB::Tuple.unpack inst.wait_and_pop)
+            end
+            arr.sort! { |t1, t2| FDB::Tuple.compare(t1, t2) }
+            arr.each do |x|
+                inst.push( FDB::Tuple.pack x)
+            end
+        when "ENCODE_FLOAT"
+            bytes = inst.wait_and_pop
+            inst.push(FDB::Tuple::SingleFloat.new(bytes.unpack("g")[0]))
+        when "ENCODE_DOUBLE"
+            bytes = inst.wait_and_pop
+            inst.push(bytes.unpack("G")[0])
+        when "DECODE_FLOAT"
+            f_val = inst.wait_and_pop
+            inst.push([f_val.value].pack("g"))
+        when "DECODE_DOUBLE"
+            d_val = inst.wait_and_pop
+            inst.push([d_val].pack("G"))
         when "START_THREAD"
           t = Tester.new( @db, inst.wait_and_pop )
           thr = Thread.new do

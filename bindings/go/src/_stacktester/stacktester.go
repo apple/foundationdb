@@ -22,11 +22,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"fdb"
 	"fdb/tuple"
 	"log"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"runtime"
@@ -39,6 +42,21 @@ const verbose bool = false
 
 var trMap = map[string]fdb.Transaction {}
 var trMapLock = sync.RWMutex{}
+
+// Make tuples sortable by byte-order
+type byBytes []tuple.Tuple
+
+func (b byBytes) Len() int {
+	return len(b)
+}
+
+func (b byBytes) Swap(i, j int) {
+	b[i], b[j] = b[j], b[i]
+}
+
+func (b byBytes) Less(i, j int) bool {
+	return bytes.Compare(b[i].Pack(), b[j].Pack()) < 0
+}
 
 func int64ToBool(i int64) bool {
 	switch i {
@@ -83,7 +101,10 @@ func (sm *StackMachine) waitAndPop() (ret stackEntry) {
 
 	ret, sm.stack = sm.stack[len(sm.stack) - 1], sm.stack[:len(sm.stack) - 1]
 	switch el := ret.item.(type) {
-	case int64, []byte, string:
+	case []byte:
+		ret.item = el
+	case int64, string, bool, tuple.UUID, float32, float64, tuple.Tuple:
+		ret.item = el
 	case fdb.Key:
 		ret.item = []byte(el)
 	case fdb.FutureNil:
@@ -145,6 +166,40 @@ func (sm *StackMachine) store(idx int, item interface{}) {
 	sm.stack = append(sm.stack, stackEntry{item, idx})
 }
 
+func tupleToString(t tuple.Tuple) string {
+	var buffer bytes.Buffer
+	buffer.WriteByte('(')
+	for i, el := range t {
+		if i > 0 {
+			buffer.WriteString(", ")
+		}
+		switch el := el.(type) {
+		case int64:
+			buffer.WriteString(fmt.Sprintf("%d", el))
+		case []byte:
+			buffer.WriteString(fmt.Sprintf("%+q", string(el)))
+		case string:
+			buffer.WriteString(fmt.Sprintf("%+q", el))
+		case bool:
+			buffer.WriteString(fmt.Sprintf("%t", el))
+		case tuple.UUID:
+			buffer.WriteString(hex.EncodeToString(el[:]))
+		case float32:
+			buffer.WriteString(fmt.Sprintf("%f", el))
+		case float64:
+			buffer.WriteString(fmt.Sprintf("%f", el))
+		case nil:
+			buffer.WriteString("nil")
+		case tuple.Tuple:
+			buffer.WriteString(tupleToString(el))
+		default:
+			log.Fatalf("Don't know how to stringify tuple elemement %v %T\n", el, el)
+		}
+	}
+	buffer.WriteByte(')')
+	return buffer.String()
+}
+
 func (sm *StackMachine) dumpStack() {
 	for i := len(sm.stack) - 1; i >= 0; i-- {
 		fmt.Printf(" %d.", sm.stack[i].idx)
@@ -164,6 +219,16 @@ func (sm *StackMachine) dumpStack() {
 			fmt.Printf(" %+q", string(el))
 		case string:
 			fmt.Printf(" %+q", el)
+		case bool:
+			fmt.Printf(" %t", el)
+		case tuple.Tuple:
+			fmt.Printf(" %s", tupleToString(el))
+		case tuple.UUID:
+			fmt.Printf(" %s", hex.EncodeToString(el[:]))
+		case float32:
+			fmt.Printf(" %f", el)
+		case float64:
+			fmt.Printf(" %f", el)
 		case nil:
 			fmt.Printf(" nil")
 		default:
@@ -561,6 +626,39 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		for _, el := range(t) {
 			sm.store(idx, []byte(tuple.Tuple{el}.Pack()))
 		}
+	case op == "TUPLE_SORT":
+		count := sm.waitAndPop().item.(int64)
+		tuples := make([]tuple.Tuple, count)
+		for i := 0; i < int(count); i++ {
+			tuples[i], e = tuple.Unpack(fdb.Key(sm.waitAndPop().item.([]byte)))
+			if e != nil {
+				panic(e)
+			}
+		}
+		sort.Sort(byBytes(tuples))
+		for _, t := range tuples {
+			sm.store(idx, t.Pack())
+		}
+	case op == "ENCODE_FLOAT":
+		val_bytes := sm.waitAndPop().item.([]byte)
+		var val float32
+		binary.Read(bytes.NewBuffer(val_bytes), binary.BigEndian, &val)
+		sm.store(idx, val)
+	case op == "ENCODE_DOUBLE":
+		val_bytes := sm.waitAndPop().item.([]byte)
+		var val float64
+		binary.Read(bytes.NewBuffer(val_bytes), binary.BigEndian, &val)
+		sm.store(idx, val)
+	case op == "DECODE_FLOAT":
+		val := sm.waitAndPop().item.(float32)
+		var ibuf bytes.Buffer
+		binary.Write(&ibuf, binary.BigEndian, val)
+		sm.store(idx, ibuf.Bytes())
+	case op == "DECODE_DOUBLE":
+		val := sm.waitAndPop().item.(float64)
+		var ibuf bytes.Buffer
+		binary.Write(&ibuf, binary.BigEndian, val)
+		sm.store(idx, ibuf.Bytes())
 	case op == "TUPLE_RANGE":
 		var t tuple.Tuple
 		count := sm.waitAndPop().item.(int64)
@@ -618,7 +716,8 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 	case op == "ATOMIC_OP":
 		opname := strings.Replace(strings.Title(strings.Replace(strings.ToLower(sm.waitAndPop().item.(string)), "_", " ", -1)), " ", "", -1)
 		key := fdb.Key(sm.waitAndPop().item.([]byte))
-		value := sm.waitAndPop().item.([]byte)
+		ival := sm.waitAndPop().item
+		value := ival.([]byte)
 		sm.executeMutation(t, func (tr fdb.Transaction) (interface{}, error) {
 			reflect.ValueOf(tr).MethodByName(opname).Call([]reflect.Value{reflect.ValueOf(key), reflect.ValueOf(value)})
 			return nil, nil

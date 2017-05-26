@@ -23,25 +23,15 @@
 
 var future = require('./future');
 var Database = require('./database');
-var apiVersion = require('./apiVersion');
-
-var openDatabase = function(dbName) {
-	return new Database(this._cluster.openDatabase(dbName));
-};
-
-var openDatabase_v22 = function(dbName, cb) {
-	var database = new Database(this._cluster.openDatabase(dbName));
-	return future.resolve(database)(cb);
-};
 
 var Cluster = function(_cluster) {
 	this._cluster = _cluster;
 	this.options = _cluster.options;
 
-	if(apiVersion.value < 23)
-		this.openDatabase = openDatabase_v22;
-	else
-		this.openDatabase = openDatabase;
+};
+
+Cluster.prototype.openDatabase = function() {
+	return new Database(this._cluster.openDatabase());
 };
 
 module.exports = Cluster;
