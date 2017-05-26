@@ -1522,13 +1522,23 @@ THREAD_FUNC cancel(void *arg) {
 
 ACTOR Future<Void> checkUndestroyedFutures(std::vector<ThreadSingleAssignmentVar<int>*> undestroyed) {
 	state int fNum;
+	state ThreadSingleAssignmentVar<int>* f;
+	state double start = now();
+
 	for(fNum = 0; fNum < undestroyed.size(); ++fNum) {
-		state ThreadSingleAssignmentVar<int>* f = undestroyed[fNum];
-		state double start = now();
-		while(!f->isReady()) {
-			ASSERT(now() < start+60);
-			Void _ = wait(delay(5.0));
+		f = undestroyed[fNum];
+		
+		while(!f->isReady() && start+5 >= now()) {
+			Void _ = wait(delay(1.0));
 		}
+
+		ASSERT(f->isReady());
+	}
+
+	Void _ = wait(delay(1.0));
+
+	for(fNum = 0; fNum < undestroyed.size(); ++fNum) {
+		f = undestroyed[fNum];
 
 		ASSERT(f->debugGetReferenceCount() == 1);
 		ASSERT(f->isReady());
@@ -1545,7 +1555,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 
 	volatile bool *done = (volatile bool*)arg;
 	try {
-		for(int i = 0; i < 100; ++i) {
+		for(int i = 0; i < 25; ++i) {
 			FutureInfo f = createVarOnMainThread(false);
 			FutureInfo tf = T::createThreadFuture(f);
 			tf.validate();
@@ -1553,7 +1563,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 			tf.future.extractPtr(); // leaks
 		}
 
-		for(int numRuns = 0; numRuns < 100; ++numRuns) {
+		for(int numRuns = 0; numRuns < 25; ++numRuns) {
 			std::vector<ThreadSingleAssignmentVar<int>*> undestroyed;
 			std::vector<THREAD_HANDLE> threads;
 			for(int i = 0; i < 10; ++i) {
