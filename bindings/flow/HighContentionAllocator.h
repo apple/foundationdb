@@ -28,7 +28,7 @@
 namespace FDB {
 	class HighContentionAllocator {
 	public:
-		HighContentionAllocator(Subspace subspace) : counters(subspace.get(0)), recent(subspace.get(1)) {}
+		HighContentionAllocator(Subspace subspace) : counters(subspace.get((int64_t)0)), recent(subspace.get((int64_t)1)) {}
 		Future<Standalone<StringRef>> allocate(Reference<Transaction> const& tr) const;
 
 		static int64_t windowSize(int64_t start);

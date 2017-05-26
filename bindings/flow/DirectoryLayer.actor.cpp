@@ -26,7 +26,7 @@ namespace FDB {
 	const StringRef DirectoryLayer::HIGH_CONTENTION_KEY = LiteralStringRef("hca");
 	const StringRef DirectoryLayer::LAYER_KEY = LiteralStringRef("layer");
 	const StringRef DirectoryLayer::VERSION_KEY = LiteralStringRef("version");
-	const uint64_t DirectoryLayer::SUB_DIR_KEY = 0;
+	const int64_t DirectoryLayer::SUB_DIR_KEY = 0;
 
 	const uint32_t DirectoryLayer::VERSION[3] = {1, 0, 0};
 

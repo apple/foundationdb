@@ -35,6 +35,44 @@ catch(err) {
 
 console.log(fdb.tuple.pack([0xff * 0xff]));
 console.log(fdb.tuple.pack([0xffffffff + 100 ]));
+console.log(fdb.buffer.printable(fdb.tuple.pack(['begin', [true, null, false], 'end'])))
 console.log(fdb.tuple.unpack(fdb.buffer.fromByteLiteral('\x1a\xff\xff\xff\xff\xff\xff')));
-console.log(fdb.tuple.unpack(fdb.tuple.pack(['TEST', 'herp', 1, -10, 393493, '\u0000abc', 0xffffffff + 100])));
+console.log(fdb.tuple.unpack(fdb.tuple.pack(['TEST', 'herp', 1, -10, 393493, '\u0000abc', 0xffffffff + 100, true, false, [new Boolean(true), null, new Boolean(false), 0, 'asdf'], null])));
+console.log(fdb.buffer.printable(fdb.tuple.pack([[[[['three']]], 'two'], 'one'])))
 console.log(fdb.tuple.range(['TEST', 1]));
+console.log(fdb.buffer.printable(fdb.tuple.pack([fdb.tuple.Float.fromBytes(new Buffer('402df854', 'hex')), fdb.tuple.Double.fromBytes(new Buffer('4005BF0A8B145769', 'hex')), new fdb.tuple.UUID(new Buffer('deadc0deba5eba115ca1ab1edeadc0de', 'hex'))])))
+console.log(fdb.tuple.unpack(fdb.tuple.pack([fdb.tuple.Float.fromBytes(new Buffer('2734236f', 'hex'))])))
+
+tuples = [
+    [1,2],
+    [1],
+    [2],
+    [true],
+    [false],
+    [1,true],
+    [1,false],
+    [1, []],
+    [1, [null]],
+    [1, [0]],
+    [1, [1]],
+    [1, [0,1,2]],
+    [null],
+    []
+];
+tuples.sort(fdb.tuple.compare);
+console.log(tuples);
+
+tuples = [
+    [fdb.tuple.Float.fromBytes(new Buffer('2734236f', 'hex'))], // A really small value.
+    [fdb.tuple.Float.fromBytes(new Buffer('80000000', 'hex'))], // -0.0
+    [new fdb.tuple.Float(0.0)],
+    [new fdb.tuple.Float(3.14)],
+    [new fdb.tuple.Float(-3.14)],
+    [new fdb.tuple.Float(2.7182818)],
+    [new fdb.tuple.Float(-2.7182818)],
+    [fdb.tuple.Float.fromBytes(new Buffer('7f800000', 'hex'))], // Infinity
+    [fdb.tuple.Float.fromBytes(new Buffer('7fffffff', 'hex'))], // NaN
+    [fdb.tuple.Float.fromBytes(new Buffer('ffffffff', 'hex'))], // -NaN
+];
+tuples.sort(fdb.tuple.compare);
+console.log(tuples);

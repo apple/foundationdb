@@ -20,8 +20,10 @@
 #
 
 
+import ctypes
 import sys
 import os
+import struct
 import threading
 import time
 import random
@@ -454,12 +456,38 @@ class Tester:
                 elif inst.op == six.u("TUPLE_UNPACK"):
                     for i in fdb.tuple.unpack( inst.pop() ):
                         inst.push(fdb.tuple.pack((i,)))
+                elif inst.op == six.u("TUPLE_SORT"):
+                    count = inst.pop()
+                    items = inst.pop(count)
+                    unpacked = map(fdb.tuple.unpack, items)
+                    if six.PY3:
+                        sorted_items = sorted(unpacked, key=fdb.tuple.pack)
+                    else:
+                        sorted_items = sorted(unpacked, cmp=fdb.tuple.compare)
+                    for item in sorted_items:
+                        inst.push(fdb.tuple.pack(item))
                 elif inst.op == six.u("TUPLE_RANGE"):
                     count = inst.pop()
                     items = inst.pop(count)
                     r = fdb.tuple.range( tuple(items) )
                     inst.push(r.start)
                     inst.push(r.stop)
+                elif inst.op == six.u("ENCODE_FLOAT"):
+                    f_bytes = inst.pop()
+                    f = struct.unpack(">f", f_bytes)[0]
+                    inst.push(fdb.tuple.SingleFloat(f))
+                elif inst.op == six.u("ENCODE_DOUBLE"):
+                    d_bytes = inst.pop()
+                    d = struct.unpack(">d", d_bytes)[0]
+                    inst.push(d)
+                elif inst.op == six.u("DECODE_FLOAT"):
+                    f = inst.pop()
+                    f_bytes = struct.pack(">f", f.value)
+                    inst.push(f_bytes)
+                elif inst.op == six.u("DECODE_DOUBLE"):
+                    d = inst.pop()
+                    d_bytes = struct.pack(">d", d)
+                    inst.push(d_bytes)
                 elif inst.op == six.u("START_THREAD"):
                     t = Tester( self.db, inst.pop() )
                     thr = threading.Thread(target=t.run)

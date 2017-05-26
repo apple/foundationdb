@@ -20,6 +20,9 @@
 
 package com.apple.cie.foundationdb.test;
 
+import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.*;
 
 import com.apple.cie.foundationdb.Database;
@@ -341,8 +344,9 @@ public class StackTester {
 			}
 			else if(op == StackOperation.SUB) {
 				List<Object> params = inst.popParams(2).get();
-				long result = StackUtils.getNumber(params.get(0)).longValue() - StackUtils.getNumber(params.get(1)).longValue();
-				inst.push(result);
+				BigInteger a = StackUtils.getBigInteger(params.get(0));
+				BigInteger b = StackUtils.getBigInteger(params.get(1));
+				inst.push(a.subtract(b));
 			}
 			else if(op == StackOperation.CONCAT) {
 				List<Object> params = inst.popParams(2).get();
@@ -372,6 +376,18 @@ public class StackTester {
 					inst.push(itemBytes);
 				}
 			}
+			else if (op == StackOperation.TUPLE_SORT) {
+				int listSize = StackUtils.getInt(inst.popParam().get());
+				List<Object> rawElements = inst.popParams(listSize).get();
+				List<Tuple> tuples = new ArrayList<Tuple>(listSize);
+				for(Object o : rawElements) {
+					tuples.add(Tuple.fromBytes((byte[])o));
+				}
+				Collections.sort(tuples);
+				for(Tuple t : tuples) {
+					inst.push(t.pack());
+				}
+			}
 			else if(op == StackOperation.TUPLE_RANGE) {
 				List<Object> params = inst.popParams(1).get();
 				int tupleSize = StackUtils.getInt(params, 0);
@@ -380,6 +396,28 @@ public class StackTester {
 				Range range = Tuple.fromItems(elements).range();
 				inst.push(range.begin);
 				inst.push(range.end);
+			}
+			else if (op == StackOperation.ENCODE_FLOAT) {
+				Object param = inst.popParam().get();
+				byte[] fBytes = (byte[])param;
+				float value = ByteBuffer.wrap(fBytes).order(ByteOrder.BIG_ENDIAN).getFloat();
+				inst.push(value);
+			}
+			else if (op == StackOperation.ENCODE_DOUBLE) {
+				Object param = inst.popParam().get();
+				byte[] dBytes = (byte[])param;
+				double value = ByteBuffer.wrap(dBytes).order(ByteOrder.BIG_ENDIAN).getDouble();
+				inst.push(value);
+			}
+			else if (op == StackOperation.DECODE_FLOAT) {
+				Object param = inst.popParam().get();
+				float value = ((Number)param).floatValue();
+				inst.push(ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putFloat(value).array());
+			}
+			else if (op == StackOperation.DECODE_DOUBLE) {
+				Object param = inst.popParam().get();
+				double value = ((Number)param).doubleValue();
+				inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
 			}
 			else if(op == StackOperation.UNIT_TESTS) {
 				try {
@@ -566,7 +604,7 @@ public class StackTester {
 
 	private static void logStack(final Database db, final Map<Integer, StackEntry> entries, final byte[] prefix) {
 		db.run(new Function<Transaction, Void>() {
-		    @Override
+			@Override
 			public Void apply(Transaction tr) {
 				for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
 					byte[] pk = ByteArrayUtil.join(prefix, Tuple.from(it.getKey(), it.getValue().idx).pack());

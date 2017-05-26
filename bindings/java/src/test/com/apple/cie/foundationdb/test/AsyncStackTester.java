@@ -20,6 +20,9 @@
 
 package com.apple.cie.foundationdb.test;
 
+import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.*;
 
 import com.apple.cie.foundationdb.Cluster;
@@ -471,8 +474,9 @@ public class AsyncStackTester {
 			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
 				@Override
 				public Future<Void> apply(List<Object> params) {
-					long result = StackUtils.getNumber(params.get(0)).longValue() -
-							StackUtils.getNumber(params.get(1)).longValue();
+					BigInteger result = StackUtils.getBigInteger(params.get(0)).subtract(
+							StackUtils.getBigInteger(params.get(1))
+					);
 					inst.push(result);
 					return ReadyFuture.DONE;
 				}
@@ -526,6 +530,28 @@ public class AsyncStackTester {
 				}
 			});
 		}
+		else if(op == StackOperation.TUPLE_SORT) {
+			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
+				@Override
+				public Future<Void> apply(Object param) {
+					final int listSize = StackUtils.getInt(param);
+					return inst.popParams(listSize).flatMap(new Function<List<Object>, Future<Void>>() {
+						@Override
+						public Future<Void> apply(List<Object> rawElements) {
+							List<Tuple> tuples = new ArrayList(listSize);
+							for(Object o : rawElements) {
+								tuples.add(Tuple.fromBytes((byte[])o));
+							}
+							Collections.sort(tuples);
+							for(Tuple t : tuples) {
+								inst.push(t.pack());
+							}
+							return ReadyFuture.DONE;
+						}
+					});
+				}
+			});
+		}
 		else if(op == StackOperation.TUPLE_RANGE) {
 			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
 				@Override
@@ -541,6 +567,48 @@ public class AsyncStackTester {
 							return ReadyFuture.DONE;
 						}
 					});
+				}
+			});
+		}
+		else if (op == StackOperation.ENCODE_FLOAT) {
+			return inst.popParam().map(new Function<Object, Void>() {
+				@Override
+				public Void apply(Object param) {
+					byte[] fBytes = (byte[])param;
+					float value = ByteBuffer.wrap(fBytes).order(ByteOrder.BIG_ENDIAN).getFloat();
+					inst.push(value);
+					return null;
+				}
+			});
+		}
+		else if (op == StackOperation.ENCODE_DOUBLE) {
+			return inst.popParam().map(new Function<Object, Void>() {
+				@Override
+				public Void apply(Object param) {
+					byte[] dBytes = (byte[])param;
+					double value = ByteBuffer.wrap(dBytes).order(ByteOrder.BIG_ENDIAN).getDouble();
+					inst.push(value);
+					return null;
+				}
+			});
+		}
+		else if (op == StackOperation.DECODE_FLOAT) {
+			return inst.popParam().map(new Function<Object, Void>() {
+				@Override
+				public Void apply(Object param) {
+					float value = ((Number)param).floatValue();
+					inst.push(ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putFloat(value).array());
+					return null;
+				}
+			});
+		}
+		else if (op == StackOperation.DECODE_DOUBLE) {
+			return inst.popParam().map(new Function<Object, Void>() {
+				@Override
+				public Void apply(Object param) {
+					double value = ((Number)param).doubleValue();
+					inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
+					return null;
 				}
 			});
 		}

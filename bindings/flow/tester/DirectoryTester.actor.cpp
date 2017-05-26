@@ -405,7 +405,7 @@ struct DirectoryExistsFunc : InstructionFunc {
 			logOp(format("exists %s: %d", pathToString(combinePaths(directory->getPath(), path)).c_str(), result));
 		}
 
-		data->stack.push(Tuple().append(result ? 1 : 0).pack());
+		data->stack.push(Tuple().append((int64_t)(result ? 1 : 0)).pack());
 		return Void();
 	}
 };
@@ -468,7 +468,7 @@ struct DirectoryContainsFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple key = wait(data->stack.waitAndPop());
 		bool result = data->directoryData.subspace()->contains(key.getString(0));
-		data->stack.push(Tuple().append(result ? 1 : 0).pack());
+		data->stack.push(Tuple().append((int64_t)(result ? 1 : 0)).pack());
 
 		return Void();
 	}
@@ -500,7 +500,7 @@ struct DirectoryLogSubspaceFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Tuple prefix = wait(data->stack.waitAndPop());
 		Tuple tuple;
-		tuple.append(data->directoryData.directoryListIndex);
+		tuple.append((int64_t)data->directoryData.directoryListIndex);
 		instruction->tr->set(Subspace(tuple, prefix.getString(0)).key(), data->directoryData.subspace()->key());
 
 		return Void();
@@ -526,7 +526,7 @@ struct DirectoryLogDirectoryFunc : InstructionFunc {
 			}
 		}	
 
-		Subspace logSubspace(Tuple().append(data->directoryData.directoryListIndex), prefix.getString(0));
+		Subspace logSubspace(Tuple().append((int64_t)(data->directoryData.directoryListIndex)), prefix.getString(0));
 
 		Tuple pathTuple;
 		for(auto &p : directory->getPath()) {
@@ -535,7 +535,7 @@ struct DirectoryLogDirectoryFunc : InstructionFunc {
 
 		instruction->tr->set(logSubspace.pack(LiteralStringRef("path"), true), pathTuple.pack());
 		instruction->tr->set(logSubspace.pack(LiteralStringRef("layer"), true), Tuple().append(directory->getLayer()).pack());
-		instruction->tr->set(logSubspace.pack(LiteralStringRef("exists"), true), Tuple().append(exists ? 1 : 0).pack());
+		instruction->tr->set(logSubspace.pack(LiteralStringRef("exists"), true), Tuple().append((int64_t)(exists ? 1 : 0)).pack());
 		instruction->tr->set(logSubspace.pack(LiteralStringRef("children"), true), childrenTuple.pack());
 
 		return Void();

@@ -18,9 +18,12 @@
 # limitations under the License.
 #
 
+import ctypes
 import random
+import struct
 
 import fdb
+import fdb.tuple
 
 from bindingtester import FDB_API_VERSION
 from bindingtester.tests import Test, Instruction, InstructionSet, ResultSpecification
@@ -51,7 +54,7 @@ class ApiTest(Test):
 
         self.generated_keys = []
         self.outstanding_ops = []
-        self.random = test_util.RandomGenerator(args.max_int_bits)
+        self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version)
 
     def add_stack_items(self, num):
         self.stack_size += num
@@ -144,7 +147,7 @@ class ApiTest(Test):
         mutations += ['VERSIONSTAMP']
         versions = ['GET_READ_VERSION', 'SET_READ_VERSION', 'GET_COMMITTED_VERSION']
         snapshot_versions = ['GET_READ_VERSION_SNAPSHOT']
-        tuples = ['TUPLE_PACK', 'TUPLE_UNPACK', 'TUPLE_RANGE', 'SUB']
+        tuples = ['TUPLE_PACK', 'TUPLE_UNPACK', 'TUPLE_RANGE', 'TUPLE_SORT', 'SUB', 'ENCODE_FLOAT', 'ENCODE_DOUBLE', 'DECODE_DOUBLE', 'DECODE_FLOAT']
         resets = ['ON_ERROR', 'RESET', 'CANCEL']
         read_conflicts = ['READ_CONFLICT_RANGE', 'READ_CONFLICT_KEY']
         write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
@@ -179,6 +182,7 @@ class ApiTest(Test):
         for i in range(args.num_ops):
             op = random.choice(op_choices)
             index = len(instructions)
+            read_performed = False
 
             #print 'Adding instruction %s at %d' % (op, index)
 
@@ -218,6 +222,7 @@ class ApiTest(Test):
                 instructions.append(op)
                 self.add_strings(1)
                 self.can_set_version = False
+                read_performed = True
 
             elif op == 'GET_KEY' or op == 'GET_KEY_SNAPSHOT' or op == 'GET_KEY_DATABASE':
                 if op.endswith('_DATABASE') or self.can_use_key_selectors:
@@ -230,6 +235,7 @@ class ApiTest(Test):
                     #Don't add key here because we may be outside of our prefix
                     self.add_strings(1)
                     self.can_set_version = False
+                    read_performed = True
 
             elif op == 'GET_RANGE' or op == 'GET_RANGE_SNAPSHOT' or op == 'GET_RANGE_DATABASE':
                 self.ensure_key(instructions, 2)
@@ -245,6 +251,7 @@ class ApiTest(Test):
                     self.add_stack_items(1)
 
                 self.can_set_version = False
+                read_performed = True
 
             elif op == 'GET_RANGE_STARTS_WITH' or op == 'GET_RANGE_STARTS_WITH_SNAPSHOT' or op == 'GET_RANGE_STARTS_WITH_DATABASE':
                 #TODO: not tested well
@@ -260,6 +267,7 @@ class ApiTest(Test):
                     self.add_stack_items(1)
 
                 self.can_set_version = False
+                read_performed = True
 
             elif op == 'GET_RANGE_SELECTOR' or op == 'GET_RANGE_SELECTOR_SNAPSHOT' or op == 'GET_RANGE_SELECTOR_DATABASE':
                 if op.endswith('_DATABASE') or self.can_use_key_selectors:
@@ -279,6 +287,7 @@ class ApiTest(Test):
                         self.add_stack_items(1)
 
                     self.can_set_version = False
+                    read_performed = True
 
             elif op == 'GET_READ_VERSION' or op == 'GET_READ_VERSION_SNAPSHOT':
                 instructions.append(op)
@@ -409,6 +418,15 @@ class ApiTest(Test):
                 instructions.append(op)
                 self.add_strings(len(tup))
 
+            elif op == 'TUPLE_SORT':
+                tups = self.random.random_tuple_list(10, 30)
+                for tup in tups:
+                    instructions.push_args(len(tup), *tup)
+                    instructions.append('TUPLE_PACK')
+                instructions.push_args(len(tups))
+                instructions.append(op)
+                self.add_strings(len(tups))
+
             #Use SUB to test if integers are correctly unpacked
             elif op == 'SUB':
                 a = self.random.random_int() / 2
@@ -422,10 +440,36 @@ class ApiTest(Test):
                 instructions.append('TUPLE_PACK')
                 self.add_stack_items(1)
 
+            elif op == 'ENCODE_FLOAT':
+                f = self.random.random_float(8)
+                f_bytes = struct.pack('>f', f)
+                instructions.push_args(f_bytes)
+                instructions.append(op)
+                self.add_stack_items(1)
+
+            elif op == 'ENCODE_DOUBLE':
+                d = self.random.random_float(11)
+                d_bytes = struct.pack('>d', d)
+                instructions.push_args(d_bytes)
+                instructions.append(op)
+                self.add_stack_items(1)
+
+            elif op == 'DECODE_FLOAT':
+                f = self.random.random_float(8)
+                instructions.push_args(fdb.tuple.SingleFloat(f))
+                instructions.append(op)
+                self.add_strings(1)
+
+            elif op == 'DECODE_DOUBLE':
+                d = self.random.random_float(11)
+                instructions.push_args(d)
+                instructions.append(op)
+                self.add_strings(1)
+
             else:
                 assert False
 
-            if op in reads or op in snapshot_reads:
+            if read_performed and op not in database_reads:
                 self.outstanding_ops.append((self.stack_size, len(instructions)-1))
 
             if args.concurrency == 1 and (op in database_reads or op in database_mutations):

@@ -20,8 +20,11 @@
 
 package com.apple.cie.foundationdb.test;
 
+import java.math.BigInteger;
 import java.util.*;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -312,8 +315,9 @@ public class StackTester {
 			}
 			else if(op == StackOperation.SUB) {
 				List<Object> params = inst.popParams(2).join();
-				long result = StackUtils.getNumber(params.get(0)).longValue() - StackUtils.getNumber(params.get(1)).longValue();
-				inst.push(result);
+				BigInteger a = StackUtils.getBigInteger(params.get(0));
+				BigInteger b = StackUtils.getBigInteger(params.get(1));
+				inst.push(a.subtract(b));
 			}
 			else if(op == StackOperation.CONCAT) {
 				List<Object> params = inst.popParams(2).join();
@@ -351,6 +355,40 @@ public class StackTester {
 				Range range = Tuple.fromItems(elements).range();
 				inst.push(range.begin);
 				inst.push(range.end);
+			}
+			else if (op == StackOperation.TUPLE_SORT) {
+				int listSize = StackUtils.getInt(inst.popParam().join());
+				List<Object> rawElements = inst.popParams(listSize).join();
+				List<Tuple> tuples = new ArrayList<Tuple>(listSize);
+				for(Object o : rawElements) {
+					tuples.add(Tuple.fromBytes((byte[])o));
+				}
+				Collections.sort(tuples);
+				for(Tuple t : tuples) {
+					inst.push(t.pack());
+				}
+			}
+			else if (op == StackOperation.ENCODE_FLOAT) {
+				Object param = inst.popParam().join();
+				byte[] fBytes = (byte[])param;
+				float value = ByteBuffer.wrap(fBytes).order(ByteOrder.BIG_ENDIAN).getFloat();
+				inst.push(value);
+			}
+			else if (op == StackOperation.ENCODE_DOUBLE) {
+				Object param = inst.popParam().join();
+				byte[] dBytes = (byte[])param;
+				double value = ByteBuffer.wrap(dBytes).order(ByteOrder.BIG_ENDIAN).getDouble();
+				inst.push(value);
+			}
+			else if (op == StackOperation.DECODE_FLOAT) {
+				Object param = inst.popParam().join();
+				float value = ((Number)param).floatValue();
+				inst.push(ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putFloat(value).array());
+			}
+			else if (op == StackOperation.DECODE_DOUBLE) {
+				Object param = inst.popParam().join();
+				double value = ((Number)param).doubleValue();
+				inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
 			}
 			else if(op == StackOperation.UNIT_TESTS) {
 				try {
