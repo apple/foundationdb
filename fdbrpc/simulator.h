@@ -55,6 +55,7 @@ public:
 		TDMetricCollection tdmetrics;
 		Reference<IListener> listener;
 		bool failed;
+		bool excluded;
 		int64_t cpuTicks;
 		bool rebooting;
 		std::vector<flowGlobalType> globals;
@@ -67,14 +68,15 @@ public:
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddress address,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
 			: name(name), locality(locality), startingClass(startingClass), address(address), dataFolder(dataFolder),
-				network(net), coordinationFolder(coordinationFolder), failed(false), cpuTicks(0),
+				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
 				fault_injection_r(0), machine(0)
 		{}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
-		bool isReliable() { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
+		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
+		bool isAvailable() const { return !excluded && isReliable(); }
 
 		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
@@ -129,7 +131,8 @@ public:
 	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool killIsSafe = false, bool forceKill = false ) = 0;
 	virtual void killDataCenter(Optional<Standalone<StringRef>> dcId, KillType ) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
-	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) = 0;
+	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
+	virtual bool isAvailable() const = 0;
 
 	virtual void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
 		swapsDisabled.insert(zoneId);
@@ -152,7 +155,7 @@ public:
 
 	virtual void clogInterface( uint32_t ip, double seconds, ClogMode mode = ClogDefault ) = 0;
 	virtual void clogPair( uint32_t from, uint32_t to, double seconds ) = 0;
-	virtual std::vector<ProcessInfo*> getAllProcesses() = 0;
+	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineById(Optional<Standalone<StringRef>> const& zoneId) = 0;

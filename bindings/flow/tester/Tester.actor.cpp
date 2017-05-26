@@ -24,7 +24,6 @@
 #include "bindings/flow/FDBLoanerTypes.h"
 
 #include "Tester.actor.h"
-
 #ifdef  __linux__
 #include <string.h>
 #endif
@@ -101,6 +100,22 @@ std::string tupleToString(Tuple const& tuple) {
 		}
 		else if(type == Tuple::INT) {
 			str += format("%ld", tuple.getInt(i));
+		}
+		else if(type == Tuple::FLOAT) {
+			str += format("%f", tuple.getFloat(i));
+		}
+		else if(type == Tuple::DOUBLE) {
+			str += format("%f", tuple.getDouble(i));
+		}
+		else if(type == Tuple::BOOL) {
+			str += tuple.getBool(i) ? "true" : "false";
+		}
+		else if(type == Tuple::UUID) {
+			Uuid u = tuple.getUuid(i);
+			str += format("%016llx%016llx", *(uint64_t*)u.getData().begin(), *(uint64_t*)(u.getData().begin() + 8));
+		}
+		else if(type == Tuple::NESTED) {
+			str += tupleToString(tuple.getNested(i));
 		}
 		else {
 			ASSERT(false);
@@ -1027,6 +1042,21 @@ struct TuplePackFunc : InstructionFunc {
 				else if(type == Tuple::UTF8) {
 					tuple.append(itemTuple.getString(0), true);
 				}
+				else if(type == Tuple::FLOAT) {
+					tuple << itemTuple.getFloat(0);
+				}
+				else if(type == Tuple::DOUBLE) {
+					tuple << itemTuple.getDouble(0);
+				}
+				else if(type == Tuple::BOOL) {
+					tuple << itemTuple.getBool(0);
+				}
+				else if(type == Tuple::UUID) {
+					tuple << itemTuple.getUuid(0);
+				}
+				else if(type == Tuple::NESTED) {
+					tuple.appendNested(itemTuple.getNested(0));
+				}
 				else {
 					ASSERT(false);
 				}
@@ -1083,7 +1113,7 @@ struct TupleRangeFunc : InstructionFunc {
 			return Void();
 
 		state Tuple tuple;
-		state int i = 0;
+		state size_t i = 0;
 		for (; i < items1.size(); ++i) {
 			Standalone<StringRef> str = wait(items1[i].value);
 			Tuple itemTuple = Tuple::unpack(str);
@@ -1100,6 +1130,21 @@ struct TupleRangeFunc : InstructionFunc {
 				}
 				else if(type == Tuple::UTF8) {
 					tuple.append(itemTuple.getString(0), true);
+				}
+				else if(type == Tuple::FLOAT) {
+					tuple << itemTuple.getFloat(0);
+				}
+				else if(type == Tuple::DOUBLE) {
+					tuple << itemTuple.getDouble(0);
+				}
+				else if(type == Tuple::BOOL) {
+					tuple << itemTuple.getBool(0);
+				}
+				else if(type == Tuple::UUID) {
+					tuple << itemTuple.getUuid(0);
+				}
+				else if(type == Tuple::NESTED) {
+					tuple.appendNested(itemTuple.getNested(0));
 				}
 				else {
 					ASSERT(false);
@@ -1119,6 +1164,141 @@ struct TupleRangeFunc : InstructionFunc {
 };
 const char* TupleRangeFunc::name = "TUPLE_RANGE";
 REGISTER_INSTRUCTION_FUNC(TupleRangeFunc);
+
+// TUPLE_SORT
+struct TupleSortFunc : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		state std::vector<StackItem> items = data->stack.pop();
+		if (items.size() != 1)
+			return Void();
+
+		Standalone<StringRef> s1 = wait(items[0].value);
+		state int64_t count = Tuple::unpack(s1).getInt(0);
+
+		state std::vector<StackItem> items1 = data->stack.pop(count);
+		if (items1.size() != count)
+			return Void();
+
+		state std::vector<Tuple> tuples;
+		state size_t i = 0;
+		for(; i < items1.size(); i++) {
+			Standalone<StringRef> value = wait(items1[i].value);
+			tuples.push_back(Tuple::unpack(value));
+		}
+
+		std::sort(tuples.begin(), tuples.end());
+		for(Tuple const& t : tuples) {
+			data->stack.push(t.pack());
+		}
+
+		return Void();
+	}
+};
+const char* TupleSortFunc::name = "TUPLE_SORT";
+REGISTER_INSTRUCTION_FUNC(TupleSortFunc);
+
+// ENCODE_FLOAT
+struct EncodeFloatFunc : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		std::vector<StackItem> items = data->stack.pop();
+		if (items.size() != 1)
+			return Void();
+
+		Standalone<StringRef> s1 = wait(items[0].value);
+		Standalone<StringRef> fBytes = Tuple::unpack(s1).getString(0);
+		ASSERT(fBytes.size() == 4);
+
+		int32_t intVal = *(int32_t*)fBytes.begin();
+		intVal = bigEndian32(intVal);
+		float fVal = *(float*)&intVal;
+
+		Tuple t;
+		t.append(fVal);
+		data->stack.push(t.pack());
+
+		return Void();
+	}
+};
+const char* EncodeFloatFunc::name = "ENCODE_FLOAT";
+REGISTER_INSTRUCTION_FUNC(EncodeFloatFunc);
+
+// ENCODE_DOUBLE
+struct EncodeDoubleFunc : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		std::vector<StackItem> items = data->stack.pop();
+		if (items.size() != 1)
+			return Void();
+
+		Standalone<StringRef> s1 = wait(items[0].value);
+		Standalone<StringRef> dBytes = Tuple::unpack(s1).getString(0);
+		ASSERT(dBytes.size() == 8);
+
+		int64_t intVal = *(int64_t*)dBytes.begin();
+		intVal = bigEndian64(intVal);
+		double dVal = *(double*)&intVal;
+
+		Tuple t;
+		t.append(dVal);
+		data->stack.push(t.pack());
+
+		return Void();
+	}
+};
+const char* EncodeDoubleFunc::name = "ENCODE_DOUBLE";
+REGISTER_INSTRUCTION_FUNC(EncodeDoubleFunc);
+
+// DECODE_FLOAT
+struct DecodeFloatFunc : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		std::vector<StackItem> items = data->stack.pop();
+		if (items.size() != 1)
+			return Void();
+
+		Standalone<StringRef> s1 = wait(items[0].value);
+		float fVal = Tuple::unpack(s1).getFloat(0);
+		int32_t intVal = *(int32_t*)&fVal;
+		intVal = bigEndian32(intVal);
+
+		Tuple t;
+		t.append(StringRef((uint8_t*)&intVal, 4), false);
+		data->stack.push(t.pack());
+
+		return Void();
+	}
+};
+const char* DecodeFloatFunc::name = "DECODE_FLOAT";
+REGISTER_INSTRUCTION_FUNC(DecodeFloatFunc);
+
+// DECODE_DOUBLE
+struct DecodeDoubleFunc : InstructionFunc {
+	static const char* name;
+
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
+		std::vector<StackItem> items = data->stack.pop();
+		if (items.size() != 1)
+			return Void();
+
+		Standalone<StringRef> s1 = wait(items[0].value);
+		double dVal = Tuple::unpack(s1).getDouble(0);
+		int64_t intVal = *(int64_t*)&dVal;
+		intVal = bigEndian64(intVal);
+
+		Tuple t;
+		t.append(StringRef((uint8_t*)&intVal, 8), false);
+		data->stack.push(t.pack());
+		return Void();
+	}
+};
+const char* DecodeDoubleFunc::name = "DECODE_DOUBLE";
+REGISTER_INSTRUCTION_FUNC(DecodeDoubleFunc);
 
 // Thread Operations
 // START_THREAD
@@ -1481,7 +1661,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 
 		// Connect to the default cluster/database, and create a transaction
 		auto cluster = fdb->createCluster(clusterFilename);
-		Reference<DatabaseContext> db = cluster->createDatabase(LiteralStringRef("DB"));
+		Reference<DatabaseContext> db = cluster->createDatabase();
 
 		Reference<FlowTesterData> data = Reference<FlowTesterData>(new FlowTesterData(fdb));
 		Void _ = wait(runTest(data, db, prefix));
@@ -1505,13 +1685,13 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(410);
+		API *fdb = FDB::API::selectAPIVersion(500);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
 
 		auto c = fdb->createCluster(std::string());
-		auto db = c->createDatabase(LiteralStringRef("DB"));
+		auto db = c->createDatabase();
 		state Reference<Transaction> tr(new Transaction(db));
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();

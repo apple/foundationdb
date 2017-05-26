@@ -157,6 +157,7 @@ ERROR( directory_prefix_not_empty, 2264, "The database has keys stored at the pr
 ERROR( directory_prefix_in_use, 2265, "The directory layer already has a conflicting prefix" )
 ERROR( invalid_destination_directory, 2266, "The target directory is invalid" )
 ERROR( cannot_modify_root_directory, 2267, "The root directory cannot be modified" )
+ERROR( invalid_uuid_size, 2268, "UUID is not sixteen bytes");
 
 // 2300 - backup and restore errors
 ERROR( backup_error, 2300, "Backup error")

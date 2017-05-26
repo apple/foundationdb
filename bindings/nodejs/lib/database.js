@@ -25,7 +25,6 @@ var Transaction = require('./transaction');
 var future = require('./future');
 var fdb = require('./fdbModule');
 var fdbUtil = require('./fdbUtil');
-var apiVersion = require('./apiVersion');
 
 var onError = function(tr, err, func, cb) {
 	tr.onError(err, function(retryErr, retryRes) {
@@ -125,10 +124,7 @@ Database.prototype.setAndWatch = function(key, value, cb) {
 	return this.doTransaction(function(tr, innerCb) {
 		tr.set(key, value);
 		var watchObj = tr.watch(key);
-		if(apiVersion.value >= 200)
-			innerCb(undefined, { watch: watchObj });
-		else
-			innerCb(undefined, watchObj);
+		innerCb(undefined, { watch: watchObj });
 	}, cb);
 };
 
@@ -136,10 +132,7 @@ Database.prototype.clearAndWatch = function(key, cb) {
 	return this.doTransaction(function(tr, innerCb) {
 		tr.clear(key);
 		var watchObj = tr.watch(key);
-		if(apiVersion.value >= 200)
-			innerCb(undefined, { watch: watchObj });
-		else
-			innerCb(undefined, watchObj);
+		innerCb(undefined, { watch: watchObj });
 	}, cb);
 };
 

@@ -32,7 +32,7 @@ import com.apple.cie.foundationdb.async.AsyncUtil;
 
 class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable, OptionConsumer {
 	private DatabaseOptions options;
-	private Executor executor;
+	private final Executor executor;
 
 	protected FDBDatabase(long cPtr, Executor executor) {
 		super(cPtr);

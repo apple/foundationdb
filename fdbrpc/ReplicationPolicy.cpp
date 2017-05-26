@@ -178,13 +178,13 @@ bool PolicyAcross::validate(
 		if (g_replicationdebug > 3) {
 			printf("Across check values:%9lu key: %-7s solutions:%2lu count:%2d policy: %-10s => %s\n", validMap.size(), _attribKey.c_str(), solutionSet.size(), _count, _policy->name().c_str(), _policy->info().c_str());
 			for (auto& itValue : validMap) {
-				printf("   value: (%3lu) %-10s\n", itValue.first._id, fromServers->valueText(itValue.first).c_str());
+				printf("   value: (%3d) %-10s\n", itValue.first._id, fromServers->valueText(itValue.first).c_str());
 			}
 		}
 		for (auto& itValid : validMap) {
 			if (_policy->validate(itValid.second, fromServers)) {
 				if (g_replicationdebug > 4) {
-					printf("Across valid solution: %6lu key: %-7s count:%3d of%3d value: (%3lu) %-10s policy: %-10s => %s\n", itValid.second.size(), _attribKey.c_str(), count+1, _count, itValid.first._id, fromServers->valueText(itValid.first).c_str(), _policy->name().c_str(), _policy->info().c_str());
+					printf("Across valid solution: %6lu key: %-7s count:%3d of%3d value: (%3d) %-10s policy: %-10s => %s\n", itValid.second.size(), _attribKey.c_str(), count+1, _count, itValid.first._id, fromServers->valueText(itValid.first).c_str(), _policy->name().c_str(), _policy->info().c_str());
 					if (g_replicationdebug > 5) {
 						for (auto& entry : itValid.second) {
 							printf("   entry: %s\n", fromServers->getEntryInfo(entry).c_str());
@@ -256,7 +256,7 @@ bool PolicyAcross::selectReplicas(
 							_addedResults.push_back(_arena, std::pair<int, int>(resultsAdded, resultsSize));
 						}
 						if (g_replicationdebug > 5) {
-							printf("Across !added:%3d key: %-7s count:%3d of%3d value: (%3lu) %-10s entry: %s\n", resultsAdded, _attribKey.c_str(), count, _count, value.get()._id, fromServers->valueText(value.get()).c_str(), fromServers->getEntryInfo(alsoServer).c_str());
+							printf("Across !added:%3d key: %-7s count:%3d of%3d value: (%3d) %-10s entry: %s\n", resultsAdded, _attribKey.c_str(), count, _count, value.get()._id, fromServers->valueText(value.get()).c_str(), fromServers->getEntryInfo(alsoServer).c_str());
 						}
 						if (count >= _count) break;
 						_usedValues.insert(lowerBound, value.get());
@@ -404,7 +404,7 @@ bool PolicyAnd::selectReplicas(
 
 	for (auto& policy : _sortedPolicies) {
 		if (g_replicationdebug > 3) {
-			printf("And    also:%5d used:  %4lu from %3d items  policy: %-10s => %s\n", newResults.size(), newResults.size()-alsoServers.size(), fromServers->size(), policy->name().c_str(), policy->info().c_str());
+			printf("And    also:%5lu used:  %4lu from %3d items  policy: %-10s => %s\n", newResults.size(), newResults.size()-alsoServers.size(), fromServers->size(), policy->name().c_str(), policy->info().c_str());
 		}
 		if (!policy->selectReplicas(fromServers, newResults, newResults))
 		{
@@ -421,7 +421,7 @@ bool PolicyAnd::selectReplicas(
 	}
 
 	if (g_replicationdebug > 2) {
-		printf("And    used:%5d results:%3lu from %3d items\n", newResults.size()-alsoServers.size(), results.size(), fromServers->size());
+		printf("And    used:%5lu results:%3lu from %3d items\n", newResults.size()-alsoServers.size(), results.size(), fromServers->size());
 	}
 	return passed;
 }

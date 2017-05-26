@@ -134,7 +134,7 @@ bool findBestPolicySet(
 		testRate = ratePolicy(testLocalitySet, policy, nSelectTests);
 
 		if (g_replicationdebug > 3) {
-			printf("   rate: %7.5\n", testRate);
+			printf("   rate: %7.5f\n", testRate);
 		}
 
 		if (bestRate < 0.0)
@@ -466,7 +466,7 @@ bool	testPolicy(
 	solved = serverMap->selectReplicas(policy, including, entryResults, results);
 
 	if (g_replicationdebug > 1) {
-		printf("%-10s solution:%3lu  policy: %-10s => %s    include:%4d\n", ((solved) ? "Solved" : "Unsolved"), results.size(), policy->name().c_str(), policy->info().c_str(), including.size());
+		printf("%-10s solution:%3lu  policy: %-10s => %s    include:%4lu\n", ((solved) ? "Solved" : "Unsolved"), results.size(), policy->name().c_str(), policy->info().c_str(), including.size());
 	}
 	if (g_replicationdebug > 2) {
 		for (auto& entry : entryResults) {

@@ -20,12 +20,15 @@
 
 package com.apple.cie.foundationdb.tuple;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -39,26 +42,34 @@ import com.apple.cie.foundationdb.Range;
  *  ideal for building a variety of higher-level data models.<br>
  * <h3>Types</h3>
  * A {@code Tuple} can
- *  contain byte arrays ({@code byte[]}), {@link String}s, {@link Number}s, and {@code null}. All
- *  {@code Number}s will be converted to a {@code long} integral value, so all
- *  floating point information will be lost and their range will be constrained to the range
- *  [{@code 2^63-1}, {@code -2^63}]. Note that for numbers outside this range the way that Java
+ *  contain byte arrays ({@code byte[]}), {@link String}s, {@link Number}s, {@link UUID}s,
+ *  {@code boolean}s, {@link List}s, other {@code Tuple}s, and {@code null}.
+ *  {@link Float} and {@link Double} instances will be serialized as single- and double-precision
+ *  numbers respectively, and {@link BigInteger}s within the range [{@code -2^2040+1},
+ *  {@code 2^2040-1}] are serialized without loss of precision (those outside the range
+ *  will raise an {@link IllegalArgumentException}). All other {@code Number}s will be converted to
+ *  a {@code long} integral value, so the range will be constrained to
+ *  [{@code -2^63}, {@code 2^63-1}]. Note that for numbers outside this range the way that Java
  *  truncates integral values may yield unexpected results.<br>
  * <h3>{@code null} values</h3>
  * The FoundationDB tuple specification has a special type-code for {@code None}; {@code nil}; or,
  *  as Java would understand it, {@code null}.
  *  The behavior of the layer in the presence of {@code null} varies by type with the intention
- *  of matching expected behavior in Java. {@code byte[]} and {@link String}s can be {@code null},
- *  where integral numbers (i.e. {@code long}s) cannot.
- *  This means that the typed getters ({@link #getBytes(int) getBytes()} and {@link #getString(int) getString()})
+ *  of matching expected behavior in Java. {@code byte[]}, {@link String}s, {@link UUID}s, and
+ *  nested {@link List}s and {@code Tuple}s can be {@code null},
+ *  whereas numbers (e.g., {@code long}s and {@code double}s) and booleans cannot.
+ *  This means that the typed getters ({@link #getBytes(int) getBytes()}, {@link #getString(int) getString()}),
+ *  {@link #getUUID(int) getUUID()}, {@link #getNestedTuple(int) getNestedTuple()}, and {@link #getNestedList(int) getNestedList()})
  *  will return {@code null} if the entry at that location was {@code null} and the typed adds
  *  ({@link #add(byte[])} and {@link #add(String)}) will accept {@code null}. The
- *  {@link #getLong(int) typed get for integers}, however, will throw a {@code NullPointerException} if
+ *  {@link #getLong(int) typed get for integers} and other typed getters, however, will throw a {@link NullPointerException} if
  *  the entry in the {@code Tuple} was {@code null} at that position.<br>
  * <br>
  * This class is not thread safe.
  */
 public class Tuple implements Comparable<Tuple>, Iterable<Object> {
+	private static IterableComparator comparator = new IterableComparator();
+
 	private List<Object> elements;
 
 	private Tuple(List<? extends Object> elements, Object newItem) {
@@ -72,12 +83,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Creates a copy of this {@code Tuple} with an appended last element. The parameter
-	 *  is untyped but only {@link String}, {@code byte[]}, {@link Number}s, and {@code null} are allowed.
-	 *  All {@code Number}s are converted to a 8 byte integral value, so all floating point
-	 *  information is lost.
+	 *  is untyped but only {@link String}, {@code byte[]}, {@link Number}s, {@link UUID}s,
+	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, and {@code null} are allowed. If an object of
+	 *  another type is passed, then an {@link IllegalArgumentException} is thrown.
 	 *
 	 * @param o the object to append. Must be {@link String}, {@code byte[]},
-	 *  {@link Number}s, or {@code null}.
+	 *  {@link Number}s, {@link UUID}, {@link List}, {@link Boolean}, or {@code null}.
 	 *
 	 * @return a newly created {@code Tuple}
 	 */
@@ -85,6 +96,10 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		if(o != null &&
 				!(o instanceof String) &&
 				!(o instanceof byte[]) &&
+				!(o instanceof UUID) &&
+				!(o instanceof List<?>) &&
+				!(o instanceof Tuple) &&
+				!(o instanceof Boolean) &&
 				!(o instanceof Number)) {
 			throw new IllegalArgumentException("Parameter type (" + o.getClass().getName() + ") not recognized");
 		}
@@ -122,6 +137,92 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 */
 	public Tuple add(byte[] b) {
 		return new Tuple(this.elements, b);
+	}
+
+	/**
+	 * Creates a copy of this {@code Tuple} with a {@code boolean} appended as the last element.
+	 *
+	 * @param b the {@code boolean} to append
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public Tuple add(boolean b) {
+		return new Tuple(this.elements, b);
+	}
+
+	/**
+	 * Creates a copy of this {@code Tuple} with a {@link UUID} appended as the last element.
+	 *
+	 * @param uuid the {@link UUID} to append
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public Tuple add(UUID uuid) {
+		return new Tuple(this.elements, uuid);
+	}
+
+	/**
+	 * Creates a copy of this {@code Tuple} with a {@link BigInteger} appended as the last element.
+	 * As {@link Tuple}s cannot contain {@code null} numeric types, a {@link NullPointerException}
+	 * is raised if a {@code null} argument is passed.
+	 *
+	 * @param bi the {@link BigInteger} to append
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public Tuple add(BigInteger bi) {
+		if(bi == null) {
+			throw new NullPointerException("Number types in Tuple cannot be null");
+		}
+		return new Tuple(this.elements, bi);
+	}
+
+	/**
+	 * Creates a copy of this {@code Tuple} with a {@code float} appended as the last element.
+	 *
+	 * @param f the {@code float} to append
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public Tuple add(float f) {
+		return new Tuple(this.elements, f);
+	}
+
+	/**
+	 * Creates a copy of this {@code Tuple} with a {@code double} appended as the last element.
+	 *
+	 * @param d the {@code double} to append
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public Tuple add(double d) {
+		return new Tuple(this.elements, d);
+	}
+
+	/**
+	 * Creates a copy of this {@code Tuple} with an {@link List} appended as the last element.
+	 * This does not add the elements individually (for that, use {@link Tuple#addAll(List) Tuple.addAll}).
+	 * This adds the list as a single elemented nested within the outer {@code Tuple}.
+	 *
+	 * @param l the {@link List} to append
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public Tuple add(List<? extends Object> l) {
+		return new Tuple(this.elements, l);
+	}
+
+	/**
+	 * Creates a copy of this {@code Tuple} with a {@code Tuple} appended as the last element.
+	 * This does not add the elements individually (for that, use {@link Tuple#addAll(Tuple) Tuple.addAll}).
+	 * This adds the list as a single elemented nested within the outer {@code Tuple}.
+	 *
+	 * @param t the {@code Tuple} to append
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public Tuple add(Tuple t) {
+		return new Tuple(this.elements, t);
 	}
 
 	/**
@@ -321,6 +422,138 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
+	 * Gets an indexed item as a {@link BigInteger}. This function will not do type conversion
+	 *  and so will throw a {@code ClassCastException} if the tuple element is not of
+	 *  a {@code Number} type. If the underlying type is a floating point value, this
+	 *  will lead to a loss of precision. The element at the index may not be {@code null}.
+	 *
+	 * @param index the location of the element to return
+	 *
+	 * @return the item at {@code index} as a {@link BigInteger}
+	 */
+	public BigInteger getBigInteger(int index) {
+		Object o = this.elements.get(index);
+		if(o == null)
+			throw new NullPointerException("Number types in Tuples may not be null");
+		if(o instanceof BigInteger) {
+			return (BigInteger)o;
+		} else {
+			return BigInteger.valueOf(((Number)o).longValue());
+		}
+	}
+
+	/**
+	 * Gets an indexed item as a {@code float}. This function will not do type conversion
+	 *  and so will throw a {@code ClassCastException} if the element is not a number type.
+	 *  The element at the index may not be {@code null}.
+	 *
+	 * @param index the location of the item to return
+	 *
+	 * @return the item at {@code index} as a {@code float}
+	 */
+	public float getFloat(int index) {
+		Object o = this.elements.get(index);
+		if(o == null)
+			throw new NullPointerException("Number types in Tuples may not be null");
+		return ((Number)o).floatValue();
+	}
+
+	/**
+	 * Gets an indexed item as a {@code double}. This function will not do type conversion
+	 *  and so will throw a {@code ClassCastException} if the element is not a number type.
+	 *  The element at the index may not be {@code null}.
+	 *
+	 * @param index the location of the item to return
+	 *
+	 * @return the item at {@code index} as a {@code double}
+	 */
+	public double getDouble(int index) {
+		Object o = this.elements.get(index);
+		if(o == null)
+			throw new NullPointerException("Number types in Tuples may not be null");
+		return ((Number)o).doubleValue();
+	}
+
+	/**
+	 * Gets an indexed item as a {@code boolean}. This function will not do type conversion
+	 *  and so will throw a {@code ClassCastException} if the element is not a {@code Boolean}.
+	 *  The element at the index may not be {@code null}.
+	 *
+	 * @param index the location of the item to return
+	 *
+	 * @return the item at {@code index} as a {@code boolean}
+	 */
+	public boolean getBoolean(int index) {
+		Object o = this.elements.get(index);
+		if(o == null)
+			throw new NullPointerException("Boolean type in Tuples may not be null");
+		return (Boolean)o;
+
+	}
+
+	/**
+	 * Gets an indexed item as a {@link UUID}. This function will not do type conversion
+	 *  and so will throw a {@code ClassCastException} if the element is not a {@code UUID}.
+	 *  The element at the index may not be {@code null}.
+	 *
+	 * @param index the location of the item to return
+	 *
+	 * @return the item at {@code index} as a {@link UUID}
+	 */
+	public UUID getUUID(int index) {
+		Object o = this.elements.get(index);
+		if(o == null)
+			return null;
+		return (UUID)o;
+	}
+
+	/**
+	 * Gets an indexed item as a {@link List}. This function will not do type conversion
+	 *  and so will throw a {@code ClassCastException} if the element is not a {@link List}
+	 *  or {@code Tuple}. The element at the index may be {@code null}.
+	 *
+	 * @param index the location of the item to return
+	 *
+	 * @return the item at {@code index} as a {@link List}
+	 */
+	public List<Object> getNestedList(int index) {
+		Object o = this.elements.get(index);
+		if(o == null) {
+			return null;
+		} else if(o instanceof Tuple) {
+			return ((Tuple)o).getItems();
+		} else if(o instanceof List<?>) {
+			List<Object> ret = new LinkedList<Object>();
+			ret.addAll((List<? extends Object>)o);
+			return ret;
+		} else {
+			throw new ClassCastException("Cannot convert item of type " + o.getClass() + " to list");
+		}
+	}
+
+	/**
+	 * Gets an indexed item as a {@link Tuple}. This function will not do type conversion
+	 *  and so will throw a {@code ClassCastException} if the element is not a {@link List}
+	 *  or {@code Tuple}. The element at the index may be {@code null}.
+	 *
+	 * @param index the location of the item to return
+	 *
+	 * @return the item at {@code index} as a {@link List}
+	 */
+	public Tuple getNestedTuple(int index) {
+		Object o = this.elements.get(index);
+		if(o == null) {
+			return null;
+		} else if(o instanceof Tuple) {
+			return (Tuple)o;
+		} else if(o instanceof List<?>) {
+			return Tuple.fromItems((List<? extends Object>)o);
+		} else {
+			throw new ClassCastException("Cannot convert item of type " + o.getClass() + " to tuple");
+		}
+	}
+
+	/**
 	 * Gets an indexed item without forcing a type.
 	 *
 	 * @param index the index of the item to return
@@ -400,7 +633,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 */
 	@Override
 	public int compareTo(Tuple t) {
-		return ByteArrayUtil.compareUnsigned(this.pack(), t.pack());
+		return comparator.compare(elements, t.elements);
 	}
 
 	/**
@@ -473,7 +706,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Creates a new {@code Tuple} from a variable number of elements. The elements
 	 *  must follow the type guidelines from {@link Tuple#addObject(Object) add}, and so
-	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, or {@code null}s.
+	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
+	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
 	 *
 	 * @param items the elements from which to create the {@code Tuple}.
 	 *
@@ -490,7 +724,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Efficiently creates a new {@code Tuple} from a list of objects. The elements
 	 *  must follow the type guidelines from {@link Tuple#addObject(Object) add}, and so
-	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, or {@code null}s.
+	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
+	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
 	 *
 	 * @param items the elements from which to create the {@code Tuple}.
 	 *
@@ -503,7 +738,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Efficiently creates a new {@code Tuple} from a {@link Stream} of objects. The
 	 *  elements must follow the type guidelines from {@link Tuple#addObject(Object) add},
-	 *  and so can only be {@link String}s, {@code byte[]}s, {@link Number}s, or {@code null}s.
+	 *  and so can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
+	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
 	 *
 	 * @param items the {@link Stream} of items from which to create the {@code Tuple}.
 	 *
@@ -518,7 +754,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Creates a new {@code Tuple} from a variable number of elements. The elements
 	 *  must follow the type guidelines from {@link Tuple#addObject(Object) add}, and so
-	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, or {@code null}s.
+	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
+	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
 	 *
 	 * @param items the elements from which to create the {@code Tuple}.
 	 *
@@ -544,12 +781,26 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		t = t.add(Long.MIN_VALUE + 1);
 		t = t.add(Long.MIN_VALUE);
 		t = t.add("foo");
+		t = t.addObject(null);
+		t = t.add(false);
+		t = t.add(true);
+		t = t.add(3.14159);
+		t = t.add(3.14159f);
+		t = t.add(java.util.UUID.randomUUID());
+		t = t.add(t.getItems());
+		t = t.add(t);
+		t = t.add(new BigInteger("100000000000000000000000000000000000000000000"));
+		t = t.add(new BigInteger("-100000000000000000000000000000000000000000000"));
 		byte[] bytes = t.pack();
 		System.out.println("Packed: " + ByteArrayUtil.printable(bytes));
 		List<Object> items = Tuple.fromBytes(bytes).getItems();
 		for(Object obj : items) {
-			System.out.println(" -> type: (" + obj.getClass().getName() + "): " + obj);
+			if (obj != null)
+				System.out.println(" -> type: (" + obj.getClass().getName() + "): " + obj);
+			else
+				System.out.println(" -> type: (null): null");
 		}
+
 
 		t = Tuple.fromStream(t.stream().map(item -> {
 			if(item instanceof String) {
@@ -559,6 +810,33 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 			}
 		}));
 		System.out.println("Upper cased: " + t);
+
+		Tuple t2 = Tuple.fromBytes(bytes);
+		System.out.println("t2.getLong(0): " + t2.getLong(0));
+		System.out.println("t2.getBigInteger(1): " + t2.getBigInteger(1));
+		System.out.println("t2.getString(9): " + t2.getString(9));
+		System.out.println("t2.get(10): " + t2.get(10));
+		System.out.println("t2.getBoolean(11): " + t2.getBoolean(11));
+		System.out.println("t2.getBoolean(12): " + t2.getBoolean(12));
+		System.out.println("t2.getDouble(13): " + t2.getDouble(13));
+		System.out.println("t2.getFloat(13): " + t2.getFloat(13));
+		System.out.println("t2.getLong(13): " + t2.getLong(13));
+		System.out.println("t2.getBigInteger(13): " + t2.getBigInteger(13));
+		System.out.println("t2.getDouble(14): " + t2.getDouble(14));
+		System.out.println("t2.getFloat(14): " + t2.getFloat(14));
+		System.out.println("t2.getLong(14): " + t2.getLong(14));
+		System.out.println("t2.getBigInteger(14): " + t2.getBigInteger(14));
+		System.out.println("t2.getNestedList(17): " + t2.getNestedList(17));
+		System.out.println("t2.getNestedTuple(17): " + t2.getNestedTuple(17));
+
+		System.out.println("(2*(Long.MAX_VALUE+1),) = " + ByteArrayUtil.printable(Tuple.from(
+				BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE).shiftLeft(1)
+		).pack()));
+		System.out.println("(2*Long.MIN_VALUE,) = " + ByteArrayUtil.printable(Tuple.from(
+				BigInteger.valueOf(Long.MIN_VALUE).multiply(new BigInteger("2"))
+		).pack()));
+		System.out.println("2*Long.MIN_VALUE = " + Tuple.fromBytes(Tuple.from(
+				BigInteger.valueOf(Long.MIN_VALUE).multiply(new BigInteger("2"))).pack()).getBigInteger(0));
 	}
 
 	private static Tuple createTuple(int items) {

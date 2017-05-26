@@ -489,7 +489,7 @@ void initHelp() {
 		"If KEY is not already present in the database, it will be created." ESCAPINGKV);
 	helpMap["option"] = CommandHelp(
 		"option <STATE> <OPTION> <ARG>",
-		"enables or disables an option", 
+		"enables or disables an option",
 		"If STATE is `on', then the option OPTION will be enabled with optional parameter ARG, if required. If STATE is `off', then OPTION will be disabled.\n\nIf there is no active transaction, then the option will be applied to all operations as well as all subsequently created transactions (using `begin').\n\nIf there is an active transaction (one created with `begin'), then enabled options apply only to that transaction. Options cannot be disabled on an active transaction.\n\nCalling `option' with no parameters prints a list of all enabled options.\n\nFor information about specific options that can be set, type `help options'.");
 	helpMap["help"] = CommandHelp(
 		"help [<topic>]",
@@ -584,8 +584,8 @@ std::string getProcessAddressByServerID(StatusObjectReader processesMap, std::st
 			}
 		}
 		catch (std::exception &e) {
-			// If an entry in the process map is badly formed then something will throw. Since we are 
-			// looking for a positive match, just ignore any read execeptions and move on to the next proc			
+			// If an entry in the process map is badly formed then something will throw. Since we are
+			// looking for a positive match, just ignore any read execeptions and move on to the next proc
 		}
 	}
 	return "unknown";
@@ -681,9 +681,9 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 					if (statusObjCluster.get("recovery_state", recoveryState)) {
 						std::string name;
 						std::string description;
-						if (recoveryState.get("name", name) && 
-							recoveryState.get("description", description) && 
-							name != "fully_recovered") 
+						if (recoveryState.get("name", name) &&
+							recoveryState.get("description", description) &&
+							name != "fully_recovered")
 						{
 							fatalRecoveryState = true;
 
@@ -713,10 +713,10 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 
 			// Check if cluster controllable is reachable
-			try {	
+			try {
 				// print any cluster messages
 				if (statusObjCluster.has("messages") && statusObjCluster.last().get_array().size()){
-					
+
 					// any messages we don't want to display
 					std::set<std::string> skipMsgs = { "unreachable_process", "" };
 					if (fatalRecoveryState){
@@ -728,7 +728,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						skipMsgs.insert("read_probe_timeout");
 						skipMsgs.insert("commit_probe_timeout");
 					}
-					
+
 					for (StatusObjectReader msgObj : statusObjCluster.last().get_array()){
 						std::string messageName;
 						if(!msgObj.get("name", messageName)){
@@ -776,12 +776,12 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							if (msgObj.has("description"))
 								outputString += "\n" + lineWrap(msgObj.last().get_str().c_str(), 80);
 						}
-						
+
 					}
 				}
 			}
 			catch (std::runtime_error& e){}
-			
+
 			if (fatalRecoveryState){
 				printf("%s", outputString.c_str());
 				return;
@@ -826,10 +826,10 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				if (excludedServersArr.size()) {
 					outputString += format("\n  Exclusions             - %d (type `exclude' for details)", excludedServersArr.size());
 				}
-					
+
 				if (statusObjConfig.get("proxies", intVal))
 					outputString += format("\n  Desired Proxies        - %d", intVal);
-					
+
 				if (statusObjConfig.get("resolvers", intVal))
 					outputString += format("\n  Desired Resolvers      - %d", intVal);
 
@@ -847,7 +847,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			StatusObjectReader machinesMap;
 
 			outputStringCache = outputString;
-			// this bool removed code duplication when there's an else (usually due to a missing field) that should print some error message 
+			// this bool removed code duplication when there's an else (usually due to a missing field) that should print some error message
 			//     which would be the same error message if the catch block was hit
 			bool success = false;
 			try {
@@ -932,7 +932,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 							outputString += "1 machine";
 						else
 							outputString += format("%d machines", minLoss);
-						
+
 						if (dataLoss > availLoss){
 							outputString += format(" (%d without data loss)", dataLoss);
 						}
@@ -1074,7 +1074,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				bool unknownMCT = false;
 				bool unknownRP = false;
 
-				// Print performance limit details if known.  
+				// Print performance limit details if known.
 				try {
 					StatusObjectReader limit = statusObjCluster["qos.performance_limited_by"];
 					std::string name = limit["name"].get_str();
@@ -1153,7 +1153,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						StatusObjectReader procObj(proc.second);
 						std::string address;
 						procObj.get("address", address);
-						
+
 						std::string line;
 
 						// Windows does not support the "hh" width specifier so just using unsigned int to be safe.
@@ -1271,7 +1271,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 		// status minimal
 		else if (level == StatusClient::MINIMAL) {
-			// Checking for field exsistence is not necessary here because if a field is missing there is no additional information 
+			// Checking for field exsistence is not necessary here because if a field is missing there is no additional information
 			// that we would be able to display if we continued execution. Instead, any missing fields will throw and the catch will display the proper message.
 			try {
 				// If any of these throw, can't get status because the result makes no sense.
@@ -1366,7 +1366,7 @@ ACTOR Future<Void> checkStatus(Future<Void> f, Reference<ClusterConnectionFile> 
 	Void _ = wait(f);
 	StatusObject s = wait(StatusClient::statusFetcher(clusterFile));
 	printf("\n");
-	printStatus(s, StatusClient::MINIMAL, displayDatabaseAvailable);	
+	printStatus(s, StatusClient::MINIMAL, displayDatabaseAvailable);
 	printf("\n");
 	return Void();
 }
@@ -1418,16 +1418,16 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 				return true;
 			}
 
-			bool noChanges = conf.get().old_replication == conf.get().auto_replication && 
-				conf.get().old_logs == conf.get().auto_logs && 
-				conf.get().old_proxies == conf.get().auto_proxies && 
-				conf.get().old_resolvers == conf.get().auto_resolvers && 
-				conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction && 
+			bool noChanges = conf.get().old_replication == conf.get().auto_replication &&
+				conf.get().old_logs == conf.get().auto_logs &&
+				conf.get().old_proxies == conf.get().auto_proxies &&
+				conf.get().old_resolvers == conf.get().auto_resolvers &&
+				conf.get().old_processes_with_transaction == conf.get().auto_processes_with_transaction &&
 				conf.get().old_machines_with_transaction == conf.get().auto_machines_with_transaction;
 
-			bool noDesiredChanges = noChanges && 
-				conf.get().old_logs == conf.get().desired_logs && 
-				conf.get().old_proxies == conf.get().desired_proxies && 
+			bool noDesiredChanges = noChanges &&
+				conf.get().old_logs == conf.get().desired_logs &&
+				conf.get().old_proxies == conf.get().desired_proxies &&
 				conf.get().old_resolvers == conf.get().desired_resolvers;
 
 			std::string outputString;
@@ -1435,7 +1435,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			outputString += "\nYour cluster has:\n\n";
 			outputString += format("  processes %d\n", conf.get().processes);
 			outputString += format("  machines  %d\n", conf.get().machines);
-			
+
 			if(noDesiredChanges) outputString += "\nConfigure recommends keeping your current configuration:\n\n";
 			else if(noChanges) outputString += "\nConfigure cannot modify the configuration because some parameters have been set manually:\n\n";
 			else outputString += "\nConfigure recommends the following changes:\n\n";
@@ -1452,7 +1452,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 			outputString += format("| transaction-class processes | %16d | %16d |\n", conf.get().old_processes_with_transaction, conf.get().auto_processes_with_transaction);
 			outputString += format("| transaction-class machines  | %16d | %16d |\n", conf.get().old_machines_with_transaction, conf.get().auto_machines_with_transaction);
 			outputString +=        " ------------------------------------------------------------------- \n\n";
-			
+
 			std::printf("%s", outputString.c_str());
 
 			if(noChanges)
@@ -1465,7 +1465,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 				return false;
 			}
 		}
-		
+
 		ConfigurationResult::Type r  = wait( makeInterruptable( changeConfig( db, std::vector<StringRef>(tokens.begin()+1,tokens.end()), conf) ) );
 		result = r;
 	}
@@ -1527,7 +1527,7 @@ ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, boo
 		state std::vector<StringRef>::iterator t;
 		for(t = tokens.begin()+1; t != tokens.end(); ++t) {
 			try {
-				// SOMEDAY: Check for keywords	
+				// SOMEDAY: Check for keywords
 				auto const& addr = NetworkAddress::parse( t->toString() );
 				if( addr.isTLS() != isClusterTLS ) {
 					printf("ERROR: cannot use coordinator with incompatible TLS state: `%s'\n", t->toString().c_str());
@@ -1654,13 +1654,13 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 										    "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n";
 
 			StatusObjectReader statusObj(status);
-	
+
 			StatusObjectReader statusObjCluster;
 			if (!statusObj.get("cluster", statusObjCluster)) {
 				printf("%s", errorString.c_str());
 				return true;
 			}
-	
+
 			StatusObjectReader processesMap;
 			if (!statusObjCluster.get("processes", processesMap)) {
 				printf("%s", errorString.c_str());
@@ -1681,14 +1681,14 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					}
 					NetworkAddress addr = NetworkAddress::parse(addrStr);
 					bool excluded = (process.has("excluded") && process.last().get_bool()) || addressExcluded(exclusions, addr);
-					
+
 					if(!excluded) {
 						StatusObjectReader disk;
 						if (!process.get("disk", disk)) {
 							printf("%s", errorString.c_str());
 							return true;
 						}
-						
+
 						int64_t total_bytes;
 						if (!disk.get("total_bytes", total_bytes)) {
 							printf("%s", errorString.c_str());
@@ -1703,7 +1703,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 
 						worstFreeSpaceRatio = std::min(worstFreeSpaceRatio, double(free_bytes)/total_bytes);
 					}
-					
+
 					for (StatusObjectReader role : rolesArray) {
 						if (role["role"].get_str() == "storage") {
 							if (excluded)
@@ -1769,7 +1769,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 		bool foundCoordinator = false;
 		auto ccs = ClusterConnectionFile( ccf->getFilename() ).getConnectionString();
 		for( auto& c : ccs.coordinators()) {
-			if (std::count( addresses.begin(), addresses.end(), AddressExclusion(c.ip, c.port) ) || 
+			if (std::count( addresses.begin(), addresses.end(), AddressExclusion(c.ip, c.port) ) ||
 					std::count( addresses.begin(), addresses.end(), AddressExclusion(c.ip) )) {
 				printf("WARNING: %s is a coordinator!\n", c.toString().c_str());
 				foundCoordinator = true;
@@ -1934,7 +1934,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 	}
 
 	// printf("final text (%d tokens): `%s' & `%s'\n", count, base_input.c_str(), ntext.c_str());
-	
+
 	if (!count) {
 		cmd_generator(ntext.c_str(), lc);
 		return;
@@ -1990,7 +1990,7 @@ struct CLIOptions {
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
 
-	CLIOptions( int argc, char* argv[] ) 
+	CLIOptions( int argc, char* argv[] )
 		: trace(false),
 		 exit_timeout(0),
 		 initialStatusCheck(true),
@@ -2116,7 +2116,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	state const char *database = "DB";
 	state Standalone<StringRef> openDbName = StringRef(database);
 
-	state Reference<ClusterConnectionFile> ccf; 
+	state Reference<ClusterConnectionFile> ccf;
 
 	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
 	try {
@@ -2484,7 +2484,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						} else if(address_interface.size() == 1) {
 							printf("\nThe following address can be killed:\n");
 						} else {
-							printf("\nThe following %d addresses can be killed:\n", address_interface.size());
+							printf("\nThe following %lu addresses can be killed:\n", address_interface.size());
 						}
 						for( auto it : address_interface ) {
 							printf("%s\n", printable(it.first).c_str());
@@ -2532,7 +2532,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						} else if(address_interface.size() == 1) {
 							printf("\nThe following address can be checked:\n");
 						} else {
-							printf("\nThe following %d addresses can be checked:\n", address_interface.size());
+							printf("\nThe following %lu addresses can be checked:\n", address_interface.size());
 						}
 						for( auto it : address_interface ) {
 							printf("%s\n", printable(it.first).c_str());
@@ -2660,7 +2660,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 						continue;
 					}
-					
+
 					if (tokens.size() != 3) {
 						printUsage(tokens[0]);
 						is_error = true;
@@ -2681,7 +2681,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 						continue;
 					}
-					
+
 					if (tokens.size() != 2) {
 						printUsage(tokens[0]);
 						is_error = true;
@@ -2702,7 +2702,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						is_error = true;
 						continue;
 					}
-					
+
 					if (tokens.size() != 3) {
 						printUsage(tokens[0]);
 						is_error = true;
@@ -2800,7 +2800,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 }
 
 ACTOR Future<int> runCli(CLIOptions opt) {
-	state LineNoise linenoise( 
+	state LineNoise linenoise(
 		[](std::string const& line, std::vector<std::string>& completions) {
 			fdbcli_comp_cmd(line, completions);
 		},
