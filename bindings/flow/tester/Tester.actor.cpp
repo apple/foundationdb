@@ -392,8 +392,8 @@ struct LogStackFunc : InstructionFunc {
 			try {
 				for(auto it : entries) {
 					Tuple tk;
-					tk.append((int64_t)it.first);
-					tk.append((int64_t)it.second.index);
+					tk.append(it.first);
+					tk.append(it.second.index);
 					state Standalone<StringRef> pk = tk.pack().withPrefix(prefix);
 					Standalone<StringRef> pv = wait(it.second.value);
 					tr->set(pk, pv.substr(0, std::min(pv.size(), 40000)));
