@@ -215,6 +215,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 	{
 		std::map<ProcessClass::Fitness, vector<std::pair<WorkerInterface, ProcessClass>>> fitness_workers;
 		std::vector<std::pair<WorkerInterface, ProcessClass>>		results;
+		std::vector<LocalityData>							unavailableLocals;
 		LocalitySetRef																					logServerSet;
 		LocalityMap<std::pair<WorkerInterface, ProcessClass>>*	logServerMap;
 		bool		bCompleted = false;
@@ -226,6 +227,24 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			auto fitness = it.second.processClass.machineClassFitness( ProcessClass::TLog );
 			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.interf.address()) && fitness != ProcessClass::NeverAssign ) {
 				fitness_workers[ fitness ].push_back(std::make_pair(it.second.interf, it.second.processClass));
+			}
+			else {
+				if (it.second.interf.locality.dataHallId().present())
+					TraceEvent(SevWarn,"GWFTADNotAvailable", id)
+						.detail("Fitness", fitness)
+						.detailext("Zone", it.second.interf.locality.zoneId())
+						.detailext("DataHall", it.second.interf.locality.dataHallId())
+						.detail("Address", it.second.interf.address())
+						.detail("workerAvailable", workerAvailable(it.second, checkStable))
+						.detail("isExcludedServer", conf.isExcludedServer(it.second.interf.address()))
+						.detail("checkStable", checkStable)
+						.detail("reboots", it.second.reboots)
+						.detail("isAvailable", IFailureMonitor::failureMonitor().getState(it.second.interf.storage.getEndpoint()).isAvailable())
+						.detail("Locality", it.second.interf.locality.toString())
+						.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
+						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
+						.detail("DesiredLogs", conf.getDesiredLogs());
+				unavailableLocals.push_back(it.second.interf.locality);
 			}
 		}
 
@@ -316,11 +335,15 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 					.detail("Policy", conf.tLogPolicy->info())
 					.detail("Processes", logServerSet->size())
 					.detail("Workers", id_worker.size())
+					.detail("FitnessGroups", fitness_workers.size())
 					.detail("TLogZones", ::describeZones(tLocalities))
 					.detail("TLogDataHalls", ::describeDataHalls(tLocalities))
+					.detail("MissingZones", ::describeZones(unavailableLocals))
+					.detail("MissingDataHalls", ::describeDataHalls(unavailableLocals))
 					.detail("Replication", conf.tLogReplicationFactor)
 					.detail("DesiredLogs", conf.getDesiredLogs())
 					.detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
+					.detail("checkStable", checkStable)
 					.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
 
 			// Free the set
@@ -1242,9 +1265,9 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
 	ProcessClass processClass = req.processClass;
-
-	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString());
 	auto info = self->id_worker.find( w.locality.processId() );
+
+	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
 
 	if( info == self->id_worker.end() ) {
 		auto classIter = self->id_class.find(w.locality.processId());

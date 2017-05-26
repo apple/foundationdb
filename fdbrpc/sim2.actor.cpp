@@ -944,9 +944,27 @@ public:
 
 		return m;
 	}
+	virtual bool isAvailable() const
+	{
+		std::vector<ProcessInfo*>	processesLeft, processesDead;
+
+		for (auto processInfo : getAllProcesses()) {
+			// Add non-test processes (ie. datahall is not be set for test processes)
+			if (processInfo->startingClass != ProcessClass::TesterClass) {
+				// Do not kill protected processes
+				if (protectedAddresses.count(processInfo->address))
+					processesLeft.push_back(processInfo);
+				else if (processInfo->isAvailable())
+					processesLeft.push_back(processInfo);
+				else
+					processesDead.push_back(processInfo);
+			}
+		}
+		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
+	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
-	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType)
+	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const
 	{
 		bool	canSurvive = true;
 		KillType	newKt = kt;
@@ -1017,12 +1035,12 @@ public:
 		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
 
 		if (kt == KillInstantly) {
-			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detailext("ZoneId", machine->locality.zoneId()).backtrace();
+			TraceEvent(SevWarn, "FailMachine").detail("Name", machine->name).detail("Address", machine->address).detailext("ZoneId", machine->locality.zoneId()).detail("Process", describe(*machine)).detail("Rebooting", machine->rebooting).backtrace();
 			// This will remove all the "tracked" messages that came from the machine being killed
 			latestEventCache.clear();
 			machine->failed = true;
 		} else if (kt == InjectFaults) {
-			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detailext("ZoneId", machine->locality.zoneId()).backtrace();
+			TraceEvent(SevWarn, "FaultMachine").detail("Name", machine->name).detail("Address", machine->address).detailext("ZoneId", machine->locality.zoneId()).detail("Process", describe(*machine)).detail("Rebooting", machine->rebooting).backtrace();
 			should_inject_fault = simulator_should_inject_fault;
 			machine->fault_injection_r = g_random->randomUniqueID().first();
 			machine->fault_injection_p1 = 0.1;
@@ -1030,6 +1048,7 @@ public:
 		} else {
 			ASSERT( false );
 		}
+		ASSERT(!protectedAddresses.count(machine->address) || machine->rebooting);
 	}
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) {
 		if( kt == RebootProcessAndDelete && protectedAddresses.count(process->address) )
@@ -1096,25 +1115,31 @@ public:
 				for (auto processInfo : machineRec.second.processes) {
 					// Add non-test processes (ie. datahall is not be set for test processes)
 					if (processInfo->startingClass != ProcessClass::TesterClass) {
-						// Add machine processes to dead group if dead or specified kill machine
-						if (processInfo->failed || (machineRec.second.zoneId == zoneId))
-							processesDead.push_back(processInfo);
-						else
+						if (protectedAddresses.count(processInfo->address))
 							processesLeft.push_back(processInfo);
+						else if (processInfo->isAvailable() && (machineRec.second.zoneId != zoneId)) {
+							processesLeft.push_back(processInfo);
+						}
+						// Add processes from dead machines and datacenter machines to dead group
+						else
+							processesDead.push_back(processInfo);
 					}
 				}
 			}
-			if (!canKillProcesses(processesLeft, processesLeft, kt, &kt)) {
+			if (!canKillProcesses(processesLeft, processesDead, kt, &kt)) {
 				if ((kt != Reboot) && (!killIsSafe)) {
 					kt = Reboot;
 				}
-				TraceEvent("ChangedKillMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("OrigKillType", ktOrig).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalZones", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
+				TraceEvent("ChangedKillMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("OrigKillType", ktOrig).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
 			}
 			else if ((kt == KillInstantly) || (kt == InjectFaults)) {
-				TraceEvent("DeadMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalZones", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
+				TraceEvent("DeadMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
+				for (auto process : processesLeft) {
+					TraceEvent("DeadMachineSurvivors", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", describe(*process));
+				}
 			}
 			else {
-				TraceEvent("ClearMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalZones", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
+				TraceEvent("ClearMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
 			}
 		}
 
@@ -1125,7 +1150,7 @@ public:
 			return false;
 		}
 
-		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KilledMachines", killedMachines).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt == ktOrig).detail("killIsSafe", killIsSafe);
+		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KilledMachines", killedMachines).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig).detail("killIsSafe", killIsSafe);
 		if (kt < RebootAndDelete ) {
 			for (auto& process : machines[zoneId].processes) {
 				TraceEvent("KillMachineProcess", zoneId).detail("KillType", kt).detail("Process", process->toString()).detail("startingClass", process->startingClass.toString());
@@ -1171,16 +1196,19 @@ public:
 				for (auto processInfo : machineRec.second.processes) {
 					// Add non-test processes (ie. datahall is not be set for test processes)
 					if (processInfo->startingClass != ProcessClass::TesterClass) {
-						// Add processes from dead machines and datacenter machines to dead group
-						if (processInfo->failed || (datacenterZones.find(machineRec.second.zoneId) != datacenterZones.end()))
-							processesDead.push_back(processInfo);
-						else
+						// Do not kill protected processes
+						if (protectedAddresses.count(processInfo->address))
 							processesLeft.push_back(processInfo);
+						else if (processInfo->isAvailable() && (datacenterZones.find(machineRec.second.zoneId) == datacenterZones.end())) {
+							processesLeft.push_back(processInfo);
+						}
+						else
+							processesDead.push_back(processInfo);
 					}
 				}
 			}
 
-			if (!canKillProcesses(processesLeft, processesLeft, kt, &kt)) {
+			if (!canKillProcesses(processesLeft, processesDead, kt, &kt)) {
 				TraceEvent(SevWarn, "DcKillChanged").detailext("DataCenter", dcId).detail("KillType", ktOrig).detail("NewKillType", kt);
 			}
 			else {
@@ -1219,7 +1247,7 @@ public:
 	virtual void clogPair( uint32_t from, uint32_t to, double seconds ) {
 		g_clogging.clogPairFor( from, to, seconds );
 	}
-	virtual std::vector<ProcessInfo*> getAllProcesses() {
+	virtual std::vector<ProcessInfo*> getAllProcesses() const {
 		std::vector<ProcessInfo*> processes;
 		for( auto c = machines.begin(); c != machines.end(); ++c )
 			processes.insert( processes.end(), c->second.processes.begin(), c->second.processes.end() );
