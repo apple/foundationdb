@@ -35,6 +35,7 @@
 #include "ConflictSet.h"
 #include "DataDistribution.h"
 #include "NetworkTest.h"
+#include "IKeyValueStore.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include "pubsub.h"
@@ -74,7 +75,7 @@
 
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
-	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM };
+	OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_KVFILE };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONNFILE,             "-C",                          SO_REQ_SEP },
@@ -630,7 +631,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  -r ROLE, --role ROLE\n"
 			   "                 Server role (valid options are fdbd, test, multitest,\n");
 		printf("                 simulation, networktestclient, networktestserver,\n");
-		printf("                 consistencycheck). The default is `fdbd'.\n");
+		printf("                 consistencycheck, kvfileintegritycheck, kvfilegeneratesums). The default is `fdbd'.\n");
 #ifdef _WIN32
 		printf("  -n, --newconsole\n"
 			   "                 Create a new console.\n");
@@ -836,6 +837,8 @@ int main(int argc, char* argv[]) {
 			CreateTemplateDatabase,
 			NetworkTestClient,
 			NetworkTestServer,
+			KVFileIntegrityCheck,
+			KVFileGenerateIOLogChecksums,
 			ConsistencyCheck
 		};
 		std::string fileSystemPath = "", dataFolder, connFile = "", seedConnFile = "", seedConnString = "", logFolder = ".", metricsConnFile = "", metricsPrefix = "";
@@ -844,6 +847,7 @@ int main(int argc, char* argv[]) {
 		uint32_t randomSeed = platform::getRandomSeed();
 
 		const char *testFile = "tests/default.txt";
+		std::string kvFile;
 		std::string publicAddressStr, listenAddressStr = "public";
 		std::string testServersStr;
 		NetworkAddress publicAddress, listenAddress;
@@ -965,6 +969,8 @@ int main(int argc, char* argv[]) {
 					else if (!strcmp(sRole, "createtemplatedb")) role = CreateTemplateDatabase;
 					else if (!strcmp(sRole, "networktestclient")) role = NetworkTestClient;
 					else if (!strcmp(sRole, "networktestserver")) role = NetworkTestServer;
+					else if (!strcmp(sRole, "kvfileintegritycheck")) role = KVFileIntegrityCheck;
+					else if (!strcmp(sRole, "kvfilegeneratesums")) role = KVFileGenerateIOLogChecksums;
 					else if (!strcmp(sRole, "consistencycheck")) role = ConsistencyCheck;
 					else {
 						fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
@@ -1094,6 +1100,9 @@ int main(int argc, char* argv[]) {
 	#endif
 				case OPT_TESTFILE:
 					testFile = args.OptionArg();
+					break;
+				case OPT_KVFILE:
+					kvFile = args.OptionArg();
 					break;
 				case OPT_RESTARTING:
 					restarting = true;
@@ -1228,7 +1237,7 @@ int main(int argc, char* argv[]) {
 		bool autoPublicAddress = StringRef(publicAddressStr).startsWith(LiteralStringRef("auto:"));
 
 		Reference<ClusterConnectionFile> connectionFile;
-		if ( (role != Simulation && role != CreateTemplateDatabase) || autoPublicAddress ) {
+		if ( (role != Simulation && role != CreateTemplateDatabase && role != KVFileIntegrityCheck && role != KVFileGenerateIOLogChecksums) || autoPublicAddress ) {
 
 				if (seedSpecified && !fileExists(connFile)){
 					std::string connectionString = seedConnString.length() ? seedConnString : "";
@@ -1593,6 +1602,12 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == NetworkTestServer) {
 			f = stopAfter( networkTestServer() );
+			g_network->run();
+		} else if (role == KVFileIntegrityCheck) {
+			auto f = stopAfter( KVFileCheck(kvFile, true) );
+			g_network->run();
+		} else if (role == KVFileGenerateIOLogChecksums) {
+			auto f = stopAfter( GenerateIOLogChecksumFile(kvFile) );
 			g_network->run();
 		}
 

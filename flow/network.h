@@ -196,7 +196,7 @@ public:
 
 	enum enumGlobal {
 		enFailureMonitor = 0, enFlowTransport = 1, enTDMetrics = 2, enNetworkConnections = 3,
-		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8
+		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8, enASIOTimedOut = 9, enASIOTimedOutInjected = 10
 	};
 
 	virtual void longTaskCheck( const char* name ) {}

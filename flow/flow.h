@@ -64,7 +64,7 @@ bool validationIsEnabled();
 
 #define BUGGIFY_WITH_PROB(x) (getSBVar(__FILE__, __LINE__) && g_random->random01() < (x))
 #define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES)
-#define EXPENSIVE_VALIDATION validationIsEnabled() && g_random->random01() < P_EXPENSIVE_VALIDATION
+#define EXPENSIVE_VALIDATION (validationIsEnabled() && g_random->random01() < P_EXPENSIVE_VALIDATION)
 
 extern std::string format(const char* form, ...);
 extern Standalone<StringRef> strinc(StringRef const& str);

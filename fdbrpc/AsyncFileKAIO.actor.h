@@ -36,6 +36,12 @@
 #include "fdbrpc/linux_kaio.h"
 #include "flow/Knobs.h"
 #include "flow/UnitTest.h"
+#include <stdio.h>
+#include "flow/Hash3.h"
+#include "flow/genericactors.actor.h"
+
+// Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location /data/v7/fdb/
+#define KAIO_LOGGING 0
 
 DESCR struct SlowAioSubmit {
 	int64_t submitDuration; // ns
@@ -47,6 +53,48 @@ DESCR struct SlowAioSubmit {
 
 class AsyncFileKAIO : public IAsyncFile, public ReferenceCounted<AsyncFileKAIO> {
 public:
+
+#if KAIO_LOGGING
+private:
+	#pragma pack(push, 1)
+	struct OpLogEntry {
+		OpLogEntry() : result(0) {}
+		enum EOperation { READ = 1, WRITE = 2, SYNC = 3, TRUNCATE = 4 };
+		enum EStage { START = 1, LAUNCH = 2, REQUEUE = 3, COMPLETE = 4, READY = 5 };
+		int64_t timestamp;
+		uint32_t id;
+		uint32_t checksum;
+		uint32_t pageOffset;
+		uint8_t pageCount;
+		uint8_t op;
+		uint8_t stage;
+		uint32_t result;
+
+		static uint32_t nextID() {
+			static uint32_t last = 0;
+			return ++last;
+		}
+
+		void log(FILE *file) {
+			if(ftell(file) > (int64_t)50 * 1e9)
+				fseek(file, 0, SEEK_SET);
+			if(!fwrite(this, sizeof(OpLogEntry), 1, file))
+				throw io_error();
+		}
+	};
+	#pragma pop
+
+	FILE *logFile;
+	struct IOBlock;
+	static void KAIOLogBlockEvent(IOBlock *ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
+	static void KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntry::EStage stage, uint32_t result = 0);
+	static void KAIOLogEvent(FILE *logFile, uint32_t id, OpLogEntry::EOperation op, OpLogEntry::EStage stage, uint32_t pageOffset = 0, uint32_t result = 0);
+public:
+#else
+	#define KAIOLogBlockEvent(...)
+	#define KAIOLogEvent(...)
+#endif
+
 	static Future<Reference<IAsyncFile>> open( std::string filename, int flags, int mode, void* ignore ) {
 		ASSERT( flags & OPEN_UNBUFFERED );
 
@@ -146,7 +194,13 @@ public:
 		io->offset = offset;
 
 		enqueue(io, "read", this);
-		return io->result.getFuture();
+		Future<int> result = io->result.getFuture();
+
+#if KAIO_LOGGING
+		//result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
+#endif
+
+		return result;
 	}
 	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
 		++countFileLogicalWrites;
@@ -165,7 +219,13 @@ public:
 		nextFileSize = std::max( nextFileSize, offset+length );
 
 		enqueue(io, "write", this);
-		return success(io->result.getFuture());
+		Future<int> result = io->result.getFuture();
+		
+#if KAIO_LOGGING
+		//result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
+#endif
+
+		return success(result);
 	}
 	virtual Future<Void> truncate( int64_t size ) {
 		++countFileLogicalWrites;
@@ -175,22 +235,34 @@ public:
 			return io_timeout();
 		}
 
+#if KAIO_LOGGING
+		uint32_t id = OpLogEntry::nextID();
+#endif
+		int result = -1;
+		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::START, size / 4096);
 		bool completed = false;
 		if( ctx.fallocateSupported && size >= lastFileSize ) {
-			if (fallocate( fd, 0, 0, size)) {
+			result = fallocate( fd, 0, 0, size);
+			if (result != 0) {
 				int fallocateErrCode = errno;
 				TraceEvent("AsyncFileKAIOAllocateError").detail("fd",fd).detail("filename", filename).GetLastError();
 				if ( fallocateErrCode == EOPNOTSUPP ) {
 					// Mark fallocate as unsupported. Try again with truncate.
 					ctx.fallocateSupported = false;
 				} else {
+					KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
 					return io_error();
 				}
 			} else {
 				completed = true;
 			}
 		}
-		if ( !completed && ftruncate(fd, size) ) {
+		if ( !completed )
+			result = ftruncate(fd, size);
+
+		KAIOLogEvent(logFile, id, OpLogEntry::TRUNCATE, OpLogEntry::COMPLETE, size / 4096, result);
+
+		if(result != 0) {
 			TraceEvent("AsyncFileKAIOTruncateError").detail("fd",fd).detail("filename", filename).GetLastError();
 			return io_error();
 		}
@@ -215,11 +287,21 @@ public:
 			return io_timeout();
 		}
 
+#if KAIO_LOGGING
+		uint32_t id = OpLogEntry::nextID();
+#endif
+
+		KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::START);
+
 		Future<Void> fsync = throwErrorIfFailed(Reference<AsyncFileKAIO>::addRef(this), AsyncFileEIO::async_fdatasync(fd));  // Don't close the file until the asynchronous thing is done
 		// Alas, AIO f(data)sync doesn't seem to actually be implemented by the kernel
 		/*IOBlock *io = new IOBlock(IO_CMD_FDSYNC, fd);
 		submit(io, "write");
 		fsync=success(io->result.getFuture());*/
+
+#if KAIO_LOGGING
+		fsync = map(fsync, [=](Void r) mutable { KAIOLogEvent(logFile, id, OpLogEntry::SYNC, OpLogEntry::COMPLETE); return r; });
+#endif
 
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE) {
 			flags &= ~OPEN_ATOMIC_WRITE_AND_CREATE;
@@ -236,7 +318,14 @@ public:
 	virtual std::string getFilename() {
 		return filename;
 	}
-	~AsyncFileKAIO() { close(fd); }
+	~AsyncFileKAIO() {
+		close(fd);
+
+#if KAIO_LOGGING
+		if(logFile != nullptr)
+			fclose(logFile);
+#endif
+	}
 
 	static void launch() {
 		if (ctx.queue.size() && ctx.outstanding < FLOW_KNOBS->MAX_OUTSTANDING - FLOW_KNOBS->MIN_SUBMIT) {
@@ -254,6 +343,9 @@ public:
 
 			for(int i=0; i<n; i++) {
 				auto io = ctx.queue.top();
+
+				KAIOLogBlockEvent(io, OpLogEntry::LAUNCH);
+
 				ctx.queue.pop();
 				toStart[i] = io;
 				io->startTime = now();
@@ -305,6 +397,7 @@ public:
 				if (errno == EAGAIN) {
 					rc = 0;
 				} else {
+					KAIOLogBlockEvent(toStart[0], OpLogEntry::COMPLETE, errno ? -errno : -1000000);
 					// Other errors are assumed to represent failure to issue the first I/O in the list
 					toStart[0]->setResult( errno ? -errno : -1000000 );
 					rc = 1;
@@ -312,8 +405,10 @@ public:
 			} else
 				ctx.outstanding += rc;
 			// Any unsubmitted I/Os need to be requeued
-			for(int i=rc; i<n; i++)
+			for(int i=rc; i<n; i++) {
+				KAIOLogBlockEvent(toStart[i], OpLogEntry::REQUEUE);
 				ctx.queue.push(toStart[i]);
+			}
 		}
 	}
 
@@ -335,6 +430,9 @@ private:
 		IOBlock *prev;
 		IOBlock *next;
 		double startTime;
+#if KAIO_LOGGING
+		int32_t iolog_id;
+#endif
 
 		struct indirect_order_by_priority { bool operator () ( IOBlock* a, IOBlock* b ) { return a->prio < b->prio; } };
 
@@ -342,6 +440,9 @@ private:
 			memset((linux_iocb*)this, 0, sizeof(linux_iocb));
 			aio_lio_opcode = op;
 			aio_fildes = fd;
+#if KAIO_LOGGING
+			iolog_id = 0;
+#endif
 		}
 
 		int getTask() const { return (prio>>32)+1; }
@@ -369,11 +470,13 @@ private:
 		void timeout(bool warnOnly) {
 			TraceEvent(SevWarnAlways, "AsyncFileKAIOTimeout").detail("fd", aio_fildes).detail("op", aio_lio_opcode).detail("nbytes", nbytes).detail("offset", offset).detail("ptr", int64_t(buf))
 				.detail("filename", owner->filename);
+			g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType)true);
 
 			if(!warnOnly)
 				owner->failed = true;
 		}
 	};
+
 	struct Context {
 		io_context_t iocx;
 		int evfd;
@@ -453,10 +556,45 @@ private:
 			countLogicalWrites.init(LiteralStringRef("AsyncFile.CountLogicalWrites"));
 			countLogicalReads.init( LiteralStringRef("AsyncFile.CountLogicalReads"));
 		}
+		
+#if KAIO_LOGGING
+		logFile = nullptr;
+		// TODO:  Don't do this hacky investigation-specific thing
+		StringRef fname(filename);
+		if(fname.endsWith(LiteralStringRef(".sqlite")) || fname.endsWith(LiteralStringRef(".sqlite-wal"))) {
+			std::string logFileName = filename;
+			while(logFileName.find("/") != std::string::npos)
+				logFileName = logFileName.substr(logFileName.find("/") + 1);
+			if(!logFileName.empty()) {
+				// TODO: don't hardcode this path
+				std::string logPath("/data/v7/fdb/");
+				try {
+					platform::createDirectory(logPath);
+					logFileName = logPath + format("%s.iolog", logFileName.c_str());
+					logFile = fopen(logFileName.c_str(), "r+");
+					if(logFile == nullptr)
+						logFile = fopen(logFileName.c_str(), "w");
+					if(logFile != nullptr)
+						TraceEvent("KAIOLogOpened").detail("File", filename).detail("LogFile", logFileName);
+					else
+						TraceEvent(SevWarn, "KAIOLogOpenFailure")
+							.detail("File", filename)
+							.detail("LogFile", logFileName)
+							.detail("ErrorCode", errno)
+							.detail("ErrorDesc", strerror(errno));
+				} catch(Error &e) {
+					TraceEvent(SevError, "KAIOLogOpenFailure").error(e);
+				}
+			}
+		}
+#endif
 	}
 
 	void enqueue( IOBlock* io, const char* op, AsyncFileKAIO* owner ) {
 		ASSERT( int64_t(io->buf) % 4096 == 0 && io->offset % 4096 == 0 && io->nbytes % 4096 == 0 );
+
+		KAIOLogBlockEvent(owner->logFile, io, OpLogEntry::START);
+
 		io->flags |= 1;
 		io->eventfd = ctx.evfd;
 		io->prio = (int64_t(g_network->getCurrentTask())<<32) - (++ctx.opsIssued);
@@ -520,6 +658,8 @@ private:
 			for(int i=0; i<n; i++) {
 				IOBlock* iob = static_cast<IOBlock*>(ev[i].iocb);
 
+				KAIOLogBlockEvent(iob, OpLogEntry::COMPLETE, ev[i].result);
+
 				if(ctx.ioTimeout > 0) {
 					ctx.removeFromRequestList(iob);
 				}
@@ -529,6 +669,63 @@ private:
 		}
 	}
 };
+
+#if KAIO_LOGGING
+// Call from contexts where only an ioblock is available, log if its owner is set
+void AsyncFileKAIO::KAIOLogBlockEvent(IOBlock *ioblock, OpLogEntry::EStage stage, uint32_t result) {
+	if(ioblock->owner)
+		return KAIOLogBlockEvent(ioblock->owner->logFile, ioblock, stage, result);
+}
+
+void AsyncFileKAIO::KAIOLogBlockEvent(FILE *logFile, IOBlock *ioblock, OpLogEntry::EStage stage, uint32_t result) {
+	if(logFile != nullptr) {
+		// Figure out what type of operation this is
+		OpLogEntry::EOperation op;
+		if(ioblock->aio_lio_opcode == IO_CMD_PREAD)
+			op = OpLogEntry::READ;
+		else if(ioblock->aio_lio_opcode == IO_CMD_PWRITE)
+			op = OpLogEntry::WRITE;
+		else
+			return;
+
+		// Assign this IO operation an io log id number if it doesn't already have one
+		if(ioblock->iolog_id == 0)
+			ioblock->iolog_id = OpLogEntry::nextID();
+
+		OpLogEntry e;
+		e.timestamp = timer_int();
+		e.op = (uint8_t)op;
+		e.id = ioblock->iolog_id;
+		e.stage = (uint8_t)stage;
+		e.pageOffset = (uint32_t)(ioblock->offset / 4096);
+		e.pageCount = (uint8_t)(ioblock->nbytes / 4096);
+		e.result = result;
+
+		// Log a checksum for Writes up to the Complete stage or Reads starting from the Complete stage
+		if( (op == OpLogEntry::WRITE && stage <= OpLogEntry::COMPLETE) || (op == OpLogEntry::READ && stage >= OpLogEntry::COMPLETE) )
+			e.checksum = hashlittle(ioblock->buf, ioblock->nbytes, 0xab12fd93);
+		else
+			e.checksum = 0;
+
+		e.log(logFile);
+	}
+}
+
+void AsyncFileKAIO::KAIOLogEvent(FILE *logFile, uint32_t id, OpLogEntry::EOperation op, OpLogEntry::EStage stage, uint32_t pageOffset, uint32_t result) {
+	if(logFile != nullptr) {
+		OpLogEntry e;
+		e.timestamp = timer_int();
+		e.id = id;
+		e.op = (uint8_t)op;
+		e.stage = (uint8_t)stage;
+		e.pageOffset = pageOffset;
+		e.pageCount = 0;
+		e.checksum = 0;
+		e.result = result;
+		e.log(logFile);
+	}
+}
+#endif
 
 ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
 	state void *buf = FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal

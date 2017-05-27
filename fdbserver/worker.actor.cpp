@@ -75,6 +75,17 @@ struct ErrorInfo {
 	template <class Ar> void serialize(Ar&) { ASSERT(false); }
 };
 
+Error checkIOTimeout(Error const &e) {
+	// Convert io_errors to io_timeout if global timeout bool was set
+	if(e.code() == error_code_io_error && (bool)g_network->global(INetwork::enASIOTimedOut)) {
+		Error timeout = io_timeout();
+		if(e.isInjectedFault() || (bool)g_network->global(INetwork::enASIOTimedOutInjected))
+			timeout = timeout.asInjectedFault();
+		return timeout;
+	}
+	return e;
+}
+
 ACTOR Future<Void> forwardError( PromiseStream<ErrorInfo> errors,
 	const char* context, UID id,
 	Future<Void> process )
@@ -108,9 +119,12 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 	}
 }
 
-ACTOR Future<Void> workerDisplayErrors(FutureStream<ErrorInfo> errors) {
+ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 	loop choose {
-		when( ErrorInfo err = waitNext(errors) ) {
+		when( ErrorInfo _err = waitNext(errors) ) {
+			ErrorInfo err = _err;
+			err.error = checkIOTimeout(err.error);  // Convert io_errors to io_timeout if ASIO flag is set
+
 			bool ok =
 				err.error.code() == error_code_success ||
 				err.error.code() == error_code_please_reboot ||
@@ -436,7 +450,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData localities,
 	ProcessClass processClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix ) {
 	state PromiseStream< ErrorInfo > errors;
-	state Future<Void> displayErrors = workerDisplayErrors( errors.getFuture() );  // Needs to be stopped last
+	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
@@ -535,7 +549,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 			DiskStore s = stores[f];
 			// FIXME: Error handling
 			if( s.storedComponent == DiskStore::Storage ) {
-				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles);
+				IKeyValueStore* kv = openKVStore(s.storeType, s.filename, s.storeID, memoryLimit, false, validateDataFiles);
 				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add( kvClosed );
 
@@ -792,7 +806,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
 			}
 			when( Void _ = wait( errorForwarders.getResult() ) ) {}
-			when( Void _ = wait( displayErrors ) ) {}
+			when( Void _ = wait( handleErrors ) ) {}
 		}
 	} catch (Error& err) {
 		state Error e = err;
@@ -878,22 +892,27 @@ ACTOR Future<Void> fdbd(
 	std::string metricsConnFile,
 	std::string metricsPrefix )
 {
-	ServerCoordinators coordinators( connFile );
-	TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("machineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
+	try {
+		ServerCoordinators coordinators( connFile );
+		TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("machineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
 
-	// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
-	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
-	Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
-	vector<Future<Void>> v;
-	if ( coordFolder.size() )
-		v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-	v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc ), "clusterController") );
-	v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
-	v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
-	v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix), "workerServer", UID(), &normalWorkerErrors()) );
-	state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
+		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
+		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
+		Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
+		vector<Future<Void>> v;
+		if ( coordFolder.size() )
+			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
+		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc ), "clusterController") );
+		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
+		v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix), "workerServer", UID(), &normalWorkerErrors()) );
+		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
-	Void _ = wait( quorum(v,1) );
-	ASSERT(false);  // None of these actors should terminate normally
-	throw internal_error();
+		Void _ = wait( quorum(v,1) );
+		ASSERT(false);  // None of these actors should terminate normally
+		throw internal_error();
+	} catch(Error &e) {
+		Error err = checkIOTimeout(e);
+		throw err;
+	}
 }

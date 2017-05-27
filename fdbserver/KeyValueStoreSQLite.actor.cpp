@@ -253,11 +253,18 @@ struct SQLiteDB : NonCopyable {
 
 	void checkError( const char* context, int rc ) {
 		//if (g_random->random01() < .001) rc = SQLITE_INTERRUPT;
+
 		if (rc) {
+			Error err = (rc == SQLITE_IOERR_TIMEOUT) ? io_timeout() : io_error();
+
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
-			Error err = io_error();
-			if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))
+			//
+			// Also, timeouts returned from our VFS plugin to SQLite are no always propagated out of the sqlite API as timeouts,
+			// so if a timeout has been injected in this process then assume this error is an injected fault.
+			if (g_network->isSimulated() &&
+				( (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting) || (bool)g_network->global(INetwork::enASIOTimedOutInjected))
+			)
 				err = err.asInjectedFault();
 
 			if (db)
@@ -293,16 +300,34 @@ struct SQLiteDB : NonCopyable {
 		if (rc && rc != SQLITE_DONE) checkError("vacuum", rc);
 		return rc == SQLITE_DONE;
 	}
-	void check(bool verbose) {
+	int check(bool verbose) {
 		int errors = 0;
 		int tables[] = {1, table, freetable};
 		TraceEvent("BTreeIntegrityCheckBegin").detail("Filename", filename);
-		char* e = sqlite3BtreeIntegrityCheck(btree, tables, 3, 100, &errors, verbose);
+		char* e = sqlite3BtreeIntegrityCheck(btree, tables, 3, 1000, &errors, verbose);
 		if (!(g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))) {
-			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheck").detail("filename", filename).detail("ErrorTotal", errors).detail("ErrorDetail", e ? e : "");
+			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheck").detail("filename", filename).detail("ErrorTotal", errors);
+			if(e != nullptr) {
+				// e is a string containing 1 or more lines.  Create a separate trace event for each line.
+				char *lineStart = e;
+				while(lineStart != nullptr) {
+					char *lineEnd = strstr(lineStart, "\n");
+					if(lineEnd != nullptr) {
+						*lineEnd = '\0';
+						++lineEnd;
+					}
+
+					// If the line length found is not zero then print a trace event
+					if(*lineStart != '\0')
+						TraceEvent(SevError, "BTreeIntegrityCheck").detail("filename", filename).detail("ErrorDetail", lineStart);
+					lineStart = lineEnd;
+				}
+			}
 			TEST(true);  // BTree integrity checked
 		}
 		if (e) sqlite3_free(e);
+
+		return errors;
 	}
 	int checkAllPageChecksums();
 };
@@ -1440,7 +1465,7 @@ public:
 	virtual Future<Optional<Value>> readValuePrefix( KeyRef key, int maxLength, Optional<UID> debugID );
 	virtual Future<Standalone<VectorRef<KeyValueRef>>> readRange( KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30 );
 
-	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool validateFile);
+	KeyValueStoreSQLite(std::string const& filename, UID logID, KeyValueStoreType type, bool checkChecksums, bool checkIntegrity);
 	~KeyValueStoreSQLite();
 
 	Future<Void> doClean();
@@ -1453,7 +1478,6 @@ private:
 	Reference<IThreadPool> readThreads, writeThread;
 	Promise<Void> stopped;
 	Future<Void> cleaning, logging, starting, stopOnErr;
-	bool validateFile;
 
 	int64_t readsRequested, writesRequested;
 	ThreadSafeCounter readsComplete;
@@ -1556,8 +1580,9 @@ private:
 		UID dbgid;
 		vector<Reference<ReadCursor>>& readThreads;
 		bool checkAllChecksumsOnOpen;
+		bool checkIntegrityOnOpen;
 
-		explicit Writer( std::string const& filename, bool isBtreeV2, bool checkAllChecksumsOnOpen, volatile int64_t& writesComplete, volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed, volatile int64_t& freeListPages, UID dbgid, vector<Reference<ReadCursor>>* pReadThreads )
+		explicit Writer( std::string const& filename, bool isBtreeV2, bool checkAllChecksumsOnOpen, bool checkIntegrityOnOpen, volatile int64_t& writesComplete, volatile SpringCleaningStats& springCleaningStats, volatile int64_t& diskBytesUsed, volatile int64_t& freeListPages, UID dbgid, vector<Reference<ReadCursor>>* pReadThreads )
 			: conn( filename, isBtreeV2, isBtreeV2 ),
 			  commits(), setsThisCommit(),
 			  freeTableEmpty(false),
@@ -1568,7 +1593,8 @@ private:
 			  cursor(NULL),
 			  dbgid(dbgid),
 			  readThreads(*pReadThreads),
-			  checkAllChecksumsOnOpen(checkAllChecksumsOnOpen)
+			  checkAllChecksumsOnOpen(checkAllChecksumsOnOpen),
+			  checkIntegrityOnOpen(checkIntegrityOnOpen)
 		{
 		}
 		~Writer() {
@@ -1577,8 +1603,15 @@ private:
 			TraceEvent("KVWriterDestroyed", dbgid);
 		}
 		virtual void init() {
-			if(checkAllChecksumsOnOpen)
-				conn.checkAllPageChecksums();
+			if(checkAllChecksumsOnOpen) {
+				if(conn.checkAllPageChecksums() != 0) {
+					// It's not strictly necessary to discard the file immediately if a page checksum error is found
+					// because most of the file could be valid and bad pages will be detected if they are read.
+					// However, we shouldn't use the file unless we absolutely have to because some range(s) of keys
+					// have effectively lost a replica.
+					throw file_corrupt();
+				}
+			}
 			conn.open(true);
 
 			//If a wal file fails during the commit process before finishing a checkpoint, then it is possible that our wal file will be non-empty
@@ -1588,8 +1621,12 @@ private:
 
 			cursor = new Cursor(conn, true);
 
-			if (EXPENSIVE_VALIDATION)
-				conn.check(false);
+			if (checkIntegrityOnOpen || EXPENSIVE_VALIDATION) {
+				if(conn.check(false) != 0) {
+					// A corrupt btree structure must not be used.
+					throw file_corrupt();
+				}
+			}
 		}
 
 		struct InitAction : TypedAction<Writer, InitAction>, FastAllocated<InitAction> {
@@ -1840,8 +1877,8 @@ private:
 		}
 	}
 };
-IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, KeyValueStoreType storeType, bool validateFile ) {
-	return new KeyValueStoreSQLite(filename, logID, storeType, validateFile);
+IKeyValueStore* keyValueStoreSQLite( std::string const& filename, UID logID, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity) {
+	return new KeyValueStoreSQLite(filename, logID, storeType, checkChecksums, checkIntegrity);
 }
 
 ACTOR Future<Void> cleanPeriodically( KeyValueStoreSQLite* self ) {
@@ -1860,14 +1897,13 @@ ACTOR static Future<Void> startReadThreadsWhen( KeyValueStoreSQLite* kv, Future<
 sqlite3_vfs *vfsAsync();
 static int vfs_registered = 0;
 
-KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, KeyValueStoreType storeType, bool validateFile)
+KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, KeyValueStoreType storeType, bool checkChecksums, bool checkIntegrity)
 	: type(storeType),
 	  filename(filename),
 	  logID(id),
 	  readThreads(CoroThreadPool::createThreadPool()),
 	  writeThread(CoroThreadPool::createThreadPool()),
-	  readsRequested(0), writesRequested(0), writesComplete(0), diskBytesUsed(0), freeListPages(0),
-	  validateFile(validateFile)
+	  readsRequested(0), writesRequested(0), writesComplete(0), diskBytesUsed(0), freeListPages(0)
 {
 	stopOnErr = stopOnError(this);
 
@@ -1887,7 +1923,7 @@ KeyValueStoreSQLite::KeyValueStoreSQLite(std::string const& filename, UID id, Ke
 	sqlite3_soft_heap_limit64( SERVER_KNOBS->SOFT_HEAP_LIMIT );  // SOMEDAY: Is this a performance issue?  Should we drop the cache sizes for individual threads?
 	int taskId = g_network->getCurrentTask();
 	g_network->setCurrentTask(TaskDiskWrite);
-	writeThread->addThread( new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, validateFile, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors) );
+	writeThread->addThread( new Writer(filename, type==KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity, writesComplete, springCleaningStats, diskBytesUsed, freeListPages, id, &readCursors) );
 	g_network->setCurrentTask(taskId);
 	auto p = new Writer::InitAction();
 	auto f = p->result.getFuture();
@@ -1969,3 +2005,49 @@ void createTemplateDatabase() {
 	db1.createFromScratch();
 	db2.createFromScratch();
 }
+
+ACTOR Future<Void> GenerateIOLogChecksumFile(std::string filename) {
+	if(!fileExists(filename))
+		throw file_not_found();
+
+	FILE *f = fopen(filename.c_str(), "r");
+	FILE *fout = fopen((filename + ".checksums").c_str(), "w");
+	uint8_t buf[4096];
+	unsigned int c = 0;
+	while(fread(buf, 1, 4096, f) > 0)
+		fprintf(fout, "%u %u\n", c++, hashlittle(buf, 4096, 0xab12fd93));
+    fclose(f);
+	fclose(fout);
+
+	return Void();
+}
+
+// If integrity is true, a full btree integrity check is done.
+// If integrity is false, only a scan of all pages to validate their checksums is done.
+ACTOR Future<Void> KVFileCheck(std::string filename, bool integrity) {
+	if(!fileExists(filename))
+		throw file_not_found();
+
+	StringRef kvFile(filename);
+	KeyValueStoreType type = KeyValueStoreType::END;
+	if(kvFile.endsWith(LiteralStringRef(".fdb")))
+		type = KeyValueStoreType::SSD_BTREE_V1;
+	else if(kvFile.endsWith(LiteralStringRef(".sqlite")))
+		type = KeyValueStoreType::SSD_BTREE_V2;
+	ASSERT(type != KeyValueStoreType::END);
+
+	state IKeyValueStore* store = keyValueStoreSQLite(filename, UID(0, 0), type, !integrity, integrity);
+	ASSERT(store != nullptr);
+
+	// Wait for integry check to finish
+	Optional<Value> _ = wait(store->readValue(StringRef()));
+
+	if(store->getError().isError())
+		Void _ = wait(store->getError());
+	Future<Void> c = store->onClosed();
+	store->close();
+	Void _ = wait(c);
+
+	return Void();
+}
+

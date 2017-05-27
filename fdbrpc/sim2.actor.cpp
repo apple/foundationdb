@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-
 #include "simulator.h"
 #include "flow/IThreadPool.h"
 #include "IAsyncFile.h"
@@ -50,7 +49,15 @@ bool simulator_should_inject_fault( const char* context, const char* file, int l
 			h2 = p->fault_injection_r;
 
 		if (h1 < p->fault_injection_p1*std::numeric_limits<uint32_t>::max()) {
+			TEST(true);
+			TEST(error_code == error_code_io_timeout);
+			TEST(error_code == error_code_io_error);
+			TEST(error_code == error_code_platform_error);
 			TraceEvent(SevWarn, "FaultInjected").detail("Context", context).detail("File", file).detail("Line", line).detail("ErrorCode", error_code);
+			if(error_code == error_code_io_timeout) {
+				g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType)true);
+				g_network->setGlobal(INetwork::enASIOTimedOutInjected, (flowGlobalType)true);
+			}
 			return true;
 		}
 	}
@@ -521,8 +528,8 @@ private:
 
 		debugFileCheck("SimpleFileRead", self->filename, data, offset, length);
 
-		INJECT_FAULT(io_error, "SimpleFile::read");
 		INJECT_FAULT(io_timeout, "SimpleFile::read");
+		INJECT_FAULT(io_error, "SimpleFile::read");
 
 		return read_bytes;
 	}
@@ -559,8 +566,9 @@ private:
 		}
 
 		debugFileCheck("SimpleFileWrite", self->filename, (void*)data.begin(), offset, data.size());
-		INJECT_FAULT(io_error, "SimpleFile::write");
+
 		INJECT_FAULT(io_timeout, "SimpleFile::write");
+		INJECT_FAULT(io_error, "SimpleFile::write");
 
 		return Void();
 	}
@@ -580,6 +588,8 @@ private:
 
 		if (randLog)
 			fprintf( randLog, "SFT2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
+
+		INJECT_FAULT( io_timeout, "SimpleFile::truncate" );
 		INJECT_FAULT( io_error, "SimpleFile::truncate" );
 
 		return Void();
@@ -611,6 +621,8 @@ private:
 
 		if (randLog)
 			fprintf( randLog, "SFC2 %s %s %s\n", self->dbgId.shortString().c_str(), self->filename.c_str(), opId.shortString().c_str());
+
+		INJECT_FAULT( io_timeout, "SimpleFile::sync" );
 		INJECT_FAULT( io_error, "SimpleFile::sync" );
 
 		return Void();
@@ -1031,6 +1043,7 @@ public:
 		killProcess_internal( p, KillInstantly );
 	}
 	void killProcess_internal( ProcessInfo* machine, KillType kt ) {
+		TEST( true ); // Simulated machine was killed with any kill type
 		TEST( kt == KillInstantly ); // Simulated machine was killed instantly
 		TEST( kt == InjectFaults ); // Simulated machine was killed with faults
 
@@ -1092,12 +1105,17 @@ public:
 		auto ktOrig = kt;
 		if (killIsSafe) ASSERT( kt == ISimulator::RebootAndDelete );  // Only types of "safe" kill supported so far
 
+		TEST(true); // Trying to killing a machine 
+		TEST(kt == KillInstantly); // Trying to kill instantly
+		TEST(kt == InjectFaults);  // Trying to kill by injecting faults
+
 		if(speedUpSimulation && !forceKill) {
 			return false;
 		}
 
 		int processesOnMachine = 0;
 
+		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
 		for (auto& process : machines[zoneId].processes) {
 			if (protectedAddresses.count(process->address))
@@ -1142,6 +1160,8 @@ public:
 				TraceEvent("ClearMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
 			}
 		}
+
+		TEST(originalKt != kt);  // Kill type was changed from requested to reboot.
 
 		// Check if any processes on machine are rebooting
 		if( processesOnMachine != processesPerMachine && kt >= RebootAndDelete ) {
