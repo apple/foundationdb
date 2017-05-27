@@ -118,6 +118,9 @@ struct MachineAttritionWorkload : TestWorkload {
 
 		ASSERT( g_network->isSimulated() );
 
+		TEST(g_simulator.killableMachines > 0);    // Some machines can be killed
+		TEST(g_simulator.killableDatacenters > 0); // Some processes can be killed
+
 		if( self->killDc ) {
 			Void _ = wait( delay( delayBeforeKill ) );
 
@@ -143,6 +146,8 @@ struct MachineAttritionWorkload : TestWorkload {
 				TraceEvent("WorkerKillBegin").detail("killedMachines", killedMachines)
 					.detail("machinesToKill", self->machinesToKill).detail("machinesToLeave", self->machinesToLeave)
 					.detail("machines", self->machines.size());
+				TEST(true);  // Killing a machine
+
 				Void _ = wait( delay( delayBeforeKill ) );
 				TraceEvent("WorkerKillAfterDelay");
 

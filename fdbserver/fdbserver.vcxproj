@@ -136,6 +136,7 @@
     <ActorCompiler Include="workloads\Unreadable.actor.cpp" />
     <ActorCompiler Include="workloads\VersionStamp.actor.cpp" />
     <ActorCompiler Include="workloads\Serializability.actor.cpp" />
+    <ActorCompiler Include="workloads\DiskDurability.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ApplyMetadataMutation.h" />

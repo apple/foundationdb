@@ -454,6 +454,7 @@ SQLITE_API int sqlite3_exec(
 #define SQLITE_IOERR_SHMOPEN           (SQLITE_IOERR | (18<<8))
 #define SQLITE_IOERR_SHMSIZE           (SQLITE_IOERR | (19<<8))
 #define SQLITE_IOERR_SHMLOCK           (SQLITE_IOERR | (20<<8))
+#define SQLITE_IOERR_TIMEOUT           (SQLITE_IOERR | (21<<8))
 #define SQLITE_LOCKED_SHAREDCACHE      (SQLITE_LOCKED |  (1<<8))
 #define SQLITE_BUSY_RECOVERY           (SQLITE_BUSY   |  (1<<8))
 #define SQLITE_CANTOPEN_NOTEMPDIR      (SQLITE_CANTOPEN | (1<<8))
