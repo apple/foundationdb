@@ -447,12 +447,25 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
 	uint8_t* p = unprocessed_begin;
+
+	bool checksumEnabled = true;
+	if (!g_network->isSimulated() && transport->localAddress.isTLS() && peerAddress.isTLS()) {
+		checksumEnabled = false;
+	}
+
 	loop {
-		if (e-p < sizeof(uint32_t) * 2) break;
+		uint32_t packetLen, packetChecksum;
 
 		//Retrieve packet length and checksum
-		uint32_t packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
-		uint32_t packetChecksum = *(uint32_t*)p; p += sizeof(uint32_t);
+		if (checksumEnabled) {
+			if (e-p < sizeof(uint32_t) * 2) break;
+			packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
+			packetChecksum = *(uint32_t*)p; p += sizeof(uint32_t);
+		} else {
+			if (e-p < sizeof(uint32_t)) break;
+			packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
+		}
+
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 			throw platform_error();
@@ -470,37 +483,39 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 		if (e-p<packetLen) break;
 		ASSERT( packetLen >= sizeof(UID) );
 
-		bool isBuggifyEnabled = false;
-		if(g_network->isSimulated() && g_simulator.enableConnectionFailures && BUGGIFY_WITH_PROB(0.001)) {
-			isBuggifyEnabled = true;
-			TraceEvent(SevInfo, "BitsFlip");
-			int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
+		if (checksumEnabled) {
+			bool isBuggifyEnabled = false;
+			if(g_network->isSimulated() && g_simulator.enableConnectionFailures && BUGGIFY_WITH_PROB(0.001)) {
+				isBuggifyEnabled = true;
+				TraceEvent(SevInfo, "BitsFlip");
+				int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
 
-			uint32_t firstFlipByteLocation = g_random->randomUInt32() % packetLen;
-			int firstFlipBitLocation = g_random->randomInt(0, 8);
-			*(p + firstFlipByteLocation) ^= 1 << firstFlipBitLocation;
-			flipBits--;
+				uint32_t firstFlipByteLocation = g_random->randomUInt32() % packetLen;
+				int firstFlipBitLocation = g_random->randomInt(0, 8);
+				*(p + firstFlipByteLocation) ^= 1 << firstFlipBitLocation;
+				flipBits--;
 
-			for (int i = 0; i < flipBits; i++) {
-				uint32_t byteLocation = g_random->randomUInt32() % packetLen;
-				int bitLocation = g_random->randomInt(0, 8);
-				if (byteLocation != firstFlipByteLocation || bitLocation != firstFlipBitLocation) {
-					*(p + byteLocation) ^= 1 << bitLocation;
+				for (int i = 0; i < flipBits; i++) {
+					uint32_t byteLocation = g_random->randomUInt32() % packetLen;
+					int bitLocation = g_random->randomInt(0, 8);
+					if (byteLocation != firstFlipByteLocation || bitLocation != firstFlipBitLocation) {
+						*(p + byteLocation) ^= 1 << bitLocation;
+					}
 				}
 			}
-		}
 
-		uint32_t calculatedChecksum = crc32c_append(0, p, packetLen);
-		if (calculatedChecksum != packetChecksum) {
-			if (isBuggifyEnabled) {
-				TraceEvent(SevInfo, "ChecksumMismatchExp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+			uint32_t calculatedChecksum = crc32c_append(0, p, packetLen);
+			if (calculatedChecksum != packetChecksum) {
+				if (isBuggifyEnabled) {
+					TraceEvent(SevInfo, "ChecksumMismatchExp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+				} else {
+					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+				}
+				throw checksum_failed();
 			} else {
-				TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
-			}
-			throw checksum_failed();
-		} else {
-			if (isBuggifyEnabled) {
-				TraceEvent(SevError, "ChecksumMatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+				if (isBuggifyEnabled) {
+					TraceEvent(SevError, "ChecksumMatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+				}
 			}
 		}
 
@@ -761,6 +776,11 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		return (PacketID)NULL;
 	} else {
+		bool checksumEnabled = true;
+		if (!g_network->isSimulated() && self->localAddress.isTLS() && destination.address.isTLS()) {
+			checksumEnabled = false;
+		}
+
 		++self->countPacketsGenerated;
 
 		Peer* peer = self->getPeer(destination.address);
@@ -785,34 +805,41 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		// Reserve some space for packet length and checksum, write them after serializing data
 		SplitBuffer packetInfoBuffer;
 		uint32_t len, checksum = 0;
-		int packetInfoSize = sizeof(len) + sizeof(checksum);
+		int packetInfoSize = sizeof(len);
+		if (checksumEnabled) {
+			packetInfoSize += sizeof(checksum);
+		}
+
 		wr.writeAhead(packetInfoSize , &packetInfoBuffer);
 		wr << destination.token;
 		what.serializePacketWriter(wr);
 		pb = wr.finish();
-
 		len = wr.size() - packetInfoSize;
 
-		// Find the correct place to start calculating checksum
-		uint32_t checksumUnprocessedLength = len;
-		prevBytesWritten += packetInfoSize;
-		if (prevBytesWritten >= PacketBuffer::DATA_SIZE) {
-			prevBytesWritten -= PacketBuffer::DATA_SIZE;
-			checksumPb = checksumPb->nextPacketBuffer();
-		}
+		if (checksumEnabled) {
+			// Find the correct place to start calculating checksum
+			uint32_t checksumUnprocessedLength = len;
+			prevBytesWritten += packetInfoSize;
+			if (prevBytesWritten >= PacketBuffer::DATA_SIZE) {
+				prevBytesWritten -= PacketBuffer::DATA_SIZE;
+				checksumPb = checksumPb->nextPacketBuffer();
+			}
 
-		// Checksum calculation
-		while (checksumUnprocessedLength > 0) {
-			uint32_t processLength = std::min(checksumUnprocessedLength, (uint32_t)(PacketBuffer::DATA_SIZE - prevBytesWritten));
-			checksum = crc32c_append(checksum, checksumPb->data + prevBytesWritten, processLength);
-			checksumUnprocessedLength -= processLength;
-			checksumPb = checksumPb->nextPacketBuffer();
-			prevBytesWritten = 0;
+			// Checksum calculation
+			while (checksumUnprocessedLength > 0) {
+				uint32_t processLength = std::min(checksumUnprocessedLength, (uint32_t)(PacketBuffer::DATA_SIZE - prevBytesWritten));
+				checksum = crc32c_append(checksum, checksumPb->data + prevBytesWritten, processLength);
+				checksumUnprocessedLength -= processLength;
+				checksumPb = checksumPb->nextPacketBuffer();
+				prevBytesWritten = 0;
+			}
 		}
 
 		// Write packet length and checksum into packet buffer
 		packetInfoBuffer.write(&len, sizeof(len));
-		packetInfoBuffer.write(&checksum, sizeof(checksum), sizeof(len));
+		if (checksumEnabled) {
+			packetInfoBuffer.write(&checksum, sizeof(checksum), sizeof(len));
+		}
 
 		if (len > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("ToPeer", destination.address).detail("Length", (int)len);
