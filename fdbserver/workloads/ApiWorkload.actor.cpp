@@ -47,7 +47,7 @@ Future<Void> ApiWorkload::clearKeyspace() {
 
 ACTOR Future<Void> setup(Database cx, ApiWorkload *self) {
 	state Future<Void> disabler = disableConnectionFailuresAfter(300, "ApiWorkload");
-	self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx));
+	self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx, cx, false));
 
 	//Clear keyspace before running
 	Void _ = wait(timeoutError(self->clearKeyspace(), 600));
@@ -270,25 +270,25 @@ ACTOR Future<Void> chooseTransactionFactory(Database cx, std::vector<Transaction
 
 	if(transactionType == NATIVE) {
 		printf("client %d: Running NativeAPI Transactions\n", self->clientPrefixInt);
-		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx));
+		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx, self->extraDB, self->useExtraDB));
 	}
 	else if(transactionType == READ_YOUR_WRITES)
 	{
 		printf("client %d: Running ReadYourWrites Transactions\n", self->clientPrefixInt);
-		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<FlowTransactionWrapper<ReadYourWritesTransaction>, const Database>(cx));
+		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<FlowTransactionWrapper<ReadYourWritesTransaction>, const Database>(cx, self->extraDB, self->useExtraDB));
 	}
 	else if(transactionType == THREAD_SAFE)
 	{
 		printf("client %d: Running ThreadSafe Transactions\n", self->clientPrefixInt);
 		Reference<IDatabase> dbHandle = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
-		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle));
+		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle, dbHandle, false));
 	}
 	else if(transactionType == MULTI_VERSION)
 	{
 		printf("client %d: Running Multi-Version Transactions\n", self->clientPrefixInt);
 		Reference<IDatabase> threadSafeHandle = wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
 		Reference<IDatabase> dbHandle = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
-		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle));
+		self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<ThreadTransactionWrapper, Reference<IDatabase>>(dbHandle, dbHandle, false));
 	}
 
 	return Void();

@@ -549,10 +549,14 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
-	if (self->lastEpochEnd == 0)
+	if (self->lastEpochEnd == 0) {
 		self->recoveryTransactionVersion = 1;
-	else
+	} else {
 		self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
+		if(BUGGIFY) {
+			self->recoveryTransactionVersion += g_random->randomInt64(0, 1e6*SERVER_KNOBS->VERSIONS_PER_SECOND);
+		}
+	}
 
 	TraceEvent("MasterRecovering", self->dbgid).detail("lastEpochEnd", self->lastEpochEnd).detail("recoveryTransactionVersion", self->recoveryTransactionVersion);
 
