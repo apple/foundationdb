@@ -85,9 +85,16 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 //A wrapper class for flow based transactions (NativeAPI, ReadYourWrites)
 template<class T>
 struct FlowTransactionWrapper : public TransactionWrapper {
-
+	Database cx;
+	Database extraDB;
+	bool useExtraDB;
 	T transaction;
-	FlowTransactionWrapper(Database cx) : transaction(cx) { }
+	T lastTransaction;
+	FlowTransactionWrapper(Database cx, Database extraDB, bool useExtraDB) : cx(cx), extraDB(extraDB), useExtraDB(useExtraDB), transaction(cx) {
+		if(useExtraDB && g_random->random01() < 0.5) {
+			transaction = T(extraDB);
+		}
+	}
 	virtual ~FlowTransactionWrapper() { }
 
 	//Sets a key-value pair in the database
@@ -132,7 +139,12 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 
 	//Processes transaction error conditions
 	Future<Void> onError(Error const& e) {
-		return transaction.onError(e);
+		Future<Void> returnVal = transaction.onError(e);
+		if( useExtraDB ) {
+			lastTransaction = std::move(transaction);
+			transaction = T( g_random->random01() < 0.5 ? extraDB : cx );
+		}
+		return returnVal;
 	}
 
 	//Gets the read version of a transaction
@@ -160,7 +172,7 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 
 	Reference<ITransaction> transaction;
 
-	ThreadTransactionWrapper(Reference<IDatabase> db) : transaction(db->createTransaction()) { }
+	ThreadTransactionWrapper(Reference<IDatabase> db, Reference<IDatabase> extraDB, bool useExtraDB) : transaction(db->createTransaction()) { }
 	virtual ~ThreadTransactionWrapper() { }
 
 	//Sets a key-value pair in the database
@@ -237,17 +249,21 @@ struct TransactionFactory : public TransactionFactoryInterface {
 
 	//The database used to create transaction (of type Database, Reference<ThreadSafeDatabase>, etc.)
 	DB dbHandle;
+	DB extraDbHandle;
+	bool useExtraDB;
 
-	TransactionFactory(DB dbHandle) : dbHandle(dbHandle) { }
+	TransactionFactory(DB dbHandle, DB extraDbHandle, bool useExtraDB) : dbHandle(dbHandle), extraDbHandle(extraDbHandle), useExtraDB(useExtraDB) { }
 	virtual ~TransactionFactory() { }
 
 	//Creates a new transaction
 	Reference<TransactionWrapper> createTransaction() {
-		return Reference<TransactionWrapper>(new T(dbHandle));
+		return Reference<TransactionWrapper>(new T(dbHandle, extraDbHandle, useExtraDB));
 	}
 };
 
 struct ApiWorkload : TestWorkload {
+	bool useExtraDB;
+	Database extraDB;
 
 	ApiWorkload(WorkloadContext const& wcx, int maxClients = -1) : TestWorkload(wcx), success(true), transactionFactory(NULL), maxClients(maxClients) {
 		clientPrefixInt = getOption(options, LiteralStringRef("clientId"), clientId);
@@ -262,6 +278,13 @@ struct ApiWorkload : TestWorkload {
 		maxLongKeyLength = getOption(options, LiteralStringRef("maxLongKeyLength"), 128);
 		minValueLength = getOption(options, LiteralStringRef("minValueLength"), 1);
 		maxValueLength = getOption(options, LiteralStringRef("maxValueLength"), 10000);
+
+		useExtraDB = g_simulator.extraDB != NULL;
+		if(useExtraDB) {
+			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
+			extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+		}
 	}
 
 	Future<Void> setup(Database const& cx);

@@ -54,15 +54,13 @@ struct ChangeConfigWorkload : TestWorkload {
 
 	virtual void getMetrics( vector<PerfMetric>& m ) {}
 
-	ACTOR Future<Void> ChangeConfigClient( Database cx, ChangeConfigWorkload *self) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "ChangeConfig");
-		Void _ = wait( delay( self->minDelayBeforeChange + g_random->random01() * ( self->maxDelayBeforeChange - self->minDelayBeforeChange ) ) );
-
+	ACTOR Future<Void> extraDatabaseConfigure(ChangeConfigWorkload *self) {
 		if (g_network->isSimulated() && g_simulator.extraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
 			state Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
 
+			Void _ = wait(delay(5*g_random->random01()));
 			if (self->configMode.size())
 				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode));
 			if (self->networkAddresses.size()) {
@@ -71,6 +69,19 @@ struct ChangeConfigWorkload : TestWorkload {
 				else
 					CoordinatorsResult::Type _ = wait(changeQuorum(extraDB, specifiedQuorumChange(NetworkAddress::parseList(self->networkAddresses))));
 			}
+			Void _ = wait(delay(5*g_random->random01()));
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> ChangeConfigClient( Database cx, ChangeConfigWorkload *self) {
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "ChangeConfig");
+		Void _ = wait( delay( self->minDelayBeforeChange + g_random->random01() * ( self->maxDelayBeforeChange - self->minDelayBeforeChange ) ) );
+
+		state bool extraConfigureBefore = g_random->random01() < 0.5;
+
+		if(extraConfigureBefore) {
+			Void _ = wait( self->extraDatabaseConfigure(self) );
 		}
 
 		if( self->configMode.size() )
@@ -81,6 +92,11 @@ struct ChangeConfigWorkload : TestWorkload {
 			else
 				CoordinatorsResult::Type _ = wait( changeQuorum( cx, specifiedQuorumChange(NetworkAddress::parseList( self->networkAddresses )) ) );
 		}
+
+		if(!extraConfigureBefore) {
+			Void _ = wait( self->extraDatabaseConfigure(self) );
+		}
+
 		return Void();
 	}
 };

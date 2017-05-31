@@ -808,6 +808,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 				self->changeCount.insert( allKeys, 0 );
 				doingCommit = false;
 				//TraceEvent("WDRError").error(e, true);
+				if(e.code() == error_code_database_locked) {
+					self->memoryDatabase = self->lastCommittedDatabase;
+					self->addedConflicts.insert(allKeys, false);
+					return Void();
+				}
 				if( e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || e.code() == error_code_transaction_too_large || e.code() == error_code_key_too_large || e.code() == error_code_value_too_large || cancelled )
 					throw not_committed();
 				try {

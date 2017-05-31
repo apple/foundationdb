@@ -1375,6 +1375,7 @@ public:
 	}
 
 	ACTOR static Future<Void> atomicSwitchover(DatabaseBackupAgent* backupAgent, Database dest, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, Key addPrefix, Key removePrefix) {
+		state DatabaseBackupAgent drAgent(dest);
 		state UID destlogUid = wait(backupAgent->getLogUid(dest, tagName));
 		state int status = wait(backupAgent->getStateValue(dest, destlogUid));
 
@@ -1385,7 +1386,7 @@ public:
 
 		state UID logUid = g_random->randomUniqueID();
 		state Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
-		state UID logUidCurrent = wait(backupAgent->getLogUid(backupAgent->taskBucket->src, tagName));
+		state UID logUidCurrent = wait(drAgent.getLogUid(backupAgent->taskBucket->src, tagName));
 
 		if (logUidCurrent.isValid()) {
 			logUid = logUidCurrent;
@@ -1446,7 +1447,7 @@ public:
 		TraceEvent("DBA_switchover_stopped");
 
 		try {
-			Void _ = wait( backupAgent->submitBackup(backupAgent->taskBucket->src, tagName, backupRanges, false, addPrefix, removePrefix, true, true) );
+			Void _ = wait( drAgent.submitBackup(backupAgent->taskBucket->src, tagName, backupRanges, false, addPrefix, removePrefix, true, true) );
 		} catch( Error &e ) {
 			if( e.code() != error_code_backup_duplicate )
 				throw;
@@ -1454,7 +1455,7 @@ public:
 
 		TraceEvent("DBA_switchover_submitted");
 
-		int _ = wait( backupAgent->waitSubmitted(backupAgent->taskBucket->src, tagName) );
+		int _ = wait( drAgent.waitSubmitted(backupAgent->taskBucket->src, tagName) );
 
 		TraceEvent("DBA_switchover_started");
 
