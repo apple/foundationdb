@@ -64,13 +64,14 @@ public:
 
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
+		bool io_timeout_injected;
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddress address,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
 			: name(name), locality(locality), startingClass(startingClass), address(address), dataFolder(dataFolder),
 				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0)
+				fault_injection_r(0), machine(0), io_timeout_injected(false)
 		{}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }

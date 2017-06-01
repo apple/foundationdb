@@ -649,6 +649,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  -k KEY, --key KEY  Target key for search role.\n");
 		printf("  -m SIZE, --memory SIZE\n"
 			   "                 Memory limit. The default value is 8GiB. When specified\n"
+		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
 			   "                 without a unit, MiB is assumed.\n");
 		printf("  -M SIZE, --storage_memory SIZE\n"
 			   "                 Maximum amount of memory used for storage. The default\n"
@@ -816,7 +817,7 @@ int main(int argc, char* argv[]) {
 
 		//Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
-		
+
 		std::string commandLine;
 		for (int a = 0; a<argc; a++) {
 			if (a) commandLine += ' ';
@@ -1438,7 +1439,7 @@ int main(int argc, char* argv[]) {
 		// Initialize the thread pool
 		CoroThreadPool::init();
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
-		TraceEvent::setNetworkThread(); 
+		TraceEvent::setNetworkThread();
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();

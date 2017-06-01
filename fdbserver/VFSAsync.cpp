@@ -113,8 +113,6 @@ static int asyncRead(sqlite3_file *pFile, void *zBuf, int iAmt, sqlite_int64 iOf
 		}
 		return SQLITE_OK;
 	} catch (Error& e) {
-		if(e.code() == error_code_io_timeout)
-			return SQLITE_IOERR_TIMEOUT;
 		return SQLITE_IOERR_READ;
 	}
 }
@@ -148,8 +146,6 @@ static int asyncReadZeroCopy(sqlite3_file *pFile, void **data, int iAmt, sqlite_
 		++p->debug_zcreads;
 		return SQLITE_OK;
 	} catch (Error& e) {
-		if(e.code() == error_code_io_timeout)
-			return SQLITE_IOERR_TIMEOUT;
 		return SQLITE_IOERR_READ;
 	}
 }
@@ -183,8 +179,6 @@ static int asyncWrite(sqlite3_file *pFile, const void *zBuf, int iAmt, sqlite_in
 		waitFor( p->file->write( zBuf, iAmt, iOfst ) );
 		return SQLITE_OK;
 	} catch(Error& e) {
-		if(e.code() == error_code_io_timeout)
-			return SQLITE_IOERR_TIMEOUT;
 		return SQLITE_IOERR_WRITE;
 	}
 }
@@ -195,8 +189,6 @@ static int asyncTruncate(sqlite3_file *pFile, sqlite_int64 size){
 		waitFor( p->file->truncate( size ) );
 		return SQLITE_OK;
 	} catch(Error& e) {
-		if(e.code() == error_code_io_timeout)
-			return SQLITE_IOERR_TIMEOUT;
 		return SQLITE_IOERR_TRUNCATE;
 	}
 }
@@ -213,8 +205,6 @@ static int asyncSync(sqlite3_file *pFile, int flags){
 			.detail("IAsyncFile", (int64_t)p->file.getPtr())
 			.error(e);
 		
-		if(e.code() == error_code_io_timeout)
-			return SQLITE_IOERR_TIMEOUT;
 		return SQLITE_IOERR_FSYNC;
 	}
 }

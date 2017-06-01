@@ -253,18 +253,11 @@ struct SQLiteDB : NonCopyable {
 
 	void checkError( const char* context, int rc ) {
 		//if (g_random->random01() < .001) rc = SQLITE_INTERRUPT;
-
 		if (rc) {
-			Error err = (rc == SQLITE_IOERR_TIMEOUT) ? io_timeout() : io_error();
-
 			// Our exceptions don't propagate through sqlite, so we don't know for sure if the error that caused this was
 			// an injected fault.  Assume that if fault injection is happening, this is an injected fault.
-			//
-			// Also, timeouts returned from our VFS plugin to SQLite are no always propagated out of the sqlite API as timeouts,
-			// so if a timeout has been injected in this process then assume this error is an injected fault.
-			if (g_network->isSimulated() &&
-				( (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting) || (bool)g_network->global(INetwork::enASIOTimedOutInjected))
-			)
+			Error err = io_error();
+			if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))
 				err = err.asInjectedFault();
 
 			if (db)
@@ -2016,7 +2009,7 @@ ACTOR Future<Void> GenerateIOLogChecksumFile(std::string filename) {
 	unsigned int c = 0;
 	while(fread(buf, 1, 4096, f) > 0)
 		fprintf(fout, "%u %u\n", c++, hashlittle(buf, 4096, 0xab12fd93));
-    fclose(f);
+	fclose(f);
 	fclose(fout);
 
 	return Void();
