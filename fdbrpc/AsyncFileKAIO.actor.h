@@ -562,7 +562,7 @@ private:
 		// TODO:  Don't do this hacky investigation-specific thing
 		StringRef fname(filename);
 		if(fname.endsWith(LiteralStringRef(".sqlite")) || fname.endsWith(LiteralStringRef(".sqlite-wal"))) {
-			std::string logFileName = filename;
+			std::string logFileName = basename(filename);
 			while(logFileName.find("/") != std::string::npos)
 				logFileName = logFileName.substr(logFileName.find("/") + 1);
 			if(!logFileName.empty()) {
@@ -576,12 +576,13 @@ private:
 						logFile = fopen(logFileName.c_str(), "w");
 					if(logFile != nullptr)
 						TraceEvent("KAIOLogOpened").detail("File", filename).detail("LogFile", logFileName);
-					else
+					else {
 						TraceEvent(SevWarn, "KAIOLogOpenFailure")
 							.detail("File", filename)
 							.detail("LogFile", logFileName)
 							.detail("ErrorCode", errno)
 							.detail("ErrorDesc", strerror(errno));
+					}
 				} catch(Error &e) {
 					TraceEvent(SevError, "KAIOLogOpenFailure").error(e);
 				}

@@ -56,7 +56,7 @@ bool simulator_should_inject_fault( const char* context, const char* file, int l
 			TraceEvent(SevWarn, "FaultInjected").detail("Context", context).detail("File", file).detail("Line", line).detail("ErrorCode", error_code);
 			if(error_code == error_code_io_timeout) {
 				g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType)true);
-				g_network->setGlobal(INetwork::enASIOTimedOutInjected, (flowGlobalType)true);
+				g_pSimulator->getCurrentProcess()->io_timeout_injected = true;
 			}
 			return true;
 		}

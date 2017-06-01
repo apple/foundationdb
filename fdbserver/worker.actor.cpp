@@ -76,10 +76,11 @@ struct ErrorInfo {
 };
 
 Error checkIOTimeout(Error const &e) {
-	// Convert io_errors to io_timeout if global timeout bool was set
-	if(e.code() == error_code_io_error && (bool)g_network->global(INetwork::enASIOTimedOut)) {
+	// Convert all_errors to io_timeout if global timeout bool was set
+	if((bool)g_network->global(INetwork::enASIOTimedOut)) {
 		Error timeout = io_timeout();
-		if(e.isInjectedFault() || (bool)g_network->global(INetwork::enASIOTimedOutInjected))
+		// If this error was injected OR if the timeout was injected then make the resulting io_timeout injected
+		if(e.isInjectedFault() || (g_network->isSimulated() && g_pSimulator->getCurrentProcess()->io_timeout_injected) )
 			timeout = timeout.asInjectedFault();
 		return timeout;
 	}
@@ -123,7 +124,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 	loop choose {
 		when( ErrorInfo _err = waitNext(errors) ) {
 			ErrorInfo err = _err;
-			err.error = checkIOTimeout(err.error);  // Convert io_errors to io_timeout if ASIO flag is set
+			err.error = checkIOTimeout(err.error);  // Possibly convert error to io_timeout
 
 			bool ok =
 				err.error.code() == error_code_success ||
