@@ -554,7 +554,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	} else {
 		self->recoveryTransactionVersion = self->lastEpochEnd + SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT;
 		if(BUGGIFY) {
-			self->recoveryTransactionVersion += g_random->randomInt64(0, 1e6*SERVER_KNOBS->VERSIONS_PER_SECOND);
+			self->recoveryTransactionVersion += g_random->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 		}
 	}
 
