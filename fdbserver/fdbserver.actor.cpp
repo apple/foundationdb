@@ -649,8 +649,8 @@ static void printUsage( const char *name, bool devhelp ) {
 		printf("  -k KEY, --key KEY  Target key for search role.\n");
 		printf("  -m SIZE, --memory SIZE\n"
 			   "                 Memory limit. The default value is 8GiB. When specified\n"
-		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
 			   "                 without a unit, MiB is assumed.\n");
+		printf("  --kvfile FILE  Input file (SQLite database file) for use by the 'kvfilegeneratesums' and 'kvfileintegritycheck' roles.\n");
 		printf("  -M SIZE, --storage_memory SIZE\n"
 			   "                 Maximum amount of memory used for storage. The default\n"
 			   "                 value is 1GiB. When specified without a unit, MB is\n"
