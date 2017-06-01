@@ -22,9 +22,6 @@ randomTestDuration=60
 timeout=2100
 
 testName=AtomicSwitchover
-switch1After=10.0
-switch2After=20.0
-stopAfter=130.0
 clearAfterTest=false
 simBackupAgents=BackupToDB
 extraDB=2

@@ -26,16 +26,16 @@
 
 //A workload which test the correctness of backup and restore process
 struct AtomicSwitchoverWorkload : TestWorkload {
-	double switch1After, switch2After, stopAfter;
+	double switch1delay, switch2delay, stopDelay;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	Database extraDB;
 
 	AtomicSwitchoverWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx) {
 
-		switch1After = getOption(options, LiteralStringRef("switch1After"), 20.0);
-		switch2After = getOption(options, LiteralStringRef("switch2After"), 30.0);
-		stopAfter = getOption(options, LiteralStringRef("stopAfter"), 40.0);
+		switch1delay = getOption(options, LiteralStringRef("switch1delay"), 50.0);
+		switch2delay = getOption(options, LiteralStringRef("switch2delay"), 50.0);
+		stopDelay = getOption(options, LiteralStringRef("stopDelay"), 50.0);
 
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 
@@ -153,27 +153,24 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, AtomicSwitchoverWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
-		state Future<Void> switch1After = delay(self->switch1After);
-		state Future<Void> switch2After = delay(self->switch2After);
-		state Future<Void> stopAfter = delay(self->stopAfter);
 		state Future<Void> disabler = disableConnectionFailuresAfter(300, "atomicSwitchover");
 
 		TraceEvent("AS_Wait1");
 		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );
 		TraceEvent("AS_Ready1");
-		Void _ = wait( switch1After );
+		Void _ = wait( delay(g_random->random01()*self->switch1delay) );
 		TraceEvent("AS_Switch1");
 		Void _ = wait( backupAgent.atomicSwitchover(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
 		TraceEvent("AS_Wait2");
 		int _ = wait( restoreAgent.waitBackup(cx, BackupAgentBase::getDefaultTag(), false) );
 		TraceEvent("AS_Ready2");
-		Void _ = wait( switch2After );
+		Void _ = wait( delay(g_random->random01()*self->switch2delay) );
 		TraceEvent("AS_Switch2");
 		Void _ = wait( restoreAgent.atomicSwitchover(cx, BackupAgentBase::getDefaultTag(), self->backupRanges, StringRef(), StringRef()) );
 		TraceEvent("AS_Wait3");
 		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );
 		TraceEvent("AS_Ready3");
-		Void _ = wait( stopAfter );
+		Void _ = wait( delay(g_random->random01()*self->stopDelay) );
 		TraceEvent("AS_Abort");
 		Void _ = wait( backupAgent.abortBackup(self->extraDB, BackupAgentBase::getDefaultTag()) );
 		TraceEvent("AS_Done");
