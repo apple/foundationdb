@@ -745,7 +745,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_random->randomShuffle(coordinatorAddresses);
 	for(int i = 0; i < (coordinatorAddresses.size()/2)+1; i++) {
 		TraceEvent("ProtectMachine").detail("Address", coordinatorAddresses[i]).detail("Coordinators", coordinatorAddresses.size()).backtrace();
-		g_simulator.protectedAddresses.insert(coordinatorAddresses[i]);
+		g_simulator.protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip,coordinatorAddresses[i].port,true,false));
 	}
 	g_random->randomShuffle(coordinatorAddresses);
 

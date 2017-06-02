@@ -705,7 +705,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 
 			if(g_network->isSimulated()) {
 				for(int i = 0; i < (desiredCoordinators.size()/2)+1; i++) {
-					g_simulator.protectedAddresses.insert( desiredCoordinators[i] );
+					g_simulator.protectedAddresses.insert( NetworkAddress(desiredCoordinators[i].ip,desiredCoordinators[i].port,true,false) );
 				}
 			}
 
