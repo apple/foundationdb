@@ -815,6 +815,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 		endRole(interf.id(), "Worker", "WorkerError", ok, e);
 		errorForwarders.clear(false);
+		tlog = Void();
 
 		if (e.code() != error_code_actor_cancelled) { // We get cancelled e.g. when an entire simulation times out, but in that case we won't be restarted and don't need to wait for shutdown
 			stopping.send(Void());
