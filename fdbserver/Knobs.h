@@ -303,6 +303,14 @@ public:
 	double STATUS_MIN_TIME_BETWEEN_REQUESTS;
 	int CONFIGURATION_ROWS_TO_FETCH;
 
+	// IPager
+	int PAGER_RESERVED_PAGES;
+
+	// IndirectShadowPager
+	int FREE_PAGE_VACUUM_THRESHOLD;
+	int VACUUM_QUEUE_SIZE;
+	int VACUUM_BYTES_PER_SECOND;
+
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
 };
 

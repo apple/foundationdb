@@ -361,6 +361,14 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( STATUS_MIN_TIME_BETWEEN_REQUESTS,                      0.0 );
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 
+	// IPager
+	init( PAGER_RESERVED_PAGES,                                    1 );
+
+	// IndirectShadowPager
+	init( FREE_PAGE_VACUUM_THRESHOLD,                              1 );
+	init( VACUUM_QUEUE_SIZE,                                  100000 );
+	init( VACUUM_BYTES_PER_SECOND,                               1e6 );
+
 	if(clientKnobs)
 		clientKnobs->IS_ACCEPTABLE_DELAY = clientKnobs->IS_ACCEPTABLE_DELAY*std::min(MAX_READ_TRANSACTION_LIFE_VERSIONS, MAX_WRITE_TRANSACTION_LIFE_VERSIONS)/(5.0*VERSIONS_PER_SECOND);
 }

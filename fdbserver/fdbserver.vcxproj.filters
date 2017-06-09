@@ -246,6 +246,9 @@
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp" />
+    <ActorCompiler Include="MemoryPager.actor.cpp" />
+    <ActorCompiler Include="IndirectShadowPager.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -330,6 +333,10 @@
     <ClInclude Include="ApplyMetadataMutation.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="LogProtocolMessage.h" />
+    <ClInclude Include="IPager.h" />
+    <ClInclude Include="IVersionedStore.h" />
+    <ClInclude Include="MemoryPager.h" />
+    <ClInclude Include="IndirectShadowPager.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="workloads">
