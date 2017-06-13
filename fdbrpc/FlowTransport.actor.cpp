@@ -449,7 +449,7 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 	uint8_t* p = unprocessed_begin;
 
 	bool checksumEnabled = true;
-	if (!g_network->isSimulated() && transport->localAddress.isTLS() && peerAddress.isTLS()) {
+	if (transport->localAddress.isTLS() || peerAddress.isTLS()) {
 		checksumEnabled = false;
 	}
 
@@ -777,7 +777,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		return (PacketID)NULL;
 	} else {
 		bool checksumEnabled = true;
-		if (!g_network->isSimulated() && self->localAddress.isTLS() && destination.address.isTLS()) {
+		if (self->localAddress.isTLS() || destination.address.isTLS()) {
 			checksumEnabled = false;
 		}
 
