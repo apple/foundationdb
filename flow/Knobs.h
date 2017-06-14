@@ -89,6 +89,7 @@ public:
 	//AsyncFileKAIO
 	int MAX_OUTSTANDING;
 	int MIN_SUBMIT;
+	int KAIO_PAGE_WRITE_CHECKSUM_HISTORY;
 
 	//AsyncFileNonDurable
 	double MAX_PRIOR_MODIFICATION_DELAY;

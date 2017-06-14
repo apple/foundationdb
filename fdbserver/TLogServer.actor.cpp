@@ -1650,8 +1650,6 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	logData->removed = rejoinMasters(self, recruited, req.epoch);
 	self->queueOrder.push_back(recruited.id());
 
-	Void _ = wait( delay(0.0) ); // if multiple recruitment requests were already in the promise stream make sure they are all started before any are removed
-
 	TraceEvent("TLogStart", logData->logId);
 
 	try {
@@ -1686,6 +1684,8 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			throw;
 		}
 
+		Void _ = wait( delay(0.0) ); // if multiple recruitment requests were already in the promise stream make sure they are all started before any are removed
+
 		double inputSum = 0;
 		double durableSum = 0;
 		for(auto it : self->id_data) {
@@ -1709,7 +1709,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		if(self->id_data.size() || (self->oldLogServer.isValid() && !self->oldLogServer.isReady())) {
 			return Void();
 		} else {
-			throw;
+			throw worker_removed();
 		}
 	}
 

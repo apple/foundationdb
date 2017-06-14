@@ -359,7 +359,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			}
 			if (removedCount >= 1) {
 				TraceEvent("ProtectMachine").detail("Address", addr).detail("Coordinators", coordinators.size()).backtrace();
-				g_simulator.protectedAddresses.insert(addr);
+				g_simulator.protectedAddresses.insert(NetworkAddress(addr.ip,addr.port,true,false));
 				safeCoordinators.push_back(addr);
 				safeCount++;
 			}

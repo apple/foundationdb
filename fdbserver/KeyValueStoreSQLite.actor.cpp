@@ -65,9 +65,7 @@ struct SpringCleaningStats {
 };
 
 struct PageChecksumCodec {
-	PageChecksumCodec(std::string const &filename, int verifyChecksumHistorySize) : pageSize(0), reserveSize(0), filename(filename), silent(false) {
-		checksumHistory.resize(verifyChecksumHistorySize);
-	}
+	PageChecksumCodec(std::string const &filename) : pageSize(0), reserveSize(0), filename(filename), silent(false) {}
 
 	int pageSize;
 	int reserveSize;
@@ -80,7 +78,6 @@ struct PageChecksumCodec {
 		uint32_t part2;
 		std::string toString() { return format("0x%08x%08x", part1, part2); }
 	};
-	std::vector<std::pair<Pgno, SumType>> checksumHistory;
 
 	// Calculates and then either stores or verifies a checksum.
 	// The checksum is read/stored at the end of the page buffer.
@@ -116,33 +113,6 @@ struct PageChecksumCodec {
 					.error(checksum_failed());
 
 			return false;
-		}
-
-		// Update or check sum in history if the history buffer isn't empty and if we're not in a simulated injected fault situation
-		if(!checksumHistory.empty() &&
-			(!g_network->isSimulated() || (!g_simulator.getCurrentProcess()->fault_injection_p1 && !g_simulator.getCurrentProcess()->rebooting))
-		) {
-			auto &bucket = checksumHistory[pageNumber % checksumHistory.size()];
-			if(write) {
-				// For writes, put this pagenumber and sum into the bucket
-				bucket.first = pageNumber;
-				bucket.second = *sumOut;
-			}
-			else {
-				// For reads, see if the bucket has the right page number, if so then verify sum
-				if(bucket.first == pageNumber && bucket.second != *pSumInPage) {
-					TraceEvent (SevError, "SQLitePageChecksumDetectedLostWrite")
-						.detail("CodecPageSize", pageSize)
-						.detail("CodecReserveSize", reserveSize)
-						.detail("Filename", filename)
-						.detail("PageNumber", pageNumber)
-						.detail("PageSize", pageLen)
-						.detail("ChecksumInPage", pSumInPage->toString())
-						.detail("ChecksumHistory", bucket.second.toString())
-						.error(checksum_failed());
-					return false;
-				}
-			}
 		}
 
 		return true;
@@ -246,7 +216,7 @@ struct SQLiteDB : NonCopyable {
 				ASSERT(false);
 			}
 			// Always start with a new pager codec with default options.
-			pPagerCodec = new PageChecksumCodec(filename, SERVER_KNOBS->SQLITE_PAGER_CHECKSUM_HISTORY);
+			pPagerCodec = new PageChecksumCodec(filename);
 			sqlite3BtreePagerSetCodec(btree, PageChecksumCodec::codec, PageChecksumCodec::sizeChange, PageChecksumCodec::free, pPagerCodec);
 		}
 	}
