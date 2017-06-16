@@ -425,7 +425,7 @@ private:
 			std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(offset, length, true, writeEnded);
 
 			if(BUGGIFY_WITH_PROB(0.001))
-				priorModifications.push_back(delay(g_random->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY));
+				priorModifications.push_back(delay(g_random->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) || self->killed.getFuture());
 			else
 				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, length) || self->killed.getFuture());
 
@@ -547,7 +547,7 @@ private:
 			std::vector<Future<Void>> priorModifications = self->getModificationsAndInsert(size, -1, true, truncateEnded);
 
 			if(BUGGIFY_WITH_PROB(0.001))
-				priorModifications.push_back(delay(g_random->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY));
+				priorModifications.push_back(delay(g_random->random01() * FLOW_KNOBS->MAX_PRIOR_MODIFICATION_DELAY) || self->killed.getFuture());
 			else
 				priorModifications.push_back(waitUntilDiskReady(self->diskParameters, 0) || self->killed.getFuture());
 

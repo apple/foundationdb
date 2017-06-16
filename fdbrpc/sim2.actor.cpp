@@ -49,14 +49,13 @@ bool simulator_should_inject_fault( const char* context, const char* file, int l
 			h2 = p->fault_injection_r;
 
 		if (h1 < p->fault_injection_p1*std::numeric_limits<uint32_t>::max()) {
-			TEST(true);
-			TEST(error_code == error_code_io_timeout);
-			TEST(error_code == error_code_io_error);
-			TEST(error_code == error_code_platform_error);
+			TEST(true);                                     // A fault was injected
+			TEST(error_code == error_code_io_timeout);      // An io timeout was injected
+			TEST(error_code == error_code_io_error);        // An io error was injected
+			TEST(error_code == error_code_platform_error);  // A platform error was injected.
 			TraceEvent(SevWarn, "FaultInjected").detail("Context", context).detail("File", file).detail("Line", line).detail("ErrorCode", error_code);
 			if(error_code == error_code_io_timeout) {
 				g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType)true);
-				g_pSimulator->getCurrentProcess()->io_timeout_injected = true;
 			}
 			return true;
 		}
@@ -949,6 +948,7 @@ public:
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
+		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
 
 		TraceEvent("NewMachine").detail("Name", name).detail("Address", m->address).detailext("zoneId", m->locality.zoneId());
 
@@ -1172,6 +1172,8 @@ public:
 
 		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KilledMachines", killedMachines).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig).detail("killIsSafe", killIsSafe);
 		if (kt < RebootAndDelete ) {
+			if(kt == InjectFaults && machines[zoneId].machineProcess != nullptr)
+				killProcess_internal( machines[zoneId].machineProcess, kt );
 			for (auto& process : machines[zoneId].processes) {
 				TraceEvent("KillMachineProcess", zoneId).detail("KillType", kt).detail("Process", process->toString()).detail("startingClass", process->startingClass.toString());
 				if (process->startingClass != ProcessClass::TesterClass)
