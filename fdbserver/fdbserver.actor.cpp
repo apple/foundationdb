@@ -107,6 +107,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_NOBOX,                "-q",                          SO_NONE },
 	{ OPT_NOBOX,                "--no_dialog",                 SO_NONE },
 #endif
+	{ OPT_KVFILE,               "--kvfile",                    SO_REQ_SEP },
 	{ OPT_TESTFILE,             "-f",                          SO_REQ_SEP },
 	{ OPT_TESTFILE,             "--testfile",                  SO_REQ_SEP },
 	{ OPT_RESTARTING,           "-R",                          SO_NONE },

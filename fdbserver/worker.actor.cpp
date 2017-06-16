@@ -77,10 +77,16 @@ struct ErrorInfo {
 
 Error checkIOTimeout(Error const &e) {
 	// Convert all_errors to io_timeout if global timeout bool was set
-	if((bool)g_network->global(INetwork::enASIOTimedOut)) {
+	bool timeoutOccurred = (bool)g_network->global(INetwork::enASIOTimedOut);
+	// In simulation, have to check global timed out flag for both this process and the machine process on which IO is done
+	if(g_network->isSimulated() && !timeoutOccurred)
+		timeoutOccurred = g_pSimulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
+
+	if(timeoutOccurred) {
+		TEST(true); // Timeout occurred
 		Error timeout = io_timeout();
-		// If this error was injected OR if the timeout was injected then make the resulting io_timeout injected
-		if(e.isInjectedFault() || (g_network->isSimulated() && g_pSimulator->getCurrentProcess()->io_timeout_injected) )
+		// Preserve injectedness of error
+		if(e.isInjectedFault())
 			timeout = timeout.asInjectedFault();
 		return timeout;
 	}
@@ -124,13 +130,14 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 	loop choose {
 		when( ErrorInfo _err = waitNext(errors) ) {
 			ErrorInfo err = _err;
-			err.error = checkIOTimeout(err.error);  // Possibly convert error to io_timeout
-
 			bool ok =
 				err.error.code() == error_code_success ||
 				err.error.code() == error_code_please_reboot ||
 				err.error.code() == error_code_actor_cancelled ||
 				err.error.code() == error_code_coordinators_changed;  // The worker server was cancelled
+
+			if(!ok)
+				err.error = checkIOTimeout(err.error);  // Possibly convert error to io_timeout
 
 			endRole(err.id, err.context, "Error", ok, err.error);
 
