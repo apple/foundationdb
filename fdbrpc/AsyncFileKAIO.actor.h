@@ -200,9 +200,6 @@ public:
 		//result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
 #endif
 
-		// Update checksum history if it is in use
-		if(FLOW_KNOBS->KAIO_PAGE_WRITE_CHECKSUM_HISTORY > 0)
-			result = map(result, [=](int r) { updateChecksumHistory(false, offset, length, (uint8_t *)data); return r; });
 		return result;
 	}
 	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
@@ -227,10 +224,6 @@ public:
 #if KAIO_LOGGING
 		//result = map(result, [=](int r) mutable { KAIOLogBlockEvent(io, OpLogEntry::READY, r); return r; });
 #endif
-
-		// Update checksum history if it is in use
-		if(FLOW_KNOBS->KAIO_PAGE_WRITE_CHECKSUM_HISTORY > 0)
-			result = map(result, [=](int r) { updateChecksumHistory(true, offset, length, (uint8_t *)data); return r; });
 
 		return success(result);
 	}
@@ -276,12 +269,6 @@ public:
 
 		lastFileSize = nextFileSize = size;
 
-		// Truncate the page checksum history if it is in use
-		if( FLOW_KNOBS->KAIO_PAGE_WRITE_CHECKSUM_HISTORY > 0 && ((size / checksumHistoryPageSize) < checksumHistory.size()) ) {
-			int oldCapacity = checksumHistory.capacity();
-			checksumHistory.resize(size / checksumHistoryPageSize);
-			checksumHistoryBudget -= (checksumHistory.capacity() - oldCapacity);
-		}
 		return Void();
 	}
 
@@ -339,7 +326,6 @@ public:
 		if(logFile != nullptr)
 			fclose(logFile);
 #endif
-		checksumHistoryBudget += checksumHistory.capacity();
 	}
 
 	static void launch() {
@@ -438,58 +424,6 @@ private:
 	Int64MetricHandle countLogicalWrites;
 	Int64MetricHandle countLogicalReads;
 
-	std::vector<uint32_t> checksumHistory;
-	// This is the most page checksum history blocks we will use across all files.
-	static int checksumHistoryBudget;
-	static int checksumHistoryPageSize;
-
-	// Update or check checksum(s) in history for any full pages covered by this operation
-	void updateChecksumHistory(bool write, int64_t offset, int len, uint8_t *buf) {
-		// Check or set each full block in the the range
-		int page = offset / checksumHistoryPageSize;                       // First page number
-		if(offset != page * checksumHistoryPageSize)
-			++page;                                                        // Advance page if first page touch isn't whole
-		int pageEnd = (offset + len) / checksumHistoryPageSize;            // Last page plus 1
-		uint8_t *start = buf + (page * checksumHistoryPageSize - offset);  // Beginning of the first page within buf
-
-		// Make sure history is large enough or limit pageEnd
-		if(checksumHistory.size() < pageEnd) {
-			if(checksumHistoryBudget > 0) {
-				// Resize history and update budget based on capacity change
-				auto initialCapacity = checksumHistory.capacity();
-				checksumHistory.resize(checksumHistory.size() + std::min<int>(checksumHistoryBudget, pageEnd - checksumHistory.size()));
-				checksumHistoryBudget -= (checksumHistory.capacity() - initialCapacity);
-			}
-
-			// Limit pageEnd to end of history, which works whether or not all of the desired
-			// history slots were allocatd.
-			pageEnd = checksumHistory.size();
-		}
-
-		while(page < pageEnd) {
-			uint32_t checksum = hashlittle(start, checksumHistoryPageSize, 0xab12fd93);
-			uint32_t &historySum = checksumHistory[page];
-
-			// For writes, just update the stored sum
-			if(write) {
-				historySum = checksum;
-			}
-			else if(historySum != 0 && historySum != checksum) {
-				// For reads, verify the stored sum if it is not 0.  If it fails, clear it.
-				TraceEvent (SevError, "AsyncFileKAIODetectedLostWrite")
-					.detail("Filename", filename)
-					.detail("PageNumber", page)
-					.detail("ChecksumOfPage", checksum)
-					.detail("ChecksumHistory", historySum)
-					.error(checksum_failed());
-				historySum = 0;
-			}
-
-			start += checksumHistoryPageSize;
-			++page;
-		}
-	}
-	
 	struct IOBlock : linux_iocb, FastAllocated<IOBlock> {
 		Promise<int> result;
 		Reference<AsyncFileKAIO> owner;
@@ -617,11 +551,6 @@ private:
 	static Context ctx;
 
 	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename) : fd(fd), flags(flags), filename(filename), failed(false) {
-		// Initialize the static history budget the first time (and only the first time) a file is opened.
-		static int _ = checksumHistoryBudget = FLOW_KNOBS->KAIO_PAGE_WRITE_CHECKSUM_HISTORY;
-
-		// Adjust the budget by the initial capacity of history, which should be 0 but maybe not for some implementations.
-		checksumHistoryBudget -= checksumHistory.capacity();
 
 		if( !g_network->isSimulated() ) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
@@ -800,10 +729,6 @@ void AsyncFileKAIO::KAIOLogEvent(FILE *logFile, uint32_t id, OpLogEntry::EOperat
 	}
 }
 #endif
-
-// TODO:  Move this to the .cpp if there ever is one.  Only one source file includes this header so defining this here is safe.  
-int AsyncFileKAIO::checksumHistoryBudget;
-int AsyncFileKAIO::checksumHistoryPageSize = 4096;
 
 ACTOR Future<Void> runTestOps(Reference<IAsyncFile> f, int numIterations, int fileSize, bool expectedToSucceed) {
 	state void *buf = FastAllocator<4096>::allocate(); // we leak this if there is an error, but that shouldn't be a big deal
