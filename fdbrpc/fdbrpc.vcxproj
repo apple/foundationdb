@@ -30,6 +30,7 @@
     <ClCompile Include="libb64\cdecode.c" />
     <ClCompile Include="md5\md5.c" />
     <ClCompile Include="Platform.cpp" />
+    <ClCompile Include="AsyncFileWriteChecker.cpp" />
     <ClCompile Include="libcoroutine\Common.c" />
     <ClCompile Include="libcoroutine\Coro.c" />
     <ClCompile Include="Locality.cpp" />

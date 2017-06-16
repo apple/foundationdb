@@ -1,0 +1,130 @@
+/*
+ * AsyncFileWriteChecker.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * 
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ * 
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#include "IAsyncFile.h"
+
+class AsyncFileWriteChecker : public IAsyncFile, public ReferenceCounted<AsyncFileWriteChecker> {
+public:
+	void addref() { ReferenceCounted<AsyncFileWriteChecker>::addref(); }
+	void delref() { ReferenceCounted<AsyncFileWriteChecker>::delref(); }
+
+	// For read() and write(), the data buffer must remain valid until the future is ready
+	Future<int> read( void* data, int length, int64_t offset ) {
+		return map(m_f->read(data, length, offset), [=](int r) { updateChecksumHistory(false, offset, length, (uint8_t *)data); return r; });
+	}
+	Future<Void> readZeroCopy( void** data, int* length, int64_t offset ) {
+		return map(m_f->readZeroCopy(data, length, offset), [=](Void r) { updateChecksumHistory(false, offset, *length, (uint8_t *)data); return r; });
+	}
+
+	Future<Void> write( void const* data, int length, int64_t offset ) {
+		updateChecksumHistory(true, offset, length, (uint8_t *)data);
+		return m_f->write(data, length, offset);
+	}
+
+	Future<Void> truncate( int64_t size )  {
+		return map(m_f->truncate(size), [=](Void r) {
+			// Truncate the page checksum history if it is in use
+			if( (size / checksumHistoryPageSize) < checksumHistory.size() ) {
+				int oldCapacity = checksumHistory.capacity();
+				checksumHistory.resize(size / checksumHistoryPageSize);
+				checksumHistoryBudget -= (checksumHistory.capacity() - oldCapacity);
+			}
+			return r;
+		});
+	}
+
+	Future<Void> sync() { return m_f->sync(); }
+	Future<Void> flush() { return m_f->flush(); }
+	Future<int64_t> size() { return m_f->size(); }
+	std::string getFilename() { return m_f->getFilename(); }
+	void releaseZeroCopy( void* data, int length, int64_t offset )  { return m_f->releaseZeroCopy(data, length, offset); }
+	int64_t debugFD() { return m_f->debugFD(); }
+
+	AsyncFileWriteChecker(Reference<IAsyncFile> f) : m_f(f) {
+		// Initialize the static history budget the first time (and only the first time) a file is opened.
+		static int _ = checksumHistoryBudget = FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY;
+
+		// Adjust the budget by the initial capacity of history, which should be 0 but maybe not for some implementations.
+		checksumHistoryBudget -= checksumHistory.capacity();
+	}
+
+
+	virtual ~AsyncFileWriteChecker() {
+		checksumHistoryBudget += checksumHistory.capacity();
+	}
+
+private:
+	Reference<IAsyncFile> m_f;
+
+	std::vector<uint32_t> checksumHistory;
+	// This is the most page checksum history blocks we will use across all files.
+	static int checksumHistoryBudget;
+	static int checksumHistoryPageSize;
+
+	// Update or check checksum(s) in history for any full pages covered by this operation
+	void updateChecksumHistory(bool write, int64_t offset, int len, uint8_t *buf) {
+		// Check or set each full block in the the range
+		int page = offset / checksumHistoryPageSize;                       // First page number
+		if(offset != page * checksumHistoryPageSize)
+			++page;                                                        // Advance page if first page touch isn't whole
+		int pageEnd = (offset + len) / checksumHistoryPageSize;            // Last page plus 1
+		uint8_t *start = buf + (page * checksumHistoryPageSize - offset);  // Beginning of the first page within buf
+
+		// Make sure history is large enough or limit pageEnd
+		if(checksumHistory.size() < pageEnd) {
+			if(checksumHistoryBudget > 0) {
+				// Resize history and update budget based on capacity change
+				auto initialCapacity = checksumHistory.capacity();
+				checksumHistory.resize(checksumHistory.size() + std::min<int>(checksumHistoryBudget, pageEnd - checksumHistory.size()));
+				checksumHistoryBudget -= (checksumHistory.capacity() - initialCapacity);
+			}
+
+			// Limit pageEnd to end of history, which works whether or not all of the desired
+			// history slots were allocatd.
+			pageEnd = checksumHistory.size();
+		}
+
+		while(page < pageEnd) {
+			//printf("%d %d %u %u\n", write, page, checksum, historySum);
+			uint32_t checksum = hashlittle(start, checksumHistoryPageSize, 0xab12fd93);
+			uint32_t &historySum = checksumHistory[page];
+
+			// For writes, just update the stored sum
+			if(write) {
+				historySum = checksum;
+			}
+			else {
+				if(historySum != 0 && historySum != checksum) {
+					// For reads, verify the stored sum if it is not 0.  If it fails, clear it.
+					TraceEvent (SevError, "AsyncFileKAIODetectedLostWrite")
+						.detail("Filename", m_f->getFilename())
+						.detail("PageNumber", page)
+						.detail("ChecksumOfPage", checksum)
+						.detail("ChecksumHistory", historySum)
+						.error(checksum_failed());
+					historySum = 0;
+				}
+			}
+
+			start += checksumHistoryPageSize;
+			++page;
+		}
+	}
+};
