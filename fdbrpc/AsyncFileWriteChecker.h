@@ -81,11 +81,15 @@ private:
 	// Update or check checksum(s) in history for any full pages covered by this operation
 	void updateChecksumHistory(bool write, int64_t offset, int len, uint8_t *buf) {
 		// Check or set each full block in the the range
-		int page = offset / checksumHistoryPageSize;                       // First page number
-		if(offset != page * checksumHistoryPageSize)
-			++page;                                                        // Advance page if first page touch isn't whole
-		int pageEnd = (offset + len) / checksumHistoryPageSize;            // Last page plus 1
-		uint8_t *start = buf + (page * checksumHistoryPageSize - offset);  // Beginning of the first page within buf
+		int page = offset / checksumHistoryPageSize;            // First page number
+		int slack = offset % checksumHistoryPageSize;           // Bytes after most recent page boundary
+		uint8_t *start = buf;                                   // Position in buffer to start checking from
+		// If offset is not page-aligned, move to next page and adjust start
+		if(slack != 0) {
+			++page;
+			start += (checksumHistoryPageSize - slack);
+		}
+		int pageEnd = (offset + len) / checksumHistoryPageSize; // Last page plus 1
 
 		// Make sure history is large enough or limit pageEnd
 		if(checksumHistory.size() < pageEnd) {
@@ -97,7 +101,7 @@ private:
 			}
 
 			// Limit pageEnd to end of history, which works whether or not all of the desired
-			// history slots were allocatd.
+			// history slots were allocated.
 			pageEnd = checksumHistory.size();
 		}
 
