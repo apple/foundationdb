@@ -198,15 +198,16 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 		bool runBackupAgents)
 {
 	state ISimulator::ProcessInfo *simProcess = g_simulator.getCurrentProcess();
-	state int cycles =0;
+	state UID randomId = g_nondeterministic_random->randomUniqueID();
+	state int cycles = 0;
 
 	loop {
 		auto waitTime = SERVER_KNOBS->MIN_REBOOT_TIME + (SERVER_KNOBS->MAX_REBOOT_TIME - SERVER_KNOBS->MIN_REBOOT_TIME) * g_random->random01();
 		cycles ++;
-		TraceEvent("SimulatedFDBDWait").detail("Cycles", cycles)
+		TraceEvent("SimulatedFDBDWait").detail("Cycles", cycles).detail("RandomId", randomId)
 			.detail("ProcessAddress", NetworkAddress(ip, port, true, false))
 			.detailext("ZoneId", localities.zoneId())
-			.detail("waitTime", waitTime);
+			.detail("waitTime", waitTime).detail("Port", port);
 
 		Void _ = wait( delay( waitTime ) );
 
@@ -215,10 +216,11 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 		state Future<ISimulator::KillType> onShutdown = process->onShutdown();
 
 		try {
-			TraceEvent("SimulatedRebooterStarting", localities.zoneId()).detail("Cycles", cycles)
+			TraceEvent("SimulatedRebooterStarting", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
 				.detailext("ZoneId", localities.zoneId())
 				.detailext("DataHall", localities.dataHallId())
 				.detail("ProcessAddress", process->address.toString())
+				.detail("ProcessExcluded", process->excluded)
 				.detail("UsingSSL", useSSL);
 			TraceEvent("ProgramStart").detail("Cycles", cycles)
 				.detail("SourceVersion", getHGVersion())
@@ -255,8 +257,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed ? SevInfo : SevError, "SimulatedFDBDTerminated", localities.zoneId()).error(e, true);
 			}
 
-			TraceEvent("SimulatedFDBDDone", localities.zoneId()).detail("Cycles", cycles)
+			TraceEvent("SimulatedFDBDDone", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("ProcessAddress", process->address)
+				.detail("ProcessExcluded", process->excluded)
 				.detailext("ZoneId", localities.zoneId())
 				.detail("KillType", onShutdown.isReady() ? onShutdown.get() : ISimulator::None);
 
@@ -280,21 +283,23 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 		g_simulator.destroyProcess( process );  // Leak memory here; the process may be used in other parts of the simulation
 
 		auto shutdownResult = onShutdown.get();
-		TraceEvent("SimulatedFDBDShutdown", localities.zoneId()).detail("Cycles", cycles)
+		TraceEvent("SimulatedFDBDShutdown", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
 			.detail("ProcessAddress", process->address)
+			.detail("ProcessExcluded", process->excluded)
 			.detailext("ZoneId", localities.zoneId())
 			.detail("KillType", shutdownResult);
 
 		if( shutdownResult < ISimulator::RebootProcessAndDelete ) {
-			TraceEvent("SimulatedFDBDLowerReboot", localities.zoneId()).detail("Cycles", cycles)
+			TraceEvent("SimulatedFDBDLowerReboot", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("ProcessAddress", process->address)
+				.detail("ProcessExcluded", process->excluded)
 				.detailext("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
 			return onShutdown.get();
 		}
 
 		if( onShutdown.get() == ISimulator::RebootProcessAndDelete ) {
-			TraceEvent("SimulatedFDBDRebootAndDelete", localities.zoneId()).detail("Cycles", cycles)
+			TraceEvent("SimulatedFDBDRebootAndDelete", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("ProcessAddress", process->address)
 				.detailext("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
@@ -311,7 +316,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			}
 		}
 		else {
-			TraceEvent("SimulatedFDBDJustRepeat", localities.zoneId()).detail("Cycles", cycles)
+			TraceEvent("SimulatedFDBDJustRepeat", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("ProcessAddress", process->address)
 				.detailext("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
@@ -744,7 +749,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	g_random->randomShuffle(coordinatorAddresses);
 	for(int i = 0; i < (coordinatorAddresses.size()/2)+1; i++) {
-		TraceEvent("ProtectMachine").detail("Address", coordinatorAddresses[i]).detail("Coordinators", coordinatorAddresses.size()).backtrace();
+		TraceEvent("ProtectCoordinator").detail("Address", coordinatorAddresses[i]).detail("Coordinators", describe(coordinatorAddresses)).backtrace();
 		g_simulator.protectedAddresses.insert(NetworkAddress(coordinatorAddresses[i].ip,coordinatorAddresses[i].port,true,false));
 	}
 	g_random->randomShuffle(coordinatorAddresses);

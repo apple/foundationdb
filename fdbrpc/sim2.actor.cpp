@@ -946,11 +946,12 @@ public:
 		machine.processes.push_back(m);
 		currentlyRebootingProcesses.erase(address);
 		addressMap[ m->address ] = m;
+		m->excluded = g_simulator.isExcluded(address);
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
 
-		TraceEvent("NewMachine").detail("Name", name).detail("Address", m->address).detailext("zoneId", m->locality.zoneId());
+		TraceEvent("NewMachine").detail("Name", name).detail("Address", m->address).detailext("zoneId", m->locality.zoneId()).detail("Excluded", m->excluded);
 
 		// FIXME: Sometimes, connections to/from this process will explicitly close
 
@@ -962,14 +963,14 @@ public:
 
 		for (auto processInfo : getAllProcesses()) {
 			// Add non-test processes (ie. datahall is not be set for test processes)
-			if (processInfo->startingClass != ProcessClass::TesterClass) {
-				// Do not kill protected processes
-				if (protectedAddresses.count(processInfo->address))
-					processesLeft.push_back(processInfo);
-				else if (processInfo->isAvailable())
+			if (processInfo->isAvailableClass()) {
+				// Mark all of the unavailable as dead
+				if (!processInfo->isAvailable())
+					processesDead.push_back(processInfo);
+				else if (protectedAddresses.count(processInfo->address))
 					processesLeft.push_back(processInfo);
 				else
-					processesDead.push_back(processInfo);
+					processesLeft.push_back(processInfo);
 			}
 		}
 		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
@@ -979,16 +980,20 @@ public:
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const
 	{
 		bool	canSurvive = true;
+		int		nQuorum = ((desiredCoordinators+1)/2)*2-1;
+
 		KillType	newKt = kt;
 		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
 		{
 			LocalityGroup	processesLeft, processesDead;
 			std::vector<LocalityData>	localitiesDead, localitiesLeft, badCombo;
+			std::set<Optional<Standalone<StringRef>>>	uniqueMachines;
 			ASSERT(storagePolicy);
 			ASSERT(tLogPolicy);
 			for (auto processInfo : availableProcesses) {
 				processesLeft.add(processInfo->locality);
 				localitiesLeft.push_back(processInfo->locality);
+				uniqueMachines.insert(processInfo->locality.machineId());
 			}
 			for (auto processInfo : deadProcesses) {
 				processesDead.add(processInfo->locality);
@@ -1023,8 +1028,13 @@ public:
 				canSurvive = false;
 				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("storagePolicy", storagePolicy->info()).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("RemainingZones", ::describeZones(localitiesLeft)).detail("RemainingDataHalls", ::describeDataHalls(localitiesLeft)).detail("Reason", "storagePolicy does not validates against remaining processes.");
 			}
+			else if ((kt != RebootAndDelete) && (kt != RebootProcessAndDelete) && (nQuorum > uniqueMachines.size())) {
+				auto newKt = (g_random->random01() < 0.33) ? RebootAndDelete : Reboot;
+				canSurvive = false;
+				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("storagePolicy", storagePolicy->info()).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("RemainingZones", ::describeZones(localitiesLeft)).detail("RemainingDataHalls", ::describeDataHalls(localitiesLeft)).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size()).detail("Reason", "Not enough unique machines to perform auto configuration of coordinators.");
+			}
 			else {
-				TraceEvent("CanSurviveKills").detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("DeadZones", ::describeZones(localitiesDead)).detail("DeadDataHalls", ::describeDataHalls(localitiesDead)).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
+				TraceEvent("CanSurviveKills").detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("DeadZones", ::describeZones(localitiesDead)).detail("DeadDataHalls", ::describeDataHalls(localitiesDead)).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info()).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size()).detail("ZonesLeft", ::describeZones(localitiesLeft)).detail("ValidateRemaining", processesLeft.validate(tLogPolicy));
 			}
 		}
 		if (newKillType) *newKillType = newKt;
@@ -1032,7 +1042,7 @@ public:
 	}
 
 	virtual void destroyProcess( ISimulator::ProcessInfo *p ) {
-		TraceEvent("ProcessDestroyed").detail("Name", p->name).detail("Address", p->address).detailext("zoneId", p->locality.zoneId()).backtrace();
+		TraceEvent("ProcessDestroyed").detail("Name", p->name).detail("Address", p->address).detailext("zoneId", p->locality.zoneId());
 		currentlyRebootingProcesses.insert(std::pair<NetworkAddress, ProcessInfo*>(p->address, p));
 		std::vector<ProcessInfo*>& processes = machines[ p->locality.zoneId().get() ].processes;
 		if( p != processes.back() ) {
@@ -1105,7 +1115,7 @@ public:
 		auto ktOrig = kt;
 		if (killIsSafe) ASSERT( kt == ISimulator::RebootAndDelete );  // Only types of "safe" kill supported so far
 
-		TEST(true); // Trying to killing a machine 
+		TEST(true); // Trying to killing a machine
 		TEST(kt == KillInstantly); // Trying to kill instantly
 		TEST(kt == InjectFaults);  // Trying to kill by injecting faults
 
@@ -1124,6 +1134,12 @@ public:
 				processesOnMachine++;
 		}
 
+		// Do nothing, if no processes to kill
+		if (processesOnMachine == 0) {
+			TraceEvent(SevWarn, "AbortedKill", zoneId).detailext("ZoneId", zoneId).detail("Reason", "The target had no processes running.").detail("processes", processesOnMachine).detail("processesPerMachine", processesPerMachine).backtrace();
+			return false;
+		}
+
 		// Check if machine can be removed, if requested
 		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
 		{
@@ -1132,12 +1148,13 @@ public:
 			for (auto machineRec : machines) {
 				for (auto processInfo : machineRec.second.processes) {
 					// Add non-test processes (ie. datahall is not be set for test processes)
-					if (processInfo->startingClass != ProcessClass::TesterClass) {
-						if (protectedAddresses.count(processInfo->address))
+					if (processInfo->isAvailableClass()) {
+						if (!processInfo->isAvailable())
+							processesDead.push_back(processInfo);
+						else if (protectedAddresses.count(processInfo->address))
 							processesLeft.push_back(processInfo);
-						else if (processInfo->isAvailable() && (machineRec.second.zoneId != zoneId)) {
+						else if (machineRec.second.zoneId != zoneId)
 							processesLeft.push_back(processInfo);
-						}
 						// Add processes from dead machines and datacenter machines to dead group
 						else
 							processesDead.push_back(processInfo);
@@ -1155,9 +1172,18 @@ public:
 				for (auto process : processesLeft) {
 					TraceEvent("DeadMachineSurvivors", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", describe(*process));
 				}
+				for (auto process : processesDead) {
+					TraceEvent("DeadMachineVictims", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", describe(*process));
+				}
 			}
 			else {
 				TraceEvent("ClearMachine", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("TotalProcesses", machines.size()).detail("processesPerMachine", processesPerMachine).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
+				for (auto process : processesLeft) {
+					TraceEvent("ClearMachineSurvivors", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", describe(*process));
+				}
+				for (auto process : processesDead) {
+					TraceEvent("ClearMachineVictims", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", describe(*process));
+				}
 			}
 		}
 
@@ -1169,6 +1195,14 @@ public:
 			TraceEvent(SevWarn, "AbortedReboot", zoneId).detailext("ZoneId", zoneId).detail("Reason", "The target did not have all of its processes running.").detail("processes", processesOnMachine).detail("processesPerMachine", processesPerMachine).backtrace();
 			return false;
 		}
+
+		// Check if any processes on machine are rebooting
+		if ( processesOnMachine != processesPerMachine) {
+			TEST(true); //Attempted reboot, but the target did not have all of its processes running
+			TraceEvent(SevWarn, "AbortedKill", zoneId).detailext("ZoneId", zoneId).detail("Reason", "The target did not have all of its processes running.").detail("processes", processesOnMachine).detail("processesPerMachine", processesPerMachine).backtrace();
+			return false;
+		}
+
 
 		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KilledMachines", killedMachines).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig).detail("killIsSafe", killIsSafe);
 		if (kt < RebootAndDelete ) {
@@ -1215,13 +1249,15 @@ public:
 			for (auto machineRec : machines) {
 				for (auto processInfo : machineRec.second.processes) {
 					// Add non-test processes (ie. datahall is not be set for test processes)
-					if (processInfo->startingClass != ProcessClass::TesterClass) {
-						// Do not kill protected processes
-						if (protectedAddresses.count(processInfo->address))
+					if (processInfo->isAvailableClass()) {
+						// Mark all of the unavailable as dead
+						if (!processInfo->isAvailable())
+							processesDead.push_back(processInfo);
+						else if (protectedAddresses.count(processInfo->address))
 							processesLeft.push_back(processInfo);
-						else if (processInfo->isAvailable() && (datacenterZones.find(machineRec.second.zoneId) == datacenterZones.end())) {
+						// Keep all not in the datacenter zones
+						else if (datacenterZones.find(machineRec.second.zoneId) == datacenterZones.end())
 							processesLeft.push_back(processInfo);
-						}
 						else
 							processesDead.push_back(processInfo);
 					}
@@ -1391,6 +1427,7 @@ public:
 	std::map<Optional<Standalone<StringRef>>, MachineInfo > machines;
 	std::map<NetworkAddress, ProcessInfo*> addressMap;
 	std::map<ProcessInfo*, Promise<Void>> filesDeadMap;
+	std::set<AddressExclusion>	exclusionSet;
 
 	//tasks is guarded by ISimulator::mutex
 	std::priority_queue<Task, std::vector<Task>> tasks;

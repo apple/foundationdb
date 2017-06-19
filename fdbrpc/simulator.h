@@ -71,20 +71,35 @@ public:
 			: name(name), locality(locality), startingClass(startingClass), address(address), dataFolder(dataFolder),
 				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0), io_timeout_injected(false)
-		{}
+				fault_injection_r(0), machine(0), io_timeout_injected(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
 		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
 		bool isAvailable() const { return !excluded && isReliable(); }
 
+		// Returns true if the class represents an acceptable worker
+		bool isAvailableClass() const {
+			switch (startingClass._class) {
+				case ProcessClass::UnsetClass: return true;
+				case ProcessClass::StorageClass: return true;
+				case ProcessClass::TransactionClass: return true;
+				case ProcessClass::ResolutionClass: return false;
+				case ProcessClass::ProxyClass: return false;
+				case ProcessClass::MasterClass: return false;
+				case ProcessClass::TesterClass: return false;
+				case ProcessClass::StatelessClass: return false;
+				case ProcessClass::LogClass: return true;
+				default: return false;
+			}
+		}
+
 		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
-			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder); }
+			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s  excluded: %d",
+			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder, excluded); }
 
 		// Members not for external use
 		Promise<KillType> shutdownSignal;
@@ -134,6 +149,19 @@ public:
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+
+	virtual void excludeAddress(NetworkAddress const& address) {
+		excludedAddresses.insert(address);
+	}
+	virtual void includeAddress(NetworkAddress const& address) {
+		excludedAddresses.erase(address);
+	}
+	virtual void includeAllAddresses() {
+		excludedAddresses.clear();
+	}
+	virtual bool isExcluded(NetworkAddress const& address) const {
+		return excludedAddresses.count(address) == 0;
+	}
 
 	virtual void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
 		swapsDisabled.insert(zoneId);
@@ -201,6 +229,7 @@ protected:
 
 private:
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
+	std::set<NetworkAddress> excludedAddresses;
 	bool allSwapsDisabled;
 };
 
