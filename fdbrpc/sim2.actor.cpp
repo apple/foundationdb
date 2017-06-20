@@ -31,6 +31,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "AsyncFileWriteChecker.h"
 
 
 using std::min;
@@ -49,14 +50,13 @@ bool simulator_should_inject_fault( const char* context, const char* file, int l
 			h2 = p->fault_injection_r;
 
 		if (h1 < p->fault_injection_p1*std::numeric_limits<uint32_t>::max()) {
-			TEST(true);
-			TEST(error_code == error_code_io_timeout);
-			TEST(error_code == error_code_io_error);
-			TEST(error_code == error_code_platform_error);
+			TEST(true);                                     // A fault was injected
+			TEST(error_code == error_code_io_timeout);      // An io timeout was injected
+			TEST(error_code == error_code_io_error);        // An io error was injected
+			TEST(error_code == error_code_platform_error);  // A platform error was injected.
 			TraceEvent(SevWarn, "FaultInjected").detail("Context", context).detail("File", file).detail("Line", line).detail("ErrorCode", error_code);
 			if(error_code == error_code_io_timeout) {
 				g_network->setGlobal(INetwork::enASIOTimedOut, (flowGlobalType)true);
-				g_pSimulator->getCurrentProcess()->io_timeout_injected = true;
 			}
 			return true;
 		}
@@ -950,6 +950,7 @@ public:
 
 		m->setGlobal(enTDMetrics, (flowGlobalType) &m->tdmetrics);
 		m->setGlobal(enNetworkConnections, (flowGlobalType) m->network);
+		m->setGlobal(enASIOTimedOut, (flowGlobalType) false);
 
 		TraceEvent("NewMachine").detail("Name", name).detail("Address", m->address).detailext("zoneId", m->locality.zoneId()).detail("Excluded", m->excluded);
 
@@ -1206,6 +1207,8 @@ public:
 
 		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KilledMachines", killedMachines).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig).detail("killIsSafe", killIsSafe);
 		if (kt < RebootAndDelete ) {
+			if(kt == InjectFaults && machines[zoneId].machineProcess != nullptr)
+				killProcess_internal( machines[zoneId].machineProcess, kt );
 			for (auto& process : machines[zoneId].processes) {
 				TraceEvent("KillMachineProcess", zoneId).detail("KillType", kt).detail("Process", process->toString()).detail("startingClass", process->startingClass.toString());
 				if (process->startingClass != ProcessClass::TesterClass)
@@ -1540,14 +1543,20 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 				actualFilename = filename + ".part";
 				auto partFile = machineCache.find(actualFilename);
 				if(partFile != machineCache.end()) {
-					return AsyncFileDetachable::open(partFile->second);
+					Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second);
+					if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+						f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+					return f;
 				}
 			}
 			//Simulated disk parameters are shared by the AsyncFileNonDurable and the underlying SimpleFile.  This way, they can both keep up with the time to start the next operation
 			Reference<DiskParameters> diskParameters(new DiskParameters(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH));
 			machineCache[actualFilename] = AsyncFileNonDurable::open(filename, actualFilename, SimpleFile::open(filename, flags, mode, diskParameters, false), diskParameters);
 		}
-		return AsyncFileDetachable::open( machineCache[actualFilename] );
+		Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open( machineCache[actualFilename] );
+		if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+		return f;
 	}
 	else
 		return AsyncFileCached::open(filename, flags, mode);
