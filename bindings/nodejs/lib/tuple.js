@@ -24,6 +24,7 @@
 var assert = require('assert');
 var buffer = require('./bufferConversion');
 var fdbUtil = require('./fdbUtil');
+var fdb = require('./fdbModule');
 var FDBError = require('./error');
 
 var sizeLimits = new Array(8);
@@ -83,7 +84,7 @@ function Float(value) {
 			return this.rawData;
 		} else {
 			var buf = new Buffer(4);
-			buf.writeFloatBE(this.value, 0);
+			buf.writeFloatBE(fdb.toFloat(this.value), 0);
 			return buf;
 		}
 	};
@@ -230,7 +231,7 @@ function encode(item, buf, pos) {
 		if (isNaN(item.value) && item.rawData !== undefined) {
 			item.rawData.copy(outBuf, 1, 0, 4);
 		} else {
-			outBuf.writeFloatBE(item.value, 1);
+			outBuf.writeFloatBE(fdb.toFloat(item.value), 1);
 		}
 		adjustFloat(outBuf, 1, true);
 		return outBuf;
