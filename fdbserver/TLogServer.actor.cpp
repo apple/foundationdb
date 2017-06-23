@@ -43,9 +43,6 @@ using std::make_pair;
 using std::min;
 using std::max;
 
-//FIXME: also defined in worker, move to someplace available to both
-#define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
-
 struct TLogQueueEntryRef {
 	UID id;
 	Version version;
@@ -203,6 +200,55 @@ struct CompareFirst {
 	}
 };
 
+struct TLogData : NonCopyable {
+	AsyncTrigger newLogData;
+	Deque<UID> queueOrder;
+	std::map<UID, Reference<struct LogData>> id_data;
+
+	UID dbgid;
+
+	IKeyValueStore* persistentData;
+	IDiskQueue* rawPersistentQueue;
+	TLogQueue *persistentQueue;
+
+	int64_t diskQueueCommitBytes;
+	AsyncVar<bool> largeDiskQueueCommitBytes; //becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
+
+	Reference<AsyncVar<ServerDBInfo>> dbInfo;
+
+	NotifiedVersion queueCommitEnd;
+	Version queueCommitBegin;
+	AsyncTrigger newVersion;
+
+	int64_t instanceID;
+	int64_t bytesInput;
+	int64_t bytesDurable;
+
+	Version prevVersion;
+
+	struct peekTrackerData {
+		std::map<int, Promise<Version>> sequence_version;
+		double lastUpdate;
+	};
+
+	std::map<UID, peekTrackerData> peekTracker;
+	WorkerCache<TLogInterface> tlogCache;
+
+	Future<Void> updatePersist; //SOMEDAY: integrate the recovery and update storage so that only one of them is committing to persistant data.
+	Future<Void> oldLogServer;
+
+	PromiseStream<Future<Void>> sharedActors;
+
+	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
+			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
+			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
+			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
+			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
+			  bytesInput(0), bytesDurable(0), updatePersist(Void())
+		{
+		}
+};
+
 struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	struct TagData {
 		std::deque<std::pair<Version, LengthPrefixedStringRef>> version_messages;
@@ -290,80 +336,40 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Future<Void> removed;
 	TLogInterface tli;
 	PromiseStream<Future<Void>> addActor;
+	TLogData* tLogData;
 
-	explicit LogData(TLogInterface interf) : knownCommittedVersion(0), tli(interf), logId(interf.id()),
+	explicit LogData(TLogData* tLogData, TLogInterface interf) : tLogData(tLogData), knownCommittedVersion(0), tli(interf), logId(interf.id()),
 			cc("TLog", interf.id().toString()),
 			bytesInput("bytesInput", cc),
 			bytesDurable("bytesDurable", cc),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion)
 	{
+		startRole(interf.id(), UID(), "TLog");
+
 		persistentDataVersion.init(LiteralStringRef("TLog.PersistentDataVersion"), cc.id);
 		persistentDataDurableVersion.init(LiteralStringRef("TLog.PersistentDataDurableVersion"), cc.id);
 		version.initMetric(LiteralStringRef("TLog.Version"), cc.id);
 		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
 
 		specialCounter(cc, "version", [this](){ return this->version.get(); });
+		specialCounter(cc, "kvstoreBytesUsed", [tLogData](){ return tLogData->persistentData->getStorageBytes().used; });
+		specialCounter(cc, "kvstoreBytesFree", [tLogData](){ return tLogData->persistentData->getStorageBytes().free; });
+		specialCounter(cc, "kvstoreBytesAvailable", [tLogData](){ return tLogData->persistentData->getStorageBytes().available; });
+		specialCounter(cc, "kvstoreBytesTotal", [tLogData](){ return tLogData->persistentData->getStorageBytes().total; });
+		specialCounter(cc, "queueDiskBytesUsed", [tLogData](){ return tLogData->rawPersistentQueue->getStorageBytes().used; });
+		specialCounter(cc, "queueDiskBytesFree", [tLogData](){ return tLogData->rawPersistentQueue->getStorageBytes().free; });
+		specialCounter(cc, "queueDiskBytesAvailable", [tLogData](){ return tLogData->rawPersistentQueue->getStorageBytes().available; });
+		specialCounter(cc, "queueDiskBytesTotal", [tLogData](){ return tLogData->rawPersistentQueue->getStorageBytes().total; });
+	}
+
+	~LogData() {
+		tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
+		ASSERT(tLogData->bytesDurable <= tLogData->bytesInput);
+		endRole(tli.id(), "TLog", "Error", true);
 	}
 
 	LogEpoch epoch() const { return recoveryCount; }
-};
-
-struct TLogData : NonCopyable {
-	AsyncTrigger newLogData;
-	Deque<UID> queueOrder;
-	std::map<UID, Reference<LogData>> id_data;
-
-	UID dbgid;
-
-	IKeyValueStore* persistentData;
-	IDiskQueue* rawPersistentQueue;
-	TLogQueue *persistentQueue;
-
-	int64_t diskQueueCommitBytes;
-	AsyncVar<bool> largeDiskQueueCommitBytes; //becomes true when diskQueueCommitBytes is greater than MAX_QUEUE_COMMIT_BYTES
-
-	Reference<AsyncVar<ServerDBInfo>> dbInfo;
-
-	NotifiedVersion queueCommitEnd;
-	Version queueCommitBegin;
-	AsyncTrigger newVersion;
-
-	int64_t instanceID;
-	int64_t bytesInput;
-	int64_t bytesDurable;
-
-	Version prevVersion;
-
-	struct peekTrackerData {
-		std::map<int, Promise<Version>> sequence_version;
-		double lastUpdate;
-	};
-
-	std::map<UID, peekTrackerData> peekTracker;
-	WorkerCache<TLogInterface> tlogCache;
-
-	Future<Void> updatePersist; //SOMEDAY: integrate the recovery and update storage so that only one of them is committing to persistant data.
-	Future<Void> oldLogServer;
-
-	PromiseStream<Future<Void>> sharedActors;
-
-	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
-			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
-			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
-			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
-			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
-			  bytesInput(0), bytesDurable(0), updatePersist(Void())
-		{
-			//specialCounter(cc, "kvstoreBytesUsed", [this](){ return this->persistentData->getStorageBytes().used; });
-			//specialCounter(cc, "kvstoreBytesFree", [this](){ return this->persistentData->getStorageBytes().free; });
-			//specialCounter(cc, "kvstoreBytesAvailable", [this](){ return this->persistentData->getStorageBytes().available; });
-			//specialCounter(cc, "kvstoreBytesTotal", [this](){ return this->persistentData->getStorageBytes().total; });
-			//specialCounter(cc, "queueDiskBytesUsed", [this](){ return this->rawPersistentQueue->getStorageBytes().used; });
-			//specialCounter(cc, "queueDiskBytesFree", [this](){ return this->rawPersistentQueue->getStorageBytes().free; });
-			//specialCounter(cc, "queueDiskBytesAvailable", [this](){ return this->rawPersistentQueue->getStorageBytes().available; });
-			//specialCounter(cc, "queueDiskBytesTotal", [this](){ return this->rawPersistentQueue->getStorageBytes().total; });
-		}
 };
 
 ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > reply, Reference<LogData> logData ) {
@@ -533,6 +539,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	}
 
 	ASSERT(logData->bytesDurable.getValue() <= logData->bytesInput.getValue());
+	ASSERT(self->bytesDurable <= self->bytesInput);
 
 	if( self->queueCommitEnd.get() > 0 )
 		self->persistentQueue->pop( newPersistentDataVersion+1 ); // SOMEDAY: this can cause a slow task (~0.5ms), presumably from erasing too many versions. Should we limit the number of versions cleared at a time?
@@ -559,8 +566,6 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	state int totalSize = 0;
 
 	if(logData->stopped) {
-		//FIXME: do we really want to make everything durable for this generation once we pass the threshold?
-		//FIXME: do we need yields?
 		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD) {
 			while(logData->persistentDataDurableVersion != logData->version.get()) {
 				std::vector<std::pair<std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator, std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator>> iters;
@@ -1179,6 +1184,20 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 	}
 }
 
+void removeLog( TLogData* self, Reference<LogData> logData ) {
+	TraceEvent("TLogRemoved", logData->logId).detail("input", logData->bytesInput.getValue()).detail("durable", logData->bytesDurable.getValue());
+	logData->stopped = true;
+
+	logData->addActor = PromiseStream<Future<Void>>(); //there could be items still in the promise stream if one of the actors threw an error immediately
+	self->id_data.erase(logData->logId);
+
+	if(self->id_data.size() || (self->oldLogServer.isValid() && !self->oldLogServer.isReady())) {
+		return;
+	} else {
+		throw worker_removed();
+	}
+}
+
 ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, Future<Void> recovery ) {
 	if(logData->removed.isReady()) {
 		Void _ = wait(delay(0)); //to avoid iterator invalidation in restorePersistentState when removed is already ready
@@ -1188,27 +1207,8 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, Future<
 			throw logData->removed.getError();
 		}
 
-		double inputSum = 0;
-		double durableSum = 0;
-		for(auto it : self->id_data) {
-			inputSum += it.second->bytesInput.getValue();
-			durableSum += it.second->bytesDurable.getValue();
-			TraceEvent("QueueMetrics1", self->dbgid).detail("logId", it.first).detail("input", it.second->bytesInput.getValue()).detail("durable", it.second->bytesDurable.getValue());
-		}
-
-		TraceEvent("RemoveMetrics1", self->dbgid).detail("logId", logData->logId).detail("inputSum", inputSum).detail("durableSum", durableSum).detail("nonDurableSum", inputSum - durableSum)
-			.detail("input", self->bytesInput).detail("durable", self->bytesDurable).detail("nonDurable", self->bytesInput - self->bytesDurable).detail("durableIncrease", logData->bytesInput.getValue() - logData->bytesDurable.getValue());
-
-		self->bytesDurable += logData->bytesInput.getValue() - logData->bytesDurable.getValue();
-		logData->stopped = true;
-		self->id_data.erase(logData->logId);
-		TraceEvent("TLogRemoved", logData->logId);
-
-		if(self->id_data.size() || (self->oldLogServer.isValid() && !self->oldLogServer.isReady())) {
-			return Void();
-		} else {
-			throw logData->removed.getError();
-		}
+		removeLog(self, logData);
+		return Void();
 	}
 
 	TraceEvent("newLogData", self->dbgid).detail("logId", logData->logId);
@@ -1237,29 +1237,8 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, Future<
 		if( e.code() != error_code_worker_removed )
 			throw;
 
-		double inputSum = 0;
-		double durableSum = 0;
-		for(auto it : self->id_data) {
-			inputSum += it.second->bytesInput.getValue();
-			durableSum += it.second->bytesDurable.getValue();
-			TraceEvent("QueueMetrics2", self->dbgid).detail("logId", it.first).detail("input", it.second->bytesInput.getValue()).detail("durable", it.second->bytesDurable.getValue());
-		}
-
-		TraceEvent("RemoveMetrics2", self->dbgid).detail("logId", logData->logId).detail("inputSum", inputSum).detail("durableSum", durableSum).detail("nonDurableSum", inputSum - durableSum)
-			.detail("input", self->bytesInput).detail("durable", self->bytesDurable).detail("nonDurable", self->bytesInput - self->bytesDurable).detail("durableIncrease", logData->bytesInput.getValue() - logData->bytesDurable.getValue());
-
-		self->bytesDurable += logData->bytesInput.getValue() - logData->bytesDurable.getValue();
-		logData->stopped = true;
-
-		logData->addActor = PromiseStream<Future<Void>>(); //there could be items still in the promise stream if one of the actors threw an error immediately
-		self->id_data.erase(logData->logId);
-		TraceEvent("TLogRemoved", logData->logId);
-
-		if(self->id_data.size() || (self->oldLogServer.isValid() && !self->oldLogServer.isReady())) {
-			return Void();
-		} else {
-			throw;
-		}
+		removeLog(self, logData);
+		return Void();
 	}
 }
 
@@ -1357,7 +1336,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
 
-		logData = Reference<LogData>( new LogData(recruited) );
+		logData = Reference<LogData>( new LogData(self, recruited) );
 		logData->stopped = true;
 		self->id_data[id1] = logData;
 
@@ -1644,7 +1623,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		it.second->stopped = true;
 	}
 
-	state Reference<LogData> logData = Reference<LogData>( new LogData(recruited) );
+	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited) );
 	self->id_data[recruited.id()] = logData;
 	logData->recoveryCount = req.epoch;
 	logData->removed = rejoinMasters(self, recruited, req.epoch);
@@ -1686,31 +1665,8 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 		Void _ = wait( delay(0.0) ); // if multiple recruitment requests were already in the promise stream make sure they are all started before any are removed
 
-		double inputSum = 0;
-		double durableSum = 0;
-		for(auto it : self->id_data) {
-			inputSum += it.second->bytesInput.getValue();
-			durableSum += it.second->bytesDurable.getValue();
-			TraceEvent("QueueMetrics3", self->dbgid).detail("logId", it.first).detail("input", it.second->bytesInput.getValue()).detail("durable", it.second->bytesDurable.getValue());
-		}
-
-		TraceEvent("RemoveMetrics3", self->dbgid).detail("logId", logData->logId).detail("inputSum", inputSum).detail("durableSum", durableSum).detail("nonDurableSum", inputSum - durableSum)
-			.detail("input", self->bytesInput).detail("durable", self->bytesDurable).detail("nonDurable", self->bytesInput - self->bytesDurable).detail("durableIncrease", logData->bytesInput.getValue() - logData->bytesDurable.getValue());
-
-		//FIXME: check that bytes durable cannot be increased by a dead log, check that bytes durable never becomes larger that bytes input
-		//FIXME: factor error handling code
-		self->bytesDurable += logData->bytesInput.getValue() - logData->bytesDurable.getValue();
-		logData->stopped = true;
-
-		logData->addActor = PromiseStream<Future<Void>>(); //there could be items still in the promise stream if one of the actors threw an error immediately
-		self->id_data.erase(logData->logId);
-		TraceEvent("TLogRemoved", logData->logId);
-
-		if(self->id_data.size() || (self->oldLogServer.isValid() && !self->oldLogServer.isReady())) {
-			return Void();
-		} else {
-			throw worker_removed();
-		}
+		removeLog(self, logData);
+		return Void();
 	}
 
 	TraceEvent("TLogReady", logData->logId);
