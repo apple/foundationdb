@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-var fdb = require('../lib/fdb.js').apiVersion(200);
+var fdb = require('../lib/fdb.js').apiVersion(500);
+var fdbModule = require('../lib/fdbModule.js');
 
 console.log(fdb.tuple.pack([-Math.pow(2,53)]));
 console.log(fdb.tuple.pack([-Math.pow(2,53)+1]));
@@ -76,3 +77,25 @@ tuples = [
 ];
 tuples.sort(fdb.tuple.compare);
 console.log(tuples);
+
+// Float overruns.
+const floats = [ 2.037036e90, -2.037036e90, 4.9090935e-91, -4.9090935e-91, 2.345624805922133125e14, -2.345624805922133125e14 ];
+for (var i = 0; i < floats.length; i++) {
+    var f = floats[i];
+    console.log(f + " -> " + fdb.tuple.Float.fromBytes((new fdb.tuple.Float(f)).toBytes()).value);
+}
+
+// Float type errors.
+try {
+    console.log((new fdb.tuple.Float("asdf")).toBytes());
+} catch (e) {
+    console.log("Caught!");
+    console.log(e);
+}
+
+try {
+    console.log(fdbModule.toFloat(3.14, 2.718));
+} catch (e) {
+    console.log("Caught!");
+    console.log(e);
+}

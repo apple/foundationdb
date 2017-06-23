@@ -33,6 +33,7 @@
 #include "Version.h"
 #include "FdbError.h"
 #include "FdbOptions.h"
+#include "FdbUtil.h"
 
 uv_thread_t fdbThread;
 
@@ -140,6 +141,7 @@ void init(Handle<Object> target){
 	target->Set(String::NewSymbol("options"), FdbOptions::CreateOptions(FdbOptions::NetworkOption));
 	target->Set(String::NewSymbol("streamingMode"), FdbOptions::CreateEnum(FdbOptions::StreamingMode));
 	target->Set(String::NewSymbol("atomic"), FdbOptions::CreateOptions(FdbOptions::MutationType));
+	target->Set(String::NewSymbol("toFloat"), FunctionTemplate::New(ToFloat)->GetFunction());
 }
 
 #if NODE_VERSION_AT_LEAST(0, 8, 0)
