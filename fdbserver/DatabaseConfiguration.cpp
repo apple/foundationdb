@@ -81,18 +81,21 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 	std::map<std::string, std::string> result;
 
 	if( initialized ) {
-		if( tLogReplicationFactor == durableStorageQuorum &&
-			durableStorageQuorum == storageTeamSize &&
+		if( durableStorageQuorum == storageTeamSize &&
 			tLogWriteAntiQuorum == 0 ) {
-			if( durableStorageQuorum == 1 && desiredDataCenters == 1 && minDataCenters == 1 )
+			if( tLogReplicationFactor == 1 && durableStorageQuorum == 1 && desiredDataCenters == 1 && minDataCenters == 1 )
 				result["redundancy_mode"] = "single";
-			else if( durableStorageQuorum == 2 && desiredDataCenters == 1 && minDataCenters == 1 )
+			else if( tLogReplicationFactor == 2 && durableStorageQuorum == 2 && desiredDataCenters == 1 && minDataCenters == 1 )
 				result["redundancy_mode"] = "double";
-			else if( durableStorageQuorum == 3 && desiredDataCenters == 1 && minDataCenters == 1 )
+			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 && desiredDataCenters == 1 && minDataCenters == 1 )
 				result["redundancy_mode"] = "triple";
-			else if( durableStorageQuorum == 3 && desiredDataCenters == 2 && minDataCenters == 1 )
+			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 2 && desiredDataCenters == 1 && minDataCenters == 1 )
+				result["redundancy_mode"] = "fast_recovery_double";
+			else if( tLogReplicationFactor == 4 && durableStorageQuorum == 3 && desiredDataCenters == 1 && minDataCenters == 1 )
+				result["redundancy_mode"] = "fast_recovery_triple";
+			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 && desiredDataCenters == 2 && minDataCenters == 1 )
 				result["redundancy_mode"] = "two_datacenter";
-			else if( durableStorageQuorum == 3 && desiredDataCenters == 3 && minDataCenters == 2 )
+			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 && desiredDataCenters == 3 && minDataCenters == 2 )
 				result["redundancy_mode"] = "three_datacenter";
 			else
 				result["redundancy_mode"] = "custom";
