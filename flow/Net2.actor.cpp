@@ -52,7 +52,7 @@ using namespace boost::asio::ip;
 // These impact both communications and the deserialization of certain zookeeper, database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A470010001LL;
+uint64_t currentProtocolVersion        = 0x0FDB00A550010001LL;
 uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -550,7 +550,7 @@ void Net2::run() {
 
 	timeOffsetLogger = logTimeOffset();
 	startProfiling(this);
-	
+
 	// Get the address to the launch function
 	typedef void (*runCycleFuncPtr)();
 	runCycleFuncPtr runFunc = reinterpret_cast<runCycleFuncPtr>(reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc)));
@@ -606,7 +606,7 @@ void Net2::run() {
 		taskBegin = timer_monotonic();
 		numYields = 0;
 		int minTaskID = TaskMaxPriority;
-		
+
 		while (!ready.empty()) {
 			++countTasks;
 			currentTaskID = ready.top().taskID;
@@ -671,7 +671,7 @@ void Net2::run() {
 		}
 #endif
 
-		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && g_nondeterministic_random->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE) 
+		if ((nnow-now) > FLOW_KNOBS->SLOW_LOOP_CUTOFF && g_nondeterministic_random->random01() < (nnow-now)*FLOW_KNOBS->SLOW_LOOP_SAMPLING_RATE)
 			TraceEvent("SomewhatSlowRunLoopBottom").detail("Elapsed", nnow - now); // This includes the time spent running tasks
 
 		trackMinPriority( minTaskID, nnow );
