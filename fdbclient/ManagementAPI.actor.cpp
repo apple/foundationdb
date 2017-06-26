@@ -87,7 +87,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		return out;
 	}
 
-	std::string redundancy, log_replicas, log_recovery_anti_quorum, dc="1", minDC="1";
+	std::string redundancy, log_replicas, log_recovery_anti_quorum;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
 
@@ -121,10 +121,10 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 		tLogPolicy = IRepPolicyRef(new PolicyAcross(4, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "two_datacenter") {
-		redundancy="3"; log_replicas="3"; log_recovery_anti_quorum="0"; dc="2"; minDC="1";
+		redundancy="3"; log_replicas="3"; log_recovery_anti_quorum="0";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "three_datacenter") {
-		redundancy="3"; log_replicas="3"; log_recovery_anti_quorum="0"; dc="3"; minDC="2";
+		redundancy="3"; log_replicas="3"; log_recovery_anti_quorum="0";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAnd({
 			IRepPolicyRef(new PolicyAcross(3, "dcid", IRepPolicyRef(new PolicyOne()))),
 			IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())))
@@ -145,8 +145,6 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		out[p+"log_replicas"] = log_replicas;
 		out[p+"log_anti_quorum"] = "0";
 		out[p+"log_recovery_anti_quorum"] = log_recovery_anti_quorum;
-		out[p+"replica_datacenters"] = dc;
-		out[p+"min_replica_datacenters"] = minDC;
 
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, storagePolicy);
@@ -214,9 +212,7 @@ ConfigurationResult::Type buildConfiguration( std::string const& configMode, std
 bool isCompleteConfiguration( std::map<std::string, std::string> const& options ) {
 	std::string p = configKeysPrefix.toString();
 
-	return options.count( p+"min_replica_datacenters" ) == 1 &&
-			options.count( p+"replica_datacenters" ) == 1 &&
-			options.count( p+"log_replicas" ) == 1 &&
+	return 	options.count( p+"log_replicas" ) == 1 &&
 			options.count( p+"log_anti_quorum" ) == 1 &&
 			options.count( p+"storage_quorum" ) == 1 &&
 			options.count( p+"storage_replicas" ) == 1 &&

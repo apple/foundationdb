@@ -263,10 +263,6 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, vector<StorageSer
 			req.criticalRecruitment = true;
 			for(auto s = servers->begin(); s != servers->end(); ++s)
 				req.excludeMachines.push_back(s->locality.zoneId());
-			if( dataCenters.size() < self->configuration.minDataCenters ) {
-				for(auto dc = dataCenters.begin(); dc != dataCenters.end(); ++dc)
-					req.excludeDCs.push_back(*dc);
-			}
 
 			TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
 				.detail("ExcludingMachines", req.excludeMachines.size())

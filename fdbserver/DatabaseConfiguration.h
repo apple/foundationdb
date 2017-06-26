@@ -43,14 +43,11 @@ struct DatabaseConfiguration {
 	std::string toString() const;
 	std::map<std::string, std::string> toMap() const;
 
-	// SOMEDAY: think about changing desiredDataCenters to minDataCenters
 	// SOMEDAY: think about changing storageTeamSize to durableStorageQuorum
-	int32_t minMachinesRequired() const { return std::max(tLogReplicationFactor, std::max(storageTeamSize, desiredDataCenters)); }
+	int32_t minMachinesRequired() const { return std::max(tLogReplicationFactor, storageTeamSize); }
 	int32_t maxMachineFailuresTolerated() const { return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, durableStorageQuorum - 1); }
 
 	// Redundancy Levels
-	int32_t minDataCenters;
-	int32_t desiredDataCenters;
 	IRepPolicyRef storagePolicy;
 
 	// MasterProxy Servers

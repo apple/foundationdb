@@ -818,8 +818,8 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	g_simulator.desiredCoordinators = coordinatorCount;
 	g_simulator.killableMachines = startingConfig.maxMachineFailuresTolerated();
-	g_simulator.neededDatacenters = startingConfig.minDataCenters;
-	g_simulator.killableDatacenters = startingConfig.minDataCenters - 1;
+	g_simulator.neededDatacenters = 1;
+	g_simulator.killableDatacenters = 0;
 	g_simulator.physicalDatacenters = dataCenters;
 	g_simulator.maxCoordinatorsInDatacenter = ((coordinatorCount-1)/dataCenters) + 1;
 	g_simulator.machinesNeededForProgress = startingConfig.minMachinesRequired() + nonVersatileMachines;
