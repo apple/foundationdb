@@ -438,7 +438,6 @@ struct DDTeamCollection {
 	Database cx;
 	UID masterId;
 	int teamSize;
-	int minDataCenters, desiredDataCenters;
 	IRepPolicyRef replicationPolicy;
 	KeyValueStoreType storeType;
 
@@ -481,13 +480,11 @@ struct DDTeamCollection {
 		PromiseStream<RelocateShard> const& output,
 		Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 		int teamSize,
-		int minDataCenters,
-		int desiredDataCenters,
 		IRepPolicyRef replicationPolicy,
 		KeyValueStoreType storeType,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges )
 		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
-		 teamSize( teamSize ), minDataCenters( minDataCenters ), desiredDataCenters( desiredDataCenters ), replicationPolicy(replicationPolicy), storeType( storeType ), serverChanges(serverChanges),
+		 teamSize( teamSize ), replicationPolicy(replicationPolicy), storeType( storeType ), serverChanges(serverChanges),
 		 initialFailureReactionDelay( delay( BUGGIFY ? 0 : SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution  ) ), healthyTeamCount( 0 ),
 		 initializationDoneActor(logOnCompletion(initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
 		 unhealthyServers(0)
@@ -958,7 +955,6 @@ struct DDTeamCollection {
 		int serverCount = 0;
 		int uniqueDataCenters = 0;
 		int uniqueMachines = 0;
-		std::set<Optional<Standalone<StringRef>>> dataCenters;
 		std::set<Optional<Standalone<StringRef>>> machines;
 
 		for(auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
@@ -966,15 +962,12 @@ struct DDTeamCollection {
 				++serverCount;
 				LocalityData& serverLocation = i->second->lastKnownInterface.locality;
 				machines.insert( serverLocation.zoneId() );
-				// Only add the datacenter if it's set or we don't care (less than two datacenters targeted)
-				if( serverLocation.dcId().present() || self->desiredDataCenters < 2 )
-					dataCenters.insert( serverLocation.dcId() );
 			}
 		}
 		uniqueMachines = machines.size();
 
 		// If there are too few machines to even build teams or there are too few represented datacenters, build no new teams
-		if( uniqueMachines >= self->teamSize && dataCenters.size() >= self->minDataCenters ) {
+		if( uniqueMachines >= self->teamSize ) {
 			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER*serverCount;
 
 			// Count only properly sized teams against the desired number of teams. This is to prevent "emergency" merged teams (see MoveKeys)
@@ -989,7 +982,7 @@ struct DDTeamCollection {
 			}
 
 			TraceEvent("BuildTeamsBegin", self->masterId).detail("DesiredTeams", desiredTeams).detail("UniqueMachines", uniqueMachines)
-				.detail("TeamSize", self->teamSize).detail("Servers", serverCount).detail("DataCenters", dataCenters.size())
+				.detail("TeamSize", self->teamSize).detail("Servers", serverCount)
 				.detail("CurrentTrackedTeams", self->teams.size()).detail("TeamCount", teamCount);
 
 			if( desiredTeams > teamCount ) {
@@ -1767,14 +1760,13 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	MoveKeysLock lock,
 	PromiseStream<RelocateShard> output,
-	UID masterId, int teamSize, int minDataCenters, int desiredDataCenters,
+	UID masterId, int teamSize,
 	IRepPolicyRef replicationPolicy,
 	KeyValueStoreType storeType,
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
 	Future<Void> readyToStart )
 {
-	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, teamSize, minDataCenters,
-		desiredDataCenters, replicationPolicy, storeType, serverChanges );
+	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, teamSize, replicationPolicy, storeType, serverChanges );
 
 	state Future<Void> loggingTrigger = Void();
 	state PromiseStream<Void> serverRemoved;
@@ -2120,8 +2112,7 @@ ACTOR Future<Void> dataDistribution(
 			actors.push_back( popOldTags( cx, logSystem, recoveryCommitVersion) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, shardsAffectedByTeamFailure, output, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, getShardMetrics, tci, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, configuration.storageTeamSize, configuration.durableStorageQuorum, lastLimited ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tci, cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration.storageTeamSize, configuration.minDataCenters,
-				configuration.desiredDataCenters, configuration.storagePolicy, configuration.storageServerStoreType, serverChanges, readyToStart.getFuture() ), "DDTeamCollection", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tci, cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration.storageTeamSize, configuration.storagePolicy, configuration.storageServerStoreType, serverChanges, readyToStart.getFuture() ), "DDTeamCollection", mi.id(), &normalDDQueueErrors() ) );
 
 			Void _ = wait( waitForAll( actors ) );
 			return Void();
@@ -2153,8 +2144,6 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 		PromiseStream<RelocateShard>(),
 		Reference<ShardsAffectedByTeamFailure>(new ShardsAffectedByTeamFailure()),
 		teamSize,
-		-1,
-		-1,
 		policy,
 		KeyValueStoreType(),
 		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>>()

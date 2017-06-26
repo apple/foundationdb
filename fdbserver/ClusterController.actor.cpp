@@ -452,28 +452,23 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 		ProcessClass::Fitness resolverFit;
 		int proxyCount;
 		int resolverCount;
-		int datacenters;
 
-		InDatacenterFitness( ProcessClass::Fitness proxyFit, ProcessClass::Fitness resolverFit, int proxyCount, int resolverCount, int datacenters)
-			: proxyFit(proxyFit), resolverFit(resolverFit), proxyCount(proxyCount), resolverCount(resolverCount), datacenters(datacenters) {}
+		InDatacenterFitness( ProcessClass::Fitness proxyFit, ProcessClass::Fitness resolverFit, int proxyCount, int resolverCount)
+			: proxyFit(proxyFit), resolverFit(resolverFit), proxyCount(proxyCount), resolverCount(resolverCount) {}
 
-		InDatacenterFitness() : proxyFit( ProcessClass::NeverAssign ), resolverFit( ProcessClass::NeverAssign ), datacenters(10000000) {}
+		InDatacenterFitness() : proxyFit( ProcessClass::NeverAssign ), resolverFit( ProcessClass::NeverAssign ) {}
 
 		InDatacenterFitness( vector<std::pair<WorkerInterface, ProcessClass>> proxies, vector<std::pair<WorkerInterface, ProcessClass>> resolvers ) {
-			std::set<Optional<Standalone<StringRef>>> dcs;
 			proxyFit = ProcessClass::BestFit;
 			resolverFit = ProcessClass::BestFit;
 			for(auto it: proxies) {
-				dcs.insert(it.first.locality.dcId());
 				proxyFit = std::max(proxyFit, it.second.machineClassFitness( ProcessClass::Proxy ));
 			}
 			for(auto it: resolvers) {
-				dcs.insert(it.first.locality.dcId());
 				resolverFit = std::max(resolverFit, it.second.machineClassFitness( ProcessClass::Resolver ));
 			}
 			proxyCount = proxies.size();
 			resolverCount = resolvers.size();
-			datacenters = dcs.size();
 		}
 
 		InDatacenterFitness( vector<MasterProxyInterface> proxies, vector<ResolverInterface> resolvers, vector<ProcessClass> proxyClasses, vector<ProcessClass> resolverClasses ) {
@@ -491,12 +486,9 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 
 			proxyCount = proxies.size();
 			resolverCount = resolvers.size();
-			datacenters = dcs.size();
 		}
 
 		bool operator < (InDatacenterFitness const& r) const {
-			if(datacenters != r.datacenters) return datacenters < r.datacenters;
-
 			int lmax = std::max(resolverFit,proxyFit);
 			int lmin = std::min(resolverFit,proxyFit);
 			int rmax = std::max(r.resolverFit,r.proxyFit);
@@ -508,17 +500,16 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			return resolverCount > r.resolverCount;
 		}
 
-		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && datacenters == r.datacenters && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
+		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
 	};
 
 	struct AcrossDatacenterFitness {
 		ProcessClass::Fitness tlogFit;
 		int tlogCount;
-		int datacenters;
 
-		AcrossDatacenterFitness( ProcessClass::Fitness tlogFit, int tlogCount, int datacenters ) : tlogFit(tlogFit), tlogCount(tlogCount), datacenters(datacenters) {}
+		AcrossDatacenterFitness( ProcessClass::Fitness tlogFit, int tlogCount) : tlogFit(tlogFit), tlogCount(tlogCount) {}
 
-		AcrossDatacenterFitness() : tlogFit( ProcessClass::NeverAssign ), datacenters(0), tlogCount(0) {}
+		AcrossDatacenterFitness() : tlogFit( ProcessClass::NeverAssign ), tlogCount(0) {}
 
 		AcrossDatacenterFitness( vector<std::pair<WorkerInterface, ProcessClass>> tlogs ) {
 			std::set<Optional<Standalone<StringRef>>> dcs;
@@ -527,7 +518,6 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 				dcs.insert(it.first.locality.dcId());
 				tlogFit = std::max(tlogFit, it.second.machineClassFitness( ProcessClass::TLog ));
 			}
-			datacenters = dcs.size();
 			tlogCount = tlogs.size();
 		}
 
@@ -539,17 +529,15 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 				dcs.insert(tlogs[i].interf().locality.dcId());
 				tlogFit = std::max(tlogFit, processClasses[i].machineClassFitness( ProcessClass::TLog ));
 			}
-			datacenters = dcs.size();
 			tlogCount = tlogs.size();
 		}
 
 		bool operator < (AcrossDatacenterFitness const& r) const {
 			if(tlogFit != r.tlogFit) return tlogFit < r.tlogFit;
-			if(tlogCount != r.tlogCount) return tlogCount > r.tlogCount;
-			return datacenters > r.datacenters;
+			return tlogCount > r.tlogCount;
 		}
 
-		bool operator == (AcrossDatacenterFitness const& r) const { return datacenters == r.datacenters && tlogFit == r.tlogFit && tlogCount == r.tlogCount; }
+		bool operator == (AcrossDatacenterFitness const& r) const { return tlogFit == r.tlogFit && tlogCount == r.tlogCount; }
 	};
 
 	std::set<Optional<Standalone<StringRef>>> getDatacenters( DatabaseConfiguration const& conf, bool checkStable = false ) {
@@ -613,8 +601,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			.detail("desiredResolvers", req.configuration.getDesiredResolvers()).detail("actualResolvers", result.resolvers.size());
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
-			( AcrossDatacenterFitness(tlogs) > AcrossDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), req.configuration.minDataCenters) ||
-			bestFitness > InDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_PROXY_FITNESS, (ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredProxies(), req.configuration.getDesiredResolvers(), 1) ) ) {
+			( AcrossDatacenterFitness(tlogs) > AcrossDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
+			bestFitness > InDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_PROXY_FITNESS, (ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredProxies(), req.configuration.getDesiredResolvers()) ) ) {
 			throw operation_failed();
 		}
 
@@ -697,10 +685,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 		if(oldInFit < newInFit) return false;
 		if(oldMasterFit > newMasterFit || oldAcrossFit > newAcrossFit || oldInFit > newInFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit)
-				.detail("oldAcrossFitD", oldAcrossFit.datacenters).detail("newAcrossFitD", newAcrossFit.datacenters)
 				.detail("oldAcrossFitC", oldAcrossFit.tlogCount).detail("newAcrossFitC", newAcrossFit.tlogCount)
 				.detail("oldAcrossFitT", oldAcrossFit.tlogFit).detail("newAcrossFitT", newAcrossFit.tlogFit)
-				.detail("oldInFitD", oldInFit.datacenters).detail("newInFitD", newInFit.datacenters)
 				.detail("oldInFitP", oldInFit.proxyFit).detail("newInFitP", newInFit.proxyFit)
 				.detail("oldInFitR", oldInFit.resolverFit).detail("newInFitR", newInFit.resolverFit)
 				.detail("oldInFitPC", oldInFit.proxyCount).detail("newInFitPC", newInFit.proxyCount)
