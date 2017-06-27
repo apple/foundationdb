@@ -54,7 +54,7 @@ class PythonPerformance(PythonTest):
     def __init__(self, key_count=1000000, key_size=16, value_size=100):
         super(PythonPerformance, self).__init__()
         self.key_count = key_count
-        self.key_size = 16
+        self.key_size = key_size
         self.value_str = ''.join(['x' for i in range(value_size)])
 
     #Python Performance Tests (checks if functions run and yield correct results, gets performance indicators)
