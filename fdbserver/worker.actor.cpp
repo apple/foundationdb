@@ -171,8 +171,6 @@ ACTOR Future<Void> loadedPonger( FutureStream<LoadedPingRequest> pings ) {
 	}
 }
 
-#define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
-
 StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
@@ -596,7 +594,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
-				startRole( s.storeID, interf.id(), "TLog", details, "Restored" );
+				startRole( s.storeID, interf.id(), "SharedTLog", details, "Restored" );
 
 				Promise<Void> oldLog;
 				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog );
@@ -605,7 +603,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				if(tlog.isReady()) {
 					tlog = oldLog.getFuture() || tl;
 				}
-				errorForwarders.add( forwardError( errors, "TLog", s.storeID, tl ) );
+				errorForwarders.add( forwardError( errors, "SharedTLog", s.storeID, tl ) );
 			}
 		}
 
@@ -664,7 +662,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					details["StorageEngine"] = req.storeType.toString();
 					
 					//FIXME: start role for every tlog instance, rather that just for the shared actor, also use a different role type for the shared actor
-					startRole( logId, interf.id(), "TLog", details );
+					startRole( logId, interf.id(), "SharedTLog", details );
 
 					std::string filename = filenameFromId( req.storeType, folder, fileLogDataPrefix.toString(), logId );
 					IKeyValueStore* data = openKVStore( req.storeType, filename, logId, memoryLimit );
@@ -674,7 +672,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>() );
 					tlog = handleIOErrors( tlog, data, logId );
 					tlog = handleIOErrors( tlog, queue, logId );
-					errorForwarders.add( forwardError( errors, "TLog", logId, tlog ) );
+					errorForwarders.add( forwardError( errors, "SharedTLog", logId, tlog ) );
 				}
 			}
 			when( InitializeStorageRequest req = waitNext(interf.storage.getFuture()) ) {

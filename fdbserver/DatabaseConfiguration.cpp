@@ -77,15 +77,18 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 	std::map<std::string, std::string> result;
 
 	if( initialized ) {
-		if( tLogReplicationFactor == durableStorageQuorum &&
-			durableStorageQuorum == storageTeamSize &&
+		if( durableStorageQuorum == storageTeamSize &&
 			tLogWriteAntiQuorum == 0 ) {
-			if( durableStorageQuorum == 1 )
+			if( tLogReplicationFactor == 1 && durableStorageQuorum == 1 )
 				result["redundancy_mode"] = "single";
-			else if( durableStorageQuorum == 2 )
+			else if( tLogReplicationFactor == 2 && durableStorageQuorum == 2 )
 				result["redundancy_mode"] = "double";
-			else if( durableStorageQuorum == 3 )
+			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 )
 				result["redundancy_mode"] = "triple";
+			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 2 )
+				result["redundancy_mode"] = "fast_recovery_double";
+			else if( tLogReplicationFactor == 4 && durableStorageQuorum == 3 )
+				result["redundancy_mode"] = "fast_recovery_triple";
 			else
 				result["redundancy_mode"] = "custom";
 		} else

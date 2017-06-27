@@ -2424,6 +2424,7 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 			tr.info.taskID = info.taskID;
 			tr.setOption( FDBTransactionOptions::ACCESS_SYSTEM_KEYS );
 			tr.setOption( FDBTransactionOptions::CAUSAL_WRITE_RISKY );
+			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.addReadConflictRange(range);
 			tr.addWriteConflictRange(range);
 			Void _ = wait( tr.commit() );

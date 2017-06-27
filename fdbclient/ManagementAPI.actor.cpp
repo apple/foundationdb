@@ -87,7 +87,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		return out;
 	}
 
-	std::string redundancy, log_replicas, log_recovery_anti_quorum;
+	std::string redundancy, log_replicas;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
 
@@ -95,36 +95,23 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	if (mode == "single") {
 		redundancy="1";
 		log_replicas="1";
-		log_recovery_anti_quorum="0";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyOne());
 
-	} else if(mode == "double") {
+	} else if(mode == "double" || mode == "fast_recovery_double") {
 		redundancy="2";
 		log_replicas="2";
-		log_recovery_anti_quorum="0";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "triple") {
+	} else if(mode == "triple" || mode == "fast_recovery_triple") {
 		redundancy="3";
 		log_replicas="3";
-		log_recovery_anti_quorum="0";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "fast_recovery_double") {
-		redundancy="2";
-		log_replicas="3";
-		log_recovery_anti_quorum="1";
-		storagePolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
-		tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "fast_recovery_triple") {
-		redundancy="3";
-		log_replicas="4";
-		log_recovery_anti_quorum="1";
-		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-		tLogPolicy = IRepPolicyRef(new PolicyAcross(4, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "two_datacenter") {
-		redundancy="3"; log_replicas="3"; log_recovery_anti_quorum="0";
+		redundancy="3";
+		log_replicas="3";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "three_datacenter") {
-		redundancy="3"; log_replicas="3"; log_recovery_anti_quorum="0";
+		redundancy="3";
+		log_replicas="3";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAnd({
 			IRepPolicyRef(new PolicyAcross(3, "dcid", IRepPolicyRef(new PolicyOne()))),
 			IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())))
@@ -132,7 +119,6 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else if(mode == "three_data_hall") {
 		redundancy="3";
 		log_replicas="4";
-		log_recovery_anti_quorum="0";
 		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "data_hall", IRepPolicyRef(new PolicyOne())));
 		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
@@ -144,7 +130,6 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 			out[p+"storage_quorum"] = redundancy;
 		out[p+"log_replicas"] = log_replicas;
 		out[p+"log_anti_quorum"] = "0";
-		out[p+"log_recovery_anti_quorum"] = log_recovery_anti_quorum;
 
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, storagePolicy);
@@ -303,10 +288,10 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		result.auto_replication = "double";
 		storage_replication = 2;
 		log_replication = 2;
-	} else if( result.old_replication == "double" ) {
+	} else if( result.old_replication == "double" || result.old_replication == "fast_recovery_double" ) {
 		storage_replication = 2;
 		log_replication = 2;
-	} else if( result.old_replication == "triple" ) {
+	} else if( result.old_replication == "triple" || result.old_replication == "fast_recovery_triple" ) {
 		storage_replication = 3;
 		log_replication = 3;
 	} else if( result.old_replication == "two_datacenter" ) {
@@ -315,12 +300,6 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	} else if( result.old_replication == "three_datacenter" ) {
 		storage_replication = 3;
 		log_replication = 3;
-	} else if( result.old_replication == "fast_recovery_double" ) {
-		storage_replication = 2;
-		log_replication = 3;
-	} else if( result.old_replication == "fast_recovery_triple" ) {
-		storage_replication = 3;
-		log_replication = 4;
 	} else
 		return ConfigureAutoResult();
 

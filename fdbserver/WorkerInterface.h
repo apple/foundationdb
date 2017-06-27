@@ -32,6 +32,8 @@
 #include "fdbrpc/MultiInterface.h"
 #include "fdbclient/ClientWorkerInterface.h"
 
+#define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
+
 struct WorkerInterface {
 	ClientWorkerInterface clientInterface;
 	LocalityData locality;
