@@ -20,6 +20,9 @@
 
 package com.apple.cie.foundationdb.test;
 
+import com.apple.cie.foundationdb.subspace.Subspace;
+import com.apple.cie.foundationdb.tuple.Tuple;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -29,13 +32,15 @@ public class TesterArgs {
     private boolean multiversionApi;
     private boolean callbacksOnExternalThread;
     private boolean externalClient;
+    private Subspace subspace;
     private List<String> testsToRun;
 
-    private TesterArgs(String outputDirectory, boolean multiversionApi, boolean callbacksOnExternalThread, boolean externalClient, List<String> testsToRun) {
+    private TesterArgs(String outputDirectory, boolean multiversionApi, boolean callbacksOnExternalThread, boolean externalClient, Subspace subspace, List<String> testsToRun) {
         this.outputDirectory = outputDirectory;
         this.multiversionApi = multiversionApi;
         this.callbacksOnExternalThread = callbacksOnExternalThread;
         this.externalClient = externalClient;
+        this.subspace = subspace;
         this.testsToRun = testsToRun;
     }
 
@@ -68,6 +73,7 @@ public class TesterArgs {
         boolean multiversionApi = true;
         boolean callbacksOnExternalThread = false;
         boolean externalClient = false;
+        Subspace subspace = new Subspace();
         List<String> testsToRun = new ArrayList<String>();
 
         for (int i = 0; i < args.length; i++) {
@@ -79,6 +85,14 @@ public class TesterArgs {
                     System.out.println("No output directory specified for argument " + arg + "\n");
                     printUsage();
                     throw new IllegalArgumentException("No output directory specified for argument " + arg);
+                }
+            } else if (arg.equals("--subspace")) {
+                if (i + 1 < args.length) {
+                    subspace = new Subspace(Tuple.from(args[++i]));
+                } else {
+                    System.out.println("No subspace specified for argument " + args + "\n");
+                    printUsage();
+                    throw new IllegalArgumentException("Not subspace specified for argument " + arg);
                 }
             } else if (arg.equals("--disable-multiversion-api")) {
                 multiversionApi = false;
@@ -108,7 +122,7 @@ public class TesterArgs {
             }
         }
 
-        return new TesterArgs(outputDirectory, multiversionApi, callbacksOnExternalThread, externalClient, testsToRun);
+        return new TesterArgs(outputDirectory, multiversionApi, callbacksOnExternalThread, externalClient, subspace, testsToRun);
     }
 
     // Accessors.
@@ -127,6 +141,10 @@ public class TesterArgs {
 
     public boolean useExternalClient() {
         return externalClient;
+    }
+
+    public Subspace getSubspace() {
+        return subspace;
     }
 
     public List<String> getTestsToRun() {

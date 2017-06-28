@@ -22,6 +22,7 @@ package com.apple.cie.foundationdb.test;
 
 import com.apple.cie.foundationdb.Database;
 import com.apple.cie.foundationdb.Transaction;
+import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
 
 import java.util.*;
 import java.util.function.Function;
@@ -33,8 +34,35 @@ public class RYWBenchmark extends AbstractTester {
     public static final int DEFAULT_KEY_COUNT = 10_000;
     public static final int DEFAULT_KEY_SIZE = 16;
 
-    private final Map<String, Function<? super Transaction, ? extends Double>> tests;
     private final String keyFormat;
+
+    private enum Tests {
+        GET_SINGLE("RYW Java Completable: get single cached value throughput"),
+        GET_MANY_SEQUENTIAL("RYW Java Completable: get sequential cached value throughput"),
+        GET_RANGE_BASIC("RYW Java Completable: get range cached values throughput"),
+        SINGLE_CLEAR_GET_RANGE("RYW Java Completable: get range cached values with clears throughput"),
+        CLEAR_RANGE_GET_RANGE("RYW Java Completable: get range cached values with clear ranges throughput"),
+        INTERLEAVED_SETS_GETS("RYW Java Completable: interleaved sets and gets on a single key throughput");
+
+        private String kpi;
+        private Function<? super Transaction, ? extends Double> function;
+
+        Tests(String kpi) {
+            this.kpi = kpi;
+        }
+
+        public void setFunction(Function<?super Transaction, ? extends Double> function) {
+            this.function = function;
+        }
+
+        public Function<? super Transaction, ? extends Double> getFunction() {
+            return function;
+        }
+
+        public String getKpi() {
+            return kpi;
+        }
+    }
 
     public RYWBenchmark() {
         this(DEFAULT_KEY_COUNT, DEFAULT_KEY_SIZE);
@@ -46,13 +74,12 @@ public class RYWBenchmark extends AbstractTester {
 
         keyFormat = "%0" + keySize + "d";
 
-        tests = new HashMap<>();
-        tests.put("get_single", tr -> getSingle(tr, 10_000));
-        tests.put("get_many_sequential", tr -> getManySequential(tr, 10_000));
-        tests.put("get_range_basic", tr -> getRangeBasic(tr, 1_000));
-        tests.put("single_clear_get_range", tr -> singleClearGetRange(tr, 1_000));
-        tests.put("clear_range_get_range", tr -> clearRangeGetRange(tr, 1_000));
-        tests.put("interleaved_sets_gets", tr -> interleavedSetsGets(tr, 10_000));
+        Tests.GET_SINGLE.setFunction(tr -> getSingle(tr, 10_000));
+        Tests.GET_MANY_SEQUENTIAL.setFunction(tr -> getManySequential(tr, 10_000));
+        Tests.GET_RANGE_BASIC.setFunction(tr -> getRangeBasic(tr, 1_000));
+        Tests.SINGLE_CLEAR_GET_RANGE.setFunction(tr -> singleClearGetRange(tr, 1_000));
+        Tests.CLEAR_RANGE_GET_RANGE.setFunction(tr -> clearRangeGetRange(tr, 1_000));
+        Tests.INTERLEAVED_SETS_GETS.setFunction(tr -> interleavedSetsGets(tr, 10_000));
     }
 
     @Override
@@ -62,18 +89,21 @@ public class RYWBenchmark extends AbstractTester {
 
         List<String> testsToRun;
         if (args.getTestsToRun().isEmpty()) {
-            testsToRun = tests.keySet().stream().sorted().collect(Collectors.toList());
+            testsToRun = Arrays.stream(Tests.values()).map(Tests::name).map(String::toLowerCase).sorted().collect(Collectors.toList());
         } else {
             testsToRun = args.getTestsToRun();
         }
 
         for (String test : testsToRun) {
-            if (!tests.containsKey(test)) {
+            Tests testObj;
+            try {
+                testObj = Tests.valueOf(test.toUpperCase());
+            } catch (IllegalArgumentException e) {
                 result.addError(new IllegalArgumentException("Test " + test + " not implemented"));
                 continue;
             }
 
-            Function<? super Transaction, ? extends Double> function = tests.get(test);
+            Function<? super Transaction, ? extends Double> function = testObj.getFunction();
 
             try {
                 Thread.sleep(5_000);
@@ -96,7 +126,7 @@ public class RYWBenchmark extends AbstractTester {
 
             if (results.size() == NUM_RUNS) {
                 Collections.sort(results);
-                result.addKpi(String.format("%s (%s)", test, multiVersionDescription()), results.get(results.size() / 2).intValue(), "keys/s");
+                result.addKpi(String.format("%s", testObj.getKpi()), results.get(results.size() / 2).intValue(), "keys/s");
             }
         }
 
@@ -184,7 +214,7 @@ public class RYWBenchmark extends AbstractTester {
     }
 
     public byte[] key(int i) {
-        return String.format(keyFormat, i).getBytes(ASCII);
+        return ByteArrayUtil.join(args.getSubspace().pack(), String.format(keyFormat, i).getBytes(ASCII));
     }
 
     public static void main(String[] args) {

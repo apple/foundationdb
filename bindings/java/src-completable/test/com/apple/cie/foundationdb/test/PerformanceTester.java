@@ -27,15 +27,12 @@ import com.apple.cie.foundationdb.TransactionContext;
 import com.apple.cie.foundationdb.async.AsyncUtil;
 import com.apple.cie.foundationdb.subspace.Subspace;
 import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.tuple.Tuple;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -49,14 +46,44 @@ public class PerformanceTester extends AbstractTester {
     private final int keySize;
     private final int valueSize;
 
-    private final Subspace subspace;
     private final String keyFormat;
     private final byte[] valueBytes;
-    private final Map<String, Function<? super Database, ? extends Double>> tests;
 
     public static final int DEFAULT_KEY_COUNT = 10_000;
     public static final int DEFAULT_KEY_SIZE = 16;
     public static final int DEFAULT_VALUE_SIZE = 100;
+
+    private enum Tests {
+        FUTURE_LATENCY("Java Completable API future throughput"),
+        SET("Java Completable API set throughput"),
+        CLEAR("Java Completable API clear throughput"),
+        CLEAR_RANGE("Java Completable API clear_range throughput"),
+        PARALLEL_GET("Java Completable API parallel get throughput"),
+        SERIAL_GET("Java Completable API serial get throughput"),
+        GET_RANGE("Java Completable API get_range throughput"),
+        GET_KEY("Java Completable API get_key throughput"),
+        ALTERNATING_GET_SET("Java Completable API alternating get and set throughput"),
+        WRITE_TRANSACTION("Java Completable API single-key transaction throughput");
+
+        private String kpi;
+        private Function<? super Database, ? extends Double> function;
+
+        Tests(String kpi) {
+            this.kpi = kpi;
+        }
+
+        public void setFunction(Function<?super Database, ? extends Double> function) {
+            this.function = function;
+        }
+
+        public Function<? super Database, ? extends Double> getFunction() {
+            return function;
+        }
+
+        public String getKpi() {
+            return kpi;
+        }
+    }
 
     public PerformanceTester() {
         this(DEFAULT_KEY_COUNT, DEFAULT_KEY_SIZE, DEFAULT_VALUE_SIZE);
@@ -68,24 +95,22 @@ public class PerformanceTester extends AbstractTester {
         this.keySize = keySize;
         this.valueSize = valueSize;
 
-        subspace = new Subspace(Tuple.from("java-completable-test"));
         keyFormat = "%0" + keySize + "d";
 
         valueBytes = new byte[valueSize];
         Arrays.fill(valueBytes, (byte)'x');
 
         // Initialize tests.
-        tests = new HashMap<>();
-        tests.put("future_latency", db -> futureLatency(db, 100_000));
-        tests.put("clear", db -> clear(db, 100_000));
-        tests.put("clear_range", db -> clearRange(db, 100_000));
-        tests.put("set", db -> set(db, 100_000));
-        tests.put("parallel_get", db -> parallelGet(db, 10_000));
-        tests.put("alternating_get_set", db -> alternatingGetSet(db, 2_000));
-        tests.put("serial_get", db -> serialGet(db, 2_000));
-        tests.put("get_range", db -> getRange(db, 1000));
-        tests.put("get_key", db -> getKey(db, 2_000));
-        tests.put("write_transaction", db -> writeTransaction(db, 1_000));
+        Tests.FUTURE_LATENCY.setFunction(db -> futureLatency(db, 100_000));
+        Tests.SET.setFunction(db -> set(db, 100_000));
+        Tests.CLEAR.setFunction(db -> clear(db, 100_000));
+        Tests.CLEAR_RANGE.setFunction(db -> clearRange(db, 100_000));
+        Tests.PARALLEL_GET.setFunction(db -> parallelGet(db, 10_000));
+        Tests.SERIAL_GET.setFunction(db -> serialGet(db, 2_000));
+        Tests.GET_RANGE.setFunction(db -> getRange(db, 1_000));
+        Tests.GET_KEY.setFunction(db -> getKey(db, 2_000));
+        Tests.ALTERNATING_GET_SET.setFunction(db -> alternatingGetSet(db, 2_000));
+        Tests.WRITE_TRANSACTION.setFunction(db -> writeTransaction(db, 1_000));
     }
 
     @Override
@@ -94,18 +119,21 @@ public class PerformanceTester extends AbstractTester {
 
         List<String> testsToRun;
         if (args.getTestsToRun().isEmpty()) {
-            testsToRun = tests.keySet().stream().sorted().collect(Collectors.toList());
+            testsToRun = Arrays.stream(Tests.values()).map(Tests::name).map(String::toLowerCase).sorted().collect(Collectors.toList());
         } else {
             testsToRun = args.getTestsToRun();
         }
 
         for (String test : testsToRun) {
-            if (!tests.containsKey(test)) {
+            Tests testObj;
+            try {
+                testObj = Tests.valueOf(test.toUpperCase());
+            } catch (IllegalArgumentException e) {
                 result.addError(new IllegalArgumentException("Test " + test + " not implemented"));
                 continue;
             }
 
-            Function<? super Database, ? extends Double> function = tests.get(test);
+            Function<? super Database, ? extends Double> function = testObj.getFunction();
 
             try {
                 Thread.sleep(5_000);
@@ -128,7 +156,7 @@ public class PerformanceTester extends AbstractTester {
 
             if (results.size() == NUM_RUNS) {
                 Collections.sort(results);
-                result.addKpi(String.format("%s (%s)", test, multiVersionDescription()), results.get(results.size()/2).intValue(), "keys/s");
+                result.addKpi(String.format("%s (%s)", testObj.getKpi(), multiVersionDescription()), results.get(results.size()/2).intValue(), "keys/s");
             }
         }
     }
@@ -136,7 +164,16 @@ public class PerformanceTester extends AbstractTester {
     public void insertData(Database db) {
         System.out.println("Loading database");
 
-        db.run(tr -> { tr.clear(subspace.range()); return null; });
+        db.run(tr -> {
+            byte[] subspacePrefix = args.getSubspace().pack();
+            if (subspacePrefix.length == 0) {
+                // Clear user space.
+                tr.clear(new byte[0], new byte[]{(byte)0xff});
+            } else {
+                tr.clear(args.getSubspace().range());
+            }
+            return null;
+        });
 
         int keysPerActor = 100_000 / (keySize + valueSize);
         int numActors = (int)Math.ceil(keyCount*1.0/keysPerActor);
@@ -323,7 +360,7 @@ public class PerformanceTester extends AbstractTester {
     }
 
     public byte[] key(int i) {
-        return ByteArrayUtil.join(subspace.pack(), String.format(keyFormat, i).getBytes(ASCII));
+        return ByteArrayUtil.join(args.getSubspace().pack(), String.format(keyFormat, i).getBytes(ASCII));
     }
 
     public int randomKeyIndex() {
