@@ -273,7 +273,7 @@ Reference<ITLSPolicy> TLSOptions::get_policy() {
 	return policy;
 }
 
-static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_error, ... ) {
+static void TLSConnectionLogFunc( const char* event, void* uid_ptr, int is_error, ... ) {
 	UID uid;
 
 	if ( uid_ptr )
