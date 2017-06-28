@@ -365,6 +365,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	~LogData() {
 		tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
+		TraceEvent("TLogBytesWhenRemoved", tli.id()).detail("sharedBytesInput", tLogData->bytesInput).detail("sharedBytesDurable", tLogData->bytesDurable).detail("localBytesInput", bytesInput.getValue()).detail("localBytesDurable", bytesDurable.getValue());
+
 		ASSERT(tLogData->bytesDurable <= tLogData->bytesInput);
 		endRole(tli.id(), "TLog", "Error", true);
 	}
@@ -536,6 +538,10 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 		self->bytesDurable += logData->messageBlocks.front().second.size() * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 		logData->messageBlocks.pop_front();
 		Void _ = wait(yield(TaskUpdateStorage));
+	}
+
+	if(logData->bytesDurable.getValue() > logData->bytesInput.getValue() || self->bytesDurable > self->bytesInput) {
+		TraceEvent(SevError, "BytesDurableTooLarge", logData->logId).detail("sharedBytesInput", self->bytesInput).detail("sharedBytesDurable", self->bytesDurable).detail("localBytesInput", logData->bytesInput.getValue()).detail("localBytesDurable", logData->bytesDurable.getValue());
 	}
 
 	ASSERT(logData->bytesDurable.getValue() <= logData->bytesInput.getValue());
