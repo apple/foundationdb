@@ -135,7 +135,7 @@ class RYWBenchmark(PythonTest):
       start = time.time()
       for i in range(0, count):
         list(tr.get_range(self.key(0), self.key(self.key_count)))
-      kpi = self.key_count * count / (time.time() - start)
+      kpi = self.key_count * count / 2 / (time.time() - start)
       self.insert_data(tr)
       return kpi
 
@@ -145,7 +145,7 @@ class RYWBenchmark(PythonTest):
       start = time.time()
       for i in range(0, count):
         list(tr.get_range(self.key(0), self.key(self.key_count)))
-      kpi = self.key_count * count / (time.time() - start)
+      kpi = self.key_count * count * 3 / 4 / (time.time() - start)
       self.insert_data(tr)
       return kpi
 
