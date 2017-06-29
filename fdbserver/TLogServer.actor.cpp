@@ -286,8 +286,9 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 					self->version_messages.pop_front();
 				}
 
-				tlogData->bytesDurable += (messagesErased * sizeof(std::pair<Version, LengthPrefixedStringRef>) * SERVER_KNOBS->VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS) >> 10;
-				*gBytesErased += (messagesErased * sizeof(std::pair<Version, LengthPrefixedStringRef>) * SERVER_KNOBS->VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS) >> 10;
+				int64_t bytesErased = (messagesErased * sizeof(std::pair<Version, LengthPrefixedStringRef>) * SERVER_KNOBS->VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS) >> 10;
+				tlogData->bytesDurable += bytesErased;
+				*gBytesErased += bytesErased;
 				Void _ = wait(yield(taskID));
 			}
 
@@ -353,6 +354,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		queueCommittedVersion.initMetric(LiteralStringRef("TLog.QueueCommittedVersion"), cc.id);
 
 		specialCounter(cc, "version", [this](){ return this->version.get(); });
+		specialCounter(cc, "sharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
+		specialCounter(cc, "sharedBytesDurable", [tLogData](){ return tLogData->bytesDurable; });
 		specialCounter(cc, "kvstoreBytesUsed", [tLogData](){ return tLogData->persistentData->getStorageBytes().used; });
 		specialCounter(cc, "kvstoreBytesFree", [tLogData](){ return tLogData->persistentData->getStorageBytes().free; });
 		specialCounter(cc, "kvstoreBytesAvailable", [tLogData](){ return tLogData->persistentData->getStorageBytes().available; });
@@ -365,6 +368,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	~LogData() {
 		tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
+		TraceEvent("TLogBytesWhenRemoved", tli.id()).detail("sharedBytesInput", tLogData->bytesInput).detail("sharedBytesDurable", tLogData->bytesDurable).detail("localBytesInput", bytesInput.getValue()).detail("localBytesDurable", bytesDurable.getValue());
+
 		ASSERT(tLogData->bytesDurable <= tLogData->bytesInput);
 		endRole(tli.id(), "TLog", "Error", true);
 	}
@@ -532,10 +537,15 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	Void _ = wait(yield(TaskUpdateStorage));
 
 	while(!logData->messageBlocks.empty() && logData->messageBlocks.front().first <= newPersistentDataVersion) {
-		logData->bytesDurable += logData->messageBlocks.front().second.size() * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
-		self->bytesDurable += logData->messageBlocks.front().second.size() * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
+		int64_t bytesErased = int64_t(logData->messageBlocks.front().second.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
+		logData->bytesDurable += bytesErased;
+		self->bytesDurable += bytesErased;
 		logData->messageBlocks.pop_front();
 		Void _ = wait(yield(TaskUpdateStorage));
+	}
+
+	if(logData->bytesDurable.getValue() > logData->bytesInput.getValue() || self->bytesDurable > self->bytesInput) {
+		TraceEvent(SevError, "BytesDurableTooLarge", logData->logId).detail("sharedBytesInput", self->bytesInput).detail("sharedBytesDurable", self->bytesDurable).detail("localBytesInput", logData->bytesInput.getValue()).detail("localBytesDurable", logData->bytesDurable.getValue());
 	}
 
 	ASSERT(logData->bytesDurable.getValue() <= logData->bytesInput.getValue());
