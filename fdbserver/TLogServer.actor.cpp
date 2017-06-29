@@ -177,29 +177,6 @@ private:
 	}
 };
 
-struct LengthPrefixedStringRef {
-	// Represents a pointer to a string which is prefixed by a 4-byte length
-	// A LengthPrefixedStringRef is only pointer-sized (8 bytes vs 12 bytes for StringRef), but the corresponding string is 4 bytes bigger, and
-	// substring operations aren't efficient as they are with StringRef.  It's a good choice when there might be lots of references to the same
-	// exact string.
-
-	uint32_t* length;
-
-	StringRef toStringRef() const { ASSERT(length); return StringRef( (uint8_t*)(length+1), *length ); }
-	int expectedSize() const { ASSERT(length); return *length; }
-	uint32_t* getLengthPtr() const { return length; }
-
-	LengthPrefixedStringRef() : length(NULL) {}
-	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
-};
-
-template<class T>
-struct CompareFirst {
-	bool operator() (T const& lhs, T const& rhs) const {
-		return lhs.first < rhs.first;
-	}
-};
-
 struct TLogData : NonCopyable {
 	AsyncTrigger newLogData;
 	Deque<UID> queueOrder;
@@ -339,12 +316,13 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	PromiseStream<Future<Void>> addActor;
 	TLogData* tLogData;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf) : tLogData(tLogData), knownCommittedVersion(0), tli(interf), logId(interf.id()),
+	int persistentDataFormat;
+	explicit LogData(TLogData* tLogData, TLogInterface interf, int persistentDataFormat = 1) : tLogData(tLogData), knownCommittedVersion(0), tli(interf), logId(interf.id()),
 			cc("TLog", interf.id().toString()),
 			bytesInput("bytesInput", cc),
 			bytesDurable("bytesDurable", cc),
 			// These are initialized differently on init() or recovery
-			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion)
+			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), persistentDataFormat(persistentDataFormat)
 	{
 		startRole(interf.id(), UID(), "TLog");
 
@@ -414,8 +392,8 @@ KeyRange prefixRange( KeyRef prefix ) {
 ////// Persistence format (for self->persistentData)
 
 // Immutable keys
-static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/3") );
-static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/2"), LiteralStringRef("FoundationDB/LogServer/2/4") );
+static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/4") );
+static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/2"), LiteralStringRef("FoundationDB/LogServer/2/5") );
 static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
 
 // Updated on updatePersistentData()
@@ -826,7 +804,20 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			messages << int32_t(-1) << currentVersion;
 		}
 
-		messages << it->second.toStringRef();
+		if(self->persistentDataFormat == 0) {
+			BinaryReader rd( it->second.getLengthPtr(), it->second.expectedSize()+4, Unversioned() );
+			while(!rd.empty()) {
+				int32_t messageLength;
+				uint32_t subVersion;
+				rd >> messageLength >> subVersion;
+				messageLength += sizeof(uint16_t);
+				messages << messageLength << subVersion << uint16_t(0);
+				messageLength -= (sizeof(subVersion) + sizeof(uint16_t));
+				messages.serializeBytes(rd.readBytes(messageLength), messageLength);
+			}
+		} else {
+			messages << it->second.toStringRef();
+		}
 	}
 }
 
@@ -869,6 +860,17 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		Void _ = wait( delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()) );
 	}
 
+	Version poppedVer = poppedVersion(logData, req.tag);
+	
+	if(poppedVer > req.begin) {
+		TLogPeekReply rep;
+		rep.maxKnownVersion = logData->version.get();
+		rep.popped = poppedVer;
+		rep.end = poppedVer;
+		req.reply.send( rep );
+		return Void();
+	}
+
 	state Version endVersion = logData->version.get() + 1;
 
 	//grab messages from disk
@@ -891,7 +893,21 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		for (auto &kv : kvs) {
 			auto ver = decodeTagMessagesKey(kv.key);
 			messages << int32_t(-1) << ver;
-			messages.serializeBytes(kv.value);
+			
+			if(logData->persistentDataFormat == 0) {
+				BinaryReader rd( kv.value, Unversioned() );
+				while(!rd.empty()) {
+					int32_t messageLength;
+					uint32_t subVersion;
+					rd >> messageLength >> subVersion;
+					messageLength += sizeof(uint16_t);
+					messages << messageLength << subVersion << uint16_t(0);
+					messageLength -= (sizeof(subVersion) + sizeof(uint16_t));
+					messages.serializeBytes(rd.readBytes(messageLength), messageLength);
+				}
+			} else {
+				messages.serializeBytes(kv.value);
+			}
 		}
 
 		if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
@@ -903,17 +919,11 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		//TraceEvent("TLogPeekResults", self->dbgid).detail("ForAddress", req.reply.getEndpoint().address).detail("MessageBytes", messages.getLength()).detail("NextEpoch", next_pos.epoch).detail("NextSeq", next_pos.sequence).detail("NowSeq", self->sequence.getNextSequence());
 	}
 
-	Version poppedVer = poppedVersion(logData, req.tag);
-
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
-	if(poppedVer > req.begin) {
-		reply.popped = poppedVer;
-		reply.end = poppedVer;
-	} else {
-		reply.messages = messages.toStringRef();
-		reply.end = endVersion;
-	}
+	reply.messages = messages.toStringRef();
+	reply.end = endVersion;
+
 	//TraceEvent("TlogPeek", self->dbgid).detail("logId", logData->logId).detail("endVer", reply.end).detail("msgBytes", reply.messages.expectedSize()).detail("ForAddress", req.reply.getEndpoint().address);
 
 	if(req.sequence.present()) {
@@ -1301,7 +1311,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	}
 
 	state std::vector<Future<ErrorOr<Void>>> removed;
-
+	state int persistentDataFormat = 0;
 	if(fFormat.get().get() == LiteralStringRef("FoundationDB/LogServer/2/2")) {
 		TLogInterface recruited;
 		recruited.uniqueID = self->dbgid;
@@ -1323,6 +1333,8 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 		Void _ = wait( oldTLog::tLog(self->persistentData, self->rawPersistentQueue, recruited, self->dbInfo) );
 		throw internal_error();
+	} else if(fFormat.get().get() >= LiteralStringRef("FoundationDB/LogServer/2/4")) {
+		persistentDataFormat = 1;
 	}
 
 	ASSERT(fVers.get().size() == fRecoverCounts.get().size());
@@ -1346,7 +1358,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.getQueuingMetrics );
 		DUMPTOKEN( recruited.confirmRunning );
 
-		logData = Reference<LogData>( new LogData(self, recruited) );
+		logData = Reference<LogData>( new LogData(self, recruited, persistentDataFormat) );
 		logData->stopped = true;
 		self->id_data[id1] = logData;
 
@@ -1512,7 +1524,12 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 
 			// FIXME: This logic duplicates stuff in LogPushData::addMessage(), and really would be better in PeekResults or somewhere else.  Also unnecessary copying.
 			StringRef msg = r->getMessage();
-			wr << uint32_t( msg.size() + sizeof(uint32_t) ) << r->version().sub;
+			auto tags = r->getTags();
+			wr << uint32_t( msg.size() + sizeof(uint32_t) + sizeof(uint16_t) + tags.size()*sizeof(Tag) ) << r->version().sub << uint16_t(tags.size());
+			for(auto& t : tags) {
+				wr << t;
+			}
+
 			wr.serializeBytes( msg );
 			r->nextMessage();
 		}

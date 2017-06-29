@@ -752,6 +752,25 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 						resolver( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
+			when( InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture()) ) {
+				TLogInterface recruited;
+				recruited.locality = locality;
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				startRole( recruited.id(), interf.id(), "logRouter", details );
+
+				DUMPTOKEN( recruited.peekMessages );
+				DUMPTOKEN( recruited.popMessages );
+				DUMPTOKEN( recruited.commit );
+				DUMPTOKEN( recruited.lock );
+				DUMPTOKEN( recruited.getQueuingMetrics );
+				DUMPTOKEN( recruited.confirmRunning );
+
+				errorForwarders.add( zombie(recruited, forwardError( errors, "logRouter", recruited.id(), 
+						logRouter( recruited, req, dbInfo ) ) ) );
+				req.reply.send(recruited);
+			}
 			when( DebugQueryRequest req = waitNext(interf.debugQuery.getFuture()) ) {
 				errorForwarders.add( forwardError( errors, "DebugQuery", UID(), debugQueryServer(req) ) );
 			}

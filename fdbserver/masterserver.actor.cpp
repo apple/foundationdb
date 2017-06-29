@@ -244,7 +244,7 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, Future< RecruitFrom
 ACTOR Future<Void> newTLogServers( Reference<MasterData> self, Future< RecruitFromConfigurationReply > recruits, Reference<ILogSystem> oldLogSystem ) {
 	RecruitFromConfigurationReply recr = wait( recruits );
 
-	Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr.tLogs, self->configuration, self->prevDBState.recoveryCount + 1 ) );
+	Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr.tLogs, recr.remoteTLogs, recr.logRouters, self->configuration, self->prevDBState.recoveryCount + 1 ) );
 	self->logSystem = newLogSystem;
 
 	return Void();
@@ -358,6 +358,7 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 				return Void();
 			}
 
+			//FIXME: include remote logs in the log key
 			tr.set(logsKey, self->logSystem->getLogsValue());
 			Void _ = wait( tr.commit() );
 			return Void();
@@ -397,6 +398,7 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->myDBState.present() ? self->myDBState.get().recoveryCount : self->prevDBState.recoveryCount).detail("logs", describe(logSystem->getLogSystemConfig().tLogs));
 
 		if (!self->myDBState.present()) {
+			//FIXME: prior committed tlogs should include
 			Void _ = wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->provisionalProxies, self->resolvers, self->prevDBState.recoveryCount, self->prevDBState.getPriorCommittedLogServers() ));
 		} else {
 			updateLogsKey = updateLogsValue(self, cx);
@@ -946,7 +948,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 	loop {
 		DBCoreState coreState;
 		self->logSystem->toCoreState( coreState );
-		if( !self->fullyRecovered.isSet() && !coreState.oldTLogData.size() ) {
+		if( !self->fullyRecovered.isSet() && coreState.remoteTLogsRecovered ) { //FIXME: !coreState.oldTLogData.size()
 			if( !skipTransition ) {
 				Void _ = wait( writeRecoveredMasterState(self) );
 				self->registrationTrigger.trigger();
@@ -1123,7 +1125,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 
 	DBCoreState coreState;
 	self->logSystem->toCoreState( coreState );
-	state bool skipTransition = !coreState.oldTLogData.size();
+	state bool skipTransition = false; //FIXME: !coreState.oldTLogData.size();
 
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	Void _ = wait( writeTransitionMasterState( self, skipTransition ) );

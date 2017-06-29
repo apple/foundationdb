@@ -36,6 +36,8 @@ void DatabaseConfiguration::resetInternal() {
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
 	storagePolicy = IRepPolicyRef();
 	tLogPolicy = IRepPolicyRef();
+	remoteTLogCount = 0;
+	remoteTLogReplicationFactor = 0;
 }
 
 void parse( int* i, ValueRef const& v ) {
@@ -69,8 +71,9 @@ bool DatabaseConfiguration::isValid() const {
 		autoResolverCount >= 1 &&
 		autoDesiredTLogCount >= 1 &&
 		storagePolicy &&
-		tLogPolicy
-		;
+		tLogPolicy &&
+		remoteTLogCount >= 0 &&
+		remoteTLogReplicationFactor >=0;
 }
 
 std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
@@ -138,6 +141,8 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);
 	else if (ck == LiteralStringRef("log_replication_policy")) parseReplicationPolicy(&tLogPolicy, value);
+	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteTLogCount, value);
+	else if (ck == LiteralStringRef("remote_log_replication")) parse(&remoteTLogReplicationFactor, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect
 }

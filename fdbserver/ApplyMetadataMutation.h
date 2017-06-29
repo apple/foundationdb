@@ -136,6 +136,12 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 								if(confChange) *confChange = true;
 							}
 						}
+						for( auto tl : logSystem->getLogSystemConfig().remoteTLogs ) {
+							if(!tl.present() || addr.excludes(tl.interf().commit.getEndpoint().address)) {
+								TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL).detail("addr", addr.toString());
+								if(confChange) *confChange = true;
+							}
+						}
 					} else if(m.param1 != excludedServersVersionKey) {
 						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL);
 						if(confChange) *confChange = true;

@@ -180,29 +180,6 @@ namespace oldTLog {
 		}
 	};
 
-	struct LengthPrefixedStringRef {
-		// Represents a pointer to a string which is prefixed by a 4-byte length
-		// A LengthPrefixedStringRef is only pointer-sized (8 bytes vs 12 bytes for StringRef), but the corresponding string is 4 bytes bigger, and
-		// substring operations aren't efficient as they are with StringRef.  It's a good choice when there might be lots of references to the same
-		// exact string.
-
-		uint32_t* length;
-
-		StringRef toStringRef() const { ASSERT(length); return StringRef( (uint8_t*)(length+1), *length ); }
-		int expectedSize() const { ASSERT(length); return *length; }
-		uint32_t* getLengthPtr() const { return length; }
-
-		LengthPrefixedStringRef() : length(NULL) {}
-		LengthPrefixedStringRef(uint32_t* length) : length(length) {}
-	};
-
-	template<class T>
-	struct CompareFirst {
-		bool operator() (T const& lhs, T const& rhs) const {
-			return lhs.first < rhs.first;
-		}
-	};
-
 	struct TLogData : NonCopyable {
 		struct TagData {
 			std::deque<std::pair<Version, LengthPrefixedStringRef>> version_messages;

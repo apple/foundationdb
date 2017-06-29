@@ -42,6 +42,7 @@ struct WorkerInterface {
 	RequestStream< struct InitializeMasterProxyRequest > masterProxy;
 	RequestStream< struct InitializeResolverRequest > resolver;
 	RequestStream< struct InitializeStorageRequest > storage;
+	RequestStream< struct InitializeLogRouterRequest > logRouter;
 
 	RequestStream< struct DebugQueryRequest > debugQuery;
 	RequestStream< struct LoadedPingRequest > debugPing;
@@ -65,7 +66,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & debugQuery & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & cpuProfilerRequest & testerInterface & diskStoreRequest;
+		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & logRouter & debugQuery & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & cpuProfilerRequest & testerInterface & diskStoreRequest;
 	}
 };
 
@@ -77,13 +78,26 @@ struct InitializeTLogRequest {
 	LogEpoch epoch;
 	std::vector<Tag> recoverTags;
 	KeyValueStoreType storeType;
+	Optional<Tag> remoteTag;
+	Version minRemoteVersion;
 	ReplyPromise< struct TLogInterface > reply;
 
 	InitializeTLogRequest() {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & reply;
+		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & remoteTag & minRemoteVersion & reply;
+	}
+};
+
+struct InitializeLogRouterRequest {
+	uint64_t recoveryCount;
+	Tag routerTag;
+	ReplyPromise<struct TLogInterface> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & recoveryCount & routerTag & reply;
 	}
 };
 
@@ -294,6 +308,7 @@ Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue
 Future<Void> debugQueryServer( DebugQueryRequest const& req );
 Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& ccInterface, Reference<ClusterConnectionFile> const&, LocalityData const&, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 Future<Void> resolver( ResolverInterface const& proxy, InitializeResolverRequest const&, Reference<AsyncVar<ServerDBInfo>> const& db );
+Future<Void> logRouter( TLogInterface const& interf, InitializeLogRouterRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db );
 Future<Void> runMetrics( Future<Database> const& fcx, Key const& metricsPrefix );
 
 void registerThreadForProfiling();

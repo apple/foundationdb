@@ -554,8 +554,11 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 
 		id_used[masterProcessId]++;
 		auto tlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used );
-		for(int i = 0; i < tlogs.size(); i++)
+		for(int i = 0; i < tlogs.size(); i++) {
 			result.tLogs.push_back(tlogs[i].first);
+			result.remoteTLogs.push_back(tlogs[i].first);
+			result.logRouters.push_back(tlogs[i].first);
+		}
 
 		auto datacenters = getDatacenters( req.configuration );
 

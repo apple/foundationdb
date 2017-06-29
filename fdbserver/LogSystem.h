@@ -47,6 +47,10 @@ struct ILogSystem {
 		virtual bool hasMessage() = 0;
 
 		//pre: only callable if hasMessage() returns true
+		//return the tags associated with the message for teh current sequence
+		virtual std::vector<Tag> getTags() = 0;
+
+		//pre: only callable if hasMessage() returns true
 		//returns the arena containing the contents of getMessage() and reader()
 		virtual Arena& arena() = 0;
 
@@ -107,6 +111,7 @@ struct ILogSystem {
 		LogMessageVersion messageVersion, end;
 		Version poppedVersion;
 		int32_t messageLength;
+		std::vector<Tag> tags;
 		bool hasMsg;
 		Future<Void> more;
 		UID randomID;
@@ -133,6 +138,8 @@ struct ILogSystem {
 		virtual void nextMessage();
 
 		virtual StringRef getMessage();
+
+		virtual std::vector<Tag> getTags();
 
 		virtual void advanceTo(LogMessageVersion n);
 
@@ -167,8 +174,8 @@ struct ILogSystem {
 		LogMessageVersion messageVersion;
 		bool hasNextMessage;
 		UID randomID;
-		int							tLogReplicationFactor;
-		IRepPolicyRef		tLogPolicy;
+		int tLogReplicationFactor;
+		IRepPolicyRef tLogPolicy;
 		std::vector< LocalityData > tLogLocalities;
 
 		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector< LocalityData > const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
@@ -194,6 +201,8 @@ struct ILogSystem {
 		virtual void nextMessage();
 
 		virtual StringRef getMessage();
+
+		virtual std::vector<Tag> getTags();
 
 		virtual void advanceTo(LogMessageVersion n);
 
@@ -236,6 +245,8 @@ struct ILogSystem {
 		virtual void nextMessage();
 
 		virtual StringRef getMessage();
+
+		virtual std::vector<Tag> getTags();
 
 		virtual void advanceTo(LogMessageVersion n);
 
@@ -316,7 +327,7 @@ struct ILogSystem {
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 		// Returns the first unreadable version number of the recovered epoch (i.e. message version numbers < (get_end(), 0) will be readable)
 
-	virtual Future<Reference<ILogSystem>> newEpoch( vector<WorkerInterface> availableLogServers, DatabaseConfiguration const& config, LogEpoch recoveryCount ) = 0;
+	virtual Future<Reference<ILogSystem>> newEpoch( vector<WorkerInterface> availableLogServers, vector<WorkerInterface> availableRemoteLogServers, vector<WorkerInterface> availableLogRouters, DatabaseConfiguration const& config, LogEpoch recoveryCount ) = 0;
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 		// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional until the caller updates the coordinated DBCoreState
 
@@ -333,7 +344,38 @@ struct ILogSystem {
 
 	virtual void getPushLocations( std::vector<Tag> const& tags, vector<int>& locations ) = 0;
 
+	virtual void addRemoteTags( std::vector<Tag>& tags ) = 0;
+
+	virtual void getRemotePushLocations( std::vector<Tag> const& tags, vector<int>& locations ) = 0;
+	
+	virtual Tag getRemoteLogTag( Tag serverTag ) = 0;
+
+	virtual Tag getRandomRouterTag() = 0;
+
 	virtual void stopRejoins() = 0;
+};
+
+struct LengthPrefixedStringRef {
+	// Represents a pointer to a string which is prefixed by a 4-byte length
+	// A LengthPrefixedStringRef is only pointer-sized (8 bytes vs 12 bytes for StringRef), but the corresponding string is 4 bytes bigger, and
+	// substring operations aren't efficient as they are with StringRef.  It's a good choice when there might be lots of references to the same
+	// exact string.
+
+	uint32_t* length;
+
+	StringRef toStringRef() const { ASSERT(length); return StringRef( (uint8_t*)(length+1), *length ); }
+	int expectedSize() const { ASSERT(length); return *length; }
+	uint32_t* getLengthPtr() const { return length; }
+
+	LengthPrefixedStringRef() : length(NULL) {}
+	LengthPrefixedStringRef(uint32_t* length) : length(length) {}
+};
+
+template<class T>
+struct CompareFirst {
+	bool operator() (T const& lhs, T const& rhs) const {
+		return lhs.first < rhs.first;
+	}
 };
 
 struct LogPushData : NonCopyable {
@@ -353,33 +395,48 @@ struct LogPushData : NonCopyable {
 
 	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations = false ) {
 		if( !usePreviousLocations ) {
+			prev_tags.clear();
+			prev_tags.push_back( logSystem->getRandomRouterTag() );
 			msg_locations.clear();
-			logSystem->getPushLocations( next_message_tags, msg_locations );
+			logSystem->getPushLocations( prev_tags, msg_locations );
+			for(auto& tag : next_message_tags) {
+				prev_tags.push_back(tag);
+			}
+			next_message_tags.clear();
 		}
 		uint32_t subseq = this->subsequence++;
 		for(int loc : msg_locations) {
-			for(auto& tag : next_message_tags)
+			for(auto& tag : prev_tags)
 				addTagToLoc( tag, loc );
 
-			messagesWriter[loc] << uint32_t(rawMessageWithoutLength.size() + sizeof(subseq)) << subseq;
+			messagesWriter[loc] << uint32_t(rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size()) << subseq << uint16_t(prev_tags.size());
+			for(auto& tag : prev_tags)
+				messagesWriter[loc] << tag;
 			messagesWriter[loc].serializeBytes(rawMessageWithoutLength);
 		}
-		next_message_tags.clear();
 	}
 
 	template <class T>
 	void addTypedMessage( T const& item ) {
+		prev_tags.clear();
+		prev_tags.push_back( logSystem->getRandomRouterTag() );
 		msg_locations.clear();
-		logSystem->getPushLocations( next_message_tags, msg_locations );
+		logSystem->getPushLocations( prev_tags, msg_locations );
+		for(auto& tag : next_message_tags) {
+			prev_tags.push_back(tag);
+		}
 		uint32_t subseq = this->subsequence++;
 		for(int loc : msg_locations) {
-			for(auto& tag : next_message_tags)
+			for(auto& tag : prev_tags)
 				addTagToLoc( tag, loc );
 
 			// FIXME: memcpy after the first time
 			BinaryWriter& wr = messagesWriter[loc];
 			int offset = wr.getLength();
-			wr << uint32_t(0) << subseq << item;
+			wr << uint32_t(0) << subseq << uint16_t(prev_tags.size());
+			for(auto& tag : prev_tags)
+				wr << tag;
+			wr << item;
 			*(uint32_t*)((uint8_t*)wr.getData() + offset) = wr.getLength() - offset - sizeof(uint32_t);
 		}
 		next_message_tags.clear();
@@ -409,6 +466,7 @@ private:
 	Reference<ILogSystem> logSystem;
 	Arena arena;
 	vector<Tag> next_message_tags;
+	vector<Tag> prev_tags;
 	vector<Map<Tag, TagMessagesRef>> tags;
 	vector<BinaryWriter> messagesWriter;
 	vector<int> msg_locations;

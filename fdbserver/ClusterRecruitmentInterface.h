@@ -78,12 +78,14 @@ struct RecruitFromConfigurationRequest {
 
 struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> tLogs;
+	vector<WorkerInterface> remoteTLogs;
+	vector<WorkerInterface> logRouters;
 	vector<WorkerInterface> proxies;
 	vector<WorkerInterface> resolvers;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & proxies & resolvers;
+		ar & tLogs & remoteTLogs & logRouters & proxies & resolvers;
 	}
 };
 

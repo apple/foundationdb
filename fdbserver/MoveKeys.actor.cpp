@@ -699,6 +699,8 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 			}
 			tag += skipTags;
 
+			ASSERT(tag < SERVER_KNOBS->MAX_TAG);
+
 			tr.set( serverTagKeyFor(server.id()), serverTagValue(tag) );
 			tr.set( serverListKeyFor(server.id()), serverListValue(server) );
 			KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(tag));
