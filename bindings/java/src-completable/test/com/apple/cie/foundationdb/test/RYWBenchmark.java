@@ -173,7 +173,7 @@ public class RYWBenchmark extends AbstractTester {
         }
         long end = System.nanoTime();
 
-        Double kpi = count * 1_000_000_000.0 * keyCount/(end - start);
+        Double kpi = count * 1_000_000_000.0 * keyCount / 2 / (end - start);
         insertData(tr);
         return kpi;
     }
@@ -188,7 +188,7 @@ public class RYWBenchmark extends AbstractTester {
         }
         long end = System.nanoTime();
 
-        Double kpi = count * 1_000_000_000.0 * keyCount/(end - start);
+        Double kpi = count * 1_000_000_000.0 * keyCount * 3 / 4 / (end - start);
         insertData(tr);
         return kpi;
     }
