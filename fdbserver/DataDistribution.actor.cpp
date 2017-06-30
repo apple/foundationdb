@@ -485,11 +485,12 @@ struct DDTeamCollection {
 		int desiredDataCenters,
 		IRepPolicyRef replicationPolicy,
 		KeyValueStoreType storeType,
-		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges )
+		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges,
+		Future<Void> readyToStart )
 		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
 		 teamSize( teamSize ), minDataCenters( minDataCenters ), desiredDataCenters( desiredDataCenters ), replicationPolicy(replicationPolicy), storeType( storeType ), serverChanges(serverChanges),
 		 initialFailureReactionDelay( delay( BUGGIFY ? 0 : SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution  ) ), healthyTeamCount( 0 ),
-		 initializationDoneActor(logOnCompletion(initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
+		 initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
 		 unhealthyServers(0)
 	{
 		TraceEvent("DDTrackerStarting", masterId)
@@ -1774,7 +1775,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	Future<Void> readyToStart )
 {
 	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, teamSize, minDataCenters,
-		desiredDataCenters, replicationPolicy, storeType, serverChanges );
+		desiredDataCenters, replicationPolicy, storeType, serverChanges, readyToStart );
 
 	state Future<Void> loggingTrigger = Void();
 	state PromiseStream<Void> serverRemoved;
@@ -2157,7 +2158,8 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 		-1,
 		policy,
 		KeyValueStoreType(),
-		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>>()
+		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>>(),
+		Future<Void>(Void())
 	);
 
 	for(int id = 1; id <= processCount; id++) {
