@@ -73,7 +73,13 @@ public:
 private:
 	Reference<IAsyncFile> m_f;
 
-	std::vector<uint32_t> checksumHistory;
+	struct WriteInfo {
+		WriteInfo() : checksum(0), timestamp(0) {}
+		uint32_t checksum;
+		uint32_t timestamp;
+	};
+
+	std::vector<WriteInfo> checksumHistory;
 	// This is the most page checksum history blocks we will use across all files.
 	static int checksumHistoryBudget;
 	static int checksumHistoryPageSize;
@@ -108,22 +114,24 @@ private:
 		while(page < pageEnd) {
 			//printf("%d %d %u %u\n", write, page, checksum, historySum);
 			uint32_t checksum = hashlittle(start, checksumHistoryPageSize, 0xab12fd93);
-			uint32_t &historySum = checksumHistory[page];
+			WriteInfo &history = checksumHistory[page];
 
 			// For writes, just update the stored sum
 			if(write) {
-				historySum = checksum;
+				history.timestamp = (uint32_t)now();
+				history.checksum = checksum;
 			}
 			else {
-				if(historySum != 0 && historySum != checksum) {
+				if(history.checksum != 0 && history.checksum != checksum) {
 					// For reads, verify the stored sum if it is not 0.  If it fails, clear it.
-					TraceEvent (SevError, "AsyncFileKAIODetectedLostWrite")
+					TraceEvent (SevError, "AsyncFileLostWriteDetected")
 						.detail("Filename", m_f->getFilename())
 						.detail("PageNumber", page)
 						.detail("ChecksumOfPage", checksum)
-						.detail("ChecksumHistory", historySum)
+						.detail("ChecksumHistory", history.checksum)
+						.detail("LastWriteTime", history.timestamp)
 						.error(checksum_failed());
-					historySum = 0;
+					history.checksum = 0;
 				}
 			}
 
