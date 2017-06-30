@@ -23,25 +23,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 double getTime() {
 	static struct timeval tv;
 	gettimeofday(&tv, NULL);
 	return tv.tv_usec/1000000.0 + tv.tv_sec;
-}
-
-int getError(int err, const char* context) {
-	if(err) {
-		fprintf(stderr, "Error in %s: %d\n", context, err);
-	}
-
-	return err;
-}
-
-void checkError(int err, const char* context) {
-	if(getError(err, context)) {
-		exit(1);
-	}
 }
 
 int cmpfunc(const void* a, const void* b) {
@@ -62,7 +49,7 @@ struct Kpi {
 };
 
 struct Error {
-	const char *message;
+	char *message;
 
 	struct Error *next;
 };
@@ -92,7 +79,8 @@ void addKpi(struct ResultSet *rs, const char *name, int value, const char *units
 
 void addError(struct ResultSet *rs, const char *message) {
 	struct Error *e = malloc(sizeof(struct Error));
-	e->message = message;
+	e->message = (char*)malloc(strlen(message)+1);
+	strcpy(e->message, message);
 	e->next = rs->errors;
 	rs->errors = e;
 }
@@ -126,7 +114,7 @@ void writeResultSet(struct ResultSet *rs) {
 
 	struct Error *e = rs->errors;
 	while(e != NULL) {
-		fprintf(fp, "\t\t%s", e->message);
+		fprintf(fp, "\t\t\"%s\"", e->message);
 		if(e->next != NULL) {
 			fprintf(fp, ",");
 		}
@@ -138,5 +126,49 @@ void writeResultSet(struct ResultSet *rs) {
 	fprintf(fp, "}\n");
 
 	fclose(fp);
+}
+
+void freeResultSet(struct ResultSet *rs) {
+	struct Kpi *k = rs->kpis;
+	while(k != NULL) {
+		struct Kpi *next = k->next;
+		free(k);
+		k = next;
+	}
+
+	struct Error *e = rs->errors;
+	while(e != NULL) {
+		struct Error *next = e->next;
+		free(e->message);
+		free(e);
+		e = next;
+	}
+
+	free(rs);
+}
+
+int getError(int err, const char* context, struct ResultSet *rs) {
+	if(err) {
+		char *msg = (char*)malloc(strlen(context) + 100);
+		sprintf(msg, "Error in %s: %d", context, err);
+		fprintf(stderr, "%s\n", msg);
+		if(rs != NULL) {
+			addError(rs, msg);
+		}
+
+		free(msg);
+	}
+
+	return err;
+}
+
+void checkError(int err, const char* context, struct ResultSet *rs) {
+	if(getError(err, context, rs)) {
+		if(rs != NULL) {
+			writeResultSet(rs);
+			freeResultSet(rs);
+		}
+		exit(1);
+	}
 }
 

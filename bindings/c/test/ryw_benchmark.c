@@ -43,27 +43,27 @@ void preload(FDBTransaction *tr, int numKeys) {
 }
 
 void* runNetwork() {
-	checkError(fdb_run_network(), "run network");
+	checkError(fdb_run_network(), "run network", NULL);
 	return NULL;
 }
 
-FDBDatabase* openDatabase() {
-	checkError(fdb_setup_network(), "setup network");
+FDBDatabase* openDatabase(struct ResultSet *rs) {
+	checkError(fdb_setup_network(), "setup network", rs);
 	pthread_create(&netThread, NULL, &runNetwork, NULL);
 
 	FDBFuture *f = fdb_create_cluster(NULL);
-	checkError(fdb_future_block_until_ready(f), "block for cluster");
+	checkError(fdb_future_block_until_ready(f), "block for cluster", rs);
 
 	FDBCluster *cluster;
-	checkError(fdb_future_get_cluster(f, &cluster), "get cluster");
+	checkError(fdb_future_get_cluster(f, &cluster), "get cluster", rs);
 
 	fdb_future_destroy(f);
 
 	f = fdb_cluster_create_database(cluster, (uint8_t*)"DB", 2);
-	checkError(fdb_future_block_until_ready(f), "block for database");
+	checkError(fdb_future_block_until_ready(f), "block for database", rs);
 
 	FDBDatabase *db;
-	checkError(fdb_future_get_database(f, &db), "get database");
+	checkError(fdb_future_get_database(f, &db), "get database", rs);
 
 	fdb_future_destroy(f);
 	fdb_cluster_destroy(cluster);
@@ -76,7 +76,7 @@ int keySize = 16;
 uint8_t** keys;
 
 void populateKeys() {
-	keys = (uint8_t**)malloc(sizeof(uint8_t*)*(numKeys+1));
+	keys = (uint8_t**)malloc(sizeof(uint8_t*)*(numKeys+1)); // This and its contents are never deallocated
 
 	uint32_t i;
 	for(i = 0; i <= numKeys; ++i) {
@@ -95,12 +95,16 @@ void insertData(FDBTransaction *tr) {
 	}
 }
 
-int runTest(int (*testFxn)(FDBTransaction*), FDBTransaction *tr, struct ResultSet *rs, const char *kpiName) {
-	int numRuns = 1;
+int runTest(int (*testFxn)(FDBTransaction*, struct ResultSet*), FDBTransaction *tr, struct ResultSet *rs, const char *kpiName) {
+	int numRuns = 25;
 	int *results = malloc(sizeof(int)*numRuns);
 	int i = 0;
 	for(; i < numRuns; ++i) {
-		results[i] = testFxn(tr);
+		results[i] = testFxn(tr, rs);
+		if(results[i] < 0) {
+			free(results);
+			return -1;
+		}
 	}
 
 	int result = median(results, numRuns);
@@ -111,7 +115,7 @@ int runTest(int (*testFxn)(FDBTransaction*), FDBTransaction *tr, struct ResultSe
 	return result;
 }
 
-int getSingle(FDBTransaction *tr) {
+int getSingle(FDBTransaction *tr, struct ResultSet *rs) {
 	int present;
 	uint8_t const *value;
 	int length;
@@ -120,8 +124,8 @@ int getSingle(FDBTransaction *tr) {
 	double start = getTime();
 	for(i = 0; i < numKeys; ++i) {
 		FDBFuture *f = fdb_transaction_get(tr, keys[5001], keySize, 0);
-		checkError(fdb_future_block_until_ready(f), "block for get");
-		checkError(fdb_future_get_value(f, &present, &value, &length), "get result");
+		if(getError(fdb_future_block_until_ready(f), "GetSingle (block for get)", rs)) return -1;
+		if(getError(fdb_future_get_value(f, &present, &value, &length), "GetSingle (get result)", rs)) return -1;
 		fdb_future_destroy(f);
 	}
 	double end = getTime();
@@ -129,7 +133,7 @@ int getSingle(FDBTransaction *tr) {
 	return numKeys / (end - start);
 }
 
-int getManySequential(FDBTransaction *tr) {
+int getManySequential(FDBTransaction *tr, struct ResultSet *rs) {
 	int present;
 	uint8_t const *value;
 	int length;
@@ -138,8 +142,8 @@ int getManySequential(FDBTransaction *tr) {
 	double start = getTime();
 	for(i = 0; i < numKeys; ++i) {
 		FDBFuture *f = fdb_transaction_get(tr, keys[i], keySize, 0);
-		checkError(fdb_future_block_until_ready(f), "block for get");
-		checkError(fdb_future_get_value(f, &present, &value, &length), "get result");
+		if(getError(fdb_future_block_until_ready(f), "GetManySequential (block for get)", rs)) return -1;
+		if(getError(fdb_future_get_value(f, &present, &value, &length), "GetManySequential (get result)", rs)) return -1;
 		fdb_future_destroy(f);
 	}
 	double end = getTime();
@@ -147,7 +151,7 @@ int getManySequential(FDBTransaction *tr) {
 	return numKeys / (end - start);
 }
 
-int getRangeBasic(FDBTransaction *tr) {
+int getRangeBasic(FDBTransaction *tr, struct ResultSet *rs) {
 	int count;
 	const FDBKeyValue *kvs;
 	int more;
@@ -157,11 +161,13 @@ int getRangeBasic(FDBTransaction *tr) {
 	for(i = 0; i < 100; ++i) {
 		FDBFuture *f = fdb_transaction_get_range(tr, FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize), FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize), numKeys, 0, 0, 1, 0, 0);
 
-		checkError(fdb_future_block_until_ready(f), "block for get range");
-		checkError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "get range results");
+		if(getError(fdb_future_block_until_ready(f), "GetRangeBasic (block for get range)", rs)) return -1;
+		if(getError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "GetRangeBasic (get range results)", rs)) return -1;
 
 		if(count != numKeys) {
 			fprintf(stderr, "Bad count %d (expected %d)\n", count, numKeys);
+			addError(rs, "GetRangeBasic bad count");
+			return -1;
 		}
 	}
 	double end = getTime();
@@ -169,7 +175,7 @@ int getRangeBasic(FDBTransaction *tr) {
 	return 100 * numKeys / (end - start);
 }
 
-int singleClearGetRange(FDBTransaction *tr) {
+int singleClearGetRange(FDBTransaction *tr, struct ResultSet *rs) {
 	int count;
 	const FDBKeyValue *kvs;
 	int more;
@@ -183,13 +189,15 @@ int singleClearGetRange(FDBTransaction *tr) {
 	for(i = 0; i < 100; ++i) {
 		FDBFuture *f = fdb_transaction_get_range(tr, FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize), FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize), numKeys, 0, 0, 1, 0, 0);
 
-		checkError(fdb_future_block_until_ready(f), "block for get range");
-		checkError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "get range results");
+		if(getError(fdb_future_block_until_ready(f), "SingleClearGetRange (block for get range)", rs)) return -1;
+		if(getError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "SingleClearGetRange (get range results)", rs)) return -1;
 
 		fdb_future_destroy(f);
 
 		if(count != numKeys/2) {
 			fprintf(stderr, "Bad count %d (expected %d)\n", count, numKeys);
+			addError(rs, "SingleClearGetRange bad count");
+			return -1;
 		}
 	}
 	double end = getTime();
@@ -198,7 +206,7 @@ int singleClearGetRange(FDBTransaction *tr) {
 	return 100 * numKeys / 2 / (end - start);
 }
 
-int clearRangeGetRange(FDBTransaction *tr) {
+int clearRangeGetRange(FDBTransaction *tr, struct ResultSet *rs) {
 	int count;
 	const FDBKeyValue *kvs;
 	int more;
@@ -212,13 +220,15 @@ int clearRangeGetRange(FDBTransaction *tr) {
 	for(i = 0; i < 100; ++i) {
 		FDBFuture *f = fdb_transaction_get_range(tr, FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[0], keySize), FDB_KEYSEL_LAST_LESS_OR_EQUAL(keys[numKeys], keySize), numKeys, 0, 0, 1, 0, 0);
 
-		checkError(fdb_future_block_until_ready(f), "block for get range");
-		checkError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "get range results");
+		if(getError(fdb_future_block_until_ready(f), "ClearRangeGetRange (block for get range)", rs)) return -1;
+		if(getError(fdb_future_get_keyvalue_array(f, &kvs, &count, &more), "ClearRangeGetRange (get range results)", rs)) return -1;
 
 		fdb_future_destroy(f);
 
 		if(count != numKeys*3/4) {
 			fprintf(stderr, "Bad count %d (expected %d)\n", count, numKeys*3/4);
+			addError(rs, "ClearRangeGetRange bad count");
+			return -1;
 		}
 	}
 	double end = getTime();
@@ -227,7 +237,7 @@ int clearRangeGetRange(FDBTransaction *tr) {
 	return 100 * numKeys * 3 / 4 / (end - start);
 }
 
-int interleavedSetsGets(FDBTransaction *tr) {
+int interleavedSetsGets(FDBTransaction *tr, struct ResultSet *rs) {
 	int present;
 	uint8_t const *value;
 	int length;
@@ -243,8 +253,8 @@ int interleavedSetsGets(FDBTransaction *tr) {
 
 	for(i = 0; i < 10000; ++i) {
 		FDBFuture *f = fdb_transaction_get(tr, k, 3, 0);
-		checkError(fdb_future_block_until_ready(f), "block for get");
-		checkError(fdb_future_get_value(f, &present, &value, &length), "get result");
+		if(getError(fdb_future_block_until_ready(f), "InterleavedSetsGets (block for get)", rs)) return -1;
+		if(getError(fdb_future_get_value(f, &present, &value, &length), "InterleavedSetsGets (get result)", rs)) return -1;
 		fdb_future_destroy(f);
 
 		sprintf((char*)v, "%d", ++num);
@@ -255,18 +265,17 @@ int interleavedSetsGets(FDBTransaction *tr) {
 	return 10000 / (end - start);
 }
 
-struct ResultSet* runTests() {
-	struct ResultSet *rs = newResultSet();
-	FDBDatabase *db = openDatabase();
+struct ResultSet* runTests(struct ResultSet *rs) {
+	FDBDatabase *db = openDatabase(rs);
 
 	FDBTransaction *tr;
-	checkError(fdb_database_create_transaction(db, &tr), "create transaction");
+	checkError(fdb_database_create_transaction(db, &tr), "create transaction", rs);
 
 	FDBFuture *f = fdb_transaction_get_read_version(tr);
-	checkError(fdb_future_block_until_ready(f), "block for read version");
+	checkError(fdb_future_block_until_ready(f), "block for read version", rs);
 
 	int64_t version;
-	checkError(fdb_future_get_version(f, &version), "get version");
+	checkError(fdb_future_get_version(f, &version), "get version", rs);
 	fdb_future_destroy(f);
 
 	insertData(tr);
@@ -285,11 +294,13 @@ struct ResultSet* runTests() {
 }
 
 int main(int argc, char **argv) {
-	checkError(fdb_select_api_version(500), "select API version");
+	struct ResultSet *rs = newResultSet();
+	checkError(fdb_select_api_version(500), "select API version", rs);
 	printf("Running RYW Benchmark test at client version: %s\n", fdb_get_client_version());
 
 	populateKeys();
-	struct ResultSet *rs = runTests();
+	runTests(rs);
 	writeResultSet(rs);
+	freeResultSet(rs);
 }
 
