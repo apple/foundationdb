@@ -280,17 +280,6 @@ private:
 				results.push_back( {0, {{lowerBoundKey, root}}} );
 			}
 
-			// Verify that no consecutive split keys are equal
-			// TODO:  Is this still needed or do keys already have version suffixes?
-			StringRef lastSplitKey(LiteralStringRef("\xff\xff\xff"));
-			for(auto const &p : pages) {
-				if(p.first != 0) {
-					StringRef splitKey = merged[p.first].key;
-					ASSERT(splitKey != lastSplitKey);
-					lastSplitKey = splitKey;
-				}
-			}
-
 			// For each IPage of data, assign a logical pageID.
 			std::vector<LogicalPageID> logicalPages;
 
