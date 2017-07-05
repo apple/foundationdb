@@ -10,9 +10,19 @@ This package requires:
 
 Use of this package requires the selection of a FoundationDB API version at runtime. This package currently supports FoundationDB API versions 200-500.
 
-To install this package, in the top level of this repository run:
+To build this package, in the top level of this repository run:
 
     make fdb_go
+
+This will create binary packages for the appropriate platform within the "build" subdirectory of this folder.
+
+To install this package, you can run the "fdb-go-install.sh" script:
+
+    ./fdb-go-install.sh install 
+
+The "install" command of this script does not depend on the presence of the repo in general and will download the repository into
+your local go path. Running "localinstall" instead of "install" will use the local copy here (with a symlink) instead
+of downloading from the remote repository.
 
 Documentation
 -------------

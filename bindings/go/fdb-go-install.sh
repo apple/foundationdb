@@ -1,6 +1,6 @@
 #!/bin/bash -eu
 #
-# install.sh
+# fdb-go-install.sh
 #
 # Installs the FoundationDB Go bindings for a client. This will download
 # the repository from the remote repo either into the go directory
@@ -13,8 +13,8 @@
 
 DESTDIR="${DESTDIR:-}"
 FDBVER="${FDBVER:-5.0.1}"
-REMOTE="${REMOTE:-github.geo.apple.com}"
-FDBREPO="${FDBREPO:-cie/foundation}"
+REMOTE="${REMOTE:-github.com}"
+FDBREPO="${FDBREPO:-apple/foundationdb}"
 
 status=0
 
@@ -35,7 +35,7 @@ filedir=$(cd `dirname "${BASH_SOURCE[0]}"` && pwd)
 destdir=""
 
 function printUsage() {
-    echo "Usage: install.sh <cmd>"
+    echo "Usage: fdb-go-install.sh <cmd>"
     echo
     echo "cmd: One of the commands to run. The options are:"
     echo "     install         Download the FDB go bindings and install them"
