@@ -82,6 +82,7 @@ struct SimpleFixedSizeMapRef {
 			if(bw.getLength() + 8 + kv.first.size() + kv.second.size() > pageSize) {
 				memcpy(page->mutate(), bw.getData(), bw.getLength());
 				*(uint32_t *)(page->mutate() + mapSizeOffset) = i - start;
+				printf("buildmany: writing page start=%d %s\n", start, kvPairs[start].first.c_str());
 				pages.push_back({start, page});
 				bw = BinaryWriter(AssumeVersion(currentProtocolVersion));
 				bw << newFlags;
@@ -96,11 +97,13 @@ struct SimpleFixedSizeMapRef {
 		}
 
 		if(bw.getLength() != sizeof(newFlags)) {
+			printf("buildmany: adding last page start=%d %s\n", start, kvPairs[start].first.c_str());
 			memcpy(page->mutate(), bw.getData(), bw.getLength());
 			*(uint32_t *)(page->mutate() + mapSizeOffset) = i - start;
 			pages.push_back({start, page});
 		}
 
+		printf("buildmany: returning pages.size %lu, kvpairs %lu\n", pages.size(), kvPairs.size());
 		return pages;
 	}
 
@@ -196,7 +199,9 @@ private:
 
 	LogicalPageID m_root;
 
-	typedef std::vector<std::pair<Version, std::vector<std::pair<std::string, LogicalPageID>>>> VersionedChildrenT;
+	typedef std::pair<std::string, LogicalPageID> KeyPagePairT;
+	typedef std::pair<Version, std::vector<KeyPagePairT>> VersionedKeyToPageSetT;
+	typedef std::vector<VersionedKeyToPageSetT> VersionedChildrenT;
 	typedef std::map<std::string, std::vector<std::pair<Version, std::string>>> MutationBufferT;
 	struct KeyVersionValue {
 		KeyVersionValue(Key k, Version ver, Value val) : key(k), version(ver), value(val) {}
@@ -214,18 +219,22 @@ private:
 		Value value;
 	};
 
+	// Returns list of (version, list of (lower_bound, list of children) )
 	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, Reference<IPagerSnapshot> snapshot, LogicalPageID root, std::string lowerBoundKey, MutationBufferT::const_iterator bufBegin, MutationBufferT::const_iterator bufEnd) {
-		printf("commit subtree from page %u\n", root);
+		state std::string printPrefix = format("commit subtree(lowerboundkey %s, page %u) ", lowerBoundKey.c_str(), root);
+		printf("%s\n", printPrefix.c_str());
+
 		if(bufBegin == bufEnd) {
 			return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 		}
 
 		state FixedSizeMap map;
-		printf("commitSubtree: Reading page %d\n", root);
 		Reference<const IPage> rawPage = wait(snapshot->getPhysicalPage(root));
 		map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
+		printf("Read page %d: %s\n", root, map.toString().c_str());
 
 		if(map.flags & EPageFlags::IS_LEAF) {
+			printf("%s leaf\n", printPrefix.c_str());
 			VersionedChildrenT results;
 			FixedSizeMap::KVPairsT kvpairs;
 
@@ -264,11 +273,15 @@ private:
 
 			IPager *pager = self->m_pager;
 			vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( leafEntries, EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
+			printf("%s new page count %lu\n", printPrefix.c_str(), pages.size());
 
-			if(pages.size() != 1)
+			// If there isn't still just a single page of data then return the previous lower bound and page ID that lead to this page to be used for version 0
+			if(pages.size() != 1) {
 				results.push_back( {0, {{lowerBoundKey, root}}} );
+			}
 
 			// Verify that no consecutive split keys are equal
+			// TODO:  Is this still needed or do keys already have version suffixes?
 			StringRef lastSplitKey(LiteralStringRef("\xff\xff\xff"));
 			for(auto const &p : pages) {
 				if(p.first != 0) {
@@ -290,7 +303,7 @@ private:
 				logicalPages.push_back(self->m_pager->allocateLogicalPage() );
 
 			// Write each page using its assigned page ID
-			printf("Writing leaf pages, subtreeRoot=%u\n", root);
+			printf("%s Writing %lu replacement pages at version %lld\n", printPrefix.c_str(), pages.size(), minVersion);
 			for(int i=0; i<pages.size(); i++)
 				self->writePage(logicalPages[i], pages[i].second, minVersion);
 
@@ -306,9 +319,11 @@ private:
 				}
 			}
 
+			printf("%s DONE.\n", printPrefix.c_str());
 			return results;
 		}
 		else {
+			printf("%s not leaf\n", printPrefix.c_str());
 			state std::vector<Future<VersionedChildrenT>> m_futureChildren;
 
 			auto childMutBegin = bufBegin;
@@ -330,15 +345,15 @@ private:
 
 			Void _ = wait(waitForAll(m_futureChildren));
 
-			bool unmodified = true;
+			bool modified = false;
 			for( auto &c : m_futureChildren) {
 				if(c.get().size() != 1 || c.get()[0].second.size() != 1) {
-					unmodified = false;
+					modified = true;
 					break;
 				}
 			}
 
-			if(unmodified)
+			if(!modified)
 				return VersionedChildrenT({{0, {{lowerBoundKey, root}}}});
 
 			Version version = 0;
@@ -350,89 +365,101 @@ private:
 				FixedSizeMap::KVPairsT childEntries;  // Logically std::vector<std::pair<std::string, LogicalPageID>> childEntries;
 
 				// For each Future<VersionedChildrenT>
-				//printf("LOOP:  Version %lld\n", version);
+				printf("%s creating replacement pages for %d at Version %lld\n", printPrefix.c_str(), root, version);
+
+				// If we're writing version 0, there is a chance that we don't have to write ourselves, if there are no changes
+				bool modified = version != 0;
 
 				for( auto& c : m_futureChildren ) {
 					const VersionedChildrenT &children = c.get();
-					/*
-					printf("  versioned page set size: %d\n", children.size());
+
+					printf("  versioned page set size: %lu versions\n", children.size());
 					for(auto &versionedPageSet : children) {
 						printf("    version: %lld\n", versionedPageSet.first);
 						for(auto &boundaryPage : versionedPageSet.second) {
 							printf("      %s -> %u\n", boundaryPage.first.c_str(), boundaryPage.second);
 						}
 					}
-					printf("  Current version: %lld\n", version);
-					*/
 
 					// Find the first version greater than the current version we are writing
 					auto cv = std::upper_bound( children.begin(), children.end(), version, [](Version a, VersionedChildrenT::value_type const &b) { return a < b.first; } );
 
 					// If there are no versions before the one we found, just update nextVersion and continue.
 					if(cv == children.begin()) {
-						//printf("  First version (%lld) in set is greater than current, setting nextVersion and continuing\n", cv->first);
+						printf("  First version (%lld) in set is greater than current, setting nextVersion and continuing\n", cv->first);
 						nextVersion = std::min(nextVersion, cv->first);
-						//printf("  curr %lld next %lld\n", version, nextVersion);
+						printf("  curr %lld next %lld\n", version, nextVersion);
 						continue;
 					}
 
 					// If a version greater than the current version being written was found, update nextVersion
 					if(cv != children.end()) {
-						//printf("  First greater version found is %lld\n");
 						nextVersion = std::min(nextVersion, cv->first);
-						//printf("  curr %lld next %lld\n", version, nextVersion);
+						printf("  curr %lld next %lld\n", version, nextVersion);
 					}
 
 					// Go back one to the last version that was valid prior to or at the current version we are writing
 					--cv;
 
-					//printf("  Using children for version %lld\n", cv->first);
+					printf("  Using children for version %lld from this set, building version %lld\n", cv->first, version);
+
+					// If page count isn't 1 then the root is definitely modified
+					modified = modified || cv->second.size() != 1;
 
 					// Add the children at this version to the child entries list for the current version being built.
 					for (auto &childPage : cv->second) {
-						//printf("  Adding child page '%s'\n", childPage.first.c_str());
+						printf("  Adding child page '%s'\n", childPage.first.c_str());
 						childEntries.push_back( {childPage.first, std::string((char *)&childPage.second, sizeof(uint32_t))});
 					}
 				}
 
-				//printf("Finished pass through futurechildren.  childEntries=%d  version=%lld  nextVersion=%lld\n", childEntries.size(), version, nextVersion);
+				printf("Finished pass through futurechildren.  childEntries=%lu  version=%lld  nextVersion=%lld\n", childEntries.size(), version, nextVersion);
 
-				// TODO: Track split points across iterations of this loop, so that they don't shift unnecessarily and
-				// cause unnecessary path copying
+				if(modified) {
+					// TODO: Track split points across iterations of this loop, so that they don't shift unnecessarily and
+					// cause unnecessary path copying
 
-				IPager *pager = self->m_pager;
-				vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
+					IPager *pager = self->m_pager;
+					vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
 
-				// For each IPage of data, assign a logical pageID.
-				std::vector<LogicalPageID> logicalPages;
+					// For each IPage of data, assign a logical pageID.
+					std::vector<LogicalPageID> logicalPages;
 
-				// Only reuse first page if only one page is being returned or if root is not the btree root.
-				if(pages.size() == 1 || root != self->m_root)
-					logicalPages.push_back(root);
+					// Only reuse first page if only one page is being returned or if root is not the btree root.
+					if(pages.size() == 1 || root != self->m_root)
+						logicalPages.push_back(root);
 
-				// Allocate enough pageIDs for all of the pages
-				for(int i=logicalPages.size(); i<pages.size(); i++)
-					logicalPages.push_back( self->m_pager->allocateLogicalPage() );
+					// Allocate enough pageIDs for all of the pages
+					for(int i=logicalPages.size(); i<pages.size(); i++)
+						logicalPages.push_back( self->m_pager->allocateLogicalPage() );
 
-				// Write each page using its assigned page ID
-				printf("Writing internal pages, subtreeRoot=%u\n", root);
-				for(int i=0; i<pages.size(); i++)
-					self->writePage( logicalPages[i], pages[i].second, version );
+					// Write each page using its assigned page ID
+					printf("Writing internal pages, subtreeRoot=%u\n", root);
+					for(int i=0; i<pages.size(); i++)
+						self->writePage( logicalPages[i], pages[i].second, version );
 
-				result.resize(result.size()+1);
-				result.back().first = version;
+					result.resize(result.size()+1);
+					result.back().first = version;
 
-				for(int i=0; i<pages.size(); i++)
-					result.back().second.push_back( {childEntries[pages[i].first].first, logicalPages[i]} );
+					for(int i=0; i<pages.size(); i++)
+						result.back().second.push_back( {childEntries[pages[i].first].first, logicalPages[i]} );
 
-				if (result.size() > 1 && result.back().second == result.end()[-2].second)
-					result.pop_back();
+					if (result.size() > 1 && result.back().second == result.end()[-2].second) {
+						printf("Output same as last version, popping it.\n");
+						result.pop_back();
+					}
+				}
+				else {
+					printf("Version 0 has no changes\n");
+					result.push_back({0, {{lowerBoundKey, root}}});
+				}
 
 				if (nextVersion == std::numeric_limits<Version>::max())
 					break;
 				version = nextVersion;
 			}
 
+			printf("%s DONE.\n", printPrefix.c_str());
 			return result;
 		}
 	}
@@ -442,34 +469,31 @@ private:
 
 		VersionedChildrenT rootNodes = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, std::string(), self->m_buffer.begin(), self->m_buffer.end()));
 
-		for(auto const &versionedPages : rootNodes) {
-			// If the version of the root page set is 0 and the page set size is 1 then there is nothing to write.
-			if(versionedPages.first == 0 & versionedPages.second.size() == 1)
-				continue;
+		for(VersionedKeyToPageSetT versionedPages : rootNodes) {
+			printf("Root node set for version %lld has %lu pages\n", versionedPages.first, versionedPages.second.size());
 
-			FixedSizeMap::KVPairsT childEntries;
-			for (auto &childPage : versionedPages.second)
-				childEntries.push_back( {childPage.first, std::string((char *)&childPage.second, sizeof(uint32_t))});
+			// If versionedPages has size 1 then the key should be "" and the page ID should be self->m_root
+			ASSERT(!versionedPages.second.empty());
+			// While there are multiple child pages for this version we must write new tree levels.
+			while(versionedPages.second.size() > 1) {
+				FixedSizeMap::KVPairsT childEntries;
+				for (auto &childPage : versionedPages.second)
+					childEntries.push_back( {childPage.first, std::string((char *)&childPage.second, sizeof(uint32_t))});
 
-			IPager *pager = self->m_pager;
-			vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
-			// Until we have only one root, write new multi-page top levels of the tree
-			while(pages.size() != 1) {
-				printf("Root level would be %d pages\n", pages.size());
-				FixedSizeMap::KVPairsT newRootLevelEntries;
-				printf("Writing new root level at version %lld\n", versionedPages.first);
+				IPager *pager = self->m_pager;
+				vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
+
+				printf("Writing a new root level at version %lld with %lu children across %lu pages\n", versionedPages.first, versionedPages.second.size(), pages.size());
+				versionedPages.second.clear();
+
 				for(auto const &p : pages) {
-					LogicalPageID pageID = self->m_pager->allocateLogicalPage();
+					LogicalPageID pageID = pages.size() == 1 ? self->m_root : self->m_pager->allocateLogicalPage();
 					self->writePage(pageID, p.second, versionedPages.first);
-					newRootLevelEntries.push_back( {childEntries[p.first].first, std::string((char *)&pageID, sizeof(LogicalPageID))});
+					versionedPages.second.push_back( {childEntries[p.first].first, pageID} );
 				}
-
-				pages = FixedSizeMap::buildMany( newRootLevelEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
-				childEntries = std::move(newRootLevelEntries);
 			}
 
-			printf("Writing new root id %d\n", self->m_root);
-			self->writePage(self->m_root, pages[0].second, versionedPages.first);
+			ASSERT(versionedPages.second[0].second == self->m_root);
 		}
 
 		self->m_pager->setLatestVersion(self->m_writeVersion);
@@ -533,6 +557,7 @@ private:
 				printf("findEqual: Reading page %d @%lld\n", pageNumber, self->m_version);
 				Reference<const IPage> rawPage = wait(self->m_pager->getPhysicalPage(pageNumber));
 				FixedSizeMap map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
+				printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, map.toString().c_str());
 
 				// Special case of empty page (which should only happen for root)
 				if(map.entries.empty()) {
