@@ -21,20 +21,20 @@
 package main
 
 import (
-        "log"
-        "fmt"
-        "github.com/FoundationDB/fdb-go/fdb"
-        "github.com/FoundationDB/fdb-go/fdb/directory"
-        "github.com/FoundationDB/fdb-go/fdb/subspace"
-        "github.com/FoundationDB/fdb-go/fdb/tuple"
+	"log"
+	"fmt"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
-        _, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-                tr.ClearRange(sub)
-                return nil, nil
-        })
-        return err
+	_, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
+		tr.ClearRange(sub)
+		return nil, nil
+	})
+	return err
 }
 
 func print_subspace(trtr fdb.Transactor, sub subspace.Subspace) {
@@ -49,13 +49,13 @@ func print_subspace(trtr fdb.Transactor, sub subspace.Subspace) {
 }
 
 func _pack(t interface{}) []byte {
-        return tuple.Tuple{t}.Pack()
+	return tuple.Tuple{t}.Pack()
 }
 
 func _unpack(t []byte) tuple.Tuple {
-        i, e := tuple.Unpack(t)
-        if e != nil {return nil}
-        return i
+	i, e := tuple.Unpack(t)
+	if e != nil {return nil}
+	return i
 }
 
 type Workspace struct {
@@ -87,7 +87,7 @@ func (wrkspc Workspace) Session(foo func(directory.DirectorySubspace)) (err erro
 }
 
 func main() {
-	fdb.MustAPIVersion(300)
+	fdb.MustAPIVersion(500)
 
 	db := fdb.MustOpenDefault()
 
