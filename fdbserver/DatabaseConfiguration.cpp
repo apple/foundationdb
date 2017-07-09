@@ -38,6 +38,7 @@ void DatabaseConfiguration::resetInternal() {
 	tLogPolicy = IRepPolicyRef();
 	remoteTLogCount = 0;
 	remoteTLogReplicationFactor = 0;
+	remoteTLogPolicy = IRepPolicyRef();
 }
 
 void parse( int* i, ValueRef const& v ) {
@@ -53,6 +54,7 @@ void parseReplicationPolicy(IRepPolicyRef* policy, ValueRef const& v) {
 void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	storagePolicy = IRepPolicyRef(new PolicyAcross(storageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
 	tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
 }
 
 bool DatabaseConfiguration::isValid() const {
@@ -73,7 +75,8 @@ bool DatabaseConfiguration::isValid() const {
 		storagePolicy &&
 		tLogPolicy &&
 		remoteTLogCount >= 0 &&
-		remoteTLogReplicationFactor >=0;
+		remoteTLogReplicationFactor >=0 &&
+		remoteTLogPolicy;
 }
 
 std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
@@ -143,6 +146,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("log_replication_policy")) parseReplicationPolicy(&tLogPolicy, value);
 	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteTLogCount, value);
 	else if (ck == LiteralStringRef("remote_log_replication")) parse(&remoteTLogReplicationFactor, value);
+	else if (ck == LiteralStringRef("remote_replication_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect
 }

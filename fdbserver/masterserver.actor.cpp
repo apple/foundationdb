@@ -948,7 +948,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 	loop {
 		DBCoreState coreState;
 		self->logSystem->toCoreState( coreState );
-		if( !self->fullyRecovered.isSet() && coreState.remoteTLogsRecovered ) { //FIXME: !coreState.oldTLogData.size()
+		if( !self->fullyRecovered.isSet() && !coreState.oldTLogData.size() ) {
 			if( !skipTransition ) {
 				Void _ = wait( writeRecoveredMasterState(self) );
 				self->registrationTrigger.trigger();
@@ -1108,7 +1108,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::writing_coordinated_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::writing_coordinated_state])
-		.detail("TLogs", self->logSystem->getLogServerCount())
 		.detail("TLogList", self->logSystem->describe())
 		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
 
@@ -1125,7 +1124,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 
 	DBCoreState coreState;
 	self->logSystem->toCoreState( coreState );
-	state bool skipTransition = false; //FIXME: !coreState.oldTLogData.size();
+	state bool skipTransition = !coreState.oldTLogData.size();
 
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	Void _ = wait( writeTransitionMasterState( self, skipTransition ) );

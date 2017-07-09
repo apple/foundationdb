@@ -78,8 +78,9 @@ struct LogRouterData {
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Map< Tag, TagData > tag_data;
 	Tag routerTag;
+	int logSet;
 
-	LogRouterData(UID dbgid, Tag routerTag) : dbgid(dbgid), routerTag(routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()) {}
+	LogRouterData(UID dbgid, Tag routerTag, int logSet) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()) {}
 };
 
 void commitMessages( LogRouterData* self, Version version, Arena arena, StringRef messages, VectorRef< TagMessagesRef > tags) {
@@ -160,7 +161,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 	state Version tagAt = self->version.get()+1;
 	state Version tagPopped = 0;
 	state Version lastVer = 0;
-	state std::vector<Tag> tags;
+	state std::vector<int> tags;
 
 	loop {
 		loop {
@@ -214,18 +215,13 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 			StringRef msg = r->getMessage();
 			auto originalTags = r->getTags();
 			tags.clear();
-			for(auto tag : originalTags) {
-				if(tag >= 0 && tag < SERVER_KNOBS->MAX_TAG) {
-					tags.push_back(self->logSystem->get()->getRemoteLogTag(tag));
-				}
-			}
 			//FIXME: do we add txsTags?
-			self->logSystem->get()->addRemoteTags(tags);
+			self->logSystem->get()->addRemoteTags(self->logSet, originalTags, tags);
 
 			for(auto tag : tags) {
 				auto it = tag_offsets.find(tag);
 				if (it == tag_offsets.end()) {
-					it = tag_offsets.insert(mapPair( tag, TagMessagesRef() ));
+					it = tag_offsets.insert(mapPair( Tag(tag), TagMessagesRef() ));
 					it->value.tag = it->key;
 				}
 				it->value.messageOffsets.push_back( arena, wr.getLength() );
@@ -353,9 +349,10 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 ACTOR Future<Void> logRouterCore(
 	TLogInterface interf,
 	Tag tag,
+	int logSet,
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
-	state LogRouterData logRouterData(interf.id(), tag);
+	state LogRouterData logRouterData(interf.id(), tag, logSet);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection( addActor.getFuture() );
 	state Future<Void> dbInfoChange = Void();
@@ -365,7 +362,8 @@ ACTOR Future<Void> logRouterCore(
 	loop choose {
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			if( db->get().recoveryState >= RecoveryState::FULLY_RECOVERED && std::count( db->get().logSystemConfig.logRouters.begin(), db->get().logSystemConfig.logRouters.end(), interf.id() ) ) {
+			if( db->get().recoveryState >= RecoveryState::FULLY_RECOVERED && logSet <  db->get().logSystemConfig.tLogs.size() &&
+					std::count( db->get().logSystemConfig.tLogs[logSet].logRouters.begin(), db->get().logSystemConfig.tLogs[logSet].logRouters.end(), interf.id() ) ) {
 				logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
 			} else {
 				logRouterData.logSystem->set(Reference<ILogSystem>());
@@ -381,10 +379,12 @@ ACTOR Future<Void> logRouterCore(
 	}
 }
 
-ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, TLogInterface myInterface) {
+ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, TLogInterface myInterface, int logSet) {
 	loop{
-		if (db->get().recoveryCount >= recoveryCount && !std::count(db->get().logSystemConfig.logRouters.begin(), db->get().logSystemConfig.logRouters.end(), myInterface.id()))
-		throw worker_removed();
+		if (db->get().recoveryCount >= recoveryCount && logSet < db->get().logSystemConfig.tLogs.size() &&
+			!std::count(db->get().logSystemConfig.tLogs[logSet].logRouters.begin(), db->get().logSystemConfig.tLogs[logSet].logRouters.end(), myInterface.id())) {
+			throw worker_removed();
+		}
 		Void _ = wait(db->onChange());
 	}
 }
@@ -395,10 +395,10 @@ ACTOR Future<Void> logRouter(
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
 	try {
-		state Future<Void> core = logRouterCore(interf, req.routerTag, db);
+		state Future<Void> core = logRouterCore(interf, req.routerTag, req.logSet, db);
 		loop choose{
 			when(Void _ = wait(core)) { return Void(); }
-			when(Void _ = wait(checkRemoved(db, req.recoveryCount, interf))) {}
+			when(Void _ = wait(checkRemoved(db, req.recoveryCount, interf, req.logSet))) {}
 		}
 	}
 	catch (Error& e) {

@@ -34,136 +34,128 @@
 //   transaction log replicas and the write quorum that was used to commit to them.  The read quorum required to
 //   ensure durability of locking and recovery is therefore tLogWriteAntiQuorum + 1.
 
-struct OldTLogCoreData {
-	vector< UID > tLogs;
-	int32_t tLogWriteAntiQuorum;
-	int32_t tLogReplicationFactor;
+struct CoreTLogSet {
+	std::vector< UID > tLogs;
+	int32_t tLogWriteAntiQuorum; // The write anti quorum previously used to write to tLogs, which might be different from the anti quorum suggested by the current configuration going forward!
+	int32_t tLogReplicationFactor; // The replication factor previously used to write to tLogs, which might be different from the current configuration
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
-	vector< UID > remoteTLogs;
-	int32_t remoteTLogReplicationFactor;
-	std::vector< LocalityData > remoteTLogLocalities;
-	IRepPolicyRef	tLogPolicy;
-	Version epochEnd;
+	IRepPolicyRef tLogPolicy;
+	bool isLocal;
+	bool hasBest;
 
-	OldTLogCoreData() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), epochEnd(0), remoteTLogReplicationFactor(0) {}
+	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBest(true) {}
 
-	bool operator == (OldTLogCoreData const& rhs) const { return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor &&
-		epochEnd == rhs.epochEnd && remoteTLogs == rhs.remoteTLogs && remoteTLogReplicationFactor == rhs.remoteTLogReplicationFactor &&
-		((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info()))); }
+	bool operator == (CoreTLogSet const& rhs) const { 
+		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal &&
+		hasBest == rhs.hasBest && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info()))); 
+	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & tLogs & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & epochEnd & tLogLocalities;
+		ar & tLogs & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & hasBest;
+	}
+};
+
+struct OldTLogCoreData {
+	std::vector<CoreTLogSet> tLogs;
+	Version epochEnd;
+
+	OldTLogCoreData() : epochEnd(0) {}
+
+	bool operator == (OldTLogCoreData const& rhs) const { 
+		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd;
+	}
+
+	template <class Archive>
+	void serialize(Archive& ar) {
 		if( ar.protocolVersion() >= 0x0FDB00A560010001LL) {
-			ar & remoteTLogs & remoteTLogReplicationFactor & remoteTLogLocalities;
+			ar & tLogs & epochEnd;
 		}
 		else if(ar.isDeserializing) {
-			remoteTLogReplicationFactor = 0;
+			tLogs.push_back(CoreTLogSet());
+			ar & tLogs[0].tLogs & tLogs[0].tLogWriteAntiQuorum & tLogs[0].tLogReplicationFactor & tLogs[0].tLogPolicy & epochEnd & tLogs[0].tLogLocalities;
 		}
 	}
 };
 
 struct DBCoreState {
-	vector< UID > tLogs;
-	int32_t tLogWriteAntiQuorum;        // The write anti quorum previously used to write to tLogs, which might be different from the anti quorum suggested by the current configuration going forward!
-	int32_t tLogReplicationFactor;  // The replication factor previously used to write to tLogs, which might be different from the current configuration
-
-	IRepPolicyRef	tLogPolicy;
+	std::vector<CoreTLogSet> tLogs;
+	std::vector<OldTLogCoreData> oldTLogData;
 	DBRecoveryCount recoveryCount;  // Increases with sequential successful recoveries.
 	int logSystemType;
-	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
+	
+	DBCoreState() : recoveryCount(0), logSystemType(0) {}
 
-	std::vector<OldTLogCoreData> oldTLogData;
-
-	vector< UID > remoteTLogs;
-	int32_t remoteTLogReplicationFactor;
-	std::vector< LocalityData > remoteTLogLocalities;
-	bool remoteTLogsRecovered;
-
-	DBCoreState() : recoveryCount(0), tLogWriteAntiQuorum(0), tLogReplicationFactor(0), logSystemType(0), remoteTLogReplicationFactor(0), remoteTLogsRecovered(false) {}
-
-	//FIXME: should this include old remote logs
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
 		for(int i = 0; i < oldTLogData.size(); i++) {
-			for(auto it : oldTLogData[i].tLogs) {
-				priorCommittedLogServers.push_back(it);
+			for(auto& it : oldTLogData[i].tLogs) {
+				for(auto& log : it.tLogs) {
+					priorCommittedLogServers.push_back(log);
+				}
 			}
 		}
 		return priorCommittedLogServers;
 	}
 
 	bool isEqual(DBCoreState const& r) const {
-		if (logSystemType != r.logSystemType || recoveryCount != r.recoveryCount || tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor || oldTLogData.size() != r.oldTLogData.size()
-			|| tLogLocalities != r.tLogLocalities || tLogs != r.tLogs || remoteTLogs != r.remoteTLogs || remoteTLogReplicationFactor != r.remoteTLogReplicationFactor || remoteTLogLocalities != r.remoteTLogLocalities || remoteTLogsRecovered != r.remoteTLogsRecovered)
-			return false;
-		for(int i = 0; i < oldTLogData.size(); i++ ) {
-			if (oldTLogData[i] != r.oldTLogData[i])
-				return false;
-		}
-		return true;
+		return logSystemType == r.logSystemType && recoveryCount == r.recoveryCount && tLogs == r.tLogs && oldTLogData == r.oldTLogData;
 	}
 	bool operator == ( const DBCoreState& rhs ) const { return isEqual(rhs); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		UID functionId = g_nondeterministic_random->randomUniqueID();
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A320050001LL );
-		ar & tLogs & tLogWriteAntiQuorum & recoveryCount & tLogReplicationFactor & logSystemType;
-		if( ar.protocolVersion() >= 0x0FDB00A460010001LL) {
-			uint64_t tLocalitySize = (uint64_t)tLogLocalities.size();
-			ar & oldTLogData & tLogPolicy & tLocalitySize;
-			if (ar.isDeserializing) {
-				tLogLocalities.reserve(tLocalitySize);
-				for (size_t i = 0; i < tLocalitySize; i++) {
-					LocalityData	locality;
-					ar & locality;
-					tLogLocalities.push_back(locality);
-				}
-			}
-			else {
-				for (auto& locality : tLogLocalities) {
-					ar & locality;
-				}
-			}
-		}
-		else if(ar.isDeserializing) {
-			oldTLogData.clear();
-			oldTLogData.push_back(OldTLogCoreData());
-			ar & oldTLogData[0].tLogs & oldTLogData[0].epochEnd & oldTLogData[0].tLogWriteAntiQuorum & oldTLogData[0].tLogReplicationFactor;
-			tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
-			if(!oldTLogData[0].tLogs.size()) {
-				oldTLogData.pop_back();
-			}
-			else {
-				for(int i = 0; i < oldTLogData.size(); i++ ) {
-					oldTLogData[i].tLogPolicy = IRepPolicyRef(new PolicyAcross(oldTLogData[i].tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
-					if (oldTLogData[i].tLogs.size())
-					{
-						oldTLogData[i].tLogLocalities.reserve(oldTLogData[i].tLogs.size());
-						for (auto& tLog : oldTLogData[i].tLogs) {
-							LocalityData	locality;
-							locality.set(LocalityData::keyZoneId, g_random->randomUniqueID().toString());
-							locality.set(LocalityData::keyDataHallId, LiteralStringRef("0"));
-							oldTLogData[i].tLogLocalities.push_back(locality);
-						}
+		if( ar.protocolVersion() >= 0x0FDB00A560010001LL) {
+			ar & tLogs & oldTLogData & recoveryCount & logSystemType;
+		} else if(ar.isDeserializing) {
+			tLogs.push_back(CoreTLogSet());
+			ar & tLogs[0].tLogs & tLogs[0].tLogWriteAntiQuorum & recoveryCount & tLogs[0].tLogReplicationFactor & logSystemType;
+
+			if( ar.protocolVersion() >= 0x0FDB00A460010001LL) {
+				uint64_t tLocalitySize = (uint64_t)tLogLocalities.size();
+				ar & oldTLogData & tLogs[0].tLogPolicy & tLocalitySize;
+				if (ar.isDeserializing) {
+					tLogs[0].tLogLocalities.reserve(tLocalitySize);
+					for (size_t i = 0; i < tLocalitySize; i++) {
+						LocalityData locality;
+						ar & locality;
+						tLogs[0].tLogLocalities.push_back(locality);
 					}
 				}
 			}
-			tLogLocalities.reserve(tLogs.size());
-			for (auto& tLog : tLogs) {
-				LocalityData	locality;
-				locality.set(LocalityData::keyZoneId, g_random->randomUniqueID().toString());
-				locality.set(LocalityData::keyDataHallId, LiteralStringRef("0"));
-				tLogLocalities.push_back(locality);
+			else {
+				oldTLogData.clear();
+				oldTLogData.push_back(OldTLogCoreData());
+				oldTLogData.tLogs.push_back(CoreTLogSet());
+				ar & oldTLogData[0].tLogs[0].tLogs & oldTLogData[0].tLogs[0].epochEnd & oldTLogData[0].tLogs[0].tLogWriteAntiQuorum & oldTLogData[0].tLogs[0].tLogReplicationFactor;
+				tLogs[0].tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogs[0].tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+				if(!oldTLogData[0].tLogs[0].tLogs.size()) {
+					oldTLogData.pop_back();
+				}
+				else {
+					for(int i = 0; i < oldTLogData.tLogs[0].size(); i++ ) {
+						oldTLogData[i].tLogs[0].tLogPolicy = IRepPolicyRef(new PolicyAcross(oldTLogData[i].tLogs[0].tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+						if (oldTLogData[i].tLogs[0].tLogs.size())
+						{
+							oldTLogData[i].tLogs[0].tLogLocalities.reserve(oldTLogData[i].tLogs[0].tLogs.size());
+							for (auto& tLog : oldTLogData[i].tLogs[0].tLogs) {
+								LocalityData locality;
+								locality.set(LocalityData::keyZoneId, g_random->randomUniqueID().toString());
+								locality.set(LocalityData::keyDataHallId, LiteralStringRef("0"));
+								oldTLogData[i].tLogs[0].tLogLocalities.push_back(locality);
+							}
+						}
+					}
+				}
+				tLogs[0].tLogLocalities.reserve(tLogs[0].tLogs.size());
+				for (auto& tLog : tLogs[0].tLogs) {
+					LocalityData locality;
+					locality.set(LocalityData::keyZoneId, g_random->randomUniqueID().toString());
+					locality.set(LocalityData::keyDataHallId, LiteralStringRef("0"));
+					tLogs[0].tLogLocalities.push_back(locality);
+				}
 			}
-		}
-		if( ar.protocolVersion() >= 0x0FDB00A560010001LL) {
-			ar & remoteTLogs & remoteTLogReplicationFactor & remoteTLogLocalities & remoteTLogsRecovered;
-		}
-		else if(ar.isDeserializing) {
-			remoteTLogReplicationFactor = 0;
-			remoteTLogsRecovered = false;
 		}
 
 		TraceEvent("CoreStateSerialize").detail("AntiQuorum", tLogWriteAntiQuorum)
@@ -174,9 +166,6 @@ struct DBCoreState {
 			.detail("oldTLogData", oldTLogData.size())
 			.detail("deserializing", ar.isDeserializing);
 	}
-
-	std::string toString() const { return format("type: %d anti: %d replication: %d policy: %s tLogs: %s oldGenerations: %d  tlocalities: %s",
-		logSystemType, tLogWriteAntiQuorum, tLogReplicationFactor, (tLogPolicy ? tLogPolicy->info().c_str() : "[unset]"), describe(tLogs).c_str(), oldTLogData.size(), describe(tLogLocalities).c_str()); }
 };
 
 #endif

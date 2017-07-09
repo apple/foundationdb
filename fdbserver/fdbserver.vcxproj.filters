@@ -247,6 +247,13 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
+    <ActorCompiler Include="LogRouter.actor.cpp" />
+    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SkipList.cpp" />

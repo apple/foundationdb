@@ -79,25 +79,25 @@ struct InitializeTLogRequest {
 	std::vector<Tag> recoverTags;
 	KeyValueStoreType storeType;
 	Optional<Tag> remoteTag;
-	Version minRemoteVersion;
 	ReplyPromise< struct TLogInterface > reply;
 
 	InitializeTLogRequest() {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & remoteTag & minRemoteVersion & reply;
+		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & remoteTag & reply;
 	}
 };
 
 struct InitializeLogRouterRequest {
 	uint64_t recoveryCount;
+	int logSet;
 	Tag routerTag;
 	ReplyPromise<struct TLogInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & routerTag & reply;
+		ar & recoveryCount & routerTag & logSet & reply;
 	}
 };
 

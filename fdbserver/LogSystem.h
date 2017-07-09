@@ -339,16 +339,9 @@ struct ILogSystem {
 	virtual Future<Void> onLogSystemConfigChange() = 0;
 		// Returns when the log system configuration has changed due to a tlog rejoin.
 
-	virtual int getLogServerCount() = 0;
-		// Used by LogPushData; returns the number of log servers
-
 	virtual void getPushLocations( std::vector<Tag> const& tags, vector<int>& locations ) = 0;
 
-	virtual void addRemoteTags( std::vector<Tag>& tags ) = 0;
-
-	virtual void getRemotePushLocations( std::vector<Tag> const& tags, vector<int>& locations ) = 0;
-	
-	virtual Tag getRemoteLogTag( Tag serverTag ) = 0;
+	virtual void addRemoteTags( int logSet, std::vector<Tag> originalTags, std::vector<int>& tags ) = 0;
 
 	virtual Tag getRandomRouterTag() = 0;
 

@@ -63,10 +63,11 @@ struct DatabaseConfiguration {
 	int32_t autoDesiredTLogCount;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
-	int32_t remoteTLogReplicationFactor;
 	KeyValueStoreType tLogDataStoreType;
 	IRepPolicyRef tLogPolicy;
 	int32_t remoteTLogCount;
+	int32_t remoteTLogReplicationFactor;
+	IRepPolicyRef remoteTLogPolicy;
 
 	// Storage servers
 	int32_t durableStorageQuorum;
