@@ -381,6 +381,7 @@ public class PerformanceTester extends AbstractTester {
             new PerformanceTester().run(args);
         } catch (IllegalArgumentException e) {
             System.out.println("Could not run test due to malformed arguments.");
+            System.out.println(e.getMessage());
             System.exit(1);
         } catch (Exception e) {
             System.out.println("Fatal error encountered during run: " + e);
