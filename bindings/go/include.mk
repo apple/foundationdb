@@ -25,6 +25,7 @@ GOPATH := $(CURDIR)/bindings/go/build
 GO_IMPORT_PATH := github.com/apple/foundationdb/bindings/go/src
 GO_DEST := $(GOPATH)/src/$(GO_IMPORT_PATH)
 
+.PHONY: fdb_go fdb_go_path fdb_go_tester fdb_go_tester_clean godoc godoc_clean
 
 # We only override if the environment didn't set it (this is used by
 # the fdbwebsite documentation build process)
