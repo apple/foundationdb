@@ -40,8 +40,8 @@
 package directory
 
 import (
-	"fdb"
-	"fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"errors"
 )
 
@@ -140,15 +140,15 @@ type Directory interface {
 }
 
 func stringsEqual(a, b []string) bool {
-    if len(a) != len(b) {
-        return false
-    }
-    for i, v := range a {
-        if v != b[i] {
-            return false
-        }
-    }
-    return true
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func moveTo(t fdb.Transactor, dl directoryLayer, path, newAbsolutePath []string) (DirectorySubspace, error) {

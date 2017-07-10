@@ -21,10 +21,10 @@
 package main
 
 import (
-	"fdb"
-	"fdb/tuple"
-	"fdb/subspace"
-	"fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"strings"
 	"bytes"
 )
@@ -94,14 +94,14 @@ func (sm *StackMachine) maybePath() []string {
 }
 
 var createOps = map[string]bool {
-    "CREATE_SUBSPACE": true,
-    "CREATE_LAYER": true,
-    "CREATE_OR_OPEN": true,
-    "CREATE": true,
-    "OPEN": true,
-    "MOVE": true,
-    "MOVE_TO": true,
-    "OPEN_SUBSPACE": true,
+	"CREATE_SUBSPACE": true,
+	"CREATE_LAYER": true,
+	"CREATE_OR_OPEN": true,
+	"CREATE": true,
+	"OPEN": true,
+	"MOVE": true,
+	"MOVE_TO": true,
+	"OPEN_SUBSPACE": true,
 }
 
 func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, idx int, t fdb.Transactor, rt fdb.ReadTransactor) {

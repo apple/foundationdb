@@ -21,10 +21,10 @@
 package main
 
 import (
-	"github.com/FoundationDB/fdb-go/fdb"
-	"github.com/FoundationDB/fdb-go/fdb/directory"
-	"github.com/FoundationDB/fdb-go/fdb/subspace"
-	"github.com/FoundationDB/fdb-go/fdb/tuple"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"log"
 	"fmt"
 )
@@ -101,7 +101,7 @@ func (q *Queue) FirstItem(trtr fdb.Transactor) (interface{}, error) {
 func main() {
 	fmt.Println("Queue Example Program")
 
-	fdb.MustAPIVersion(300)
+	fdb.MustAPIVersion(500)
 
 	db := fdb.MustOpenDefault()
 

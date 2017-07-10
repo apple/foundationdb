@@ -33,8 +33,8 @@
 package subspace
 
 import (
-	"fdb"
-	"fdb/tuple"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"bytes"
 	"errors"
 )

@@ -23,18 +23,18 @@ package main
 import (
 	"log"
 	"fmt"
-	"github.com/FoundationDB/fdb-go/fdb"
-	"github.com/FoundationDB/fdb-go/fdb/directory"
-	"github.com/FoundationDB/fdb-go/fdb/subspace"
-	"github.com/FoundationDB/fdb-go/fdb/tuple"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
-        _, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-                tr.ClearRange(sub)
-                return nil, nil
-        })
-        return err
+	_, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
+		tr.ClearRange(sub)
+		return nil, nil
+	})
+	return err
 }
 
 func _pack(t interface{}) []byte {
@@ -53,7 +53,7 @@ type Table struct {
 
 func (tbl *Table) NewTable(ss subspace.Subspace) {
 	tbl.row = ss.Sub("row")
-        tbl.col = ss.Sub("col")
+	tbl.col = ss.Sub("col")
 }
 
 func (tbl Table) TableSetCell(trtr fdb.Transactor, row, column int, value interface{}) {
@@ -128,9 +128,9 @@ func (tbl Table) TableGetCol(tr fdb.ReadTransactor, col int) ([]interface{}, err
 }
 
 func main() {
-	fdb.MustAPIVersion(300)
+	fdb.MustAPIVersion(500)
 
-        db := fdb.MustOpenDefault()
+	db := fdb.MustOpenDefault()
 
 	TableDemoDir, err := directory.CreateOrOpen(db, []string{"Graph"}, nil)
 	if err != nil {log.Fatal(err)}
@@ -150,9 +150,3 @@ func main() {
 	g.TableSetRow(db, 1, "Hello", "World", "Again!", 1)
 	fmt.Println(g.TableGetRow(db, 1))
 }
-
-
-
-
-
-
