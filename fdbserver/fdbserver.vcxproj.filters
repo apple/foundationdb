@@ -246,7 +246,6 @@
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
-    <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ActorCompiler Include="LogRouter.actor.cpp" />
     <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
       <Filter>workloads</Filter>

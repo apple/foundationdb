@@ -32,6 +32,109 @@
 
 struct DBCoreState;
 
+template <class Collection>
+void uniquify( Collection& c ) {
+	std::sort(c.begin(), c.end());
+	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
+}
+
+class LogSet {
+public:
+	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
+	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
+	int32_t tLogWriteAntiQuorum;
+	int32_t tLogReplicationFactor;
+	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
+	IRepPolicyRef tLogPolicy;
+	LocalitySetRef logServerSet;
+	std::vector<int> logIndexArray;
+	std::map<int,LocalityEntry>	logEntryMap;
+	bool isLocal;
+	bool hasBest;
+
+	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBest(true) {}
+
+	int bestLocationFor( Tag tag ) {
+		return hasBest ? tag % logServers.size() : invalidTag;
+	}
+
+	void updateLocalitySet() {
+		LocalityMap<int>* logServerMap;
+		logServerSet = LocalitySetRef(new LocalityMap<int>());
+		logServerMap = (LocalityMap<int>*) logServerSet.getPtr();
+
+		logEntryMap.clear();
+		logIndexArray.clear();
+		logIndexArray.reserve(logServers.size());
+
+		for( int i = 0; i < logServers.size(); i++ ) {
+			if (logServers[i]->get().present()) {
+				logIndexArray.push_back(i);
+				ASSERT(logEntryMap.find(i) == logEntryMap.end());
+				logEntryMap[logIndexArray.back()] = logServerMap->add(logServers[i]->get().interf().locality, &logIndexArray.back());
+			}
+		}
+	}
+
+	void updateLocalitySet( vector<WorkerInterface> const& workers ) {
+		LocalityMap<int>* logServerMap;
+
+		logServerSet = LocalitySetRef(new LocalityMap<int>());
+		logServerMap = (LocalityMap<int>*) logServerSet.getPtr();
+
+		logEntryMap.clear();
+		logIndexArray.clear();
+		logIndexArray.reserve(workers.size());
+
+		for( int i = 0; i < workers.size(); i++ ) {
+			ASSERT(logEntryMap.find(i) == logEntryMap.end());
+			logIndexArray.push_back(i);
+			logEntryMap[logIndexArray.back()] = logServerMap->add(workers[i].locality, &logIndexArray.back());
+		}
+	}
+
+	void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations, int locationOffset ) {
+		newLocations.clear();
+		alsoServers.clear();
+		resultEntries.clear();
+
+		if(hasBest) {
+			for(auto& t : tags) {
+				newLocations.push_back(bestLocationFor(t));
+			}
+		}
+
+		uniquify( newLocations );
+
+		if (newLocations.size())
+			alsoServers.reserve(newLocations.size());
+
+		// Convert locations to the also servers
+		for (auto location : newLocations) {
+			ASSERT(logEntryMap[location]._id == location);
+			locations.push_back(locationOffset + location);
+			alsoServers.push_back(logEntryMap[location]);
+		}
+
+		// Run the policy, assert if unable to satify
+		bool result = logServerSet->selectReplicas(tLogPolicy, alsoServers, resultEntries);
+		ASSERT(result);
+
+		// Add the new servers to the location array
+		LocalityMap<int>* logServerMap = (LocalityMap<int>*) logServerSet.getPtr();
+		for (auto entry : resultEntries) {
+			locations.push_back(locationOffset + *logServerMap->getObject(entry));
+		}
+		//TraceEvent("getPushLocations").detail("Policy", tLogPolicy->info())
+		//	.detail("Results", locations.size()).detail("Selection", logServerSet->size())
+		//	.detail("Included", alsoServers.size()).detail("Duration", timer() - t);
+	}
+
+private:
+	std::vector<LocalityEntry> alsoServers, resultEntries;
+	std::vector<int> newLocations;
+};
+
 struct ILogSystem {
 	// Represents a particular (possibly provisional) epoch of the log subsystem
 
@@ -165,9 +268,8 @@ struct ILogSystem {
 	};
 
 	struct MergedPeekCursor : IPeekCursor, ReferenceCounted<MergedPeekCursor> {
-		LocalityGroup	localityGroup;
-		std::vector< std::pair<LogMessageVersion, int> > sortedVersions;
 		vector< Reference<IPeekCursor> > serverCursors;
+		std::vector< std::pair<LogMessageVersion, int> > sortedVersions;
 		Tag tag;
 		int bestServer, currentCursor, readQuorum;
 		Optional<LogMessageVersion> nextVersion;
@@ -176,11 +278,10 @@ struct ILogSystem {
 		UID randomID;
 		int tLogReplicationFactor;
 		IRepPolicyRef tLogPolicy;
-		std::vector< LocalityData > tLogLocalities;
 
-		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector< LocalityData > const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
+		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore );
 
-		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, std::vector< LocalityData > const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
+		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion );
 
 		// if server_cursors[c]->hasMessage(), then nextSequence <= server_cursors[c]->sequence() and there are no messages known to that server with sequences in [nextSequence,server_cursors[c]->sequence())
 
@@ -194,7 +295,7 @@ struct ILogSystem {
 
 		void calcHasMessage();
 
-		void updateMessage(bool usePolicy);
+		void updateMessage();
 
 		virtual bool hasMessage();
 
@@ -222,6 +323,62 @@ struct ILogSystem {
 
 		virtual void delref() {
 			ReferenceCounted<MergedPeekCursor>::delref();
+		}
+	};
+
+	struct SetPeekCursor : IPeekCursor, ReferenceCounted<SetPeekCursor> {
+		std::vector<LogSet> logSets;
+		std::vector< std::vector< Reference<IPeekCursor> > > serverCursors;
+		Tag tag;
+		int bestSet, bestServer, currentSet, currentCursor;
+		LocalityGroup localityGroup;
+		std::vector< std::pair<LogMessageVersion, int> > sortedVersions;
+		Optional<LogMessageVersion> nextVersion;
+		LogMessageVersion messageVersion;
+		bool hasNextMessage;
+		bool useBestSet;
+		UID randomID;
+
+		SetPeekCursor( std::vector<LogSet> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore );
+
+		virtual Reference<IPeekCursor> cloneNoMore();
+
+		virtual void setProtocolVersion( uint64_t version );
+
+		virtual Arena& arena();
+
+		virtual ArenaReader* reader();
+
+		void calcHasMessage();
+
+		void updateMessage(int logIdx, bool usePolicy);
+
+		virtual bool hasMessage();
+
+		virtual void nextMessage();
+
+		virtual StringRef getMessage();
+
+		virtual std::vector<Tag> getTags();
+
+		virtual void advanceTo(LogMessageVersion n);
+
+		virtual Future<Void> getMore();
+
+		virtual Future<Void> onFailed();
+
+		virtual bool isActive();
+
+		virtual LogMessageVersion version();
+
+		virtual Version popped();
+
+		virtual void addref() {
+			ReferenceCounted<SetPeekCursor>::addref();
+		}
+
+		virtual void delref() {
+			ReferenceCounted<SetPeekCursor>::delref();
 		}
 	};
 

@@ -1447,26 +1447,34 @@ static StatusArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<
 	if(db->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
 		for(auto it : db->get().logSystemConfig.oldTLogs) {
 			StatusObject statusObj;
-			int failedLogs = 0;
 			StatusArray logsObj;
-			for(auto log : it.tLogs) {
-				StatusObject logObj;
-				bool failed = !log.present() || !address_workers.count(log.interf().address());
-				logObj["id"] = log.id().shortString();
-				logObj["healthy"] = !failed;
-				if(log.present()) {
-					logObj["address"] = log.interf().address().toString();
+			int maxFaultTolerance = 0;
+			
+			for(int i = 0; i < it.tLogs.size(); i++) {
+				int failedLogs = 0;
+				for(auto& log : it.tLogs[i].tLogs) {
+					StatusObject logObj;
+					bool failed = !log.present() || !address_workers.count(log.interf().address());
+					logObj["id"] = log.id().shortString();
+					logObj["healthy"] = !failed;
+					if(log.present()) {
+						logObj["address"] = log.interf().address().toString();
+					}
+					logsObj.push_back(logObj);
+					if(failed) {
+						failedLogs++;
+					}
 				}
-				logsObj.push_back(logObj);
-				if(failed) {
-					failedLogs++;
+				maxFaultTolerance = std::max(maxFaultTolerance, it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs);
+				//FIXME: add information for remote and satellites
+				if(i==0) {
+					statusObj["log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
+					statusObj["log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
+					statusObj["log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
 				}
 			}
-			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, it.tLogReplicationFactor - 1 - it.tLogWriteAntiQuorum - failedLogs);
+			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, maxFaultTolerance);
 			statusObj["logs"] = logsObj;
-			statusObj["log_replication_factor"] = it.tLogReplicationFactor;
-			statusObj["log_write_anti_quorum"] = it.tLogWriteAntiQuorum;
-			statusObj["log_fault_tolerance"] = it.tLogReplicationFactor - 1 - it.tLogWriteAntiQuorum - failedLogs;
 			oldTlogsArray.push_back(statusObj);
 		}
 	}

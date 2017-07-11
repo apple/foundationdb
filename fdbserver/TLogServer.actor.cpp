@@ -213,7 +213,6 @@ struct TLogData : NonCopyable {
 	WorkerCache<TLogInterface> tlogCache;
 
 	Future<Void> updatePersist; //SOMEDAY: integrate the recovery and update storage so that only one of them is committing to persistant data.
-	Future<Void> oldLogServer;
 
 	PromiseStream<Future<Void>> sharedActors;
 
@@ -395,7 +394,7 @@ KeyRange prefixRange( KeyRef prefix ) {
 
 // Immutable keys
 static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/4") );
-static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/2"), LiteralStringRef("FoundationDB/LogServer/2/5") );
+static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/3"), LiteralStringRef("FoundationDB/LogServer/2/5") );
 static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
 
 // Updated on updatePersistentData()
@@ -1195,8 +1194,8 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			dbInfoChange = self->dbInfo->onChange();
 			bool found = false;
 			if(self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED) {
-				for(auto& log : self->dbInfo->get().logSystemConfig.tLogs) {
-					if( std::count( self->dbInfo->get().logSystemConfig.tLogs.begin(), self->dbInfo->get().logSystemConfig.tLogs.end(), logData->logId ) ) {
+				for(auto& logs : self->dbInfo->get().logSystemConfig.tLogs) {
+					if( std::count( logs.tLogs.begin(), logs.tLogs.end(), logData->logId ) ) {
 						found = true;
 						break;
 					}
@@ -1249,7 +1248,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 	logData->addActor = PromiseStream<Future<Void>>(); //there could be items still in the promise stream if one of the actors threw an error immediately
 	self->id_data.erase(logData->logId);
 
-	if(self->id_data.size() || (self->oldLogServer.isValid() && !self->oldLogServer.isReady())) {
+	if(self->id_data.size()) {
 		return;
 	} else {
 		throw worker_removed();
@@ -1417,7 +1416,7 @@ ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
 	}
 }
 
-ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> oldLog, PromiseStream<InitializeTLogRequest> tlogRequests ) {
+ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests ) {
 	state double startt = now();
 	state Reference<LogData> logData;
 	state KeyRange tagKeys;
@@ -1455,28 +1454,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 	state std::vector<Future<ErrorOr<Void>>> removed;
 	state int persistentDataFormat = 0;
-	if(fFormat.get().get() == LiteralStringRef("FoundationDB/LogServer/2/2")) {
-		TLogInterface recruited;
-		recruited.uniqueID = self->dbgid;
-		recruited.locality = locality;
-		recruited.initEndpoints();
-
-		DUMPTOKEN( recruited.peekMessages );
-		DUMPTOKEN( recruited.popMessages );
-		DUMPTOKEN( recruited.commit );
-		DUMPTOKEN( recruited.lock );
-		DUMPTOKEN( recruited.getQueuingMetrics );
-		DUMPTOKEN( recruited.confirmRunning );
-
-		//FIXME: need for upgrades from 4.X to 5.0, remove once this upgrade path is no longer needed
-		oldLog.send(Void());
-		while(!tlogRequests.isEmpty()) {
-			tlogRequests.getFuture().pop().reply.sendError(recruitment_failed());
-		}
-
-		Void _ = wait( oldTLog::tLog(self->persistentData, self->rawPersistentQueue, recruited, self->dbInfo) );
-		throw internal_error();
-	} else if(fFormat.get().get() >= LiteralStringRef("FoundationDB/LogServer/2/4")) {
+	if(fFormat.get().get() >= LiteralStringRef("FoundationDB/LogServer/2/4")) {
 		persistentDataFormat = 1;
 	}
 
@@ -1857,7 +1835,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 }
 
 // New tLog (if !recoverFrom.size()) or restore from network
-ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk, Promise<Void> oldLog )
+ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk )
 {
 	state TLogData self( tlogId, persistentData, persistentQueue, db );
 	state Future<Void> error = actorCollection( self.sharedActors.getFuture() );
@@ -1866,7 +1844,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 
 	try {
 		if(restoreFromDisk) {
-			Void _ = wait( restorePersistentState( &self, locality, oldLog, tlogRequests ) );
+			Void _ = wait( restorePersistentState( &self, locality, tlogRequests ) );
 		} else {
 			Void _ = wait( checkEmptyQueue(&self) );
 		}

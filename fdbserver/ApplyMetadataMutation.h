@@ -130,16 +130,12 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					if (logSystem && m.param1.startsWith( excludedServersPrefix )) {
 						// If one of our existing tLogs is now excluded, we have to die and recover
 						auto addr = decodeExcludedServersKey(m.param1);
-						for( auto tl : logSystem->getLogSystemConfig().tLogs ) {
-							if(!tl.present() || addr.excludes(tl.interf().commit.getEndpoint().address)) {
-								TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL).detail("addr", addr.toString());
-								if(confChange) *confChange = true;
-							}
-						}
-						for( auto tl : logSystem->getLogSystemConfig().remoteTLogs ) {
-							if(!tl.present() || addr.excludes(tl.interf().commit.getEndpoint().address)) {
-								TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL).detail("addr", addr.toString());
-								if(confChange) *confChange = true;
+						for( auto& logs : logSystem->getLogSystemConfig().tLogs ) {
+							for( auto& tl : logs.tLogs ) {
+								if(!tl.present() || addr.excludes(tl.interf().commit.getEndpoint().address)) {
+									TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL).detail("addr", addr.toString());
+									if(confChange) *confChange = true;
+								}
 							}
 						}
 					} else if(m.param1 != excludedServersVersionKey) {

@@ -596,13 +596,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				details["StorageEngine"] = s.storeType.toString();
 				startRole( s.storeID, interf.id(), "SharedTLog", details, "Restored" );
 
-				Promise<Void> oldLog;
-				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog );
+				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true );
 				tl = handleIOErrors( tl, kv, s.storeID );
 				tl = handleIOErrors( tl, queue, s.storeID );
-				if(tlog.isReady()) {
-					tlog = oldLog.getFuture() || tl;
-				}
 				errorForwarders.add( forwardError( errors, "SharedTLog", s.storeID, tl ) );
 			}
 		}
@@ -669,7 +665,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + logId.toString() + "-" ), logId );
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
-					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>() );
+					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false );
 					tlog = handleIOErrors( tlog, data, logId );
 					tlog = handleIOErrors( tlog, queue, logId );
 					errorForwarders.add( forwardError( errors, "SharedTLog", logId, tlog ) );

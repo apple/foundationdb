@@ -57,7 +57,7 @@ protected:
 
 struct TLogSet {
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
-	std::vector<TLogInterface> logRouters;
+	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	IRepPolicyRef tLogPolicy;

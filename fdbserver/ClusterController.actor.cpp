@@ -636,14 +636,15 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 
 		if(oldMasterFit < newMasterFit) return false;
 
+		//FIXME: implement for remote logs and log routers
 		std::vector<ProcessClass> tlogProcessClasses;
-		for(auto& it : dbi.logSystemConfig.tLogs ) {
+		for(auto& it : dbi.logSystemConfig.tLogs[0].tLogs ) {
 			auto tlogWorker = id_worker.find(it.interf().locality.processId());
 			if ( tlogWorker == id_worker.end() )
 				return false;
 			tlogProcessClasses.push_back(tlogWorker->second.processClass);
 		}
-		AcrossDatacenterFitness oldAcrossFit(dbi.logSystemConfig.tLogs, tlogProcessClasses);
+		AcrossDatacenterFitness oldAcrossFit(dbi.logSystemConfig.tLogs[0].tLogs, tlogProcessClasses);
 		AcrossDatacenterFitness newAcrossFit(getWorkersForTlogsAcrossDatacenters(db.config, id_used, true));
 
 		if(oldAcrossFit < newAcrossFit) return false;

@@ -149,7 +149,7 @@ ACTOR Future<Void> writeTransitionMasterState( Reference<MasterData> self, bool 
 	self->logSystem->toCoreState( newState );
 	newState.recoveryCount = self->prevDBState.recoveryCount + 1;
 
-	ASSERT( newState.tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum && newState.tLogReplicationFactor == self->configuration.tLogReplicationFactor );
+	ASSERT( newState.tLogs[0].tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum && newState.tLogs[0].tLogReplicationFactor == self->configuration.tLogReplicationFactor );
 
 	try {
 		Void _ = wait( self->cstate2.setExclusive( BinaryWriter::toValue(newState, IncludeVersion()) ) );
@@ -181,7 +181,7 @@ ACTOR Future<Void> writeRecoveredMasterState( Reference<MasterData> self ) {
 	state DBCoreState newState = self->myDBState.get();
 	self->logSystem->toCoreState( newState );
 
-	ASSERT( newState.tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum && newState.tLogReplicationFactor == self->configuration.tLogReplicationFactor );
+	ASSERT( newState.tLogs[0].tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum && newState.tLogs[0].tLogReplicationFactor == self->configuration.tLogReplicationFactor );
 
 	try {
 		Void _ = wait( self->cstate3.setExclusive( BinaryWriter::toValue(newState, IncludeVersion()) ) );
@@ -340,13 +340,18 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 			Optional<Standalone<StringRef>> value = wait( tr.get(logsKey) );
 			ASSERT(value.present());
 
-			auto logConf = self->logSystem->getLogSystemConfig();
+			std::vector<OptionalInterface<TLogInterface>> logConf;
 			auto logs = decodeLogsValue(value.get());
+			for(auto& log : self->logSystem->getLogSystemConfig().tLogs) {
+				for(auto& tl : log.tLogs) {
+					logConf.push_back(tl);
+				}
+			}
 
-			bool match = (logs.first.size() == logConf.tLogs.size());
+			bool match = (logs.first.size() == logConf.size());
 			if(match) {
 				for(int i = 0; i < logs.first.size(); i++) {
-					if(logs.first[i].first != logConf.tLogs[i].id()) {
+					if(logs.first[i].first != logConf[i].id()) {
 						match = false;
 						break;
 					}
