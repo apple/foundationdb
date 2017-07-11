@@ -411,13 +411,13 @@ Version ILogSystem::MergedPeekCursor::popped() {
 	return poppedVersion;
 }
 
-ILogSystem::SetPeekCursor::SetPeekCursor( std::vector<LogSet> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore )
+ILogSystem::SetPeekCursor::SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore )
 	: logSets(logSets), bestSet(bestSet), bestServer(bestServer), tag(tag), currentCursor(0), currentSet(bestSet), hasNextMessage(false), messageVersion(begin), useBestSet(true), randomID(g_random->randomUniqueID()) {
 	serverCursors.resize(logSets.size());
 	int maxServers = 0;
 	for( int i = 0; i < logSets.size(); i++ ) {
-		for( int j = 0; j < logSets[i].logServers.size(); j++) {
-			Reference<ILogSystem::ServerPeekCursor> cursor( new ILogSystem::ServerPeekCursor( logSets[i].logServers[j], tag, begin, end, true, parallelGetMore ) );
+		for( int j = 0; j < logSets[i]->logServers.size(); j++) {
+			Reference<ILogSystem::ServerPeekCursor> cursor( new ILogSystem::ServerPeekCursor( logSets[i]->logServers[j], tag, begin, end, true, parallelGetMore ) );
 			serverCursors[i].push_back( cursor );
 		}
 		maxServers = std::max<int>(maxServers, serverCursors[i].size());
@@ -506,18 +506,18 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 			std::sort(sortedVersions.begin(), sortedVersions.end());
 
 			for(auto sortedVersion : sortedVersions) {
-				auto& locality = logSets[logIdx].tLogLocalities[sortedVersion.second];
+				auto& locality = logSets[logIdx]->tLogLocalities[sortedVersion.second];
 				localityGroup.add(locality);
 
-				if( localityGroup.size() >= logSets[logIdx].tLogReplicationFactor && localityGroup.validate(logSets[logIdx].tLogPolicy) ) {
+				if( localityGroup.size() >= logSets[logIdx]->tLogReplicationFactor && localityGroup.validate(logSets[logIdx]->tLogPolicy) ) {
 					messageVersion = sortedVersion.first;
 					break;
 				}
 			}
 		} else {
 			//(int)oldLogData[i].logServers.size() + 1 - oldLogData[i].tLogReplicationFactor
-			std::nth_element(sortedVersions.begin(), sortedVersions.end()-(logSets[logIdx].logServers.size()+1-logSets[logIdx].tLogReplicationFactor), sortedVersions.end());
-			messageVersion = sortedVersions[sortedVersions.size()-(logSets[logIdx].logServers.size()+1-logSets[logIdx].tLogReplicationFactor)].first;
+			std::nth_element(sortedVersions.begin(), sortedVersions.end()-(logSets[logIdx]->logServers.size()+1-logSets[logIdx]->tLogReplicationFactor), sortedVersions.end());
+			messageVersion = sortedVersions[sortedVersions.size()-(logSets[logIdx]->logServers.size()+1-logSets[logIdx]->tLogReplicationFactor)].first;
 		}
 
 		for(int i = 0; i < serverCursors[logIdx].size(); i++) {
@@ -586,10 +586,10 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 				self->localityGroup.clear();
 				for( int i = 0; i < self->serverCursors[self->bestSet].size(); i++) {
 					if(!self->serverCursors[self->bestSet][i]->isActive()) {
-						self->localityGroup.add(self->logSets[self->bestSet].tLogLocalities[i]);
+						self->localityGroup.add(self->logSets[self->bestSet]->tLogLocalities[i]);
 					}
 				}
-				bestSetValid = self->localityGroup.size() < self->logSets[self->bestSet].tLogReplicationFactor || !self->localityGroup.validate(self->logSets[self->bestSet].tLogPolicy);
+				bestSetValid = self->localityGroup.size() < self->logSets[self->bestSet]->tLogReplicationFactor || !self->localityGroup.validate(self->logSets[self->bestSet]->tLogPolicy);
 			}
 			if(bestSetValid) {
 				vector<Future<Void>> q;

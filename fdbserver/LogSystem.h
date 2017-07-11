@@ -38,7 +38,7 @@ void uniquify( Collection& c ) {
 	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
 }
 
-class LogSet {
+class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logRouters;
@@ -327,7 +327,7 @@ struct ILogSystem {
 	};
 
 	struct SetPeekCursor : IPeekCursor, ReferenceCounted<SetPeekCursor> {
-		std::vector<LogSet> logSets;
+		std::vector<Reference<LogSet>> logSets;
 		std::vector< std::vector< Reference<IPeekCursor> > > serverCursors;
 		Tag tag;
 		int bestSet, bestServer, currentSet, currentCursor;
@@ -339,7 +339,7 @@ struct ILogSystem {
 		bool useBestSet;
 		UID randomID;
 
-		SetPeekCursor( std::vector<LogSet> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore );
+		SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 
@@ -532,7 +532,13 @@ struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
 	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
-		tags.resize( logSystem->getLogSystemConfig().tLogs.size() );
+		int totalSize = 0;
+		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
+			if(log.isLocal) {
+				totalSize += log.tLogs.size();
+			}
+		}
+		tags.resize( totalSize );
 		for(int i = 0; i < tags.size(); i++) {
 			messagesWriter.push_back( BinaryWriter( AssumeVersion(currentProtocolVersion) ) );
 		}
