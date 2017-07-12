@@ -25,7 +25,6 @@ import com.apple.cie.foundationdb.KeySelector;
 import com.apple.cie.foundationdb.Transaction;
 import com.apple.cie.foundationdb.TransactionContext;
 import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.subspace.Subspace;
 import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
 
 import java.util.ArrayList;
@@ -62,6 +61,7 @@ public class PerformanceTester extends AbstractTester {
         SERIAL_GET("Java Completable API serial get throughput"),
         GET_RANGE("Java Completable API get_range throughput"),
         GET_KEY("Java Completable API get_key throughput"),
+        GET_SINGLE_KEY_RANGE("Java Completable API get_single_key_range throughput"),
         ALTERNATING_GET_SET("Java Completable API alternating get and set throughput"),
         WRITE_TRANSACTION("Java Completable API single-key transaction throughput");
 
@@ -109,6 +109,7 @@ public class PerformanceTester extends AbstractTester {
         Tests.SERIAL_GET.setFunction(db -> serialGet(db, 2_000));
         Tests.GET_RANGE.setFunction(db -> getRange(db, 1_000));
         Tests.GET_KEY.setFunction(db -> getKey(db, 2_000));
+        Tests.GET_SINGLE_KEY_RANGE.setFunction(db -> getSingleKeyRange(db, 2_000));
         Tests.ALTERNATING_GET_SET.setFunction(db -> alternatingGetSet(db, 2_000));
         Tests.WRITE_TRANSACTION.setFunction(db -> writeTransaction(db, 1_000));
     }
@@ -338,6 +339,20 @@ public class PerformanceTester extends AbstractTester {
             long start = System.nanoTime();
             for (int i = 0; i < count; i++) {
                 tr.getKey(new KeySelector(randomKey(), true, random.nextInt(20) - 10)).join();
+            }
+            long end = System.nanoTime();
+
+            return count*1_000_000_000.0/(end - start);
+        });
+    }
+
+    public Double getSingleKeyRange(TransactionContext tcx, int count) {
+        return tcx.run(tr -> {
+            tr.options().setRetryLimit(5);
+            long start = System.nanoTime();
+            for (int i = 0; i < count; i++) {
+                int keyIndex = randomKeyIndex();
+                tr.getRange(key(keyIndex), key(keyIndex + 1)).asList().join();
             }
             long end = System.nanoTime();
 
