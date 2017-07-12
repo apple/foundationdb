@@ -144,6 +144,11 @@ define add_java_binding_targets
 	  @rm -r packages/jar$(1)_regular
 	  @cd bindings && jar uf $$(TOPDIR)/$$@ ../LICENSE
 
+    packages/fdb-java$(1)-$$(JARVER)-tests.jar: fdb_java$(1) versions.target
+	  @echo "Building       $$@"
+	  @rm -f $$@
+	  @cp $$(TOPDIR)/bindings/java/foundationdb-tests$(1).jar packages/fdb-java$(1)-$$(JARVER)-tests.jar
+
     packages/fdb-java$(1)-$$(JARVER)-sources.jar: $$(JAVA$(1)_GENERATED_SOURCES) versions.target
 	  @echo "Building       $$@"
 	  @rm -f $$@
@@ -165,7 +170,7 @@ define add_java_binding_targets
 	  @cd packages/bundle$(1)_regular && jar cf $(TOPDIR)/$$@ *
 	  @rm -rf packages/bundle$(1)_regular
 
-    fdb_java$(1)_release: packages/fdb-java$(1)-$$(JARVER)-bundle.jar
+    fdb_java$(1)_release: packages/fdb-java$(1)-$$(JARVER)-bundle.jar packages/fdb-java$(1)-$$(JARVER)-tests.jar
 
     fdb_java$(1)_release_clean:
 	  @echo "Cleaning       Java release"
