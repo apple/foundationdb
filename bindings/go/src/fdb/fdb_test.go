@@ -23,7 +23,7 @@
 package fdb_test
 
 import (
-	"fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"fmt"
 	"testing"
 )

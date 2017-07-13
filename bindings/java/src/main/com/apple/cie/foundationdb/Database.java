@@ -46,8 +46,8 @@ public interface Database extends Disposable, TransactionContext {
 	 * Creates a {@link Transaction} that operates on this {@code Database}.<br>
 	 * <br>
 	 * Note: Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
-	 *  option. This is because the Java bindings disallow use of {@code Transaction} objects after either
-	 *  {@link Transaction#reset} or {@link Transaction#onError} is called.
+	 *  option. This is because the Java bindings disallow use of {@code Transaction} objects after
+	 *  {@link Transaction#onError} is called.
 	 *
 	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
 	 */
