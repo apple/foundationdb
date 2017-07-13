@@ -27,9 +27,12 @@
 #include "Status.h"
 #include "ClientDBInfo.h"
 
+// Streams from WorkerInterface that are safe and useful to call from a client.
+// A ClientWorkerInterface is embedded as the first element of a WorkerInterface.
 struct ClientWorkerInterface {
 	RequestStream< struct RebootRequest > reboot;
-	
+	RequestStream< struct ProfilerRequest > cpuProfilerRequest;
+
 	bool operator == (ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClientWorkerInterface const& r) const { return id() != r.id(); }
 	UID id() const { return reboot.getEndpoint().token; }
@@ -44,12 +47,24 @@ struct ClientWorkerInterface {
 struct RebootRequest {
 	bool deleteData;
 	bool checkData;
-	
+
 	RebootRequest(bool deleteData = false, bool checkData = false) : deleteData(deleteData), checkData(checkData) {}
-	
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ar & deleteData & checkData;
+	}
+};
+
+struct ProfilerRequest {
+	ReplyPromise<Void> reply;
+
+	bool enabled;
+	Standalone<StringRef> outputFile;
+
+	template<class Ar>
+	void serialize( Ar& ar ) {
+		ar & reply & enabled & outputFile;
 	}
 };
 

@@ -534,6 +534,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	{
 		auto recruited = interf;  //ghetto! don't we all love a good #define
 		DUMPTOKEN(recruited.clientInterface.reboot);
+		DUMPTOKEN(recruited.clientInterface.cpuProfilerRequest);
 		DUMPTOKEN(recruited.tLog);
 		DUMPTOKEN(recruited.master);
 		DUMPTOKEN(recruited.masterProxy);
@@ -546,7 +547,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		DUMPTOKEN(recruited.setMetricsRate);
 		DUMPTOKEN(recruited.eventLogRequest);
 		DUMPTOKEN(recruited.traceBatchDumpRequest);
-		DUMPTOKEN(recruited.cpuProfilerRequest);
 	}
 
 	try {
@@ -645,6 +645,10 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					ASSERT(!rebootReq.deleteData);
 					flushAndExit(0);
 				}
+			}
+			when( ProfilerRequest req = waitNext(interf.clientInterface.cpuProfilerRequest.getFuture()) ) {
+				updateCpuProfiler(req);
+				req.reply.send(Void());
 			}
 			when( RecruitMasterRequest req = waitNext(interf.master.getFuture()) ) {
 				MasterInterface recruited;
@@ -786,10 +790,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 			}
 			when( TraceBatchDumpRequest req = waitNext(interf.traceBatchDumpRequest.getFuture()) ) {
 				g_traceBatch.dump();
-				req.reply.send(Void());
-			}
-			when( ProfilerRequest req = waitNext(interf.cpuProfilerRequest.getFuture()) ) {
-				updateCpuProfiler(req);
 				req.reply.send(Void());
 			}
 			when( DiskStoreRequest req = waitNext(interf.diskStoreRequest.getFuture()) ) {

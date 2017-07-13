@@ -52,9 +52,6 @@ struct WorkerInterface {
 	RequestStream< struct TraceBatchDumpRequest > traceBatchDumpRequest;
 	RequestStream< struct DiskStoreRequest > diskStoreRequest;
 
-	//A stream used to start or stop CPU profiling on a worker
-	RequestStream< struct ProfilerRequest > cpuProfilerRequest;
-
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
@@ -65,7 +62,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & debugQuery & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & cpuProfilerRequest & testerInterface & diskStoreRequest;
+		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & debugQuery & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & testerInterface & diskStoreRequest;
 	}
 };
 
@@ -144,19 +141,6 @@ struct TraceBatchDumpRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ar & reply;
-	}
-};
-
-//A request to start or stop CPU profiling on a worker
-struct ProfilerRequest {
-	ReplyPromise<Void> reply;
-
-	bool enabled;
-	Standalone<StringRef> outputFile;
-
-	template<class Ar>
-	void serialize( Ar& ar ) {
-		ar & reply & enabled & outputFile;
 	}
 };
 
