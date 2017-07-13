@@ -546,7 +546,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			return std::numeric_limits<Version>::max();
 	}
 
-	virtual void addRemoteTags( int logSet, std::vector<Tag> originalTags, std::vector<int>& tags ) {
+	virtual void addRemoteTags( int logSet, std::vector<Tag> const& originalTags, std::vector<int>& tags ) {
 		tLogs[logSet]->getPushLocations(originalTags, tags, SERVER_KNOBS->MAX_TAG);
 	}
 

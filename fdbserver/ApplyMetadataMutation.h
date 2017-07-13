@@ -202,17 +202,20 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if(toCommit) {
 					// Notifies all servers that a Master's server epoch ends
 					auto allServers = txnStateStore->readRange(serverTagKeys).get();
+					std::set<Tag> allTags;
+					for (auto &kv : allServers)
+						allTags.insert(decodeServerTagValue(kv.value));
 
 					if (m.param1 == lastEpochEndKey) {
-						for (auto &kv : allServers)
-							toCommit->addTag(decodeServerTagValue(kv.value));
+						for (auto t : allTags)
+							toCommit->addTag(t);
 						toCommit->addTypedMessage(LogProtocolMessage());
 					}
 
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					for (auto &kv : allServers)
-						toCommit->addTag(decodeServerTagValue(kv.value));
+					for (auto t : allTags)
+						toCommit->addTag(t);
 					toCommit->addTypedMessage(privatized);
 				}
 			}

@@ -498,7 +498,7 @@ struct ILogSystem {
 
 	virtual void getPushLocations( std::vector<Tag> const& tags, vector<int>& locations ) = 0;
 
-	virtual void addRemoteTags( int logSet, std::vector<Tag> originalTags, std::vector<int>& tags ) = 0;
+	virtual void addRemoteTags( int logSet, std::vector<Tag> const& originalTags, std::vector<int>& tags ) = 0;
 
 	virtual Tag getRandomRouterTag() = 0;
 
