@@ -22,5 +22,23 @@
 
 fdb_flow_CFLAGS := -Ibindings/c $(fdbrpc_CFLAGS)
 fdb_flow_LDFLAGS := -Llib -lfdb_c $(fdbrpc_LDFLAGS)
-fdb_flow_LIBS := lib/libfdbrpc.a
+fdb_flow_LIBS :=
 
+packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH).tar.gz: fdb_flow
+	@echo "Packaging      fdb_flow"
+	@rm -rf packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
+	@mkdir -p packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/lib packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/flow packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/c/foundationdb
+	@cp lib/libfdb_flow.a packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/lib
+	@find bindings/flow -name '*.h' -not -name '*tester*' -exec cp {} packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/flow \;
+	@find bindings/c/foundationdb -name '*.h' -exec cp {} packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/c/foundationdb \;
+	@tar czf packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH).tar.gz -C packages fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
+	@rm -rf packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
+
+FDB_FLOW: packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH).tar.gz
+
+FDB_FLOW_clean:
+	@echo "Cleaning       fdb_flow package"
+	@rm -rf packages/fdb-flow-*.tar.gz
+
+packages: FDB_FLOW
+packages_clean: FDB_FLOW_clean
