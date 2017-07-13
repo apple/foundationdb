@@ -496,9 +496,9 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 		bool advancedPast = false;
 		sortedVersions.clear();
 		for(int i = 0; i < serverCursors[logIdx].size(); i++) {
-			auto& serverCursor = serverCursors[i];
-			if (nextVersion.present()) serverCursor[logIdx]->advanceTo(nextVersion.get());
-			sortedVersions.push_back(std::pair<LogMessageVersion, int>(serverCursor[logIdx]->version(), i));
+			auto& serverCursor = serverCursors[logIdx][i];
+			if (nextVersion.present()) serverCursor->advanceTo(nextVersion.get());
+			sortedVersions.push_back(std::pair<LogMessageVersion, int>(serverCursor->version(), i));
 		}
 
 		if(usePolicy) {

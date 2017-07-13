@@ -599,6 +599,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true );
 				tl = handleIOErrors( tl, kv, s.storeID );
 				tl = handleIOErrors( tl, queue, s.storeID );
+				if(tlog.isReady()) {
+					tlog = tl;
+				}
 				errorForwarders.add( forwardError( errors, "SharedTLog", s.storeID, tl ) );
 			}
 		}

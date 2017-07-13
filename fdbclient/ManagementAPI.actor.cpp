@@ -87,40 +87,48 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		return out;
 	}
 
-	std::string redundancy, log_replicas;
+	std::string redundancy, log_replicas, remote_replicas;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
+	IRepPolicyRef remoteTLogPolicy;
+	//FIXME: add modes for real remote policies
 
 	bool redundancySpecified = true;
 	if (mode == "single") {
 		redundancy="1";
 		log_replicas="1";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyOne());
+		remote_replicas="1";
+		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
 
 	} else if(mode == "double" || mode == "fast_recovery_double") {
 		redundancy="2";
 		log_replicas="2";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+		remote_replicas="2";
+		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "triple" || mode == "fast_recovery_triple") {
 		redundancy="3";
 		log_replicas="3";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+		remote_replicas="3";
+		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "two_datacenter") {
 		redundancy="3";
 		log_replicas="3";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+		remote_replicas="3";
+		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "three_datacenter") {
 		redundancy="3";
 		log_replicas="3";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAnd({
+		remote_replicas="3";
+		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAnd({
 			IRepPolicyRef(new PolicyAcross(3, "dcid", IRepPolicyRef(new PolicyOne()))),
 			IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())))
 		}));
 	} else if(mode == "three_data_hall") {
 		redundancy="3";
 		log_replicas="4";
+		remote_replicas="4";
 		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "data_hall", IRepPolicyRef(new PolicyOne())));
-		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
+		tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
 	} else
@@ -129,6 +137,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		out[p+"storage_replicas"] =
 			out[p+"storage_quorum"] = redundancy;
 		out[p+"log_replicas"] = log_replicas;
+		out[p+"remote_log_replication"] = remote_replicas;
 		out[p+"log_anti_quorum"] = "0";
 
 		BinaryWriter policyWriter(IncludeVersion());
@@ -138,6 +147,10 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		policyWriter = BinaryWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, tLogPolicy);
 		out[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
+
+		policyWriter = BinaryWriter(IncludeVersion());
+		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
+		out[p+"remote_replication_policy"] = policyWriter.toStringRef().toString();
 
 		return out;
 	}

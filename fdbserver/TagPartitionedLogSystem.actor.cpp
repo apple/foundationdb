@@ -59,7 +59,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Future<Void> rejoins;
 	Future<Void> recoveryComplete;
 	Future<Void> remoteRecovery;
-	AsyncTrigger logSystemConfigChanges;
+	Future<Void> remoteRecoveryComplete;
 	bool recoveryCompleteWrittenToCoreState;
 
 	Optional<Version> epochEndVersion;
@@ -316,22 +316,25 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, bool parallelGetMore ) {
-		if(tLogs.size() < 2) {
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
-		}
-		
 		if(tag >= SERVER_KNOBS->MAX_TAG) {
+			if(tLogs.size() < 2) {
+				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+			}
+
 			//FIXME: non-static logRouters
 			return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[1]->logRouters, -1, (int)tLogs[1]->logRouters.size(), tag, begin, getPeekEnd(), false ) );
 		} else {
+			if(tLogs.size() < 1) {
+				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+			}
 			if(oldLogData.size() == 0 || begin >= oldLogData[0].epochEnd) {
-				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( tLogs, 1, tLogs[1]->logServers.size() ? tLogs[1]->bestLocationFor( tag ) : -1, tag, begin, getPeekEnd(), parallelGetMore ) );
+				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( tLogs, 0, tLogs[0]->logServers.size() ? tLogs[0]->bestLocationFor( tag ) : -1, tag, begin, getPeekEnd(), parallelGetMore ) );
 			} else {
 				std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 				std::vector< LogMessageVersion > epochEnds;
-				cursors.push_back( Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( tLogs, 1, tLogs[1]->logServers.size() ? tLogs[1]->bestLocationFor( tag ) : -1, tag, oldLogData[0].epochEnd, getPeekEnd(), parallelGetMore)) );
+				cursors.push_back( Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( tLogs, 0, tLogs[0]->logServers.size() ? tLogs[0]->bestLocationFor( tag ) : -1, tag, oldLogData[0].epochEnd, getPeekEnd(), parallelGetMore)) );
 				for(int i = 0; i < oldLogData.size() && begin < oldLogData[i].epochEnd; i++) {
-					cursors.push_back( Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( oldLogData[i].tLogs, 1, oldLogData[i].tLogs[1]->logServers.size() ? oldLogData[i].tLogs[1]->bestLocationFor( tag ) : -1, tag, i+1 == oldLogData.size() ? begin : std::max(oldLogData[i+1].epochEnd, begin), oldLogData[i].epochEnd, parallelGetMore)) );
+					cursors.push_back( Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( oldLogData[i].tLogs, 0, oldLogData[i].tLogs[0]->logServers.size() ? oldLogData[i].tLogs[0]->bestLocationFor( tag ) : -1, tag, i+1 == oldLogData.size() ? begin : std::max(oldLogData[i+1].epochEnd, begin), oldLogData[i].epochEnd, parallelGetMore)) );
 					epochEnds.push_back(LogMessageVersion(oldLogData[i].epochEnd));
 				}
 
@@ -342,27 +345,36 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual Reference<IPeekCursor> peekSingle( Version begin, Tag tag ) {
 		ASSERT(tag < SERVER_KNOBS->MAX_TAG);
-		if(tLogs.size() < 2) {
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
-		}
 		
-		if(oldLogData.size() == 0 || begin >= oldLogData[0].epochEnd) {
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[1]->logServers.size() ?
-				tLogs[1]->logServers[tLogs[1]->bestLocationFor( tag )] :
-				Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
-		} else {
-			TEST(true); //peekSingle used during non-copying tlog recovery
-			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
-			std::vector< LogMessageVersion > epochEnds;
-			cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[1]->logServers.size() ?
-				tLogs[1]->logServers[tLogs[1]->bestLocationFor( tag )] :
-				Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, oldLogData[0].epochEnd, getPeekEnd(), false, false) ) );
-			for(int i = 0; i < oldLogData.size() && begin < oldLogData[i].epochEnd; i++) {
-				cursors.push_back( Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( oldLogData[i].tLogs, 1, oldLogData[i].tLogs[1]->logServers.size() ? oldLogData[i].tLogs[1]->bestLocationFor( tag ) : -1, tag, i+1 == oldLogData.size() ? begin : std::max(oldLogData[i+1].epochEnd, begin), oldLogData[i].epochEnd, false)) );
-				epochEnds.push_back(LogMessageVersion(oldLogData[i].epochEnd));
+		if(tag <= SERVER_KNOBS->MIN_TAG) {
+			if(tLogs.size() < 1) {
+				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 			}
+			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[0]->logServers.size() ?
+					tLogs[0]->logServers[tLogs[0]->bestLocationFor( tag )] :
+					Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+		} else {
+			if(tLogs.size() < 2) {
+				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+			}
+			if(oldLogData.size() == 0 || begin >= oldLogData[0].epochEnd) {
+				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[1]->logServers.size() ?
+					tLogs[1]->logServers[tLogs[1]->bestLocationFor( tag )] :
+					Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+			} else {
+				TEST(true); //peekSingle used during non-copying tlog recovery
+				std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
+				std::vector< LogMessageVersion > epochEnds;
+				cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[1]->logServers.size() ?
+					tLogs[1]->logServers[tLogs[1]->bestLocationFor( tag )] :
+					Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, oldLogData[0].epochEnd, getPeekEnd(), false, false) ) );
+				for(int i = 0; i < oldLogData.size() && begin < oldLogData[i].epochEnd; i++) {
+					cursors.push_back( Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( oldLogData[i].tLogs, 1, oldLogData[i].tLogs[1]->logServers.size() ? oldLogData[i].tLogs[1]->bestLocationFor( tag ) : -1, tag, i+1 == oldLogData.size() ? begin : std::max(oldLogData[i+1].epochEnd, begin), oldLogData[i].epochEnd, false)) );
+					epochEnds.push_back(LogMessageVersion(oldLogData[i].epochEnd));
+				}
 
-			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+				return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+			}
 		}
 	}
 
@@ -721,7 +733,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					int safe_range_end = logServers[log]->tLogReplicationFactor - absent;
 
 					if( ( prevState.logSystemType == 2 && (!last_end.present() || ((safe_range_end > 0) && (safe_range_end-1 < results.size()) && results[ safe_range_end-1 ].end < last_end.get())) ) ) {
-						knownCommittedVersion = std::max(knownCommittedVersion, end.get() - (g_network->isSimulated() ? 10*SERVER_KNOBS->VERSIONS_PER_SECOND : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)); //In simulation this must be the maximum MAX_READ_TRANSACTION_LIFE_VERSIONS
+						knownCommittedVersion = std::max(knownCommittedVersion, results[ new_safe_range_begin ].end - (g_network->isSimulated() ? 10*SERVER_KNOBS->VERSIONS_PER_SECOND : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)); //In simulation this must be the maximum MAX_READ_TRANSACTION_LIFE_VERSIONS
 						for(int i = 0; i < results.size(); i++) {
 							knownCommittedVersion = std::max(knownCommittedVersion, results[i].knownCommittedVersion);
 						}
@@ -751,7 +763,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 							.detail("logSystemType", prevState.logSystemType)
 							.detail("knownCommittedVersion", knownCommittedVersion);
 
-						if(!end.present() == results[ new_safe_range_begin ].end < end.get() ) {
+						if( !end.present() || results[ new_safe_range_begin ].end < end.get() ) {
 							end = results[ new_safe_range_begin ].end;
 						}
 					}
@@ -774,7 +786,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 							.detail("SafeEnd", safe_range_end)
 							.detail("NewSafeBegin", new_safe_range_begin)
 							.detail("LogZones", ::describeZones(logServers[log]->tLogLocalities))
-							.detail("LogDataHalls", ::describeDataHalls(logServers[log]->tLogLocalities));
+							.detail("LogDataHalls", ::describeDataHalls(logServers[log]->tLogLocalities))
+							.detail("logSystemType", prevState.logSystemType);
 					}
 				}
 				// Too many failures
@@ -858,7 +871,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < logRouterInitializationReplies.size(); i++ ) {
 			self->tLogs[logNum]->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(logRouterInitializationReplies[i].get()) ) ) );
 		}
-		self->logSystemConfigChanges.trigger();
 
 		state double startTime = now();
 		state UID remoteRecruitmentID = g_random->randomUniqueID();
@@ -903,8 +915,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < self->tLogs[logNum]->logServers.size(); i++)
 			recoveryComplete.push_back( transformErrors( throwErrorOr( self->tLogs[logNum]->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor( TLogRecoveryFinishedRequest(), SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		
-		Void _ = wait( waitForAll(recoveryComplete) );
-		
+		self->remoteRecoveryComplete = waitForAll(recoveryComplete);
 		self->tLogs[logNum]->logRouters.resize(logRouterWorkers.size());
 
 		return Void();
@@ -987,6 +998,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			recoveryComplete.push_back( transformErrors( throwErrorOr( logSystem->tLogs[0]->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor( TLogRecoveryFinishedRequest(), SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		logSystem->recoveryComplete = waitForAll(recoveryComplete);
 		logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), remoteTLogWorkers, logRouterWorkers, configuration, recoveryCount, oldLogSystem->epochEndVersion.get(), minTag, 1);
+		Void _ = wait(logSystem->remoteRecovery);
 
 		return logSystem;
 	}

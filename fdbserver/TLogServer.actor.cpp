@@ -862,12 +862,27 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	}
 
 	Version poppedVer = poppedVersion(logData, req.tag);
-
 	if(poppedVer > req.begin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
 		rep.popped = poppedVer;
 		rep.end = poppedVer;
+
+		if(req.sequence.present()) {
+			auto& trackerData = self->peekTracker[peekId];
+			trackerData.lastUpdate = now();
+			auto& sequenceData = trackerData.sequence_version[sequence+1];
+			if(sequenceData.isSet()) {
+				if(sequenceData.getFuture().get() != rep.end) {
+					TEST(true); //tlog peek second attempt ended at a different version
+					req.reply.sendError(timed_out());
+					return Void();
+				}
+			} else {
+				sequenceData.send(rep.end);
+			}
+		}
+
 		req.reply.send( rep );
 		return Void();
 	}
@@ -1296,8 +1311,10 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 					// Log the changes to the persistent queue, to be committed by commitQueue()
 					TLogQueueEntryRef qe;
 					qe.version = ver;
+					qe.knownCommittedVersion = 0;
 					qe.messages = wr.toStringRef();
 					qe.tags = r;
+					qe.id = logData->logId;
 					self->persistentQueue->push( qe );
 
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
@@ -1319,8 +1336,10 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 						// Log the changes to the persistent queue, to be committed by commitQueue()
 						TLogQueueEntryRef qe;
 						qe.version = ver;
+						qe.knownCommittedVersion = 0;
 						qe.messages = StringRef();
 						qe.tags = VectorRef<TagMessagesRef>();
+						qe.id = logData->logId;
 						self->persistentQueue->push( qe );
 
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
@@ -1806,6 +1825,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			state Promise<Void> copyComplete;
 			TraceEvent("TLogRecover", self->dbgid).detail("logId", logData->logId).detail("at", req.recoverAt).detail("known", req.knownCommittedVersion).detail("tags", describe(req.recoverTags));
 			recovery = recoverFromLogSystem( self, logData, req.recoverFrom, req.recoverAt, req.knownCommittedVersion, req.recoverTags, copyComplete );
+			Void _ = wait(recovery); //FIXME
 			Void _ = wait(copyComplete.getFuture() || logData->removed );
 		} else {
 			// Brand new tlog, initialization has already been done by caller

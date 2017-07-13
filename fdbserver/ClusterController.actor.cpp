@@ -211,21 +211,21 @@ public:
 		throw no_more_servers();
 	}
 
-std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDatacenters( DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false )
+std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDatacenters( DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false, std::set<NetworkAddress> additionalExlusions = std::set<NetworkAddress>() )
 	{
 		std::map<ProcessClass::Fitness, vector<std::pair<WorkerInterface, ProcessClass>>> fitness_workers;
-		std::vector<std::pair<WorkerInterface, ProcessClass>>		results;
-		std::vector<LocalityData>							unavailableLocals;
-		LocalitySetRef																					logServerSet;
-		LocalityMap<std::pair<WorkerInterface, ProcessClass>>*	logServerMap;
-		bool		bCompleted = false;
+		std::vector<std::pair<WorkerInterface, ProcessClass>> results;
+		std::vector<LocalityData> unavailableLocals;
+		LocalitySetRef logServerSet;
+		LocalityMap<std::pair<WorkerInterface, ProcessClass>>* logServerMap;
+		bool bCompleted = false;
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<std::pair<WorkerInterface, ProcessClass>>());
 		logServerMap = (LocalityMap<std::pair<WorkerInterface, ProcessClass>>*) logServerSet.getPtr();
 
 		for( auto& it : id_worker ) {
 			auto fitness = it.second.processClass.machineClassFitness( ProcessClass::TLog );
-			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.interf.address()) && fitness != ProcessClass::NeverAssign ) {
+			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.interf.address()) && !additionalExlusions.count(it.second.interf.address()) && fitness != ProcessClass::NeverAssign ) {
 				fitness_workers[ fitness ].push_back(std::make_pair(it.second.interf, it.second.processClass));
 			}
 			else {
@@ -267,7 +267,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			}
 			else if (logServerSet->size() <= conf.getDesiredLogs()) {
 				ASSERT(conf.tLogPolicy);
-				if (logServerSet->validate(conf.tLogPolicy))	{
+				if (logServerSet->validate(conf.tLogPolicy)) {
 					for (auto& object : logServerMap->getObjects()) {
 						results.push_back(*object);
 					}
@@ -285,8 +285,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			}
 			// Try to select the desired size, if larger
 			else {
-				std::vector<LocalityEntry>	bestSet;
-				std::vector<LocalityData>	tLocalities;
+				std::vector<LocalityEntry> bestSet;
+				std::vector<LocalityData> tLocalities;
 				ASSERT(conf.tLogPolicy);
 
 				// Try to find the best team of servers to fulfill the policy
@@ -554,10 +554,17 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 
 		id_used[masterProcessId]++;
 		auto tlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used );
+
+		std::set<NetworkAddress> additionalExclusions;
 		for(int i = 0; i < tlogs.size(); i++) {
 			result.tLogs.push_back(tlogs[i].first);
-			result.remoteTLogs.push_back(tlogs[i].first);
-			result.logRouters.push_back(tlogs[i].first);
+			additionalExclusions.insert(tlogs[i].first.address());
+		}
+
+		auto remoteTlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used, false, additionalExclusions );
+		for(int i = 0; i < remoteTlogs.size(); i++) {
+			result.remoteTLogs.push_back(remoteTlogs[i].first);
+			result.logRouters.push_back(remoteTlogs[i].first);
 		}
 
 		auto datacenters = getDatacenters( req.configuration );

@@ -553,11 +553,11 @@ struct LogPushData : NonCopyable {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
 			prev_tags.push_back( logSystem->getRandomRouterTag() );
-			msg_locations.clear();
-			logSystem->getPushLocations( prev_tags, msg_locations );
 			for(auto& tag : next_message_tags) {
 				prev_tags.push_back(tag);
 			}
+			msg_locations.clear();
+			logSystem->getPushLocations( prev_tags, msg_locations );
 			next_message_tags.clear();
 		}
 		uint32_t subseq = this->subsequence++;
@@ -576,11 +576,12 @@ struct LogPushData : NonCopyable {
 	void addTypedMessage( T const& item ) {
 		prev_tags.clear();
 		prev_tags.push_back( logSystem->getRandomRouterTag() );
-		msg_locations.clear();
-		logSystem->getPushLocations( prev_tags, msg_locations );
 		for(auto& tag : next_message_tags) {
 			prev_tags.push_back(tag);
 		}
+		msg_locations.clear();
+		logSystem->getPushLocations( prev_tags, msg_locations );
+		
 		uint32_t subseq = this->subsequence++;
 		for(int loc : msg_locations) {
 			for(auto& tag : prev_tags)

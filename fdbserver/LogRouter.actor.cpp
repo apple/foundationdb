@@ -228,7 +228,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 			}
 
 			//FIXME: do not reserialize tags
-			wr << uint32_t( msg.size() + sizeof(uint32_t) +sizeof(uint8_t) + originalTags.size()*sizeof(Tag) ) << r->version().sub << uint8_t(originalTags.size());
+			wr << uint32_t( msg.size() + sizeof(uint32_t) +sizeof(uint16_t) + originalTags.size()*sizeof(Tag) ) << r->version().sub << uint16_t(originalTags.size());
 			for(auto t : originalTags) {
 				wr << t;
 			}
