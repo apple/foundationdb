@@ -82,7 +82,7 @@ struct SimpleFixedSizeMapRef {
 			if(bw.getLength() + 8 + kv.first.size() + kv.second.size() > pageSize) {
 				memcpy(page->mutate(), bw.getData(), bw.getLength());
 				*(uint32_t *)(page->mutate() + mapSizeOffset) = i - start;
-				printf("buildmany: writing page start=%d %s\n", start, kvPairs[start].first.c_str());
+				//printf("buildmany: writing page start=%d %s\n", start, kvPairs[start].first.c_str());
 				pages.push_back({start, page});
 				bw = BinaryWriter(AssumeVersion(currentProtocolVersion));
 				bw << newFlags;
@@ -97,13 +97,13 @@ struct SimpleFixedSizeMapRef {
 		}
 
 		if(bw.getLength() != sizeof(newFlags)) {
-			printf("buildmany: adding last page start=%d %s\n", start, kvPairs[start].first.c_str());
+			//printf("buildmany: adding last page start=%d %s\n", start, kvPairs[start].first.c_str());
 			memcpy(page->mutate(), bw.getData(), bw.getLength());
 			*(uint32_t *)(page->mutate() + mapSizeOffset) = i - start;
 			pages.push_back({start, page});
 		}
 
-		printf("buildmany: returning pages.size %lu, kvpairs %lu\n", pages.size(), kvPairs.size());
+		//printf("buildmany: returning pages.size %lu, kvpairs %lu\n", pages.size(), kvPairs.size());
 		return pages;
 	}
 
@@ -219,22 +219,51 @@ private:
 		Value value;
 	};
 
+	void buildNewRoot(Version version, vector<std::pair<int, Reference<IPage>>> &pages, std::vector<LogicalPageID> &logicalPageIDs, FixedSizeMap::KVPairsT &childEntries) {
+		// While there are multiple child pages for this version we must write new tree levels.
+		while(pages.size() > 1) {
+			FixedSizeMap::KVPairsT newChildEntries;
+			for(int i=0; i<pages.size(); i++)
+				newChildEntries.push_back( {childEntries[pages[i].first].first, std::string((char *)&logicalPageIDs[i], sizeof(uint32_t))});
+			childEntries = std::move(newChildEntries);
+
+			pages = FixedSizeMap::buildMany( childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_page_size_override);
+
+			printf("Writing a new root level at version %lld with %lu children across %lu pages\n", version, childEntries.size(), pages.size());
+
+			// Allocate logical page ids for the new level
+			logicalPageIDs.clear();
+
+			// Only reuse root if there's one replacement page being written or if the subtree root is not the tree root
+			if(pages.size() == 1)
+				logicalPageIDs.push_back(m_root);
+
+			// Allocate enough pageIDs for all of the pages
+			for(int i=logicalPageIDs.size(); i<pages.size(); i++)
+				logicalPageIDs.push_back( m_pager->allocateLogicalPage() );
+
+			for(int i=0; i<pages.size(); i++)
+				writePage( logicalPageIDs[i], pages[i].second, version );
+		}
+	}
+
+
 	// Returns list of (version, list of (lower_bound, list of children) )
 	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, Reference<IPagerSnapshot> snapshot, LogicalPageID root, std::string lowerBoundKey, MutationBufferT::const_iterator bufBegin, MutationBufferT::const_iterator bufEnd) {
 		state std::string printPrefix = format("commit subtree(lowerboundkey %s, page %u) ", lowerBoundKey.c_str(), root);
 		printf("%s\n", printPrefix.c_str());
 
 		if(bufBegin == bufEnd) {
+			printf("%s no changes\n", printPrefix.c_str());
 			return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 		}
 
 		state FixedSizeMap map;
 		Reference<const IPage> rawPage = wait(snapshot->getPhysicalPage(root));
 		map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
-		printf("Read page %d: %s\n", root, map.toString().c_str());
+		printf("%s Read page %d: %s\n", printPrefix.c_str(), root, map.toString().c_str());
 
 		if(map.flags & EPageFlags::IS_LEAF) {
-			printf("%s leaf\n", printPrefix.c_str());
 			VersionedChildrenT results;
 			FixedSizeMap::KVPairsT kvpairs;
 
@@ -252,7 +281,8 @@ private:
 			while(iBuf != bufEnd) {
 				Key k = StringRef(iBuf->first);
 				for(auto const &vv : iBuf->second) {
-					mutations.push_back(KeyVersionValue(StringRef(k), vv.first, StringRef(vv.second)));
+					printf("Inserting %s %s @%lld\n", k.toString().c_str(), vv.second.c_str(), vv.first);
+					mutations.push_back(KeyVersionValue(k, vv.first, StringRef(vv.second)));
 					minVersion = std::min(minVersion, vv.first);
 				}
 				++iBuf;
@@ -273,7 +303,6 @@ private:
 
 			IPager *pager = self->m_pager;
 			vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( leafEntries, EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
-			printf("%s new page count %lu\n", printPrefix.c_str(), pages.size());
 
 			// If there isn't still just a single page of data then return the previous lower bound and page ID that lead to this page to be used for version 0
 			if(pages.size() != 1) {
@@ -292,9 +321,13 @@ private:
 				logicalPages.push_back(self->m_pager->allocateLogicalPage() );
 
 			// Write each page using its assigned page ID
-			printf("%s Writing %lu replacement pages at version %lld\n", printPrefix.c_str(), pages.size(), minVersion);
+			printf("%s Writing %lu replacement pages for %d at version %lld\n", printPrefix.c_str(), pages.size(), root, minVersion);
 			for(int i=0; i<pages.size(); i++)
 				self->writePage(logicalPages[i], pages[i].second, minVersion);
+
+			// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
+			if(root == self->m_root)
+				self->buildNewRoot(minVersion, pages, logicalPages, leafEntries);
 
 			results.push_back({minVersion, {}});
 
@@ -312,7 +345,6 @@ private:
 			return results;
 		}
 		else {
-			printf("%s not leaf\n", printPrefix.c_str());
 			state std::vector<Future<VersionedChildrenT>> m_futureChildren;
 
 			auto childMutBegin = bufBegin;
@@ -342,8 +374,10 @@ private:
 				}
 			}
 
-			if(!modified)
+			if(!modified) {
+				printf("%s not modified.\n", printPrefix.c_str());
 				return VersionedChildrenT({{0, {{lowerBoundKey, root}}}});
+			}
 
 			Version version = 0;
 			VersionedChildrenT result;
@@ -354,15 +388,16 @@ private:
 				FixedSizeMap::KVPairsT childEntries;  // Logically std::vector<std::pair<std::string, LogicalPageID>> childEntries;
 
 				// For each Future<VersionedChildrenT>
-				printf("%s creating replacement pages for %d at Version %lld\n", printPrefix.c_str(), root, version);
+				printf("%s creating replacement pages for id=%d at Version %lld\n", printPrefix.c_str(), root, version);
 
 				// If we're writing version 0, there is a chance that we don't have to write ourselves, if there are no changes
 				bool modified = version != 0;
 
-				for( auto& c : m_futureChildren ) {
-					const VersionedChildrenT &children = c.get();
+				for(int i = 0; i < m_futureChildren.size(); ++i) {
+					const VersionedChildrenT &children = m_futureChildren[i].get();
+					LogicalPageID pageID = *(uint32_t*)map.entries[i].second.data();
 
-					printf("  versioned page set size: %lu versions\n", children.size());
+					printf("  Versioned page set that replaced page %d: %lu versions\n", pageID, children.size());
 					for(auto &versionedPageSet : children) {
 						printf("    version: %lld\n", versionedPageSet.first);
 						for(auto &boundaryPage : versionedPageSet.second) {
@@ -427,6 +462,10 @@ private:
 					for(int i=0; i<pages.size(); i++)
 						self->writePage( logicalPages[i], pages[i].second, version );
 
+					// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
+					if(root == self->m_root)
+						self->buildNewRoot(version, pages, logicalPages, childEntries);
+
 					result.resize(result.size()+1);
 					result.back().first = version;
 
@@ -456,34 +495,7 @@ private:
 	ACTOR static Future<Void> commit_impl(VersionedBTree *self) {
 		Version latestVersion = wait(self->m_pager->getLatestVersion());
 
-		VersionedChildrenT rootNodes = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, std::string(), self->m_buffer.begin(), self->m_buffer.end()));
-
-		for(VersionedKeyToPageSetT versionedPages : rootNodes) {
-			printf("Root node set for version %lld has %lu pages\n", versionedPages.first, versionedPages.second.size());
-
-			// If versionedPages has size 1 then the key should be "" and the page ID should be self->m_root
-			ASSERT(!versionedPages.second.empty());
-			// While there are multiple child pages for this version we must write new tree levels.
-			while(versionedPages.second.size() > 1) {
-				FixedSizeMap::KVPairsT childEntries;
-				for (auto &childPage : versionedPages.second)
-					childEntries.push_back( {childPage.first, std::string((char *)&childPage.second, sizeof(uint32_t))});
-
-				IPager *pager = self->m_pager;
-				vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
-
-				printf("Writing a new root level at version %lld with %lu children across %lu pages\n", versionedPages.first, versionedPages.second.size(), pages.size());
-				versionedPages.second.clear();
-
-				for(auto const &p : pages) {
-					LogicalPageID pageID = pages.size() == 1 ? self->m_root : self->m_pager->allocateLogicalPage();
-					self->writePage(pageID, p.second, versionedPages.first);
-					versionedPages.second.push_back( {childEntries[p.first].first, pageID} );
-				}
-			}
-
-			ASSERT(versionedPages.second[0].second == self->m_root);
-		}
+		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, std::string(), self->m_buffer.begin(), self->m_buffer.end()));
 
 		self->m_pager->setLatestVersion(self->m_writeVersion);
 		self->m_pager->commit();
@@ -543,10 +555,9 @@ private:
 			state KeyRef tupleKey = t.pack();
 
 			loop {
-				printf("findEqual: Reading page %d @%lld\n", pageNumber, self->m_version);
 				Reference<const IPage> rawPage = wait(self->m_pager->getPhysicalPage(pageNumber));
 				FixedSizeMap map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
-				printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, map.toString().c_str());
+				//printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, map.toString().c_str());
 
 				// Special case of empty page (which should only happen for root)
 				if(map.entries.empty()) {
@@ -602,17 +613,17 @@ TEST_CASE("/redwood/set") {
 	Version lastVer = wait(btree->getLatestVersion());
 	state Version version = lastVer + 1;
 	state int commits = g_random->randomInt(1, 20);
-	printf("Will do %d commits\n", commits);
+	//printf("Will do %d commits\n", commits);
 	while(commits--) {
 		int versions = g_random->randomInt(1, 20);
-		printf("  Commit will have %d versions\n", versions);
+		//printf("  Commit will have %d versions\n", versions);
 		while(versions--) {
 			btree->setWriteVersion(version);
 			int changes = g_random->randomInt(0, 20);
-			printf("    Version will have %d changes\n", changes);
+			//printf("    Version %lld will have %d changes\n", version, changes);
 			while(changes--) {
 				KeyValue kv = randomKV();
-				printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
+				//printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
 				btree->set(kv);
 				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
 			}
