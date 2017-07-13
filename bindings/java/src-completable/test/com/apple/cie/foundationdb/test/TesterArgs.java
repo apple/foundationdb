@@ -99,7 +99,7 @@ public class TesterArgs {
             } else if (arg.equals("--enable-callbacks-on-external-threads")) {
                 callbacksOnExternalThread = true;
             } else if (arg.equals("--use-external-client")) {
-                externalClient = false;
+                externalClient = true;
             } else if (arg.equals("--tests-to-run")) {
                 if (i + 1 < args.length && args[i + 1].charAt(0) != '-') {
                     int j;
