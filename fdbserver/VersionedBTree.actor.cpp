@@ -154,8 +154,8 @@ public:
 
 	ACTOR static Future<Void> init(VersionedBTree *self) {
 		// TODO: don't just create a new root, load the existing one
-		self->m_root = self->m_pager->allocateLogicalPage();
 		Version latest = wait(self->m_pager->getLatestVersion());
+		self->m_root = self->m_pager->allocateLogicalPage();
 		Version v = latest + 1;
 		IPager *pager = self->m_pager;
 		self->writePage(self->m_root, FixedSizeMap::emptyPage(EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }), v);
@@ -498,7 +498,7 @@ private:
 		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, std::string(), self->m_buffer.begin(), self->m_buffer.end()));
 
 		self->m_pager->setLatestVersion(self->m_writeVersion);
-		self->m_pager->commit();
+		Void _ = wait(self->m_pager->commit());
 
 		self->m_buffer.clear();
 		return Void();
