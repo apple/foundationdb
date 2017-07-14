@@ -32,7 +32,11 @@
 
 #define INTERNAL_PAGES_HAVE_TUPLES 1
 
-#define debug_printf(...)
+#ifdef REDWOOD_DEBUG
+  #define debug_printf printf
+#else
+  #define debug_printf(...)
+#endif
 
 struct SimpleFixedSizeMapRef {
 	typedef std::vector<std::pair<std::string, std::string>> KVPairsT;
@@ -158,14 +162,15 @@ public:
 	}
 
 	ACTOR static Future<Void> init(VersionedBTree *self) {
-		// TODO: don't just create a new root, load the existing one
-		Version latest = wait(self->m_pager->getLatestVersion());
-		self->m_root = self->m_pager->allocateLogicalPage();
-		Version v = latest + 1;
-		IPager *pager = self->m_pager;
-		self->writePage(self->m_root, FixedSizeMap::emptyPage(EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }), v);
-		self->m_pager->setLatestVersion(v);
-		Void _ = wait(self->m_pager->commit());
+		self->m_root = 0;
+		state Version latest = wait(self->m_pager->getLatestVersion());
+		if(latest == 0) {
+			IPager *pager = self->m_pager;
+			self->writePage(self->m_root, FixedSizeMap::emptyPage(EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }), 1);
+			self->m_pager->setLatestVersion(1);
+			Void _ = wait(self->m_pager->commit());
+		}
+		printf("latest %lld\n", latest);
 		return Void();
 	}
 
@@ -563,9 +568,10 @@ private:
 			state KeyRef tupleKey = t.pack();
 
 			loop {
+				debug_printf("findEqual: Reading page %d\n", pageNumber);
 				Reference<const IPage> rawPage = wait(self->m_pager->getPhysicalPage(pageNumber));
 				FixedSizeMap map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
-				//debug_printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, map.toString().c_str());
+				debug_printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, map.toString().c_str());
 
 				// Special case of empty page (which should only happen for root)
 				if(map.entries.empty()) {
@@ -620,7 +626,10 @@ TEST_CASE("/redwood/correctness/memory/set") {
 	else
 		pager = createMemoryPager();
 
-	state VersionedBTree *btree = new VersionedBTree(pager, g_random->randomInt(50, 200));
+	state int pageSize = g_random->coinflip() ? -1 : g_random->randomInt(50, 200);
+
+	state VersionedBTree *btree = new VersionedBTree(pager, pageSize);
+
 	Void _ = wait(btree->init());
 
 	state std::map<std::pair<std::string, Version>, std::string> written;
@@ -663,7 +672,7 @@ TEST_CASE("/redwood/correctness/memory/set") {
 
 			pager = new IndirectShadowPager("pagerfile");
 
-			btree = new VersionedBTree(pager, g_random->randomInt(50, 200));
+			btree = new VersionedBTree(pager, pageSize);
 			Void _ = wait(btree->init());
 
 			Version lastVer = wait(btree->getLatestVersion());
@@ -712,7 +721,7 @@ TEST_CASE("/redwood/performance/set") {
 
 	state int nodeCount = 100000;
 	state int maxChangesPerVersion = 5;
-	state int versions = 4;
+	state int versions = 1000;
 	int maxKeySize = 100;
 	int maxValueSize = 500;
 

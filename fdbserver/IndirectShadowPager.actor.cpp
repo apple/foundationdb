@@ -23,6 +23,12 @@
 
 #include "flow/UnitTest.h"
 
+#ifdef REDWOOD_DEBUG
+  #define debug_printf printf
+#else
+  #define debug_printf(...)
+#endif
+
 IndirectShadowPage::IndirectShadowPage() : allocated(true) {
 	data = (uint8_t*)FastAllocator<4096>::allocate();
 }
@@ -95,7 +101,7 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 				pr >> pagesAllocated;
 				pager->pagerFile.init(fileSize, pagesAllocated);
 
-				fprintf(stderr, "Recovered pages allocated: %d\n", pager->pagerFile.pagesAllocated);
+				debug_printf("Recovered pages allocated: %d\n", pager->pagerFile.pagesAllocated);
 				ASSERT(pager->pagerFile.pagesAllocated != PagerFile::INVALID_PAGE);
 
 				Optional<Value> latestVersionValue = wait(pager->pageTableLog->readValue(IndirectShadowPager::LATEST_VERSION_KEY));
@@ -111,7 +117,7 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 					vr >> pager->oldestVersion;
 				}
 
-				fprintf(stderr, "Recovered version info: %d - %d\n", pager->oldestVersion, pager->latestVersion);
+				debug_printf("Recovered version info: %d - %d\n", pager->oldestVersion, pager->latestVersion);
 				pager->committedVersion = pager->latestVersion;
 
 				Standalone<VectorRef<KeyValueRef>> tableEntries = wait(pager->pageTableLog->readRange(KeyRangeRef(IndirectShadowPager::TABLE_ENTRY_PREFIX, strinc(IndirectShadowPager::TABLE_ENTRY_PREFIX))));
@@ -130,10 +136,10 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 
 					LogicalPageID pageTableSize = std::max<LogicalPageID>(logicalPageID+1, SERVER_KNOBS->PAGER_RESERVED_PAGES);
 					pager->pageTable.resize(pageTableSize);
-					fprintf(stderr, "Recovered page table size: %d\n", pageTableSize);
+					debug_printf("Recovered page table size: %d\n", pageTableSize);
 				}
 				else {
-					fprintf(stderr, "Recovered no page table entries\n");
+					debug_printf("Recovered no page table entries\n");
 				}
 
 				LogicalPageID nextPageID = SERVER_KNOBS->PAGER_RESERVED_PAGES;
@@ -172,10 +178,10 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 						++nextPageID;
 					}
 
-					fprintf(stderr, "Recovered page table entry %d -> (%d, %d)\n", logicalPageID, version, physicalPageID);
+					debug_printf("Recovered page table entry %d -> (%d, %d)\n", logicalPageID, version, physicalPageID);
 				}
 
-				fprintf(stderr, "Building physical free list\n");
+				debug_printf("Building physical free list\n");
 				// TODO: can we do this better? does it require storing extra info in the log?
 				PhysicalPageID nextPhysicalPageID = 0;
 				for(auto itr = allocatedPhysicalPages.begin(); itr != allocatedPhysicalPages.end(); ++itr) {
@@ -198,7 +204,7 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 		pager->pagerFile.finishedMarkingPages();
 		pager->pagerFile.startVacuuming();
 
-		fprintf(stderr, "Finished recovery\n", pager->oldestVersion);
+		debug_printf("Finished recovery\n", pager->oldestVersion);
 		TraceEvent("PagerFinishedRecovery");
 	}
 	catch(Error &e) {
@@ -236,17 +242,17 @@ ACTOR Future<Void> housekeeper(IndirectShadowPager *pager) {
 						pager->freePhysicalPageID(prev->second);
 					}
 					if(itr == pageVersionMap.end() || itr->first >= pager->oldestVersion) {
-						//fprintf(stderr, "Updating oldest version for logical page %d: %d\n", pageID, pager->oldestVersion);
+						//debug_printf("Updating oldest version for logical page %d: %d\n", pageID, pager->oldestVersion);
 						pager->logPageTableClear(pageID, 0, pager->oldestVersion);
 
 						if(itr != pageVersionMap.end() && itr->first > pager->oldestVersion) {
-							//fprintf(stderr, "Erasing pages to prev from pageVersionMap for %d (itr=%d, prev=%d)\n", pageID, itr->first, prev->first);
+							//debug_printf("Erasing pages to prev from pageVersionMap for %d (itr=%d, prev=%d)\n", pageID, itr->first, prev->first);
 							prev->first = pager->oldestVersion;
 							pager->logPageTableUpdate(pageID, pager->oldestVersion, prev->second);
 							itr = pageVersionMap.erase(pageVersionMap.begin(), prev);
 						}
 						else {
-							//fprintf(stderr, "Erasing pages to itr from pageVersionMap for %d (%d) (itr=%d, prev=%d)\n", pageID, itr == pageVersionMap.end(), itr==pageVersionMap.end() ? -1 : itr->first, prev->first);
+							//debug_printf("Erasing pages to itr from pageVersionMap for %d (%d) (itr=%d, prev=%d)\n", pageID, itr == pageVersionMap.end(), itr==pageVersionMap.end() ? -1 : itr->first, prev->first);
 							itr = pageVersionMap.erase(pageVersionMap.begin(), itr);
 						}
 					}
@@ -337,13 +343,13 @@ void IndirectShadowPager::freeLogicalPage(LogicalPageID pageID, Version version)
 	}
 
 	if(itr != pageVersionMap.end()) {
-		//fprintf(stderr, "Clearing newest versions for logical page %d: %d\n", pageID, version);
+		//debug_printf("Clearing newest versions for logical page %d: %d\n", pageID, version);
 		logPageTableClearToEnd(pageID, version);
 		pageVersionMap.erase(itr, pageVersionMap.end());
 	}
 	
 	if(pageVersionMap.size() == 0) {
-		fprintf(stderr, "Freeing logical page %d (freeLogicalPage)\n", pageID);
+		debug_printf("Freeing logical page %d (freeLogicalPage)\n", pageID);
 		logicalFreeList.push_back(pageID);
 	}
 	else if(pageVersionMap.back().second != PagerFile::INVALID_PAGE) {
@@ -361,7 +367,7 @@ ACTOR Future<Void> waitAndFreePhysicalPageID(IndirectShadowPager *pager, Physica
 // TODO: we need to be more careful about making sure the action that caused the page to be freed is durable before freeing the page
 // Otherwise, the page could be rewritten prematurely.
 void IndirectShadowPager::freePhysicalPageID(PhysicalPageID pageID) {
-	fprintf(stderr, "Freeing physical page: %u\n", pageID);
+	debug_printf("Freeing physical page: %u\n", pageID);
 	auto itr = readCounts.find(pageID);
 	if(itr != readCounts.end()) {
 		operations.add(waitAndFreePhysicalPageID(this, pageID, itr->second.second.getFuture()));
@@ -520,7 +526,7 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 	--itr;
 
 	state PhysicalPageID physicalPageID = itr->second;
-	fprintf(stderr, "Reading %d at v%d from %d\n", pageID, version, physicalPageID);
+	debug_printf("Reading %d at v%d from %d\n", pageID, version, physicalPageID);
 	
 	ASSERT(physicalPageID != PagerFile::INVALID_PAGE);
 	++pager->readCounts[physicalPageID].first;
@@ -568,7 +574,7 @@ PageVersionMap::iterator IndirectShadowPager::pageVersionMapUpperBound(PageVersi
 
 void IndirectShadowPager::freeLogicalPageID(LogicalPageID pageID) {
 	if(pageID >= SERVER_KNOBS->PAGER_RESERVED_PAGES) {
-		fprintf(stderr, "Freeing logical page: %u\n", pageID);
+		debug_printf("Freeing logical page: %u\n", pageID);
 		logicalFreeList.push_back(pageID);
 	}
 }
@@ -669,7 +675,7 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 		if(!pagerFile->vacuumQueue.empty()) {
 			state PhysicalPageID lastUsedPage = pagerFile->vacuumQueue.rbegin()->first;
 			PhysicalPageID lastFreePage = *pagerFile->freePages.rbegin();
-			//fprintf(stderr, "Vacuuming: evaluating (free list size=%u, lastFreePage=%u, lastUsedPage=%u, pagesAllocated=%u)\n", pagerFile->freePages.size(), lastFreePage, lastUsedPage, pagerFile->pagesAllocated);
+			//debug_printf("Vacuuming: evaluating (free list size=%u, lastFreePage=%u, lastUsedPage=%u, pagesAllocated=%u)\n", pagerFile->freePages.size(), lastFreePage, lastUsedPage, pagerFile->pagesAllocated);
 			ASSERT(lastFreePage < pagerFile->pagesAllocated);
 			ASSERT(lastUsedPage < pagerFile->pagesAllocated);
 			ASSERT(lastFreePage != lastUsedPage);
@@ -678,7 +684,7 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 				state std::pair<LogicalPageID, Version> logicalPageInfo = pagerFile->vacuumQueue[lastUsedPage];
 				state PhysicalPageID newPage = pagerFile->allocatePage(logicalPageInfo.first, logicalPageInfo.second);
 
-				fprintf(stderr, "Vacuuming: copying page %u to %u\n", lastUsedPage, newPage);
+				debug_printf("Vacuuming: copying page %u to %u\n", lastUsedPage, newPage);
 				Void _ = wait(copyPage(pager, page, lastUsedPage, newPage));
 
 				auto &pageVersionMap = pager->pageTable[logicalPageInfo.first];
@@ -703,11 +709,11 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 			pagesToErase = std::min<uint64_t>(pagerFile->freePages.size() - SERVER_KNOBS->FREE_PAGE_VACUUM_THRESHOLD + 1, pagerFile->pagesAllocated - firstFreePage);
 		}
 
-		//fprintf(stderr, "Vacuuming: got %u pages to erase (freePages=%u, pagesAllocated=%u, vacuumQueueEmpty=%u, minVacuumQueuePage=%u, firstFreePage=%u)\n", pagesToErase, pagerFile->freePages.size(), pagerFile->pagesAllocated, pagerFile->vacuumQueue.empty(), pagerFile->minVacuumQueuePage, firstFreePage);
+		//debug_printf("Vacuuming: got %u pages to erase (freePages=%u, pagesAllocated=%u, vacuumQueueEmpty=%u, minVacuumQueuePage=%u, firstFreePage=%u)\n", pagesToErase, pagerFile->freePages.size(), pagerFile->pagesAllocated, pagerFile->vacuumQueue.empty(), pagerFile->minVacuumQueuePage, firstFreePage);
 
 		if(pagesToErase > 0) {
 			PhysicalPageID eraseStartPage = pagerFile->pagesAllocated - pagesToErase;
-			fprintf(stderr, "Vacuuming: truncating last %u pages starting at %u\n", pagesToErase, eraseStartPage);
+			debug_printf("Vacuuming: truncating last %u pages starting at %u\n", pagesToErase, eraseStartPage);
 
 			ASSERT(pagesToErase <= pagerFile->pagesAllocated);
 
@@ -751,7 +757,7 @@ PhysicalPageID PagerFile::allocatePage(LogicalPageID logicalPageID, Version vers
 
 	markPageAllocated(logicalPageID, version, allocatedPage);
 
-	fprintf(stderr, "Allocated physical page %u\n", allocatedPage);
+	debug_printf("Allocated physical page %u\n", allocatedPage);
 	return allocatedPage;
 }
 
@@ -813,7 +819,7 @@ bool PagerFile::canVacuum() {
 		|| minVacuumQueuePage >= pagesAllocated // We finished processing all pages in the vacuum queue
 		|| !vacuumQueueReady) // Populating vacuum queue
 	{
-		//fprintf(stderr, "Vacuuming: waiting for vacuumable pages (free list size=%u, minVacuumQueuePage=%u, pages allocated=%u, vacuumQueueReady=%d)\n", freePages.size(), minVacuumQueuePage, pagesAllocated, vacuumQueueReady);
+		//debug_printf("Vacuuming: waiting for vacuumable pages (free list size=%u, minVacuumQueuePage=%u, pages allocated=%u, vacuumQueueReady=%d)\n", freePages.size(), minVacuumQueuePage, pagesAllocated, vacuumQueueReady);
 		return false;
 	}
 
