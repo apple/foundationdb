@@ -27,7 +27,7 @@
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
 
-#define REDWOOD_DEBUG
+//#define REDWOOD_DEBUG
 
 typedef uint32_t LogicalPageID; // uint64_t?
 

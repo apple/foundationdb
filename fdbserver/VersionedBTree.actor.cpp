@@ -170,7 +170,6 @@ public:
 			self->m_pager->setLatestVersion(1);
 			Void _ = wait(self->m_pager->commit());
 		}
-		printf("latest %lld\n", latest);
 		return Void();
 	}
 
@@ -676,7 +675,6 @@ TEST_CASE("/redwood/correctness/memory/set") {
 			Void _ = wait(btree->init());
 
 			Version lastVer = wait(btree->getLatestVersion());
-			printf("Starting from version %lld, last write was at version %lld\n", lastVer, version);
 			ASSERT(lastVer == version);
 		}
 
