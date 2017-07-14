@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_NOTIFIED_H
-#define FLOW_NOTIFIED_H
+#ifndef FDBCLIENT_NOTIFIED_H
+#define FDBCLIENT_NOTIFIED_H
 #pragma once
 
 #include "FDBTypes.h"
