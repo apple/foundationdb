@@ -25,7 +25,7 @@
 #include "flow/flow.h"
 #include "NativeAPI.h"
 #include "TaskBucket.h"
-#include "flow/Notified.h"
+#include "Notified.h"
 #include <fdbrpc/IAsyncFile.h>
 #include "KeyBackedTypes.h"
 #include <ctime>
