@@ -644,6 +644,7 @@ TEST_CASE("/redwood/correctness/memory/set") {
 		int versions = g_random->randomInt(1, 20);
 		//printf("  Commit will have %d versions\n", versions);
 		while(versions--) {
+			++version;
 			btree->setWriteVersion(version);
 			int changes = g_random->randomInt(0, 20);
 			//printf("    Version %lld will have %d changes\n", version, changes);
@@ -653,7 +654,6 @@ TEST_CASE("/redwood/correctness/memory/set") {
 				btree->set(kv);
 				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
 			}
-			++version;
 		}
 		Void _ = wait(btree->commit());
 
