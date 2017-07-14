@@ -24,9 +24,9 @@
 #include "flow/Trace.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "ConflictSet.h"
-#include "flow/Notified.h"
 #include "DataDistribution.h"
 #include "Knobs.h"
 #include <iterator>
