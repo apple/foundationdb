@@ -29,7 +29,7 @@ packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH).tar.gz: fdb_flow
 	@rm -rf packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
 	@mkdir -p packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/lib packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/flow packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/c/foundationdb
 	@cp lib/libfdb_flow.a packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/lib
-	@find bindings/flow -name '*.h' -not -name '*tester*' -exec cp {} packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/flow \;
+	@find bindings/flow -name '*.h' -not -name 'bindings/flow/tester/*' -exec cp {} packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/flow \;
 	@find bindings/c/foundationdb -name '*.h' -exec cp {} packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/bindings/c/foundationdb \;
 	@tar czf packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH).tar.gz -C packages fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
 	@rm -rf packages/fdb-flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
