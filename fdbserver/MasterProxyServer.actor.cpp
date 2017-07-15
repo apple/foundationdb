@@ -729,7 +729,9 @@ ACTOR Future<Void> commitBatch(
 	// txnState (transaction subsystem state) tag: message extracted from log adapter
 	bool firstMessage = true;
 	for(auto m : msg.messages) {
-		toCommit.addTag(txsTag);
+		if(firstMessage) {
+			toCommit.addTag(txsTag);
+		}
 		toCommit.addMessage(StringRef(m.begin(), m.size()), !firstMessage);
 		firstMessage = false;
 	}

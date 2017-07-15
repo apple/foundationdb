@@ -341,7 +341,9 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 		Void _ = wait(yield(TaskUpdateStorage));
 	}
 
-	self->logSystem->get()->pop(minPopped, self->routerTag);
+	if(self->logSystem->get()) {
+		self->logSystem->get()->pop(minPopped, self->routerTag);
+	}
 	req.reply.send(Void());
 	return Void();
 }
@@ -362,7 +364,7 @@ ACTOR Future<Void> logRouterCore(
 	loop choose {
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			if( db->get().recoveryState >= RecoveryState::FULLY_RECOVERED && logSet <  db->get().logSystemConfig.tLogs.size() &&
+			if( db->get().recoveryState >= RecoveryState::FULLY_RECOVERED && logSet < db->get().logSystemConfig.tLogs.size() &&
 					std::count( db->get().logSystemConfig.tLogs[logSet].logRouters.begin(), db->get().logSystemConfig.tLogs[logSet].logRouters.end(), interf.id() ) ) {
 				logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
 			} else {

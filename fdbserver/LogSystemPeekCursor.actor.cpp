@@ -233,6 +233,10 @@ bool ILogSystem::ServerPeekCursor::isActive() {
 	return IFailureMonitor::failureMonitor().getState( interf->get().interf().peekMessages.getEndpoint() ).isAvailable();
 }
 
+bool ILogSystem::ServerPeekCursor::isExhausted() {
+	return messageVersion >= end;
+}
+
 LogMessageVersion ILogSystem::ServerPeekCursor::version() { return messageVersion; } // Call only after nextMessage().  The sequence of the current message, or results.end if nextMessage() has returned false.
 
 Version ILogSystem::ServerPeekCursor::popped() { return poppedVersion; }
@@ -356,6 +360,10 @@ void ILogSystem::MergedPeekCursor::advanceTo(LogMessageVersion n) {
 }
 
 ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMessageVersion startVersion) {
+	if(self->bestServer >= 0 && self->serverCursors[self->bestServer]->isExhausted()) {
+		return Never();
+	}
+	
 	loop {
 		//TraceEvent("MPC_getMoreA", self->randomID).detail("start", startVersion.toString());
 		if(self->bestServer >= 0 && self->serverCursors[self->bestServer]->isActive()) {
@@ -398,6 +406,11 @@ Future<Void> ILogSystem::MergedPeekCursor::onFailed() {
 }
 
 bool ILogSystem::MergedPeekCursor::isActive() {
+	ASSERT(false);
+	return false;
+}
+
+bool ILogSystem::MergedPeekCursor::isExhausted() {
 	ASSERT(false);
 	return false;
 }
@@ -469,8 +482,8 @@ void ILogSystem::SetPeekCursor::calcHasMessage() {
 		}
 	}
 
+	hasNextMessage = false;
 	if(useBestSet) {
-		hasNextMessage = false;
 		updateMessage(bestSet, false); // Use Quorum logic
 
 		if(!hasNextMessage) {
@@ -575,12 +588,17 @@ void ILogSystem::SetPeekCursor::advanceTo(LogMessageVersion n) {
 
 ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVersion startVersion) {
 	loop {
-		//TraceEvent("LPC_getMoreA", self->randomID).detail("start", startVersion.toString());
+		if(self->bestServer >= 0 && self->bestSet >= 0 && self->serverCursors[self->bestSet][self->bestServer]->isExhausted()) {
+			return Never();
+		}
+		
+		//TraceEvent("LPC_getMore1", self->randomID).detail("start", startVersion.toString()).detail("t", self->tag);
 		if(self->bestServer >= 0 && self->bestSet >= 0 && self->serverCursors[self->bestSet][self->bestServer]->isActive()) {
 			ASSERT(!self->serverCursors[self->bestSet][self->bestServer]->hasMessage());
 			Void _ = wait( self->serverCursors[self->bestSet][self->bestServer]->getMore() || self->serverCursors[self->bestSet][self->bestServer]->onFailed() );
 			self->useBestSet = true;
 		} else {
+			//FIXME: if best set is exhausted, do not peek remote servers
 			bool bestSetValid = self->bestSet >= 0;
 			if(bestSetValid) {
 				self->localityGroup.clear();
@@ -641,6 +659,11 @@ Future<Void> ILogSystem::SetPeekCursor::onFailed() {
 }
 
 bool ILogSystem::SetPeekCursor::isActive() {
+	ASSERT(false);
+	return false;
+}
+
+bool ILogSystem::SetPeekCursor::isExhausted() {
 	ASSERT(false);
 	return false;
 }
@@ -714,6 +737,10 @@ Future<Void> ILogSystem::MultiCursor::onFailed() {
 }
 
 bool ILogSystem::MultiCursor::isActive() {
+	return cursors.back()->isActive();
+}
+
+bool ILogSystem::MultiCursor::isExhausted() {
 	return cursors.back()->isActive();
 }
 

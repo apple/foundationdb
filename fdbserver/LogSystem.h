@@ -189,6 +189,9 @@ struct ILogSystem {
 		// (3) the cursor cannot return any more results
 		virtual bool isActive() = 0;
 
+		//returns true if the cursor cannot return any more results
+		virtual bool isExhausted() = 0;
+
 		// Returns the smallest possible message version which the current message (if any) or a subsequent message might have
 		// (If hasMessage(), this is therefore the message version of the current message)
 		virtual LogMessageVersion version() = 0;
@@ -252,6 +255,8 @@ struct ILogSystem {
 
 		virtual bool isActive();
 
+		virtual bool isExhausted();
+
 		virtual LogMessageVersion version();
 
 		virtual Version popped();
@@ -313,6 +318,8 @@ struct ILogSystem {
 
 		virtual bool isActive();
 
+		virtual bool isExhausted();
+
 		virtual LogMessageVersion version();
 
 		virtual Version popped();
@@ -369,6 +376,8 @@ struct ILogSystem {
 
 		virtual bool isActive();
 
+		virtual bool isExhausted();
+
 		virtual LogMessageVersion version();
 
 		virtual Version popped();
@@ -412,6 +421,8 @@ struct ILogSystem {
 		virtual Future<Void> onFailed();
 
 		virtual bool isActive();
+
+		virtual bool isExhausted();
 
 		virtual LogMessageVersion version();
 

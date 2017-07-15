@@ -853,7 +853,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, vector<WorkerInterface> remoteTLogWorkers, vector<WorkerInterface> logRouterWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, Version recoveryVersion, Tag minTag, int logNum ) 
+	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, vector<WorkerInterface> remoteTLogWorkers, vector<WorkerInterface> logRouterWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, Tag minTag, int logNum ) 
 	{
 		//recruit temporary log routers and update registration with them
 		state int tempLogRouters = std::max<int>(logRouterWorkers.size(), SERVER_KNOBS->MIN_TAG - minTag + 1);
@@ -883,8 +883,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = remoteRecruitmentID;
 			req.storeType = configuration.tLogDataStoreType;
-			req.recoverFrom = self->getLogSystemConfig();
-			req.recoverAt = recoveryVersion;
+			req.recoverFrom = oldLogSystem->getLogSystemConfig();
+			req.recoverAt = oldLogSystem->epochEndVersion.get();
+			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
 			req.epoch = recoveryCount;
 			req.remoteTag = SERVER_KNOBS->MAX_TAG + i;
 		}
@@ -894,7 +895,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		self->tLogs[logNum]->updateLocalitySet(remoteTLogWorkers);
 
 		vector<int> locations;
-		for( Tag tag : self->epochEndTags ) {
+		for( Tag tag : oldLogSystem->epochEndTags ) {
 			locations.clear();
 			self->tLogs[logNum]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
 			for(int loc : locations)
@@ -997,7 +998,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < logSystem->tLogs[0]->logServers.size(); i++)
 			recoveryComplete.push_back( transformErrors( throwErrorOr( logSystem->tLogs[0]->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor( TLogRecoveryFinishedRequest(), SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		logSystem->recoveryComplete = waitForAll(recoveryComplete);
-		logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), remoteTLogWorkers, logRouterWorkers, configuration, recoveryCount, oldLogSystem->epochEndVersion.get(), minTag, 1);
+		logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), oldLogSystem, remoteTLogWorkers, logRouterWorkers, configuration, recoveryCount, minTag, 1);
 		Void _ = wait(logSystem->remoteRecovery);
 
 		return logSystem;
