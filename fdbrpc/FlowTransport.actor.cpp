@@ -137,7 +137,7 @@ class TransportData {
 public:
 	TransportData(uint64_t transportId) 
 	  : endpointNotFoundReceiver(endpoints),
-	    pingReceiver(endpoints),
+		pingReceiver(endpoints),
 		warnAlwaysForLargePacket(true),
 		lastIncompatibleMessage(0),
 		transportId(transportId)
@@ -204,7 +204,9 @@ struct ConnectPacket {
 static_assert( sizeof(ConnectPacket) == CONNECT_PACKET_V2_SIZE, "ConnectPacket packed incorrectly" );
 #pragma pack( pop )
 
-static Future<Void> connectionReader( TransportData* const& transport, Reference<IConnection> const& conn, bool const& isOutgoing, Promise<NetworkAddress> const& onPeerAddress );
+static Future<Void> connectionReader( TransportData* const& transport, Reference<IConnection> const& conn, Peer* const& peer, Promise<Peer*> const& onConnected );
+
+static PacketID sendPacket( TransportData* self, ISerializeSource const& what, const Endpoint& destination, bool reliable );
 
 struct Peer : NonCopyable {
 	// FIXME: Peers don't die!
@@ -215,12 +217,14 @@ struct Peer : NonCopyable {
 	ReliablePacketList reliable;
 	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
+	AsyncVar<bool> incompatibleDataRead;
+	bool compatible;
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;
 	double reconnectionDelay;
 
 	explicit Peer( TransportData* transport, NetworkAddress const& destination, bool doConnect = true ) 
-		: transport(transport), destination(destination), outgoingConnectionIdle(!doConnect), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME)
+		: transport(transport), destination(destination), outgoingConnectionIdle(!doConnect), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true)
 	{
 		if(doConnect) {
 			connect = connectionKeeper(this);
@@ -293,8 +297,7 @@ struct Peer : NonCopyable {
 		}
 	}
 
-	ACTOR static Future<Void> connectionMonitor( Peer* peer ) {
-
+	ACTOR static Future<Void> connectionMonitor( Peer *peer ) {
 		state RequestStream< ReplyPromise<Void> > remotePing( Endpoint( peer->destination, WLTOKEN_PING_PACKET ) );
 
 		loop {
@@ -305,9 +308,11 @@ struct Peer : NonCopyable {
 			state ReplyPromise<Void> reply;
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
 
+			peer->incompatibleDataRead.set(false);
 			choose {
 				when (Void _ = wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").detail("WithAddr", peer->destination); throw connection_failed(); }
 				when (Void _ = wait( reply.getFuture() )) {}
+				when (Void _ = wait( peer->incompatibleDataRead.onChange())) {}
 			}
 		}
 	}
@@ -371,11 +376,10 @@ struct Peer : NonCopyable {
 						throw connection_failed();
 					}
 
-					reader = connectionReader( self->transport, conn, true, Promise<NetworkAddress>() );
+					reader = connectionReader( self->transport, conn, self, Promise<Peer*>());
 				} else {
 					self->outgoingConnectionIdle = false;
 				}
-				self->transport->countConnEstablished++;
 
 				Void _ = wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
 
@@ -391,10 +395,12 @@ struct Peer : NonCopyable {
 				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed );
 				TraceEvent(ok ? SevInfo : SevError, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 
-				if (ok)
-					self->transport->countConnClosedWithoutError++;
-				else
-					self->transport->countConnClosedWithError++;
+				if(self->compatible) {
+					if (ok)
+						self->transport->countConnClosedWithoutError++;
+					else
+						self->transport->countConnClosedWithError++;
+				}
 
 				if (conn) {
 					conn->close();
@@ -407,8 +413,6 @@ struct Peer : NonCopyable {
 		}
 	}
 };
-
-static PacketID sendPacket( TransportData* self, ISerializeSource const& what, const Endpoint& destination, bool reliable );
 
 ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket ) {
 	int priority = self->endpoints.getPriority(destination.token);
@@ -518,7 +522,9 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 ACTOR static Future<Void> connectionReader(
 		TransportData* transport,
 		Reference<IConnection> conn, 
-		bool isOutgoing, Promise<NetworkAddress> onPeerAddress ) {
+		Peer *peer,
+		Promise<Peer*> onConnected) 
+{
 	// This actor exists whenever there is an open or opening connection, whether incoming or outgoing
 	// For incoming connections conn is set and peer is initially NULL; for outgoing connections it is the reverse
 
@@ -527,12 +533,14 @@ ACTOR static Future<Void> connectionReader(
 	state uint8_t* unprocessed_end = NULL;
 	state uint8_t* buffer_end = NULL;
 	state bool expectConnectPacket = true;
+	state bool compatible = false;
 	state NetworkAddress peerAddress;
 	state uint64_t peerProtocolVersion = 0;
 
 	peerAddress = conn->getPeerAddress();
-	if (!isOutgoing)
+	if (peer == nullptr) { 
 		ASSERT( !peerAddress.isPublic() );
+	}
 
 	loop {
 		loop {
@@ -577,7 +585,8 @@ ACTOR static Future<Void> connectionReader(
 									.detail("LocalVersion", currentProtocolVersion)
 									.detail("RejectedVersion", p->protocolVersion)
 									.detail("VersionMask", compatibleProtocolVersionMask)
-									.detail("Peer", p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress());
+									.detail("Peer", p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress())
+									.detail("ConnectionId", connectionId);
 								transport->lastIncompatibleMessage = now();
 							}
 							if(!transport->incompatiblePeers.count(addr)) {
@@ -586,7 +595,20 @@ ACTOR static Future<Void> connectionReader(
 						} else if(connectionId > 1) {
 							transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 						}
-						throw incompatible_protocol_version();
+
+						compatible = false;
+						if(p->protocolVersion < 0x0FDB00A470010001LL) {
+							// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
+							throw incompatible_protocol_version();
+						}
+					}
+					else {
+						compatible = true;
+						TraceEvent("ConnectionAccepted", conn->getDebugID())
+							.detail("Peer", conn->getPeerAddress())
+							.detail("ConnectionId", connectionId);
+
+						transport->countConnEstablished++;
 					}
 
 					if(connectionId > 1) {
@@ -596,21 +618,29 @@ ACTOR static Future<Void> connectionReader(
 					expectConnectPacket = false;
 
 					peerProtocolVersion = p->protocolVersion;
-					if (isOutgoing) {
+					if (peer != nullptr) {
 						// Outgoing connection; port information should be what we expect
 						TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
+						peer->compatible = compatible;
 						ASSERT( p->canonicalRemotePort == peerAddress.port );
 					} else {
 						if (p->canonicalRemotePort) {
 							peerAddress = NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort, true, peerAddress.isTLS() );
 						}
-						onPeerAddress.send( peerAddress );
+						peer = transport->getPeer(peerAddress);
+						peer->compatible = compatible;
+						onConnected.send( peer );
 						Void _ = wait( delay(0) );  // Check for cancellation
 					}
 				}
 			}
-			if (!expectConnectPacket)
+			if (compatible) {
 				scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
+			}
+			else if(!expectConnectPacket) {
+				unprocessed_begin = unprocessed_end;
+				peer->incompatibleDataRead.set(true);
+			}
 
 			if (readWillBlock)
 				break;
@@ -625,12 +655,11 @@ ACTOR static Future<Void> connectionReader(
 
 ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<IConnection> conn ) {
 	try {
-		state Promise<NetworkAddress> onPeerAddress;
-		state Future<Void> reader = connectionReader( self, conn, false, onPeerAddress );
+		state Promise<Peer*> onConnected;
+		state Future<Void> reader = connectionReader( self, conn, nullptr, onConnected );
 		choose {
 			when( Void _ = wait( reader ) ) { ASSERT(false); return Void(); }
-			when( NetworkAddress pa = wait( onPeerAddress.getFuture() ) ) {
-				Peer* p = self->getPeer( pa, false );
+			when( Peer *p = wait( onConnected.getFuture() ) ) {
 				p->onIncomingConnection( conn, reader );
 			}
 			when( Void _ = wait( delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT) ) ) {
@@ -765,9 +794,9 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 
 		Peer* peer = self->getPeer(destination.address);
 
-		// If there isn't an open connection or public address, we can't send
-		if (peer->outgoingConnectionIdle && !destination.address.isPublic()) {
-			TEST(true);  // Can't send to private address without an open connection
+		// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
+		if ((peer->outgoingConnectionIdle && !destination.address.isPublic()) || (!peer->compatible && destination.token != WLTOKEN_PING_PACKET)) {
+			TEST(true);  // Can't send to private address without a compatible open connection
 			return (PacketID)NULL;
 		}
 
