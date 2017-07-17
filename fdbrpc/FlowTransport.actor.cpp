@@ -600,7 +600,7 @@ ACTOR static Future<Void> connectionReader(
 						}
 
 						compatible = false;
-						if(p->protocolVersion < 0x0FDB00A551000000LL) { // FIXME: at merge time, we need to update the Net2 protocol version and set this version appropriately.
+						if(p->protocolVersion < 0x0FDB00A551000000LL) {
 							// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
 							throw incompatible_protocol_version();
 						}
