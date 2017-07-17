@@ -369,10 +369,10 @@ struct Peer : NonCopyable {
 					Reference<IConnection> _conn = wait( timeout( INetworkConnections::net()->connect(self->destination), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) );
 					if (_conn) {
 						conn = _conn;
-						TraceEvent("ConnEstablishedTo", conn->getDebugID()).detail("PeerAddr", self->destination);
+						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID()).detail("PeerAddr", self->destination);
 						self->prependConnectPacket();
 					} else {
-						TraceEvent("ConnTimedOut", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination);
+						TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination);
 						throw connection_failed();
 					}
 
@@ -393,13 +393,16 @@ struct Peer : NonCopyable {
 				self->discardUnreliablePackets();
 				reader = Future<Void>();
 				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed );
-				TraceEvent(ok ? SevInfo : SevError, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 
 				if(self->compatible) {
+					TraceEvent(ok ? SevInfo : SevError, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 					if (ok)
 						self->transport->countConnClosedWithoutError++;
 					else
 						self->transport->countConnClosedWithError++;
+				}
+				else {
+					TraceEvent(ok ? SevInfo : SevError, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 				}
 
 				if (conn) {
@@ -604,7 +607,7 @@ ACTOR static Future<Void> connectionReader(
 					}
 					else {
 						compatible = true;
-						TraceEvent("ConnectionAccepted", conn->getDebugID())
+						TraceEvent("ConnectionEstablished", conn->getDebugID())
 							.detail("Peer", conn->getPeerAddress())
 							.detail("ConnectionId", connectionId);
 
