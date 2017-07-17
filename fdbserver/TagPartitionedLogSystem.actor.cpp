@@ -725,7 +725,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			else {
 				TraceEvent("LogSystemWaitingForRecovery", dbgid).detail("Cycles", cycles)
 					.detail("AvailableServers", results.size())
-					.detail("RequiredServers", requiredCount)
 					.detail("TotalServers", logServers.size())
 					.detail("Required", requiredCount)
 					.detail("Present", results.size())
