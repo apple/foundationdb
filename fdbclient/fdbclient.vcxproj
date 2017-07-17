@@ -57,6 +57,7 @@
     <ClInclude Include="MultiVersionTransaction.h" />
     <ClInclude Include="MutationList.h" />
     <ClInclude Include="NativeAPI.h" />
+    <ClInclude Include="Notified.h" />
     <ClInclude Include="ReadYourWrites.h" />
     <ActorCompiler Include="RunTransaction.actor.h" />
     <ClInclude Include="RYWIterator.h" />
