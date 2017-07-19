@@ -1674,7 +1674,18 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			state double worstFreeSpaceRatio = 1.0;
 			try {
 				for (auto proc : processesMap.obj()){
+					bool storageServer = false;
 					StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+					for (StatusObjectReader role : rolesArray) {
+						if (role["role"].get_str() == "storage") {
+							storageServer = true;
+							break;
+						}
+					}
+					// Skip non-storage servers in free space calculation
+					if (!storageServer)
+						continue;
+
 					StatusObjectReader process(proc.second);
 					std::string addrStr;
 					if (!process.get("address", addrStr)) {
@@ -1683,6 +1694,9 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					}
 					NetworkAddress addr = NetworkAddress::parse(addrStr);
 					bool excluded = (process.has("excluded") && process.last().get_bool()) || addressExcluded(exclusions, addr);
+					ssTotalCount++;
+					if (excluded)
+						ssExcludedCount++;
 
 					if(!excluded) {
 						StatusObjectReader disk;
@@ -1704,15 +1718,6 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 						}
 
 						worstFreeSpaceRatio = std::min(worstFreeSpaceRatio, double(free_bytes)/total_bytes);
-					}
-
-					for (StatusObjectReader role : rolesArray) {
-						if (role["role"].get_str() == "storage") {
-							if (excluded)
-								ssExcludedCount++;
-							ssTotalCount++;
-							break;
-						}
 					}
 				}
 			}
