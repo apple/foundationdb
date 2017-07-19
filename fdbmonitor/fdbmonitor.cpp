@@ -253,7 +253,8 @@ public:
 	uint32_t restart_delay_reset_interval;
 	double last_start;
 	bool quiet;
-	bool delete_wd40_env;
+	//bool delete_wd40_env;
+	const char *delete_envvars;
 	bool deconfigured;
 	bool kill_on_configuration_change;
 
@@ -261,7 +262,7 @@ public:
 	int pipes[2][2];
 
 	Command() : argv(NULL) { }
-	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), quiet(false), delete_wd40_env(false), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
+	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%llu", section.c_str(), id);
 		ssection = _ssection;
@@ -351,10 +352,8 @@ public:
 		if (q && !strcmp(q, "true"))
 			quiet = true;
 
-		const char* dwe = get_value_multi(ini, "delete_wd40_env", ssection.c_str(), section.c_str(), "general", NULL);
-		if(dwe && !strcmp(dwe, "true")) {
-			delete_wd40_env = true;
-		}
+		const char* del_env = get_value_multi(ini, "delete_envvars", ssection.c_str(), section.c_str(), "general", NULL);
+		delete_envvars = del_env;
 
 		const char* kocc = get_value_multi(ini, "kill_on_configuration_change", ssection.c_str(), section.c_str(), "general", NULL);
 		if(kocc && strcmp(kocc, "true")) {
@@ -373,7 +372,7 @@ public:
 
 		for (auto i : keys) {
 			if (!strcmp(i.pItem, "command") || !strcmp(i.pItem, "restart_delay") || !strcmp(i.pItem, "initial_restart_delay") || !strcmp(i.pItem, "restart_backoff") ||
-				!strcmp(i.pItem, "restart_delay_reset_interval") || !strcmp(i.pItem, "disable_lifecycle_logging") || !strcmp(i.pItem, "delete_wd40_env") ||
+				!strcmp(i.pItem, "restart_delay_reset_interval") || !strcmp(i.pItem, "disable_lifecycle_logging") || !strcmp(i.pItem, "delete_envvars") ||
 				!strcmp(i.pItem, "kill_on_configuration_change"))
 			{
 				continue;
@@ -408,7 +407,7 @@ public:
 	}
 	void update(const Command& other) {
 		quiet = other.quiet;
-		delete_wd40_env = other.delete_wd40_env;
+		delete_envvars = other.delete_envvars;
 		initial_restart_delay = other.initial_restart_delay;
 		max_restart_delay = other.max_restart_delay;
 		restart_backoff = other.restart_backoff;
@@ -474,12 +473,21 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 		signal(SIGINT, SIG_DFL);
 		signal(SIGTERM, SIG_DFL);
 
-		if(cmd->delete_wd40_env) {
-			/* remove WD40 environment variables */
-			if(unsetenv("WD40_BV") || unsetenv("WD40_IS_MY_DADDY") || unsetenv("CONF_BUILD_VERSION")) {
-				log_err("unsetenv", errno, "Failed to remove parent environment variables");
-				exit(1);
-			}
+		if(cmd->delete_envvars != NULL && std::strlen(cmd->delete_envvars) > 0) {
+			std::string vars(cmd->delete_envvars);
+			size_t start = 0;
+			do {
+				size_t bound = vars.find(" ", start);
+				std::string var = vars.substr(start, bound - start);
+				log_msg(LOG_INFO, "Deleting parent environment variable: \"%s\"\n", var.c_str());
+				if(unsetenv(var.c_str())) {
+					log_err("unsetenv", errno, "Failed to remove parent environment variable: %s\n", var.c_str());
+					exit(1);
+				}
+				start = bound;
+				while(vars[start] == ' ')
+					start++;
+			} while(start <= vars.length());
 		}
 
 		dup2( cmd->pipes[0][1], fileno(stdout) );
