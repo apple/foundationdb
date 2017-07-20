@@ -38,6 +38,7 @@
 #include "LogSystem.h"
 #include "WaitFailure.h"
 #include "RecoveryState.h"
+#include "fdbrpc/simulator.h"
 
 using std::pair;
 using std::make_pair;
@@ -555,7 +556,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	state int totalSize = 0;
 
 	if(logData->stopped) {
-		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD) {
+		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD || (g_network->isSimulated() && g_simulator.speedUpSimulation)) {
 			while(logData->persistentDataDurableVersion != logData->version.get()) {
 				std::vector<std::pair<std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator, std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator>> iters;
 				for(auto tag = logData->tag_data.begin(); tag != logData->tag_data.end(); ++tag)
@@ -985,7 +986,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 	self->queueCommitEnd.set(commitNumber);
 
 	if(logData->remoteTag.present() && logData->logSystem->get())
-		logData->logSystem->get()->pop(ver+1, logData->remoteTag.get());
+		logData->logSystem->get()->pop(ver, logData->remoteTag.get());
 
 	TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 

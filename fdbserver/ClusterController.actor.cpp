@@ -561,7 +561,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			additionalExclusions.insert(tlogs[i].first.address());
 		}
 
-		auto remoteTlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used, false, additionalExclusions );
+		std::map< Optional<Standalone<StringRef>>, int> id_used2;
+		auto remoteTlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used2, false, additionalExclusions );
 		for(int i = 0; i < remoteTlogs.size(); i++) {
 			result.remoteTLogs.push_back(remoteTlogs[i].first);
 			result.logRouters.push_back(remoteTlogs[i].first);
