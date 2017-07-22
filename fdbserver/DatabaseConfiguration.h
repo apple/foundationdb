@@ -44,7 +44,7 @@ struct DatabaseConfiguration {
 	std::map<std::string, std::string> toMap() const;
 
 	// SOMEDAY: think about changing storageTeamSize to durableStorageQuorum
-	int32_t minMachinesRequired() const { return std::max(tLogReplicationFactor, storageTeamSize); }
+	int32_t minMachinesRequired() const { return std::max(tLogReplicationFactor*2, storageTeamSize); }
 	int32_t maxMachineFailuresTolerated() const { return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, durableStorageQuorum - 1); }
 
 	// Redundancy Levels

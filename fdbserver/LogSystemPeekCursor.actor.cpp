@@ -360,10 +360,6 @@ void ILogSystem::MergedPeekCursor::advanceTo(LogMessageVersion n) {
 }
 
 ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMessageVersion startVersion) {
-	if(self->bestServer >= 0 && self->serverCursors[self->bestServer]->isExhausted()) {
-		return Never();
-	}
-	
 	loop {
 		//TraceEvent("MPC_getMoreA", self->randomID).detail("start", startVersion.toString());
 		if(self->bestServer >= 0 && self->serverCursors[self->bestServer]->isActive()) {
@@ -588,10 +584,6 @@ void ILogSystem::SetPeekCursor::advanceTo(LogMessageVersion n) {
 
 ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVersion startVersion) {
 	loop {
-		if(self->bestServer >= 0 && self->bestSet >= 0 && self->serverCursors[self->bestSet][self->bestServer]->isExhausted()) {
-			return Never();
-		}
-		
 		//TraceEvent("LPC_getMore1", self->randomID).detail("start", startVersion.toString()).detail("t", self->tag);
 		if(self->bestServer >= 0 && self->bestSet >= 0 && self->serverCursors[self->bestSet][self->bestServer]->isActive()) {
 			ASSERT(!self->serverCursors[self->bestSet][self->bestServer]->hasMessage());
