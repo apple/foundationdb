@@ -125,13 +125,13 @@ static void callCallback( FDBFuture* f, void* data ) {
 		// of these per external client and cache it, so we *should*
 		// be fine.
 		if( g_jvm != 0 && g_jvm->AttachCurrentThreadAsDaemon((void **) &g_thread_jenv, JNI_NULL) == JNI_OK ) {
-            if( !findCallbackMethods( g_thread_jenv ) ) {
-                g_thread_jenv->FatalError("FDB: Could not find callback method.\n");
-            }
-        } else {
-            // Can't call FatalError, because we don't have a pointer to the jenv...
-            fprintf(stderr, "FDB: Could not attach external client thread to the JVM as daemon.\n");
-        }
+			if( !findCallbackMethods( g_thread_jenv ) ) {
+				g_thread_jenv->FatalError("FDB: Could not find callback method.\n");
+			}
+		} else {
+			// Can't call FatalError, because we don't have a pointer to the jenv...
+			fprintf(stderr, "FDB: Could not attach external client thread to the JVM as daemon.\n");
+		}
 	}
 
 	jobject callback = (jobject)data;
@@ -1076,8 +1076,8 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1stop(JNIEnv 
 }
 
 jint JNI_OnLoad(JavaVM *vm, void *reserved) {
-    g_jvm = vm;
-    return JNI_VERSION_1_1;
+	g_jvm = vm;
+	return JNI_VERSION_1_1;
 }
 
 #ifdef __cplusplus
