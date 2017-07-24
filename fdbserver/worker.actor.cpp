@@ -24,6 +24,7 @@
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/MetricLogger.h"
 #include "WorkerInterface.h"
 #include "IKeyValueStore.h"
 #include "WaitFailure.h"
