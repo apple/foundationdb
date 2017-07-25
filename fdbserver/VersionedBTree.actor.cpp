@@ -185,6 +185,8 @@ public:
 	//   write version, OR it may represent a snapshot as of the call to readAtVersion().
 	virtual Reference<IStoreCursor> readAtVersion(Version v) {
 		// TODO: Use the buffer to return uncommitted data
+		// For now, only committed versions can be read.
+		ASSERT(v <= m_lastCommittedVersion);
 		return Reference<IStoreCursor>(new Cursor(v, m_pager, m_root));
 	}
 
@@ -212,6 +214,7 @@ private:
 	typedef std::pair<Version, std::vector<KeyPagePairT>> VersionedKeyToPageSetT;
 	typedef std::vector<VersionedKeyToPageSetT> VersionedChildrenT;
 	typedef std::map<std::string, std::vector<std::pair<Version, std::string>>> MutationBufferT;
+
 	struct KeyVersionValue {
 		KeyVersionValue(Key k, Version ver, Value val) : key(k), version(ver), value(val) {}
 		bool operator< (KeyVersionValue const &rhs) const {
@@ -511,6 +514,7 @@ private:
 
 		self->m_pager->setLatestVersion(self->m_writeVersion);
 		Void _ = wait(self->m_pager->commit());
+		self->m_lastCommittedVersion = self->m_writeVersion;
 
 		self->m_buffer.clear();
 		return Void();
@@ -519,6 +523,7 @@ private:
 	IPager *m_pager;
 	MutationBufferT m_buffer;
 	Version m_writeVersion;
+	Version m_lastCommittedVersion;
 	int m_page_size_override;
 
 	class Cursor : public IStoreCursor, public ReferenceCounted<Cursor> {
@@ -639,7 +644,12 @@ TEST_CASE("/redwood/correctness/memory/set") {
 	state Version version = lastVer + 1;
 	state int commits = g_random->randomInt(1, 20);
 	//printf("Will do %d commits\n", commits);
+	state double insertTime = 0;
+	state int64_t keyBytesInserted = 0;
+	state int64_t ValueBytesInserted = 0;
+
 	while(commits--) {
+		state double startTime = now();
 		int versions = g_random->randomInt(1, 20);
 		//printf("  Commit will have %d versions\n", versions);
 		while(versions--) {
@@ -649,6 +659,8 @@ TEST_CASE("/redwood/correctness/memory/set") {
 			//printf("    Version %lld will have %d changes\n", version, changes);
 			while(changes--) {
 				KeyValue kv = randomKV();
+				keyBytesInserted += kv.key.size();
+				ValueBytesInserted += kv.value.size();
 				//printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
 				btree->set(kv);
 				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
@@ -661,8 +673,9 @@ TEST_CASE("/redwood/correctness/memory/set") {
 		state std::map<std::pair<std::string, Version>, std::string>::const_iterator iEnd = written.cend();
 		state int errors = 0;
 
+		insertTime += now() - startTime;
 		printf("Checking changes committed thus far.\n");
-		if(useDisk && g_random->coinflip()) {
+		if(useDisk && g_random->random01() < .1) {
 			printf("Reopening disk btree\n");
 
 			Future<Void> closedFuture = pager->onClosed();
@@ -703,7 +716,9 @@ TEST_CASE("/redwood/correctness/memory/set") {
 
 		if(errors != 0)
 			throw internal_error();
+		printf("Inserted %lld bytes (%lld key, %lld value) in %f seconds.\n", keyBytesInserted + ValueBytesInserted, keyBytesInserted, ValueBytesInserted, insertTime);
 	}
+	printf("Inserted %lld bytes (%lld key, %lld value) in %f seconds.\n", keyBytesInserted + ValueBytesInserted, keyBytesInserted, ValueBytesInserted, insertTime);
 
 	Future<Void> closedFuture = pager->onClosed();
 	pager->close();
