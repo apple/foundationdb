@@ -41,6 +41,16 @@
 static JavaVM* g_jvm = 0; 
 static thread_local JNIEnv* g_thread_jenv = 0;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
 static thread_local jmethodID g_IFutureCallback_call_methodID = 0;
+static thread_local bool is_external = false;
+
+void detachIfExternalThread() {
+	if(is_external && g_thread_jenv != 0) {
+		JNIEnv *local_jenv;
+		g_thread_jenv = 0;
+		g_IFutureCallback_call_methodID = 0;
+		g_jvm->DetachCurrentThread();
+	}
+}
 
 void throwOutOfMem(JNIEnv *jenv) {
 	const char *className = "java/lang/OutOfMemoryError";
@@ -121,15 +131,15 @@ static bool findCallbackMethods(JNIEnv *jenv) {
 static void callCallback( FDBFuture* f, void* data ) {
 	if (g_thread_jenv == 0) {
 		// We are on an external thread and must attach to the JVM.
-		// Best practice is to detach at some point, but we make one
-		// of these per external client and cache it, so we *should*
-		// be fine.
+		// The shutdown hook will later detach this thread.
+		is_external = true;
 		if( g_jvm != 0 && g_jvm->AttachCurrentThreadAsDaemon((void **) &g_thread_jenv, JNI_NULL) == JNI_OK ) {
 			if( !findCallbackMethods( g_thread_jenv ) ) {
 				g_thread_jenv->FatalError("FDB: Could not find callback method.\n");
 			}
 		} else {
 			// Can't call FatalError, because we don't have a pointer to the jenv...
+			// There will be a segmentation fault from the attempt to call the callback method.
 			fprintf(stderr, "FDB: Could not attach external client thread to the JVM as daemon.\n");
 		}
 	}
@@ -1060,6 +1070,11 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1run(JNIEnv *
 	if( !g_IFutureCallback_call_methodID ) {
 		if( !findCallbackMethods( jenv ) )
 			return;
+	}
+
+	fdb_error_t hookErr = fdb_add_shutdown_hook( &detachIfExternalThread );
+	if( hookErr ) {
+		safeThrow( jenv, getThrowable( jenv, hookErr ) );
 	}
 
 	fdb_error_t err = fdb_run_network();

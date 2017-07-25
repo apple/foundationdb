@@ -125,6 +125,12 @@ fdb_error_t fdb_stop_network() {
 }
 
 extern "C" DLLEXPORT
+fdb_error_t fdb_add_shutdown_hook(void (*hook)(void)) {
+    CATCH_AND_RETURN( API->addShutdownHook(hook); );
+}
+
+
+extern "C" DLLEXPORT
 FDBFuture* fdb_cluster_configure_database( FDBCluster* c, int config_type,
 											   int config_mode, uint8_t const* db_name,
 											   int db_name_length )
