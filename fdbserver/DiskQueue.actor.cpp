@@ -405,8 +405,8 @@ public:
 				TraceEvent("DiskQueueShutdownDeleting", self->dbgid)
 					.detail("File0", self->filename(0))
 					.detail("File1", self->filename(1));
-				Void _ = wait( IAsyncFileSystem::filesystem()->deleteFile( self->filename(0), false ) );
-				Void _ = wait( IAsyncFileSystem::filesystem()->deleteFile( self->filename(1), true ) );
+				Void _ = wait( IAsyncFile::incrementalDelete( self->filename(0), false ) );
+				Void _ = wait( IAsyncFile::incrementalDelete( self->filename(1), true ) );
 			}
 			TraceEvent("DiskQueueShutdownComplete", self->dbgid)
 				.detail("DeleteFiles", deleteFiles)

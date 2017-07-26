@@ -57,8 +57,11 @@ public:
 	virtual Future<Void> flush() { return Void();  }      // Sends previous writes to the OS if they have been buffered in memory, but does not make them power safe
 	virtual Future<int64_t> size() = 0;
 	virtual std::string getFilename() = 0;
-	//start an actor to truncate the file repeatedly so that the operating system doesn't delete it all at once
-	static Future<Void> incrementalDelete( std::string filename);
+
+	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
+	// The future will be set once the file is unlinked, letting the truncation happen in the background in an uncancellable ACTOR.
+	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	static Future<Void> incrementalDelete( std::string filename, bool mustBeDurable );
 
 	// Attempt to read the *length bytes at offset without copying.  If successful, a pointer to the
 	//   requested bytes is written to *data, and the number of bytes successfully read is
