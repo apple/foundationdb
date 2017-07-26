@@ -27,50 +27,38 @@
 
 IAsyncFile::IAsyncFile(){};
 
-ACTOR static Future<Void> incrementalDeleteHelper( std::string filename, bool mustBeDurable, Promise<Void> unlinked, int64_t truncateAmt, double interval ) {
+ACTOR static Future<Void> incrementalDeleteHelper( std::string filename, bool mustBeDurable, int64_t truncateAmt, double interval ) {
 	state Reference<IAsyncFile> file;
 	state int64_t remainingFileSize;
+	state bool exists = fileExists(filename);
 
-	try {
-		if(!fileExists(filename)) {
-			unlinked.send(Void());
-			return Void();
-		}
-
+	if(exists) {
 		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED, 0));
 		file = f;
 
 		int64_t fileSize = wait(file->size());
 		remainingFileSize = fileSize;
-
-		Void _ = wait(IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable));
-		unlinked.send(Void());
-	}
-	catch(Error &e) {
-		unlinked.sendError(e);
-		throw e;
 	}
 
-	for( ; remainingFileSize > 0; remainingFileSize -= truncateAmt ){
-		Void _ = wait(file->truncate(remainingFileSize));
-		Void _ = wait(file->sync());
-		Void _ = wait(delay(interval));
+	Void _ = wait(IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable));
+
+	if(exists) {
+		for( ; remainingFileSize > 0; remainingFileSize -= truncateAmt ){
+			Void _ = wait(file->truncate(remainingFileSize));
+			Void _ = wait(file->sync());
+			Void _ = wait(delay(interval));
+		}
 	}
 
 	return Void();
 }
 
 Future<Void> IAsyncFile::incrementalDelete( std::string filename, bool mustBeDurable ) {
-	Promise<Void> unlinked;
-
-	uncancellable(incrementalDeleteHelper(
+	return uncancellable(incrementalDeleteHelper(
 		filename,
 		mustBeDurable,
-		unlinked,
 		FLOW_KNOBS->INCREMENTAL_DELETE_TRUNCATE_AMOUNT,
 		FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL));
-
-	return unlinked.getFuture();
 }
 
 TEST_CASE( "fileio/incrementalDelete" ) {
@@ -86,12 +74,6 @@ TEST_CASE( "fileio/incrementalDelete" ) {
 	Void _ = wait(f->truncate(fileSize));
 	//close the file by deleting the reference
 	f.clear();
-
-	Promise<Void> unlinked;
-	state Future<Void> delFuture = incrementalDeleteHelper(filename, true, unlinked, FLOW_KNOBS->INCREMENTAL_DELETE_TRUNCATE_AMOUNT, FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL);
-
-	Void _ = wait(unlinked.getFuture());
-	Void _ = wait(delFuture);
-
+	Void _ = wait(IAsyncFile::incrementalDelete(filename, true));
 	return Void();
 }
