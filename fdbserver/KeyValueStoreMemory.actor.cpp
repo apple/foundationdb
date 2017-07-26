@@ -22,8 +22,8 @@
 #include "IKeyValueStore.h"
 #include "IDiskQueue.h"
 #include "flow/IndexedSet.h"
-#include "flow/Notified.h"
 #include "flow/ActorCollection.h"
+#include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)

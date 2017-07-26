@@ -1,5 +1,5 @@
 /*
- * package-info.java
+ * MetricLogger.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-/**
- * Provides additional constructs for asynchronous programming against Java's {@link java.util.concurrent.CompletableFuture CompletableFuture}s.
- *
- */
-package com.apple.cie.foundationdb.async;
+#pragma once
+
+#include "NativeAPI.h"
+
+Future<Void> runMetrics( Future<Database> const& fcx, Key const& metricsPrefix );

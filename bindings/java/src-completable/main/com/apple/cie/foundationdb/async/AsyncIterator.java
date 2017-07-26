@@ -61,7 +61,7 @@ public interface AsyncIterator<T> extends Iterator<T>, Disposable {
 	/**
 	 * Returns the next element in the sequence. This will not block if, since the
 	 *  last call to {@code next()}, {@link #onHasNext()} was called and the resulting
-	 *  <h1>FIXME!!!!</h1> has completed or the blocking call {@link #hasNext()} was called
+	 *  {@link CompletableFuture} has completed or the blocking call {@link #hasNext()} was called
 	 *  and has returned. It is legal, therefore, to make a call to {@code next()} without a
 	 *  preceding call to
 	 *  {@link #hasNext()} or {@link #onHasNext()}, but that invocation of {@code next()}

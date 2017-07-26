@@ -20,6 +20,10 @@
 
 #include "IAsyncFile.h"
 
+#if VALGRIND
+#include <memcheck.h>
+#endif
+
 class AsyncFileWriteChecker : public IAsyncFile, public ReferenceCounted<AsyncFileWriteChecker> {
 public:
 	void addref() { ReferenceCounted<AsyncFileWriteChecker>::addref(); }
@@ -112,9 +116,14 @@ private:
 		}
 
 		while(page < pageEnd) {
-			//printf("%d %d %u %u\n", write, page, checksum, historySum);
 			uint32_t checksum = hashlittle(start, checksumHistoryPageSize, 0xab12fd93);
 			WriteInfo &history = checksumHistory[page];
+			//printf("%d %d %u %u\n", write, page, checksum, history.checksum);
+
+#if VALGRIND
+			// It's possible we'll read or write a page where not all of the data is defined, but the checksum of the page is still valid
+			VALGRIND_MAKE_MEM_DEFINED_IF_ADDRESSABLE(&checksum, sizeof(uint32_t));
+#endif
 
 			// For writes, just update the stored sum
 			if(write) {

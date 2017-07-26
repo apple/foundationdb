@@ -71,7 +71,6 @@
     <ClInclude Include="IThreadPool.h" />
     <ClInclude Include="Knobs.h" />
     <ClInclude Include="Net2Packet.h" />
-    <ClInclude Include="Notified.h" />
     <ClInclude Include="serialize.h" />
     <ClInclude Include="SimpleOpt.h" />
     <ClInclude Include="Stats.h" />

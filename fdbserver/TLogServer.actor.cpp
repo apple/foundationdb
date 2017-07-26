@@ -23,11 +23,11 @@
 #include "flow/Stats.h"
 #include "flow/UnitTest.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "WorkerInterface.h"
 #include "TLogInterface.h"
-#include "flow/Notified.h"
 #include "Knobs.h"
 #include "IKeyValueStore.h"
 #include "flow/ActorCollection.h"
@@ -338,13 +338,14 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	TLogInterface tli;
 	PromiseStream<Future<Void>> addActor;
 	TLogData* tLogData;
+	Future<Void> recovery;
 
 	explicit LogData(TLogData* tLogData, TLogInterface interf) : tLogData(tLogData), knownCommittedVersion(0), tli(interf), logId(interf.id()),
 			cc("TLog", interf.id().toString()),
 			bytesInput("bytesInput", cc),
 			bytesDurable("bytesDurable", cc),
 			// These are initialized differently on init() or recovery
-			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion)
+			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void())
 	{
 		startRole(interf.id(), UID(), "TLog");
 
@@ -387,6 +388,7 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 	TraceEvent("TLogStop", logData->logId).detail("Ver", stopVersion).detail("isStopped", logData->stopped).detail("queueCommitted", logData->queueCommittedVersion.get());
 
 	logData->stopped = true;
+	logData->recovery = Void();
 
 	// Lock once the current version has been committed
 	Void _ = wait( logData->queueCommittedVersion.whenAtLeast( stopVersion ) );
@@ -1197,6 +1199,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 void removeLog( TLogData* self, Reference<LogData> logData ) {
 	TraceEvent("TLogRemoved", logData->logId).detail("input", logData->bytesInput.getValue()).detail("durable", logData->bytesDurable.getValue());
 	logData->stopped = true;
+	logData->recovery = Void();
 
 	logData->addActor = PromiseStream<Future<Void>>(); //there could be items still in the promise stream if one of the actors threw an error immediately
 	self->id_data.erase(logData->logId);
@@ -1208,7 +1211,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 	}
 }
 
-ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, Future<Void> recovery ) {
+ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData ) {
 	if(logData->removed.isReady()) {
 		Void _ = wait(delay(0)); //to avoid iterator invalidation in restorePersistentState when removed is already ready
 		ASSERT(logData->removed.isError());
@@ -1229,12 +1232,12 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, Future<
 	state Future<Void> warningCollector = timeoutWarningCollector( warningCollectorInput.getFuture(), 1.0, "TLogQueueCommitSlow", self->dbgid );
 	state Future<Void> error = actorCollection( logData->addActor.getFuture() );
 
-	if( recovery.isValid() && !recovery.isReady()) {
-		logData->addActor.send( recovery );
+	if( logData->recovery.isValid() && !logData->recovery.isReady()) {
+		logData->addActor.send( logData->recovery );
 	}
 
 	logData->addActor.send( waitFailureServer(logData->tli.waitFailure.getFuture()) );
-	logData->addActor.send( respondToRecovered(logData->tli, recovery) );
+	logData->addActor.send( respondToRecovered(logData->tli, logData->recovery) );
 	logData->addActor.send( logData->removed );
 	//FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
 	logData->addActor.send( traceCounters("TLogMetrics", logData->logId, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &logData->cc, self->dbgid.toString() + "/TLogMetrics"));
@@ -1436,7 +1439,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 			TraceEvent("TLogZeroVersion", self->dbgid).detail("logId", it.first);
 			it.second->queueCommittedVersion.set(it.second->version.get());
 		}
-		self->sharedActors.send( tLogCore( self, it.second, Void() ) );
+		self->sharedActors.send( tLogCore( self, it.second ) );
 	}
 
 	return Void();
@@ -1488,7 +1491,7 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 			}
 		}
 
-		TraceEvent("LogRecoveringTagResults", logData->logId).detail("Tag", tag);
+		//TraceEvent("LogRecoveringTagResults", logData->logId).detail("Tag", tag);
 
 		Version ver = 0;
 		BinaryWriter wr( Unversioned() );
@@ -1597,7 +1600,7 @@ ACTOR Future<Void> recoverFromLogSystem( TLogData* self, Reference<LogData> logD
 				committing = self->persistentData->commit();
 				commitTimeout = delay(SERVER_KNOBS->LONG_TLOG_COMMIT_TIME);
 				uncommittedBytes->set(0);
-				TraceEvent("TLogCommitRecoveryData", self->dbgid).detail("MemoryUsage", DEBUG_DETERMINISM ? 0 : getMemoryUsage());
+				//TraceEvent("TLogCommitRecoveryData", self->dbgid).detail("MemoryUsage", DEBUG_DETERMINISM ? 0 : getMemoryUsage());
 			}
 			when(Void _ = wait(uncommittedBytes->onChange())) {
 				if(uncommittedBytes->get() >= SERVER_KNOBS->LARGE_TLOG_COMMIT_BYTES)
@@ -1617,7 +1620,6 @@ ACTOR Future<Void> recoverFromLogSystem( TLogData* self, Reference<LogData> logD
 }
 
 ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
-	state Future<Void> recovery = Void();
 	state TLogInterface recruited;
 	recruited.locality = locality;
 	recruited.initEndpoints();
@@ -1631,6 +1633,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 	for(auto it : self->id_data) {
 		it.second->stopped = true;
+		it.second->recovery = Void();
 	}
 
 	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited) );
@@ -1658,7 +1661,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 			state Promise<Void> copyComplete;
 			TraceEvent("TLogRecover", self->dbgid).detail("logId", logData->logId).detail("at", req.recoverAt).detail("known", req.knownCommittedVersion).detail("tags", describe(req.recoverTags));
-			recovery = recoverFromLogSystem( self, logData, req.recoverFrom, req.recoverAt, req.knownCommittedVersion, req.recoverTags, copyComplete );
+			logData->recovery = recoverFromLogSystem( self, logData, req.recoverFrom, req.recoverAt, req.knownCommittedVersion, req.recoverTags, copyComplete );
 			Void _ = wait(copyComplete.getFuture() || logData->removed );
 		} else {
 			// Brand new tlog, initialization has already been done by caller
@@ -1683,7 +1686,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 	req.reply.send( recruited );
 
-	Void _ = wait( tLogCore( self, logData, recovery ) );
+	Void _ = wait( tLogCore( self, logData ) );
 	return Void();
 }
 
@@ -1725,6 +1728,10 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 			while(!tlogRequests.isEmpty()) {
 				tlogRequests.getFuture().pop().reply.sendError(e);
 			}
+		}
+
+		for( auto& it : self.id_data ) {
+			it.second->recovery = Void();
 		}
 
 		if (tlogTerminated( &self, persistentData, self.persistentQueue, e )) {

@@ -21,10 +21,10 @@
 package main
 
 import (
-	"github.com/FoundationDB/fdb-go/fdb"
-	"github.com/FoundationDB/fdb-go/fdb/directory"
-	"github.com/FoundationDB/fdb-go/fdb/subspace"
-	"github.com/FoundationDB/fdb-go/fdb/tuple"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"log"
 	"fmt"
 )
@@ -116,7 +116,7 @@ func (graph *Graph) get_in_neighbors(trtr fdb.Transactor, node int) ([]int, erro
 }
 
 func main() {
-	fdb.MustAPIVersion(300)
+	fdb.MustAPIVersion(500)
 
 	db := fdb.MustOpenDefault()
 
