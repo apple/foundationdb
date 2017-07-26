@@ -59,7 +59,6 @@ public:
 	virtual std::string getFilename() = 0;
 
 	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
-	// The future will be set once the file is unlinked, letting the truncation happen in the background in an uncancellable ACTOR.
 	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
 	static Future<Void> incrementalDelete( std::string filename, bool mustBeDurable );
 
