@@ -1823,8 +1823,8 @@ private:
 			self->logging.cancel();
 			Void _ = wait( self->readThreads->stop() && self->writeThread->stop() );
 			if (deleteOnClose) {
-				Void _ = wait( IAsyncFileSystem::filesystem()->deleteFile( self->filename, true ) );
-				Void _ = wait( IAsyncFileSystem::filesystem()->deleteFile( self->filename + "-wal", false ) );
+				Void _ = wait( IAsyncFile::incrementalDelete( self->filename, true ) );
+				Void _ = wait( IAsyncFile::incrementalDelete( self->filename + "-wal", false ) );
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
