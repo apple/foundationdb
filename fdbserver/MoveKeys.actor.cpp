@@ -828,8 +828,7 @@ void seedShardServers(
 
 	// We have to set this range in two blocks, because the master tracking of "keyServersLocations" depends on a change to a specific
 	//   key (keyServersKeyServersKey)
-	krmSetPreviouslyEmptyRange( tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), keyServersPrefix), keyServersValue( serverIds ), Value() );
-	krmSetPreviouslyEmptyRange( tr, arena, keyServersPrefix, KeyRangeRef(keyServersPrefix, allKeys.end), keyServersValue( serverIds ), Value() );
+	krmSetPreviouslyEmptyRange( tr, arena, keyServersPrefix, KeyRangeRef(KeyRef(), allKeys.end), keyServersValue( serverIds ), Value() );
 
 	for(int s=0; s<servers.size(); s++)
 		krmSetPreviouslyEmptyRange( tr, arena, serverKeysPrefixFor( servers[s].id() ), allKeys, serverKeysTrue, serverKeysFalse );
