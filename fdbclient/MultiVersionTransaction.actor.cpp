@@ -1148,6 +1148,9 @@ THREAD_FUNC_RETURN runNetworkThread(void *param) {
 		catch(Error &e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
 		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+		}
 	}
 
 	THREAD_RETURN;
@@ -1185,6 +1188,9 @@ void MultiVersionApi::runNetwork() {
 		}
 		catch(Error &e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
 		}
 	}
 
