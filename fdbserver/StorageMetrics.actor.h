@@ -54,7 +54,7 @@ struct StorageMetricSample {
 				bck_split.decrementNonEnd();
 
 				KeyRef split = keyBetween(KeyRangeRef(bck_split != sample.begin() ? std::max<KeyRef>(*bck_split,range.begin) : range.begin, *it));
-				if(!front || (getEstimate(KeyRangeRef(range.begin, split)) > 0) && split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT ) 
+				if(!front || (getEstimate(KeyRangeRef(range.begin, split)) > 0 && split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT))
 					return split;
 			}
 
@@ -63,7 +63,7 @@ struct StorageMetricSample {
 				++it;
 
 				KeyRef split = keyBetween(KeyRangeRef(*fwd_split, it != sample.end() ? std::min<KeyRef>(*it, range.end) : range.end));
-				if(front || (getEstimate(KeyRangeRef(split, range.end)) > 0) && split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT )
+				if(front || (getEstimate(KeyRangeRef(split, range.end)) > 0 && split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT))
 					return split;
 
 				fwd_split = it;
