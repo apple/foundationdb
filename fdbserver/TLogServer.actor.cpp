@@ -1237,7 +1237,7 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, Future<
 	logData->addActor.send( respondToRecovered(logData->tli, recovery) );
 	logData->addActor.send( logData->removed );
 	//FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
-	logData->addActor.send( traceCounters("TLogMetrics", logData->logId, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &logData->cc, self->dbgid.toString() + "/TLogMetrics"));
+	logData->addActor.send( traceCounters("TLogMetrics", logData->logId, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &logData->cc, logData->logId.toString() + "/TLogMetrics"));
 	logData->addActor.send( serveTLogInterface(self, logData->tli, logData, warningCollectorInput) );
 
 	try {
