@@ -1878,54 +1878,6 @@ ACTOR Future<bool> isDataDistributionEnabled( Database cx ) {
 	}
 }
 
-ACTOR Future<int> disableDataDistribution( Database cx ) {
-	state Transaction tr(cx);
-	state int oldMode = -1;
-	state BinaryWriter wr(Unversioned());
-	wr << 0;
-
-	loop {
-		try {
-			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
-			if (oldMode < 0) {
-				oldMode = 1;
-				if (old.present()) {
-					BinaryReader rd(old.get(), Unversioned());
-					rd >> oldMode;
-				}
-			}
-			// SOMEDAY: Write a wrapper in MoveKeys.h
-			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << dataDistributionModeLock;
-			tr.set( moveKeysLockOwnerKey, wrMyOwner.toStringRef() );
-			tr.set( dataDistributionModeKey, wr.toStringRef() );
-
-			Void _ = wait( tr.commit() );
-			return oldMode;
-		} catch (Error& e) {
-			TraceEvent("disableDDModeRetrying").error(e);
-			Void _ = wait ( tr.onError(e) );
-		}
-	}
-}
-
-ACTOR Future<Void> enableDataDistribution( Database cx, int mode ) {
-	state Transaction tr(cx);
-	state BinaryWriter wr(Unversioned());
-	wr << mode;
-
-	loop {
-		try {
-			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
-			tr.set( dataDistributionModeKey, wr.toStringRef() );
-			Void _ = wait( tr.commit() );
-			return Void();
-		} catch (Error& e) {
-			TraceEvent("enableDDModeRetrying").error(e);
-			Void _ = wait( tr.onError(e) );
-		}
-	}
-}
-
 //Ensures that the serverKeys key space is properly coalesced
 //This method is only used for testing and is not implemented in a manner that is safe for large databases
 ACTOR Future<Void> debugCheckCoalescing(Database cx) {

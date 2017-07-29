@@ -504,6 +504,7 @@ void initHelp() {
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
 
 	hiddenCommands.insert("expensive_data_check");
+	hiddenCommands.insert("datadistribution");
 }
 
 void printVersion() {
@@ -2712,6 +2713,25 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 						if (!intrans) {
 							Void _ = wait( commitTransaction( tr ) );
+						}
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "datadistribution")) {
+					if (tokens.size() != 2) {
+						printf("Usage: datadistribution <on|off>\n");
+						is_error = true;
+					} else {
+						if(tokencmp(tokens[1], "on")) {
+							int _ = wait(setDDMode(db, 1));
+							printf("Data distribution is enabled\n");
+						} else if(tokencmp(tokens[1], "off")) {
+							int _ = wait(setDDMode(db, 0));
+							printf("Data distribution is disabled\n");
+						} else {
+							printf("Usage: datadistribution <on|off>\n");
+							is_error = true;
 						}
 					}
 					continue;
