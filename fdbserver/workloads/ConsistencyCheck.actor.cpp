@@ -171,6 +171,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state DatabaseConfiguration configuration;
 
 				state Transaction tr(cx);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				loop {
 					try {
 						Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, 1000) );
@@ -285,6 +286,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		loop
 		{
 			state Transaction tr(cx);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try
 			{
 				Version version = wait(tr.getReadVersion());
@@ -532,6 +534,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 	ACTOR Future<int64_t> getDatabaseSize(Database cx) {
 		state Transaction tr( cx );
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		loop {
 			try {
 				StorageMetrics metrics = wait( tr.getStorageMetrics( KeyRangeRef(allKeys.begin, keyServersPrefix), 100000 ) );
