@@ -1334,7 +1334,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
 				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
-				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize));
+				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize, key));
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
@@ -1877,7 +1877,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeWrapper(Database cx, Reference<
 			int rangeSize = 0;
 			for (const KeyValueRef &res : ret.contents())
 				rangeSize += res.key.size() + res.value.size();
-			trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, latency, rangeSize));
+			trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, latency, rangeSize, begin.getKey(), end.getKey()));
 		}
 		return ret;
 	}
@@ -2506,7 +2506,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req->transaction.mutations.size(), req->transaction.mutations.expectedSize()));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req->transaction.mutations.size(), req->transaction.mutations.expectedSize(), req));
 					return Void();
 				} else {
 					if (info.debugID.present())

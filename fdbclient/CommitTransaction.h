@@ -26,7 +26,8 @@
 
 struct MutationRef {
 	static const int OVERHEAD_BYTES = 12; //12 is the size of Header in MutationList entries
-	enum Type : uint8_t { SetValue=0, ClearRange, AddValue, DebugKeyRange, DebugKey, NoOp, And, Or, Xor, AppendIfFits, AvailableForReuse, Reserved_For_LogProtocolMessage /* See fdbserver/LogProtocolMessage.h */, Max, Min, SetVersionstampedKey, SetVersionstampedValue, MAX_ATOMIC_OP };
+	enum Type : uint8_t { SetValue=0, ClearRange, AddValue, DebugKeyRange, DebugKey, NoOp, And, Or, Xor, AppendIfFits, AvailableForReuse, Reserved_For_LogProtocolMessage /* See fdbserver/LogProtocolMessage.h */, Max, Min, SetVersionstampedKey, SetVersionstampedValue, MAX_ATOMIC_OP, END }; // END should be the last element
+	const char * typeString[END] = { "SetValue", "ClearRange", "AddValue", "DebugKeyRange", "DebugKey", "NoOp", "And", "Or", "Xor", "AppendIfFits", "AvailableForReuse", "Reserved_For_LogProtocolMessage", "Max", "Min", "SetVersionstampedKey", "SetVersionstampedValue", "MAX_ATOMIC_OP" };
 	// This is stored this way for serialization purposes.
 	uint8_t type;
 	StringRef param1, param2;
@@ -38,7 +39,7 @@ struct MutationRef {
 	int expectedSize() const { return param1.size() + param2.size(); }
 
 	std::string toString() const {
-		return format("code: %d param1: %s param2: %s", type, printable(param1).c_str(), printable(param2).c_str());
+		return format("code: %s param1: %s param2: %s", typeString[type], printable(param1).c_str(), printable(param2).c_str());
 	}
 
 	template <class Ar>

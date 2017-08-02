@@ -64,58 +64,74 @@ namespace FdbClientLogEvents {
 	};
 
 	struct EventGet : public Event {
-		EventGet(double ts, double lat, int size) : Event(GET_LATENCY, ts), latency(lat), valueSize(size) { }
+		EventGet(double ts, double lat, int size, const Key &in_key) : Event(GET_LATENCY, ts), latency(lat), valueSize(size), key(printable(in_key)) { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & latency & valueSize;
+				return Event::serialize(ar) & latency & valueSize & key;
 			else
-				return ar & latency & valueSize;
+				return ar & latency & valueSize & key;
 		}
 
 		double latency;
 		int valueSize;
+		std::string key;
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_Get").detail("TransactionID", id).detail("Latency", latency).detail("ValueSizeBytes", valueSize);
+			TraceEvent("TransactionTrace_Get").detail("TransactionID", id).detail("Latency", latency).detail("ValueSizeBytes", valueSize).detail("Key", key);
 		}
 	};
 
 	struct EventGetRange : public Event {
-		EventGetRange(double ts, double lat, int size) : Event(GET_RANGE_LATENCY, ts), latency(lat), rangeSize(size) { }
+		EventGetRange(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE_LATENCY, ts), latency(lat), rangeSize(size), startKey(printable(start_key)), endKey(printable(end_key)) { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & latency & rangeSize;
+				return Event::serialize(ar) & latency & rangeSize & startKey & endKey;
 			else
-				return ar & latency & rangeSize;
+				return ar & latency & rangeSize & startKey & endKey;
 		}
 
 		double latency;
 		int rangeSize;
+		std::string startKey;
+		std::string endKey;
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRange").detail("TransactionID", id).detail("Latency", latency).detail("RangeSizeBytes", rangeSize);
+			TraceEvent("TransactionTrace_GetRange").detail("TransactionID", id).detail("Latency", latency).detail("RangeSizeBytes", rangeSize).detail("StartKey", startKey).detail("EndKey", endKey);
 		}
 	};
 
 	struct EventCommit : public Event {
 		EventCommit() :Event(COMMIT_LATENCY, 0) {}
-		EventCommit(double ts, double lat, int mut, int bytes) : Event(COMMIT_LATENCY, ts), latency(lat), numMutations(mut), commitBytes(bytes) { }
+		EventCommit(double ts, double lat, int mut, int bytes, CommitTransactionRequest *commit_req) : Event(COMMIT_LATENCY, ts), latency(lat), numMutations(mut), commitBytes(bytes), req(*commit_req) { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & latency & numMutations & commitBytes;
+				return Event::serialize(ar) & latency & numMutations & commitBytes & req.transaction & req.arena;
 			else
-				return ar & latency & numMutations & commitBytes;
+				return ar & latency & numMutations & commitBytes & req.transaction & req.arena;
 		}
 
 		double latency;
 		int numMutations;
 		int commitBytes;
+		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
 		void logEvent(std::string id) const {
 			TraceEvent("TransactionTrace_Commit").detail("TransactionID", id).detail("Latency", latency).detail("NumMutations", numMutations).detail("CommitSizeBytes", commitBytes);
+
+			for (auto &read_range : req.transaction.read_conflict_ranges) {
+				TraceEvent("TransactionTrace_Commit_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
+			}
+
+			for (auto &write_range : req.transaction.write_conflict_ranges) {
+				TraceEvent("TransactionTrace_Commit_WriteConflictRange").detail("TransactionID", id).detail("Begin", printable(write_range.begin)).detail("End", printable(write_range.end));
+			}
+
+			for (auto &mutation : req.transaction.mutations) {
+				TraceEvent("TransactionTrace_Commit_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
+			}
 		}
 	};
 
