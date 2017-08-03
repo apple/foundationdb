@@ -18,8 +18,6 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 500
-
 #include "test.h"
 #include <foundationdb/fdb_c.h>
 #include <foundationdb/fdb_c_options.g.h>

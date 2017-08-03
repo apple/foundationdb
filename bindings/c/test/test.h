@@ -27,7 +27,7 @@
 #include <pthread.h>
 
 #ifndef FDB_API_VERSION
-#error "Cannot include test.h without defining FDB_API_VERSION"
+#define FDB_API_VERSION 500
 #endif
 
 #include <foundationdb/fdb_c.h>
@@ -208,21 +208,6 @@ void checkError(fdb_error_t err, const char* context, struct ResultSet *rs) {
 	}
 }
 
-fdb_error_t maybeLogError(fdb_error_t err, const char* context, struct ResultSet *rs) {
-	if(err && !fdb_error_predicate( FDB_ERROR_PREDICATE_RETRYABLE, err ) ) {
-		char *msg = (char*)malloc(strlen(context) + 100);
-		sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
-		fprintf(stderr, "%s\n", msg);
-		if(rs != NULL) {
-			addError(rs, msg);
-		}
-
-		free(msg);
-	}
-
-	return err;
-}
-
 fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet *rs) {
 	char *msg = (char*)malloc(strlen(context) + 100);
 	sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
@@ -232,6 +217,13 @@ fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet *rs)
 	}
 
 	free(msg);
+	return err;
+}
+
+fdb_error_t maybeLogError(fdb_error_t err, const char* context, struct ResultSet *rs) {
+	if(err && !fdb_error_predicate( FDB_ERROR_PREDICATE_RETRYABLE, err ) ) {
+        return logError(err, context, rs);
+	}
 	return err;
 }
 
