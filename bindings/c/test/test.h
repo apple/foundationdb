@@ -40,8 +40,8 @@ double getTime() {
 }
 
 void writeKey(uint8_t **dest, int key, int keySize) {
-    *dest = (uint8_t*)malloc((sizeof(uint8_t))*keySize);
-    sprintf((char*)*dest, "%0*d", keySize, key);
+	*dest = (uint8_t*)malloc((sizeof(uint8_t))*keySize);
+	sprintf((char*)*dest, "%0*d", keySize, key);
 }
 
 uint8_t **generateKeys(int numKeys, int keySize) {
@@ -49,17 +49,17 @@ uint8_t **generateKeys(int numKeys, int keySize) {
 
 	uint32_t i;
 	for(i = 0; i <= numKeys; ++i) {
-        writeKey(keys + i, i, keySize);
+		writeKey(keys + i, i, keySize);
 	}
 
-    return keys;
+	return keys;
 }
 void freeKeys(uint8_t **keys, int numKeys) {
-    uint32_t i;
-    for(i = 0; i < numKeys; i++) {
-        free(keys[i]);
-    }
-    free(keys);
+	uint32_t i;
+	for(i = 0; i < numKeys; i++) {
+		free(keys[i]);
+	}
+	free(keys);
 }
 
 int cmpfunc(const void* a, const void* b) {
@@ -72,8 +72,8 @@ int median(int *values, int length) {
 }
 
 struct RunResult {
-    int res;
-    fdb_error_t e;
+	int res;
+	fdb_error_t e;
 };
 #define RES(x, y) (struct RunResult) { x, y }
 
@@ -209,30 +209,30 @@ void checkError(fdb_error_t err, const char* context, struct ResultSet *rs) {
 }
 
 fdb_error_t maybeLogError(fdb_error_t err, const char* context, struct ResultSet *rs) {
-    if(err && !fdb_error_predicate( FDB_ERROR_PREDICATE_RETRYABLE, err ) ) {
+	if(err && !fdb_error_predicate( FDB_ERROR_PREDICATE_RETRYABLE, err ) ) {
 		char *msg = (char*)malloc(strlen(context) + 100);
 		sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
-        fprintf(stderr, "%s\n", msg);
-        if(rs != NULL) {
-            addError(rs, msg);
-        }
+		fprintf(stderr, "%s\n", msg);
+		if(rs != NULL) {
+			addError(rs, msg);
+		}
 
-        free(msg);
-    }
+		free(msg);
+	}
 
-    return err;
+	return err;
 }
 
 fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet *rs) {
-    char *msg = (char*)malloc(strlen(context) + 100);
-    sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
-    fprintf(stderr, "%s\n", msg);
-    if(rs != NULL) {
-        addError(rs, msg);
-    }
+	char *msg = (char*)malloc(strlen(context) + 100);
+	sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
+	fprintf(stderr, "%s\n", msg);
+	if(rs != NULL) {
+		addError(rs, msg);
+	}
 
-    free(msg);
-    return err;
+	free(msg);
+	return err;
 }
 
 void* runNetwork() {
