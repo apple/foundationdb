@@ -663,33 +663,56 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 	state int maxSkipTags = 1;
 	loop {
 		try {
+			state Future<Standalone<RangeResultRef>> fTagLocalities = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
 			state Future<Optional<Value>> fv = tr.get( serverListKeyFor(server.id()) );
 			state Future<Optional<Value>> fExclProc = tr.get(
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip, server.address().port ))) );
 			state Future<Optional<Value>> fExclIP = tr.get(
 				StringRef(encodeExcludedServersKey( AddressExclusion( server.address().ip ))) );
-			state Future<Standalone<RangeResultRef>> fTags( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true) );
+			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
 
-			Void _ = wait( success(fv) && success(fExclProc) && success(fExclIP) && success(fTags) );
+			Void _ = wait( success(fTagLocalities) && success(fv) && success(fExclProc) && success(fExclIP) && success(fTags) );
 
 			// If we have been added to the excluded state servers list, we have to fail
 			if (fExclProc.get().present() || fExclIP.get().present())
 				throw recruitment_failed();
 
-			if(fTags.get().more)
+			if(fTagLocalities.get().more || fTags.get().more)
 				ASSERT(false);
+
+			int8_t maxTagLocality = 0;
+			state int8_t locality = -1;
+			for(auto& kv : fTagLocalities.get()) {
+				int8_t loc = decodeTagLocalityListValue( kv.value );
+				if( decodeTagLocalityListKey( kv.key ) == server.locality.dcId() ) {
+					locality = loc;
+					break;
+				}
+				maxTagLocality = std::max(maxTagLocality, loc);
+			}
+
+			if(locality == -1) {
+				locality = maxTagLocality + 1;
+				if(locality < 0)
+					throw recruitment_failed();
+				tr.set( tagLocalityListKeyFor(server.locality.dcId()), tagLocalityListValue(locality) );
+			}
 
 			int skipTags = g_random->randomInt(0, maxSkipTags);
 
-			state Tag tag = 0;
-			std::vector<Tag> usedTags;
-			for(auto it : fTags.get())
-				usedTags.push_back(decodeServerTagValue( it.value ));
+			state uint16_t tagId = 0;
+			std::vector<uint16_t> usedTags;
+			for(auto& it : fTags.get()) {
+				Tag t = decodeServerTagValue( it.value );
+				if(t.locality == locality) {
+					usedTags.push_back(t.id);
+				}
+			}
 			std::sort(usedTags.begin(), usedTags.end());
 
 			int usedIdx = 0;
-			for(; tag <= usedTags.end()[-1]; tag++) {
-				if(tag < usedTags[usedIdx]) {
+			for(; usedTags.size() > 0 && tagId <= usedTags.end()[-1]; tagId++) {
+				if(tagId < usedTags[usedIdx]) {
 					if(skipTags == 0)
 						break;
 					skipTags--;
@@ -697,16 +720,15 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 					usedIdx++;
 				}
 			}
-			tag += skipTags;
+			tagId += skipTags;
 
-			ASSERT(tag < SERVER_KNOBS->MAX_TAG);
-
+			state Tag tag(locality, tagId);
 			tr.set( serverTagKeyFor(server.id()), serverTagValue(tag) );
 			tr.set( serverListKeyFor(server.id()), serverListValue(server) );
 			KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(tag));
 			tr.addReadConflictRange( conflictRange );
 			tr.addWriteConflictRange( conflictRange );
-			tr.atomicOp( serverTagMaxKey, serverTagMaxValue(tag), MutationRef::Max );
+			tr.atomicOp( serverMaxTagKeyFor(locality), serverTagMaxValue(tag), MutationRef::Max );
 
 			Void _ = wait( tr.commit() );
 			return std::make_pair(tr.getCommittedVersion(), tag);
@@ -754,13 +776,40 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 				tr.reset();
 				TraceEvent("RemoveStorageServerRetrying").detail("canRemove", canRemove);
 			} else {
-				Optional<Value> v = wait( tr.get( serverListKeyFor(serverID) ) );
-				if (!v.present()) {
+
+				state Future<Optional<Value>> fListKey = tr.get( serverListKeyFor(serverID) );
+				state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<Standalone<RangeResultRef>> fTagLocalities = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
+
+				Void _ = wait( success(fListKey) && success(fTags) && success(fTagLocalities) );
+
+				if (!fListKey.get().present()) {
 					if (retry) {
 						TEST(true);  // Storage server already removed after retrying transaction
 						return Void();
 					}
 					ASSERT(false);  // Removing an already-removed server?  A never added server?
+				}
+
+				int8_t locality = -100;
+				std::set<int8_t> allLocalities;
+				for(auto& it : fTags.get()) {
+					UID sId = decodeServerTagKey( it.key );
+					Tag t = decodeServerTagValue( it.value );
+					if(sId == serverID) {
+						locality = t.locality;
+					} else {
+						allLocalities.insert(t.locality);
+					}
+				}
+
+				if(locality >= 0 && !allLocalities.count(locality) ) {
+					for(auto& it : fTagLocalities.get()) {
+						if( locality == decodeTagLocalityListValue(it.value) ) {
+							tr.clear(it.key);
+							break;
+						}
+					}
 				}
 
 				tr.clear( serverListKeyFor(serverID) );
@@ -809,9 +858,19 @@ void seedShardServers(
 	CommitTransactionRef &tr,
 	vector<StorageServerInterface> servers )
 {
+	std::map<Optional<Value>, Tag> dcId_locality;
 	std::map<UID, Tag> server_tag;
-	for(Tag s=0; s<servers.size(); s++)
-		server_tag[servers[s].id()] = s;
+	int8_t nextLocality = 0;
+	for(auto& s : servers) {
+		if(!dcId_locality.count(s.locality.dcId())) {
+			tr.set(arena, tagLocalityListKeyFor(s.locality.dcId()), tagLocalityListValue(nextLocality));
+			dcId_locality[s.locality.dcId()] = Tag(nextLocality, 0);
+			nextLocality++;
+		}
+		Tag& t = dcId_locality[s.locality.dcId()];
+		server_tag[s.id()] = Tag(t.locality, t.id);
+		t.id++;
+	}
 	std::sort(servers.begin(), servers.end());
 
 	// This isn't strictly necessary, but make sure this is the first transaction
@@ -822,7 +881,9 @@ void seedShardServers(
 		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
 		tr.set(arena, serverTagKeyFor(servers[s].id()), serverTagValue(server_tag[servers[s].id()]));
 	}
-	tr.set(arena, serverTagMaxKey, serverTagMaxValue(servers.size()-1));
+	for(auto it : dcId_locality) {
+		tr.set(arena, serverMaxTagKeyFor(it.second.locality), serverTagMaxValue(Tag(it.second.locality, it.second.id-1)));
+	}
 
 	std::vector<UID> serverIds;
 	for(int i=0;i<servers.size();i++)

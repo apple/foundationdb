@@ -255,8 +255,8 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, vector<StorageSer
 	servers->clear();
 	if (self->lastEpochEnd) return Void();
 
-	state Tag tag = 0;
-	state std::set<Optional<Standalone<StringRef>>> dataCenters;
+	state std::map<Optional<Value>,Tag> dcId_tags;
+	state int8_t nextLocality = 0;
 	while( servers->size() < self->configuration.storageTeamSize ) {
 		try {
 			RecruitStorageRequest req;
@@ -268,13 +268,13 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, vector<StorageSer
 				.detail("ExcludingMachines", req.excludeMachines.size())
 				.detail("ExcludingDataCenters", req.excludeDCs.size());
 
-			RecruitStorageReply candidateWorker = wait( brokenPromiseToNever( self->clusterController.recruitStorage.getReply( req ) ) );
+			state RecruitStorageReply candidateWorker = wait( brokenPromiseToNever( self->clusterController.recruitStorage.getReply( req ) ) );
 
 			TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
 				.detail("CandidateWorker", candidateWorker.worker.locality.toString());
 
 			InitializeStorageRequest isr;
-			isr.seedTag = tag;
+			isr.seedTag = dcId_tags.count(candidateWorker.worker.locality.dcId()) ? dcId_tags[candidateWorker.worker.locality.dcId()] : Tag(nextLocality, 0);
 			isr.storeType = self->configuration.storageServerStoreType;
 			isr.reqId = g_random->randomUniqueID();
 			isr.interfaceId = g_random->randomUniqueID();
@@ -289,9 +289,14 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, vector<StorageSer
 				Void _ = wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY) );
 			}
 			else {
+				if(!dcId_tags.count(candidateWorker.worker.locality.dcId())) {
+					dcId_tags[candidateWorker.worker.locality.dcId()] = Tag(nextLocality, 0);
+					nextLocality++;
+				}
+				
+				Tag& tag = dcId_tags[candidateWorker.worker.locality.dcId()];
+				tag.id++;
 				servers->push_back( newServer.get() );
-				dataCenters.insert( newServer.get().locality.dcId() );
-				tag++;
 			}
 		} catch ( Error &e ) {
 			if(e.code() != error_code_timed_out) {

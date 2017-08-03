@@ -160,14 +160,15 @@ struct GetStorageServerRejoinInfoReply {
 
 struct GetStorageServerRejoinInfoRequest {
 	UID id;
+	Optional<Value> dcId;
 	ReplyPromise< GetStorageServerRejoinInfoReply > reply;
 
 	GetStorageServerRejoinInfoRequest() {}
-	explicit GetStorageServerRejoinInfoRequest(UID const& id ) : id(id) {}
+	explicit GetStorageServerRejoinInfoRequest( UID const& id, Optional<Value> const& dcId ) : id(id), dcId(dcId) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & id & reply;
+		ar & id & dcId & reply;
 	}
 };
 

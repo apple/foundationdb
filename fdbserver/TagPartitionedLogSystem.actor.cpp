@@ -316,7 +316,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, bool parallelGetMore ) {
-		if(tag >= SERVER_KNOBS->MAX_TAG) {
+		if(tag.locality == tagLocalityRemoteLog) {
 			if(tLogs.size() < 2) {
 				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 			}
@@ -344,9 +344,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Reference<IPeekCursor> peekSingle( Version begin, Tag tag ) {
-		ASSERT(tag < SERVER_KNOBS->MAX_TAG);
-		
-		if(tag <= SERVER_KNOBS->MIN_TAG) {
+		if(tag.locality == tagLocalityLogRouter) {
 			if(tLogs.size() < 1) {
 				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 			}
@@ -381,7 +379,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	virtual void pop( Version upTo, Tag tag ) {
 		if (!upTo) return;
 		for(auto& t : tLogs) {
-			std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>>& popServers = tag >= SERVER_KNOBS->MAX_TAG ? t->logRouters : t->logServers;
+			std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>>& popServers = tag.locality == tagLocalityRemoteLog ? t->logRouters : t->logServers;
 			for(auto& log : popServers) {
 				Version prev = outstandingPops[std::make_pair(log->get().id(),tag)];
 				if (prev < upTo)
@@ -434,6 +432,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		
 		return waitForAll(quorumResults);
+	}
+
+	virtual Future<Void> endEpoch() {
+		std::vector<Future<Void>> lockResults;
+		for( auto& logSet : tLogs ) {
+			for( auto& log : logSet->logServers ) {
+				lockResults.push_back(success(lockTLog( dbgid, log )));
+			}
+		}
+		return waitForAll(lockResults);
 	}
 
 	virtual Future<Reference<ILogSystem>> newEpoch( vector<WorkerInterface> availableLogServers, vector<WorkerInterface> availableRemoteLogServers, vector<WorkerInterface> availableLogRouters, DatabaseConfiguration const& config, LogEpoch recoveryCount ) {
@@ -547,7 +555,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual void addRemoteTags( int logSet, std::vector<Tag> const& originalTags, std::vector<int>& tags ) {
-		tLogs[logSet]->getPushLocations(originalTags, tags, SERVER_KNOBS->MAX_TAG);
+		tLogs[logSet]->getPushLocations(originalTags, tags, 0);
 	}
 
 	virtual void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations ) {
@@ -562,7 +570,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual Tag getRandomRouterTag() {
 		ASSERT(minRouters < 1e6);
-		return SERVER_KNOBS->MIN_TAG - g_random->randomInt(0, minRouters);
+		return Tag(tagLocalityLogRouter, g_random->randomInt(0, minRouters));
 	}
 
 	std::set< Tag > const& getEpochEndTags() const { return epochEndTags; }
@@ -853,15 +861,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, vector<WorkerInterface> remoteTLogWorkers, vector<WorkerInterface> logRouterWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, Tag minTag, int logNum ) 
+	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, vector<WorkerInterface> remoteTLogWorkers, vector<WorkerInterface> logRouterWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, uint16_t minTag, int logNum ) 
 	{
 		//recruit temporary log routers and update registration with them
-		state int tempLogRouters = std::max<int>(logRouterWorkers.size(), SERVER_KNOBS->MIN_TAG - minTag + 1);
+		state int tempLogRouters = std::max<int>(logRouterWorkers.size(), minTag + 1);
 		state vector<Future<TLogInterface>> logRouterInitializationReplies;
 		for( int i = 0; i < tempLogRouters; i++) {
 			InitializeLogRouterRequest req;
 			req.recoveryCount = recoveryCount;
-			req.routerTag = SERVER_KNOBS->MIN_TAG - i;
+			req.routerTag = Tag(tagLocalityLogRouter, i);
 			req.logSet = logNum;
 			logRouterInitializationReplies.push_back( transformErrors( throwErrorOr( logRouterWorkers[i%logRouterWorkers.size()].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		}
@@ -887,7 +895,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.recoverAt = oldLogSystem->epochEndVersion.get();
 			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
 			req.epoch = recoveryCount;
-			req.remoteTag = SERVER_KNOBS->MAX_TAG + i;
+			req.remoteTag = Tag(tagLocalityRemoteLog, i);
 		}
 
 		self->tLogs[logNum]->tLogLocalities.resize( remoteTLogWorkers.size() );
@@ -972,9 +980,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogs[0]->updateLocalitySet(tLogWorkers);
 
 		std::vector<int> locations;
-		state Tag minTag = 0;
+		state uint16_t minTag = 0;
 		for( Tag tag : oldLogSystem->getEpochEndTags() ) {
-			minTag = std::min(minTag, tag);
+			minTag = std::min(minTag, tag.id);
 			locations.clear();
 			logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
 			for(int loc : locations)

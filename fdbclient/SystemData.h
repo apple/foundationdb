@@ -54,10 +54,11 @@ bool serverHasKey( ValueRef storedValue );
 
 extern const KeyRangeRef serverTagKeys;
 extern const KeyRef serverTagPrefix;
-extern const KeyRef serverTagMaxKey;
+extern const KeyRangeRef serverTagMaxKeys;
 extern const KeyRangeRef serverTagConflictKeys;
 extern const KeyRef serverTagConflictPrefix;
 
+const Key serverMaxTagKeyFor( int8_t tagLocality );
 const Key serverTagKeyFor( UID serverID );
 const Value serverTagValue( Tag );
 UID decodeServerTagKey( KeyRef const& );
@@ -65,6 +66,14 @@ Tag decodeServerTagValue( ValueRef const& );
 const Key serverTagConflictKeyFor( Tag );
 const Value serverTagMaxValue( Tag );
 Tag decodeServerTagMaxValue( ValueRef const& );
+
+//    "\xff/tagLocalityList/[[datacenterID]]" := "[[tagLocality]]"
+extern const KeyRangeRef tagLocalityListKeys;
+extern const KeyRef tagLocalityListPrefix;
+const Key tagLocalityListKeyFor( Optional<Value> dcID );
+const Value tagLocalityListValue( int8_t const& );
+Optional<Value> decodeTagLocalityListKey( KeyRef const& );
+int8_t decodeTagLocalityListValue( ValueRef const& );
 
 //    "\xff/serverList/[[serverID]]" := "[[StorageServerInterface]]"
 // Storage servers are listed here when they are recruited - always before assigning them keys

@@ -38,8 +38,9 @@ struct LogRouterData {
 	struct TagData {
 		std::deque<std::pair<Version, LengthPrefixedStringRef>> version_messages;
 		Version popped;
+		Tag t;
 
-		TagData( Version popped, Tag tag ) : popped(popped) {}
+		TagData( Version popped, Tag tag ) : popped(popped), t(tag) {}
 
 		TagData(TagData&& r) noexcept(true) : version_messages(std::move(r.version_messages)), popped(r.popped) {}
 		void operator= (TagData&& r) noexcept(true) {

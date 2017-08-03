@@ -3175,7 +3175,7 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 			self.tag = seedTag;
 		}
 
-		TraceEvent("StorageServerInit", ssi.id()).detail("Version", self.version.get()).detail("SeedTag", seedTag);
+		TraceEvent("StorageServerInit", ssi.id()).detail("Version", self.version.get()).detail("SeedTag", seedTag.toString());
 		recruitReply.send(ssi);
 		self.byteSampleRecovery = Void();
 		Void _ = wait( storageServerCore(&self, ssi) );
@@ -3199,7 +3199,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 		state Future<Void> infoChanged = self->db->onChange();
 		state Reference<MultiInterface<MasterProxyInterface>> proxies( new MultiInterface<MasterProxyInterface>(self->db->get().client.proxies, self->db->get().myLocality, ALWAYS_FRESH) );
 		choose {
-			when( GetStorageServerRejoinInfoReply rep = wait( proxies->size() ? loadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id()) ) : Never() ) ) {
+			when( GetStorageServerRejoinInfoReply rep = wait( proxies->size() ? loadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
 				self->tag = rep.tag;
 				try {
 					tr.reset();

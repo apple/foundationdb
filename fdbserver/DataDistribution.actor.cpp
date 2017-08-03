@@ -1963,6 +1963,31 @@ static std::set<int> const& normalDDQueueErrors() {
 	return s;
 }
 
+ACTOR Future<Void> popOldTags( Transaction* tr, Reference<ILogSystem> logSystem, Version recoveryCommitVersion, int8_t tagLocality, Standalone<RangeResultRef> tags ) {
+	Optional<Standalone<StringRef>> val = wait( tr->get(serverMaxTagKeyFor(tagLocality)) );
+	if(!val.present())
+		return Void();
+
+	state Tag maxTag = decodeServerTagMaxValue( val.get() );
+
+	std::set<Tag> unusedTags;
+	for(uint16_t i = 0; i <= maxTag.id; i++)
+		unusedTags.insert(Tag(tagLocality, i));
+
+	for(auto kv : tags) {
+		Tag t = decodeServerTagValue( kv.value );
+		if(t.locality == tagLocality) {
+			unusedTags.erase(t);
+		}
+	}
+
+	for(auto tag : unusedTags)
+		logSystem->pop(recoveryCommitVersion, tag);
+
+	return Void();
+}
+
+//FIXME: support upgrades
 ACTOR Future<Void> popOldTags( Database cx, Reference<ILogSystem> logSystem, Version recoveryCommitVersion ) {
 	state Transaction tr(cx);
 
@@ -1971,24 +1996,16 @@ ACTOR Future<Void> popOldTags( Database cx, Reference<ILogSystem> logSystem, Ver
 
 	loop {
 		try {
-			Optional<Standalone<StringRef>> val = wait( tr.get(serverTagMaxKey) );
-			if(!val.present())
-				return Void();
+			state Future<Standalone<RangeResultRef>> fTagLocalities = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
+			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
 
-			state Tag maxTag = decodeServerTagMaxValue( val.get() );
+			Void _ = wait( success(fTagLocalities) && success(fTags) );
 
-			Standalone<RangeResultRef> tags = wait( tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true) );
-
-			std::set<Tag> unusedTags;
-			for(int i = 0; i <= maxTag; i++)
-				unusedTags.insert(i);
-
-			for(auto kv : tags)
-				unusedTags.erase(decodeServerTagValue( kv.value ));
-
-			for(auto tag : unusedTags)
-				logSystem->pop(recoveryCommitVersion, tag);
-
+			state std::vector<Future<Void>> popActors;
+			for(auto& kv : fTagLocalities.get()) {
+				popActors.push_back(popOldTags(&tr, logSystem, recoveryCommitVersion, decodeTagLocalityListValue(kv.value), fTags.get()));
+			}
+			Void _ = wait( waitForAll(popActors) );
 			return Void();
 		} catch( Error &e ) {
 			Void _ = wait( tr.onError(e) );

@@ -540,9 +540,9 @@ ACTOR Future<Void> commitBatch(
 	
 					if(self->singleKeyMutationEvent->enabled) {
 						KeyRangeRef shard = self->keyTags.rangeContaining(m.param1).range();
-						self->singleKeyMutationEvent->tag1 = (int64_t)tags[0];
-						self->singleKeyMutationEvent->tag2 = (int64_t)tags[1];
-						self->singleKeyMutationEvent->tag3 = (int64_t)tags[2];
+						self->singleKeyMutationEvent->tag1 = (int64_t)tags[0].id;
+						self->singleKeyMutationEvent->tag2 = (int64_t)tags[1].id;
+						self->singleKeyMutationEvent->tag3 = (int64_t)tags[2].id;
 						self->singleKeyMutationEvent->shardBegin = shard.begin;
 						self->singleKeyMutationEvent->shardEnd = shard.end;
 						self->singleKeyMutationEvent->log();
@@ -1020,9 +1020,14 @@ ACTOR static Future<Void> readRequestServer(
 				GetStorageServerRejoinInfoReply rep;
 				rep.version = commitData->version;
 				rep.tag = decodeServerTagValue( commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get() );
-				req.reply.send(rep);
-			} else
+				if(commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get().present() && decodeTagLocalityListValue(commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get().get()) == rep.tag.locality) {
+					req.reply.send(rep);
+				} else {
+					req.reply.sendError(storage_changed_locality());
+				}
+			} else {
 				req.reply.sendError(worker_removed());
+			}
 		}
 	}
 }

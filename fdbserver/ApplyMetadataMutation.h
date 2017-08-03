@@ -98,7 +98,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString()).detail("Server", serverKeysDecodeServer(m.param1))
-						.detail("tagKey", printable(serverTagKeyFor( serverKeysDecodeServer(m.param1) ))).detail("tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ));
+						.detail("tagKey", printable(serverTagKeyFor( serverKeysDecodeServer(m.param1) ))).detail("tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ).toString());
 
 					toCommit->addTag( decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ) );
 					toCommit->addTypedMessage(privatized);
@@ -110,7 +110,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if(toCommit) {
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					TraceEvent("ServerTag", dbgid).detail("server", id).detail("tag", tag);
+					TraceEvent("ServerTag", dbgid).detail("server", id).detail("tag", tag.toString());
 
 					toCommit->addTag(tag);
 					toCommit->addTypedMessage(LogProtocolMessage());
@@ -146,7 +146,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
 			else if (m.param1.startsWith(serverListPrefix) || m.param1 == databaseLockedKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
-				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin)) {
+				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
 			else if (m.param1.startsWith(applyMutationsEndRange.begin)) {
@@ -242,13 +242,16 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			if ( serverListKeys.intersects( range )) {
 				if(!initialCommit) txnStateStore->clear( range & serverListKeys );
 			}
+			if ( tagLocalityListKeys.intersects( range )) {
+				if(!initialCommit) txnStateStore->clear( range & tagLocalityListKeys );
+			}
 			if ( serverTagKeys.intersects( range )) {
 				// Storage server removal always happens in a separate version from any prior writes (or any subsequent reuse of the tag) so we
 				// can safely destroy the tag here without any concern about intra-batch ordering
 				if (logSystem && popVersion) {
 					auto serverKeysCleared = txnStateStore->readRange( range & serverTagKeys ).get();	// read is expected to be immediately available
 					for(auto &kv : serverKeysCleared) {
-						TraceEvent("ServerTagRemove").detail("popVersion", popVersion).detail("tag", decodeServerTagValue(kv.value)).detail("server", decodeServerTagKey(kv.key));
+						TraceEvent("ServerTagRemove").detail("popVersion", popVersion).detail("tag", decodeServerTagValue(kv.value).toString()).detail("server", decodeServerTagKey(kv.key));
 						logSystem->pop( popVersion, decodeServerTagValue(kv.value) );
 
 						if(toCommit) {

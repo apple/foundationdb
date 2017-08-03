@@ -197,7 +197,6 @@ struct TLogData : NonCopyable {
 
 	NotifiedVersion queueCommitEnd;
 	Version queueCommitBegin;
-	AsyncTrigger newVersion;
 
 	int64_t instanceID;
 	int64_t bytesInput;
@@ -1083,7 +1082,6 @@ ACTOR Future<Void> tLogCommit(
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		self->prevVersion = logData->version.get();
 		logData->version.set( req.version );
-		self->newVersion.trigger();
 
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.AfterTLogCommit");
@@ -1219,6 +1217,10 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			}
 			if(found) {
 				logData->logSystem->set(ILogSystem::fromServerDBInfo( self->dbgid, self->dbInfo->get() ));
+				if(logData->remoteTag.present() && logData->stopped) {
+					TraceEvent("TLogAlreadyStopped", self->dbgid);
+					logData->removed = logData->removed && logData->logSystem->get()->endEpoch();
+				}
 			} else {
 				logData->logSystem->set(Reference<ILogSystem>());
 			}
@@ -1318,6 +1320,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 					qe.id = logData->logId;
 					self->persistentQueue->push( qe );
 
+					self->diskQueueCommitBytes += qe.expectedSize();
+					if( self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES ) {
+						self->largeDiskQueueCommitBytes.set(true);
+					}
+
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 					//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 					self->prevVersion = logData->version.get();
@@ -1342,6 +1349,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 						qe.tags = VectorRef<TagMessagesRef>();
 						qe.id = logData->logId;
 						self->persistentQueue->push( qe );
+
+						self->diskQueueCommitBytes += qe.expectedSize();
+						if( self->diskQueueCommitBytes > SERVER_KNOBS->MAX_QUEUE_COMMIT_BYTES ) {
+							self->largeDiskQueueCommitBytes.set(true);
+						}
 
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 						//FIXME: could we just use the ver and lastVer variables, or replace them with this?
@@ -1797,6 +1809,12 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 	DUMPTOKEN( recruited.confirmRunning );
 
 	for(auto it : self->id_data) {
+		if( !it.second->stopped ) {
+			TraceEvent("TLogStoppedByNewRecruitment", self->dbgid).detail("stoppedId", it.first.toString()).detail("recruitedId", recruited.id()).detail("endEpoch", it.second->logSystem->get().getPtr() != 0);
+			if(it.second->remoteTag.present() && it.second->logSystem->get()) {
+				it.second->removed = it.second->removed && it.second->logSystem->get()->endEpoch();
+			}
+		}
 		it.second->stopped = true;
 	}
 

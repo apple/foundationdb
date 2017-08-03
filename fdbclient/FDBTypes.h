@@ -31,14 +31,44 @@ typedef uint64_t LogEpoch;
 typedef uint64_t Sequence;
 typedef StringRef KeyRef;
 typedef StringRef ValueRef;
-typedef int16_t Tag;
 typedef int64_t Generation;
+
+enum { tagLocalitySpecial = -100, tagLocalityLogRouter = -1, tagLocalityRemoteLog = -2};
+
+#pragma pack(push, 1)
+struct Tag {
+	int8_t locality;
+	uint16_t id;
+
+	Tag() : locality(tagLocalitySpecial), id(0) {}
+	Tag(int8_t locality, uint16_t id) : locality(locality), id(id) {}
+
+	bool operator == ( const Tag& r ) const { return locality==r.locality && id==r.id; }
+	bool operator != ( const Tag& r ) const { return locality!=r.locality || id!=r.id; }
+	bool operator < ( const Tag& r ) const { return locality < r.locality || (locality == r.locality && id < r.id); }
+
+	std::string toString() const {
+		return format("%d:%d", locality, id);
+	}
+
+	template <class Ar>
+	force_inline void serialize_unversioned(Ar& ar) { 
+		ar & locality & id;
+	}
+};
+#pragma pack(pop)
+
+template <class Ar> void load( Ar& ar, Tag& tag ) { tag.serialize_unversioned(ar); }
+template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).serialize_unversioned(ar); }
+
+static const Tag invalidTag {tagLocalitySpecial, 0};
+static const Tag txsTag {tagLocalitySpecial, 1};
 
 struct KeyRangeRef;
 struct KeyValueRef;
 
 static std::string describe( const Tag item ) {
-	return format("%d", item);
+	return format("%d:%d", item.locality, item.id);
 }
 
 template <class T>
@@ -198,10 +228,9 @@ typedef Standalone<KeyRef> Key;
 typedef Standalone<ValueRef> Value;
 typedef Standalone<KeyRangeRef> KeyRange;
 typedef Standalone<KeyValueRef> KeyValue;
-typedef Standalone<struct KeySelectorRef> KeySelector;
+typedef Standalone<struct KeySelectorRef> KeySelector; 
 
 enum { invalidVersion = -1, latestVersion = -2 };
-enum { invalidTag = -100, txsTag = -1 };
 
 inline Key keyAfter( const KeyRef& key ) {
 	if(key == LiteralStringRef("\xff\xff"))

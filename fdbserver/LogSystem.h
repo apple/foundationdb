@@ -55,7 +55,7 @@ public:
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBest(true) {}
 
 	int bestLocationFor( Tag tag ) {
-		return hasBest ? tag % logServers.size() : invalidTag;
+		return hasBest ? tag.id % logServers.size() : -1;
 	}
 
 	void updateLocalitySet() {
@@ -477,6 +477,9 @@ struct ILogSystem {
 
 	virtual Future<Void> confirmEpochLive( Optional<UID> debugID = Optional<UID>() ) = 0;
 		// Returns success after confirming that pushes in the current epoch are still possible
+
+	virtual Future<Void> endEpoch() = 0;
+		// Ends the current epoch without starting a new one
 
 	static Reference<ILogSystem> fromServerDBInfo( UID const& dbgid, struct ServerDBInfo const& db );
 	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const& );
