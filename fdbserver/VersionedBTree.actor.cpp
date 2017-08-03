@@ -158,7 +158,11 @@ public:
 		return m_pager->getLatestVersion();
 	}
 
-	VersionedBTree(IPager *pager, int page_size_override = -1) : m_pager(pager), m_writeVersion(invalidVersion), m_page_size_override(page_size_override) {
+	VersionedBTree(IPager *pager, int page_size_override = -1)
+	  : m_pager(pager),
+		m_writeVersion(invalidVersion),
+		m_page_size_override(page_size_override),
+		m_lastCommittedVersion(invalidVersion) {
 	}
 
 	ACTOR static Future<Void> init(VersionedBTree *self) {
@@ -166,10 +170,12 @@ public:
 		state Version latest = wait(self->m_pager->getLatestVersion());
 		if(latest == 0) {
 			IPager *pager = self->m_pager;
-			self->writePage(self->m_root, FixedSizeMap::emptyPage(EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }), 1);
-			self->m_pager->setLatestVersion(1);
+			++latest;
+			self->writePage(self->m_root, FixedSizeMap::emptyPage(EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }), latest);
+			self->m_pager->setLatestVersion(latest);
 			Void _ = wait(self->m_pager->commit());
 		}
+		self->m_lastCommittedVersion = latest;
 		return Void();
 	}
 
@@ -587,7 +593,7 @@ private:
 				if(map.flags && EPageFlags::IS_LEAF) {
 					int i = map.findLastLessOrEqual(tupleKey);
 					if(i >= 0 && Tuple::unpack(map.entries[i].first).getString(0) == key) {
-						self->m_kv = Standalone<KeyValueRef>(KeyValueRef(key, map.entries[i].second), self->m_arena);
+						self->m_kv = KeyValueRef(StringRef(self->m_arena, key), StringRef(self->m_arena, map.entries[i].second));
 					}
 					else {
 						self->m_kv = Optional<KeyValueRef>();
