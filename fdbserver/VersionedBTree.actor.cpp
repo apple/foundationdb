@@ -29,6 +29,7 @@
 #include "IndirectShadowPager.h"
 #include <map>
 #include <vector>
+#include "fdbclient/CommitTransaction.h"
 
 #define INTERNAL_PAGES_HAVE_TUPLES 1
 
@@ -144,7 +145,7 @@ public:
 	// A write shall not become durable until the following call to commit() begins, and shall be durable once the following call to commit() returns
 	virtual void set(KeyValueRef keyValue) {
 		ASSERT(m_writeVersion != invalidVersion);
-		m_buffer[keyValue.key.toString()].push_back({m_writeVersion, keyValue.value.toString()});
+		m_buffer[keyValue.key][m_writeVersion] = ValueMutation(keyValue.value);
 	}
 	virtual void clear(KeyRangeRef range) NOT_IMPLEMENTED
 	virtual void mutate(int op, StringRef param1, StringRef param2) NOT_IMPLEMENTED
@@ -219,7 +220,26 @@ private:
 	typedef std::pair<std::string, LogicalPageID> KeyPagePairT;
 	typedef std::pair<Version, std::vector<KeyPagePairT>> VersionedKeyToPageSetT;
 	typedef std::vector<VersionedKeyToPageSetT> VersionedChildrenT;
-	typedef std::map<std::string, std::vector<std::pair<Version, std::string>>> MutationBufferT;
+
+	/* Represents 3 types of mutations to a value.
+	 *   - Clear to a range end
+	 *   - Set to a value
+	 *   - Atomic Op with a value (not yet used)
+	 */
+	struct ValueMutation {
+		ValueMutation(Optional<Value> value = Optional<Value>(), MutationRef::Type atomicOp = MutationRef::Type::NoOp) : value(value), atomicOp(atomicOp) {}
+		Optional<Value> value;
+		MutationRef::Type atomicOp;
+
+		bool isClear() const { return !value.present(); }
+		bool isAtomicOp() const { return atomicOp != MutationRef::Type::NoOp; }
+		bool isSet() const { return value.present() && !isAtomicOp(); }
+		bool isFinal() const { return isClear() || isSet(); }
+	};
+
+	typedef std::map<Version, ValueMutation> VersionedMutationsT;
+	// buffer[key] = { version => mutation) }
+	typedef std::map<Key, VersionedMutationsT> MutationBufferT;
 
 	struct KeyVersionValue {
 		KeyVersionValue(Key k, Version ver, Value val) : key(k), version(ver), value(val) {}
@@ -302,8 +322,9 @@ private:
 			while(iBuf != bufEnd) {
 				Key k = StringRef(iBuf->first);
 				for(auto const &vv : iBuf->second) {
-					debug_printf("Inserting %s %s @%lld\n", k.toString().c_str(), vv.second.c_str(), vv.first);
-					mutations.push_back(KeyVersionValue(k, vv.first, StringRef(vv.second)));
+					ASSERT(vv.second.value.present());
+					debug_printf("Inserting %s %s @%lld\n", k.toString().c_str(), vv.second.toString().c_str(), vv.first);
+					mutations.push_back(KeyVersionValue(k, vv.first, vv.second.value.get()));
 					minVersion = std::min(minVersion, vv.first);
 				}
 				++iBuf;
@@ -375,10 +396,10 @@ private:
 				if (i+1 != map.entries.size()) {
 					if(INTERNAL_PAGES_HAVE_TUPLES) {
 						Tuple t = Tuple::unpack(map.entries[i+1].first);
-						childMutEnd = self->m_buffer.lower_bound( t.getString(0).toString() );
+						childMutEnd = self->m_buffer.lower_bound( t.getString(0) );
 					}
 					else
-						childMutEnd = self->m_buffer.lower_bound( map.entries[i+1].first );
+						childMutEnd = self->m_buffer.lower_bound( StringRef(map.entries[i+1].first) );
 				}
 
 				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].second.data(), map.entries[i].first, childMutBegin, childMutEnd));
