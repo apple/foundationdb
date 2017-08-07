@@ -222,7 +222,7 @@ fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet *rs)
 
 fdb_error_t maybeLogError(fdb_error_t err, const char* context, struct ResultSet *rs) {
 	if(err && !fdb_error_predicate( FDB_ERROR_PREDICATE_RETRYABLE, err ) ) {
-        return logError(err, context, rs);
+		return logError(err, context, rs);
 	}
 	return err;
 }
