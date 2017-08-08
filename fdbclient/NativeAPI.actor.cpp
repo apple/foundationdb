@@ -1364,7 +1364,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				if (trLogInfo)
-					trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_GET, startTimeD, static_cast<int>(e.code())));
+					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, static_cast<int>(e.code()), key));
 				throw e;
 			}
 		}
@@ -1883,7 +1883,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeWrapper(Database cx, Reference<
 	}
 	catch (Error &e) {
 		if (trLogInfo)
-			trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_GET_RANGE, startTime, static_cast<int>(e.code())));
+			trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()), begin.getKey(), end.getKey()));
 		throw;
 	}
 }
@@ -2544,7 +2544,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if (e.code() != error_code_past_version && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
 				TraceEvent(SevError, "tryCommitError").error(e);
 			if (trLogInfo)
-				trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_COMMIT, startTime, static_cast<int>(e.code())));
+				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
 			throw;
 		}
 	}

@@ -64,7 +64,7 @@ namespace FdbClientLogEvents {
 	};
 
 	struct EventGet : public Event {
-		EventGet(double ts, double lat, int size, const Key &in_key) : Event(GET_LATENCY, ts), latency(lat), valueSize(size), key(printable(in_key)) { }
+		EventGet(double ts, double lat, int size, const KeyRef &in_key) : Event(GET_LATENCY, ts), latency(lat), valueSize(size), key(in_key) { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -75,15 +75,15 @@ namespace FdbClientLogEvents {
 
 		double latency;
 		int valueSize;
-		std::string key;
+		Key key;
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_Get").detail("TransactionID", id).detail("Latency", latency).detail("ValueSizeBytes", valueSize).detail("Key", key);
+			TraceEvent("TransactionTrace_Get").detail("TransactionID", id).detail("Latency", latency).detail("ValueSizeBytes", valueSize).detail("Key", printable(key));
 		}
 	};
 
 	struct EventGetRange : public Event {
-		EventGetRange(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE_LATENCY, ts), latency(lat), rangeSize(size), startKey(printable(start_key)), endKey(printable(end_key)) { }
+		EventGetRange(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE_LATENCY, ts), latency(lat), rangeSize(size), startKey(start_key), endKey(end_key) { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -94,16 +94,15 @@ namespace FdbClientLogEvents {
 
 		double latency;
 		int rangeSize;
-		std::string startKey;
-		std::string endKey;
+		Key startKey;
+		Key endKey;
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_GetRange").detail("TransactionID", id).detail("Latency", latency).detail("RangeSizeBytes", rangeSize).detail("StartKey", startKey).detail("EndKey", endKey);
+			TraceEvent("TransactionTrace_GetRange").detail("TransactionID", id).detail("Latency", latency).detail("RangeSizeBytes", rangeSize).detail("StartKey", printable(startKey)).detail("EndKey", printable(endKey));
 		}
 	};
 
 	struct EventCommit : public Event {
-		EventCommit() :Event(COMMIT_LATENCY, 0) {}
 		EventCommit(double ts, double lat, int mut, int bytes, CommitTransactionRequest *commit_req) : Event(COMMIT_LATENCY, ts), latency(lat), numMutations(mut), commitBytes(bytes), req(*commit_req) { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
@@ -119,8 +118,6 @@ namespace FdbClientLogEvents {
 		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
 
 		void logEvent(std::string id) const {
-			TraceEvent("TransactionTrace_Commit").detail("TransactionID", id).detail("Latency", latency).detail("NumMutations", numMutations).detail("CommitSizeBytes", commitBytes);
-
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
 				TraceEvent("TransactionTrace_Commit_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
 			}
@@ -132,36 +129,75 @@ namespace FdbClientLogEvents {
 			for (auto &mutation : req.transaction.mutations) {
 				TraceEvent("TransactionTrace_Commit_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
 			}
+
+			TraceEvent("TransactionTrace_Commit").detail("TransactionID", id).detail("Latency", latency).detail("NumMutations", numMutations).detail("CommitSizeBytes", commitBytes);
 		}
 	};
 
-	struct EventError : public Event {
-		EventError(EventType t, double ts, int err_code) : Event(t, ts), errCode(err_code) { }
+	struct EventGetError : public Event {
+		EventGetError(double ts, int err_code, const KeyRef &in_key) : Event(ERROR_GET, ts), errCode(err_code), key(in_key) { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
-				return Event::serialize(ar) & errCode;
+				return Event::serialize(ar) & errCode & key;
 			else
-				return ar & errCode;
+				return ar & errCode & key;
 		}
+
 		int errCode;
+		Key key;
 
 		void logEvent(std::string id) const {
-			const char *eventName;
-			if(type == ERROR_GET) {
-				eventName = "TransactionTrace_GetError";
-			}
-			else if(type == ERROR_GET_RANGE) {
-				eventName = "TransactionTrace_GetRangeError";
-			}
-			else if(type == ERROR_COMMIT) {
-				eventName = "TransactionTrace_CommitError";
-			}
-			else {
-				eventName = "TransactionTrace_Error";
+			TraceEvent("TransactionTrace_GetError").detail("TransactionID", id).detail("ErrCode", errCode).detail("Key", printable(key));
+		}
+	};
+
+	struct EventGetRangeError : public Event {
+		EventGetRangeError(double ts, int err_code, const KeyRef &start_key, const KeyRef & end_key) : Event(ERROR_GET_RANGE, ts), errCode(err_code), startKey(start_key), endKey(end_key) { }
+
+		template <typename Ar>	Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return Event::serialize(ar) & errCode & startKey & endKey;
+			else
+				return ar & errCode & startKey & endKey;
+		}
+
+		int errCode;
+		Key startKey;
+		Key endKey;
+
+		void logEvent(std::string id) const {
+			TraceEvent("TransactionTrace_GetRangeError").detail("TransactionID", id).detail("ErrCode", errCode).detail("StartKey", printable(startKey)).detail("EndKey", printable(endKey));
+		}
+	};
+
+	struct EventCommitError : public Event {
+		EventCommitError(double ts, int err_code, CommitTransactionRequest *commit_req) : Event(ERROR_COMMIT, ts), errCode(err_code), req(*commit_req) { }
+	
+		template <typename Ar>	Ar& serialize(Ar &ar) {
+			if (!ar.isDeserializing)
+				return Event::serialize(ar) & errCode & req.transaction & req.arena;
+			else
+				return ar & errCode & req.transaction & req.arena;
+		}
+
+		int errCode;
+		CommitTransactionRequest req; // Only CommitTransactionRef and Arena object within CommitTransactionRequest is serialized
+
+		void logEvent(std::string id) const {
+			for (auto &read_range : req.transaction.read_conflict_ranges) {
+				TraceEvent("TransactionTrace_CommitError_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
 			}
 
-			TraceEvent(SevWarn, eventName).detail("TransactionID", id).detail("Error", errCode).detail("Description", Error(errCode).what());
+			for (auto &write_range : req.transaction.write_conflict_ranges) {
+				TraceEvent("TransactionTrace_CommitError_WriteConflictRange").detail("TransactionID", id).detail("Begin", printable(write_range.begin)).detail("End", printable(write_range.end));
+			}
+
+			for (auto &mutation : req.transaction.mutations) {
+				TraceEvent("TransactionTrace_CommitError_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
+			}
+
+			TraceEvent("TransactionTrace_CommitError").detail("TransactionID", id).detail("ErrCode", errCode);
 		}
 	};
 }
