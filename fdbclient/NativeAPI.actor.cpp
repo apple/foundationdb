@@ -1116,16 +1116,19 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
 					ASSERT( keyServersShards.size() );  // There should always be storage servers, except on version 0 which should not get to this function
 
+					Reference<LocationInfo> cachedLocation;
 					for (pair<KeyRangeRef, vector<StorageServerInterface>> keyServersShard : keyServersShards) {
-						cx->setCachedLocation(keyServersShard.first, keyServersShard.second);
+						auto locationInfo = cx->setCachedLocation(keyServersShard.first, keyServersShard.second);
 
 						if (isBackward ? (keyServersShard.first.begin < key && keyServersShard.first.end >= key) : keyServersShard.first.contains(key)) {
 							range = keyServersShard.first;
-							serverInterfaces = keyServersShard.second;
+							cachedLocation = locationInfo;
 						}
 					}
 
-					break;
+					ASSERT(isBackward ? (range.begin < key && range.end >= key) : range.contains(key));
+
+					return make_pair(range, cachedLocation);
 				}
 			}
 		}
