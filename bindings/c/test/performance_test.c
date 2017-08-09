@@ -234,9 +234,9 @@ struct RunResult parallelGet(struct ResultSet *rs, FDBTransaction *tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if(e) return RES(0, e);
 
-	double start = getTime();
-
 	FDBFuture **futures = (FDBFuture**)malloc((sizeof(FDBFuture*)) * PARALLEL_GET_COUNT);
+
+	double start = getTime();
 
 	int i;
 	for(i = 0; i < PARALLEL_GET_COUNT; i++) {
@@ -276,9 +276,9 @@ struct RunResult alternatingGetSet(struct ResultSet *rs, FDBTransaction *tr) {
 	fdb_error_t e = maybeLogError(setRetryLimit(rs, tr, 5), "setting retry limit", rs);
 	if(e) return RES(0, e);
 
-	double start = getTime();
-
 	FDBFuture **futures = (FDBFuture**)malloc((sizeof(FDBFuture*)) * ALTERNATING_GET_SET_COUNT);
+
+	double start = getTime();
 
 	int i;
 	for(i = 0; i < ALTERNATING_GET_SET_COUNT; i++) {
@@ -372,10 +372,9 @@ struct RunResult serialGet(struct ResultSet *rs, FDBTransaction *tr) {
 		}
 	}
 
-	free(keyIndices);
-
 	double end = getTime();
 
+	free(keyIndices);
 	return RES(SERIAL_GET_COUNT/(end - start), 0);
 }
 
