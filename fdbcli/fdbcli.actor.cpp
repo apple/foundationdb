@@ -30,6 +30,7 @@
 #include "fdbclient/FDBOptions.g.h"
 
 #include "flow/DeterministicRandom.h"
+#include "flow/SignalSafeUnwind.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Platform.h"
 
@@ -2861,6 +2862,7 @@ ACTOR Future<Void> timeExit(double duration) {
 
 int main(int argc, char **argv) {
 	platformInit();
+	initSignalSafeUnwind();
 	Error::init();
 
 	registerCrashHandler();
