@@ -115,6 +115,7 @@ struct ILogSystem {
 		bool parallelGetMore;
 		int sequence;
 		Deque<Future<TLogPeekReply>> futureResults;
+		Future<Void> interfaceChanged;
 
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
 
