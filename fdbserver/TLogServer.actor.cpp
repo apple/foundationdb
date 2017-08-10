@@ -1129,11 +1129,11 @@ ACTOR Future<Void> respondToRecovered( TLogInterface tli, Future<Void> recovery 
 
 ACTOR Future<Void> cleanupPeekTrackers( TLogData* self ) {
 	loop {
-		double minExpireTime = SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME;
+		double minTimeUntilExpiration = SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME;
 		auto it = self->peekTracker.begin();
 		while(it != self->peekTracker.end()) {
-			double expireTime = SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME - now()-it->second.lastUpdate;
-			if(expireTime < 1.0e-6) {
+			double timeUntilExpiration = it->second.lastUpdate + SERVER_KNOBS->PEEK_TRACKER_EXPIRATION_TIME - now();
+			if(timeUntilExpiration < 1.0e-6) {
 				for(auto seq : it->second.sequence_version) {
 					if(!seq.second.isSet()) {
 						seq.second.sendError(timed_out());
@@ -1141,12 +1141,12 @@ ACTOR Future<Void> cleanupPeekTrackers( TLogData* self ) {
 				}
 				it = self->peekTracker.erase(it);
 			} else {
-				minExpireTime = std::min(minExpireTime, expireTime);
+				minTimeUntilExpiration = std::min(minTimeUntilExpiration, timeUntilExpiration);
 				++it;
 			}
 		}
 
-		Void _ = wait( delay(minExpireTime) );
+		Void _ = wait( delay(minTimeUntilExpiration) );
 	}
 }
 
