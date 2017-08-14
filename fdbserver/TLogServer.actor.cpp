@@ -200,6 +200,63 @@ struct CompareFirst {
 	}
 };
 
+KeyRange prefixRange( KeyRef prefix ) {
+	Key end = strinc(prefix);
+	return KeyRangeRef( prefix, end );
+}
+
+////// Persistence format (for self->persistentData)
+
+// Immutable keys
+static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/3") );
+static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/2"), LiteralStringRef("FoundationDB/LogServer/2/4") );
+static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
+
+// Updated on updatePersistentData()
+static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef( LiteralStringRef( "version/" ), LiteralStringRef( "version0" ) );
+static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
+static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
+
+static Key persistTagMessagesKey( UID id, Tag tag, Version version ) {
+	BinaryWriter wr( Unversioned() );
+	wr.serializeBytes(persistTagMessagesKeys.begin);
+	wr << id;
+	wr << tag;
+	wr << bigEndian64( version );
+	return wr.toStringRef();
+}
+
+static Key persistTagPoppedKey( UID id, Tag tag ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( persistTagPoppedKeys.begin );
+	wr << id;
+	wr << tag;
+	return wr.toStringRef();
+}
+
+static Value persistTagPoppedValue( Version popped ) {
+	return BinaryWriter::toValue( popped, Unversioned() );
+}
+
+static Tag decodeTagPoppedKey( KeyRef id, KeyRef key ) {
+	Tag s;
+	BinaryReader rd( key.removePrefix(persistTagPoppedKeys.begin).removePrefix(id), Unversioned() );
+	rd >> s;
+	return s;
+}
+
+static Version decodeTagPoppedValue( ValueRef value ) {
+	return BinaryReader::fromStringRef<Version>( value, Unversioned() );
+}
+
+static StringRef stripTagMessagesKey( StringRef key ) {
+	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size() );
+}
+
+static Version decodeTagMessagesKey( StringRef key ) {
+	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessagesKey(key), Unversioned() ) );
+}
+
 struct TLogData : NonCopyable {
 	AsyncTrigger newLogData;
 	Deque<UID> queueOrder;
@@ -238,13 +295,14 @@ struct TLogData : NonCopyable {
 	Future<Void> oldLogServer;
 
 	PromiseStream<Future<Void>> sharedActors;
+	bool terminated;
 
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
 			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
 			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
-			  bytesInput(0), bytesDurable(0), updatePersist(Void())
+			  bytesInput(0), bytesDurable(0), updatePersist(Void()), terminated(false)
 		{
 		}
 };
@@ -373,6 +431,16 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 		ASSERT(tLogData->bytesDurable <= tLogData->bytesInput);
 		endRole(tli.id(), "TLog", "Error", true);
+
+		if(!tLogData->terminated) {
+			Key logIdKey = BinaryWriter::toValue(logId,Unversioned());
+			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)) );
+			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)) );
+			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
+			tLogData->persistentData->clear( KeyRangeRef( msgKey, strinc(msgKey) ) );
+			Key poppedKey = logIdKey.withPrefix(persistTagPoppedKeys.begin);
+			tLogData->persistentData->clear( KeyRangeRef( poppedKey, strinc(poppedKey) ) );
+		}
 	}
 
 	LogEpoch epoch() const { return recoveryCount; }
@@ -406,63 +474,6 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 
 	reply.send( result );
 	return Void();
-}
-
-KeyRange prefixRange( KeyRef prefix ) {
-	Key end = strinc(prefix);
-	return KeyRangeRef( prefix, end );
-}
-
-////// Persistence format (for self->persistentData)
-
-// Immutable keys
-static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/3") );
-static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/2"), LiteralStringRef("FoundationDB/LogServer/2/4") );
-static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
-
-// Updated on updatePersistentData()
-static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef( LiteralStringRef( "version/" ), LiteralStringRef( "version0" ) );
-static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
-static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
-
-static Key persistTagMessagesKey( UID id, Tag tag, Version version ) {
-	BinaryWriter wr( Unversioned() );
-	wr.serializeBytes(persistTagMessagesKeys.begin);
-	wr << id;
-	wr << tag;
-	wr << bigEndian64( version );
-	return wr.toStringRef();
-}
-
-static Key persistTagPoppedKey( UID id, Tag tag ) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( persistTagPoppedKeys.begin );
-	wr << id;
-	wr << tag;
-	return wr.toStringRef();
-}
-
-static Value persistTagPoppedValue( Version popped ) {
-	return BinaryWriter::toValue( popped, Unversioned() );
-}
-
-static Tag decodeTagPoppedKey( KeyRef id, KeyRef key ) {
-	Tag s;
-	BinaryReader rd( key.removePrefix(persistTagPoppedKeys.begin).removePrefix(id), Unversioned() );
-	rd >> s;
-	return s;
-}
-
-static Version decodeTagPoppedValue( ValueRef value ) {
-	return BinaryReader::fromStringRef<Version>( value, Unversioned() );
-}
-
-static StringRef stripTagMessagesKey( StringRef key ) {
-	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size() );
-}
-
-static Version decodeTagMessagesKey( StringRef key ) {
-	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessagesKey(key), Unversioned() ) );
 }
 
 void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Tag tag, LogData::TagData& data ) {
@@ -612,9 +623,15 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 				} else {
 					Void _ = wait( delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL, TaskUpdateStorage) );
 				}
+
+				if( logData->removed.isReady() ) {
+					break;
+				}
 			}
 
-			self->queueOrder.pop_front();
+			if(logData->persistentDataDurableVersion == logData->version.get()) {
+				self->queueOrder.pop_front();
+			}
 			Void _ = wait( delay(0.0, TaskUpdateStorage) );
 		} else {
 			Void _ = wait( delay(BUGGIFY ? SERVER_KNOBS->BUGGIFY_TLOG_STORAGE_MIN_UPDATE_INTERVAL : SERVER_KNOBS->TLOG_STORAGE_MIN_UPDATE_INTERVAL, TaskUpdateStorage) );
@@ -1397,8 +1414,13 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 				when( TLogQueueEntry qe = wait( self->persistentQueue->readNext() ) ) {
 					if(!self->queueOrder.size() || self->queueOrder.back() != qe.id) self->queueOrder.push_back(qe.id);
 					if(qe.id != lastId) {
-						logData = self->id_data[qe.id];
 						lastId = qe.id;
+						auto it = self->id_data.find(qe.id);
+						if(it != self->id_data.end()) {
+							logData = it->second;
+						} else {
+							logData = Reference<LogData>();
+						}
 					} else {
 						ASSERT( qe.version >= lastVer );
 						lastVer = qe.version;
@@ -1407,19 +1429,21 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 					//TraceEvent("TLogRecoveredQE", self->dbgid).detail("logId", qe.id).detail("ver", qe.version).detail("MessageBytes", qe.messages.size()).detail("Tags", qe.tags.size())
 					//	.detail("Tag0", qe.tags.size() ? qe.tags[0].tag : invalidTag).detail("version", logData->version.get());
 
-					logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, qe.knownCommittedVersion);
-					if( qe.version > logData->version.get() ) {
-						commitMessages(logData, qe.version, qe.arena(), qe.messages, qe.tags, self->bytesInput);
-						logData->version.set( qe.version );
-						logData->queueCommittedVersion.set( qe.version );
+					if(logData) {
+						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, qe.knownCommittedVersion);
+						if( qe.version > logData->version.get() ) {
+							commitMessages(logData, qe.version, qe.arena(), qe.messages, qe.tags, self->bytesInput);
+							logData->version.set( qe.version );
+							logData->queueCommittedVersion.set( qe.version );
 
-						while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
-							TEST(true);  // Flush excess data during TLog queue recovery
-							TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid).detail("BytesInput", self->bytesInput).detail("BytesDurable", self->bytesDurable).detail("Version", logData->version.get()).detail("PVer", logData->persistentDataVersion);
+							while (self->bytesInput - self->bytesDurable >= recoverMemoryLimit) {
+								TEST(true);  // Flush excess data during TLog queue recovery
+								TraceEvent("FlushLargeQueueDuringRecovery", self->dbgid).detail("BytesInput", self->bytesInput).detail("BytesDurable", self->bytesDurable).detail("Version", logData->version.get()).detail("PVer", logData->persistentDataVersion);
 
-							choose {
-								when( Void _ = wait( updateStorage(self) ) ) {}
-								when( Void _ = wait( allRemoved ) ) { throw worker_removed(); }
+								choose {
+									when( Void _ = wait( updateStorage(self) ) ) {}
+									when( Void _ = wait( allRemoved ) ) { throw worker_removed(); }
+								}
 							}
 						}
 					}
@@ -1447,6 +1471,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 bool tlogTerminated( TLogData* self, IKeyValueStore* persistentData, TLogQueue* persistentQueue, Error const& e ) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just close it.
+	self->terminated = true;
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();
 		persistentQueue->dispose();
