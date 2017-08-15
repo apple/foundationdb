@@ -2222,12 +2222,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			if (err) {
 				LogCommand(line, randomID, "ERROR: malformed escape sequence");
 				is_error = true;
-				continue;
 			}
 			if (partial) {
 				LogCommand(line, randomID, "ERROR: unterminated quote");
 				is_error = true;
-				continue;
 			}
 
 			state bool multi = parsed.size() > 1;
