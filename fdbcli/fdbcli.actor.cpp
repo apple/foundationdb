@@ -2217,32 +2217,44 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			state UID randomID = g_random->randomUniqueID();
 			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line)));
 
-			bool err, partial;
-			state std::vector<std::vector<StringRef>> parsed = parseLine(line, err, partial);
-			if (err) {
-				LogCommand(line, randomID, "ERROR: malformed escape sequence");
-				is_error = true;
-			}
-			if (partial) {
-				LogCommand(line, randomID, "ERROR: unterminated quote");
-				is_error = true;
+			bool malformed, partial;
+			state std::vector<std::vector<StringRef>> parsed = parseLine(line, malformed, partial);
+			if (malformed) LogCommand(line, randomID, "ERROR: malformed escape sequence");
+			if (partial) LogCommand(line, randomID, "ERROR: unterminated quote");
+			if (malformed || partial) {
+				if (parsed.size() > 0) {
+					// Denote via a special token that the command was a parse failure.
+					auto& last_command = parsed.back();
+					last_command.insert(last_command.begin(), StringRef((const uint8_t*)"parse_error", strlen("parse_error")));
+				}
 			}
 
 			state bool multi = parsed.size() > 1;
+			is_error = false;
 
 			state std::vector<std::vector<StringRef>>::iterator iter;
 			for (iter = parsed.begin(); iter != parsed.end(); ++iter) {
 				state std::vector<StringRef> tokens = *iter;
 
-				if (opt.exec.present() && is_error) {
+				if (is_error) {
 					printf("WARNING: the previous command failed, the remaining commands will not be executed.\n");
-					return 1;
+					break;
 				}
-
-				is_error = false;
 
 				if (!tokens.size())
 					continue;
+
+				if (tokencmp(tokens[0], "parse_error")) {
+					printf("ERROR: Command failed to completely parse.\n");
+					if (tokens.size() > 1) {
+						printf("ERROR: Not running partial or malformed command:");
+						for (auto t = tokens.begin() + 1; t != tokens.end(); ++t)
+							printf(" %s", formatStringRef(*t, true).c_str());
+						printf("\n");
+					}
+					is_error = true;
+					continue;
+				}
 
 				if (multi) {
 					printf(">>>");
