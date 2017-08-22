@@ -649,166 +649,126 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 }
 
 struct SimulationConfig {
-  explicit SimulationConfig(int extraDB);
-  int extraDB;
-  const int NOT_SPECIFIED = -1;
+	explicit SimulationConfig(int extraDB);
+	int extraDB;
 
-  int logs;
-  int proxies;
-  int resolvers;
+	DatabaseConfiguration db;
 
-  // Predefined redundancy mode name
-  const char* config_name;
+	void set_config(std::string config);
 
-  // Custom redundancy mode
-  // Only used if config_name == nullptr
-  int log_replicas = NOT_SPECIFIED;
-  int log_anti_quorum = NOT_SPECIFIED;
-  int storage_replicas = NOT_SPECIFIED;
-  int storage_quorum = NOT_SPECIFIED;
-  int replica_datacenters = NOT_SPECIFIED;
-  int min_replica_datacenters = NOT_SPECIFIED;
+	// Simulation layout
+	int datacenters;
+	int machine_count;  // Total, not per DC.
+	int processes_per_machine;
+	int coordinators;
 
-  // Simulation layout
-  int datacenters;
-  int machine_count;  // Total, not per DC.
-  int processes_per_machine;
-  int coordinators;
-
-  const char* storage_engine;
-
-	int32_t minMachinesRequired() const { return std::max(log_replicas, storage_replicas); }
-	int32_t maxMachineFailuresTolerated() const { return std::min(log_replicas - 1 - log_anti_quorum, storage_quorum - 1); }
-
-  std::string toString();
+	std::string toString();
 
 private:
-  void generateNormalConfig();
+	void generateNormalConfig();
 };
 
 SimulationConfig::SimulationConfig(int extraDB) : extraDB(extraDB) {
-  // Set up the simplest most default config.
-  logs = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
-  proxies = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
-  resolvers = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
+	generateNormalConfig();
+}
 
-  log_replicas = logs;
-  storage_replicas = storage_quorum = logs;
-  log_anti_quorum = 0;
+void SimulationConfig::set_config(std::string config) {
+	// The only mechanism we have for turning "single" into what single means
+	// is buildConfiguration()... :/
+	std::map<std::string, std::string> hack_map;
+	ASSERT( buildConfiguration(config, hack_map) );
+	for(auto kv : hack_map) db.set( kv.first, kv.second );
+}
 
-  config_name = "single";
-  storage_engine = "memory";
-
-  datacenters = 1;
-  machine_count = 1;
-  processes_per_machine = 1;
-  coordinators = 1;
-
-  generateNormalConfig();
+StringRef StringRefOf(const char* s) {
+  return StringRef((uint8_t*)s, strlen(s));
 }
 
 void SimulationConfig::generateNormalConfig() {
-  datacenters = g_random->randomInt( 1, 4 );
-  if (g_random->random01() < 0.25) logs = g_random->randomInt(1,7);
-  if (g_random->random01() < 0.25) proxies = g_random->randomInt(1,7);
-  if (g_random->random01() < 0.25) resolvers = g_random->randomInt(1,7);
-	storage_engine = g_random->random01() < 0.5 ? "ssd" : "memory";
+	set_config("new");
+	datacenters = g_random->randomInt( 1, 4 );
+	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
+	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
+	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);
+	if (g_random->random01() < 0.5) {
+		set_config("ssd");
+	} else {
+		set_config("memory");
+	}
 
-  int replication_type = g_random->randomInt( 1, 6 );
-  //replication_type = 1;  //ahm
-  switch (replication_type) {
-  case 0: {
+	int replication_type = std::min(g_random->randomInt( 1, 6 ), 3);
+	//replication_type = 1;  //ahm
+	switch (replication_type) {
+	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
-    config_name = nullptr;
-		storage_replicas = g_random->randomInt(1,5);
-    storage_quorum = storage_replicas;
-		log_replicas = g_random->randomInt(1,5);
-		log_anti_quorum = g_random->randomInt(0, log_replicas);
-		replica_datacenters = 1;
-		min_replica_datacenters = 1;
-    break;
+		int storage_servers = g_random->randomInt(1,5);
+		int replication_factor = g_random->randomInt(1,5);
+		int anti_quorum = g_random->randomInt(0, db.tLogReplicationFactor);
+		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
+		set_config(format("storage_replicas:=%d storage_quorum:=%d "
+		                  "log_replicas:=%d log_anti_quorum:=%1 "
+		                  "replica_datacenters:=1 min_replica_datacenters:=1",
+		                  storage_servers, storage_servers,
+		                  replication_factor, anti_quorum));
+		break;
 	}
 	case 1: {
 		TEST( true );  // Simulated cluster running in single redundancy mode
-    config_name = "single";
-		storage_replicas = storage_quorum = 1;
-    log_replicas = 1;
-    log_anti_quorum = 0;
-    break;
+		set_config("single");
+		break;
 	}
 	case 2: {
 		TEST( true );  // Simulated cluster running in double redundancy mode
-    config_name = "double";
-		storage_replicas = storage_quorum = 2;
-    log_replicas = 2;
-    log_anti_quorum = 0;
-    break;
+		set_config("double");
+		break;
 	}
 	case 3: {
 		if( datacenters == 1 ) {
 			TEST( true );  // Simulated cluster running in triple redundancy mode
-			config_name = "triple";
-      storage_replicas = storage_quorum = 3;
-      log_replicas = 3;
-      log_anti_quorum = 0;
+			set_config("triple");
 		}
 		else if( datacenters == 2 ) {
 			TEST( true );  // Simulated cluster running in 2 datacenter mode
-			config_name = "two_datacenter";
-      storage_replicas = storage_quorum = 3;
-      log_replicas = 3;
-      log_anti_quorum = 0;
+			set_config("two_datacenter");
 		}
 		else if( datacenters == 3 ) {
 			TEST( true );  // Simulated cluster running in 3 data-hall mode
-			config_name = "three_data_hall";
-      storage_replicas = storage_quorum = 4;
-      log_replicas = 4;
-      log_anti_quorum = 0;
+			set_config("three_data_hall");
 		}
 		else {
 			ASSERT( false );
 		}
-    break;
+		break;
 	}
-  case 4:
-  case 5:
-    // Leave all settings at their default
-    break;
-  default:
-    ASSERT(false);  // Programmer forgot to adjust cases.
-  }
+	default:
+		ASSERT(false);  // Programmer forgot to adjust cases.
+	}
 
-  machine_count = g_random->randomInt( std::max( 2+datacenters, minMachinesRequired() ), extraDB ? 6 : 10 );
-  processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
-  coordinators = BUGGIFY ? g_random->randomInt(1, machine_count+1) : std::min( machine_count, maxMachineFailuresTolerated()*2 + 1 );
+	machine_count = g_random->randomInt( std::max( 2+datacenters, db.minMachinesRequired() ), extraDB ? 6 : 10 );
+	processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
+	coordinators = BUGGIFY ? g_random->randomInt(1, machine_count+1) : std::min( machine_count, db.maxMachineFailuresTolerated()*2 + 1 );
 }
 
 std::string SimulationConfig::toString() {
-  std::stringstream config;
-  config << "new";
-#define COPY_INT(x) do { ASSERT(x != NOT_SPECIFIED); config << " " #x ":=" << x; } while(0)
-#define COPY_STR(x) do { ASSERT(x != nullptr); config << " " << x; } while(0)
+	std::stringstream config;
+	std::map<std::string, std::string>&& dbconfig = db.toMap();
+	config << "new";
 
-  if (config_name != nullptr) {
-    COPY_STR(config_name);
-  } else {
-    COPY_INT(log_replicas);
-    COPY_INT(log_anti_quorum);
-    COPY_INT(storage_replicas);
-    COPY_INT(storage_quorum);
-    COPY_INT(replica_datacenters);
-    COPY_INT(min_replica_datacenters);
-  }
+	if (dbconfig["redundancy_mode"] != "custom") {
+		config << " " << dbconfig["redundancy_mode"];
+	} else {
+		config << " " << "log_replicas:=" << db.tLogReplicationFactor;
+		config << " " << "log_anti_quorum:=" << db.tLogWriteAntiQuorum;
+		config << " " << "storage_replicas:=" << db.storageTeamSize;
+		config << " " << "storage_quorum:=" << db.durableStorageQuorum;
+	}
 
-  COPY_INT(logs);
-  COPY_INT(proxies);
-  COPY_INT(resolvers);
+	config << " logs=" << db.getDesiredLogs();
+	config << " proxies=" << db.getDesiredProxies();
+	config << " resolvers=" << db.getDesiredResolvers();
 
-  COPY_STR(storage_engine);
-#undef COPY_INT
-#undef COPY_STR
-  return config.str();
+	config << " " << dbconfig["storage_engine"];
+	return config.str();
 }
 
 void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseFolder,
@@ -816,34 +776,28 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 							Standalone<StringRef> *pStartingConfiguration, int extraDB)
 {
 	// SOMEDAY: this does not test multi-interface configurations
-  SimulationConfig simconfig(extraDB);
+	SimulationConfig simconfig(extraDB);
 	std::string startingConfigString = simconfig.toString();
-	std::map<std::string,std::string> startingConfigMap;
-	ASSERT( buildConfiguration( startingConfigString, startingConfigMap ) == ConfigurationResult::SUCCESS );
 
-	DatabaseConfiguration startingConfig;
-	for(auto kv : startingConfigMap) startingConfig.set( kv.first, kv.second );
-	g_simulator.storagePolicy = startingConfig.storagePolicy;
-	g_simulator.tLogPolicy = startingConfig.tLogPolicy;
-	g_simulator.tLogWriteAntiQuorum = startingConfig.tLogWriteAntiQuorum;
+	g_simulator.storagePolicy = simconfig.db.storagePolicy;
+	g_simulator.tLogPolicy = simconfig.db.tLogPolicy;
+	g_simulator.tLogWriteAntiQuorum = simconfig.db.tLogWriteAntiQuorum;
 	ASSERT(g_simulator.storagePolicy);
 	ASSERT(g_simulator.tLogPolicy);
 	TraceEvent("simulatorConfig").detail("tLogPolicy", g_simulator.tLogPolicy->info()).detail("storagePolicy", g_simulator.storagePolicy->info()).detail("tLogWriteAntiQuorum", g_simulator.tLogWriteAntiQuorum).detail("ConfigString", startingConfigString);
 
-  int dataCenters = simconfig.datacenters;
-	int machineCount = simconfig.machine_count;
+	const int dataCenters = simconfig.datacenters;
+	const int machineCount = simconfig.machine_count;
+	const int coordinatorCount = simconfig.coordinators;
+	const int processesPerMachine = simconfig.processes_per_machine;
 
 	// half the time, when we have more than 4 machines that are not the first in their dataCenter, assign classes
 	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
-	int processesPerMachine = simconfig.processes_per_machine;
 
 	// Use SSL half the time
 	bool sslEnabled = g_random->random01() < 0.05;
 	TEST( sslEnabled ); // SSL enabled
 	TEST( !sslEnabled ); // SSL disabled
-
-	// Pick coordination processes.
-	int coordinatorCount = simconfig.coordinators;
 
 	vector<NetworkAddress> coordinatorAddresses;
 	for( int dc = 0; dc < dataCenters; dc++ ) {
@@ -927,12 +881,12 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	}
 
 	g_simulator.desiredCoordinators = coordinatorCount;
-	g_simulator.killableMachines = startingConfig.maxMachineFailuresTolerated();
+	g_simulator.killableMachines = simconfig.db.maxMachineFailuresTolerated();
 	g_simulator.neededDatacenters = 1;
 	g_simulator.killableDatacenters = 0;
 	g_simulator.physicalDatacenters = dataCenters;
 	g_simulator.maxCoordinatorsInDatacenter = ((coordinatorCount-1)/dataCenters) + 1;
-	g_simulator.machinesNeededForProgress = startingConfig.minMachinesRequired() + nonVersatileMachines;
+	g_simulator.machinesNeededForProgress = simconfig.db.minMachinesRequired() + nonVersatileMachines;
 	g_simulator.processesPerMachine = processesPerMachine;
 
 	TraceEvent("SetupSimulatorSettings")
