@@ -126,6 +126,7 @@ struct SimpleFixedSizeMapRef {
 class VersionedBTree : public IVersionedStore {
 public:
 	enum EPageFlags { IS_LEAF = 1};
+	static Key endKey;
 
 	typedef SimpleFixedSizeMapRef FixedSizeMap;
 
@@ -470,7 +471,7 @@ private:
 
 
 	// Returns list of (version, list of (lower_bound, list of children) )
-	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, MutationBufferT::const_iterator iMutationMap, MutationBufferT::const_iterator iMutationMapEnd) {
+	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, Key upperBoundKey, MutationBufferT::const_iterator iMutationMap, MutationBufferT::const_iterator iMutationMapEnd) {
 		state std::string printPrefix = format("commit subtree(lowerboundkey %s, page %u) ", lowerBoundKey.toString().c_str(), root);
 		debug_printf("%s\n", printPrefix.c_str());
 
@@ -496,10 +497,22 @@ private:
 
 			// There will be multiple loops advancing iExisting, existing will track its current value
 			KeyVersionValue existing;
+			KeyVersionValue lastExisting;
 			if(iExisting != iExistingEnd)
 				existing = KeyVersionValue::unpack(*iExisting);
 			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
 			Version minVersion = std::numeric_limits<Version>::max();
+
+			// First read and output any existing values that are less than or equal to the first mutation key
+			while(iExisting != iExistingEnd && existing.key <= mutationRangeStart) {
+				merged.push_back(existing.pack());
+				debug_printf("Added existing pre range %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+				++iExisting;
+				if(iExisting != iExistingEnd) {
+					lastExisting = existing;
+					existing = KeyVersionValue::unpack(*iExisting);
+				}
+			}
 
 			while(iMutationMap != iMutationMapEnd) {
 				printf("mutationRangeStart %s\n", printable(mutationRangeStart).c_str());
@@ -508,23 +521,11 @@ private:
 
 				// The end of the mutation range is the next key in the mutation map
 				++iMutationMap;
-				Key mutationRangeEnd = (iMutationMap == iMutationMapEnd) ? Key(LiteralStringRef("\xff\xff\xff\xff")) : iMutationMap->first;
+				Key mutationRangeEnd = (iMutationMap == iMutationMapEnd) ? endKey : iMutationMap->first;
 				printf("mutationRangeEnd %s\n", printable(mutationRangeEnd).c_str());
 
 				// Tracks whether there was a clearRange covering mutationRange to mutationEnd (or beyond) in the mutation set
 				Version rangeClearedVersion = invalidVersion;
-				KeyVersionValue lastExisting;
-
-				// First read and output any existing values that are less than or equal to mutationRangeStart
-				while(iExisting != iExistingEnd && existing.key <= mutationRangeStart) {
-					merged.push_back(existing.pack());
-					debug_printf("Added existing pre range %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
-					++iExisting;
-					if(iExisting != iExistingEnd) {
-						lastExisting = existing;
-						existing = KeyVersionValue::unpack(*iExisting);
-					}
-				}
 
 				// Now insert the mutations which affect the individual key of mutationRangeStart
 				bool firstMutation = true;
@@ -588,9 +589,12 @@ private:
 						}
 					}
 					else if(rangeClearedVersion != invalidVersion) {
-						// If there are no more existing keys but the range was cleared then add a clear of the last key
-						merged.push_back(KeyVersionValue(lastExisting.key, rangeClearedVersion).pack());
-						debug_printf("Added clear of last existing %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+						// If there are no more existing keys but the range was cleared then we might have to add a clear of the last key
+						// but only if the key encoded in upperBoundKey is not the same, which case the clear belongs in that page.
+						if(existing.key != KeyVersionValue::unpack(KeyValueRef(upperBoundKey, StringRef())).key) {
+							merged.push_back(KeyVersionValue(existing.key, rangeClearedVersion).pack());
+							debug_printf("Added clear of last existing %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+						}
 					}
 				}
 
@@ -643,12 +647,22 @@ private:
 			auto childMutBegin = iMutationMap;
 
 			for(int i=0; i<map.entries.size(); i++) {
-				auto childMutEnd = iMutationMapEnd;
+				MutationBufferT::const_iterator childMutEnd;
+				Key upperBoundKey;
 				if (i+1 != map.entries.size()) {
-					childMutEnd = self->m_buffer.lower_bound( KeyVersionValue::unpack(KeyValueRef(map.entries[i+1].key, ValueRef())).key );
+					upperBoundKey = map.entries[i+1].key;
+					childMutEnd = self->m_buffer.lower_bound( KeyVersionValue::unpack(KeyValueRef(upperBoundKey, ValueRef())).key );
+				}
+				else {
+					upperBoundKey = endKey;
+					childMutEnd = iMutationMapEnd;
 				}
 
-				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].value.begin(), map.entries[i].key, childMutBegin, childMutEnd));
+				// The next child page might have existing kv pairs that are covered by the previous mutation range
+				if(childMutBegin != iMutationMap)
+					--childMutBegin;
+
+				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].value.begin(), map.entries[i].key, upperBoundKey, childMutBegin, childMutEnd));
 				childMutBegin = childMutEnd;
 			}
 
@@ -793,7 +807,7 @@ private:
 		}
 		debug_printf("-------------------------------------\n");
 
-		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, StringRef(), self->m_buffer.begin(), self->m_buffer.end()));
+		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, StringRef(), endKey, self->m_buffer.begin(), self->m_buffer.end()));
 
 		self->m_pager->setLatestVersion(self->m_writeVersion);
 		Void _ = wait(self->m_pager->commit());
@@ -902,6 +916,8 @@ private:
 		}
 	};
 };
+
+Key VersionedBTree::endKey = Key(LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"));
 
 KeyValue randomKV(int keySize = 10, int valueSize = 5) {
 	int kLen = g_random->randomInt(1, keySize);
