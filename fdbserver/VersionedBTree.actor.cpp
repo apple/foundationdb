@@ -31,16 +31,14 @@
 #include <vector>
 #include "fdbclient/CommitTransaction.h"
 
-#define INTERNAL_PAGES_HAVE_TUPLES 1
-
 #ifdef REDWOOD_DEBUG
-  #define debug_printf printf
+  #define debug_printf(args...) fprintf(stdout, args)
 #else
   #define debug_printf(...)
 #endif
 
 struct SimpleFixedSizeMapRef {
-	typedef std::vector<std::pair<std::string, std::string>> KVPairsT;
+	typedef std::vector<KeyValue> KVPairsT;
 
 	SimpleFixedSizeMapRef() : flags(0) {}
 
@@ -56,7 +54,7 @@ struct SimpleFixedSizeMapRef {
 	int findLastLessOrEqual(StringRef key) {
 		return std::upper_bound(entries.begin(), entries.end(),
 								key,
-								[](StringRef const& a, KVPairsT::value_type const& b) { return a<b.first; })
+								[](StringRef const& a, KVPairsT::value_type const& b) { return a < b.key; })
 					- entries.begin() - 1;
 	}
 
@@ -87,7 +85,7 @@ struct SimpleFixedSizeMapRef {
 
 		for(auto const &kv : kvPairs) {
 			// If page would overflow, output it and start new one
-			if(bw.getLength() + 8 + kv.first.size() + kv.second.size() > pageSize) {
+			if(bw.getLength() + 8 + kv.key.size() + kv.value.size() > pageSize) {
 				// Page so far can't be empty, this means a single kv pair is too big for a page.
 				ASSERT(bw.getLength() != sizeof(newFlags));
 				memcpy(page->mutate(), bw.getData(), bw.getLength());
@@ -145,9 +143,15 @@ public:
 	// A write shall not become durable until the following call to commit() begins, and shall be durable once the following call to commit() returns
 	virtual void set(KeyValueRef keyValue) {
 		ASSERT(m_writeVersion != invalidVersion);
-		m_buffer[keyValue.key][m_writeVersion] = ValueMutation(keyValue.value);
+
+		applyMutation(new Mutation(m_writeVersion, keyValue.key, keyValue.value, MutationRef::SetValue));
 	}
-	virtual void clear(KeyRangeRef range) NOT_IMPLEMENTED
+	virtual void clear(KeyRangeRef range) {
+		ASSERT(m_writeVersion != invalidVersion);
+
+		applyMutation(new Mutation(m_writeVersion, range.begin, range.end, MutationRef::ClearRange));
+	}
+
 	virtual void mutate(int op, StringRef param1, StringRef param2) NOT_IMPLEMENTED
 
 	// Versions [begin, end) no longer readable
@@ -182,7 +186,10 @@ public:
 
 	Future<Void> init() { return init(this); }
 
-	virtual ~VersionedBTree() {}
+	virtual ~VersionedBTree() {
+		for(Mutation *m : m_mutations)
+			delete m;
+	}
 
 	// readAtVersion() may only be called on a version which has previously been passed to setWriteVersion() and never previously passed
 	//   to forgetVersion.  The returned results when violating this precondition are unspecified; the store is not required to be able to detect violations.
@@ -217,32 +224,182 @@ private:
 
 	LogicalPageID m_root;
 
-	typedef std::pair<std::string, LogicalPageID> KeyPagePairT;
+	typedef std::pair<Key, LogicalPageID> KeyPagePairT;
 	typedef std::pair<Version, std::vector<KeyPagePairT>> VersionedKeyToPageSetT;
 	typedef std::vector<VersionedKeyToPageSetT> VersionedChildrenT;
 
-	/* Represents 3 types of mutations to a value.
-	 *   - Clear to a range end
-	 *   - Set to a value
-	 *   - Atomic Op with a value (not yet used)
-	 */
-	struct ValueMutation {
-		ValueMutation(Optional<Value> value = Optional<Value>(), MutationRef::Type atomicOp = MutationRef::Type::NoOp) : value(value), atomicOp(atomicOp) {}
-		Optional<Value> value;
-		MutationRef::Type atomicOp;
+	struct Mutation {
+		Mutation(Version ver, Key key, Value valueOrEnd, MutationRef::Type op) : version(ver), key(key), valueOrEnd(valueOrEnd), op(op) {}
+		Version version;
+		Key key;
+		Value valueOrEnd;
+		MutationRef::Type op;
 
-		bool isClear() const { return !value.present(); }
-		bool isAtomicOp() const { return atomicOp != MutationRef::Type::NoOp; }
-		bool isSet() const { return value.present() && !isAtomicOp(); }
-		bool isFinal() const { return isClear() || isSet(); }
+		inline bool isClear() const { return op == MutationRef::ClearRange; }
+		inline bool isSet() const { return op == MutationRef::SetValue; }
+		inline bool isAtomicOp() const { return !isClear() && !isSet(); }
+
+		struct byVersion { bool operator() (const Mutation *a, const Mutation *b) { return a->version < b->version; } };
+		struct byKey { bool operator() (const Mutation *a, const Mutation *b) { return a->key < b->key; } };
+
+		std::string toString() {
+			return format("@%lld op=%d key=%s value_or_end=%s", version, op, printable(key).c_str(), printable(valueOrEnd).c_str());
+		}
 	};
 
-	typedef std::map<Version, ValueMutation> VersionedMutationsT;
-	// buffer[key] = { version => mutation) }
-	typedef std::map<Key, VersionedMutationsT> MutationBufferT;
+	typedef std::set<Mutation *, Mutation::byVersion> MutationsByVersionT;
+	typedef std::set<Mutation *, Mutation::byKey> MutationsByKeyT;
+
+	typedef std::map<Key, MutationsByVersionT> MutationBufferT;
+	typedef std::map<Version, MutationsByKeyT> MutationBufferPerVersionT;
+
+	/* MutationBufferT should be simplified to the following.  It is more efficient to mutate,
+	 * has a smaller memory footprint, and may even be easier to use during commit.  It does
+	 * not require sets to be modeled as a mutation of a range from key to keyAfter(key).  It
+	 * loses the ability to model "range sets" of unspecified existing keys, but that doesn't
+	 * seem very useful anyway.  This model also no longer uses the Mutation structure,
+	 * which could possibly be removed entirely unless there is some benefit to having it.
+	 *
+	 * typedef std::map<Key, std::pair<Optional<Version>, std::map<Version, Optional<Value>>>> MutationBufferT;
+	 *
+	 * The pair stored for a key in the buffer map represents
+	 *   rangeClearVersion: the version at which a range starting with this key was cleared
+	 *   individualOps: the individual ops (sets/clear/atomic) done on this key
+	 *
+	 * - Keys are inserted into the buffer map for every individual operation (set/clear/atomic)
+	 *   key and for both the start and end of a range clear.
+	 * - When a new key is inserted in the buffer map it should take on the immediately previous
+	 *   entry's range clear version.
+	 * - To apply a single clear, add it to the individual ops only if the last entry is not also a clear.
+	 * - To apply a range clear, set any unset range clear values >= start and < end.
+	 *
+	 * Example:
+	 *
+	 * Version Op
+	 * 1 set b
+	 * 2 set b
+	 * 3 clear bb c
+	 * 3 clear b
+	 * 4 clear a d
+	 * 4 set cc
+	 * 5 clear cc g
+	 *
+	 * Buffer state after these operations:
+	 * Key  RangeClearVersion   IndividualOps
+	 * a    4
+	 * b    4                   1,set  2,set  3,clear
+	 * bb   3
+	 * c    4
+	 * cc   4                   4,set  5,clear
+	 * d    5
+	 * gg
+	*/
+
+	// Find or create a mutation buffer boundary for bound and return an iterator to it
+	MutationBufferT::iterator insertMutationBoundary(Key bound) {
+		// Find the first split point in buffer that is >= key
+		MutationBufferT::iterator start = m_buffer.lower_bound(bound);
+
+		// If an exact match was found then we're done
+		if(start != m_buffer.end() && start->first == bound)
+			return start;
+
+		// If begin was found then bound will be the first lexically ordered boundary so we can just insert it.
+		if(start == m_buffer.begin())
+			return m_buffer.insert(start, {bound, {}});
+
+		// At this point, we know that
+		//  - buffer is not empty
+		//  - bound does not exist in buffer
+		//  - start points to the first thing passed bound (which could even be end())
+		// Previous will refer to the start of the range we are splitting
+		MutationBufferT::iterator previous = start;
+		--previous;
+
+		// Insert the new boundary
+		start = m_buffer.insert(start, {bound, {}});
+
+		// Copy any range mutations from previous boundary to the new one
+		for(Mutation *m : previous->second)
+			if(m->isClear())
+				start->second.insert(m);
+
+		return start;
+	}
+
+	void applyMutation(Mutation *m) {
+		// Mutation pointers can exist in many places in m_buffer so rather than reference count them
+		// since they will all be deleted together we'll just stash them here.
+		m_mutations.push_back(m);
+
+		// TODO:  Update mapForVersion if we're going to use it in commitSubtree, or remove it
+		//auto &mapForVersion = m_buffer_byVersion[m_writeVersion];
+
+		// TODO:  Combine both cases of these if's as they are now nearly identical except for mutation repeat check and boundary selection
+		if(m->isClear()) {
+			auto start = insertMutationBoundary(m->key);
+			auto end = insertMutationBoundary(m->valueOrEnd);
+			while(start != end) {
+				auto &mutationSet = start->second;
+				auto im = mutationSet.end();
+				bool skip = false;
+				// If mutationSet has stuff in it, see if the new mutation replaces or
+				// combines with the last entry in mutationSet.
+				if(im != mutationSet.begin()) {
+					--im;
+					// If the previous last mutation is a clear, then the new clear does nothing so we can skip it.
+					if((*im)->isClear()) {
+						skip = true;
+					}
+					else {
+						// If the version is the same, erase it so we can replace it with the new mutation
+						if((*im)->version == m->version)
+							mutationSet.erase(im);
+					}
+				}
+				if(!skip)
+					mutationSet.insert(mutationSet.end(), m);
+				++start;
+			}
+		}
+		else {
+			insertMutationBoundary(keyAfter(m->key));
+			auto &mutationSet = insertMutationBoundary(m->key)->second;
+			auto im = mutationSet.end();
+			bool skip = false;
+			if(im != mutationSet.begin()) {
+				--im;
+				// If the previous last mutation is a set to the same value as the new one then we can skip the new mutation as it does nothing
+				if((*im)->isSet() && m->isSet() && (*im)->valueOrEnd == m->valueOrEnd) {
+					skip = true;
+				}
+				else {
+					// If the version is the same, erase it so we can replace it with the new mutation
+					if((*im)->version == m->version)
+						mutationSet.erase(im);
+				}
+			}
+			if(!skip)
+				mutationSet.insert(mutationSet.end(), m);
+		}
+
+		/*
+		debug_printf("-------------------------------------\n");
+		debug_printf("BUFFER\n");
+		for(auto &i : m_buffer) {
+			debug_printf("'%s'\n", printable(i.first).c_str());
+			for(auto j : i.second) {
+				debug_printf("\t%s\n", j->toString().c_str());
+			}
+		}
+		debug_printf("-------------------------------------\n");
+		*/
+
+	}
 
 	struct KeyVersionValue {
-		KeyVersionValue(Key k, Version ver, Value val) : key(k), version(ver), value(val) {}
+		KeyVersionValue() : version(invalidVersion) {}
+		KeyVersionValue(Key k, Version ver, Optional<Value> val = Optional<Value>()) : key(k), version(ver), value(val) {}
 		bool operator< (KeyVersionValue const &rhs) const {
 			int64_t cmp = key.compare(rhs.key);
 			if(cmp == 0) {
@@ -254,7 +411,30 @@ private:
 		}
 		Key key;
 		Version version;
-		Value value;
+		Optional<Value> value;
+
+		inline KeyValue pack() const {
+			Tuple k;
+			k.append(key);
+			k.append(version);
+			Tuple v;
+			if(value.present())
+				v.append(value.get());
+			else
+				v.appendNull();
+			return KeyValueRef(k.pack(), v.pack());
+		}
+		static inline KeyVersionValue unpack(KeyValueRef kv) {
+			Tuple k = Tuple::unpack(kv.key);
+			if(kv.value.size() == 0)
+				return KeyVersionValue(k.getString(0), k.getInt(1));
+			Tuple v = Tuple::unpack(kv.value);
+			return KeyVersionValue(k.getString(0), k.getInt(1), v.getType(0) == Tuple::NULL_TYPE ? Optional<Value>() : v.getString(0));
+		}
+
+		std::string toString() const {
+			return format("'%s' -> '%s' @%lld", key.toString().c_str(), value.present() ? value.get().toString().c_str() : "<cleared>", version);
+		}
 	};
 
 	void buildNewRoot(Version version, vector<std::pair<int, Reference<IPage>>> &pages, std::vector<LogicalPageID> &logicalPageIDs, FixedSizeMap::KVPairsT &childEntries) {
@@ -262,7 +442,7 @@ private:
 		while(pages.size() > 1) {
 			FixedSizeMap::KVPairsT newChildEntries;
 			for(int i=0; i<pages.size(); i++)
-				newChildEntries.push_back( {childEntries[pages[i].first].first, std::string((char *)&logicalPageIDs[i], sizeof(uint32_t))});
+				newChildEntries.push_back(KeyValueRef(childEntries[pages[i].first].key, StringRef((unsigned char *)&logicalPageIDs[i], sizeof(uint32_t))));
 			childEntries = std::move(newChildEntries);
 
 			int oldPages = pages.size();
@@ -290,11 +470,11 @@ private:
 
 
 	// Returns list of (version, list of (lower_bound, list of children) )
-	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, Reference<IPagerSnapshot> snapshot, LogicalPageID root, std::string lowerBoundKey, MutationBufferT::const_iterator bufBegin, MutationBufferT::const_iterator bufEnd) {
-		state std::string printPrefix = format("commit subtree(lowerboundkey %s, page %u) ", lowerBoundKey.c_str(), root);
+	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, MutationBufferT::const_iterator iMutationMap, MutationBufferT::const_iterator iMutationMapEnd) {
+		state std::string printPrefix = format("commit subtree(lowerboundkey %s, page %u) ", lowerBoundKey.toString().c_str(), root);
 		debug_printf("%s\n", printPrefix.c_str());
 
-		if(bufBegin == bufEnd) {
+		if(iMutationMap == iMutationMapEnd) {
 			debug_printf("%s no changes\n", printPrefix.c_str());
 			return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 		}
@@ -306,45 +486,122 @@ private:
 
 		if(map.flags & EPageFlags::IS_LEAF) {
 			VersionedChildrenT results;
-			FixedSizeMap::KVPairsT kvpairs;
+			FixedSizeMap::KVPairsT merged;
 
-			// Fill existing with records from the roof page (which is a leaf)
-			std::vector<KeyVersionValue> existing;
-			for(auto const &kv : map.entries) {
-				Tuple t = Tuple::unpack(kv.first);
-				existing.push_back(KeyVersionValue(t.getString(0), t.getInt(1), StringRef(kv.second)));
-			}
+			SimpleFixedSizeMapRef::KVPairsT::const_iterator iExisting = map.entries.begin();
+			SimpleFixedSizeMapRef::KVPairsT::const_iterator iExistingEnd = map.entries.end();
 
-			// Fill mutations with changes begin committed
-			std::vector<KeyVersionValue> mutations;
+			// It's a given that the mutation map is not empty so it's safe to do this
+			Key mutationRangeStart = iMutationMap->first;
+
+			// There will be multiple loops advancing iExisting, existing will track its current value
+			KeyVersionValue existing;
+			if(iExisting != iExistingEnd)
+				existing = KeyVersionValue::unpack(*iExisting);
+			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
 			Version minVersion = std::numeric_limits<Version>::max();
-			MutationBufferT::const_iterator iBuf = bufBegin;
-			while(iBuf != bufEnd) {
-				Key k = StringRef(iBuf->first);
-				for(auto const &vv : iBuf->second) {
-					ASSERT(vv.second.value.present());
-					debug_printf("Inserting %s %s @%lld\n", k.toString().c_str(), vv.second.toString().c_str(), vv.first);
-					mutations.push_back(KeyVersionValue(k, vv.first, vv.second.value.get()));
-					minVersion = std::min(minVersion, vv.first);
-				}
-				++iBuf;
-			}
 
-			std::vector<KeyVersionValue> merged;
-			std::merge(existing.cbegin(), existing.cend(), mutations.cbegin(), mutations.cend(), std::back_inserter(merged));
+			while(iMutationMap != iMutationMapEnd) {
+				printf("mutationRangeStart %s\n", printable(mutationRangeStart).c_str());
+				MutationsByVersionT::const_iterator iMutations = iMutationMap->second.begin();
+				MutationsByVersionT::const_iterator iMutationsEnd = iMutationMap->second.end();
+
+				// The end of the mutation range is the next key in the mutation map
+				++iMutationMap;
+				Key mutationRangeEnd = (iMutationMap == iMutationMapEnd) ? Key(LiteralStringRef("\xff\xff\xff\xff")) : iMutationMap->first;
+				printf("mutationRangeEnd %s\n", printable(mutationRangeEnd).c_str());
+
+				// Tracks whether there was a clearRange covering mutationRange to mutationEnd (or beyond) in the mutation set
+				Version rangeClearedVersion = invalidVersion;
+				KeyVersionValue lastExisting;
+
+				// First read and output any existing values that are less than or equal to mutationRangeStart
+				while(iExisting != iExistingEnd && existing.key <= mutationRangeStart) {
+					merged.push_back(existing.pack());
+					debug_printf("Added existing pre range %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+					++iExisting;
+					if(iExisting != iExistingEnd) {
+						lastExisting = existing;
+						existing = KeyVersionValue::unpack(*iExisting);
+					}
+				}
+
+				// Now insert the mutations which affect the individual key of mutationRangeStart
+				bool firstMutation = true;
+				while(iMutations != iMutationsEnd) {
+					Mutation *m = *iMutations;
+					debug_printf("mutation: %s first: %d\n", m->toString().c_str(), firstMutation);
+					// Potentially update earliest version of mutations being applied.
+					if(m->version < minVersion)
+						minVersion = m->version;
+
+					if(m->isClear()) {
+						// Any clear range mutation applies at least from mutationRangeStart to mutationRangeEnd, by definition,
+						// because clears cause insertions of split points into the mutation buffer
+						if(rangeClearedVersion == invalidVersion)
+							rangeClearedVersion = m->version;
+
+						// Here we're only handling clears for the key mutationRangeStart, if the rest of the range
+						// is cleared it will be handled below
+						// Only write a clear if this is either not the first mutation OR
+						// lastExisting was a clear for the same key
+						if(!firstMutation || (lastExisting.value.present() && lastExisting.key == mutationRangeStart)) {
+							merged.push_back(KeyVersionValue(mutationRangeStart, m->version).pack());
+							debug_printf("Added clear of existing or from mutation buffer %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+						}
+					}
+					else if(m->isSet()) {
+						// Write the new value if this is not the first mutation or they is different from
+						// lastExisting or the lastExisting value was either empty or not the same as m.
+						if(    !firstMutation
+							|| lastExisting.key != m->key
+							|| !lastExisting.value.present()
+							|| lastExisting.value.get() != m->valueOrEnd
+						)
+							merged.push_back(KeyVersionValue(m->key, m->version, m->valueOrEnd).pack());
+							debug_printf("Added set mutation %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+					}
+					else { // isAtomicOp
+						ASSERT(m->isAtomicOp());
+						// TODO: apply atomic op to last existing, update lastExisting
+						ASSERT(false);
+					}
+					++iMutations;
+					if(firstMutation)
+						firstMutation = false;
+				}
+
+				// Next, while the existing key is in this mutation range output it and also emit
+				// a clear at each key if required.
+				while(iExisting != iExistingEnd && existing.key < mutationRangeEnd) {
+					merged.push_back(existing.pack());
+					debug_printf("Added existing in range %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+					++iExisting;
+					if(iExisting != iExistingEnd) {
+						lastExisting = existing;
+						existing = KeyVersionValue::unpack(*iExisting);
+						// If the next key is different than the last then add a clear of the last key
+						// at the range clear version if the range was cleared
+						if(existing.key != lastExisting.key && rangeClearedVersion != invalidVersion) {
+							merged.push_back(KeyVersionValue(lastExisting.key, rangeClearedVersion).pack());
+							debug_printf("Added clear of existing, next key different %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+						}
+					}
+					else if(rangeClearedVersion != invalidVersion) {
+						// If there are no more existing keys but the range was cleared then add a clear of the last key
+						merged.push_back(KeyVersionValue(lastExisting.key, rangeClearedVersion).pack());
+						debug_printf("Added clear of last existing %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+					}
+				}
+
+				mutationRangeStart = mutationRangeEnd;
+			}
+			debug_printf("DONE MERGING MUTATIONS WITH EXISTING LEAF CONTENTS\n");
 
 			// TODO: Make version and key splits based on contents of merged list
 
-			FixedSizeMap::KVPairsT leafEntries;
-			for(auto const &kvv : merged) {
-				Tuple t;
-				t.append(kvv.key);
-				t.append(kvv.version);
-				leafEntries.push_back({t.pack().toString(), kvv.value.toString()});
-			}
-
 			IPager *pager = self->m_pager;
-			vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( leafEntries, EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
+			vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( merged, EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
 
 			// If there isn't still just a single page of data then return the previous lower bound and page ID that lead to this page to be used for version 0
 			if(pages.size() != 1) {
@@ -369,18 +626,12 @@ private:
 
 			// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
 			if(root == self->m_root)
-				self->buildNewRoot(minVersion, pages, logicalPages, leafEntries);
+				self->buildNewRoot(minVersion, pages, logicalPages, merged);
 
 			results.push_back({minVersion, {}});
 
 			for(int i=0; i<pages.size(); i++) {
-				// Actorcompiler doesn't like using #if here since there are no lines of code after this loop
-				if(INTERNAL_PAGES_HAVE_TUPLES)
-					results.back().second.push_back( {leafEntries[pages[i].first].first, logicalPages[i]} );
-				else {
-					Tuple t = Tuple::unpack(leafEntries[pages[i].first].first);
-					results.back().second.push_back( {t.getString(0).toString(), logicalPages[i]} );
-				}
+				results.back().second.push_back( {merged[pages[i].first].key, logicalPages[i]} );
 			}
 
 			debug_printf("%s DONE.\n", printPrefix.c_str());
@@ -389,20 +640,15 @@ private:
 		else {
 			state std::vector<Future<VersionedChildrenT>> m_futureChildren;
 
-			auto childMutBegin = bufBegin;
+			auto childMutBegin = iMutationMap;
 
 			for(int i=0; i<map.entries.size(); i++) {
-				auto childMutEnd = bufEnd;
+				auto childMutEnd = iMutationMapEnd;
 				if (i+1 != map.entries.size()) {
-					if(INTERNAL_PAGES_HAVE_TUPLES) {
-						Tuple t = Tuple::unpack(map.entries[i+1].first);
-						childMutEnd = self->m_buffer.lower_bound( t.getString(0) );
-					}
-					else
-						childMutEnd = self->m_buffer.lower_bound( StringRef(map.entries[i+1].first) );
+					childMutEnd = self->m_buffer.lower_bound( KeyVersionValue::unpack(KeyValueRef(map.entries[i+1].key, ValueRef())).key );
 				}
 
-				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].second.data(), map.entries[i].first, childMutBegin, childMutEnd));
+				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].value.begin(), map.entries[i].key, childMutBegin, childMutEnd));
 				childMutBegin = childMutEnd;
 			}
 
@@ -437,13 +683,13 @@ private:
 
 				for(int i = 0; i < m_futureChildren.size(); ++i) {
 					const VersionedChildrenT &children = m_futureChildren[i].get();
-					LogicalPageID pageID = *(uint32_t*)map.entries[i].second.data();
+					LogicalPageID pageID = *(uint32_t*)map.entries[i].value.begin();
 
 					debug_printf("  Versioned page set that replaced page %d: %lu versions\n", pageID, children.size());
 					for(auto &versionedPageSet : children) {
 						debug_printf("    version: %lld\n", versionedPageSet.first);
 						for(auto &boundaryPage : versionedPageSet.second) {
-							debug_printf("      %s -> %u\n", boundaryPage.first.c_str(), boundaryPage.second);
+							debug_printf("      %s -> %u\n", boundaryPage.first.toString().c_str(), boundaryPage.second);
 						}
 					}
 
@@ -474,8 +720,8 @@ private:
 
 					// Add the children at this version to the child entries list for the current version being built.
 					for (auto &childPage : cv->second) {
-						debug_printf("  Adding child page '%s'\n", childPage.first.c_str());
-						childEntries.push_back( {childPage.first, std::string((char *)&childPage.second, sizeof(uint32_t))});
+						debug_printf("  Adding child page '%s'\n", childPage.first.toString().c_str());
+						childEntries.push_back( KeyValueRef(childPage.first, StringRef((unsigned char *)&childPage.second, sizeof(uint32_t))));
 					}
 				}
 
@@ -512,7 +758,7 @@ private:
 					result.back().first = version;
 
 					for(int i=0; i<pages.size(); i++)
-						result.back().second.push_back( {childEntries[pages[i].first].first, logicalPages[i]} );
+						result.back().second.push_back( {childEntries[pages[i].first].key, logicalPages[i]} );
 
 					if (result.size() > 1 && result.back().second == result.end()[-2].second) {
 						debug_printf("Output same as last version, popping it.\n");
@@ -537,18 +783,37 @@ private:
 	ACTOR static Future<Void> commit_impl(VersionedBTree *self) {
 		Version latestVersion = wait(self->m_pager->getLatestVersion());
 
-		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, std::string(), self->m_buffer.begin(), self->m_buffer.end()));
+		debug_printf("-------------------------------------\n");
+		debug_printf("BEGIN COMMIT.  MUTATION BUFFER:\n");
+		for(auto &i : self->m_buffer) {
+			debug_printf("'%s'\n", printable(i.first).c_str());
+			for(auto j : i.second) {
+				debug_printf("\t%s\n", j->toString().c_str());
+			}
+		}
+		debug_printf("-------------------------------------\n");
+
+		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, StringRef(), self->m_buffer.begin(), self->m_buffer.end()));
 
 		self->m_pager->setLatestVersion(self->m_writeVersion);
 		Void _ = wait(self->m_pager->commit());
 		self->m_lastCommittedVersion = self->m_writeVersion;
 
 		self->m_buffer.clear();
+		for(Mutation *m : self->m_mutations)
+			delete m;
+		self->m_mutations.clear();
+
 		return Void();
 	}
 
 	IPager *m_pager;
 	MutationBufferT m_buffer;
+
+	// TODO:  Use or lose this
+	MutationBufferPerVersionT m_buffer_byVersion;
+
+	std::vector<Mutation *> m_mutations;
 	Version m_writeVersion;
 	Version m_lastCommittedVersion;
 	int m_page_size_override;
@@ -613,18 +878,21 @@ private:
 
 				if(map.flags && EPageFlags::IS_LEAF) {
 					int i = map.findLastLessOrEqual(tupleKey);
-					if(i >= 0 && Tuple::unpack(map.entries[i].first).getString(0) == key) {
-						self->m_kv = KeyValueRef(StringRef(self->m_arena, key), StringRef(self->m_arena, map.entries[i].second));
+					if(i >= 0) {
+						KeyVersionValue kvv = KeyVersionValue::unpack(map.entries[i]);
+						if(key == kvv.key && kvv.value.present()) {
+							self->m_kv = KeyValueRef(StringRef(self->m_arena, key), StringRef(self->m_arena, kvv.value.get()));
+							return Void();
+						}
 					}
-					else {
-						self->m_kv = Optional<KeyValueRef>();
-					}
+
+					self->m_kv = Optional<KeyValueRef>();
 					return Void();
 				}
 				else {
-					int i = map.findLastLessOrEqual(INTERNAL_PAGES_HAVE_TUPLES ? tupleKey : key);
+					int i = map.findLastLessOrEqual(tupleKey);
 					i = std::max(i, 0);
-					pageNumber = *(uint32_t *)map.entries[i].second.data();
+					pageNumber = *(uint32_t *)map.entries[i].value.begin();
 				}
 			}
 		}
@@ -663,7 +931,8 @@ TEST_CASE("/redwood/correctness/memory/set") {
 
 	Void _ = wait(btree->init());
 
-	state std::map<std::pair<std::string, Version>, std::string> written;
+	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
+	state std::set<Key> keys;
 
 	Version lastVer = wait(btree->getLatestVersion());
 	printf("Starting from version: %lld\n", lastVer);
@@ -678,26 +947,45 @@ TEST_CASE("/redwood/correctness/memory/set") {
 	while(commits--) {
 		state double startTime = now();
 		int versions = g_random->randomInt(1, 20);
-		//printf("  Commit will have %d versions\n", versions);
+		debug_printf("  Commit will have %d versions\n", versions);
 		while(versions--) {
 			++version;
 			btree->setWriteVersion(version);
 			int changes = g_random->randomInt(0, 20);
-			//printf("    Version %lld will have %d changes\n", version, changes);
+			debug_printf("    Version %lld will have %d changes\n", version, changes);
 			while(changes--) {
-				KeyValue kv = randomKV();
-				keyBytesInserted += kv.key.size();
-				ValueBytesInserted += kv.value.size();
-				//printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
-				btree->set(kv);
-				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
+				if(g_random->random01() < .10) {
+					// Delete a random key
+					Key start = randomKV().key;
+					Key end = randomKV().key;
+					if(end <= start)
+						end = keyAfter(start);
+					KeyRangeRef range(start, end);
+					debug_printf("      Clear '%s' to '%s' @%lld\n", start.toString().c_str(), end.toString().c_str(), version);
+					auto w = keys.lower_bound(start);
+					auto wEnd = keys.lower_bound(end);
+					while(w != wEnd) {
+						written[std::make_pair(w->toString(), version)] = Optional<std::string>();
+						++w;
+					}
+					btree->clear(range);
+				}
+				else {
+					KeyValue kv = randomKV();
+					keyBytesInserted += kv.key.size();
+					ValueBytesInserted += kv.value.size();
+					debug_printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);
+					btree->set(kv);
+					written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
+					keys.insert(kv.key);
+				}
 			}
 		}
 		Void _ = wait(btree->commit());
 
 		// Check that all writes can be read at their written versions
-		state std::map<std::pair<std::string, Version>, std::string>::const_iterator i = written.cbegin();
-		state std::map<std::pair<std::string, Version>, std::string>::const_iterator iEnd = written.cend();
+		state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i = written.cbegin();
+		state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written.cend();
 		state int errors = 0;
 
 		insertTime += now() - startTime;
@@ -721,20 +1009,27 @@ TEST_CASE("/redwood/correctness/memory/set") {
 		while(i != iEnd) {
 			state std::string key = i->first.first;
 			state Version ver = i->first.second;
-			state std::string val = i->second;
+			state Optional<std::string> val = i->second;
 
 			state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
 
 			Void _ = wait(cur->findEqual(i->first.first));
 
-			if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val)) {
-				++errors;
-				if(!cur->isValid())
-					printf("Verify failed: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.c_str(), ver);
-				else if(cur->getKey() != key)
-					printf("Verify failed: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
-				else if(cur->getValue() != val)
-					printf("Verify failed: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.c_str(), ver);
+			if(val.present()) {
+				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
+					++errors;
+					if(!cur->isValid())
+						printf("Verify failed: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
+					else if(cur->getKey() != key)
+						printf("Verify failed: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
+					else if(cur->getValue() != val.get())
+						printf("Verify failed: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
+				}
+			} else {
+				if(cur->isValid() && cur->getKey() == key) {
+					++errors;
+					printf("Verify failed: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
+				}
 			}
 			++i;
 		}
@@ -804,25 +1099,21 @@ std::string SimpleFixedSizeMapRef::toString() {
 	result.append(format("flags=0x%x data: ", flags));
 	for(auto const &kv : entries) {
 		result.append(" ");
-		if(INTERNAL_PAGES_HAVE_TUPLES || flags && VersionedBTree::IS_LEAF) {
-			Tuple t = Tuple::unpack(kv.first);
-			result.append("[");
-			for(int i = 0; i < t.size(); ++i) {
-				if(i != 0)
-					result.append(",");
-				if(t.getType(i) == Tuple::ElementType::BYTES)
-					result.append(format("%s", t.getString(i).toString().c_str()));
-				if(t.getType(i) == Tuple::ElementType::INT)
-					result.append(format("%lld", t.getInt(i)));
-			}
+		Tuple t = Tuple::unpack(kv.key);
+		result.append("[");
+		for(int i = 0; i < t.size(); ++i) {
+			if(i != 0)
+				result.append(",");
+			if(t.getType(i) == Tuple::ElementType::BYTES)
+				result.append(format("%s", t.getString(i).toString().c_str()));
+			if(t.getType(i) == Tuple::ElementType::INT)
+				result.append(format("%lld", t.getInt(i)));
 		}
-		else
-			result.append(format("'%s'", printable(StringRef(kv.first)).c_str()));
 		result.append("->");
 		if(flags && VersionedBTree::IS_LEAF)
-			result.append(format("'%s'", printable(StringRef(kv.second)).c_str()));
+			result.append(format("'%s'", printable(StringRef(kv.value)).c_str()));
 		else
-			result.append(format("%u", *(const uint32_t *)kv.second.data()));
+			result.append(format("%u", *(const uint32_t *)kv.value.begin()));
 		result.append("]");
 	}
 
