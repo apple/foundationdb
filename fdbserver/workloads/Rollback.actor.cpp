@@ -58,29 +58,32 @@ struct RollbackWorkload : TestWorkload {
 	ACTOR Future<Void> simulateFailure( Database cx, RollbackWorkload* self ) {
 		auto system = self->dbInfo->get();
 		auto tlogs = system.logSystemConfig.allPresentLogs();
-
-		if( tlogs.empty() ) {
+		
+		if( tlogs.empty() || system.client.proxies.empty() ) {
 			TraceEvent(SevInfo, "UnableToTriggerRollback").detail("Reason", "No tlogs in System Map");
 			return Void();
 		}
+
+		state MasterProxyInterface proxy = g_random->randomChoice( system.client.proxies );
+
 		int utIndex = g_random->randomInt(0, tlogs.size());
 		state NetworkAddress uncloggedTLog = tlogs[utIndex].address();
 
 		for(int t=0; t<tlogs.size(); t++)
 			if (t != utIndex)
-				if( tlogs[ t ].address().ip == system.master.address().ip ) {
-					TraceEvent(SevInfo, "UnableToTriggerRollback").detail("Reason", "master-clogged tLog shared IPs");
+				if( tlogs[ t ].address().ip == proxy.address().ip ) {
+					TraceEvent(SevInfo, "UnableToTriggerRollback").detail("Reason", "proxy-clogged tLog shared IPs");
 					return Void();
 				}
 
 		TraceEvent("AttemptingToTriggerRollback")
-			.detail("Master", system.master.address())
+			.detail("Proxy", proxy.address())
 			.detail("UncloggedTLog", uncloggedTLog);
 
 		for(int t=0; t<tlogs.size(); t++)
 			if (t != utIndex)
 				g_simulator.clogPair( 
-					system.master.address().ip,
+					proxy.address().ip,
 					tlogs[t].address().ip,
 					self->clogDuration );
 				//g_simulator.clogInterface( g_simulator.getProcess( system.tlogs[t].commit.getEndpoint() ), self->clogDuration, ClogAll );
@@ -89,12 +92,12 @@ struct RollbackWorkload : TestWorkload {
 		Void _ = wait( delay( self->clogDuration/3 ) );
 		auto system = self->dbInfo->get();
 
-		// Kill the master and the unclogged tlog
+		// Kill the proxy and the unclogged tlog
 		if (self->enableFailures) {
-			g_simulator.killProcess( g_simulator.getProcessByAddress( system.master.address() ), ISimulator::KillInstantly );
+			g_simulator.killProcess( g_simulator.getProcessByAddress( proxy.address() ), ISimulator::KillInstantly );
 			g_simulator.clogInterface( uncloggedTLog.ip, self->clogDuration, ClogAll );
 		} else {
-			g_simulator.clogInterface( system.master.address().ip, self->clogDuration, ClogAll );
+			g_simulator.clogInterface( proxy.address().ip, self->clogDuration, ClogAll );
 			g_simulator.clogInterface( uncloggedTLog.ip, self->clogDuration, ClogAll );
 		}
 		return Void();
