@@ -65,6 +65,29 @@ bool simulator_should_inject_fault( const char* context, const char* file, int l
 	return false;
 }
 
+void ISimulator::displayWorkers() const
+{
+	std::map<std::string, std::vector<ISimulator::ProcessInfo*>>	zoneMap;
+
+	// Create a map of zone Id
+	for (auto processInfo : getAllProcesses()) {
+		std::string dataHall = processInfo->locality.dataHallId().present() ? processInfo->locality.dataHallId().get().printable() : "[unset]";
+		std::string zoneId = processInfo->locality.zoneId().present() ? processInfo->locality.zoneId().get().printable() : "[unset]";
+		zoneMap[format("%-8s  %s", dataHall.c_str(), zoneId.c_str())].push_back(processInfo);
+	}
+
+	printf("DataHall  ZoneId\n");
+	printf("                  Address   Name       Class   Excluded   Failed   Rebooting DataFolder\n");
+	for (auto& zoneRecord : zoneMap) {
+		printf("\n%s\n", zoneRecord.first.c_str());
+		for (auto& processInfo : zoneRecord.second) {
+			printf("                  %9s %-10s %-7s %-8s   %-6s   %-9s %-40s\n",
+			processInfo->address.toString().c_str(), processInfo->name, processInfo->startingClass.toString().c_str(), (processInfo->excluded ? "True" : "False"), (processInfo->failed ? "True" : "False"), (processInfo->rebooting ? "True" : "False"), processInfo->dataFolder);
+		}
+	}
+
+	return;
+}
 
 namespace std {
 template<>
