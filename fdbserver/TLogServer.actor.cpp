@@ -1746,10 +1746,8 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		}
 	} catch (Error& e) {
 		TraceEvent("TLogError", tlogId).error(e);
-		if(e.code() != error_code_actor_cancelled) {
-			while(!tlogRequests.isEmpty()) {
-				tlogRequests.getFuture().pop().reply.sendError(e);
-			}
+		while(!tlogRequests.isEmpty()) {
+			tlogRequests.getFuture().pop().reply.sendError(recruitment_failed());
 		}
 
 		if (tlogTerminated( &self, persistentData, self.persistentQueue, e )) {
