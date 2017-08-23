@@ -1497,7 +1497,7 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 	state Version tagPopped = 0;
 	state Version lastVer = 0;
 
-	TraceEvent("LogRecoveringTagBegin", self->dbgid).detail("Tag", tag).detail("recoverAt", endVersion);
+	TraceEvent("LogRecoveringTagBegin", logData->logId).detail("Tag", tag).detail("recoverAt", endVersion);
 
 	while (tagAt <= endVersion) {
 		loop {
@@ -1523,11 +1523,11 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 		int writtenBytes = 0;
 		while (true) {
 			bool foundMessage = r->hasMessage();
-			//TraceEvent("LogRecoveringMsg").detail("Tag", tag).detail("foundMessage", foundMessage).detail("ver", r->version().toString());
+			//TraceEvent("LogRecoveringMsg", logData->logId).detail("Tag", tag).detail("foundMessage", foundMessage).detail("ver", r->version().toString());
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					//TraceEvent("LogRecoveringTagVersion", self->dbgid).detail("Tag", tag).detail("Ver", ver).detail("Bytes", wr.getLength());
+					//TraceEvent("LogRecoveringTagVersion", logData->logId).detail("Tag", tag).detail("Ver", ver).detail("Bytes", wr.getLength());
 					writtenBytes += 100 + wr.getLength();
 					self->persistentData->set( KeyValueRef( persistTagMessagesKey( logData->logId, tag, ver ), wr.toStringRef() ) );
 				}
@@ -1564,6 +1564,8 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 	Void _ = wait(tLogPop( self, TLogPopRequest(tagPopped, tag), logData ));
 
 	updatePersistentPopped( self, logData, tag, logData->tag_data.find(tag)->value );
+
+	TraceEvent("LogRecoveringTagComplete", logData->logId).detail("Tag", tag).detail("recoverAt", endVersion);
 	return Void();
 }
 
@@ -1596,52 +1598,59 @@ ACTOR Future<Void> recoverFromLogSystem( TLogData* self, Reference<LogData> logD
 	state Future<Void> recoveryDone = Never();
 	state Future<Void> commitTimeout = delay(SERVER_KNOBS->LONG_TLOG_COMMIT_TIME);
 
-	loop {
-		choose {
-			when(Void _ = wait(copyDone)) {
-				recoverFutures.clear();
-				for(auto tag : recoverTags )
-					recoverFutures.push_back(recoverTagFromLogSystem(self, logData, 0, knownCommittedVersion, tag, uncommittedBytes, logSystem));
-				copyDone = Never();
-				recoveryDone =  waitForAll(recoverFutures);
+	try {
+		loop {
+			choose {
+				when(Void _ = wait(copyDone)) {
+					recoverFutures.clear();
+					for(auto tag : recoverTags )
+						recoverFutures.push_back(recoverTagFromLogSystem(self, logData, 0, knownCommittedVersion, tag, uncommittedBytes, logSystem));
+					copyDone = Never();
+					recoveryDone =  waitForAll(recoverFutures);
 
-				Void __ = wait( committing );
-				Void __ = wait( self->updatePersist );
-				committing = self->persistentData->commit();
-				commitTimeout = delay(SERVER_KNOBS->LONG_TLOG_COMMIT_TIME);
-				uncommittedBytes->set(0);
-				Void __ = wait( committing );
-				TraceEvent("TLogCommitCopyData", self->dbgid);
+					Void __ = wait( committing );
+					Void __ = wait( self->updatePersist );
+					committing = self->persistentData->commit();
+					commitTimeout = delay(SERVER_KNOBS->LONG_TLOG_COMMIT_TIME);
+					uncommittedBytes->set(0);
+					Void __ = wait( committing );
+					TraceEvent("TLogCommitCopyData", logData->logId);
 
-				if(!copyComplete.isSet())
-					copyComplete.send(Void());
-			}
-			when(Void _ = wait(recoveryDone)) { break; }
-			when(Void _ = wait(commitTimeout)) {
-				TEST(true); // We need to commit occasionally if this process is long to avoid running out of memory.
-				// We let one, but not more, commits pipeline with the network transfer
-				Void __ = wait( committing );
-				Void __ = wait( self->updatePersist );
-				committing = self->persistentData->commit();
-				commitTimeout = delay(SERVER_KNOBS->LONG_TLOG_COMMIT_TIME);
-				uncommittedBytes->set(0);
-				//TraceEvent("TLogCommitRecoveryData", self->dbgid).detail("MemoryUsage", DEBUG_DETERMINISM ? 0 : getMemoryUsage());
-			}
-			when(Void _ = wait(uncommittedBytes->onChange())) {
-				if(uncommittedBytes->get() >= SERVER_KNOBS->LARGE_TLOG_COMMIT_BYTES)
-					commitTimeout = Void();
+					if(!copyComplete.isSet())
+						copyComplete.send(Void());
+				}
+				when(Void _ = wait(recoveryDone)) { break; }
+				when(Void _ = wait(commitTimeout)) {
+					TEST(true); // We need to commit occasionally if this process is long to avoid running out of memory.
+					// We let one, but not more, commits pipeline with the network transfer
+					Void __ = wait( committing );
+					Void __ = wait( self->updatePersist );
+					committing = self->persistentData->commit();
+					commitTimeout = delay(SERVER_KNOBS->LONG_TLOG_COMMIT_TIME);
+					uncommittedBytes->set(0);
+					//TraceEvent("TLogCommitRecoveryData", self->dbgid).detail("MemoryUsage", DEBUG_DETERMINISM ? 0 : getMemoryUsage());
+				}
+				when(Void _ = wait(uncommittedBytes->onChange())) {
+					if(uncommittedBytes->get() >= SERVER_KNOBS->LARGE_TLOG_COMMIT_BYTES)
+						commitTimeout = Void();
+				}
 			}
 		}
+
+		Void _ = wait( committing );
+		Void _ = wait( self->updatePersist );
+		Void _ = wait( self->persistentData->commit() );
+
+		TraceEvent("TLogRecoveryComplete", logData->logId).detail("Locality", self->dbInfo->get().myLocality.toString());
+		TEST(true);  // tLog restore from old log system completed
+
+		return Void();
+	} catch( Error &e ) {
+		TraceEvent("TLogRecoveryError", logData->logId).error(e,true);
+		if(!copyComplete.isSet())
+			copyComplete.sendError(worker_removed());
+		throw;
 	}
-
-	Void _ = wait( committing );
-	Void _ = wait( self->updatePersist );
-	Void _ = wait( self->persistentData->commit() );
-
-	TraceEvent("TLogRecoveryComplete", self->dbgid).detail("Locality", self->dbInfo->get().myLocality.toString());
-	TEST(true);  // tLog restore from old log system completed
-
-	return Void();
 }
 
 ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
