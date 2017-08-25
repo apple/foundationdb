@@ -442,6 +442,11 @@ ACTOR Future<Void> simulatedMachine(
 				ASSERT( it.second.isReady() && !it.second.isError() );
 			}
 
+			for( auto it : g_simulator.getMachineById(localities.zoneId())->deletingFiles ) {
+				filenames.insert( it );
+				closingStr += it + ", ";
+			}
+
 			TraceEvent("SimulatedMachineRebootAfterKills")
 				.detail("Folder0", myFolders[0])
 				.detail("CFolder0", coordFolders[0])

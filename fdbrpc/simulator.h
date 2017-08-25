@@ -108,6 +108,7 @@ public:
 		ProcessInfo* machineProcess;
 		std::vector<ProcessInfo*> processes;
 		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
+		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>>	zoneId;
 
