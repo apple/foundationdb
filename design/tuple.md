@@ -121,7 +121,7 @@ Status: Reserved
 
 This encoding format has been used by layers. Note that this encoding makes almost no guarantees about ordering properties of tuple-encoded values and should thus generally be avoided.
 
-### **(Deprecated) True Value**
+### **(DEPRECATED) True Value**
 
 Typecode: 0x25  
 Length: 0 bytes  
