@@ -159,14 +159,14 @@ Status: Reserved
 
 There’s definitely some question of whether this deserves to be separated from a plain old 64 bit integer, but a separate type was desired in one of the third-party bindings. This type has not been ported over to the first-party bindings.
 
-### **80 bit versionstamp**
+### **80 Bit versionstamp**
 
 Typecode: 0x32  
 Length: 10 bytes  
 Encoding: Big endian 10-byte integer. First/high 8 bytes are a database version, next two are batch version.  
 Status: Reserved
 
-### 96 Bit Versionstamp
+### **96 Bit Versionstamp**
 
 Typecode: 0x33  
 Length: 12 bytes  
@@ -186,7 +186,7 @@ These type codes may be used by third party extenders without coordinating with 
 
 The only way in which future official, otherwise backward-compatible versions of the tuple layer would be expected to use these type codes is to implement some kind of actual extensibility point for this purpose - they will not be used for standard types.
 
-### Escape Character
+### **Escape Character**
 
 Typecode: 0xff  
 Length: N/A  
