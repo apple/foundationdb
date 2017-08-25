@@ -9,16 +9,16 @@ Status: Deprecated means that a previous layer used this type, but issues with t
 
 ### **Null Value**
 
-Typecode: 0x00
-Length: 0 bytes
+Typecode: 0x00  
+Length: 0 bytes  
 Status: Standard
 
 ### **Byte String**
 
-Typecode: 0x01
-Length: Variable (terminated by` [\x00]![\xff]`)
-Encoding: `b'\x01' + value.replace(b'\x00', b'\x00\xFF') + b'\x00'` 
-Test case: `pack(“foo\x00bar”) == b'\x01foo\x00\xffbar\x00'`
+Typecode: 0x01  
+Length: Variable (terminated by` [\x00]![\xff]`)  
+Encoding: `b'\x01' + value.replace(b'\x00', b'\x00\xFF') + b'\x00'`  
+Test case: `pack(“foo\x00bar”) == b'\x01foo\x00\xffbar\x00'`  
 Status: Standard
 
 In other words, byte strings are null terminated with null values occurring in the string escaped in an order-preserving way.
