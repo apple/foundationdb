@@ -62,11 +62,11 @@ These typecodes are reserved for encoding integers larger than 8 bytes. Presumab
 ### **Integer**
 
 Typecodes: 0x0c - 0x1c  
- 0x0c is an 8 byte negative number  
- 0x13 is a 1 byte negative number  
- 0x14 is a zero  
- 0x15 is a 1 byte positive number  
- 0x1c is an 8 byte positive number  
+&nbsp;0x0c is an 8 byte negative number  
+&nbsp;0x13 is a 1 byte negative number  
+&nbsp;0x14 is a zero  
+&nbsp;0x15 is a 1 byte positive number  
+&nbsp;0x1c is an 8 byte positive number  
 Length: Depends on typecode (0-8 bytes)  
 Encoding: positive numbers are big endian  
  negative numbers are big endian one’s complement (so -1 is 0x13 0xfe)  
@@ -86,9 +86,9 @@ These typecodes are reserved for encoding integers larger than 8 bytes. Presumab
 ### **IEEE Binary Floating Point**
 
 Typecodes:   
- 0x20 - float (32 bits)  
- 0x21 - double (64 bits)  
- 0x22 - long double (80 bits)  
+&nbsp;0x20 - float (32 bits)  
+&nbsp;0x21 - double (64 bits)  
+&nbsp;0x22 - long double (80 bits)  
 Length: 4 - 10 bytes  
 Test case: `pack( -42f ) == b'=\xd7\xff\xff'`  
 Encoding: Big-endian IEEE binary representation, followed by the following transformation:  
@@ -121,7 +121,7 @@ Status: Reserved
 
 This encoding format has been used by layers. Note that this encoding makes almost no guarantees about ordering properties of tuple-encoded values and should thus generally be avoided.
 
-### **(Deprecated)**** True Value**
+### **(Deprecated) True Value**
 
 Typecode: 0x25  
 Length: 0 bytes  
