@@ -886,16 +886,29 @@ public:
 		// This is a _rudimentary_ simulation of the untrustworthiness of non-durable deletes and the possibility of
 		// rebooting during a durable one.  It isn't perfect: for example, on real filesystems testing
 		// for the existence of a non-durably deleted file BEFORE a reboot will show that it apparently doesn't exist.
-		g_simulator.getCurrentProcess()->machine->openFiles.erase(filename);
+		if(g_simulator.getCurrentProcess()->machine->openFiles.count(filename)) {
+			g_simulator.getCurrentProcess()->machine->openFiles.erase(filename);
+			g_simulator.getCurrentProcess()->machine->deletingFiles.insert(filename);
+		}
 		if ( mustBeDurable || g_random->random01() < 0.5 ) {
-			Void _ = wait( ::delay(0.05 * g_random->random01()) );
-			if (!self->getCurrentProcess()->rebooting) {
-				auto f = IAsyncFileSystem::filesystem(self->net2)->deleteFile(filename, false);
-				ASSERT( f.isReady() );
+			state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+			state int currentTaskID = g_network->getCurrentTask();
+			Void _ = wait( g_simulator.onMachine( currentProcess ) );
+			try {
 				Void _ = wait( ::delay(0.05 * g_random->random01()) );
-				TEST( true );  // Simulated durable delete
+				if (!currentProcess->rebooting) {
+					auto f = IAsyncFileSystem::filesystem(self->net2)->deleteFile(filename, false);
+					ASSERT( f.isReady() );
+					Void _ = wait( ::delay(0.05 * g_random->random01()) );
+					TEST( true );  // Simulated durable delete
+				}
+				Void _ = wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
+				return Void();
+			} catch( Error &e ) {
+				state Error err = e;
+				Void _ = wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
+				throw err;
 			}
-			return Void();
 		} else {
 			TEST( true );  // Simulated non-durable delete
 			return Void();
