@@ -213,8 +213,9 @@ public:
 			//If we are in the process of deleting a file, we can't let someone else modify it at the same time.  We therefore block the creation of new files until deletion is complete
 			state std::map<std::string, Future<Void>>::iterator deletedFile = filesBeingDeleted.find(filename);
 			if(deletedFile != filesBeingDeleted.end()) {
-				//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete").detail("Filename", filename);
+				//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete1").detail("Filename", filename);
 				Void _ = wait( deletedFile->second || shutdown );
+				//TraceEvent("AsyncFileNonDurableOpenWaitOnDelete2").detail("Filename", filename);
 				if(shutdown.isReady())
 					throw io_error().asInjectedFault();
 			}
@@ -711,35 +712,44 @@ private:
 
 	//Finishes all outstanding actors on an AsyncFileNonDurable and then deletes it
 	ACTOR Future<Void> deleteFile(AsyncFileNonDurable *self) {
-		//We must run on the main thread (instead of a SQLite coroutine).  We don't want to signal any promises from a coroutine, so we switch at the beginning
-		//of this ACTOR
-		Void _ = wait(self->returnToMainThread());
+		state ISimulator::ProcessInfo* currentProcess = g_simulator.getCurrentProcess();
+		state int currentTaskID = g_network->getCurrentTask();
+		state std::string filename = self->filename;
 
-		//Make sure all writes have gone through.
-		Promise<bool> startSyncPromise = self->startSyncPromise;
-		self->startSyncPromise = Promise<bool>();
-		startSyncPromise.send(true);
+		Void _ = wait( g_simulator.onMachine( currentProcess ) );
+		try {
+			//Make sure all writes have gone through.
+			Promise<bool> startSyncPromise = self->startSyncPromise;
+			self->startSyncPromise = Promise<bool>();
+			startSyncPromise.send(true);
 
-		std::vector<Future<Void>> outstandingModifications;
+			std::vector<Future<Void>> outstandingModifications;
 
-		for(auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end(); ++itr)
-			if(itr->value().isValid() && !itr->value().isReady())
-				outstandingModifications.push_back(itr->value());
+			for(auto itr = self->pendingModifications.ranges().begin(); itr != self->pendingModifications.ranges().end(); ++itr)
+				if(itr->value().isValid() && !itr->value().isReady())
+					outstandingModifications.push_back(itr->value());
 
-		//Ignore errors here so that all modifications can finish
-		Void _ = wait(waitForAllReady(outstandingModifications));
+			//Ignore errors here so that all modifications can finish
+			Void _ = wait(waitForAllReady(outstandingModifications));
 
-		//Make sure we aren't in the process of killing the file
-		if(self->killed.isSet())
-			Void _ = wait(self->killComplete.getFuture());
+			//Make sure we aren't in the process of killing the file
+			if(self->killed.isSet())
+				Void _ = wait(self->killComplete.getFuture());
 
-		//Remove this file from the filesBeingDeleted map so that new files can be created with this filename
-		g_simulator.getMachineByNetworkAddress( self->openedAddress )->closingFiles.erase(self->getFilename());
-		AsyncFileNonDurable::filesBeingDeleted.erase(self->filename);
-		//TraceEvent("AsyncFileNonDurable_FinishDelete", self->id).detail("Filename", self->filename);
+			//Remove this file from the filesBeingDeleted map so that new files can be created with this filename
+			g_simulator.getMachineByNetworkAddress( self->openedAddress )->closingFiles.erase(self->getFilename());
+			g_simulator.getMachineByNetworkAddress( self->openedAddress )->deletingFiles.erase(self->getFilename());
+			AsyncFileNonDurable::filesBeingDeleted.erase(self->filename);
+			//TraceEvent("AsyncFileNonDurable_FinishDelete", self->id).detail("Filename", self->filename);
 
-		delete self;
-		return Void();
+			delete self;
+			Void _ = wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
+			return Void();
+		} catch( Error &e ) {
+			state Error err = e;
+			Void _ = wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
+			throw err;
+		}
 	}
 };
 
