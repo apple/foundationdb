@@ -204,8 +204,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 	loop {
 		auto waitTime = SERVER_KNOBS->MIN_REBOOT_TIME + (SERVER_KNOBS->MAX_REBOOT_TIME - SERVER_KNOBS->MIN_REBOOT_TIME) * g_random->random01();
 		cycles ++;
-		TraceEvent("SimulatedFDBDWait").detail("Cycles", cycles).detail("RandomId", randomId)
-			.detail("ProcessAddress", NetworkAddress(ip, port, true, false))
+		TraceEvent("SimulatedFDBDPreWait").detail("Cycles", cycles).detail("RandomId", randomId)
+			.detail("Address", NetworkAddress(ip, port, true, false))
 			.detailext("ZoneId", localities.zoneId())
 			.detail("waitTime", waitTime).detail("Port", port);
 
@@ -219,10 +219,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			TraceEvent("SimulatedRebooterStarting", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
 				.detailext("ZoneId", localities.zoneId())
 				.detailext("DataHall", localities.dataHallId())
-				.detail("ProcessAddress", process->address.toString())
-				.detail("ProcessExcluded", process->excluded)
+				.detail("Address", process->address.toString())
+				.detail("Excluded", process->excluded)
 				.detail("UsingSSL", useSSL);
-			TraceEvent("ProgramStart").detail("Cycles", cycles)
+			TraceEvent("ProgramStart").detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("SourceVersion", getHGVersion())
 				.detail("Version", FDB_VT_VERSION)
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
@@ -248,7 +248,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			} catch (Error& e) {
 				// If in simulation, if we make it here with an error other than io_timeout but enASIOTimedOut is set then somewhere an io_timeout was converted to a different error.
 				if(g_network->isSimulated() && e.code() != error_code_io_timeout && (bool)g_network->global(INetwork::enASIOTimedOut))
-					TraceEvent(SevError, "IOTimeoutErrorSuppressed").detail("ErrorCode", e.code()).backtrace();
+					TraceEvent(SevError, "IOTimeoutErrorSuppressed").detail("ErrorCode", e.code()).detail("RandomId", randomId).backtrace();
 
 				if (onShutdown.isReady() && onShutdown.isError()) throw onShutdown.getError();
 				if(e.code() != error_code_actor_cancelled)
@@ -258,15 +258,15 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			}
 
 			TraceEvent("SimulatedFDBDDone", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
-				.detail("ProcessAddress", process->address)
-				.detail("ProcessExcluded", process->excluded)
+				.detail("Address", process->address)
+				.detail("Excluded", process->excluded)
 				.detailext("ZoneId", localities.zoneId())
 				.detail("KillType", onShutdown.isReady() ? onShutdown.get() : ISimulator::None);
 
 			if (!onShutdown.isReady())
 				onShutdown = ISimulator::InjectFaults;
 		} catch (Error& e) {
-			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError", localities.zoneId()).error(e, true);
+			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError", localities.zoneId()).detail("RandomId", randomId).error(e, true);
 			onShutdown = e;
 		}
 
@@ -276,6 +276,11 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			process->rebooting = true;
 			process->shutdownSignal.send(ISimulator::None);
 		}
+		TraceEvent("SimulatedFDBDWait", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
+			.detail("Address", process->address)
+			.detail("Excluded", process->excluded)
+			.detail("Rebooting", process->rebooting)
+			.detailext("ZoneId", localities.zoneId());
 		Void _ = wait( g_simulator.onProcess( simProcess ) );
 
 		Void _ = wait(delay(0.00001 + FLOW_KNOBS->MAX_BUGGIFIED_DELAY));  // One last chance for the process to clean up?
@@ -284,15 +289,15 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 
 		auto shutdownResult = onShutdown.get();
 		TraceEvent("SimulatedFDBDShutdown", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
-			.detail("ProcessAddress", process->address)
-			.detail("ProcessExcluded", process->excluded)
+			.detail("Address", process->address)
+			.detail("Excluded", process->excluded)
 			.detailext("ZoneId", localities.zoneId())
 			.detail("KillType", shutdownResult);
 
 		if( shutdownResult < ISimulator::RebootProcessAndDelete ) {
 			TraceEvent("SimulatedFDBDLowerReboot", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
-				.detail("ProcessAddress", process->address)
-				.detail("ProcessExcluded", process->excluded)
+				.detail("Address", process->address)
+				.detail("Excluded", process->excluded)
 				.detailext("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
 			return onShutdown.get();
@@ -300,7 +305,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 
 		if( onShutdown.get() == ISimulator::RebootProcessAndDelete ) {
 			TraceEvent("SimulatedFDBDRebootAndDelete", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
-				.detail("ProcessAddress", process->address)
+				.detail("Address", process->address)
 				.detailext("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
 			*coordFolder = joinPath(baseFolder, g_random->randomUniqueID().toString());
@@ -317,7 +322,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 		}
 		else {
 			TraceEvent("SimulatedFDBDJustRepeat", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
-				.detail("ProcessAddress", process->address)
+				.detail("Address", process->address)
 				.detailext("ZoneId", localities.zoneId())
 				.detail("KillType", shutdownResult);
 		}
@@ -351,6 +356,7 @@ ACTOR Future<Void> simulatedMachine(
 	state int bootCount = 0;
 	state std::vector<std::string> myFolders;
 	state std::vector<std::string> coordFolders;
+	state UID randomId = g_nondeterministic_random->randomUniqueID();
 
 	try {
 		CSimpleIni ini;
@@ -387,6 +393,7 @@ ACTOR Future<Void> simulatedMachine(
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
 				Reference<ClusterConnectionFile> clusterFile(useSeedFile ? new ClusterConnectionFile(path, connStr.toString()) : new ClusterConnectionFile(path));
 				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, i + 1, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, runBackupAgents));
+				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], i+1, true, false)).detailext("ZoneId", localities.zoneId()).detailext("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
 
 			TEST( bootCount >= 1 ); // Simulated machine rebooted
@@ -394,7 +401,7 @@ ACTOR Future<Void> simulatedMachine(
 			TEST( bootCount >= 3 ); // Simulated machine rebooted three times
 			++bootCount;
 
-			TraceEvent("SimulatedMachineStart")
+			TraceEvent("SimulatedMachineStart", randomId)
 				.detail("Folder0", myFolders[0])
 				.detail("CFolder0", coordFolders[0])
 				.detail("MachineIPs", toIPVectorString(ips))
@@ -410,7 +417,7 @@ ACTOR Future<Void> simulatedMachine(
 
 			Void _ = wait( waitForAll( processes ) );
 
-			TraceEvent("SimulatedMachineRebootStart")
+			TraceEvent("SimulatedMachineRebootStart", randomId)
 				.detail("Folder0", myFolders[0])
 				.detail("CFolder0", coordFolders[0])
 				.detail("MachineIPs", toIPVectorString(ips))
@@ -447,7 +454,7 @@ ACTOR Future<Void> simulatedMachine(
 				closingStr += it + ", ";
 			}
 
-			TraceEvent("SimulatedMachineRebootAfterKills")
+			TraceEvent("SimulatedMachineRebootAfterKills", randomId)
 				.detail("Folder0", myFolders[0])
 				.detail("CFolder0", coordFolders[0])
 				.detail("MachineIPs", toIPVectorString(ips))
@@ -476,12 +483,12 @@ ACTOR Future<Void> simulatedMachine(
 						openFiles += *it + ", ";
 						i++;
 					}
-					TraceEvent("MachineFilesOpen").detail("PAddr", toIPVectorString(ips)).detail("OpenFiles", openFiles);
+					TraceEvent("MachineFilesOpen", randomId).detail("PAddr", toIPVectorString(ips)).detail("OpenFiles", openFiles);
 				} else
 					break;
 
 				if( shutdownDelayCount++ >= 50 ) {  // Worker doesn't shut down instantly on reboot
-					TraceEvent(SevError, "SimulatedFDBDFilesCheck")
+					TraceEvent(SevError, "SimulatedFDBDFilesCheck", randomId)
 						.detail("PAddrs", toIPVectorString(ips))
 						.detailext("ZoneId", localities.zoneId())
 						.detailext("DataHall", localities.dataHallId());
@@ -492,8 +499,8 @@ ACTOR Future<Void> simulatedMachine(
 				backoff = std::min( backoff + 1.0, 6.0 );
 			}
 
-			TraceEvent("SimulatedFDBDFilesClosed")
-				.detail("ProcessAddress", toIPVectorString(ips))
+			TraceEvent("SimulatedFDBDFilesClosed", randomId)
+				.detail("Address", toIPVectorString(ips))
 				.detailext("ZoneId", localities.zoneId())
 				.detailext("DataHall", localities.dataHallId());
 
@@ -515,7 +522,7 @@ ACTOR Future<Void> simulatedMachine(
 
 			auto rebootTime = g_random->random01() * MACHINE_REBOOT_TIME;
 
-			TraceEvent("SimulatedMachineShutdown")
+			TraceEvent("SimulatedMachineShutdown", randomId)
 				.detail("Swap", swap)
 				.detail("KillType", killType)
 				.detail("RebootTime", rebootTime)
@@ -535,7 +542,7 @@ ACTOR Future<Void> simulatedMachine(
 
 				if( myFolders != toRebootFrom ) {
 					TEST( true ); // Simulated machine swapped data folders
-					TraceEvent("SimulatedMachineFolderSwap")
+					TraceEvent("SimulatedMachineFolderSwap", randomId)
 						.detail("OldFolder0", myFolders[0]).detail("NewFolder0", toRebootFrom[0])
 						.detail("MachineIPs", toIPVectorString(ips));
 				}

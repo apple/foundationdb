@@ -24,10 +24,12 @@
 // The workload that do nothing. It can be used for waiting for quiescence
 struct DummyWorkload : TestWorkload {
 	bool displayWorkers;
+	double displayDelay;
 
 	DummyWorkload(WorkloadContext const& wcx)
 	: TestWorkload(wcx) {
 		displayWorkers = getOption(options, LiteralStringRef("displayWorkers"), true);
+		displayDelay = getOption(options, LiteralStringRef("displayDelay"), 0.0);
 	}
 
 	virtual std::string description() {
@@ -35,8 +37,16 @@ struct DummyWorkload : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) {
-		if ((clientId == 0) && (displayWorkers))
-			g_simulator.displayWorkers();
+		if ((clientId == 0) && (displayWorkers)) {
+			return _start(this, cx);
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> _start( DummyWorkload* self, Database cx) {
+		if (self->displayDelay > 0.0)
+			Void _ = wait(delay(self->displayDelay));
+		g_simulator.displayWorkers();
 		return Void();
 	}
 
