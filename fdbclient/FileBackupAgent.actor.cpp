@@ -125,14 +125,18 @@ Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTrans
 	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr);
 }
 
-class RestoreConfig {
+class KeyBackedConfig {
 public:
 	static struct {
-		static TaskParam<UID> uid() { return LiteralStringRef(__FUNCTION__); }
+		static TaskParam<UID> uid() {return LiteralStringRef(__FUNCTION__); }
 	} TaskParams;
 
-	RestoreConfig(UID uid = UID()) : uid(uid), configSpace(uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(fileRestorePrefixRange.begin), uid)) {}
-	RestoreConfig(Reference<Task> task) : RestoreConfig(TaskParams.uid().get(task)) {}
+	KeyBackedConfig(StringRef prefix, UID uid = UID()) :
+			uid(uid),
+			prefix(prefix),
+			configSpace(uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(prefix), uid)) {}
+
+	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
 
 	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 		// Set the uid task parameter
@@ -141,11 +145,12 @@ public:
 		// Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the validation key
 		// which TaskBucket will check, and its value must be this restore config's uid.
 		UID u = uid;  // 'this' could be invalid in lambda
-		return map(tag().get(tr), [u,task](Optional<Value> const &tag) -> Void {
+		Key p = prefix;
+		return map(tag().get(tr), [u,p,task](Optional<Value> const &tag) -> Void {
 			if(!tag.present())
 				throw restore_error();
 			// Validation contition is that the uidPair key must be exactly {u, false}
-			TaskBucket::setValidationCondition(task, makeRestoreTag(tag.get()).key, Codec<UidAndAbortedFlagT>::pack({u, false}).pack());
+			TaskBucket::setValidationCondition(task, KeyBackedTag(tag.get(), p).key, Codec<UidAndAbortedFlagT>::pack({u, false}).pack());
 			return Void();
 		});
 	}
@@ -153,6 +158,24 @@ public:
 	KeyBackedProperty<Value> tag() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
+
+	UID getUid() { return uid; }
+
+	void clear(Reference<ReadYourWritesTransaction> tr) {
+		tr->clear(configSpace.range());
+	}
+
+protected:
+	UID uid;
+	Key prefix;
+	Subspace configSpace;
+};
+
+class RestoreConfig : public KeyBackedConfig {
+public:
+	RestoreConfig(UID uid = UID()) : KeyBackedConfig(fileRestorePrefixRange.begin, uid) {}
+	RestoreConfig(Reference<Task> task) : KeyBackedConfig(fileRestorePrefixRange.begin, task) {}
+
 	KeyBackedProperty<ERestoreState> stateEnum() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
@@ -208,10 +231,6 @@ public:
 	// lastError is a pair of error message and timestamp expressed as an int64_t
 	KeyBackedProperty<std::pair<Value, int64_t>> lastError() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
-
-	void clear(Reference<ReadYourWritesTransaction> tr) {
-		tr->clear(configSpace.range());
 	}
 
 	Future<bool> isRunnable(Reference<ReadYourWritesTransaction> tr) {
@@ -314,8 +333,6 @@ public:
 		});
 	}
 
-	UID getUid() { return uid; }
-
 	static Future<std::string> getProgress_impl(RestoreConfig const &restore, Reference<ReadYourWritesTransaction> const &tr);
 	Future<std::string> getProgress(Reference<ReadYourWritesTransaction> tr) {
 		return getProgress_impl(*this, tr);
@@ -325,10 +342,6 @@ public:
 	Future<std::string> getFullStatus(Reference<ReadYourWritesTransaction> tr) {
 		return getFullStatus_impl(*this, tr);
 	}
-
-private:
-	UID uid;
-	Subspace configSpace;
 };
 
 ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore, Reference<ReadYourWritesTransaction> tr) {
