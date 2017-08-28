@@ -56,53 +56,73 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
-// Restore tags are a single-key slice of the RestoreTags map, defined below.
+// Key backed tags are a single-key slice of the TagUidMap, defined below.
 // The Value type of the key is a UidAndAbortedFlagT which is a pair of {UID, aborted_flag}
 // All tasks on the UID will have a validation key/value that requires aborted_flag to be
 // false, so changing that value, such as changing the UID or setting aborted_flag to true,
-// will kill all of the active tasks on that restore UID.
+// will kill all of the active tasks on that backup/restore UID.
 typedef std::pair<UID, bool> UidAndAbortedFlagT;
-class RestoreTag : public KeyBackedProperty<UidAndAbortedFlagT> {
+class KeyBackedTag : public KeyBackedProperty<UidAndAbortedFlagT> {
 public:
-	RestoreTag(StringRef tagName = StringRef());
+	KeyBackedTag() : KeyBackedProperty(StringRef()) {}
+	KeyBackedTag(StringRef tagName, StringRef tagMapPrefix);
 
 	Future<Void> cancel(Reference<ReadYourWritesTransaction> tr) {
-		Key tag = tagName; // 'this' could be invalid in lambda
-		return map(get(tr), [tag,tr](Optional<UidAndAbortedFlagT> up) -> Void {
-			if(up.present()) {
+		Key tag = tagName;
+		Key tagMapPrefix = tagMapPrefix;
+		return map(get(tr), [tag, tagMapPrefix, tr](Optional<UidAndAbortedFlagT> up) -> Void {
+			if (up.present()) {
 				// Set aborted flag to true
 				up.get().second = true;
-				RestoreTag(tag).set(tr, up.get());
+				KeyBackedTag(tag, tagMapPrefix).set(tr, up.get());
 			}
 			return Void();
 		});
 	}
 
 	Key tagName;
+	Key tagMapPrefix;
 };
 
 // Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
-class RestoreTags : public KeyBackedMap<Key, UidAndAbortedFlagT> {
+class TagUidMap : public KeyBackedMap<Key, UidAndAbortedFlagT> {
 public:
-	typedef KeyBackedMap<Key, UidAndAbortedFlagT> RestoreTagMap;
+	typedef KeyBackedMap<Key, UidAndAbortedFlagT> TagMap;
 
-	RestoreTags() : RestoreTagMap(LiteralStringRef("tag->uid/").withPrefix(fileRestorePrefixRange.begin)) {}
+	TagUidMap(const StringRef & prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
-	ACTOR static Future<std::vector<RestoreTag>> getAll_impl(RestoreTags *tags, Reference<ReadYourWritesTransaction> tr) {
-		RestoreTagMap::PairsType tagPairs = wait(tags->getRange(tr, KeyRef(), {}, 1e6));
-		std::vector<RestoreTag> results;
+	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap *tagsMap, Reference<ReadYourWritesTransaction> tr) {
+		TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, KeyRef(), {}, 1e6));
+		std::vector<KeyBackedTag> results;
 		for(auto &p : tagPairs)
-			results.push_back(p.first);
+			results.push_back(KeyBackedTag(p.first, tagsMap->prefix));
 		return results;
 	}
 
-	Future<std::vector<RestoreTag>> getAll(Reference<ReadYourWritesTransaction> tr) {
+	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr) {
 		return getAll_impl(this, tr);
 	}
+
+	Key prefix;
 };
 
-RestoreTag::RestoreTag(StringRef tagName)
-  : KeyBackedProperty<UidAndAbortedFlagT>(RestoreTags().getProperty(tagName)), tagName(tagName) {
+KeyBackedTag::KeyBackedTag(StringRef tagName, StringRef tagMapPrefix)
+		: KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName), tagMapPrefix(tagMapPrefix) {}
+
+KeyBackedTag makeRestoreTag(StringRef tagName) {
+	return KeyBackedTag(tagName, fileRestorePrefixRange.begin);
+}
+
+KeyBackedTag makeBackupTag(StringRef tagName) {
+	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
+}
+
+Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr) {
+	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr);
+}
+
+Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr) {
+	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr);
 }
 
 class RestoreConfig {
@@ -125,7 +145,7 @@ public:
 			if(!tag.present())
 				throw restore_error();
 			// Validation contition is that the uidPair key must be exactly {u, false}
-			TaskBucket::setValidationCondition(task, RestoreTag(tag.get()).key, Codec<UidAndAbortedFlagT>::pack({u, false}).pack());
+			TaskBucket::setValidationCondition(task, makeRestoreTag(tag.get()).key, Codec<UidAndAbortedFlagT>::pack({u, false}).pack());
 			return Void();
 		});
 	}
@@ -3068,13 +3088,13 @@ namespace fileBackup {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-		state std::vector<RestoreTag> tags;
+		state std::vector<KeyBackedTag> tags;
 		if(tagName.size() == 0) {
-			std::vector<RestoreTag> t = wait(RestoreTags().getAll(tr));
+			std::vector<KeyBackedTag> t = wait(getAllRestoreTags(tr));
 			tags = t;
 		}
 		else
-			tags.push_back(tagName);
+			tags.push_back(makeRestoreTag(tagName));
 
 		state std::string result;
 		state int i = 0;
@@ -3093,7 +3113,7 @@ namespace fileBackup {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-		state RestoreTag tag(tagName);
+		state KeyBackedTag tag = makeRestoreTag(tagName);
 		state Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 		if(!current.present())
 			return ERestoreState::UNITIALIZED;
@@ -3434,7 +3454,7 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		// Get old restore config for this tag
-		state RestoreTag tag(tagName);
+		state KeyBackedTag tag = makeRestoreTag(tagName);
 		state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
 		if(oldUidAndAborted.present()) {
 			if (oldUidAndAborted.get().first == uid) {
@@ -3499,7 +3519,7 @@ public:
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				state RestoreTag tag(tagName);
+				state KeyBackedTag tag = makeRestoreTag(tagName);
 				Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 				if(!current.present()) {
 					if(verbose)
