@@ -175,7 +175,9 @@ class VersionedBTree : public IVersionedStore {
 public:
 	enum EPageFlags { IS_LEAF = 1};
 
-	// The end key for the entire tree
+	// The first possible KV pair that could exist in the tree
+	static KeyVersionValue beginKey;
+	// A KV pair which is beyond the last possible KV pair that could exist in the tree
 	static KeyVersionValue endKey;
 
 	typedef SimpleFixedSizeMapRef FixedSizeMap;
@@ -422,7 +424,7 @@ private:
 		// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
 		// because now all existing keys are within some range in the mutation map.
 		m_buffer.clear();
-		m_buffer[StringRef()];
+		m_buffer[beginKey.key];
 		m_buffer[endKey.key];
 	}
 
@@ -576,7 +578,7 @@ private:
 				// Output old versions of the mutation boundary key
 				while(iExisting != iExistingEnd && existing.key == iMutationBoundary->first) {
 					merged.push_back(existing.pack());
-					debug_printf("Added existing version of mutation boundary start key: %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+					debug_printf("%s: Added %s [existing, boundary start]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 					++iExisting;
 					if(iExisting != iExistingEnd)
@@ -589,7 +591,7 @@ private:
 					if(iMutations->first < minVersion || minVersion == invalidVersion)
 						minVersion = iMutations->first;
 					merged.push_back(iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack());
-					debug_printf("Added mutation of boundary start key: %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+					debug_printf("%s: Added %s [mutation, boundary start]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
 					++iMutations;
 				}
 
@@ -601,7 +603,7 @@ private:
 				// Write existing keys which are less than the next mutation boundary key, clearing if needed.
 				while(iExisting != iExistingEnd && existing.key < iMutationBoundary->first) {
 					merged.push_back(existing.pack());
-					debug_printf("Added existing key in mutation range: %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+					debug_printf("%s: Added %s [existing, middle]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 					// Write a clear of this key if needed.  A clear is required if clearRangeVersion is set and the next key is different
 					// than this one.  Note that the next key might be the in our right sibling, we can use the page upperBound to get that.
@@ -617,7 +619,7 @@ private:
 						if(clearVersion < minVersion || minVersion == invalidVersion)
 							minVersion = clearVersion;
 						merged.push_back(KeyVersionValue(existing.key, clearVersion).pack());
-						debug_printf("Added clear of existing key in mutation range: %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+						debug_printf("%s: Added %s [existing, middle clear]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
 					}
 
 					if(iExisting != iExistingEnd)
@@ -628,19 +630,22 @@ private:
 			// Write any remaining existing keys, which are not subject to clears as they are beyond the cleared range.
 			while(iExisting != iExistingEnd) {
 				merged.push_back(existing.pack());
-				debug_printf("Added existing tail key: %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
+				debug_printf("%s: Added %s [existing, tail]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 				++iExisting;
 				if(iExisting != iExistingEnd)
 					existing = KeyVersionValue::unpack(*iExisting);
 			}
 
+			debug_printf("%s Done merging mutations into existing leaf contents\n", printPrefix.c_str());
+
 			// No changes were actually made.  This could happen if there is a single-key clear which turns out
 			// to not actually exist in the leaf page.
-			if(minVersion == invalidVersion)
+			if(minVersion == invalidVersion) {
+				debug_printf("%s No changes were made during mutation merge\n", printPrefix.c_str());
 				return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
+			}
 
-			debug_printf("%s DONE MERGING MUTATIONS WITH EXISTING LEAF CONTENTS\n", printPrefix.c_str());
 
 			// TODO: Make version and key splits based on contents of merged list
 
@@ -692,6 +697,8 @@ private:
 				// The upper bound for the last child is upperBoundKey, and entries[i+1] for the others.
 				Key childUpperBound = ( (i + 1) == map.entries.size()) ? upperBoundKey : map.entries[i + 1].key;
 
+				ASSERT(childLowerBound <= childUpperBound);
+
 				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].value.begin(), childLowerBound, childUpperBound));
 			}
 
@@ -728,11 +735,11 @@ private:
 					const VersionedChildrenT &children = m_futureChildren[i].get();
 					LogicalPageID pageID = *(uint32_t*)map.entries[i].value.begin();
 
-					debug_printf("  Versioned page set that replaced page %d: %lu versions\n", pageID, children.size());
+					debug_printf("%s  Versioned page set that replaced page %d: %lu versions\n", printPrefix.c_str(), pageID, children.size());
 					for(auto &versionedPageSet : children) {
-						debug_printf("    version: %lld\n", versionedPageSet.first);
+						debug_printf("%s    version: %lld\n", printPrefix.c_str(), versionedPageSet.first);
 						for(auto &boundaryPage : versionedPageSet.second) {
-							debug_printf("      %s -> %u\n", boundaryPage.first.toString().c_str(), boundaryPage.second);
+							debug_printf("%s      '%s' -> %u\n", printPrefix.c_str(), printable(boundaryPage.first).c_str(), boundaryPage.second);
 						}
 					}
 
@@ -741,34 +748,34 @@ private:
 
 					// If there are no versions before the one we found, just update nextVersion and continue.
 					if(cv == children.begin()) {
-						debug_printf("  First version (%lld) in set is greater than current, setting nextVersion and continuing\n", cv->first);
+						debug_printf("%s First version (%lld) in set is greater than current, setting nextVersion and continuing\n", printPrefix.c_str(), cv->first);
 						nextVersion = std::min(nextVersion, cv->first);
-						debug_printf("  curr %lld next %lld\n", version, nextVersion);
+						debug_printf("%s   curr %lld next %lld\n", printPrefix.c_str(), version, nextVersion);
 						continue;
 					}
 
 					// If a version greater than the current version being written was found, update nextVersion
 					if(cv != children.end()) {
 						nextVersion = std::min(nextVersion, cv->first);
-						debug_printf("  curr %lld next %lld\n", version, nextVersion);
+						debug_printf("%s   curr %lld next %lld\n", printPrefix.c_str(), version, nextVersion);
 					}
 
 					// Go back one to the last version that was valid prior to or at the current version we are writing
 					--cv;
 
-					debug_printf("  Using children for version %lld from this set, building version %lld\n", cv->first, version);
+					debug_printf("%s   Using children for version %lld from this set, building version %lld\n", printPrefix.c_str(), cv->first, version);
 
 					// If page count isn't 1 then the root is definitely modified
 					modified = modified || cv->second.size() != 1;
 
 					// Add the children at this version to the child entries list for the current version being built.
 					for (auto &childPage : cv->second) {
-						debug_printf("  Adding child page '%s'\n", childPage.first.toString().c_str());
+						debug_printf("%s  Adding child page '%s'\n", printPrefix.c_str(), printable(childPage.first).c_str());
 						childEntries.push_back( KeyValueRef(childPage.first, StringRef((unsigned char *)&childPage.second, sizeof(uint32_t))));
 					}
 				}
 
-				debug_printf("Finished pass through futurechildren.  childEntries=%lu  version=%lld  nextVersion=%lld\n", childEntries.size(), version, nextVersion);
+				debug_printf("%s Finished pass through futurechildren.  childEntries=%lu  version=%lld  nextVersion=%lld\n", printPrefix.c_str(), childEntries.size(), version, nextVersion);
 
 				if(modified) {
 					// TODO: Track split points across iterations of this loop, so that they don't shift unnecessarily and
@@ -789,7 +796,7 @@ private:
 						logicalPages.push_back( self->m_pager->allocateLogicalPage() );
 
 					// Write each page using its assigned page ID
-					debug_printf("Writing internal pages, subtreeRoot=%u\n", root);
+					debug_printf("%s Writing internal pages\n", printPrefix.c_str());
 					for(int i=0; i<pages.size(); i++)
 						self->writePage( logicalPages[i], pages[i].second, version );
 
@@ -804,12 +811,12 @@ private:
 						result.back().second.push_back( {childEntries[pages[i].first].key, logicalPages[i]} );
 
 					if (result.size() > 1 && result.back().second == result.end()[-2].second) {
-						debug_printf("Output same as last version, popping it.\n");
+						debug_printf("%s Output same as last version, popping it.\n", printPrefix.c_str());
 						result.pop_back();
 					}
 				}
 				else {
-					debug_printf("Version 0 has no changes\n");
+					debug_printf("%s Version 0 has no changes\n", printPrefix.c_str());
 					result.push_back({0, {{lowerBoundKey, root}}});
 				}
 
@@ -829,7 +836,7 @@ private:
 		debug_printf("BEGINNING COMMIT.\n");
 		self->printMutationBuffer();
 
-		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, StringRef(), endKey.pack().key));
+		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, beginKey.pack().key, endKey.pack().key));
 
 		self->m_pager->setLatestVersion(self->m_writeVersion);
 		Void _ = wait(self->m_pager->commit());
@@ -932,6 +939,7 @@ private:
 	};
 };
 
+KeyVersionValue VersionedBTree::beginKey(StringRef(), 0);
 KeyVersionValue VersionedBTree::endKey(LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"), std::numeric_limits<Version>::max());
 
 KeyValue randomKV(int keySize = 10, int valueSize = 5) {
