@@ -68,6 +68,7 @@ struct SimpleFixedSizeMapRef {
 		return page;
 	}
 
+	// Returns a vector of pairs of lower boundary key indices within kvPairs and encoded pages.
 	template<typename Allocator>
 	static vector<std::pair<int, Reference<IPage>>> buildMany(const KVPairsT &kvPairs, uint8_t newFlags, Allocator const &newPageFn, int page_size_override = -1) {
 		vector<std::pair<int, Reference<IPage>>> pages;
@@ -514,8 +515,9 @@ private:
 
 		// If the mutation buffer key found is greater than the lower bound key then go to the previous mutation
 		// buffer key because it may cover deletion of some keys at the start of this subtree.
-		if(iMutationBoundary != self->m_buffer.begin() && iMutationBoundary->first > lowerBoundKVV.key)
+		if(iMutationBoundary != self->m_buffer.begin() && iMutationBoundary->first > lowerBoundKVV.key) {
 			--iMutationBoundary;
+		}
 		else {
 			// If the there are no mutations, we're done
 			if(iMutationBoundary == iMutationBoundaryEnd) {
@@ -566,9 +568,13 @@ private:
 
 				SingleKeyMutationsByVersion::const_iterator iMutations;
 
+				// If the mutation boundary key is less than the lower bound key then skip startKeyMutations for
+				// this bounary, we're only processing this mutation range here to apply any clears to existing data.
+				if(iMutationBoundary->first < lowerBoundKVV.key)
+					iMutations = iMutationBoundary->second.startKeyMutations.end();
 				// If the mutation boundary key is the same as the page lowerBound key then start reading single
 				// key mutations at the first version greater than the lowerBoundKey version.
-				if(iMutationBoundary->first == lowerBoundKVV.key)
+				else if(iMutationBoundary->first == lowerBoundKVV.key)
 					iMutations = iMutationBoundary->second.startKeyMutations.upper_bound(lowerBoundKVV.version);
 				else
 					iMutations = iMutationBoundary->second.startKeyMutations.begin();
@@ -674,14 +680,17 @@ private:
 				self->writePage(logicalPages[i], pages[i].second, minVersion);
 
 			// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
-			if(root == self->m_root)
+			if(root == self->m_root) {
+				debug_printf("%s Building new root\n", printPrefix.c_str());
 				self->buildNewRoot(minVersion, pages, logicalPages, merged);
+			}
 
 			results.push_back({minVersion, {}});
 
 			for(int i=0; i<pages.size(); i++) {
 				// The lower bound of the first page is the lower bound of the subtree, not the first entry in the page
 				Key lowerBound = (i == 0) ? lowerBoundKey : merged[pages[i].first].key;
+				debug_printf("%s Adding page to results: index=%d lowerBound=%s\n", printPrefix.c_str(), pages[i].first, printable(lowerBound).c_str());
 				results.back().second.push_back( {lowerBound, logicalPages[i]} );
 			}
 
