@@ -545,7 +545,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		// To ensure consistent recovery, the number of servers NOT in the write quorum plus the number of servers NOT in the read quorum
 		// have to be strictly less than the replication factor.  Otherwise there could be a replica set consistent entirely of servers that
 		// are out of date due to not being in the write quorum or unavailable due to not being in the read quorum.
-		// So (N - W) + (N - R) < F, and optimally (N-W)+(N-R)=F-1.  Thus R=2N+1-F-W.
+		// So with N = # of tlogs, W = antiquorum, R = required count, F = replication factor,
+		// W + (N - R) < F, and optimally (N-W)+(N-R)=F-1.  Thus R=N+1-F+W.
 		state int requiredCount = (int)prevState.tLogs.size()+1 - prevState.tLogReplicationFactor + prevState.tLogWriteAntiQuorum;
 		ASSERT( requiredCount > 0 && requiredCount <= prevState.tLogs.size() );
 		ASSERT( prevState.tLogReplicationFactor >= 1 && prevState.tLogReplicationFactor <= prevState.tLogs.size() );
@@ -621,7 +622,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					(!validateAllCombinations(badCombo, unResponsiveSet, prevState.tLogPolicy, availableItems, prevState.tLogWriteAntiQuorum, false)))
 			{
 				TraceEvent("EpochEndBadCombo", dbgid).detail("Cycles", cycles)
-					.detail("Required", requiredCount)
 					.detail("Present", results.size())
 					.detail("Available", availableItems.size())
 					.detail("Absent", logServers.size() - results.size())
@@ -659,7 +659,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 					TraceEvent("LogSystemRecovery", dbgid).detail("Cycles", cycles)
 						.detail("TotalServers", logServers.size())
-						.detail("Required", requiredCount)
 						.detail("Present", results.size())
 						.detail("Available", availableItems.size())
 						.detail("Absent", logServers.size() - results.size())
@@ -702,7 +701,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				else {
 					TraceEvent("LogSystemUnchangedRecovery", dbgid).detail("Cycles", cycles)
 						.detail("TotalServers", logServers.size())
-						.detail("Required", requiredCount)
 						.detail("Present", results.size())
 						.detail("Available", availableItems.size())
 						.detail("Absent", logServers.size() - results.size())
@@ -726,7 +724,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				TraceEvent("LogSystemWaitingForRecovery", dbgid).detail("Cycles", cycles)
 					.detail("AvailableServers", results.size())
 					.detail("TotalServers", logServers.size())
-					.detail("Required", requiredCount)
 					.detail("Present", results.size())
 					.detail("Available", availableItems.size())
 					.detail("Absent", logServers.size() - results.size())
@@ -791,6 +788,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.recoverAt = oldLogSystem->epochEndVersion.get();
 			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
 			req.epoch = recoveryCount;
+			TraceEvent("TLogInitializeRequest").detail("address", workers[i].tLog.getEndpoint().address);
 		}
 
 		logSystem->tLogLocalities.resize( workers.size() );
