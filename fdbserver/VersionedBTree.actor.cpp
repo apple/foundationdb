@@ -137,7 +137,7 @@ struct KeyVersionValue {
 	Version version;
 	Optional<Value> value;
 
-	bool valid() { return version != invalidVersion; }
+	bool valid() const { return version != invalidVersion; }
 
 	inline KeyValue pack() const {
 		Tuple k;
@@ -402,7 +402,7 @@ private:
 	 *   without adding an additional key to the buffer.
 	*/
 
-	void printMutationBuffer(MutationBufferT::const_iterator begin, MutationBufferT::const_iterator end) {
+	void printMutationBuffer(MutationBufferT::const_iterator begin, MutationBufferT::const_iterator end) const {
 #if REDWOOD_DEBUG
 		debug_printf("-------------------------------------\n");
 		debug_printf("BUFFER\n");
@@ -414,7 +414,7 @@ private:
 #endif
 	}
 
-	void printMutationBuffer() {
+	void printMutationBuffer() const {
 		return printMutationBuffer(m_buffer.begin(), m_buffer.end());
 	}
 
@@ -447,7 +447,10 @@ private:
 		// for it in which case we would have returned above.
 		MutationBufferT::iterator iPrevious = ib;
 		--iPrevious;
-		ib->second.rangeClearVersion = iPrevious->second.rangeClearVersion;
+		if(iPrevious->second.rangeClearVersion.present()) {
+			ib->second.rangeClearVersion = iPrevious->second.rangeClearVersion;
+			ib->second.startKeyMutations[iPrevious->second.rangeClearVersion.get()] = SingleKeyMutation();
+		}
 
 		return ib;
 	}
@@ -485,7 +488,7 @@ private:
 
 	// Returns list of (version, list of (lower_bound, list of children) )
 	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, Key upperBoundKey) {
-		state std::string printPrefix = format("commit subtree(lowerboundkey %s, page %u) ", lowerBoundKey.toString().c_str(), root);
+		state std::string printPrefix = format("commit subtree root=%lld lower='%s' upper='%s'", root, printable(lowerBoundKey).c_str(), printable(upperBoundKey).c_str());
 		debug_printf("%s\n", printPrefix.c_str());
 
 		// Decode the upper and lower bound keys for this subtree
@@ -509,7 +512,7 @@ private:
 
 		// If the mutation buffer key found is greater than the lower bound key then go to the previous mutation
 		// buffer key because it may cover deletion of some keys at the start of this subtree.
-		if(iMutationBoundary->first > lowerBoundKVV.key)
+		if(iMutationBoundary != self->m_buffer.begin() && iMutationBoundary->first > lowerBoundKVV.key)
 			--iMutationBoundary;
 		else {
 			// If the there are no mutations, we're done
@@ -552,7 +555,7 @@ private:
 			if(iExisting != iExistingEnd)
 				existing = KeyVersionValue::unpack(*iExisting);
 			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
-			Version minVersion = std::numeric_limits<Version>::max();
+			Version minVersion = invalidVersion;
 
 			// Now, process each mutation range and merge changes with existing data.
 			while(iMutationBoundary != iMutationBoundaryEnd) {
@@ -580,9 +583,10 @@ private:
 						existing = KeyVersionValue::unpack(*iExisting);
 				}
 
+				// TODO:  If a mutation set is equal to the previous existing value of the key, don't write it.
 				// Output mutations for the mutation boundary start key
 				while(iMutations != iMutationsEnd) {
-					if(iMutations->first < minVersion)
+					if(iMutations->first < minVersion || minVersion == invalidVersion)
 						minVersion = iMutations->first;
 					merged.push_back(iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack());
 					debug_printf("Added mutation of boundary start key: %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
@@ -609,7 +613,10 @@ private:
 						nextEntry = upperBoundKVV;
 
 					if(clearRangeVersion.present() && existing.key != nextEntry.key) {
-						merged.push_back(KeyVersionValue(existing.key, clearRangeVersion.get()).pack());
+						Version clearVersion = clearRangeVersion.get();
+						if(clearVersion < minVersion || minVersion == invalidVersion)
+							minVersion = clearVersion;
+						merged.push_back(KeyVersionValue(existing.key, clearVersion).pack());
 						debug_printf("Added clear of existing key in mutation range: %s\n", KeyVersionValue::unpack(merged.back()).toString().c_str());
 					}
 
@@ -627,6 +634,11 @@ private:
 				if(iExisting != iExistingEnd)
 					existing = KeyVersionValue::unpack(*iExisting);
 			}
+
+			// No changes were actually made.  This could happen if there is a single-key clear which turns out
+			// to not actually exist in the leaf page.
+			if(minVersion == invalidVersion)
+				return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 
 			debug_printf("%s DONE MERGING MUTATIONS WITH EXISTING LEAF CONTENTS\n", printPrefix.c_str());
 
@@ -663,7 +675,9 @@ private:
 			results.push_back({minVersion, {}});
 
 			for(int i=0; i<pages.size(); i++) {
-				results.back().second.push_back( {merged[pages[i].first].key, logicalPages[i]} );
+				// The lower bound of the first page is the lower bound of the subtree, not the first entry in the page
+				Key lowerBound = (i == 0) ? lowerBoundKey : merged[pages[i].first].key;
+				results.back().second.push_back( {lowerBound, logicalPages[i]} );
 			}
 
 			debug_printf("%s DONE.\n", printPrefix.c_str());
@@ -673,12 +687,12 @@ private:
 			state std::vector<Future<VersionedChildrenT>> m_futureChildren;
 
 			for(int i=0; i<map.entries.size(); i++) {
-				Key currentUpperBound;
-				if(i + 1 < map.entries.size())
-					currentUpperBound = map.entries[i].key;
-				else
-					currentUpperBound = upperBoundKey;
-				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].value.begin(), map.entries[i].key, currentUpperBound));
+				// The lower bound for the first child is lowerBoundKey, and entries[i] for the rest.
+				Key childLowerBound = (i == 0) ? lowerBoundKey : map.entries[i].key;
+				// The upper bound for the last child is upperBoundKey, and entries[i+1] for the others.
+				Key childUpperBound = ( (i + 1) == map.entries.size()) ? upperBoundKey : map.entries[i + 1].key;
+
+				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].value.begin(), childLowerBound, childUpperBound));
 			}
 
 			Void _ = wait(waitForAll(m_futureChildren));
