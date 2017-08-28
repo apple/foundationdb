@@ -3385,11 +3385,6 @@ public:
 			throw backup_duplicate();
 		}
 
-		if (logUidCurrent.isValid()) {
-			logUid = logUidCurrent;
-			logUidValue = BinaryWriter::toValue(logUid, Unversioned());
-		}
-
 		// This check will ensure that current backupUid is later than the last backup Uid
 		state Standalone<StringRef> backupUid = BackupAgentBase::getCurrentTime();
 		state std::string backupContainer = outContainer.toString();
