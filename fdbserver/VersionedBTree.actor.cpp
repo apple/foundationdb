@@ -526,6 +526,9 @@ private:
 			}
 		}
 
+		// TODO:  Check if entire subtree is erased and return no pages, also have the previous pages deleted as of
+		// the cleared version.
+
 		// Another way to have no mutations is to have a single mutation range cover this
 		// subtree but have no changes in it
 		MutationBufferT::const_iterator iMutationBoundaryNext = iMutationBoundary;
@@ -563,8 +566,7 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			while(iMutationBoundary != iMutationBoundaryEnd) {
-				debug_printf("%s Processing Mutation Range: '%s' to '%s'\n", printPrefix.c_str(), printable(iMutationBoundary->first).c_str(), printable(iMutationBoundaryEnd->first).c_str());
-				debug_printf("%s Mutations: %s\n", printPrefix.c_str(), iMutationBoundary->second.toString().c_str());
+				debug_printf("%s New mutation boundary: '%s': %s\n", printPrefix.c_str(), printable(iMutationBoundary->first).c_str(), iMutationBoundary->second.toString().c_str());
 
 				SingleKeyMutationsByVersion::const_iterator iMutations;
 
@@ -606,6 +608,8 @@ private:
 				// Advance to the next boundary because we need to know the end key for the current range.
 				++iMutationBoundary;
 
+				debug_printf("%s Mutation range end: '%s'\n", printPrefix.c_str(), printable(iMutationBoundary->first).c_str());
+
 				// Write existing keys which are less than the next mutation boundary key, clearing if needed.
 				while(iExisting != iExistingEnd && existing.key < iMutationBoundary->first) {
 					merged.push_back(existing.pack());
@@ -645,8 +649,8 @@ private:
 
 			debug_printf("%s Done merging mutations into existing leaf contents\n", printPrefix.c_str());
 
-			// No changes were actually made.  This could happen if there is a single-key clear which turns out
-			// to not actually exist in the leaf page.
+			// No changes were actually made.  This could happen if there is a clear which does not cover an entire leaf but also does
+			// not which turns out to not match any existing data in the leaf.
 			if(minVersion == invalidVersion) {
 				debug_printf("%s No changes were made during mutation merge\n", printPrefix.c_str());
 				return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
@@ -903,16 +907,14 @@ private:
 		ACTOR static Future<Void> findEqual_impl(Reference<Cursor> self, KeyRef key) {
 			state LogicalPageID pageNumber = self->m_root;
 
-			state Tuple t;
-			t.append(key);
-			t.append(self->m_version);
-			state KeyRef tupleKey = t.pack();
+			state KeyVersionValue target(key, self->m_version);
+			state Key targetPacked = target.pack().key;
 
 			loop {
 				debug_printf("findEqual: Reading page %d\n", pageNumber);
 				Reference<const IPage> rawPage = wait(self->m_pager->getPhysicalPage(pageNumber));
 				FixedSizeMap map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
-				//debug_printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, map.toString().c_str());
+				debug_printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, map.toString().c_str());
 
 				// Special case of empty page (which should only happen for root)
 				if(map.entries.empty()) {
@@ -922,7 +924,7 @@ private:
 				}
 
 				if(map.flags && EPageFlags::IS_LEAF) {
-					int i = map.findLastLessOrEqual(tupleKey);
+					int i = map.findLastLessOrEqual(targetPacked);
 					if(i >= 0) {
 						KeyVersionValue kvv = KeyVersionValue::unpack(map.entries[i]);
 						if(key == kvv.key && kvv.value.present()) {
@@ -935,7 +937,7 @@ private:
 					return Void();
 				}
 				else {
-					int i = map.findLastLessOrEqual(tupleKey);
+					int i = map.findLastLessOrEqual(targetPacked);
 					i = std::max(i, 0);
 					pageNumber = *(uint32_t *)map.entries[i].value.begin();
 				}
