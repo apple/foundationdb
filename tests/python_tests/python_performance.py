@@ -47,6 +47,7 @@ class PythonPerformance(PythonTest):
         'serial_get' : 'Python API serial get throughput',
         'get_range' : 'Python API get_range throughput',
         'get_key' : 'Python API get_key throughput',
+        'get_single_key_range' : 'Python API get_single_key_range throughput',
         'alternating_get_set' : 'Python API alternating get and set throughput',
         'write_transaction' : 'Python API single-key transaction throughput',
     }
@@ -54,7 +55,7 @@ class PythonPerformance(PythonTest):
     def __init__(self, key_count=1000000, key_size=16, value_size=100):
         super(PythonPerformance, self).__init__()
         self.key_count = key_count
-        self.key_size = 16
+        self.key_size = key_size
         self.value_str = ''.join(['x' for i in range(value_size)])
 
     #Python Performance Tests (checks if functions run and yield correct results, gets performance indicators)
@@ -264,6 +265,17 @@ class PythonPerformance(PythonTest):
 
         for i in range(count):
             tr.get_key(fdb.KeySelector(self.random_key(), True, random.randint(-10, 10))).wait()
+
+        return count / (time.time() - s)
+
+    @fdb.transactional
+    def run_get_single_key_range(self, tr, count=2000):
+        tr.options.set_retry_limit(5)
+        s = time.time()
+
+        for i in range(count):
+            index = random.randint(0, self.key_count)
+            list(tr[self.key(index):self.key(index+1)])
 
         return count / (time.time() - s)
 

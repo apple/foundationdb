@@ -90,6 +90,8 @@ public:
 	int MAX_OUTSTANDING;
 	int MIN_SUBMIT;
 
+	int PAGE_WRITE_CHECKSUM_HISTORY;
+
 	//AsyncFileNonDurable
 	double MAX_PRIOR_MODIFICATION_DELAY;
 

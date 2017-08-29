@@ -24,6 +24,7 @@
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/MetricLogger.h"
 #include "WorkerInterface.h"
 #include "IKeyValueStore.h"
 #include "WaitFailure.h"
@@ -77,10 +78,16 @@ struct ErrorInfo {
 
 Error checkIOTimeout(Error const &e) {
 	// Convert all_errors to io_timeout if global timeout bool was set
-	if((bool)g_network->global(INetwork::enASIOTimedOut)) {
+	bool timeoutOccurred = (bool)g_network->global(INetwork::enASIOTimedOut);
+	// In simulation, have to check global timed out flag for both this process and the machine process on which IO is done
+	if(g_network->isSimulated() && !timeoutOccurred)
+		timeoutOccurred = g_pSimulator->getCurrentProcess()->machine->machineProcess->global(INetwork::enASIOTimedOut);
+
+	if(timeoutOccurred) {
+		TEST(true); // Timeout occurred
 		Error timeout = io_timeout();
-		// If this error was injected OR if the timeout was injected then make the resulting io_timeout injected
-		if(e.isInjectedFault() || (g_network->isSimulated() && g_pSimulator->getCurrentProcess()->io_timeout_injected) )
+		// Preserve injectedness of error
+		if(e.isInjectedFault())
 			timeout = timeout.asInjectedFault();
 		return timeout;
 	}
@@ -124,13 +131,14 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 	loop choose {
 		when( ErrorInfo _err = waitNext(errors) ) {
 			ErrorInfo err = _err;
-			err.error = checkIOTimeout(err.error);  // Possibly convert error to io_timeout
-
 			bool ok =
 				err.error.code() == error_code_success ||
 				err.error.code() == error_code_please_reboot ||
 				err.error.code() == error_code_actor_cancelled ||
 				err.error.code() == error_code_coordinators_changed;  // The worker server was cancelled
+
+			if(!ok)
+				err.error = checkIOTimeout(err.error);  // Possibly convert error to io_timeout
 
 			endRole(err.id, err.context, "Error", ok, err.error);
 
@@ -164,8 +172,6 @@ ACTOR Future<Void> loadedPonger( FutureStream<LoadedPingRequest> pings ) {
 	}
 }
 
-#define DUMPTOKEN( name ) TraceEvent("DumpToken", recruited.id()).detail("Name", #name).detail("Token", name.getEndpoint().token)
-
 StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
@@ -179,7 +185,7 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 	if( storeType == KeyValueStoreType::SSD_BTREE_V1 )
 		return joinPath( folder, sample_filename );
 	else if ( storeType == KeyValueStoreType::SSD_BTREE_V2 )
-		return joinPath(folder, sample_filename); 
+		return joinPath(folder, sample_filename);
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
 
@@ -190,7 +196,7 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 	if( storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath( folder, prefix + id.toString() + ".fdb" );
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
-		return joinPath(folder, prefix + id.toString() + ".sqlite"); 
+		return joinPath(folder, prefix + id.toString() + ".sqlite");
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, prefix + id.toString() + "-" );
 
@@ -350,6 +356,7 @@ void startRole(UID roleId, UID workerId, std::string as, std::map<std::string, s
 	g_roles.insert({as, roleId.shortString()});
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	if (g_network->isSimulated()) g_simulator.addRole(g_network->getLocalAddress(), as);
 }
 
 void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
@@ -381,6 +388,7 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 	g_roles.erase({as, id.shortString()});
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	if (g_network->isSimulated()) g_simulator.removeRole(g_network->getLocalAddress(), as);
 }
 
 ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
@@ -589,7 +597,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				std::map<std::string, std::string> details;
 				details["StorageEngine"] = s.storeType.toString();
-				startRole( s.storeID, interf.id(), "TLog", details, "Restored" );
+				startRole( s.storeID, interf.id(), "SharedTLog", details, "Restored" );
 
 				Promise<Void> oldLog;
 				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog );
@@ -598,7 +606,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				if(tlog.isReady()) {
 					tlog = oldLog.getFuture() || tl;
 				}
-				errorForwarders.add( forwardError( errors, "TLog", s.storeID, tl ) );
+				errorForwarders.add( forwardError( errors, "SharedTLog", s.storeID, tl ) );
 			}
 		}
 
@@ -616,7 +624,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					Reference<IAsyncFile> checkFile = wait( IAsyncFileSystem::filesystem()->open( joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600 ) );
 					Void _ = wait( checkFile->sync() );
 				}
-			
+
 				if(g_network->isSimulated()) {
 					TraceEvent("SimulatedReboot").detail("Deletion", rebootReq.deleteData );
 					if( rebootReq.deleteData ) {
@@ -655,9 +663,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
 					details["StorageEngine"] = req.storeType.toString();
-					
+
 					//FIXME: start role for every tlog instance, rather that just for the shared actor, also use a different role type for the shared actor
-					startRole( logId, interf.id(), "TLog", details );
+					startRole( logId, interf.id(), "SharedTLog", details );
 
 					std::string filename = filenameFromId( req.storeType, folder, fileLogDataPrefix.toString(), logId );
 					IKeyValueStore* data = openKVStore( req.storeType, filename, logId, memoryLimit );
@@ -667,7 +675,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>() );
 					tlog = handleIOErrors( tlog, data, logId );
 					tlog = handleIOErrors( tlog, queue, logId );
-					errorForwarders.add( forwardError( errors, "TLog", logId, tlog ) );
+					errorForwarders.add( forwardError( errors, "SharedTLog", logId, tlog ) );
 				}
 			}
 			when( InitializeStorageRequest req = waitNext(interf.storage.getFuture()) ) {
@@ -815,6 +823,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 		endRole(interf.id(), "Worker", "WorkerError", ok, e);
 		errorForwarders.clear(false);
+		tlog = Void();
 
 		if (e.code() != error_code_actor_cancelled) { // We get cancelled e.g. when an entire simulation times out, but in that case we won't be restarted and don't need to wait for shutdown
 			stopping.send(Void());

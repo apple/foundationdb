@@ -136,12 +136,14 @@ copy "$(TargetPath)" "modules\$(NodeVersionDir)\fdblib.node"
     <ClCompile Include="src\Cluster.cpp" />
     <ClCompile Include="src\FdbV8Wrapper.cpp" />
     <ClCompile Include="src\FdbOptions.cpp" />
+    <ClCompile Include="src\FdbUtil.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Cluster.h" />
     <ClInclude Include="src\Database.h" />
     <ClInclude Include="src\FdbError.h" />
     <ClInclude Include="src\FdbOptions.h" />
+    <ClInclude Include="src\FdbUtil.h" />
     <ClInclude Include="src\NodeCallback.h" />
     <ClInclude Include="src\Transaction.h" />
     <ClInclude Include="src\Version.h" />

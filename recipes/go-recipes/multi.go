@@ -24,10 +24,10 @@ import (
 	"fmt"
 	//"log"
 	//"time"
-	"github.com/FoundationDB/fdb-go/fdb"
-	"github.com/FoundationDB/fdb-go/fdb/directory"
-	"github.com/FoundationDB/fdb-go/fdb/subspace"
-	"github.com/FoundationDB/fdb-go/fdb/tuple"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 func clear_subspace(db fdb.Transactor, ss subspace.Subspace) {
@@ -70,21 +70,21 @@ func (multi MultiMap) MultiSubtract(trtr fdb.Transactor, index, value interface{
 }
 
 func (multi MultiMap) MultiGet(tr fdb.ReadTransactor, index int) (ret []interface{}, e error) {
-        _, e = tr.ReadTransact(func(tr fdb.ReadTransaction) (interface{}, error) {
-                pr, err := fdb.PrefixRange(multi.MapSS.Pack(tuple.Tuple{index}))
-                if err != nil {return nil, err}
-                kvs := tr.GetRange(pr, fdb.RangeOptions{0, -1, false}).GetSliceOrPanic()
-                ret := make([]interface{}, len(kvs))
-                i := 0
-                for _, kv := range kvs {
-                        temp, err := multi.MapSS.Unpack(kv.Key)
-                        if err != nil {return nil, err}
-                        ret[i] = temp[1]
-                        i++
-                }
-                return nil, nil
-        })
-        return
+	_, e = tr.ReadTransact(func(tr fdb.ReadTransaction) (interface{}, error) {
+		pr, err := fdb.PrefixRange(multi.MapSS.Pack(tuple.Tuple{index}))
+		if err != nil {return nil, err}
+		kvs := tr.GetRange(pr, fdb.RangeOptions{0, -1, false}).GetSliceOrPanic()
+		ret := make([]interface{}, len(kvs))
+		i := 0
+		for _, kv := range kvs {
+			temp, err := multi.MapSS.Unpack(kv.Key)
+			if err != nil {return nil, err}
+			ret[i] = temp[1]
+			i++
+		}
+		return nil, nil
+	})
+	return
 }
 
 func (multi MultiMap) MultiGetCounts(trtr fdb.Transactor, index interface{}) (map[interface{}]int, error) {
@@ -124,7 +124,7 @@ func (multi MultiMap) MultiIsElement(trtr fdb.Transactor, index, value interface
 
 func main() {
 
-	fdb.MustAPIVersion(300)
+	fdb.MustAPIVersion(500)
 
 	db := fdb.MustOpenDefault()
 
@@ -144,8 +144,3 @@ func main() {
 	fmt.Println(m.MultiIsElement(db, 1, 2))
 	fmt.Println(m.MultiGetCounts(db, 1))
 }
-
-
-
-
-

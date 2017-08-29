@@ -268,6 +268,7 @@ public:
 		}
 
 		lastFileSize = nextFileSize = size;
+
 		return Void();
 	}
 
@@ -503,7 +504,7 @@ private:
 		}
 
 		void setIOTimeout(double timeout) {
-			ioTimeout = timeout;
+			ioTimeout = fabs(timeout);
 			timeoutWarnOnly = timeout < 0;
 		}
 
@@ -550,6 +551,7 @@ private:
 	static Context ctx;
 
 	explicit AsyncFileKAIO(int fd, int flags, std::string const& filename) : fd(fd), flags(flags), filename(filename), failed(false) {
+
 		if( !g_network->isSimulated() ) {
 			countFileLogicalWrites.init(LiteralStringRef("AsyncFile.CountFileLogicalWrites"), filename);
 			countFileLogicalReads.init( LiteralStringRef("AsyncFile.CountFileLogicalReads"), filename);

@@ -37,6 +37,7 @@
 #include "AsyncFileKAIO.actor.h"
 #include "flow/AsioReactor.h"
 #include "flow/Platform.h"
+#include "AsyncFileWriteChecker.h"
 
 // Opens a file for asynchronous I/O
 Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename, int64_t flags, int64_t mode )
@@ -54,12 +55,17 @@ Future< Reference<class IAsyncFile> > Net2FileSystem::open( std::string filename
 	if ( (flags & IAsyncFile::OPEN_EXCLUSIVE) ) ASSERT( flags & IAsyncFile::OPEN_CREATE );
 	if (!(flags & IAsyncFile::OPEN_UNCACHED))
 		return AsyncFileCached::open(filename, flags, mode);
+
+	Future<Reference<IAsyncFile>> f;
 #ifdef __linux__
 	if ( (flags & IAsyncFile::OPEN_UNBUFFERED) && !(flags & IAsyncFile::OPEN_NO_AIO) )
-		return AsyncFileKAIO::open(filename, flags, mode, NULL);
+		f = AsyncFileKAIO::open(filename, flags, mode, NULL);
+	else
 #endif
-
-	return Net2AsyncFile::open(filename, flags, mode, static_cast<boost::asio::io_service*> ((void*) g_network->global(INetwork::enASIOService)));
+	f = Net2AsyncFile::open(filename, flags, mode, static_cast<boost::asio::io_service*> ((void*) g_network->global(INetwork::enASIOService)));
+	if(FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
+		f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+	return f;
 }
 
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.

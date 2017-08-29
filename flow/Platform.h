@@ -372,11 +372,13 @@ dev_t getDeviceId(std::string path);
 
 // Version of CLang bundled with XCode doesn't yet include ia32intrin.h.
 #ifdef __APPLE__
+#if !(__has_builtin(__rdtsc))
 inline static uint64_t __rdtsc() {
 	uint64_t lo, hi;
 	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
 	return( lo | (hi << 32) );
 }
+#endif
 #endif
 
 #ifdef _WIN32

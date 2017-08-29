@@ -107,6 +107,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_NOBOX,                "-q",                          SO_NONE },
 	{ OPT_NOBOX,                "--no_dialog",                 SO_NONE },
 #endif
+	{ OPT_KVFILE,               "--kvfile",                    SO_REQ_SEP },
 	{ OPT_TESTFILE,             "-f",                          SO_REQ_SEP },
 	{ OPT_TESTFILE,             "--testfile",                  SO_REQ_SEP },
 	{ OPT_RESTARTING,           "-R",                          SO_NONE },
@@ -817,7 +818,7 @@ int main(int argc, char* argv[]) {
 
 		//Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
-
+		
 		std::string commandLine;
 		for (int a = 0; a<argc; a++) {
 			if (a) commandLine += ' ';
@@ -1439,7 +1440,7 @@ int main(int argc, char* argv[]) {
 		// Initialize the thread pool
 		CoroThreadPool::init();
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
-		TraceEvent::setNetworkThread();
+		TraceEvent::setNetworkThread(); 
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();

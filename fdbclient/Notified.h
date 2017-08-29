@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#ifndef FLOW_NOTIFIED_H
-#define FLOW_NOTIFIED_H
+#ifndef FDBCLIENT_NOTIFIED_H
+#define FDBCLIENT_NOTIFIED_H
 #pragma once
 
-#include "fdbclient/FDBTypes.h"
+#include "FDBTypes.h"
 #include "flow/TDMetric.actor.h"
 
 struct NotifiedVersion {

@@ -64,27 +64,41 @@ public:
 
 		uint64_t fault_injection_r;
 		double fault_injection_p1, fault_injection_p2;
-		bool io_timeout_injected;
 
 		ProcessInfo(const char* name, LocalityData locality, ProcessClass startingClass, NetworkAddress address,
 					INetworkConnections *net, const char* dataFolder, const char* coordinationFolder )
 			: name(name), locality(locality), startingClass(startingClass), address(address), dataFolder(dataFolder),
 				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0), io_timeout_injected(false)
-		{}
+				fault_injection_r(0), machine(0) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
 		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
 		bool isAvailable() const { return !excluded && isReliable(); }
 
+		// Returns true if the class represents an acceptable worker
+		bool isAvailableClass() const {
+			switch (startingClass._class) {
+				case ProcessClass::UnsetClass: return true;
+				case ProcessClass::StorageClass: return true;
+				case ProcessClass::TransactionClass: return true;
+				case ProcessClass::ResolutionClass: return false;
+				case ProcessClass::ProxyClass: return false;
+				case ProcessClass::MasterClass: return false;
+				case ProcessClass::TesterClass: return false;
+				case ProcessClass::StatelessClass: return false;
+				case ProcessClass::LogClass: return true;
+				default: return false;
+			}
+		}
+
 		inline flowGlobalType global(int id) { return (globals.size() > id) ? globals[id] : NULL; };
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
-			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder); }
+			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s  excluded: %d",
+			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder, excluded); }
 
 		// Members not for external use
 		Promise<KillType> shutdownSignal;
@@ -94,6 +108,7 @@ public:
 		ProcessInfo* machineProcess;
 		std::vector<ProcessInfo*> processes;
 		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
+		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>>	zoneId;
 
@@ -134,6 +149,84 @@ public:
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual void displayWorkers() const;
+
+	virtual void addRole(NetworkAddress const& address, std::string const& role) {
+		roleAddresses[address][role] ++;
+		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("Roles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
+	}
+
+	virtual void removeRole(NetworkAddress const& address, std::string const& role) {
+		auto addressIt = roleAddresses.find(address);
+		if (addressIt != roleAddresses.end()) {
+			auto rolesIt = addressIt->second.find(role);
+			if (rolesIt != addressIt->second.end()) {
+				if (rolesIt->second > 1) {
+					rolesIt->second --;
+					TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", rolesIt->second).detail("Result", "Decremented Role");
+				}
+				else {
+					addressIt->second.erase(rolesIt);
+					if (addressIt->second.size()) {
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", 0).detail("Result", "Removed Role");
+					}
+					else {
+						roleAddresses.erase(addressIt);
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", 0).detail("Value", 0).detail("Result", "Removed Address");
+					}
+				}
+			}
+			else {
+				TraceEvent(SevWarn,"RoleRemove").detail("Address", address).detail("Role", role).detail("Result", "Role Missing");
+			}
+		}
+		else {
+			TraceEvent(SevWarn,"RoleRemove").detail("Address", address).detail("Role", role).detail("Result", "Address Missing");
+		}
+	}
+
+	virtual std::string getRoles(NetworkAddress const& address, bool skipWorkers = true) const {
+		auto addressIt = roleAddresses.find(address);
+		std::string roleText;
+		if (addressIt != roleAddresses.end()) {
+			for (auto& roleIt : addressIt->second) {
+				if ((!skipWorkers) || (roleIt.first != "Worker"))
+					roleText += roleIt.first + ((roleIt.second > 1) ? format("-%d ", roleIt.second) : " ");
+			}
+		}
+		if (roleText.empty())
+				roleText = "[unset]";
+		return roleText;
+	}
+
+	virtual void excludeAddress(NetworkAddress const& address) {
+		excludedAddresses[address]++;
+		TraceEvent("ExcludeAddress").detail("Address", address).detail("Value", excludedAddresses[address]);
+	}
+
+	virtual void includeAddress(NetworkAddress const& address) {
+		auto addressIt = excludedAddresses.find(address);
+		if (addressIt != excludedAddresses.end()) {
+			if (addressIt->second > 1) {
+				addressIt->second --;
+				TraceEvent("IncludeAddress").detail("Address", address).detail("Value", addressIt->second).detail("Result", "Decremented");
+			}
+			else {
+				excludedAddresses.erase(addressIt);
+				TraceEvent("IncludeAddress").detail("Address", address).detail("Value", 0).detail("Result", "Removed");
+			}
+		}
+		else {
+			TraceEvent(SevWarn,"IncludeAddress").detail("Address", address).detail("Result", "Missing");
+		}
+	}
+	virtual void includeAllAddresses() {
+		TraceEvent("IncludeAddressAll").detail("AddressTotal", excludedAddresses.size());
+		excludedAddresses.clear();
+	}
+	virtual bool isExcluded(NetworkAddress const& address) const {
+		return excludedAddresses.find(address) != excludedAddresses.end();
+	}
 
 	virtual void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
 		swapsDisabled.insert(zoneId);
@@ -201,6 +294,8 @@ protected:
 
 private:
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
+	std::map<NetworkAddress, int> excludedAddresses;
+	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
 	bool allSwapsDisabled;
 };
 

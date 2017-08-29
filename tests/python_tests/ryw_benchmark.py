@@ -42,8 +42,10 @@ class RYWBenchmark(PythonTest):
         'interleaved_sets_gets' : "RYW: interleaved sets and gets on a single key throughput",
     }
 
-    def __init__(self):
+    def __init__(self, key_count=10000, key_size=16):
         super(RYWBenchmark, self).__init__()
+        self.key_count = key_count
+        self.key_size = key_size
 
     def run_test(self):
         try:
@@ -60,6 +62,9 @@ class RYWBenchmark(PythonTest):
             raise
         except:
             self.result.add_error(self.get_error('Failed to complete all tests'))
+
+    def key(self, num):
+        return '%0*d' % (self.key_size, num)
 
     #Adds the stack trace to an error message
     def get_error(self, message):
@@ -102,44 +107,45 @@ class RYWBenchmark(PythonTest):
                 self.result.add_kpi(RYWBenchmark.tests[test], int(median), 'keys/s')
 
     def insert_data(self, tr):
+        del tr[:]
         for i in range(0, 10000):
-            tr[str(i)] = 'foo'
+            tr[self.key(i)] = 'foo'
 
     def run_get_single(self, tr, count=10000):
       start = time.time()
       for i in range(count):
-        tr.get("5001").wait()
+        tr.get(self.key(5001)).wait()
       return count / (time.time() - start)
 
     def run_get_many_sequential(self, tr, count=10000):
       start = time.time()
       for j in range(count):
-        tr.get(str(j)).wait()
+        tr.get(self.key(j)).wait()
       return count / (time.time() - start)
 
-    def run_get_range_basic(self, tr, count=1000):
+    def run_get_range_basic(self, tr, count=100):
       start = time.time()
       for i in range(count):
-        list(tr.get_range(str(0), str(10000)))
-      return 10000 * count / (time.time() - start)
+        list(tr.get_range(self.key(0), self.key(self.key_count)))
+      return self.key_count * count / (time.time() - start)
 
-    def run_single_clear_get_range(self, tr, count=1000):
-      for i in range(0, 10000, 2):
-        tr.clear(str(i))
+    def run_single_clear_get_range(self, tr, count=100):
+      for i in range(0, self.key_count, 2):
+        tr.clear(self.key(i))
       start = time.time()
       for i in range(0, count):
-        list(tr.get_range(str(0), str(10000)))
-      kpi = 10000 * count / (time.time() - start)
+        list(tr.get_range(self.key(0), self.key(self.key_count)))
+      kpi = self.key_count * count / 2 / (time.time() - start)
       self.insert_data(tr)
       return kpi
 
-    def run_clear_range_get_range(self, tr, count=1000):
-      for i in range(0, 10000, 4):
-        tr.clear_range(str(i), str(i+1))
+    def run_clear_range_get_range(self, tr, count=100):
+      for i in range(0, self.key_count, 4):
+        tr.clear_range(self.key(i), self.key(i+1))
       start = time.time()
       for i in range(0, count):
-        list(tr.get_range(str(0), str(10000)))
-      kpi = 10000 * count / (time.time() - start)
+        list(tr.get_range(self.key(0), self.key(self.key_count)))
+      kpi = self.key_count * count * 3 / 4 / (time.time() - start)
       self.insert_data(tr)
       return kpi
 

@@ -76,7 +76,11 @@ extern "C" int dl_iterate_phdr(
     } else {
         // This path is NOT async signal safe, and serves until and unless initSignalSafeUnwind() is called
         initChain();
-        return chain_dl_iterate_phdr(callback, data);
+
+		setProfilingEnabled(0);
+        int result = chain_dl_iterate_phdr(callback, data);
+		setProfilingEnabled(1);
+		return result;
     }
 }
 

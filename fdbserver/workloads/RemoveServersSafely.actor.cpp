@@ -68,9 +68,11 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			AddressExclusion machineIp(it->address.ip);
 			AddressExclusion pAddr(it->address.ip, it->address.port);
 
-			processAddrs.push_back(pAddr);
 			TraceEvent("RemoveAndKill").detail("Step", "listAddresses")
 				.detail("Address", pAddr.toString()).detail("Process",describe(*it));
+
+			if (g_simulator.protectedAddresses.count(it->address) == 0)
+				processAddrs.push_back(pAddr);
 			machineProcesses[machineIp].insert(pAddr);
 
 			// add only one entry for each machine
@@ -149,6 +151,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	{
 		std::vector<ISimulator::ProcessInfo*>	processes;
 		std::set<AddressExclusion>	processAddrs;
+		UID functionId = g_nondeterministic_random->randomUniqueID();
 
 		// Get the list of process network addresses
 		for (auto& netAddr : netAddrs) {
@@ -165,59 +168,112 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		// Get the list of processes matching network address
 		for (auto processInfo : g_simulator.getAllProcesses()) {
 			auto processNet = AddressExclusion(processInfo->address.ip, processInfo->address.port);
-			if (processAddrs.find(processNet) != processAddrs.end())
+			if (processAddrs.find(processNet) != processAddrs.end()) {
 				processes.push_back(processInfo);
+				TraceEvent("RemoveAndKill", functionId).detail("Step", "getProcessItem").detail("ProcessAddress", processInfo->address).detail("Process", describe(*processInfo)).detail("failed", processInfo->failed).detail("excluded", processInfo->excluded).detail("rebooting", processInfo->rebooting).detail("Protected", g_simulator.protectedAddresses.count(processInfo->address));
+			}
+			else {
+				TraceEvent("RemoveAndKill", functionId).detail("Step", "getProcessNoItem").detail("ProcessAddress", processInfo->address).detail("Process", describe(*processInfo)).detail("failed", processInfo->failed).detail("excluded", processInfo->excluded).detail("rebooting", processInfo->rebooting).detail("Protected", g_simulator.protectedAddresses.count(processInfo->address));
+			}
 		}
-		TraceEvent("RemoveAndKill").detail("Step", "getProcesses")
+		TraceEvent("RemoveAndKill", functionId).detail("Step", "getProcesses")
+			.detail("netAddrSize",netAddrs.size()).detail("processAddrSize",processAddrs.size())
 			.detail("netAddrs",describe(netAddrs)).detail("processAddrs",describe(processAddrs))
 			.detail("Proceses", processes.size()).detail("MachineProcesses", machineProcesses.size());
 
-		// Processes may have been destroyed causing
-//		ASSERT(processAddrs.size() == processes.size());
 		return processes;
+	}
+
+	virtual std::vector<ISimulator::ProcessInfo*> excludeAddresses(std::set<AddressExclusion> const& procAddrs)
+	{
+		// Get the updated list of processes which may have changed due to reboots, deletes, etc
+		std::vector<ISimulator::ProcessInfo*>	procArray = getProcesses(procAddrs);
+
+		// Include all of the excluded machines because the first command of the next section is includeall
+		TraceEvent("RemoveAndKill").detail("Step", "exclude addresses").detail("AddrTotal", procAddrs.size()).detail("ProcTotal", procArray.size()).detail("Addresses", describe(procAddrs)).detail("ClusterAvailable", g_simulator.isAvailable());
+		for (auto& procAddr : procAddrs) {
+			g_simulator.excludeAddress(NetworkAddress(procAddr.ip, procAddr.port, true, false));
+		}
+		for (auto& procRecord : procArray) {
+			procRecord->excluded = true;
+			TraceEvent("RemoveAndKill").detail("Step", "ExcludeAddress").detail("ProcessAddress", procRecord->address).detail("Process", describe(*procRecord)).detail("failed", procRecord->failed).detail("rebooting", procRecord->rebooting).detail("ClusterAvailable", g_simulator.isAvailable());
+		}
+		return procArray;
+	}
+
+	virtual std::vector<ISimulator::ProcessInfo*> includeAddresses(std::set<AddressExclusion> const& procAddrs)
+	{
+		// Get the updated list of processes which may have changed due to reboots, deletes, etc
+		std::vector<ISimulator::ProcessInfo*>	procArray = getProcesses(procAddrs);
+
+		// Include all of the excluded machines because the first command of the next section is includeall
+		TraceEvent("RemoveAndKill").detail("Step", "include addresses").detail("AddrTotal", procAddrs.size()).detail("ProcTotal", procArray.size()).detail("Addresses", describe(procAddrs)).detail("ClusterAvailable", g_simulator.isAvailable());
+		for (auto& procAddr : procAddrs) {
+			g_simulator.includeAddress(NetworkAddress(procAddr.ip, procAddr.port, true, false));
+		}
+		for (auto& procRecord : procArray) {
+			// Only change the exclusion member, if not failed since it will require a reboot to revive it
+			if (!procRecord->failed)
+				procRecord->excluded = false;
+			TraceEvent("RemoveAndKill").detail("Step", "IncludeAddress").detail("ProcessAddress", procRecord->address).detail("Process", describe(*procRecord)).detail("failed", procRecord->failed).detail("rebooting", procRecord->rebooting).detail("ClusterAvailable", g_simulator.isAvailable());
+		}
+		return procArray;
 	}
 
 	virtual std::vector<ISimulator::ProcessInfo*> protectServers(std::set<AddressExclusion> const& killAddrs)
 	{
 		std::vector<ISimulator::ProcessInfo*>	processes;
 		std::set<AddressExclusion>	processAddrs;
-		std::vector<ISimulator::ProcessInfo*>	killProcesses, killableProcesses, processesLeft, processesDead;
+		std::vector<AddressExclusion> killableAddrs;
+		std::vector<ISimulator::ProcessInfo*>	killProcArray, killableProcesses, processesLeft, processesDead;
 
 		// Get the list of processes matching network address
-		for (auto processInfo : getProcesses(killAddrs)) {
-			// Add non-test processes
-			if (processInfo->startingClass != ProcessClass::TesterClass) {
-				if (g_simulator.protectedAddresses.count(processInfo->address))
-					processesLeft.push_back(processInfo);
-				// Add reliable machine processes to available group
-				else if (processInfo->isAvailable())
-					processesLeft.push_back(processInfo);
-				else
-					processesDead.push_back(processInfo);
-			}
+		for (auto processInfo : getServers()) {
+			auto processNet = AddressExclusion(processInfo->address.ip, processInfo->address.port);
+			// Mark all of the unavailable as dead
+			if (!processInfo->isAvailable())
+				processesDead.push_back(processInfo);
+			// Save all processes not specified within set
+			else if (killAddrs.find(processNet) == killAddrs.end())
+				processesLeft.push_back(processInfo);
+			else
+				killProcArray.push_back(processInfo);
 		}
-		killProcesses = processesLeft;
 
 		// Identify the largest set of processes which can be killed
-		int	kills, randomIndex;
-		for (int kills = 0; kills < killProcesses.size(); kills ++)
+		int	randomIndex;
+		bool bCanKillProcess;
+		ISimulator::ProcessInfo*	randomProcess;
+		auto deadProcess = processesDead.back();
+		for (int killsLeft = killProcArray.size(); killsLeft > 0; killsLeft --)
 		{
 			// Select a random kill process
-			randomIndex = g_random->randomInt(0, killProcesses.size());
-			processesDead.push_back(killProcesses[randomIndex]);
-			killProcesses[randomIndex] = killProcesses.back();
-			killProcesses.pop_back();
-			processesLeft.insert(processesLeft.end(), killProcesses.begin(), killProcesses.end());
+			randomIndex = g_random->randomInt(0, killsLeft);
+			randomProcess = killProcArray[randomIndex];
+			processesDead.push_back(randomProcess);
+			killProcArray[randomIndex] = killProcArray.back();
+			killProcArray.pop_back();
+			// Add all of the remaining processes the leftover array
+			processesLeft.insert(processesLeft.end(), killProcArray.begin(), killProcArray.end());
 
-			if (g_simulator.canKillProcesses(processesLeft, processesLeft, ISimulator::KillInstantly, NULL)) {
-				killableProcesses.push_back(processesDead.back());
+			// Check if we can kill the added process
+			bCanKillProcess = g_simulator.canKillProcesses(processesLeft, processesDead, ISimulator::KillInstantly, NULL);
+
+			// Remove the added processes
+			processesLeft.resize(processesLeft.size() - killProcArray.size());
+
+			if (bCanKillProcess) {
+				killableProcesses.push_back(randomProcess);
+				killableAddrs.push_back(AddressExclusion(randomProcess->address.ip, randomProcess->address.port));
+				TraceEvent("RemoveAndKill").detail("Step", "identifyVictim")
+					.detail("VictimCount", killableAddrs.size()).detail("Victim",randomProcess->toString())
+					.detail("Victims", describe(killableAddrs));
 			}
+			// Move the process to the keep array
 			else {
-				processesLeft.push_back(processesDead.back());
+				processesLeft.push_back(randomProcess);
 				processesDead.pop_back();
 			}
-			// Remove the added processes
-			processesLeft.resize(processesLeft.size() - killProcesses.size());
 		}
 
 		return killableProcesses;
@@ -229,217 +285,155 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		// Removing the first set of machines might legitimately bring the database down, so a timeout is not an error
 		state std::vector<NetworkAddress> firstCoordinators;
-		state std::vector<ISimulator::ProcessInfo*>	killProcesses;
+		state std::vector<ISimulator::ProcessInfo*>	killProcArray;
+		state bool bClearedFirst;
 
-		TraceEvent("RemoveAndKill").detail("Step", "remove first list").detail("toKill1", describe(toKill1)).detail("KillTotal", toKill1.size())
-			.detail("ClusterAvailable", g_simulator.isAvailable());
-		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, &firstCoordinators ), self->kill1Timeout ) );
+		TraceEvent("RemoveAndKill").detail("Step", "exclude list first").detail("toKill", describe(toKill1)).detail("KillTotal", toKill1.size()).detail("ClusterAvailable", g_simulator.isAvailable());
+		self->excludeAddresses(toKill1);
 
-		TraceEvent("RemoveAndKill").detail("Step", "remove result").detail("result", result.present() ? "succeeded" : "failed");
-		killProcesses = self->getProcesses(toKill1);
-		TraceEvent("RemoveAndKill").detail("Step", "unexclude first processes").detail("toKill1", describe(toKill1))
-			.detail("KillTotal", toKill1.size()).detail("Processes", killProcesses.size());
-		for (auto& killProcess : killProcesses) {
-			killProcess->excluded = false;
+		Optional<Void> result = wait( timeout( removeAndKill( self, cx, toKill1, NULL), self->kill1Timeout ) );
+
+		bClearedFirst = result.present();
+
+		TraceEvent("RemoveAndKill").detail("Step", "excluded list first").detail("excluderesult", bClearedFirst ? "succeeded" : "failed").detail("KillTotal", toKill1.size()).detail("Processes", killProcArray.size()).detail("toKill1", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
+
+		bClearedFirst=false;
+		// Include the servers, if unable to exclude
+		if (!bClearedFirst) {
+			// Get the updated list of processes which may have changed due to reboots, deletes, etc
+			TraceEvent("RemoveAndKill").detail("Step", "include all first").detail("KillTotal", toKill1.size()).detail("toKill", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
+			Void _ = wait( includeServers( cx, vector<AddressExclusion>(1) ) );
+			self->includeAddresses(toKill1);
+			TraceEvent("RemoveAndKill").detail("Step", "included all first").detail("KillTotal", toKill1.size()).detail("toKill", describe(toKill1)).detail("ClusterAvailable", g_simulator.isAvailable());
 		}
 
-		//	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool killIsSafe = false, bool forceKill = false ) = 0;
-		//	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) = 0;
-
-		// Identify the unique machines within kill list
-		//		Remove any machine with a protected process (ie coordinator)
-		// Check if we can remove the machines and still have a healthy cluster
-		// 		If not, remove one random machine at a time until we have healthy cluster
-		// Mark all of the processes protected, store the list of modified processes
-		// Exclude the machines
-		// Remove the machines Kill instantly
-		// Unprotect the changed processes
-		killProcesses = self->protectServers(toKill2);
+		// Get the list of protected servers
+		killProcArray = self->protectServers(toKill2);
 
 		// Update the kill networks to the killable processes
-		toKill2 = self->getNetworks(killProcesses);
+		toKill2 = self->getNetworks(killProcArray);
+
+		TraceEvent("RemoveAndKill").detail("Step", "exclude list second").detail("KillTotal", toKill2.size()).detail("toKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
+		self->excludeAddresses(toKill2);
 
 		// The second set of machines is selected so that we can always make progress without it, even after the permitted number of other permanent failures
 		// so we expect to succeed after a finite amount of time
 		state Future<Void> disabler = disableConnectionFailuresAfter( self->kill2Timeout/2, "RemoveServersSafely" );
-		TraceEvent("RemoveAndKill").detail("Step", "remove second list").detail("toKill2", describe(toKill2)).detail("KillTotal", toKill2.size())
-			.detail("Processes", killProcesses.size()).detail("ClusterAvailable", g_simulator.isAvailable());
-		Void _ = wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, NULL, firstCoordinators), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
+		TraceEvent("RemoveAndKill").detail("Step", "exclude second list").detail("toKill2", describe(toKill2)).detail("KillTotal", toKill2.size())
+			.detail("Processes", killProcArray.size()).detail("ClusterAvailable", g_simulator.isAvailable());
+		Void _ = wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : NULL), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );
 
-		killProcesses = self->getProcesses(toKill2);
-		TraceEvent("RemoveAndKill").detail("Step", "unexclude second processes").detail("toKill2", describe(toKill2))
-			.detail("KillTotal", toKill2.size()).detail("Processes", killProcesses.size());
-		for (auto& killProcess : killProcesses) {
-			killProcess->excluded = false;
+		TraceEvent("RemoveAndKill").detail("Step", "excluded second list").detail("KillTotal", toKill1.size()).detail("toKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
+
+		// Reinclude all of the machine, if buggified
+		if (BUGGIFY) {
+			// Get the updated list of processes which may have changed due to reboots, deletes, etc
+			TraceEvent("RemoveAndKill").detail("Step", "include all second").detail("KillTotal", toKill1.size()).detail("toKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
+			Void _ = wait( includeServers( cx, vector<AddressExclusion>(1) ) );
+			self->includeAddresses(toKill2);
+			TraceEvent("RemoveAndKill").detail("Step", "included all second").detail("KillTotal", toKill1.size()).detail("toKill", describe(toKill2)).detail("ClusterAvailable", g_simulator.isAvailable());
 		}
-
-		TraceEvent("RemoveAndKill").detail("Step", "completed final remove").detail("KillTotal", toKill2.size()).detail("Excluded", killProcesses.size())
-			.detail("ClusterAvailable", g_simulator.isAvailable());
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> removeAndKill( RemoveServersSafelyWorkload* self, Database cx, std::set<AddressExclusion> toKill, std::vector<NetworkAddress>* outSafeCoordinators, std::vector<NetworkAddress> firstCoordinators = std::vector<NetworkAddress>())
+	virtual std::vector<ISimulator::ProcessInfo*> killAddresses(std::set<AddressExclusion> const& killAddrs)
 	{
-		// First clear the exclusion list and exclude the given list
-		TraceEvent("RemoveAndKill").detail("Step", "include all").detail("coordinators", describe(firstCoordinators)).detail("ClusterAvailable", g_simulator.isAvailable());
-		Void _ = wait( includeServers( cx, vector<AddressExclusion>(1) ) );
+		UID functionId = g_nondeterministic_random->randomUniqueID();
+		bool removeViaClear = !BUGGIFY;
+		std::vector<ISimulator::ProcessInfo*>	killProcArray;
+		std::vector<AddressExclusion>	toKillArray;
 
-		TraceEvent("RemoveAndKill").detail("Step", "getting coordinators").detail("ClusterAvailable", g_simulator.isAvailable());
+		std::copy(killAddrs.begin(), killAddrs.end(), std::back_inserter(toKillArray));
+		killProcArray = getProcesses(killAddrs);
 
-		std::vector<NetworkAddress> coordinators = wait( getCoordinators(cx) );
-		state std::vector<NetworkAddress> safeCoordinators;
-
-		TraceEvent("RemoveAndKill").detail("Step", "got coordinators").detail("coordinators", describe(coordinators));
-
-		ASSERT(coordinators.size() > (g_simulator.desiredCoordinators-1)/2);
-
-		if(firstCoordinators.size()) {
-			ASSERT(firstCoordinators.size() > (g_simulator.desiredCoordinators-1)/2);
-
-			//check that at least one coordinator from the first set is not excluded.
-			int firstSafeCount = 0;
-			for( auto it : firstCoordinators ) {
-				RemoveServersSafelyWorkload *tSelf = self;
-				if(std::none_of(toKill.begin(), toKill.end(), [tSelf, it](AddressExclusion exclusion){ return tSelf->killContainsProcess(exclusion, it); })) {
-					++firstSafeCount;
+		// Reboot and delete or kill the servers
+		if( killProcesses ) {
+			TraceEvent("RemoveAndKill", functionId).detail("Step", removeViaClear ? "ClearProcesses" : "IgnoreProcesses").detail("Addresses", describe(killAddrs))
+				.detail("Processes", killProcArray.size()).detail("ClusterAvailable", g_simulator.isAvailable()).detail("RemoveViaClear", removeViaClear);
+			for (auto& killProcess : killProcArray) {
+				if (g_simulator.protectedAddresses.count(killProcess->address))
+					TraceEvent("RemoveAndKill", functionId).detail("Step", "NoKill Process").detail("Process", describe(*killProcess)).detail("failed", killProcess->failed).detail("rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator.isAvailable()).detail("Protected", g_simulator.protectedAddresses.count(killProcess->address));
+				else if (removeViaClear) {
+					g_simulator.rebootProcess( killProcess, ISimulator::RebootProcessAndDelete);
+					TraceEvent("RemoveAndKill", functionId).detail("Step", "Clear Process").detail("Process", describe(*killProcess)).detail("failed", killProcess->failed).detail("rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator.isAvailable()).detail("Protected", g_simulator.protectedAddresses.count(killProcess->address));
 				}
-			}
-
-			int idx = g_random->randomInt(0, firstCoordinators.size());
-			int startIndex = idx;
-			while(firstSafeCount <= (g_simulator.desiredCoordinators-1)/2 ) {
-				//remove a random coordinator from the kill list
-				auto addr = firstCoordinators[idx];
-
-				int removedCount = 0;
-				for (auto it = toKill.begin(); it != toKill.end(); ) {
-					if(self->killContainsProcess(*it, firstCoordinators[idx])) {
-						toKill.erase(it++);
-						removedCount++;
-					}
-					else {
-						it ++;
-					}
-				}
-				if(removedCount >= 1) {
-					firstSafeCount++;
-				}
-
-				idx = (idx + 1) % firstCoordinators.size();
-				ASSERT(idx != startIndex || firstSafeCount > (g_simulator.desiredCoordinators-1)/2);
-			}
-		}
-
-		//check that at least one coordinator is not excluded.
-		int safeCount = 0;
-		for( auto it : coordinators ) {
-			RemoveServersSafelyWorkload *tSelf = self;
-			if(std::none_of(toKill.begin(), toKill.end(), [tSelf, it](AddressExclusion exclusion){ return tSelf->killContainsProcess(exclusion, it); })) {
-				safeCoordinators.push_back(it);
-				++safeCount;
-			}
-		}
-
-		int idx = g_random->randomInt(0, coordinators.size());
-		int startIndex = idx;
-		while(safeCount <= (g_simulator.desiredCoordinators-1)/2) {
-			//remove a random coordinator from the kill list
-			auto addr = coordinators[idx];
-
-			int removedCount = 0;
-			for (auto it = toKill.begin(); it != toKill.end(); ) {
-				if(self->killContainsProcess(*it, coordinators[idx])) {
-					toKill.erase(it++);
-					removedCount++;
-				}
+/*
 				else {
-					it ++;
+					g_simulator.killProcess( killProcess, ISimulator::KillInstantly );
+					TraceEvent("RemoveAndKill", functionId).detail("Step", "Kill Process").detail("Process", describe(*killProcess)).detail("failed", killProcess->failed).detail("rebooting", killProcess->rebooting).detail("ClusterAvailable", g_simulator.isAvailable()).detail("Protected", g_simulator.protectedAddresses.count(killProcess->address));
 				}
+*/
 			}
-			if (removedCount >= 1) {
-				TraceEvent("ProtectMachine").detail("Address", addr).detail("Coordinators", coordinators.size()).backtrace();
-				g_simulator.protectedAddresses.insert(addr);
-				safeCoordinators.push_back(addr);
-				safeCount++;
+		}
+		else {
+			std::set<Optional<Standalone<StringRef>>> zoneIds;
+			bool killedMachine;
+			for (auto& killProcess : killProcArray) {
+				zoneIds.insert(killProcess->locality.zoneId());
 			}
-
-			idx = (idx + 1) % coordinators.size();
-			ASSERT(idx != startIndex || safeCount > (g_simulator.desiredCoordinators-1)/2);
+			TraceEvent("RemoveAndKill", functionId).detail("Step", removeViaClear ? "ClearMachines" : "KillMachines").detail("Addresses", describe(killAddrs)).detail("Processes", killProcArray.size()).detail("Zones", zoneIds.size()).detail("ClusterAvailable", g_simulator.isAvailable());
+			for (auto& zoneId : zoneIds) {
+				killedMachine = g_simulator.killMachine( zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly, removeViaClear);
+				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill").detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine").detailext("ZoneId", zoneId).detail(removeViaClear ? "Cleared" : "Killed", killedMachine).detail("ClusterAvailable", g_simulator.isAvailable());
+			}
 		}
 
-		state std::vector<ISimulator::ProcessInfo*>	killProcesses;
+		return killProcArray;
+	}
 
-		killProcesses = self->getProcesses(toKill);
-		TraceEvent("RemoveAndKill").detail("Step", "exclude").detail("Addresses", describe(toKill))
-			.detail("AddressTotal", toKill.size()).detail("Processes", killProcesses.size())
-			.detail("SafeCount", safeCount).detail("ClusterAvailable", g_simulator.isAvailable());
-	//	ASSERT(toKill.size() == killProcesses.size());
-		for (auto& killProcess : killProcesses) {
-			killProcess->excluded = true;
-			TraceEvent("RemoveAndKill").detail("Step", "exclude process").detail("killProcess", describe(*killProcess));
+	ACTOR static Future<Void> removeAndKill( RemoveServersSafelyWorkload* self, Database cx, std::set<AddressExclusion> toKill, std::set<AddressExclusion>* pIncAddrs)
+	{
+		state UID functionId = g_nondeterministic_random->randomUniqueID();
+
+		// First clear the exclusion list and exclude the given list
+		TraceEvent("RemoveAndKill", functionId).detail("Step", "include all").detail("ClusterAvailable", g_simulator.isAvailable());
+		Void _ = wait( includeServers( cx, vector<AddressExclusion>(1) ) );
+		TraceEvent("RemoveAndKill", functionId).detail("Step", "included all").detail("ClusterAvailable", g_simulator.isAvailable());
+		// Reinclude the addresses that were excluded, if present
+		if (pIncAddrs) {
+			self->includeAddresses(*pIncAddrs);
 		}
 
+		state std::vector<ISimulator::ProcessInfo*>	killProcArray;
 		state std::vector<AddressExclusion>	toKillArray;
-		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
 
+		std::copy(toKill.begin(), toKill.end(), std::back_inserter(toKillArray));
+		killProcArray = self->getProcesses(toKill);
+
+		TraceEvent("RemoveAndKill", functionId).detail("Step", "Activate Server Exclusion").detail("KillAddrs", toKill.size()).detail("KillProcs", killProcArray.size()).detail("MissingProcs", toKill.size()!=killProcArray.size()).detail("toKill", describe(toKill)).detail("Addresses", describe(toKillArray)).detail("ClusterAvailable", g_simulator.isAvailable());
 		Void _ = wait( excludeServers( cx, toKillArray ) );
 
 		// We need to skip at least the quorum change if there's nothing to kill, because there might not be enough servers left
 		// alive to do a coordinators auto (?)
 		if (toKill.size()) {
 			// Wait for removal to be safe
-			TraceEvent("RemoveAndKill").detail("Step", "wait").detail("Addresses", describe(toKill));
+			TraceEvent("RemoveAndKill", functionId).detail("Step", "Wait For Server Exclusion").detail("Addresses", describe(toKill)).detail("ClusterAvailable", g_simulator.isAvailable());
 			Void _ = wait( waitForExcludedServers( cx, toKillArray ) );
 
-			// Change coordinators if necessary
-			TraceEvent("RemoveAndKill").detail("Step", "coordinators auto");
-			if(outSafeCoordinators != NULL) {
-				for(auto it : safeCoordinators) {
-					outSafeCoordinators->push_back(it);
-				}
-			}
+			TraceEvent("RemoveAndKill", functionId).detail("Step", "coordinators auto").detail("desiredCoordinators", g_simulator.desiredCoordinators).detail("ClusterAvailable", g_simulator.isAvailable());
+
+			// Setup the coordinators BEFORE the exclusion
+			// Otherwise, we may end up with NotEnoughMachinesForCoordinators
+			state int cycle=0;
+			state int nQuorum;
 			while (true) {
-				CoordinatorsResult::Type result = wait( changeQuorum( cx, autoQuorumChange(((g_simulator.desiredCoordinators+1)/2)*2-1) ) );
-				TraceEvent(result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES ? SevInfo : SevWarn, "RemoveAndKillQuorumChangeResult").detail("Step", "coordinators auto").detail("Result", (int)result);
+				cycle ++;
+				nQuorum = ((g_simulator.desiredCoordinators+1)/2)*2-1;
+				CoordinatorsResult::Type result = wait( changeQuorum( cx, autoQuorumChange(nQuorum) ) );
+				TraceEvent(result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES ? SevInfo : SevWarn, "RemoveAndKillQuorumChangeResult").detail("Step", "coordinators auto").detail("Result", (int)result).detail("attempt", cycle).detail("Quorum", nQuorum).detail("desiredCoordinators", g_simulator.desiredCoordinators);
 				if (result==CoordinatorsResult::SUCCESS || result==CoordinatorsResult::SAME_NETWORK_ADDRESSES)
 					break;
 			}
 
-			TraceEvent("RemoveAndKill").detail("Step", "unexclude before clear").detail("Processes", killProcesses.size());
-			for (auto& killProcess : killProcesses) {
-				killProcess->excluded = false;
-			}
-
-			// Reboot and delete the servers
-			if( self->killProcesses ) {
-				TraceEvent("RemoveAndKill").detail("Step", "ClearProcesses").detail("Addresses", describe(toKill))
-					.detail("Processes", killProcesses.size()).detail("ClusterAvailable", g_simulator.isAvailable());
-				for (auto& killProcess : killProcesses) {
-					TraceEvent("RemoveAndKill").detail("Step", "Clear Process").detail("Process", describe(*killProcess)).detail("ClusterAvailable", g_simulator.isAvailable()).detail("Protected", g_simulator.protectedAddresses.count(killProcess->address) == 0);
-					g_simulator.rebootProcess( killProcess, ISimulator::RebootProcessAndDelete );
-				}
-			}
-			else {
-				std::set<Optional<Standalone<StringRef>>> zoneIds;
-				bool killedMachine;
-				for (auto& killProcess : killProcesses) {
-					zoneIds.insert(killProcess->locality.zoneId());
-				}
-				TraceEvent("RemoveAndKill").detail("Step", "ClearMachines").detail("Addresses", describe(toKill)).detail("Processes", killProcesses.size()).detail("Zones", zoneIds.size()).detail("ClusterAvailable", g_simulator.isAvailable());
-				for (auto& zoneId : zoneIds) {
-					killedMachine = g_simulator.killMachine( zoneId, ISimulator::RebootAndDelete, true );
-					TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill").detail("Step", "Clear Machine").detailext("ZoneId", zoneId).detail("Cleared", killedMachine).detail("ClusterAvailable", g_simulator.isAvailable());
-				}
-			}
+			self->killAddresses(toKill);
 		}
 		else
 		{
-			TraceEvent("RemoveAndKill").detail("Step", "nothing to clear");
+			TraceEvent("RemoveAndKill", functionId).detail("Step", "nothing to clear").detail("ClusterAvailable", g_simulator.isAvailable());
 		}
 
-		TraceEvent("RemoveAndKill").detail("Step", "done")
-			.detail("ClusterAvailable", g_simulator.isAvailable());
+		TraceEvent("RemoveAndKill", functionId).detail("Step", "done").detail("ClusterAvailable", g_simulator.isAvailable());
 
 		return Void();
 	}
@@ -448,7 +442,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		vector<ISimulator::ProcessInfo*> machines;
 		vector<ISimulator::ProcessInfo*> all = g_simulator.getAllProcesses();
 		for(int i = 0; i < all.size(); i++)
-			if (all[i]->name == std::string("Server") && all[i]->startingClass != ProcessClass::TesterClass )
+			if (all[i]->name == std::string("Server") && all[i]->isAvailableClass())
 				machines.push_back( all[i] );
 		return machines;
 	}

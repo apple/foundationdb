@@ -680,7 +680,7 @@ struct TimeDescriptor {
 };
 
 struct BaseMetric {
-	BaseMetric(MetricNameRef const &name) : metricName(name), pCollection(nullptr), registered(false) {
+	BaseMetric(MetricNameRef const &name) : metricName(name), pCollection(nullptr), registered(false), enabled(false) {
 		setConfig(false);
 	}
 	virtual ~BaseMetric() {

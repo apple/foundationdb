@@ -298,11 +298,11 @@ public:
 				.detail("File0Size", self->files[0].size).detail("File1Size", self->files[1].size)
 				.detail("File0Name", self->files[0].dbgFilename).detail("SyncedFiles", syncFiles.size());*/
 
-			committed.send(Void());
 			if(g_random->random01() < 0.01) {
 				//occasionally delete all the ready future in the AndFuture
 				self->lastCommit.cleanup();
 			}
+			committed.send(Void());
 		} catch (Error& e) {
 			delete pageMem;
 			TEST(true);  // push error
@@ -405,8 +405,8 @@ public:
 				TraceEvent("DiskQueueShutdownDeleting", self->dbgid)
 					.detail("File0", self->filename(0))
 					.detail("File1", self->filename(1));
-				Void _ = wait( IAsyncFileSystem::filesystem()->deleteFile( self->filename(0), false ) );
-				Void _ = wait( IAsyncFileSystem::filesystem()->deleteFile( self->filename(1), true ) );
+				Void _ = wait( IAsyncFile::incrementalDelete( self->filename(0), false ) );
+				Void _ = wait( IAsyncFile::incrementalDelete( self->filename(1), true ) );
 			}
 			TraceEvent("DiskQueueShutdownComplete", self->dbgid)
 				.detail("DeleteFiles", deleteFiles)
@@ -419,8 +419,8 @@ public:
 		}
 
 		if( error.code() != error_code_actor_cancelled ) {
-			if (!self->stopped.isSet()) self->stopped.send(Void());
-			if (!self->error.isSet()) self->error.send(Never());
+			if (self->stopped.canBeSet()) self->stopped.send(Void());
+			if (self->error.canBeSet()) self->error.send(Never());
 			delete self;
 		}
 	}

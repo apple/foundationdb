@@ -64,7 +64,6 @@
     <ClInclude Include="network.h" />
     <ClInclude Include="AsioReactor.h" />
     <ClInclude Include="Net2Packet.h" />
-    <ClInclude Include="Notified.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="no_intellisense.opt" />

@@ -218,6 +218,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 		std::vector<LocalityData>							unavailableLocals;
 		LocalitySetRef																					logServerSet;
 		LocalityMap<std::pair<WorkerInterface, ProcessClass>>*	logServerMap;
+		UID 		functionId = g_nondeterministic_random->randomUniqueID();
 		bool		bCompleted = false;
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<std::pair<WorkerInterface, ProcessClass>>());
@@ -230,7 +231,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			}
 			else {
 				if (it.second.interf.locality.dataHallId().present())
-					TraceEvent(SevWarn,"GWFTADNotAvailable", id)
+					TraceEvent(SevWarn,"GWFTADNotAvailable", functionId)
 						.detail("Fitness", fitness)
 						.detailext("Zone", it.second.interf.locality.zoneId())
 						.detailext("DataHall", it.second.interf.locality.dataHallId())
@@ -243,7 +244,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 						.detail("Locality", it.second.interf.locality.toString())
 						.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
 						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-						.detail("DesiredLogs", conf.getDesiredLogs());
+						.detail("DesiredLogs", conf.getDesiredLogs())
+						.detail("InterfaceId", id);
 				unavailableLocals.push_back(it.second.interf.locality);
 			}
 		}
@@ -258,12 +260,13 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 				logServerMap->add(worker.first.locality, &worker);
 			}
 			if (logServerSet->size() < conf.tLogReplicationFactor) {
-				TraceEvent(SevWarn,"GWFTADTooFew", id)
+				TraceEvent(SevWarn,"GWFTADTooFew", functionId)
 					.detail("Fitness", fitness)
 					.detail("Processes", logServerSet->size())
 					.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
 					.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-					.detail("DesiredLogs", conf.getDesiredLogs());
+					.detail("DesiredLogs", conf.getDesiredLogs())
+					.detail("InterfaceId", id);
 			}
 			else if (logServerSet->size() <= conf.getDesiredLogs()) {
 				ASSERT(conf.tLogPolicy);
@@ -275,12 +278,13 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 					break;
 				}
 				else {
-					TraceEvent(SevWarn,"GWFTADNotAcceptable", id)
+					TraceEvent(SevWarn,"GWFTADNotAcceptable", functionId)
 						.detail("Fitness", fitness)
 						.detail("Processes", logServerSet->size())
 						.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
 						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-						.detail("DesiredLogs", conf.getDesiredLogs());
+						.detail("DesiredLogs", conf.getDesiredLogs())
+						.detail("InterfaceId", id);
 				}
 			}
 			// Try to select the desired size, if larger
@@ -300,7 +304,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 						results.push_back(*object);
 						tLocalities.push_back(object->first.locality);
 					}
-					TraceEvent("GWFTADBestResults", id)
+					TraceEvent("GWFTADBestResults", functionId)
 						.detail("Fitness", fitness)
 						.detail("Processes", logServerSet->size())
 						.detail("BestCount", bestSet.size())
@@ -308,17 +312,19 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 						.detail("BestDataHalls", ::describeDataHalls(tLocalities))
 						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
 						.detail("TotalResults", results.size())
-						.detail("DesiredLogs", conf.getDesiredLogs());
+						.detail("DesiredLogs", conf.getDesiredLogs())
+						.detail("InterfaceId", id);
 					bCompleted = true;
 					break;
 				}
 				else {
-					TraceEvent(SevWarn,"GWFTADNoBest", id)
+					TraceEvent(SevWarn,"GWFTADNoBest", functionId)
 						.detail("Fitness", fitness)
 						.detail("Processes", logServerSet->size())
 						.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
 						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-						.detail("DesiredLogs", conf.getDesiredLogs());
+						.detail("DesiredLogs", conf.getDesiredLogs())
+						.detail("InterfaceId", id);
 				}
 			}
 		}
@@ -331,7 +337,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 					tLocalities.push_back(object->first.locality);
 				}
 
-				TraceEvent(SevWarn, "GetTLogTeamFailed")
+				TraceEvent(SevWarn, "GetTLogTeamFailed", functionId)
 					.detail("Policy", conf.tLogPolicy->info())
 					.detail("Processes", logServerSet->size())
 					.detail("Workers", id_worker.size())
@@ -344,7 +350,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 					.detail("DesiredLogs", conf.getDesiredLogs())
 					.detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
 					.detail("checkStable", checkStable)
-					.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
+					.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS)
+					.detail("InterfaceId", id).backtrace();
 
 			// Free the set
 			logServerSet->clear();
@@ -356,14 +363,25 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			id_used[result.first.locality.processId()]++;
 		}
 
-		TraceEvent("GetTLogTeamDone")
+		TraceEvent("GetTLogTeamDone", functionId)
 			.detail("Completed", bCompleted).detail("Policy", conf.tLogPolicy->info())
 			.detail("Results", results.size()).detail("Processes", logServerSet->size())
 			.detail("Workers", id_worker.size())
 			.detail("Replication", conf.tLogReplicationFactor)
 			.detail("Desired", conf.getDesiredLogs())
 			.detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
-			.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS);
+			.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS)
+			.detail("InterfaceId", id);
+
+		for (auto& result : results) {
+			TraceEvent("GetTLogTeamWorker", functionId)
+				.detail("Class", result.second.toString())
+				.detail("Address", result.first.address())
+				.detailext("Zone", result.first.locality.zoneId())
+				.detailext("DataHall", result.first.locality.dataHallId())
+				.detail("isExcludedServer", conf.isExcludedServer(result.first.address()))
+				.detail("isAvailable", IFailureMonitor::failureMonitor().getState(result.first.storage.getEndpoint()).isAvailable());
+		}
 
 		// Free the set
 		logServerSet->clear();
@@ -452,28 +470,23 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 		ProcessClass::Fitness resolverFit;
 		int proxyCount;
 		int resolverCount;
-		int datacenters;
 
-		InDatacenterFitness( ProcessClass::Fitness proxyFit, ProcessClass::Fitness resolverFit, int proxyCount, int resolverCount, int datacenters)
-			: proxyFit(proxyFit), resolverFit(resolverFit), proxyCount(proxyCount), resolverCount(resolverCount), datacenters(datacenters) {}
+		InDatacenterFitness( ProcessClass::Fitness proxyFit, ProcessClass::Fitness resolverFit, int proxyCount, int resolverCount)
+			: proxyFit(proxyFit), resolverFit(resolverFit), proxyCount(proxyCount), resolverCount(resolverCount) {}
 
-		InDatacenterFitness() : proxyFit( ProcessClass::NeverAssign ), resolverFit( ProcessClass::NeverAssign ), datacenters(10000000) {}
+		InDatacenterFitness() : proxyFit( ProcessClass::NeverAssign ), resolverFit( ProcessClass::NeverAssign ) {}
 
 		InDatacenterFitness( vector<std::pair<WorkerInterface, ProcessClass>> proxies, vector<std::pair<WorkerInterface, ProcessClass>> resolvers ) {
-			std::set<Optional<Standalone<StringRef>>> dcs;
 			proxyFit = ProcessClass::BestFit;
 			resolverFit = ProcessClass::BestFit;
 			for(auto it: proxies) {
-				dcs.insert(it.first.locality.dcId());
 				proxyFit = std::max(proxyFit, it.second.machineClassFitness( ProcessClass::Proxy ));
 			}
 			for(auto it: resolvers) {
-				dcs.insert(it.first.locality.dcId());
 				resolverFit = std::max(resolverFit, it.second.machineClassFitness( ProcessClass::Resolver ));
 			}
 			proxyCount = proxies.size();
 			resolverCount = resolvers.size();
-			datacenters = dcs.size();
 		}
 
 		InDatacenterFitness( vector<MasterProxyInterface> proxies, vector<ResolverInterface> resolvers, vector<ProcessClass> proxyClasses, vector<ProcessClass> resolverClasses ) {
@@ -491,12 +504,9 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 
 			proxyCount = proxies.size();
 			resolverCount = resolvers.size();
-			datacenters = dcs.size();
 		}
 
 		bool operator < (InDatacenterFitness const& r) const {
-			if(datacenters != r.datacenters) return datacenters < r.datacenters;
-
 			int lmax = std::max(resolverFit,proxyFit);
 			int lmin = std::min(resolverFit,proxyFit);
 			int rmax = std::max(r.resolverFit,r.proxyFit);
@@ -508,17 +518,16 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			return resolverCount > r.resolverCount;
 		}
 
-		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && datacenters == r.datacenters && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
+		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
 	};
 
 	struct AcrossDatacenterFitness {
 		ProcessClass::Fitness tlogFit;
 		int tlogCount;
-		int datacenters;
 
-		AcrossDatacenterFitness( ProcessClass::Fitness tlogFit, int tlogCount, int datacenters ) : tlogFit(tlogFit), tlogCount(tlogCount), datacenters(datacenters) {}
+		AcrossDatacenterFitness( ProcessClass::Fitness tlogFit, int tlogCount) : tlogFit(tlogFit), tlogCount(tlogCount) {}
 
-		AcrossDatacenterFitness() : tlogFit( ProcessClass::NeverAssign ), datacenters(0), tlogCount(0) {}
+		AcrossDatacenterFitness() : tlogFit( ProcessClass::NeverAssign ), tlogCount(0) {}
 
 		AcrossDatacenterFitness( vector<std::pair<WorkerInterface, ProcessClass>> tlogs ) {
 			std::set<Optional<Standalone<StringRef>>> dcs;
@@ -527,7 +536,6 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 				dcs.insert(it.first.locality.dcId());
 				tlogFit = std::max(tlogFit, it.second.machineClassFitness( ProcessClass::TLog ));
 			}
-			datacenters = dcs.size();
 			tlogCount = tlogs.size();
 		}
 
@@ -539,17 +547,15 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 				dcs.insert(tlogs[i].interf().locality.dcId());
 				tlogFit = std::max(tlogFit, processClasses[i].machineClassFitness( ProcessClass::TLog ));
 			}
-			datacenters = dcs.size();
 			tlogCount = tlogs.size();
 		}
 
 		bool operator < (AcrossDatacenterFitness const& r) const {
 			if(tlogFit != r.tlogFit) return tlogFit < r.tlogFit;
-			if(tlogCount != r.tlogCount) return tlogCount > r.tlogCount;
-			return datacenters > r.datacenters;
+			return tlogCount > r.tlogCount;
 		}
 
-		bool operator == (AcrossDatacenterFitness const& r) const { return datacenters == r.datacenters && tlogFit == r.tlogFit && tlogCount == r.tlogCount; }
+		bool operator == (AcrossDatacenterFitness const& r) const { return tlogFit == r.tlogFit && tlogCount == r.tlogCount; }
 	};
 
 	std::set<Optional<Standalone<StringRef>>> getDatacenters( DatabaseConfiguration const& conf, bool checkStable = false ) {
@@ -613,8 +619,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			.detail("desiredResolvers", req.configuration.getDesiredResolvers()).detail("actualResolvers", result.resolvers.size());
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
-			( AcrossDatacenterFitness(tlogs) > AcrossDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), req.configuration.minDataCenters) ||
-			bestFitness > InDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_PROXY_FITNESS, (ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredProxies(), req.configuration.getDesiredResolvers(), 1) ) ) {
+			( AcrossDatacenterFitness(tlogs) > AcrossDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
+			bestFitness > InDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_PROXY_FITNESS, (ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredProxies(), req.configuration.getDesiredResolvers()) ) ) {
 			throw operation_failed();
 		}
 
@@ -697,10 +703,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 		if(oldInFit < newInFit) return false;
 		if(oldMasterFit > newMasterFit || oldAcrossFit > newAcrossFit || oldInFit > newInFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit)
-				.detail("oldAcrossFitD", oldAcrossFit.datacenters).detail("newAcrossFitD", newAcrossFit.datacenters)
 				.detail("oldAcrossFitC", oldAcrossFit.tlogCount).detail("newAcrossFitC", newAcrossFit.tlogCount)
 				.detail("oldAcrossFitT", oldAcrossFit.tlogFit).detail("newAcrossFitT", newAcrossFit.tlogFit)
-				.detail("oldInFitD", oldInFit.datacenters).detail("newInFitD", newInFit.datacenters)
 				.detail("oldInFitP", oldInFit.proxyFit).detail("newInFitP", newInFit.proxyFit)
 				.detail("oldInFitR", oldInFit.resolverFit).detail("newInFitR", newInFit.resolverFit)
 				.detail("oldInFitPC", oldInFit.proxyCount).detail("newInFitPC", newInFit.proxyCount)

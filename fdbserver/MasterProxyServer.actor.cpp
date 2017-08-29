@@ -31,9 +31,9 @@
 #include "LogSystemDiskQueueAdapter.h"
 #include "IKeyValueStore.h"
 #include "fdbclient/SystemData.h"
-#include "flow/Notified.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/batcher.actor.h"
+#include "fdbclient/Notified.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "ConflictSet.h"
 #include "flow/Stats.h"
@@ -1001,17 +1001,49 @@ ACTOR static Future<Void> readRequestServer(
 	TraceEvent("ProxyReadyForReads", proxy.id());
 
 	loop choose{
-		when(ReplyPromise<vector<StorageServerInterface>> req = waitNext(proxy.getKeyServersLocations.getFuture())) {
-			// SOMEDAY: keep ssis around?
-			vector<UID> src, dest;
-			decodeKeyServersValue(commitData->txnStateStore->readValue(keyServersKeyServersKey).get().get(), src, dest);
-			vector<StorageServerInterface> ssis;
-			ssis.reserve(src.size());
-			for (auto const& id : src) {
-				ssis.push_back(decodeServerListValue(commitData->txnStateStore->readValue(serverListKeyFor(id)).get().get()));
+		when(ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> req = waitNext(proxy.getKeyServersLocations.getFuture())) {
+			Standalone<VectorRef<KeyValueRef>> keyServersBegin = commitData->txnStateStore->readRange(KeyRangeRef(allKeys.begin, keyServersKeyServersKeys.begin), -1).get();
+			Standalone<VectorRef<KeyValueRef>> keyServersEnd = commitData->txnStateStore->readRange(KeyRangeRef(keyServersKeyServersKeys.end, allKeys.end), 2).get();
+			Standalone<VectorRef<KeyValueRef>> keyServersShardBoundaries = commitData->txnStateStore->readRange(KeyRangeRef(keyServersBegin[0].key, keyServersEnd[1].key)).get();
+
+			Standalone<VectorRef<KeyValueRef>> serverListBegin = commitData->txnStateStore->readRange(KeyRangeRef(allKeys.begin, keyServersKey(serverListKeys.begin)), -1).get();
+			Standalone<VectorRef<KeyValueRef>> serverListEnd = commitData->txnStateStore->readRange(KeyRangeRef(keyServersKey(serverListKeys.end), allKeys.end), 2).get();
+			Standalone<VectorRef<KeyValueRef>> serverListShardBoundaries = commitData->txnStateStore->readRange(KeyRangeRef(serverListBegin[0].key, serverListEnd[1].key)).get();
+
+			bool ignoreFirstServerListShard = false;
+			if (keyServersShardBoundaries.back().key > serverListShardBoundaries.front().key)
+				ignoreFirstServerListShard = true;
+
+			// shards include all keyServers and serverLists information
+			vector<pair<KeyRangeRef, vector<StorageServerInterface>>> shards;
+			int reserveSize = keyServersShardBoundaries.size() + serverListShardBoundaries.size() - 2 - (ignoreFirstServerListShard ? 1 : 0);
+			shards.reserve(reserveSize);
+
+			for (int i = 0; i < keyServersShardBoundaries.size() - 1; i++) {
+				vector<UID> src, dest;
+				decodeKeyServersValue(keyServersShardBoundaries[i].value, src, dest);
+				vector<StorageServerInterface> ssis;
+				ssis.reserve(src.size());
+				for (auto const& id : src) {
+					ssis.push_back(decodeServerListValue(commitData->txnStateStore->readValue(serverListKeyFor(id)).get().get()));
+				}
+
+				shards.push_back(std::make_pair(KeyRangeRef(keyServersShardBoundaries[i].key.removePrefix(keyServersPrefix), keyServersShardBoundaries[i + 1].key.removePrefix(keyServersPrefix)), ssis));
 			}
 
-			req.send(ssis);
+			for (int i = ignoreFirstServerListShard ? 1 : 0 ; i < serverListShardBoundaries.size() - 1; i++) {
+				vector<UID> src, dest;
+				decodeKeyServersValue(serverListShardBoundaries[i].value, src, dest);
+				vector<StorageServerInterface> ssis;
+				ssis.reserve(src.size());
+				for (auto const& id : src) {
+					ssis.push_back(decodeServerListValue(commitData->txnStateStore->readValue(serverListKeyFor(id)).get().get()));
+				}
+
+				shards.push_back(std::make_pair(KeyRangeRef(serverListShardBoundaries[i].key.removePrefix(keyServersPrefix), serverListShardBoundaries[i + 1].key.removePrefix(keyServersPrefix)), ssis));
+			}
+
+			req.send(shards);
 		}
 		when(GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture())) {
 			if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {

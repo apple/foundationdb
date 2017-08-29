@@ -24,9 +24,9 @@
 #include "flow/Trace.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "ConflictSet.h"
-#include "flow/Notified.h"
 #include "DataDistribution.h"
 #include "Knobs.h"
 #include <iterator>
@@ -263,10 +263,6 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, vector<StorageSer
 			req.criticalRecruitment = true;
 			for(auto s = servers->begin(); s != servers->end(); ++s)
 				req.excludeMachines.push_back(s->locality.zoneId());
-			if( dataCenters.size() < self->configuration.minDataCenters ) {
-				for(auto dc = dataCenters.begin(); dc != dataCenters.end(); ++dc)
-					req.excludeDCs.push_back(*dc);
-			}
 
 			TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
 				.detail("ExcludingMachines", req.excludeMachines.size())
@@ -454,7 +450,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 				}
 			}
 		}
-		when ( ReplyPromise<vector<StorageServerInterface>> req = waitNext( parent->provisionalProxies[0].getKeyServersLocations.getFuture() ) ) {
+		when ( ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> req = waitNext( parent->provisionalProxies[0].getKeyServersLocations.getFuture() ) ) {
 			req.send(Never());
 		}
 		when ( Void _ = wait( waitFailure ) ) { throw worker_removed(); }

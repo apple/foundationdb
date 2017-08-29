@@ -37,3 +37,27 @@ flow/hgVersion.h: FORCE
 
 lib/libflow.a: bin/coverage.flow.xml
 
+ifeq ($(RELEASE),true)
+  FLOWVER = $(VERSION)
+else
+  FLOWVER = $(VERSION)-PRERELEASE
+endif
+
+packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH).tar.gz: flow
+	@echo "Packaging      flow"
+	@rm -rf packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
+	@mkdir -p packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/bin packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/lib packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/flow
+	@cp lib/libflow.a packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/lib
+	@cp bin/actorcompiler.exe packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/bin
+	@find flow -name '*.h' -exec cp {} packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)/include/flow \;
+	@tar czf packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH).tar.gz -C packages flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
+	@rm -rf packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH)
+
+FLOW: packages/flow-$(FLOWVER)-$(PLATFORM)-$(ARCH).tar.gz
+
+FLOW_clean:
+	@echo "Cleaning       flow"
+	@rm -rf packages/flow-*.tar.gz
+
+packages: FLOW
+packages_clean: FLOW_clean
