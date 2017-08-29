@@ -423,17 +423,10 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 // and handling binding to a Task, initializing from a Task, and setting Task validation parameters.
 // NOTE that when doing this backup configs MUST be changed to use UNIQUE uids for each backup or bad things can happened
 // such as stale backup tasks writing data into newer backups or reading the wrong kv manifest data or writing it to the wrong backup.
-class BackupConfig {
+class BackupConfig : public KeyBackedConfig {
 public:
-	static struct {
-		// TODO:  Use this, but it isn't compatible with the rest of the backup tasks yet.
-		// static TaskParam<UID> uid() { return LiteralStringRef(__FUNCTION__); }
-	} TaskParams;
-
-	BackupConfig(UID uid = UID()) : uid(uid), configSpace(uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(fileBackupPrefixRange.begin), uid)) {}
-
-	// TODO: Make this use TaskParam like Restore does, for now it has to be compatible with old code.
-	BackupConfig(Reference<Task> task) : BackupConfig(BinaryReader::fromStringRef<UID>(task->params[FileBackupAgent::keyConfigLogUid], Unversioned())) {}
+	BackupConfig(UID uid = UID()) : KeyBackedConfig(fileBackupPrefixRange.begin, uid) {}
+	BackupConfig(Reference<Task> task) : KeyBackedConfig(fileBackupPrefixRange.begin, task) {}
 
 	// rangeFileMap maps a keyrange file's End to its Begin and Filename
 	typedef std::pair<Key, Key> KeyAndFilenameT;
@@ -449,16 +442,6 @@ public:
 	KeyBackedBinaryValue<int64_t> logBytesWritten() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
-
-	void clear(Reference<ReadYourWritesTransaction> tr) {
-		tr->clear(configSpace.range());
-	}
-
-	UID getUid() { return uid; }
-
-private:
-	UID uid;
-	Subspace configSpace;
 };
 
 FileBackupAgent::FileBackupAgent()
@@ -1042,7 +1025,10 @@ namespace fileBackup {
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Key begin, Key end, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), int priority = 0) {
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(BackupRangeTaskFunc::name, BackupRangeTaskFunc::version, doneKey, priority));
+			state Reference<Task> task(new Task(BackupRangeTaskFunc::name, BackupRangeTaskFunc::version, doneKey, priority));
+
+			// Get backup config from parent task and bind to new task
+			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
 
@@ -1050,10 +1036,10 @@ namespace fileBackup {
 			task->params[BackupAgentBase::keyEndKey] = end;
 
 			if (!waitFor) {
-				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
+				return taskBucket->addTask(tr, task);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1280,15 +1266,18 @@ namespace fileBackup {
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			// After the BackupRangeTask completes, set the stop key which will stop the BackupLogsTask
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version, doneKey));
+			state Reference<Task> task(new Task(FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version, doneKey));
+
+			// Get backup config from parent task and bind to new task
+			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
 
 			if (!waitFor) {
-				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
+				return taskBucket->addTask(tr, task);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1430,7 +1419,10 @@ namespace fileBackup {
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, Version endVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(BackupLogRangeTaskFunc::name, BackupLogRangeTaskFunc::version, doneKey, 1));
+			state Reference<Task> task(new Task(BackupLogRangeTaskFunc::name, BackupLogRangeTaskFunc::version, doneKey, 1));
+
+			// Get backup config from parent task and bind to new task
+			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
 
@@ -1438,10 +1430,10 @@ namespace fileBackup {
 			task->params[FileBackupAgent::keyEndVersion] = BinaryWriter::toValue(endVersion, Unversioned());
 
 			if (!waitFor) {
-				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
+				return taskBucket->addTask(tr, task);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1571,7 +1563,10 @@ namespace fileBackup {
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(BackupLogsTaskFunc::name, BackupLogsTaskFunc::version, doneKey, 1));
+			state Reference<Task> task(new Task(BackupLogsTaskFunc::name, BackupLogsTaskFunc::version, doneKey, 1));
+
+			// Get backup config from parent task and bind to new task
+			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
 			copyParameter(parentTask, task, FileBackupAgent::keyStateStatus);
@@ -1581,10 +1576,10 @@ namespace fileBackup {
 			task->params[BackupAgentBase::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 
 			if (!waitFor) {
-				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
+				return taskBucket->addTask(tr, task);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1624,17 +1619,20 @@ namespace fileBackup {
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version, doneKey));
+			state Reference<Task> task(new Task(FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version, doneKey));
+
+			// Get backup config from parent task and bind to new task
+			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
 			copyParameter(parentTask, task, BackupAgentBase::keyStateStatus);
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
 
 			if (!waitFor) {
-				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
+				return taskBucket->addTask(tr, task);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1683,7 +1681,10 @@ namespace fileBackup {
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(BackupDiffLogsTaskFunc::name, BackupDiffLogsTaskFunc::version, doneKey, 1));
+			state Reference<Task> task(new Task(BackupDiffLogsTaskFunc::name, BackupDiffLogsTaskFunc::version, doneKey, 1));
+
+			// Get backup config from parent task and bind to new task
+			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
 			copyParameter(parentTask, task, BackupAgentBase::keyStateStatus);
@@ -1693,10 +1694,10 @@ namespace fileBackup {
 			task->params[FileBackupAgent::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 
 			if (!waitFor) {
-				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
+				return taskBucket->addTask(tr, task);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1923,7 +1924,10 @@ namespace fileBackup {
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version, doneKey));
+			state Reference<Task> task(new Task(BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version, doneKey));
+
+			// Get backup config from parent task and bind to new task
+			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
 			copyParameter(parentTask, task, BackupAgentBase::keyStateStatus);
@@ -1931,10 +1935,10 @@ namespace fileBackup {
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigStopWhenDoneKey);
 
 			if (!waitFor) {
-				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
+				return taskBucket->addTask(tr, task);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -2011,10 +2015,17 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Key keyConfigFolderIdKey, Key keyFolderId, Key keyStateStatus, Key keyStateStop, Key keyBackupContainer,
-			Key keyConfigLogUid, Key keyConfigBackupTag, Key keyConfigBackupRanges, Key keyConfigStopWhenDoneKey, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
+			UID uid, Key keyConfigLogUid, Key keyConfigBackupTag, Key keyConfigBackupRanges, Key keyConfigStopWhenDoneKey, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
 			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version, doneKey));
+			state Reference<Task> task(new Task(StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version, doneKey));
+
+			state BackupConfig config(uid);
+			// Bind backup config to the new task
+			Void _ = wait(config.toTask(tr, task));
 
 			task->params[BackupAgentBase::keyFolderId] = keyFolderId;
 			task->params[BackupAgentBase::keyStateStatus] = keyStateStatus;
@@ -2027,10 +2038,10 @@ namespace fileBackup {
 			task->params[FileBackupAgent::keyBackupContainer] = keyBackupContainer;
 
 			if (!waitFor) {
-				return taskBucket->addTask(tr, task, keyConfigFolderIdKey, task->params[BackupAgentBase::keyFolderId]);
+				return taskBucket->addTask(tr, task);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, keyConfigFolderIdKey, task->params[BackupAgentBase::keyFolderId]));
+			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -3426,11 +3437,17 @@ public:
 			}
 		}
 
+		state BackupConfig config = BackupConfig(logUid);
+
 		// Clear the backup ranges for the tag
 		tr->clear(backupAgent->config.get(logUid.toString()).range());
 		tr->clear(backupAgent->states.get(logUid.toString()).range());
 		tr->clear(backupAgent->errors.range());
-		BackupConfig(logUid).clear(tr);
+		config.clear(tr);
+
+		// Point the tag to this new uid
+		makeBackupTag(tagName).set(tr, {logUid, false});
+		config.tag().set(tr, tagName);
 
 		tr->set(backupAgent->tagNames.pack(tagName), logUidValue);
 		tr->set(backupAgent->config.pack(FileBackupAgent::keyLastUid), backupUid);
@@ -3449,7 +3466,7 @@ public:
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyFolderId),
 			backupUid, backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus),
 			backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStop),
-			StringRef(backupContainer), logUidValue, tagName, BinaryWriter::toValue(backupRanges, IncludeVersion()),
+			StringRef(backupContainer), logUid, logUidValue, tagName, BinaryWriter::toValue(backupRanges, IncludeVersion()),
 			backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey), backupAgent->errors.pack(logUid.toString()), TaskCompletionKey::noSignal()));
 
 		return Void();
@@ -3591,12 +3608,24 @@ public:
 	ACTOR static Future<Void> abortBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		state KeyBackedTag tag = makeBackupTag(tagName);
+		state Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
+		if (!current.present()) {
+			throw backup_error();
+		}
+
 		state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
+		ASSERT(current.get().first == logUid);
+
 		int status = wait(backupAgent->getStateValue(tr, logUid));
 
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
 		}
+
+		// Cancel backup task through tag
+		Void _ = wait(tag.cancel(tr));
 
 		// Clear the folder id will prevent future tasks from executing
 		tr->clear(singleKeyRange(StringRef(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyFolderId))));
@@ -3647,7 +3676,6 @@ public:
 						tagNameDisplay = tagName.get().toString();
 					}
 
-					state Optional<Value> uid = wait(tr->get(backupAgent->config.get(logUid.toString()).pack(BackupAgentBase::keyFolderId)));
 					state Optional<Value> stopVersionKey = wait(tr->get(backupAgent->states.get(logUid.toString()).pack(BackupAgentBase::keyStateStop)));
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
