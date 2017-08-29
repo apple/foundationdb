@@ -56,6 +56,10 @@ StringRef FileBackupAgent::restoreStateText(ERestoreState id) {
 template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return Tuple().append(val); }
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
+typedef BackupAgentBase::enumState EBackupState;
+template<> Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
+template<> EBackupState Codec<EBackupState>::unpack(Tuple const &val) { return (EBackupState)val.getInt(0); }
+
 // Key backed tags are a single-key slice of the TagUidMap, defined below.
 // The Value type of the key is a UidAndAbortedFlagT which is a pair of {UID, aborted_flag}
 // All tasks on the UID will have a validation key/value that requires aborted_flag to be
@@ -440,6 +444,10 @@ public:
 	}
 
 	KeyBackedBinaryValue<int64_t> logBytesWritten() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<EBackupState> stateEnum() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 };
@@ -1568,7 +1576,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, FileBackupAgent::keyStateStatus);
 			copyParameter(parentTask, task, FileBackupAgent::keyConfigStopWhenDoneKey);
 			copyParameter(parentTask, task, FileBackupAgent::keyConfigBackupRanges);
 
@@ -1609,8 +1616,7 @@ namespace fileBackup {
 			backup.clear(tr);
 			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
-
-			tr->set(task->params[FileBackupAgent::keyStateStatus], StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_COMPLETED)));
+			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
@@ -1624,7 +1630,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, BackupAgentBase::keyStateStatus);
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
 
 			if (!waitFor) {
@@ -1686,7 +1691,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, BackupAgentBase::keyStateStatus);
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigStopWhenDoneKey);
 
@@ -1886,6 +1890,7 @@ namespace fileBackup {
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			Void _ = wait(checkTaskVersion(tr, task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
 
+			state BackupConfig config(task);
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 			state Optional<Value> stopValue = wait(tr->get(task->params[FileBackupAgent::keyStateStop]));
@@ -1907,7 +1912,7 @@ namespace fileBackup {
 				Key _ = wait(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal()));
 			}
 			else { // Start the writing of logs, if differential
-				tr->set(task->params[FileBackupAgent::keyStateStatus], StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_DIFFERENTIAL)));
+				config.stateEnum().set(tr, EBackupState::STATE_DIFFERENTIAL);
 
 				allPartsDone = futureBucket->future(tr);
 
@@ -1929,7 +1934,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, BackupAgentBase::keyStateStatus);
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigStopWhenDoneKey);
 
@@ -1976,9 +1980,12 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+			state BackupConfig config(task);
 			state UID logUid = BinaryReader::fromStringRef<UID>(task->params[FileBackupAgent::keyConfigLogUid], Unversioned());
 			state Key logUidDest = uidPrefixKey(backupLogKeys.begin, logUid);
 			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyBeginVersion], Unversioned());
+
+			ASSERT(config.getUid() == logUid);
 
 			state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 			BinaryReader br(task->params[FileBackupAgent::keyConfigBackupRanges], IncludeVersion());
@@ -1989,7 +1996,7 @@ namespace fileBackup {
 				tr->set(logRangesEncodeKey(backupRange.begin, logUid), logRangesEncodeValue(backupRange.end, logUidDest));
 			}
 
-			tr->set(task->params[FileBackupAgent::keyStateStatus], StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_BACKUP)));
+			config.stateEnum().set(tr, EBackupState::STATE_BACKUP);
 
 			state Reference<TaskFuture>	kvBackupRangeComplete = futureBucket->future(tr);
 			state Reference<TaskFuture>	kvBackupComplete = futureBucket->future(tr);
@@ -2013,7 +2020,7 @@ namespace fileBackup {
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Key keyStateStatus, Key keyStateStop, Key keyBackupContainer,
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Key keyStateStop, Key keyBackupContainer,
 			UID uid, Key keyConfigLogUid, Key keyConfigBackupTag, Key keyConfigBackupRanges, Key keyConfigStopWhenDoneKey, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2026,7 +2033,6 @@ namespace fileBackup {
 			// Bind backup config to the new task
 			Void _ = wait(config.toTask(tr, task));
 
-			task->params[BackupAgentBase::keyStateStatus] = keyStateStatus;
 			task->params[BackupAgentBase::keyStateStop] = keyStateStop;
 			task->params[BackupAgentBase::keyConfigLogUid] = keyConfigLogUid;
 			task->params[BackupAgentBase::keyConfigBackupTag] = keyConfigBackupTag;
@@ -3349,7 +3355,7 @@ public:
 	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, Key tagName, bool stopWhenDone) {
 		state std::string backTrace;
 		state UID logUid = wait(backupAgent->getLogUid(cx, tagName));
-		state Key statusKey = backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus);
+		state KeyBackedTag tag = makeBackupTag(tagName);
 
 		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -3357,7 +3363,16 @@ public:
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			try {
-				state int status = wait(backupAgent->getStateValue(tr, logUid));
+				state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
+				if (!oldUidAndAborted.present()) {
+					return EBackupState::STATE_NEVERRAN;
+				}
+				ASSERT(oldUidAndAborted.get().first == logUid);
+
+				state BackupConfig config(oldUidAndAborted.get().first);
+				state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+				Optional<EBackupState> configState = wait(config.stateEnum().get(tr));
+				ASSERT(configState.present() && configState.get() == status);
 
 				// Break, if no longer runnable
 				if (!FileBackupAgent::isRunnable((BackupAgentBase::enumState)status)) {
@@ -3369,7 +3384,7 @@ public:
 					return status;
 				}
 
-				state Future<Void> watchFuture = tr->watch( statusKey );
+				state Future<Void> watchFuture = tr->watch( config.stateEnum().key );
 				Void _ = wait( tr->commit() );
 				Void _ = wait( watchFuture );
 			}
@@ -3455,13 +3470,12 @@ public:
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigBackupTag), tagName);
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigLogUid), logUidValue);
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion()));
-		tr->set(backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_SUBMITTED)));
+		config.stateEnum().set(tr, EBackupState::STATE_SUBMITTED);
 		if (stopWhenDone) {
 			tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey), StringRef());
 		}
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket,
-			backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus),
 			backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStop),
 			StringRef(backupContainer), logUid, logUidValue, tagName, BinaryWriter::toValue(backupRanges, IncludeVersion()),
 			backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey), backupAgent->errors.pack(logUid.toString()), TaskCompletionKey::noSignal()));
@@ -3586,7 +3600,6 @@ public:
 		state int status = wait(backupAgent->getStateValue(tr, logUid));
 
 		if (!FileBackupAgent::isRunnable((BackupAgentBase::enumState)status)) {
-			Optional<Value> status = wait(tr->get(backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus)));
 			throw backup_unneeded();
 		}
 
@@ -3629,10 +3642,12 @@ public:
 
 		tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 		tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
-		BackupConfig(logUid).clear(tr);
+		state BackupConfig config(logUid);
+		// FIXME: We don't want to clear config space on abort, as it is useful to have more information about
+		// aborted backup later. Instead, we can clean it up while starting next backup under same tag.
+		//config.clear(tr);
 
-		Key	statusKey = StringRef(backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus));
-		tr->set(statusKey, StringRef(FileBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
+		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
 
 		return Void();
 	}
@@ -3646,30 +3661,27 @@ public:
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				state BackupAgentBase::enumState backupState;
+				state KeyBackedTag tag;
+				state UID logUid;
+				state BackupConfig config;
+				state EBackupState backupState;
+
 				statusText = "";
-
-				state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
-
-				state Optional<Value> status = wait(tr->get(backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus)));
-
-				state std::string backupStatus = status.present() ? status.get().toString() : "";
-				backupState = BackupAgentBase::getState(backupStatus);
-
-				if (backupState == FileBackupAgent::STATE_NEVERRAN) {
-					statusText += "No previous backups found.\n";
+				tag = makeBackupTag(tagName);
+				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
+				if (uidAndAbortedFlag.present()) {
+					logUid = uidAndAbortedFlag.get().first;
+					config = BackupConfig(logUid);
+					state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+					backupState = status;
 				}
-				else {
+
+				if (!uidAndAbortedFlag.present() || backupState == EBackupState::STATE_NEVERRAN) {
+					statusText += "No previous backups found.\n";
+				} else {
+					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					state std::string outContainer = wait(backupAgent->getLastBackupContainer(tr, logUid));
-
-					state std::string tagNameDisplay;
-					Optional<Key> tagName = wait(tr->get(backupAgent->config.get(logUid.toString()).pack(BackupAgentBase::keyConfigBackupTag)));
-
-					// Define the display tag name
-					if (tagName.present()) {
-						tagNameDisplay = tagName.get().toString();
-					}
-
+					state std::string tagNameDisplay = tagName.toString();
 					state Optional<Value> stopVersionKey = wait(tr->get(backupAgent->states.get(logUid.toString()).pack(BackupAgentBase::keyStateStop)));
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -3731,10 +3743,8 @@ public:
 	ACTOR static Future<int> getStateValue(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Key statusKey = backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus);
-		Optional<Value> status = wait(tr->get(statusKey));
-
-		return (!status.present()) ? FileBackupAgent::STATE_NEVERRAN : BackupAgentBase::getState(status.get().toString());
+		EBackupState state = wait(BackupConfig(logUid).stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+		return state;
 	}
 
 	ACTOR static Future<Version> getStateStopVersion(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid) {
