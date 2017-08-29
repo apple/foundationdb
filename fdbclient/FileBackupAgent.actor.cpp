@@ -779,7 +779,6 @@ namespace fileBackup {
 
 	bool copyDefaultParameters(Reference<Task> source, Reference<Task> dest) {
 		if (source) {
-			copyParameter(source, dest, BackupAgentBase::keyFolderId);
 			copyParameter(source, dest, BackupAgentBase::keyStateStop);
 			copyParameter(source, dest, BackupAgentBase::keyConfigBackupTag);
 			copyParameter(source, dest, BackupAgentBase::keyConfigLogUid);
@@ -2014,7 +2013,7 @@ namespace fileBackup {
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Key keyConfigFolderIdKey, Key keyFolderId, Key keyStateStatus, Key keyStateStop, Key keyBackupContainer,
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Key keyStateStatus, Key keyStateStop, Key keyBackupContainer,
 			UID uid, Key keyConfigLogUid, Key keyConfigBackupTag, Key keyConfigBackupRanges, Key keyConfigStopWhenDoneKey, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2027,7 +2026,6 @@ namespace fileBackup {
 			// Bind backup config to the new task
 			Void _ = wait(config.toTask(tr, task));
 
-			task->params[BackupAgentBase::keyFolderId] = keyFolderId;
 			task->params[BackupAgentBase::keyStateStatus] = keyStateStatus;
 			task->params[BackupAgentBase::keyStateStop] = keyStateStop;
 			task->params[BackupAgentBase::keyConfigLogUid] = keyConfigLogUid;
@@ -3456,15 +3454,14 @@ public:
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyBackupContainer), backupContainer);
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigBackupTag), tagName);
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigLogUid), logUidValue);
-		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyFolderId), backupUid);
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion()));
 		tr->set(backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_SUBMITTED)));
 		if (stopWhenDone) {
 			tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey), StringRef());
 		}
 
-		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyFolderId),
-			backupUid, backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus),
+		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket,
+			backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStatus),
 			backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStop),
 			StringRef(backupContainer), logUid, logUidValue, tagName, BinaryWriter::toValue(backupRanges, IncludeVersion()),
 			backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey), backupAgent->errors.pack(logUid.toString()), TaskCompletionKey::noSignal()));
@@ -3626,9 +3623,6 @@ public:
 
 		// Cancel backup task through tag
 		Void _ = wait(tag.cancel(tr));
-
-		// Clear the folder id will prevent future tasks from executing
-		tr->clear(singleKeyRange(StringRef(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyFolderId))));
 
 		Key configPath = uidPrefixKey(logRangesRange.begin, logUid);
 		Key logsPath = uidPrefixKey(backupLogKeys.begin, logUid);
