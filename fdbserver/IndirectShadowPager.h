@@ -26,7 +26,7 @@
 #include "IPager.h"
 
 #include "flow/ActorCollection.h"
-#include "flow/Notified.h"
+#include "fdbclient/Notified.h"
 
 #include "fdbrpc/IAsyncFile.h"
 
