@@ -87,8 +87,18 @@ public:
 	}
 	// Get property's value or defaultValue if it doesn't exist
 	Future<T> getD(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, T defaultValue = T()) const {
-		return map(get(tr, false), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
+		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
+	// Get property's value or throw error if it doesn't exist
+	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, Error err = key_not_found()) const {
+		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
+			if (!val.present())
+				throw err;
+
+			return val.get();
+		});
+	}
+
 	void set(Reference<ReadYourWritesTransaction> tr, T const &val) {
 		return tr->set(key, Codec<T>::pack(val).pack());
 	}
