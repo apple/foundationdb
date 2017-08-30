@@ -164,7 +164,7 @@ public:
 
 	UID getUid() { return uid; }
 
-	Key getUidAsKey() { return BinaryWriter::toValue(logUid, Unversioned()); }
+	Key getUidAsKey() { return BinaryWriter::toValue(uid, Unversioned()); }
 
 	void clear(Reference<ReadYourWritesTransaction> tr) {
 		tr->clear(configSpace.range());
@@ -453,6 +453,11 @@ public:
 	}
 
 	KeyBackedProperty<Key> backupContainer() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Stop differntial logging if already started or don't start after completing KV ranges
+	KeyBackedProperty<bool> stopWhenDone() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 };
@@ -1600,7 +1605,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, FileBackupAgent::keyConfigStopWhenDoneKey);
 			copyParameter(parentTask, task, FileBackupAgent::keyConfigBackupRanges);
 
 			task->params[BackupAgentBase::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
@@ -1687,7 +1691,7 @@ namespace fileBackup {
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 			state Reference<TaskFuture> allPartsDone;
 
-			state Optional<Value> stopWhenDone = wait(tr->get(task->params[FileBackupAgent::keyConfigStopWhenDoneKey]));
+			state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 
 			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[FileBackupAgent::keyBeginVersion], Unversioned());
 			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
@@ -1695,10 +1699,10 @@ namespace fileBackup {
 			tr->set(FileBackupAgent().lastRestorable.get(tagBytes).pack(), BinaryWriter::toValue(beginVersion, Unversioned()));
 
 			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
-				TraceEvent("FBA_DiffLogs").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("stopWhenDone", stopWhenDone.present());
+				TraceEvent("FBA_DiffLogs").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("stopWhenDone", stopWhenDone);
 			}
 
-			if (stopWhenDone.present()) {
+			if (stopWhenDone) {
 				allPartsDone = onDone;
 				tr->set(task->params[FileBackupAgent::keyStateStop], BinaryWriter::toValue(endVersion, Unversioned()));
 			}
@@ -1722,7 +1726,6 @@ namespace fileBackup {
 
 			copyDefaultParameters(parentTask, task);
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
-			copyParameter(parentTask, task, BackupAgentBase::keyConfigStopWhenDoneKey);
 
 			task->params[FileBackupAgent::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 
@@ -1932,16 +1935,16 @@ namespace fileBackup {
 			state Optional<Value> stopValue = wait(tr->get(task->params[FileBackupAgent::keyStateStop]));
 			state Version restoreVersion = stopValue.present() ? BinaryReader::fromStringRef<Version>(stopValue.get(), Unversioned()) : -1;
 
-			state Optional<Value> stopWhenDone = wait(tr->get(task->params[FileBackupAgent::keyConfigStopWhenDoneKey]));
+			state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 			state Reference<TaskFuture> allPartsDone;
 
 			Void _ = wait(writeRestoreFile(tr, task->params[FileBackupAgent::keyErrors], config, restoreVersion,
 				task->params[BackupAgentBase::keyConfigBackupRanges]));
 
-			TraceEvent("FBA_Complete").detail("restoreVersion", restoreVersion).detail("differential", stopWhenDone.present());
+			TraceEvent("FBA_Complete").detail("restoreVersion", restoreVersion).detail("differential", stopWhenDone);
 
 			// Start the complete task, if differential is not enabled
-			if (stopWhenDone.present()) {
+			if (stopWhenDone) {
 				// After the Backup completes, clear the backup subspace and update the status
 				Key _ = wait(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal()));
 			}
@@ -1969,7 +1972,6 @@ namespace fileBackup {
 
 			copyDefaultParameters(parentTask, task);
 			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
-			copyParameter(parentTask, task, BackupAgentBase::keyConfigStopWhenDoneKey);
 
 			if (!waitFor) {
 				return taskBucket->addTask(tr, task);
@@ -2055,7 +2057,7 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Key keyStateStop,
-			UID uid, Key keyConfigBackupRanges, Key keyConfigStopWhenDoneKey, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
+			UID uid, Key keyConfigBackupRanges, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2069,7 +2071,6 @@ namespace fileBackup {
 
 			task->params[BackupAgentBase::keyStateStop] = keyStateStop;
 			task->params[BackupAgentBase::keyConfigBackupRanges] = keyConfigBackupRanges;
-			task->params[BackupAgentBase::keyConfigStopWhenDoneKey] = keyConfigStopWhenDoneKey;
 			task->params[BackupAgentBase::keyErrors] = keyErrors;
 
 			if (!waitFor) {
@@ -3500,14 +3501,12 @@ public:
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion()));
 		config.stateEnum().set(tr, EBackupState::STATE_SUBMITTED);
 		config.backupContainer().set(tr, StringRef(backupContainer));
-		if (stopWhenDone) {
-			tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey), StringRef());
-		}
+		config.stopWhenDone().set(tr, stopWhenDone);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket,
 			backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStop),
 			logUid, BinaryWriter::toValue(backupRanges, IncludeVersion()),
-			backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey), backupAgent->errors.pack(logUid.toString()), TaskCompletionKey::noSignal()));
+			backupAgent->errors.pack(logUid.toString()), TaskCompletionKey::noSignal()));
 
 		return Void();
 	}
@@ -3632,14 +3631,15 @@ public:
 			throw backup_unneeded();
 		}
 
-		state Optional<Value> stopWhenDoneValue = wait(tr->get(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey)));
+		state BackupConfig config(logUid);
+		state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 
-		if (stopWhenDoneValue.present()) {
+		if (stopWhenDone) {
 			throw backup_duplicate();
 		}
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->set(backupAgent->config.get(logUid.toString()).pack(BackupAgentBase::keyConfigStopWhenDoneKey), StringRef());
+		config.stopWhenDone().set(tr, true);
 
 		return Void();
 	}
