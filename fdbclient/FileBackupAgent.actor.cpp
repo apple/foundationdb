@@ -791,7 +791,6 @@ namespace fileBackup {
 	bool copyDefaultParameters(Reference<Task> source, Reference<Task> dest) {
 		if (source) {
 			copyParameter(source, dest, BackupAgentBase::keyStateStop);
-			copyParameter(source, dest, BackupAgentBase::keyConfigBackupTag);
 			copyParameter(source, dest, BackupAgentBase::keyConfigLogUid);
 			copyParameter(source, dest, BackupAgentBase::keyErrors);
 
@@ -896,12 +895,17 @@ namespace fileBackup {
 		return Void();
 	}
 
-	ACTOR static Future<Void> writeRestoreFile(Reference<ReadYourWritesTransaction> tr, Key keyErrors, std::string backupContainer, UID logUid,
-		Version stopVersion, Key keyConfigBackupTag, Key keyConfigLogUid, Key keyConfigBackupRanges)
+	ACTOR static Future<Void> writeRestoreFile(Reference<ReadYourWritesTransaction> tr, Key keyErrors, BackupConfig config,
+		Version stopVersion, Key keyConfigLogUid, Key keyConfigBackupRanges)
 	{
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
+		state UID logUid = config.getUid();
+		Key backupContainerBytes = wait(config.backupContainer().getOrThrow(tr));
+		state std::string backupContainer = backupContainerBytes.toString();
+		state Key tagBytes = wait(config.tag().getOrThrow(tr));
+		state std::string tagName = tagBytes.toString();
 		state std::string filename = "restorable";
 		state std::string tempFileName = FileBackupAgent::getTempFilename();
 		state Reference<IAsyncFile> f = wait(openBackupFile(true, backupContainer, tempFileName, keyErrors, tr->getDatabase()));
@@ -914,7 +918,7 @@ namespace fileBackup {
 
 			msg += format("%-15s %ld\n", "fdbbackupver:", backupVersion);
 			msg += format("%-15s %lld\n", "restorablever:", stopVersion);
-			msg += format("%-15s %s\n", "tag:", printable(keyConfigBackupTag).c_str());
+			msg += format("%-15s %s\n", "tag:", tagName.c_str());
 			msg += format("%-15s %s\n", "logUid:", logUid.toString().c_str());
 			msg += format("%-15s %s\n", "logUidValue:", printable(keyConfigLogUid).c_str());
 
@@ -952,7 +956,7 @@ namespace fileBackup {
 			}
 			Void _ = wait(truncateCloseFile(tr->getDatabase(), keyErrors, backupContainer, filename, f, offset + msg.size()));
 			Void _ = wait(IBackupContainer::openContainer(backupContainer)->renameFile(tempFileName, filename));
-			tr->set(FileBackupAgent().lastRestorable.get(keyConfigBackupTag).pack(), BinaryWriter::toValue(stopVersion, Unversioned()));
+			tr->set(FileBackupAgent().lastRestorable.get(tagBytes).pack(), BinaryWriter::toValue(stopVersion, Unversioned()));
 		}
 		else {
 			Void _ = wait(logError(tr, keyErrors, "ERROR: Failed to open restorable file for unknown reason."));
@@ -961,7 +965,7 @@ namespace fileBackup {
 
 		TraceEvent("BA_WriteRestoreFile").detail("logUid", logUid).detail("stopVersion", stopVersion)
 			.detail("backupContainer", backupContainer)
-			.detail("backupTag", printable(StringRef(keyConfigBackupTag)));
+			.detail("backupTag", tagName);
 
 		return Void();
 	}
@@ -1674,6 +1678,12 @@ namespace fileBackup {
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			Void _ = wait(checkTaskVersion(tr, task, BackupDiffLogsTaskFunc::name, BackupDiffLogsTaskFunc::version));
 
+			state BackupConfig config(task);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			state Key tagBytes = wait(config.tag().getOrThrow(tr));
+			state std::string tagName = tagBytes.toString();
+
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 			state Reference<TaskFuture> allPartsDone;
 
@@ -1682,7 +1692,7 @@ namespace fileBackup {
 			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[FileBackupAgent::keyBeginVersion], Unversioned());
 			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
 
-			tr->set(FileBackupAgent().lastRestorable.get(task->params[FileBackupAgent::keyConfigBackupTag]).pack(), BinaryWriter::toValue(beginVersion, Unversioned()));
+			tr->set(FileBackupAgent().lastRestorable.get(tagBytes).pack(), BinaryWriter::toValue(beginVersion, Unversioned()));
 
 			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
 				TraceEvent("FBA_DiffLogs").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("stopWhenDone", stopWhenDone.present());
@@ -1917,9 +1927,6 @@ namespace fileBackup {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			Key backupContainerBytes = wait(config.backupContainer().getOrThrow(tr));
-			state std::string backupContainer = backupContainerBytes.toString();
-
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 			state Optional<Value> stopValue = wait(tr->get(task->params[FileBackupAgent::keyStateStop]));
@@ -1930,8 +1937,8 @@ namespace fileBackup {
 
 			state UID logUid = BinaryReader::fromStringRef<UID>(task->params[FileBackupAgent::keyConfigLogUid], Unversioned());
 
-			Void _ = wait(writeRestoreFile(tr, task->params[FileBackupAgent::keyErrors], backupContainer, logUid, restoreVersion,
-				task->params[FileBackupAgent::keyConfigBackupTag], task->params[BackupAgentBase::keyConfigLogUid], task->params[BackupAgentBase::keyConfigBackupRanges]));
+			Void _ = wait(writeRestoreFile(tr, task->params[FileBackupAgent::keyErrors], config, restoreVersion,
+				task->params[BackupAgentBase::keyConfigLogUid], task->params[BackupAgentBase::keyConfigBackupRanges]));
 
 			TraceEvent("FBA_Complete").detail("restoreVersion", restoreVersion).detail("differential", stopWhenDone.present());
 
@@ -2050,7 +2057,7 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Key keyStateStop,
-			UID uid, Key keyConfigLogUid, Key keyConfigBackupTag, Key keyConfigBackupRanges, Key keyConfigStopWhenDoneKey, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
+			UID uid, Key keyConfigLogUid, Key keyConfigBackupRanges, Key keyConfigStopWhenDoneKey, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2064,7 +2071,6 @@ namespace fileBackup {
 
 			task->params[BackupAgentBase::keyStateStop] = keyStateStop;
 			task->params[BackupAgentBase::keyConfigLogUid] = keyConfigLogUid;
-			task->params[BackupAgentBase::keyConfigBackupTag] = keyConfigBackupTag;
 			task->params[BackupAgentBase::keyConfigBackupRanges] = keyConfigBackupRanges;
 			task->params[BackupAgentBase::keyConfigStopWhenDoneKey] = keyConfigStopWhenDoneKey;
 			task->params[BackupAgentBase::keyErrors] = keyErrors;
@@ -3494,7 +3500,6 @@ public:
 		tr->set(backupAgent->config.pack(FileBackupAgent::keyLastUid), backupUid);
 
 		// Set the backup keys
-		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigBackupTag), tagName);
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigLogUid), logUidValue);
 		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion()));
 		config.stateEnum().set(tr, EBackupState::STATE_SUBMITTED);
@@ -3505,7 +3510,7 @@ public:
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket,
 			backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStop),
-			logUid, logUidValue, tagName, BinaryWriter::toValue(backupRanges, IncludeVersion()),
+			logUid, logUidValue, BinaryWriter::toValue(backupRanges, IncludeVersion()),
 			backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigStopWhenDoneKey), backupAgent->errors.pack(logUid.toString()), TaskCompletionKey::noSignal()));
 
 		return Void();
