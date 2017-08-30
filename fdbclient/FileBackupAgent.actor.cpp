@@ -460,6 +460,10 @@ public:
 	KeyBackedProperty<bool> stopWhenDone() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
+
+	KeyBackedProperty<Version> stopVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
 };
 
 FileBackupAgent::FileBackupAgent()
@@ -797,7 +801,6 @@ namespace fileBackup {
 
 	bool copyDefaultParameters(Reference<Task> source, Reference<Task> dest) {
 		if (source) {
-			copyParameter(source, dest, BackupAgentBase::keyStateStop);
 			copyParameter(source, dest, BackupAgentBase::keyErrors);
 
 			return true;
@@ -1287,9 +1290,14 @@ namespace fileBackup {
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			Void _ = wait(checkTaskVersion(tr, task, FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version));
 
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state BackupConfig config(task);
+
 			// Enable the stop key
 			state Version readVersion = wait(tr->getReadVersion());
-			tr->set(task->params[FileBackupAgent::keyStateStop], BinaryWriter::toValue(readVersion, Unversioned()));
+			config.stopVersion().set(tr, readVersion);
 
 			Void _ = wait(taskBucket->finish(tr, task));
 
@@ -1569,8 +1577,11 @@ namespace fileBackup {
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 			state Reference<TaskFuture> allPartsDone;
 
-			state Optional<Value> stopValue = wait(tr->get(task->params[FileBackupAgent::keyStateStop]));
-			state Version stopVersionData = stopValue.present() ? BinaryReader::fromStringRef<Version>(stopValue.get(), Unversioned()) : -1;
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state BackupConfig config(task);
+			state Version stopVersionData = wait(config.stopVersion().getD(tr, -1));
 
 			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[FileBackupAgent::keyBeginVersion], Unversioned());
 			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
@@ -1584,7 +1595,7 @@ namespace fileBackup {
 				allPartsDone = onDone;
 
 				// Updated the stop version
-				tr->set(task->params[FileBackupAgent::keyStateStop], BinaryWriter::toValue(endVersion, Unversioned()));
+				config.stopVersion().set(tr, endVersion);
 			}
 			else {
 				allPartsDone = futureBucket->future(tr);
@@ -1682,9 +1693,10 @@ namespace fileBackup {
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			Void _ = wait(checkTaskVersion(tr, task, BackupDiffLogsTaskFunc::name, BackupDiffLogsTaskFunc::version));
 
-			state BackupConfig config(task);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state BackupConfig config(task);
 			state Key tagBytes = wait(config.tag().getOrThrow(tr));
 			state std::string tagName = tagBytes.toString();
 
@@ -1704,7 +1716,7 @@ namespace fileBackup {
 
 			if (stopWhenDone) {
 				allPartsDone = onDone;
-				tr->set(task->params[FileBackupAgent::keyStateStop], BinaryWriter::toValue(endVersion, Unversioned()));
+				config.stopVersion().set(tr, endVersion);
 			}
 			else {
 				allPartsDone = futureBucket->future(tr);
@@ -1932,8 +1944,7 @@ namespace fileBackup {
 
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-			state Optional<Value> stopValue = wait(tr->get(task->params[FileBackupAgent::keyStateStop]));
-			state Version restoreVersion = stopValue.present() ? BinaryReader::fromStringRef<Version>(stopValue.get(), Unversioned()) : -1;
+			state Version restoreVersion = wait(config.stopVersion().getD(tr, -1));
 
 			state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 			state Reference<TaskFuture> allPartsDone;
@@ -2056,7 +2067,7 @@ namespace fileBackup {
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Key keyStateStop,
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
 			UID uid, Key keyConfigBackupRanges, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2069,7 +2080,6 @@ namespace fileBackup {
 			// Bind backup config to the new task
 			Void _ = wait(config.toTask(tr, task));
 
-			task->params[BackupAgentBase::keyStateStop] = keyStateStop;
 			task->params[BackupAgentBase::keyConfigBackupRanges] = keyConfigBackupRanges;
 			task->params[BackupAgentBase::keyErrors] = keyErrors;
 
@@ -3504,7 +3514,6 @@ public:
 		config.stopWhenDone().set(tr, stopWhenDone);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket,
-			backupAgent->states.get(logUid.toString()).pack(FileBackupAgent::keyStateStop),
 			logUid, BinaryWriter::toValue(backupRanges, IncludeVersion()),
 			backupAgent->errors.pack(logUid.toString()), TaskCompletionKey::noSignal()));
 
@@ -3711,7 +3720,7 @@ public:
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					state std::string outContainer = wait(backupAgent->getLastBackupContainer(tr, logUid));
 					state std::string tagNameDisplay = tagName.toString();
-					state Optional<Value> stopVersionKey = wait(tr->get(backupAgent->states.get(logUid.toString()).pack(BackupAgentBase::keyStateStop)));
+					state Version stopVersion = wait(config.stopVersion().getD(tr, -1));
 
 					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 					Optional<Key> backupKeysPacked = wait(tr->get(backupAgent->config.get(logUid.toString()).pack(BackupAgentBase::keyConfigBackupRanges)));
@@ -3732,10 +3741,7 @@ public:
 							statusText += "The backup on tag `" + tagNameDisplay + "' is restorable but continuing to " + outContainer + ".\n";
 							break;
 						case BackupAgentBase::STATE_COMPLETED:
-							{
-								Version stopVersion = stopVersionKey.present() ? BinaryReader::fromStringRef<Version>(stopVersionKey.get(), Unversioned()) : -1;
-								statusText += "The previous backup on tag `" + tagNameDisplay + "' at " + outContainer + " completed at version " + format("%lld", stopVersion) + ".\n";
-							}
+							statusText += "The previous backup on tag `" + tagNameDisplay + "' at " + outContainer + " completed at version " + format("%lld", stopVersion) + ".\n";
 							break;
 						default:
 							statusText += "The previous backup on tag `" + tagNameDisplay + "' at " + outContainer + " " + backupStatus + ".\n";
@@ -3779,8 +3785,8 @@ public:
 	ACTOR static Future<Version> getStateStopVersion(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Optional<Value> stopVersion = wait(tr->get(backupAgent->states.get(logUid.toString()).pack(BackupAgentBase::keyStateStop)));
-		return stopVersion.present() ? BinaryReader::fromStringRef<Version>(stopVersion.get(), Unversioned()) : -1;
+		Version stopVersion = wait(BackupConfig(logUid).stopVersion().getD(tr, -1));
+		return stopVersion;
 	}
 
 	ACTOR static Future<UID> getLogUid(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
