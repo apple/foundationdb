@@ -472,7 +472,6 @@ FileBackupAgent::FileBackupAgent()
 	, tagNames(subspace.get(BackupAgentBase::keyTagName))
 	// The other subspaces have logUID -> value
 	, lastRestorable(subspace.get(FileBackupAgent::keyLastRestorable))
-	, states(subspace.get(BackupAgentBase::keyStates))
 	, config(subspace.get(BackupAgentBase::keyConfig))
 	, errors(subspace.get(BackupAgentBase::keyErrors))
 	, ranges(subspace.get(BackupAgentBase::keyRanges))
@@ -3437,22 +3436,28 @@ public:
 	}
 
 	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key outContainer, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
-		state UID logUid = g_random->randomUniqueID();
-		state Key logUidValue = BinaryWriter::toValue(logUid, Unversioned());
-		state UID logUidCurrent = wait(backupAgent->getLogUid(tr, tagName));
-
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-		// We will use the global status for now to ensure that multiple backups do not start place with different tags
-		state int status = wait(backupAgent->getStateValue(tr, logUidCurrent));
+		state KeyBackedTag tag = makeBackupTag(tagName);
+		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
+		if (uidAndAbortedFlag.present()) {
+			state BackupConfig prevConfig(uidAndAbortedFlag.get().first);
+			state EBackupState prevBackupStatus = wait(prevConfig.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+			if (FileBackupAgent::isRunnable(prevBackupStatus)) {
+				throw backup_duplicate();
+			}
 
-		if (FileBackupAgent::isRunnable((BackupAgentBase::enumState)status)) {
-			throw backup_duplicate();
+			// Now is time to clear prev backup config space. We have no more use for it.
+			prevConfig.clear(tr);
+			tr->clear(backupAgent->config.get(prevConfig.getUid().toString()).range());
 		}
 
+		state BackupConfig config(g_random->randomUniqueID());
+		state UID uid = config.getUid();
+
 		// This check will ensure that current backupUid is later than the last backup Uid
-		state Standalone<StringRef> backupUid = BackupAgentBase::getCurrentTime();
+		state Standalone<StringRef> now = BackupAgentBase::getCurrentTime();
 		state std::string backupContainer = outContainer.toString();
 
 		// To be consistent with directory handling behavior since FDB backup was first released, if the container string
@@ -3460,7 +3465,7 @@ public:
 		if(backupContainer.find("file://") == 0) {
 			if(backupContainer[backupContainer.size() - 1] != '/')
 				backupContainer += "/";
-			backupContainer += std::string("backup-") + backupUid.toString();
+			backupContainer += std::string("backup-") + now.toString();
 		}
 
 		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer);
@@ -3471,10 +3476,10 @@ public:
 			throw backup_error();
 		}
 
-		Optional<Value> uidOld = wait(tr->get(backupAgent->config.pack(FileBackupAgent::keyLastUid)));
+		Optional<Value> lastBackupTimestamp = wait(backupAgent->lastBackupTimestamp().get(tr));
 
-		if ((uidOld.present()) && (uidOld.get() >= backupUid)) {
-			fprintf(stderr, "ERROR: The last backup `%s' happened in the future.\n", printable(uidOld.get()).c_str());
+		if ((lastBackupTimestamp.present()) && (lastBackupTimestamp.get() >= now)) {
+			fprintf(stderr, "ERROR: The last backup `%s' happened in the future.\n", printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
 		}
 
@@ -3492,30 +3497,27 @@ public:
 			}
 		}
 
-		state BackupConfig config = BackupConfig(logUid);
-
 		// Clear the backup ranges for the tag
-		tr->clear(backupAgent->config.get(logUid.toString()).range());
-		tr->clear(backupAgent->states.get(logUid.toString()).range());
+		tr->clear(backupAgent->config.get(uid.toString()).range());
 		tr->clear(backupAgent->errors.range());
 		config.clear(tr);
 
 		// Point the tag to this new uid
-		makeBackupTag(tagName).set(tr, {logUid, false});
+		makeBackupTag(tagName).set(tr, {uid, false});
 		config.tag().set(tr, tagName);
 
-		tr->set(backupAgent->tagNames.pack(tagName), logUidValue);
-		tr->set(backupAgent->config.pack(FileBackupAgent::keyLastUid), backupUid);
+		tr->set(backupAgent->tagNames.pack(tagName), config.getUidAsKey());
+		backupAgent->lastBackupTimestamp().set(tr, now);
 
 		// Set the backup keys
-		tr->set(backupAgent->config.get(logUid.toString()).pack(FileBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion()));
+		tr->set(backupAgent->config.get(uid.toString()).pack(FileBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion()));
 		config.stateEnum().set(tr, EBackupState::STATE_SUBMITTED);
 		config.backupContainer().set(tr, StringRef(backupContainer));
 		config.stopWhenDone().set(tr, stopWhenDone);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket,
-			logUid, BinaryWriter::toValue(backupRanges, IncludeVersion()),
-			backupAgent->errors.pack(logUid.toString()), TaskCompletionKey::noSignal()));
+			uid, BinaryWriter::toValue(backupRanges, IncludeVersion()),
+			backupAgent->errors.pack(uid.toString()), TaskCompletionKey::noSignal()));
 
 		return Void();
 	}

@@ -214,7 +214,6 @@ public:
 
 	FileBackupAgent( FileBackupAgent&& r ) noexcept(true) :
 		subspace( std::move(r.subspace) ),
-		states( std::move(r.states) ),
 		config( std::move(r.config) ),
 		errors( std::move(r.errors) ),
 		ranges( std::move(r.ranges) ),
@@ -226,7 +225,6 @@ public:
 
 	void operator=( FileBackupAgent&& r ) noexcept(true) {
 		subspace = std::move(r.subspace);
-		states = std::move(r.states);
 		config = std::move(r.config);
 		errors = std::move(r.errors);
 		ranges = std::move(r.ranges);
@@ -235,6 +233,10 @@ public:
 		taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
 		sourceStates = std::move(r.sourceStates);
+	}
+
+	KeyBackedProperty<Key> lastBackupTimestamp() {
+		return config.pack(LiteralStringRef(__FUNCTION__));
 	}
 
 	Future<Void> run(Database cx, double *pollDelay, int maxConcurrentTasks) {
@@ -343,7 +345,6 @@ public:
 	static const int dataFooterSize;
 
 	Subspace subspace;
-	Subspace states;
 	Subspace config;
 	Subspace errors;
 	Subspace ranges;
