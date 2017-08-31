@@ -533,7 +533,7 @@ private:
 		// subtree but have no changes in it
 		MutationBufferT::const_iterator iMutationBoundaryNext = iMutationBoundary;
 		++iMutationBoundaryNext;
-		if(iMutationBoundaryNext == iMutationBoundaryEnd && iMutationBoundaryNext->second.noChanges()) {
+		if(iMutationBoundaryNext == iMutationBoundaryEnd && iMutationBoundary->second.noChanges()) {
 			debug_printf("%s no changes because sole mutation range was empty\n", printPrefix.c_str());
 			return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 		}
