@@ -123,6 +123,15 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
+	} else if(mode == "multi_dc") {
+		redundancy="6";
+		log_replicas="4";
+		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
 	} else
 		redundancySpecified = false;
 	if (redundancySpecified) {
