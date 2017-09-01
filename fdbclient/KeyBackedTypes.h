@@ -69,6 +69,30 @@ struct Codec<std::pair<First, Second>> {
 	}
 };
 
+template<typename T>
+struct Codec<std::vector<T>> {
+	static Tuple pack(typename std::vector<T> const &val) {
+		Tuple t;
+		for (T item : val) {
+			Tuple itemTuple = Codec<T>::pack(item);
+			// fdbclient doesn't support nested tuples yet. For now, flatten the tuple into StringRef
+			t.append(itemTuple.pack());
+		}
+		return t;
+	}
+
+	static std::vector<T> unpack(Tuple const &t) {
+		std::vector<T> v;
+
+		for (int i = 0; i < t.size(); i++) {
+			Tuple itemTuple = Tuple::unpack(t.getString(i));
+			v.push_back(Codec<T>::unpack(itemTuple));
+		}
+
+		return v;
+	}
+};
+
 template<> inline Tuple Codec<KeyRange>::pack(KeyRange const &val) { return Tuple().append(val.begin).append(val.end); }
 template<> inline KeyRange Codec<KeyRange>::unpack(Tuple const &val) { return KeyRangeRef(val.getString(0), val.getString(1)); }
 

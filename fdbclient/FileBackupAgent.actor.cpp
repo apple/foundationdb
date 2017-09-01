@@ -464,6 +464,10 @@ public:
 	KeyBackedProperty<Version> stopVersion() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
+
+	KeyBackedProperty<std::vector<KeyRange>> backupRanges() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
 };
 
 FileBackupAgent::FileBackupAgent()
@@ -904,7 +908,7 @@ namespace fileBackup {
 	}
 
 	ACTOR static Future<Void> writeRestoreFile(Reference<ReadYourWritesTransaction> tr, Key keyErrors, BackupConfig config,
-		Version stopVersion, Key keyConfigBackupRanges)
+		Version stopVersion)
 	{
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -931,12 +935,8 @@ namespace fileBackup {
 			msg += format("%-15s %s\n", "logUidValue:", printable(config.getUidAsKey()).c_str());
 
 			// Deserialize the backup ranges
-			state Standalone<VectorRef<KeyRangeRef>> backupRanges;
-			BinaryReader br(keyConfigBackupRanges, IncludeVersion());
-			br >> backupRanges;
-
+			state std::vector<KeyRange> backupRanges = wait(config.backupRanges().getOrThrow(tr));
 			msg += format("%-15s %d\n", "ranges:", backupRanges.size());
-
 			for (auto &backupRange : backupRanges) {
 				msg += format("%-15s %s\n", "rangebegin:", printable(backupRange.begin).c_str());
 				msg += format("%-15s %s\n", "rangeend:", printable(backupRange.end).c_str());
@@ -1615,7 +1615,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, FileBackupAgent::keyConfigBackupRanges);
 
 			task->params[BackupAgentBase::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 
@@ -1668,7 +1667,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
 
 			if (!waitFor) {
 				return taskBucket->addTask(tr, task);
@@ -1736,7 +1734,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
 
 			task->params[FileBackupAgent::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
 
@@ -1948,8 +1945,7 @@ namespace fileBackup {
 			state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 			state Reference<TaskFuture> allPartsDone;
 
-			Void _ = wait(writeRestoreFile(tr, task->params[FileBackupAgent::keyErrors], config, restoreVersion,
-				task->params[BackupAgentBase::keyConfigBackupRanges]));
+			Void _ = wait(writeRestoreFile(tr, task->params[FileBackupAgent::keyErrors], config, restoreVersion));
 
 			TraceEvent("FBA_Complete").detail("restoreVersion", restoreVersion).detail("differential", stopWhenDone);
 
@@ -1981,7 +1977,6 @@ namespace fileBackup {
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
 			copyDefaultParameters(parentTask, task);
-			copyParameter(parentTask, task, BackupAgentBase::keyConfigBackupRanges);
 
 			if (!waitFor) {
 				return taskBucket->addTask(tr, task);
@@ -2033,9 +2028,7 @@ namespace fileBackup {
 
 			ASSERT(config.getUid() == logUid);
 
-			state Standalone<VectorRef<KeyRangeRef>> backupRanges;
-			BinaryReader br(task->params[FileBackupAgent::keyConfigBackupRanges], IncludeVersion());
-			br >> backupRanges;
+			state std::vector<KeyRange> backupRanges = wait(config.backupRanges().getOrThrow(tr));
 
 			// Start logging the mutations for the specified ranges of the tag
 			for (auto &backupRange : backupRanges) {
@@ -2067,7 +2060,7 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
-			UID uid, Key keyConfigBackupRanges, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
+			UID uid, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -2079,7 +2072,6 @@ namespace fileBackup {
 			// Bind backup config to the new task
 			Void _ = wait(config.toTask(tr, task));
 
-			task->params[BackupAgentBase::keyConfigBackupRanges] = keyConfigBackupRanges;
 			task->params[BackupAgentBase::keyErrors] = keyErrors;
 
 			if (!waitFor) {
@@ -3450,7 +3442,6 @@ public:
 
 			// Now is time to clear prev backup config space. We have no more use for it.
 			prevConfig.clear(tr);
-			tr->clear(backupAgent->config.get(prevConfig.getUid().toString()).range());
 		}
 
 		state BackupConfig config(g_random->randomUniqueID());
@@ -3489,35 +3480,34 @@ public:
 		}
 
 		backupRangeSet.coalesce(allKeys);
-		backupRanges = Standalone<VectorRef<KeyRangeRef>>();
+		state std::vector<KeyRange> normalizedRanges;
 
 		for (auto& backupRange : backupRangeSet.ranges()) {
 			if (backupRange.value()) {
-				backupRanges.push_back_deep(backupRanges.arena(), backupRange.range());
+				KeyRef begin = KeyRef(backupRanges.arena(), backupRange.range().begin);
+				KeyRef end = KeyRef(backupRanges.arena(), backupRange.range().end);
+				normalizedRanges.push_back(KeyRange(KeyRangeRef(begin, end), backupRanges.arena()));
 			}
 		}
 
 		// Clear the backup ranges for the tag
-		tr->clear(backupAgent->config.get(uid.toString()).range());
 		tr->clear(backupAgent->errors.range());
 		config.clear(tr);
 
 		// Point the tag to this new uid
 		makeBackupTag(tagName).set(tr, {uid, false});
-		config.tag().set(tr, tagName);
 
 		tr->set(backupAgent->tagNames.pack(tagName), config.getUidAsKey());
 		backupAgent->lastBackupTimestamp().set(tr, now);
 
 		// Set the backup keys
-		tr->set(backupAgent->config.get(uid.toString()).pack(FileBackupAgent::keyConfigBackupRanges), BinaryWriter::toValue(backupRanges, IncludeVersion()));
+		config.tag().set(tr, tagName);
 		config.stateEnum().set(tr, EBackupState::STATE_SUBMITTED);
 		config.backupContainer().set(tr, StringRef(backupContainer));
 		config.stopWhenDone().set(tr, stopWhenDone);
+		config.backupRanges().set(tr, normalizedRanges);
 
-		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket,
-			uid, BinaryWriter::toValue(backupRanges, IncludeVersion()),
-			backupAgent->errors.pack(uid.toString()), TaskCompletionKey::noSignal()));
+		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, uid, backupAgent->errors.pack(uid.toString()), TaskCompletionKey::noSignal()));
 
 		return Void();
 	}
@@ -3723,14 +3713,6 @@ public:
 					state std::string outContainer = wait(backupAgent->getLastBackupContainer(tr, logUid));
 					state std::string tagNameDisplay = tagName.toString();
 					state Version stopVersion = wait(config.stopVersion().getD(tr, -1));
-
-					state Standalone<VectorRef<KeyRangeRef>> backupRanges;
-					Optional<Key> backupKeysPacked = wait(tr->get(backupAgent->config.get(logUid.toString()).pack(BackupAgentBase::keyConfigBackupRanges)));
-
-					if (backupKeysPacked.present()) {
-						BinaryReader br(backupKeysPacked.get(), IncludeVersion());
-						br >> backupRanges;
-					}
 
 					switch (backupState) {
 						case BackupAgentBase::STATE_SUBMITTED:
