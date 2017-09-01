@@ -975,7 +975,7 @@ TEST_CASE("/redwood/correctness/memory/set") {
 	else
 		pager = createMemoryPager();
 
-	state int pageSize = g_random->coinflip() ? -1 : g_random->randomInt(50, 200);
+	state int pageSize = g_random->coinflip() ? -1 : g_random->randomInt(100, 200);
 
 	state VersionedBTree *btree = new VersionedBTree(pager, pageSize);
 
