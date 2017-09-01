@@ -309,15 +309,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 			return JNI_NULL;
 		}
 
-		uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(lastKey, NULL);
-		if (!keyvalues_barr) {
-			throwRuntimeEx( jenv, "Error getting handle to native resources" );
-			return JNI_NULL;
-		}
-
-		memcpy(keyvalues_barr, kvs[count - 1].key, kvs[count - 1].key_length);
-		// void function that is not documented as not throwing
-		jenv->ReleaseByteArrayElements(lastKey, (jbyte *)keyvalues_barr, 0);
+		jenv->SetByteArrayRegion(lastKey, kvs[count - 1].key, kvs[count - 1].key_length, (const jbyte *)keyvalues_barr);
 	}
 
 	jobject result = jenv->NewObject(resultCls, resultCtorId, lastKey, count, (jboolean)more);
@@ -327,6 +319,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 	return result;
 }
 
+// SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
 JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureResults_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
@@ -399,7 +392,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 	return result;
 }
 
-// SOMEDAY: this could be done much more efficiently with Direct ByteBuffers
+// SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
 JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureResult_FutureResult_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
@@ -425,15 +418,8 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureResult_Future
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements(result, NULL); 
-	if (!barr) {
-		throwRuntimeEx( jenv, "Error getting handle to native resources" );
-		return JNI_NULL;
-	}
 
-	memcpy(barr, value, length);
-	// passing "0" here commits the data back and releases the native copy
-	jenv->ReleaseByteArrayElements(result, (jbyte *)barr, 0);
+	jenv->SetByteArrayRegion(result, 0, length, (const jbyte *)value);
 	return result;
 }
 
@@ -458,15 +444,8 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureKey_FutureKey
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements(result, NULL); 
-	if (!barr) {
-		throwRuntimeEx( jenv, "Error getting handle to native resources" );
-		return JNI_NULL;
-	}
 
-	memcpy(barr, value, length);
-	// passing "0" here commits the data back and releases the native copy
-	jenv->ReleaseByteArrayElements(result, (jbyte *)barr, 0);
+	jenv->SetByteArrayRegion(result, 0, length, (const jbyte *)value);
 	return result;
 }
 
