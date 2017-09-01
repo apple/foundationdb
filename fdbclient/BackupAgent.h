@@ -216,23 +216,19 @@ public:
 		subspace( std::move(r.subspace) ),
 		config( std::move(r.config) ),
 		errors( std::move(r.errors) ),
-		ranges( std::move(r.ranges) ),
 		tagNames( std::move(r.tagNames) ),
 		lastRestorable( std::move(r.lastRestorable) ),
 		taskBucket( std::move(r.taskBucket) ),
-		futureBucket( std::move(r.futureBucket) ),
-		sourceStates( std::move(r.sourceStates) ) {}
+		futureBucket( std::move(r.futureBucket) ) {}
 
 	void operator=( FileBackupAgent&& r ) noexcept(true) {
 		subspace = std::move(r.subspace);
 		config = std::move(r.config);
 		errors = std::move(r.errors);
-		ranges = std::move(r.ranges);
 		tagNames = std::move(r.tagNames);
 		lastRestorable = std::move(r.lastRestorable),
 		taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
-		sourceStates = std::move(r.sourceStates);
 	}
 
 	KeyBackedProperty<Key> lastBackupTimestamp() {
@@ -332,9 +328,6 @@ public:
 	static std::string getDataFilename(Version version, int64_t size, int blockSize);
 	static std::string getLogFilename(Version beginVer, Version endVer, int64_t size, int blockSize);
 
-	static const Key keyBackupContainer;
-	static const Key keyLastRestorable;
-
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
 	Future<int64_t> getTaskCount(Database cx) { return taskBucket->getTaskCount(cx); }
 	Future<Void> watchTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->watchTaskCount(tr); }
@@ -347,10 +340,8 @@ public:
 	Subspace subspace;
 	Subspace config;
 	Subspace errors;
-	Subspace ranges;
 	Subspace tagNames;
 	Subspace lastRestorable;
-	Subspace sourceStates;
 
 	Reference<TaskBucket> taskBucket;
 	Reference<FutureBucket> futureBucket;
