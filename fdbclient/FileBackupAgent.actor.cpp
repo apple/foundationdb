@@ -466,6 +466,11 @@ public:
 	KeyBackedProperty<std::vector<KeyRange>> backupRanges() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
+
+	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange) {
+		Key mutationLogsDestKey = uidPrefixKey(backupLogKeys.begin, config.getUid());
+		tr->set(logRangesEncodeKey(backupRange.begin, config.getUid()), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
+	}
 };
 
 FileBackupAgent::FileBackupAgent()
@@ -908,7 +913,7 @@ namespace fileBackup {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-		state UID logUid = config.getUid();
+		state UID uid = config.getUid();
 		Key backupContainerBytes = wait(config.backupContainer().getOrThrow(tr));
 		state std::string backupContainer = backupContainerBytes.toString();
 		state Key tagBytes = wait(config.tag().getOrThrow(tr));
@@ -926,7 +931,7 @@ namespace fileBackup {
 			msg += format("%-15s %ld\n", "fdbbackupver:", backupVersion);
 			msg += format("%-15s %lld\n", "restorablever:", stopVersion);
 			msg += format("%-15s %s\n", "tag:", tagName.c_str());
-			msg += format("%-15s %s\n", "logUid:", logUid.toString().c_str());
+			msg += format("%-15s %s\n", "logUid:", uid.toString().c_str());
 			msg += format("%-15s %s\n", "logUidValue:", printable(config.getUidAsKey()).c_str());
 
 			// Deserialize the backup ranges
@@ -966,7 +971,7 @@ namespace fileBackup {
 			throw io_error();
 		}
 
-		TraceEvent("BA_WriteRestoreFile").detail("logUid", logUid).detail("stopVersion", stopVersion)
+		TraceEvent("BA_WriteRestoreFile").detail("logUid", uid).detail("stopVersion", stopVersion)
 			.detail("backupContainer", backupContainer)
 			.detail("backupTag", tagName);
 
@@ -1668,10 +1673,10 @@ namespace fileBackup {
 			Void _ = wait(checkTaskVersion(tr, task, FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version));
 
 			state BackupConfig backup(task);
-			state UID logUid = backup.getUid();
+			state UID uid = backup.getUid();
 
-			state Key configPath = uidPrefixKey(logRangesRange.begin, logUid);
-			state Key logsPath = uidPrefixKey(backupLogKeys.begin, logUid);
+			state Key configPath = uidPrefixKey(logRangesRange.begin, uid);
+			state Key logsPath = uidPrefixKey(backupLogKeys.begin, uid);
 
 			backup.clear(tr);
 			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
@@ -2055,17 +2060,13 @@ namespace fileBackup {
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state BackupConfig config(task);
-			state UID logUid = config.getUid();
-			state Key logUidDest = uidPrefixKey(backupLogKeys.begin, logUid);
 			state Version beginVersion = Params.beginVersion().get(task);
-
-			ASSERT(config.getUid() == logUid);
 
 			state std::vector<KeyRange> backupRanges = wait(config.backupRanges().getOrThrow(tr));
 
 			// Start logging the mutations for the specified ranges of the tag
 			for (auto &backupRange : backupRanges) {
-				tr->set(logRangesEncodeKey(backupRange.begin, logUid), logRangesEncodeValue(backupRange.end, logUidDest));
+				config.startMutationLogs();
 			}
 
 			config.stateEnum().set(tr, EBackupState::STATE_BACKUP);
@@ -2092,8 +2093,7 @@ namespace fileBackup {
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket,
-			UID uid, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, UID uid, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3420,7 +3420,6 @@ public:
 	// This method will return the final status of the backup
 	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, Key tagName, bool stopWhenDone) {
 		state std::string backTrace;
-		state UID logUid = wait(backupAgent->getLogUid(cx, tagName));
 		state KeyBackedTag tag = makeBackupTag(tagName);
 
 		loop {
@@ -3433,7 +3432,6 @@ public:
 				if (!oldUidAndAborted.present()) {
 					return EBackupState::STATE_NEVERRAN;
 				}
-				ASSERT(oldUidAndAborted.get().first == logUid);
 
 				state BackupConfig config(oldUidAndAborted.get().first);
 				state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
@@ -3658,14 +3656,15 @@ public:
 	ACTOR static Future<Void> discontinueBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
-		state int status = wait(backupAgent->getStateValue(tr, logUid));
+		state UID uid = wait(backupAgent->getLogUid(tr, tagName));
+
+		state BackupConfig config(uid);
+		state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 
 		if (!FileBackupAgent::isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
 		}
 
-		state BackupConfig config(logUid);
 		state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 
 		if (stopWhenDone) {
@@ -3688,10 +3687,8 @@ public:
 			throw backup_error();
 		}
 
-		state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
-		ASSERT(current.get().first == logUid);
-
-		int status = wait(backupAgent->getStateValue(tr, logUid));
+		state BackupConfig config(current.get().first);
+		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
@@ -3700,15 +3697,11 @@ public:
 		// Cancel backup task through tag
 		Void _ = wait(tag.cancel(tr));
 
-		Key configPath = uidPrefixKey(logRangesRange.begin, logUid);
-		Key logsPath = uidPrefixKey(backupLogKeys.begin, logUid);
+		Key configPath = uidPrefixKey(logRangesRange.begin, config.getUid());
+		Key logsPath = uidPrefixKey(backupLogKeys.begin, config.getUid());
 
 		tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 		tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
-		state BackupConfig config(logUid);
-		// FIXME: We don't want to clear config space on abort, as it is useful to have more information about
-		// aborted backup later. Instead, we can clean it up while starting next backup under same tag.
-		//config.clear(tr);
 
 		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
 
