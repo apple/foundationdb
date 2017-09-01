@@ -155,6 +155,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				LocalityData targetMachine = self->machines.back();
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
+					.detailext("zoneId", targetMachine.zoneId())
 					.detail("Reboot", self->reboot).detail("killedMachines", killedMachines)
 					.detail("machinesToKill", self->machinesToKill).detail("machinesToLeave", self->machinesToLeave)
 					.detail("machines", self->machines.size()).detail("Replace", self->replacement);
@@ -166,8 +167,9 @@ struct MachineAttritionWorkload : TestWorkload {
 						g_simulator.killMachine( targetMachine.zoneId(), ISimulator::Reboot );
 					}
 				} else {
-					TraceEvent("WorkerKill").detail("MachineCount", self->machines.size());
-					if( g_random->random01() < 0.33 ) {
+					auto randomDouble = g_random->random01();
+					TraceEvent("WorkerKill").detail("MachineCount", self->machines.size()).detail("RandomValue", randomDouble);
+					if (randomDouble < 0.33 ) {
 						TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
 						g_simulator.killMachine( targetMachine.zoneId(), ISimulator::RebootAndDelete );
 					} else {

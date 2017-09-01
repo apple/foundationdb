@@ -24,11 +24,42 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+
+#ifndef FDB_API_VERSION
+#define FDB_API_VERSION 500
+#endif
+
+#include <foundationdb/fdb_c.h>
+#include <foundationdb/fdb_c_options.g.h>
 
 double getTime() {
 	static struct timeval tv;
 	gettimeofday(&tv, NULL);
 	return tv.tv_usec/1000000.0 + tv.tv_sec;
+}
+
+void writeKey(uint8_t **dest, int key, int keySize) {
+	*dest = (uint8_t*)malloc((sizeof(uint8_t))*keySize);
+	sprintf((char*)*dest, "%0*d", keySize, key);
+}
+
+uint8_t **generateKeys(int numKeys, int keySize) {
+	uint8_t **keys = (uint8_t**)malloc(sizeof(uint8_t*)*(numKeys+1));
+
+	uint32_t i;
+	for(i = 0; i <= numKeys; ++i) {
+		writeKey(keys + i, i, keySize);
+	}
+
+	return keys;
+}
+void freeKeys(uint8_t **keys, int numKeys) {
+	uint32_t i;
+	for(i = 0; i < numKeys; i++) {
+		free(keys[i]);
+	}
+	free(keys);
 }
 
 int cmpfunc(const void* a, const void* b) {
@@ -39,6 +70,12 @@ int median(int *values, int length) {
 	qsort(values, length, sizeof(int), cmpfunc);
 	return values[length/2];
 }
+
+struct RunResult {
+	int res;
+	fdb_error_t e;
+};
+#define RES(x, y) (struct RunResult) { x, y }
 
 struct Kpi {
 	const char *name;
@@ -86,7 +123,6 @@ void addError(struct ResultSet *rs, const char *message) {
 }
 
 void writeResultSet(struct ResultSet *rs) {
-	srand(time(NULL)); // TODO: move this?
 	uint64_t id = ((uint64_t)rand() << 32) + rand();
 	char name[100];
 	sprintf(name, "fdb-c_result-%llu.json", id);
@@ -147,10 +183,10 @@ void freeResultSet(struct ResultSet *rs) {
 	free(rs);
 }
 
-int getError(int err, const char* context, struct ResultSet *rs) {
+fdb_error_t getError(fdb_error_t err, const char* context, struct ResultSet *rs) {
 	if(err) {
 		char *msg = (char*)malloc(strlen(context) + 100);
-		sprintf(msg, "Error in %s: %d", context, err);
+		sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
 		fprintf(stderr, "%s\n", msg);
 		if(rs != NULL) {
 			addError(rs, msg);
@@ -162,7 +198,7 @@ int getError(int err, const char* context, struct ResultSet *rs) {
 	return err;
 }
 
-void checkError(int err, const char* context, struct ResultSet *rs) {
+void checkError(fdb_error_t err, const char* context, struct ResultSet *rs) {
 	if(getError(err, context, rs)) {
 		if(rs != NULL) {
 			writeResultSet(rs);
@@ -172,3 +208,50 @@ void checkError(int err, const char* context, struct ResultSet *rs) {
 	}
 }
 
+fdb_error_t logError(fdb_error_t err, const char* context, struct ResultSet *rs) {
+	char *msg = (char*)malloc(strlen(context) + 100);
+	sprintf(msg, "Error in %s: %s", context, fdb_get_error(err));
+	fprintf(stderr, "%s\n", msg);
+	if(rs != NULL) {
+		addError(rs, msg);
+	}
+
+	free(msg);
+	return err;
+}
+
+fdb_error_t maybeLogError(fdb_error_t err, const char* context, struct ResultSet *rs) {
+	if(err && !fdb_error_predicate( FDB_ERROR_PREDICATE_RETRYABLE, err ) ) {
+		return logError(err, context, rs);
+	}
+	return err;
+}
+
+void* runNetwork() {
+	checkError(fdb_run_network(), "run network", NULL);
+	return NULL;
+}
+
+FDBDatabase* openDatabase(struct ResultSet *rs, pthread_t *netThread) {
+	checkError(fdb_setup_network(), "setup network", rs);
+	pthread_create(netThread, NULL, &runNetwork, NULL);
+
+	FDBFuture *f = fdb_create_cluster(NULL);
+	checkError(fdb_future_block_until_ready(f), "block for cluster", rs);
+
+	FDBCluster *cluster;
+	checkError(fdb_future_get_cluster(f, &cluster), "get cluster", rs);
+
+	fdb_future_destroy(f);
+
+	f = fdb_cluster_create_database(cluster, (uint8_t*)"DB", 2);
+	checkError(fdb_future_block_until_ready(f), "block for database", rs);
+
+	FDBDatabase *db;
+	checkError(fdb_future_get_database(f, &db), "get database", rs);
+
+	fdb_future_destroy(f);
+	fdb_cluster_destroy(cluster);
+
+	return db;
+}

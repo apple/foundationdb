@@ -27,25 +27,36 @@
 
 IAsyncFile::IAsyncFile(){};
 
-ACTOR static Future<Void> incrementalDeleteHelper( std::string filename, int64_t truncateAmt, double interval ){
+ACTOR static Future<Void> incrementalDeleteHelper( std::string filename, bool mustBeDurable, int64_t truncateAmt, double interval ) {
+	state Reference<IAsyncFile> file;
+	state int64_t remainingFileSize;
+	state bool exists = fileExists(filename);
 
-	state Reference<IAsyncFile> f = wait(
-		IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READWRITE, 0));
-	state int64_t filesize = wait(f->size());
-	state int64_t i = filesize;
+	if(exists) {
+		Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED, 0));
+		file = f;
 
-	Void _ = wait(IAsyncFileSystem::filesystem()->deleteFile(filename, true));
-	for( ;i > 0; i -= truncateAmt ){
-		Void _ = wait(f->truncate(i));
-		Void _ = wait(f->sync());
-		Void _ = wait(delay(interval));
+		int64_t fileSize = wait(file->size());
+		remainingFileSize = fileSize;
 	}
+
+	Void _ = wait(IAsyncFileSystem::filesystem()->deleteFile(filename, mustBeDurable));
+
+	if(exists) {
+		for( ; remainingFileSize > 0; remainingFileSize -= truncateAmt ){
+			Void _ = wait(file->truncate(remainingFileSize));
+			Void _ = wait(file->sync());
+			Void _ = wait(delay(interval));
+		}
+	}
+
 	return Void();
 }
 
-Future<Void> IAsyncFile::incrementalDelete( std::string filename){
+Future<Void> IAsyncFile::incrementalDelete( std::string filename, bool mustBeDurable ) {
 	return uncancellable(incrementalDeleteHelper(
 		filename,
+		mustBeDurable,
 		FLOW_KNOBS->INCREMENTAL_DELETE_TRUNCATE_AMOUNT,
 		FLOW_KNOBS->INCREMENTAL_DELETE_INTERVAL));
 }
@@ -63,6 +74,6 @@ TEST_CASE( "fileio/incrementalDelete" ) {
 	Void _ = wait(f->truncate(fileSize));
 	//close the file by deleting the reference
 	f.clear();
-	Void _ = wait(IAsyncFile::incrementalDelete(filename));
+	Void _ = wait(IAsyncFile::incrementalDelete(filename, true));
 	return Void();
 }

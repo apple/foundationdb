@@ -89,15 +89,11 @@ void eraseDirectoryRecursive( std::string const& dir ) {
 	INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
 #ifdef _WIN32
 	system( ("rd /s /q \"" + dir + "\"").c_str() );
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
 	int error =
 		nftw(dir.c_str(),
-			 [](const char *fpath, const struct stat *sb, int typeflag,
-				struct FTW *ftwbuf) -> int {
-				 if (remove(fpath))
-					 return FTW_STOP;
-				 return FTW_CONTINUE;
-			 }, 64, FTW_DEPTH | FTW_PHYS | FTW_ACTIONRETVAL);
+			[](const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) -> int { return remove(fpath); }
+			, 64, FTW_DEPTH | FTW_PHYS);
 	/* Looks like calling code expects this to continue silently if
 	   the directory we're deleting doesn't exist in the first
 	   place */
@@ -105,14 +101,6 @@ void eraseDirectoryRecursive( std::string const& dir ) {
 		TraceEvent(SevError, "nftw").detail("Directory", dir).GetLastError();
 		throw platform_error();
 	}
-#elif defined(__APPLE__)
-	// const char* argv[2];
-	// argv[0] = dir.c_str();
-	// argv[1] = NULL;
-	// FTS* fts = fts_open(argv, FTS_PHYSICAL | FTS_SEEDOT | FTS_NOSTAT, NULL);
-	// while (FTSENT* ent = fts_read(fts)) {
-	// 	if (ent->fts_info 
-	// }
 #else
 #error Port me!
 #endif

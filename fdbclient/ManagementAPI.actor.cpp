@@ -1044,6 +1044,39 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database cx ) {
 	}
 }
 
+ACTOR Future<int> setDDMode( Database cx, int mode ) {
+	state Transaction tr(cx);
+	state int oldMode = -1;
+	state BinaryWriter wr(Unversioned());
+	wr << mode;
+
+	loop {
+		try {
+			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
+			if (oldMode < 0) {
+				oldMode = 1;
+				if (old.present()) {
+					BinaryReader rd(old.get(), Unversioned());
+					rd >> oldMode;
+				}
+			}
+			if (!mode) {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << dataDistributionModeLock;
+				tr.set( moveKeysLockOwnerKey, wrMyOwner.toStringRef() );
+			}
+
+			tr.set( dataDistributionModeKey, wr.toStringRef() );
+
+			Void _ = wait( tr.commit() );
+			return oldMode;
+		} catch (Error& e) {
+			TraceEvent("setDDModeRetrying").error(e);
+			Void _ = wait (tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion> excl ) {
 	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
 

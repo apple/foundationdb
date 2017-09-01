@@ -30,6 +30,7 @@
 #include "fdbclient/FDBOptions.g.h"
 
 #include "flow/DeterministicRandom.h"
+#include "flow/SignalSafeUnwind.h"
 #include "fdbrpc/TLSConnection.h"
 #include "fdbrpc/Platform.h"
 
@@ -504,6 +505,7 @@ void initHelp() {
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
 
 	hiddenCommands.insert("expensive_data_check");
+	hiddenCommands.insert("datadistribution");
 }
 
 void printVersion() {
@@ -1672,7 +1674,18 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			state double worstFreeSpaceRatio = 1.0;
 			try {
 				for (auto proc : processesMap.obj()){
+					bool storageServer = false;
 					StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+					for (StatusObjectReader role : rolesArray) {
+						if (role["role"].get_str() == "storage") {
+							storageServer = true;
+							break;
+						}
+					}
+					// Skip non-storage servers in free space calculation
+					if (!storageServer)
+						continue;
+
 					StatusObjectReader process(proc.second);
 					std::string addrStr;
 					if (!process.get("address", addrStr)) {
@@ -1681,6 +1694,9 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 					}
 					NetworkAddress addr = NetworkAddress::parse(addrStr);
 					bool excluded = (process.has("excluded") && process.last().get_bool()) || addressExcluded(exclusions, addr);
+					ssTotalCount++;
+					if (excluded)
+						ssExcludedCount++;
 
 					if(!excluded) {
 						StatusObjectReader disk;
@@ -1702,15 +1718,6 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 						}
 
 						worstFreeSpaceRatio = std::min(worstFreeSpaceRatio, double(free_bytes)/total_bytes);
-					}
-
-					for (StatusObjectReader role : rolesArray) {
-						if (role["role"].get_str() == "storage") {
-							if (excluded)
-								ssExcludedCount++;
-							ssTotalCount++;
-							break;
-						}
 					}
 				}
 			}
@@ -2210,34 +2217,44 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			state UID randomID = g_random->randomUniqueID();
 			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line)));
 
-			bool err, partial;
-			state std::vector<std::vector<StringRef>> parsed = parseLine(line, err, partial);
-			if (err) {
-				LogCommand(line, randomID, "ERROR: malformed escape sequence");
-				is_error = true;
-				continue;
-			}
-			if (partial) {
-				LogCommand(line, randomID, "ERROR: unterminated quote");
-				is_error = true;
-				continue;
+			bool malformed, partial;
+			state std::vector<std::vector<StringRef>> parsed = parseLine(line, malformed, partial);
+			if (malformed) LogCommand(line, randomID, "ERROR: malformed escape sequence");
+			if (partial) LogCommand(line, randomID, "ERROR: unterminated quote");
+			if (malformed || partial) {
+				if (parsed.size() > 0) {
+					// Denote via a special token that the command was a parse failure.
+					auto& last_command = parsed.back();
+					last_command.insert(last_command.begin(), StringRef((const uint8_t*)"parse_error", strlen("parse_error")));
+				}
 			}
 
 			state bool multi = parsed.size() > 1;
+			is_error = false;
 
 			state std::vector<std::vector<StringRef>>::iterator iter;
 			for (iter = parsed.begin(); iter != parsed.end(); ++iter) {
 				state std::vector<StringRef> tokens = *iter;
 
-				if (opt.exec.present() && is_error) {
+				if (is_error) {
 					printf("WARNING: the previous command failed, the remaining commands will not be executed.\n");
-					return 1;
+					break;
 				}
-
-				is_error = false;
 
 				if (!tokens.size())
 					continue;
+
+				if (tokencmp(tokens[0], "parse_error")) {
+					printf("ERROR: Command failed to completely parse.\n");
+					if (tokens.size() > 1) {
+						printf("ERROR: Not running partial or malformed command:");
+						for (auto t = tokens.begin() + 1; t != tokens.end(); ++t)
+							printf(" %s", formatStringRef(*t, true).c_str());
+						printf("\n");
+					}
+					is_error = true;
+					continue;
+				}
 
 				if (multi) {
 					printf(">>>");
@@ -2717,6 +2734,25 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "datadistribution")) {
+					if (tokens.size() != 2) {
+						printf("Usage: datadistribution <on|off>\n");
+						is_error = true;
+					} else {
+						if(tokencmp(tokens[1], "on")) {
+							int _ = wait(setDDMode(db, 1));
+							printf("Data distribution is enabled\n");
+						} else if(tokencmp(tokens[1], "off")) {
+							int _ = wait(setDDMode(db, 0));
+							printf("Data distribution is disabled\n");
+						} else {
+							printf("Usage: datadistribution <on|off>\n");
+							is_error = true;
+						}
+					}
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "option")) {
 					if (tokens.size() == 2 || tokens.size() > 4) {
 						printUsage(tokens[0]);
@@ -2841,6 +2877,7 @@ ACTOR Future<Void> timeExit(double duration) {
 
 int main(int argc, char **argv) {
 	platformInit();
+	initSignalSafeUnwind();
 	Error::init();
 
 	registerCrashHandler();

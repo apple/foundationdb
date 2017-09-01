@@ -239,8 +239,12 @@ Future<Void> triggerOnError( Func what, Future<Void> signal ) {
 ACTOR template<class T>
 void uncancellable(Future<T> what, Promise<T> result)
 {
-	T val = wait(what);
-	result.send(val);
+	try {
+		T val = wait(what);
+		result.send(val);
+	} catch( Error &e ) {
+		result.sendError(e);
+	}
 }
 
 //Waits for a future to complete and cannot be cancelled

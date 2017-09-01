@@ -46,7 +46,7 @@ bindings/nodejs/fdb_node.stamp: bindings/nodejs/src/FdbOptions.g.cpp bindings/no
 	for ver in $(NODE_VERSIONS); do \
 		MMVER=`echo $$ver | sed -e 's,\., ,g' | awk '{print $$1 "." $$2}'` && \
 		mkdir modules/$$MMVER && \
-		node-gyp configure --target=$$ver && \
+		node-gyp configure --dist-url=https://nodejs.org/dist --target=$$ver && \
 		node-gyp -v build && \
 		cp build/Release/fdblib.node modules/$${MMVER} ; \
 	done
@@ -67,6 +67,7 @@ bindings/nodejs/package.json: bindings/nodejs/package.json.in $(ALL_MAKEFILES) v
 	@m4 -DVERSION=$(NPMVER) $< > $@
 	@echo "Updating       Node dependencies"
 	@cd bindings/nodejs && \
+	npm config set registry "https://registry.npmjs.org/" && \
 	npm update
 
 fdb_node_npm: fdb_node versions.target bindings/nodejs/README.md bindings/nodejs/lib/*.js bindings/nodejs/src/* bindings/nodejs/binding.gyp LICENSE

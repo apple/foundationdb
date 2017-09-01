@@ -60,7 +60,7 @@ bool IReplicationPolicy::validateFull(
 		}
 		else if (validate(fromServers->getGroupEntries(), fromServers)) {
 			if (g_replicationdebug > 2) {
-				printf("Error: Validated unsolved policy with all%5lu servers\n", fromServers->size());
+				printf("Error: Validated unsolved policy with all%5d servers\n", fromServers->size());
 			}
 			valid = false;
 		}
@@ -194,7 +194,7 @@ bool PolicyAcross::validate(
 				count ++;
 			}
 			else if (g_replicationdebug > 4) {
-				printf("Across invalid solution:%5lu key: %-7s value: (%3lu) %-10s policy: %-10s => %s\n", itValid.second.size(), _attribKey.c_str(), itValid.first._id, fromServers->valueText(itValid.first).c_str(), _policy->name().c_str(), _policy->info().c_str());
+				printf("Across invalid solution:%5lu key: %-7s value: (%3d) %-10s policy: %-10s => %s\n", itValid.second.size(), _attribKey.c_str(), itValid.first._id, fromServers->valueText(itValid.first).c_str(), _policy->name().c_str(), _policy->info().c_str());
 				if (g_replicationdebug > 5) {
 					for (auto& entry : itValid.second) {
 						printf("   entry: %s\n", fromServers->getEntryInfo(entry).c_str());
