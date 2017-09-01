@@ -754,8 +754,8 @@ Reference<Cluster> Cluster::createCluster(std::string connFileName, int apiVersi
 	return Reference<Cluster>(new Cluster( rccf, apiVersion));
 }
 
-Future<Database> Cluster::createDatabase( Standalone<StringRef> dbName ) {
-	return DatabaseContext::createDatabase( clusterInterface, Reference<Cluster>::addRef( this ), dbName, LocalityData() );
+Future<Database> Cluster::createDatabase( Standalone<StringRef> dbName, LocalityData locality ) {
+	return DatabaseContext::createDatabase( clusterInterface, Reference<Cluster>::addRef( this ), dbName, locality );
 }
 
 Future<Void> Cluster::onConnected() {

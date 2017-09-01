@@ -110,7 +110,7 @@ public:
 	static Reference<Cluster> createCluster(std::string connFileName, int apiVersion);
 
 	// See DatabaseContext::createDatabase
-	Future<Database> createDatabase( Standalone<StringRef> dbName );
+	Future<Database> createDatabase( Standalone<StringRef> dbName, LocalityData locality = LocalityData() );
 
 	void setOption(FDBClusterOptions::Option option, Optional<StringRef> value);
 

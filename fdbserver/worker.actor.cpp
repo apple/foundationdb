@@ -512,7 +512,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		if( metricsConnFile.size() > 0) {
 			try {
 				state Reference<Cluster> cluster = Cluster::createCluster( metricsConnFile, Cluster::API_VERSION_LATEST );
-				metricsLogger = runMetrics( cluster->createDatabase(LiteralStringRef("DB")), KeyRef(metricsPrefix) );
+				metricsLogger = runMetrics( cluster->createDatabase(LiteralStringRef("DB"), locality), KeyRef(metricsPrefix) );
 			} catch(Error &e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
@@ -526,7 +526,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	errorForwarders.add( registrationClient( ccInterface, interf, processClass ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
-	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo ) );
+	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 
 	filesClosed.add(stopping.getFuture());
 

@@ -1528,6 +1528,17 @@ int main(int argc, char* argv[]) {
 
 		Future<Optional<Void>> f;
 
+		Standalone<StringRef> machineId(getSharedMemoryMachineId().toString());
+
+		if (!localities.isPresent(LocalityData::keyZoneId))
+			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
+
+		if (!localities.isPresent(LocalityData::keyMachineId))
+			localities.set(LocalityData::keyMachineId, machineId);
+
+		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
+			localities.set(LocalityData::keyDcId, dcId);
+
 		if (role == Simulation) {
 			TraceEvent("Simulation").detail("TestFile", testFile);
 
@@ -1574,16 +1585,6 @@ int main(int argc, char* argv[]) {
 
 			vector<Future<Void>> actors;
 			actors.push_back( listenError );
-			Standalone<StringRef> machineId(getSharedMemoryMachineId().toString());
-
-			if (!localities.isPresent(LocalityData::keyZoneId))
-				localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
-
-			if (!localities.isPresent(LocalityData::keyMachineId))
-				localities.set(LocalityData::keyMachineId, machineId);
-
-			if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
-				localities.set(LocalityData::keyDcId, dcId);
 
 			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
@@ -1591,11 +1592,11 @@ int main(int argc, char* argv[]) {
 			f = stopAfter( waitForAll(actors) );
 			g_network->run();
 		} else if (role == MultiTester) {
-			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile ) );
+			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == Test || role == ConsistencyCheck) {
 			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
-			f = stopAfter( runTests( connectionFile, role == ConsistencyCheck ? TEST_TYPE_CONSISTENCY_CHECK : TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile ) );
+			f = stopAfter( runTests( connectionFile, role == ConsistencyCheck ? TEST_TYPE_CONSISTENCY_CHECK : TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == CreateTemplateDatabase) {
 			createTemplateDatabase();
