@@ -59,6 +59,10 @@ template<> inline Standalone<StringRef> Codec<Standalone<StringRef>>::unpack(Tup
 template<> inline Tuple Codec<UID>::pack(UID const &val) { return Codec<Standalone<StringRef>>::pack(BinaryWriter::toValue<UID>(val, Unversioned())); }
 template<> inline UID Codec<UID>::unpack(Tuple const &val) { return BinaryReader::fromStringRef<UID>(Codec<Standalone<StringRef>>::unpack(val), Unversioned()); }
 
+// This is backward compatible with Codec<Standalone<StringRef>>
+template<> inline Tuple Codec<std::string>::pack(std::string const &val) { return Tuple().append(StringRef(val)); }
+template<> inline std::string Codec<std::string>::unpack(Tuple const &val) { return val.getString(0).toString(); }
+
 // Partial specialization to cover all std::pairs as long as the component types are Codec compatible
 template<typename First, typename Second>
 struct Codec<std::pair<First, Second>> {

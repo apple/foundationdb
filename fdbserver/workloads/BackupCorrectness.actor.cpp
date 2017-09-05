@@ -112,7 +112,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			TraceEvent("BARW_doBackup abortBackup1", randomID).detail("tag", printable(tag)).detail("startDelay", startDelay);
 
 			try {
-				Void _ = wait(backupAgent->abortBackup(cx, tag));
+				Void _ = wait(backupAgent->abortBackup(cx, tag.toString()));
 			}
 			catch (Error& e) {
 				TraceEvent("BARW_doBackup abortBackup Exception", randomID).detail("tag", printable(tag)).error(e);
@@ -125,7 +125,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
-			Void _ = wait(backupAgent->submitBackup(cx, StringRef(backupContainer), tag, backupRanges, stopDifferentialDelay ? false : true));
+			Void _ = wait(backupAgent->submitBackup(cx, StringRef(backupContainer), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
 		}
 		catch (Error& e) {
 			TraceEvent("BARW_doBackup submitBackup Exception", randomID).detail("tag", printable(tag)).error(e);
@@ -145,7 +145,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				if (BUGGIFY) {
 					TraceEvent("BARW_doBackup waitForRestorable", randomID).detail("tag", printable(tag));
 					// Wait until the backup is in a restorable state
-					state int resultWait = wait(backupAgent->waitBackup(cx, tag, false));
+					state int resultWait = wait(backupAgent->waitBackup(cx, tag.toString(), false));
 					state UID logUid = wait(backupAgent->getLogUid(cx, tag));
 						state std::string lastBackupContainer = wait(backupAgent->getLastBackupContainer(cx, logUid));
 
@@ -177,7 +177,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					if (startDelay) {
 						TraceEvent("BARW_doBackup abortBackup2", randomID).detail("tag", printable(tag))
 							.detail("waitStatus", resultWait).detail("lastBackupContainer", lastBackupContainer).detail("restorable", restorableFile);
-						Void _ = wait(backupAgent->abortBackup(cx, tag));
+						Void _ = wait(backupAgent->abortBackup(cx, tag.toString()));
 					}
 					else {
 						TraceEvent("BARW_doBackup discontinueBackup", randomID).detail("tag", printable(tag)).detail("differentialAfter", stopDifferentialDelay);
@@ -199,11 +199,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_doBackup waitBackup", randomID).detail("tag", printable(tag));
-		state int statusValue = wait(backupAgent->waitBackup(cx, tag, true));
+		state int statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
 
 		state std::string statusText;
 
-		std::string _statusText = wait( backupAgent->getStatus(cx, 5, tag) );
+		std::string _statusText = wait( backupAgent->getStatus(cx, 5, tag.toString()) );
 		statusText = _statusText;
 		// Can we validate anything about status?
 
@@ -298,7 +298,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_submitBackup2", randomID).detail("tag", printable(self->backupTag));
 				try {
-					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"), self->backupTag, self->backupRanges, true);
+					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"), self->backupTag.toString(), self->backupRanges, true);
 				}
 				catch (Error& e) {
 					TraceEvent("BARW_submitBackup2 Exception", randomID).detail("backupTag", printable(self->backupTag)).error(e);
@@ -372,7 +372,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 				TraceEvent("BARW_abortBackup extra", randomID).detail("backupTag", printable(self->backupTag));
 				try {
-					Void _ = wait(backupAgent.abortBackup(cx, self->backupTag));
+					Void _ = wait(backupAgent.abortBackup(cx, self->backupTag.toString()));
 				}
 				catch (Error& e) {
 					TraceEvent("BARW_abortBackup extra Exception", randomID).error(e);

@@ -1342,7 +1342,7 @@ ACTOR Future<Void> statusBackup(Database db, std::string tagName, int errorLimit
 	{
 		state FileBackupAgent backupAgent;
 
-		std::string	statusText = wait(backupAgent.getStatus(db, errorLimit, StringRef(tagName)));
+		std::string	statusText = wait(backupAgent.getStatus(db, errorLimit, tagName));
 		printf("%s\n", statusText.c_str());
 	}
 	catch (Error& e) {
@@ -1391,7 +1391,7 @@ ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
 	{
 		state FileBackupAgent backupAgent;
 
-		Void _ = wait(backupAgent.abortBackup(db, Key(tagName)));
+		Void _ = wait(backupAgent.abortBackup(db, tagName));
 
 		printf("The backup on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
 	}

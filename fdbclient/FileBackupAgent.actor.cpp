@@ -66,34 +66,34 @@ typedef std::pair<UID, bool> UidAndAbortedFlagT;
 class KeyBackedTag : public KeyBackedProperty<UidAndAbortedFlagT> {
 public:
 	KeyBackedTag() : KeyBackedProperty(StringRef()) {}
-	KeyBackedTag(StringRef tagName, StringRef tagMapPrefix);
+	KeyBackedTag(std::string tagName, StringRef tagMapPrefix);
 
 	Future<Void> cancel(Reference<ReadYourWritesTransaction> tr) {
-		Key tag = tagName;
-		Key tagMapPrefix = tagMapPrefix;
-		return map(get(tr), [tag, tagMapPrefix, tr](Optional<UidAndAbortedFlagT> up) -> Void {
+		std::string tag = tagName;
+		Key _tagMapPrefix = tagMapPrefix;
+		return map(get(tr), [tag, _tagMapPrefix, tr](Optional<UidAndAbortedFlagT> up) -> Void {
 			if (up.present()) {
 				// Set aborted flag to true
 				up.get().second = true;
-				KeyBackedTag(tag, tagMapPrefix).set(tr, up.get());
+				KeyBackedTag(tag, _tagMapPrefix).set(tr, up.get());
 			}
 			return Void();
 		});
 	}
 
-	Key tagName;
+	std::string tagName;
 	Key tagMapPrefix;
 };
 
 // Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
-class TagUidMap : public KeyBackedMap<Key, UidAndAbortedFlagT> {
+class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
 public:
-	typedef KeyBackedMap<Key, UidAndAbortedFlagT> TagMap;
+	typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
 
 	TagUidMap(const StringRef & prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
 
 	ACTOR static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap *tagsMap, Reference<ReadYourWritesTransaction> tr) {
-		TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, KeyRef(), {}, 1e6));
+		TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6));
 		std::vector<KeyBackedTag> results;
 		for(auto &p : tagPairs)
 			results.push_back(KeyBackedTag(p.first, tagsMap->prefix));
@@ -107,14 +107,14 @@ public:
 	Key prefix;
 };
 
-KeyBackedTag::KeyBackedTag(StringRef tagName, StringRef tagMapPrefix)
+KeyBackedTag::KeyBackedTag(std::string tagName, StringRef tagMapPrefix)
 		: KeyBackedProperty<UidAndAbortedFlagT>(TagUidMap(tagMapPrefix).getProperty(tagName)), tagName(tagName), tagMapPrefix(tagMapPrefix) {}
 
-KeyBackedTag makeRestoreTag(StringRef tagName) {
+KeyBackedTag makeRestoreTag(std::string tagName) {
 	return KeyBackedTag(tagName, fileRestorePrefixRange.begin);
 }
 
-KeyBackedTag makeBackupTag(StringRef tagName) {
+KeyBackedTag makeBackupTag(std::string tagName) {
 	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
 }
 
@@ -147,7 +147,7 @@ public:
 		// which TaskBucket will check, and its value must be this restore config's uid.
 		UID u = uid;  // 'this' could be invalid in lambda
 		Key p = prefix;
-		return map(tag().get(tr), [u,p,task](Optional<Value> const &tag) -> Void {
+		return map(tag().get(tr), [u,p,task](Optional<std::string> const &tag) -> Void {
 			if(!tag.present())
 				throw restore_error();
 			// Validation contition is that the uidPair key must be exactly {u, false}
@@ -156,7 +156,7 @@ public:
 		});
 	}
 
-	KeyBackedProperty<Value> tag() {
+	KeyBackedProperty<std::string> tag() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
@@ -358,7 +358,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	state Future<int64_t> bytesWritten = restore.bytesWritten().getD(tr);
 	state Future<StringRef> status = restore.stateText(tr);
 	state Future<Version> lag = restore.getApplyVersionLag(tr);
-	state Future<Key> tag = restore.tag().getD(tr);
+	state Future<std::string> tag = restore.tag().getD(tr);
 	state Future<std::pair<Value, int64_t>> lastError = restore.lastError().getD(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
@@ -371,7 +371,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 
 	TraceEvent("FileRestoreProgress")
 		.detail("UID", uid)
-		.detail("Tag", tag.get().toString())
+		.detail("Tag", tag.get())
 		.detail("State", status.get().toString())
 		.detail("FileCount", fileCount.get())
 		.detail("FileBlocksFinished", fileBlocksFinished.get())
@@ -383,7 +383,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 
 
 	return format("Tag: %s  UID: %s  State: %s  Blocks: %lld/%lld  BlocksInProgress: %lld  Files: %lld  BytesWritten: %lld  ApplyVersionLag: %lld  LastError: %s",
-					tag.get().toString().c_str(),
+					tag.get().c_str(),
 					uid.toString().c_str(),
 					status.get().toString().c_str(),
 					fileBlocksFinished.get(),
@@ -422,10 +422,6 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 	);
 }
 
-// TODO:  Grow this class so it does for backup what RestoreConfig does for restore, such as holding all useful backup metadata
-// and handling binding to a Task, initializing from a Task, and setting Task validation parameters.
-// NOTE that when doing this backup configs MUST be changed to use UNIQUE uids for each backup or bad things can happened
-// such as stale backup tasks writing data into newer backups or reading the wrong kv manifest data or writing it to the wrong backup.
 class BackupConfig : public KeyBackedConfig {
 public:
 	BackupConfig(UID uid = UID()) : KeyBackedConfig(fileBackupPrefixRange.begin, uid) {}
@@ -916,8 +912,7 @@ namespace fileBackup {
 		state UID uid = config.getUid();
 		Key backupContainerBytes = wait(config.backupContainer().getOrThrow(tr));
 		state std::string backupContainer = backupContainerBytes.toString();
-		state Key tagBytes = wait(config.tag().getOrThrow(tr));
-		state std::string tagName = tagBytes.toString();
+		state std::string tagName = wait(config.tag().getOrThrow(tr));
 		state std::string filename = "restorable";
 		state std::string tempFileName = FileBackupAgent::getTempFilename();
 		state Reference<IAsyncFile> f = wait(openBackupFile(true, backupContainer, tempFileName, keyErrors, tr->getDatabase()));
@@ -964,7 +959,7 @@ namespace fileBackup {
 			}
 			Void _ = wait(truncateCloseFile(tr->getDatabase(), keyErrors, backupContainer, filename, f, offset + msg.size()));
 			Void _ = wait(IBackupContainer::openContainer(backupContainer)->renameFile(tempFileName, filename));
-			tr->set(FileBackupAgent().lastRestorable.get(tagBytes).pack(), BinaryWriter::toValue(stopVersion, Unversioned()));
+			tr->set(FileBackupAgent().lastRestorable.get(StringRef(tagName)).pack(), BinaryWriter::toValue(stopVersion, Unversioned()));
 		}
 		else {
 			Void _ = wait(logError(tr, keyErrors, "ERROR: Failed to open restorable file for unknown reason."));
@@ -1728,8 +1723,7 @@ namespace fileBackup {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			state BackupConfig config(task);
-			state Key tagBytes = wait(config.tag().getOrThrow(tr));
-			state std::string tagName = tagBytes.toString();
+			state std::string tagName = wait(config.tag().getOrThrow(tr));
 
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 			state Reference<TaskFuture> allPartsDone;
@@ -1739,7 +1733,7 @@ namespace fileBackup {
 			state Version beginVersion = Params.beginVersion().get(task);
 			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
 
-			tr->set(FileBackupAgent().lastRestorable.get(tagBytes).pack(), BinaryWriter::toValue(beginVersion, Unversioned()));
+			tr->set(FileBackupAgent().lastRestorable.get(StringRef(tagName)).pack(), BinaryWriter::toValue(beginVersion, Unversioned()));
 
 			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
 				TraceEvent("FBA_DiffLogs").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("stopWhenDone", stopWhenDone);
@@ -3188,7 +3182,7 @@ namespace fileBackup {
 			tags = t;
 		}
 		else
-			tags.push_back(makeRestoreTag(tagName));
+			tags.push_back(makeRestoreTag(tagName.toString()));
 
 		state std::string result;
 		state int i = 0;
@@ -3207,7 +3201,7 @@ namespace fileBackup {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-		state KeyBackedTag tag = makeRestoreTag(tagName);
+		state KeyBackedTag tag = makeRestoreTag(tagName.toString());
 		state Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 		if(!current.present())
 			return ERestoreState::UNITIALIZED;
@@ -3355,8 +3349,8 @@ namespace fileBackup {
 			state RestoreConfig restore(task);
 			if(firstVersion == Version()) {
 				Void _ = wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", this));
-				Key tag = wait(restore.tag().getD(tr));
-				ERestoreState _ = wait(abortRestore(tr, tag));
+				std::string tag = wait(restore.tag().getD(tr));
+				ERestoreState _ = wait(abortRestore(tr, StringRef(tag)));
 				return Void();
 			}
 
@@ -3418,7 +3412,7 @@ public:
 	static const int MAX_RESTORABLE_FILE_METASECTION_BYTES = 1024 * 8;
 
 	// This method will return the final status of the backup
-	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, Key tagName, bool stopWhenDone) {
+	ACTOR static Future<int> waitBackup(FileBackupAgent* backupAgent, Database cx, std::string tagName, bool stopWhenDone) {
 		state std::string backTrace;
 		state KeyBackedTag tag = makeBackupTag(tagName);
 
@@ -3458,7 +3452,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key outContainer, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
+	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key outContainer, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -3526,7 +3520,7 @@ public:
 		config.clear(tr);
 
 		// Point the tag to this new uid
-		makeBackupTag(tagName).set(tr, {uid, false});
+		tag.set(tr, {uid, false});
 
 		tr->set(backupAgent->tagNames.pack(tagName), config.getUidAsKey());
 		backupAgent->lastBackupTimestamp().set(tr, now);
@@ -3550,7 +3544,7 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		// Get old restore config for this tag
-		state KeyBackedTag tag = makeRestoreTag(tagName);
+		state KeyBackedTag tag = makeRestoreTag(tagName.toString());
 		state Optional<UidAndAbortedFlagT> oldUidAndAborted = wait(tag.get(tr));
 		if(oldUidAndAborted.present()) {
 			if (oldUidAndAborted.get().first == uid) {
@@ -3588,7 +3582,7 @@ public:
 		tag.set(tr, {uid, false});
 
 		// Configure the new restore
-		restore.tag().set(tr, tagName);
+		restore.tag().set(tr, tagName.toString());
 		restore.sourceURL().set(tr, backupURL);
 		restore.stateEnum().set(tr, ERestoreState::QUEUED);
 		restore.restoreVersion().set(tr, restoreVersion);
@@ -3615,7 +3609,7 @@ public:
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				state KeyBackedTag tag = makeRestoreTag(tagName);
+				state KeyBackedTag tag = makeRestoreTag(tagName.toString());
 				Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
 				if(!current.present()) {
 					if(verbose)
@@ -3677,7 +3671,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> abortBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
+	ACTOR static Future<Void> abortBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, std::string tagName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -3708,7 +3702,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<std::string> getStatus(FileBackupAgent* backupAgent, Database cx, int errorLimit, Key tagName) {
+	ACTOR static Future<std::string> getStatus(FileBackupAgent* backupAgent, Database cx, int errorLimit, std::string tagName) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state std::string statusText;
 
@@ -3735,24 +3729,23 @@ public:
 				} else {
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					state std::string outContainer = wait(backupAgent->getLastBackupContainer(tr, config.getUid()));
-					state std::string tagNameDisplay = tagName.toString();
 					state Version stopVersion = wait(config.stopVersion().getD(tr, -1));
 
 					switch (backupState) {
 						case BackupAgentBase::STATE_SUBMITTED:
-							statusText += "The backup on tag `" + tagNameDisplay + "' is in progress (just started) to " + outContainer + ".\n";
+							statusText += "The backup on tag `" + tagName + "' is in progress (just started) to " + outContainer + ".\n";
 							break;
 						case BackupAgentBase::STATE_BACKUP:
-							statusText += "The backup on tag `" + tagNameDisplay + "' is in progress to " + outContainer + ".\n";
+							statusText += "The backup on tag `" + tagName + "' is in progress to " + outContainer + ".\n";
 							break;
 						case BackupAgentBase::STATE_DIFFERENTIAL:
-							statusText += "The backup on tag `" + tagNameDisplay + "' is restorable but continuing to " + outContainer + ".\n";
+							statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " + outContainer + ".\n";
 							break;
 						case BackupAgentBase::STATE_COMPLETED:
-							statusText += "The previous backup on tag `" + tagNameDisplay + "' at " + outContainer + " completed at version " + format("%lld", stopVersion) + ".\n";
+							statusText += "The previous backup on tag `" + tagName + "' at " + outContainer + " completed at version " + format("%lld", stopVersion) + ".\n";
 							break;
 						default:
-							statusText += "The previous backup on tag `" + tagNameDisplay + "' at " + outContainer + " " + backupStatus + ".\n";
+							statusText += "The previous backup on tag `" + tagName + "' at " + outContainer + " " + backupStatus + ".\n";
 							break;
 					}
 				}
@@ -3961,7 +3954,7 @@ public:
 			}
 		}
 
-		int _ = wait( waitBackup(backupAgent, cx, tagName, true) );
+		int _ = wait( waitBackup(backupAgent, cx, tagName.toString(), true) );
 
 		ryw_tr->reset();
 		loop {
@@ -3984,7 +3977,7 @@ public:
 	}
 };
 
-const KeyRef BackupAgentBase::defaultTag = LiteralStringRef("default");
+const std::string BackupAgentBase::defaultTagName = "default";
 const int BackupAgentBase::logHeaderSize = 12;
 const int FileBackupAgent::dataFooterSize = 20;
 
@@ -4008,7 +4001,7 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, boo
 	return FileBackupAgentImpl::waitRestore(cx, tagName, verbose);
 };
 
-Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
+Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
 	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, tagName, backupRanges, stopWhenDone);
 }
 
@@ -4016,11 +4009,11 @@ Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransact
 	return FileBackupAgentImpl::discontinueBackup(this, tr, tagName);
 }
 
-Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> tr, Key tagName){
+Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> tr, std::string tagName){
 	return FileBackupAgentImpl::abortBackup(this, tr, tagName);
 }
 
-Future<std::string> FileBackupAgent::getStatus(Database cx, int errorLimit, Key tagName) {
+Future<std::string> FileBackupAgent::getStatus(Database cx, int errorLimit, std::string tagName) {
 	return FileBackupAgentImpl::getStatus(this, cx, errorLimit, tagName);
 }
 
@@ -4048,7 +4041,7 @@ Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTrans
 	return FileBackupAgentImpl::getLastRestorable(this, tr, tagName);
 }
 
-Future<int> FileBackupAgent::waitBackup(Database cx, Key tagName, bool stopWhenDone) {
+Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool stopWhenDone) {
 	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone);
 }
 

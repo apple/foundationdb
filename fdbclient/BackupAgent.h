@@ -189,7 +189,11 @@ public:
 	}
 
 	static const KeyRef getDefaultTag() {	
-		return defaultTag;	
+		return StringRef(defaultTagName);
+	}
+
+	static const std::string getDefaultTagName() {
+		return defaultTagName;
 	}
 
 	static Standalone<StringRef> getCurrentTime() {
@@ -205,7 +209,7 @@ public:
 	}
 
 protected:
-	static const KeyRef defaultTag;
+	static const std::string defaultTagName;
 };
 
 class FileBackupAgent : public BackupAgentBase {
@@ -270,8 +274,8 @@ public:
 
 	/** BACKUP METHODS **/
 	
-	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
-	Future<Void> submitBackup(Database cx, Key outContainer, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
+	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
+	Future<Void> submitBackup(Database cx, Key outContainer, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr){ return submitBackup(tr, outContainer, tagName, backupRanges, stopWhenDone); });
 	}
 
@@ -280,12 +284,12 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
-	Future<Void> abortBackup(Database cx, Key tagName) {
+	Future<Void> abortBackup(Reference<ReadYourWritesTransaction> tr, std::string tagName);
+	Future<Void> abortBackup(Database cx, std::string tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return abortBackup(tr, tagName); });
 	}
 
-	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
+	Future<std::string> getStatus(Database cx, int errorLimit, std::string tagName);
 
 	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid);
 	Future<int> getStateValue(Database cx, UID logUid) {
@@ -312,7 +316,7 @@ public:
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
+	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
 
 	Future<std::string> getLastBackupContainer(Reference<ReadYourWritesTransaction> tr, UID logUid);
 	Future<std::string> getLastBackupContainer(Database cx, UID logUid) {
