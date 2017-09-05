@@ -70,13 +70,10 @@ struct SimpleFixedSizeMapRef {
 
 	// Returns a vector of pairs of lower boundary key indices within kvPairs and encoded pages.
 	template<typename Allocator>
-	static vector<std::pair<int, Reference<IPage>>> buildMany(const KVPairsT &kvPairs, uint8_t newFlags, Allocator const &newPageFn, int page_size_override = -1) {
+	static vector<std::pair<int, Reference<IPage>>> buildMany(const KVPairsT &kvPairs, uint8_t newFlags, Allocator const &newPageFn, int pageSize) {
 		vector<std::pair<int, Reference<IPage>>> pages;
 
 		Reference<IPage> page = newPageFn();
-		int pageSize = page->size();
-		if(page_size_override > 0 && page_size_override < pageSize)
-			pageSize = page_size_override;
 		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
 		bw << newFlags;
 		uint32_t i = 0;
@@ -86,7 +83,7 @@ struct SimpleFixedSizeMapRef {
 
 		for(auto const &kv : kvPairs) {
 			// If page would overflow, output it and start new one
-			if(bw.getLength() + 8 + kv.key.size() + kv.value.size() > pageSize) {
+			if((bw.getLength() + 8 + kv.key.size() + kv.value.size()) > pageSize) {
 				// Page so far can't be empty, this means a single kv pair is too big for a page.
 				ASSERT(bw.getLength() != sizeof(newFlags));
 				memcpy(page->mutate(), bw.getData(), bw.getLength());
@@ -102,6 +99,9 @@ struct SimpleFixedSizeMapRef {
 			}
 
 			bw << kv;
+			// We would have flushed the current page if kv would incrementally overflow, but if it
+			// overflows a new page then the kv pair is too big for a page.
+			ASSERT(bw.getLength() <= pageSize);
 			++i;
 		}
 
@@ -122,9 +122,16 @@ struct SimpleFixedSizeMapRef {
 	uint8_t flags;
 };
 
+// Represents a key, version, and value whole/part or lack thereof.
+// This structure exists to make working with low level key/value pairs in the tree convenient.
+// Values that are written whole have a value index of -1, which is not *actually* written
+// to the tree but will be seen in this structure when unpacked.
+// Split values are written such that the value index indicates the first byte offset in the
+// value that the value part represents.
 struct KeyVersionValue {
-	KeyVersionValue() : version(invalidVersion) {}
-	KeyVersionValue(Key k, Version ver, Optional<Value> val = Optional<Value>()) : key(k), version(ver), value(val) {}
+	KeyVersionValue() : version(invalidVersion), valueIndex(-1) {}
+	KeyVersionValue(Key k, Version ver, int valIndex = -1, Optional<Value> val = Optional<Value>()) : key(k), version(ver), valueIndex(valIndex), value(val) {}
+	/*
 	bool operator< (KeyVersionValue const &rhs) const {
 		int64_t cmp = key.compare(rhs.key);
 		if(cmp == 0) {
@@ -133,9 +140,10 @@ struct KeyVersionValue {
 				return false;
 		}
 		return cmp < 0;
-	}
+	} */
 	Key key;
 	Version version;
+	int64_t valueIndex;
 	Optional<Value> value;
 
 	bool valid() const { return version != invalidVersion; }
@@ -144,6 +152,8 @@ struct KeyVersionValue {
 		Tuple k;
 		k.append(key);
 		k.append(version);
+		if(valueIndex >= 0)
+			k.append(valueIndex);
 		Tuple v;
 		if(value.present())
 			v.append(value.get());
@@ -151,22 +161,39 @@ struct KeyVersionValue {
 			v.appendNull();
 		return KeyValueRef(k.pack(), v.pack());
 	}
+
+	// Supports partial/incomplete encoded sequences.
 	static inline KeyVersionValue unpack(KeyValueRef kv) {
-		Tuple k = Tuple::unpack(kv.key);
-		if(kv.value.size() == 0)
-			return KeyVersionValue(k.getString(0), k.getInt(1));
-		Tuple v = Tuple::unpack(kv.value);
-		return KeyVersionValue(k.getString(0), k.getInt(1), v.getType(0) == Tuple::NULL_TYPE ? Optional<Value>() : v.getString(0));
+		KeyVersionValue result;
+		if(kv.key.size() != 0) {
+			Tuple k = Tuple::unpack(kv.key, true);
+			if(k.size() >= 1) {
+				result.key = k.getString(0);
+				if(k.size() >= 2) {
+					result.version = k.getInt(1);
+					if(k.size() >= 3) {
+						result.valueIndex = k.getInt(2);
+					}
+				}
+			}
+		}
+
+		if(kv.value.size() != 0) {
+			Tuple v = Tuple::unpack(kv.value);
+			if(v.getType(0) == Tuple::BYTES)
+				result.value = v.getString(0);
+		}
+
+		return result;
 	}
 
+	// Convenience function for unpacking keys only
 	static inline KeyVersionValue unpack(KeyRef key) {
-		if(key.size() == 0)
-			return KeyVersionValue(KeyRef(), 0);
 		return unpack(KeyValueRef(key, ValueRef()));
 	}
 
 	std::string toString() const {
-		return format("'%s' -> '%s' @%lld", key.toString().c_str(), value.present() ? value.get().toString().c_str() : "<cleared>", version);
+		return format("'%s' -> '%s' @%lld [%lld]", key.toString().c_str(), value.present() ? value.get().toString().c_str() : "<cleared>", version, valueIndex);
 	}
 };
 
@@ -238,11 +265,15 @@ public:
 		return m_pager->getLatestVersion();
 	}
 
-	VersionedBTree(IPager *pager, int page_size_override = -1)
+	VersionedBTree(IPager *pager, int target_page_size = -1)
 	  : m_pager(pager),
 		m_writeVersion(invalidVersion),
-		m_page_size_override(page_size_override),
-		m_lastCommittedVersion(invalidVersion) {
+		m_pageSize(pager->getUsablePageSize()),
+		m_lastCommittedVersion(invalidVersion)
+	{
+
+		if(target_page_size > 0 && target_page_size < m_pageSize)
+			m_pageSize = target_page_size;
 	}
 
 	ACTOR static Future<Void> init(VersionedBTree *self) {
@@ -321,12 +352,13 @@ private:
 		inline bool equalToSet(ValueRef val) { return isSet() && value == val; }
 
 		KeyVersionValue toKVV(Key key, Version version) const {
+			// No point in serializing an atomic op, it needs to be coalesced to a real value.
 			ASSERT(!isAtomicOp());
 
 			if(isClear())
 				return KeyVersionValue(key, version);
 
-			return KeyVersionValue(key, version, value);
+			return KeyVersionValue(key, version, -1, value);
 		}
 
 		std::string toString() const {
@@ -467,7 +499,7 @@ private:
 			childEntries = std::move(newChildEntries);
 
 			int oldPages = pages.size();
-			pages = FixedSizeMap::buildMany( childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_page_size_override);
+			pages = FixedSizeMap::buildMany( childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_pageSize);
 			// If there isn't a reduction in page count then we'll build new root levels forever.
 			ASSERT(pages.size() < oldPages);
 
@@ -598,8 +630,27 @@ private:
 				while(iMutations != iMutationsEnd) {
 					if(iMutations->first < minVersion || minVersion == invalidVersion)
 						minVersion = iMutations->first;
-					merged.push_back(iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack());
-					debug_printf("%s: Added %s [mutation, boundary start]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+					const SingleKeyMutation &m = iMutations->second;
+					//                ( (page_size - map_overhead) / min_kvpairs_per_leaf ) - kvpair_overhead_est - keybytes
+					int maxPartSize = ((self->m_pageSize - 1 - 4) / 3) - 21 - iMutationBoundary->first.size();
+					ASSERT(maxPartSize > 0);
+					if(m.isClear() || m.value.size() < maxPartSize) {
+						merged.push_back(iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack());
+						debug_printf("%s: Added %s [mutation, boundary start]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+					}
+					else {
+						int bytesLeft = m.value.size();
+						KeyVersionValue kvv(iMutationBoundary->first, iMutations->first);
+						kvv.valueIndex = 0;
+						while(bytesLeft > 0) {
+							int partSize = std::min(bytesLeft, maxPartSize);
+							kvv.value = Key(m.value.substr(kvv.valueIndex, partSize), m.value.arena());
+							merged.push_back(kvv.pack());
+							debug_printf("%s: Added %s [mutation, boundary start]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+							kvv.valueIndex += partSize;
+							bytesLeft -= partSize;
+						}
+					}
 					++iMutations;
 				}
 
@@ -660,7 +711,7 @@ private:
 			// TODO: Make version and key splits based on contents of merged list
 
 			IPager *pager = self->m_pager;
-			vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( merged, EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
+			vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( merged, EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_pageSize);
 
 			// If there isn't still just a single page of data then return the previous lower bound and page ID that lead to this page to be used for version 0
 			if(pages.size() != 1) {
@@ -795,7 +846,7 @@ private:
 					// cause unnecessary path copying
 
 					IPager *pager = self->m_pager;
-					vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_page_size_override);
+					vector< std::pair<int, Reference<IPage>> > pages = FixedSizeMap::buildMany( childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_pageSize);
 
 					// For each IPage of data, assign a logical pageID.
 					std::vector<LogicalPageID> logicalPages;
@@ -865,7 +916,7 @@ private:
 
 	Version m_writeVersion;
 	Version m_lastCommittedVersion;
-	int m_page_size_override;
+	int m_pageSize;
 
 	class Cursor : public IStoreCursor, public ReferenceCounted<Cursor> {
 	public:
@@ -907,7 +958,7 @@ private:
 		ACTOR static Future<Void> findEqual_impl(Reference<Cursor> self, KeyRef key) {
 			state LogicalPageID pageNumber = self->m_root;
 
-			state KeyVersionValue target(key, self->m_version);
+			state KeyVersionValue target(key, self->m_version, 0);
 			state Key targetPacked = target.pack().key;
 
 			loop {
@@ -951,7 +1002,7 @@ private:
 };
 
 KeyVersionValue VersionedBTree::beginKey(StringRef(), 0);
-KeyVersionValue VersionedBTree::endKey(LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"), std::numeric_limits<Version>::max());
+KeyVersionValue VersionedBTree::endKey(LiteralStringRef("\xff\xff\xff\xff"), 0);
 
 KeyValue randomKV(int keySize = 10, int valueSize = 5) {
 	int kLen = g_random->randomInt(1, keySize);
@@ -975,11 +1026,17 @@ TEST_CASE("/redwood/correctness/memory/set") {
 	else
 		pager = createMemoryPager();
 
-	state int pageSize = g_random->coinflip() ? -1 : g_random->randomInt(100, 200);
-
+	state int pageSize = g_random->coinflip() ? pager->getUsablePageSize() : g_random->randomInt(200, 400);
 	state VersionedBTree *btree = new VersionedBTree(pager, pageSize);
-
 	Void _ = wait(btree->init());
+
+	// We must be able to fit at least two any two keys plus overhead in a page to prevent
+	// a situation where the tree cannot be grown upward with decreasing level size.
+	state int maxKeySize = (pageSize / 4) - 40;
+	ASSERT(maxKeySize > 0);
+	state int maxValueSize = pageSize * 3;
+
+	printf("Using page size %d, max key size %d, max value size %d\n", pageSize, maxKeySize, maxValueSize);
 
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state std::set<Key> keys;
@@ -1021,7 +1078,7 @@ TEST_CASE("/redwood/correctness/memory/set") {
 					btree->clear(range);
 				}
 				else {
-					KeyValue kv = randomKV();
+					KeyValue kv = randomKV(maxKeySize, maxValueSize);
 					keyBytesInserted += kv.key.size();
 					ValueBytesInserted += kv.value.size();
 					debug_printf("      Set '%s' -> '%s' @%lld\n", kv.key.toString().c_str(), kv.value.toString().c_str(), version);

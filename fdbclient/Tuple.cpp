@@ -29,7 +29,7 @@ static size_t find_string_terminator(const StringRef data, size_t offset) {
 	return i;
 }
 
-Tuple::Tuple(StringRef const& str) {
+Tuple::Tuple(StringRef const& str, bool allow_incomplete) {
 	data.append(data.arena(), str.begin(), str.size());
 
 	size_t i = 0;
@@ -49,10 +49,14 @@ Tuple::Tuple(StringRef const& str) {
 			throw invalid_tuple_data_type();
 		}
 	}
+	// If incomplete tuples are allowed, remove the last offset if i is now beyond size()
+	// Strings will never be considered incomplete due to the way the string end is found.
+	if(allow_incomplete && i > data.size())
+		offsets.pop_back();
 }
 
-Tuple Tuple::unpack(StringRef const& str) {
-	return Tuple(str);
+Tuple Tuple::unpack(StringRef const& str, bool allow_incomplete) {
+	return Tuple(str, allow_incomplete);
 }
 
 Tuple& Tuple::append(Tuple const& tuple) {

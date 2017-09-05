@@ -29,7 +29,10 @@
 struct Tuple {
 	Tuple() {}
 
-	static Tuple unpack(StringRef const& str);
+	// allow_incomplete will enable parsing of a Tuple which ends with an incomplete numeric field, which will be excluded from the result.
+	// Strings can't be incomplete because they are parsed such that the end of the packed bytes is the end of the string in lieu of a
+	// specific end.
+	static Tuple unpack(StringRef const& str, bool allow_incomplete = false);
 
 	Tuple& append(Tuple const& tuple);
 	Tuple& append(StringRef const& str, bool utf8=false);
@@ -57,7 +60,7 @@ struct Tuple {
 	Tuple subTuple(size_t beginIndex, size_t endIndex = std::numeric_limits<size_t>::max()) const;
 
 private:
-	Tuple(const StringRef& data);
+	Tuple(const StringRef& data, bool allow_incomplete = false);
 	Standalone<VectorRef<uint8_t>> data;
 	std::vector<size_t> offsets;
 };
