@@ -446,7 +446,7 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	KeyBackedProperty<Key> backupContainer() {
+	KeyBackedProperty<std::string> backupContainer() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
@@ -881,12 +881,12 @@ namespace fileBackup {
 		return Void();
 	}
 
-	ACTOR static Future<std::string> getPath(Reference<ReadYourWritesTransaction> tr, Key configOutputPath) {
+	ACTOR static Future<std::string> getPath(Reference<ReadYourWritesTransaction> tr, UID uid) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Optional<Value> dir = wait(tr->get(configOutputPath));
+		state std::string dir = wait(BackupConfig(uid).backupContainer().getD(tr, ""));
 
-		return dir.present() ? dir.get().toString() : "";
+		return dir;
 	}
 
 	ACTOR template <class Tr>
@@ -910,8 +910,7 @@ namespace fileBackup {
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state UID uid = config.getUid();
-		Key backupContainerBytes = wait(config.backupContainer().getOrThrow(tr));
-		state std::string backupContainer = backupContainerBytes.toString();
+		state std::string backupContainer = wait(config.backupContainer().getOrThrow(tr));
 		state std::string tagName = wait(config.tag().getOrThrow(tr));
 		state std::string filename = "restorable";
 		state std::string tempFileName = FileBackupAgent::getTempFilename();
@@ -1131,9 +1130,8 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					Key backupContainerBytes = wait(backup.backupContainer().getOrThrow(tr));
-					backupContainer = backupContainerBytes.toString();
-
+					std::string ret = wait(backup.backupContainer().getOrThrow(tr));
+					backupContainer = ret;
 					break;
 				} catch (Error &e) {
 					Void _ = wait(tr->onError(e));
@@ -1417,9 +1415,8 @@ namespace fileBackup {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				// Wait for the read version to pass endVersion
 				try {
-					Key backupContainerBytes = wait(config.backupContainer().getOrThrow(tr));
-					backupContainer = backupContainerBytes.toString();
-
+					std::string ret = wait(config.backupContainer().getOrThrow(tr));
+					backupContainer = ret;
 					Version currentVersion = wait(tr->getReadVersion());
 					if(endVersion < currentVersion)
 						break;
@@ -1883,9 +1880,8 @@ namespace fileBackup {
 					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-					Key backupContainerBytes = wait(backup.backupContainer().getOrThrow(tr));
-					backupContainer = backupContainerBytes.toString();
+					std::string ret = wait(backup.backupContainer().getOrThrow(tr));
+					backupContainer = ret;
 
 					// Calling isFinished instead of keepRunning because if this backup was cancelled completely but we got
 					// all the way to this part we may as well write out the kvmanifest.
@@ -3528,7 +3524,7 @@ public:
 		// Set the backup keys
 		config.tag().set(tr, tagName);
 		config.stateEnum().set(tr, EBackupState::STATE_SUBMITTED);
-		config.backupContainer().set(tr, StringRef(backupContainer));
+		config.backupContainer().set(tr, backupContainer);
 		config.stopWhenDone().set(tr, stopWhenDone);
 		config.backupRanges().set(tr, normalizedRanges);
 
@@ -4062,5 +4058,5 @@ Future<std::string> FileBackupAgent::getBackupInfo(std::string container, Versio
 }
 
 Future<std::string> FileBackupAgent::getLastBackupContainer(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return fileBackup::getPath(tr, BackupConfig(logUid).backupContainer().key);
+	return fileBackup::getPath(tr, logUid);
 }
