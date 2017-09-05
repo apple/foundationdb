@@ -468,8 +468,8 @@ public:
 	}
 
 	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange) {
-		Key mutationLogsDestKey = uidPrefixKey(backupLogKeys.begin, config.getUid());
-		tr->set(logRangesEncodeKey(backupRange.begin, config.getUid()), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
+		Key mutationLogsDestKey = uidPrefixKey(backupLogKeys.begin, getUid());
+		tr->set(logRangesEncodeKey(backupRange.begin, getUid()), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
 	}
 };
 
@@ -2066,7 +2066,7 @@ namespace fileBackup {
 
 			// Start logging the mutations for the specified ranges of the tag
 			for (auto &backupRange : backupRanges) {
-				config.startMutationLogs();
+				config.startMutationLogs(tr, backupRange);
 			}
 
 			config.stateEnum().set(tr, EBackupState::STATE_BACKUP);
@@ -3718,7 +3718,6 @@ public:
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state KeyBackedTag tag;
-				state UID logUid;
 				state BackupConfig config;
 				state EBackupState backupState;
 
@@ -3726,8 +3725,7 @@ public:
 				tag = makeBackupTag(tagName);
 				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
 				if (uidAndAbortedFlag.present()) {
-					logUid = uidAndAbortedFlag.get().first;
-					config = BackupConfig(logUid);
+					config = BackupConfig(uidAndAbortedFlag.get().first);
 					state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 					backupState = status;
 				}
@@ -3736,7 +3734,7 @@ public:
 					statusText += "No previous backups found.\n";
 				} else {
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
-					state std::string outContainer = wait(backupAgent->getLastBackupContainer(tr, logUid));
+					state std::string outContainer = wait(backupAgent->getLastBackupContainer(tr, config.getUid()));
 					state std::string tagNameDisplay = tagName.toString();
 					state Version stopVersion = wait(config.stopVersion().getD(tr, -1));
 
@@ -3761,7 +3759,7 @@ public:
 
 				// Append the errors, if requested
 				if (errorLimit > 0) {
-					Standalone<RangeResultRef> values = wait(tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(), errorLimit, false, true));
+					Standalone<RangeResultRef> values = wait(tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(config.getUid(), Unversioned())).range(), errorLimit, false, true));
 
 					// Display the errors, if any
 					if (values.size() > 0) {
