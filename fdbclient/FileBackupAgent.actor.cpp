@@ -3469,7 +3469,7 @@ public:
 		state UID uid = config.getUid();
 
 		// This check will ensure that current backupUid is later than the last backup Uid
-		state Standalone<StringRef> now = BackupAgentBase::getCurrentTime();
+		state Standalone<StringRef> nowStr = BackupAgentBase::getCurrentTime();
 		state std::string backupContainer = outContainer.toString();
 
 		// To be consistent with directory handling behavior since FDB backup was first released, if the container string
@@ -3477,7 +3477,7 @@ public:
 		if(backupContainer.find("file://") == 0) {
 			if(backupContainer[backupContainer.size() - 1] != '/')
 				backupContainer += "/";
-			backupContainer += std::string("backup-") + now.toString();
+			backupContainer += std::string("backup-") + nowStr.toString();
 		}
 
 		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer);
@@ -3490,7 +3490,7 @@ public:
 
 		Optional<Value> lastBackupTimestamp = wait(backupAgent->lastBackupTimestamp().get(tr));
 
-		if ((lastBackupTimestamp.present()) && (lastBackupTimestamp.get() >= now)) {
+		if ((lastBackupTimestamp.present()) && (lastBackupTimestamp.get() >= nowStr)) {
 			fprintf(stderr, "ERROR: The last backup `%s' happened in the future.\n", printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
 		}
@@ -3505,9 +3505,7 @@ public:
 
 		for (auto& backupRange : backupRangeSet.ranges()) {
 			if (backupRange.value()) {
-				KeyRef begin = KeyRef(backupRanges.arena(), backupRange.range().begin);
-				KeyRef end = KeyRef(backupRanges.arena(), backupRange.range().end);
-				normalizedRanges.push_back(KeyRange(KeyRangeRef(begin, end), backupRanges.arena()));
+				normalizedRanges.push_back(KeyRange(KeyRangeRef(backupRange.range().begin, backupRange.range().end)));
 			}
 		}
 
@@ -3519,7 +3517,7 @@ public:
 		tag.set(tr, {uid, false});
 
 		tr->set(backupAgent->tagNames.pack(tagName), config.getUidAsKey());
-		backupAgent->lastBackupTimestamp().set(tr, now);
+		backupAgent->lastBackupTimestamp().set(tr, nowStr);
 
 		// Set the backup keys
 		config.tag().set(tr, tagName);
