@@ -503,4 +503,161 @@ public:
 	StringRef key;
 };
 
+typedef BackupAgentBase::enumState EBackupState;
+template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
+template<> inline EBackupState Codec<EBackupState>::unpack(Tuple const &val) { return (EBackupState)val.getInt(0); }
+
+// Key backed tags are a single-key slice of the TagUidMap, defined below.
+// The Value type of the key is a UidAndAbortedFlagT which is a pair of {UID, aborted_flag}
+// All tasks on the UID will have a validation key/value that requires aborted_flag to be
+// false, so changing that value, such as changing the UID or setting aborted_flag to true,
+// will kill all of the active tasks on that backup/restore UID.
+typedef std::pair<UID, bool> UidAndAbortedFlagT;
+class KeyBackedTag : public KeyBackedProperty<UidAndAbortedFlagT> {
+public:
+	KeyBackedTag() : KeyBackedProperty(StringRef()) {}
+	KeyBackedTag(std::string tagName, StringRef tagMapPrefix);
+
+	Future<Void> cancel(Reference<ReadYourWritesTransaction> tr) {
+		std::string tag = tagName;
+		Key _tagMapPrefix = tagMapPrefix;
+		return map(get(tr), [tag, _tagMapPrefix, tr](Optional<UidAndAbortedFlagT> up) -> Void {
+			if (up.present()) {
+				// Set aborted flag to true
+				up.get().second = true;
+				KeyBackedTag(tag, _tagMapPrefix).set(tr, up.get());
+			}
+			return Void();
+		});
+	}
+
+	std::string tagName;
+	Key tagMapPrefix;
+};
+
+typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
+// Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
+class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
+public:
+	TagUidMap(const StringRef & prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
+
+	static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap * const & tagsMap, Reference<ReadYourWritesTransaction> const & tr);
+
+	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr) {
+		return getAll_impl(this, tr);
+	}
+
+	Key prefix;
+};
+
+static inline KeyBackedTag makeRestoreTag(std::string tagName) {
+	return KeyBackedTag(tagName, fileRestorePrefixRange.begin);
+}
+
+static inline KeyBackedTag makeBackupTag(std::string tagName) {
+	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
+}
+
+static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr) {
+	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr);
+}
+
+static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr) {
+	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr);
+}
+
+class KeyBackedConfig {
+public:
+	static struct {
+		static TaskParam<UID> uid() {return LiteralStringRef(__FUNCTION__); }
+	} TaskParams;
+
+	KeyBackedConfig(StringRef prefix, UID uid = UID()) :
+			uid(uid),
+			prefix(prefix),
+			configSpace(uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(prefix), uid)) {}
+
+	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
+
+	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
+		// Set the uid task parameter
+		TaskParams.uid().set(task, uid);
+		// Set the validation condition for the task which is that the restore uid's tag's uid is the same as the restore uid.
+		// Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the validation key
+		// which TaskBucket will check, and its value must be this restore config's uid.
+		UID u = uid;  // 'this' could be invalid in lambda
+		Key p = prefix;
+		return map(tag().get(tr), [u,p,task](Optional<std::string> const &tag) -> Void {
+			if(!tag.present())
+				throw restore_error();
+			// Validation contition is that the uidPair key must be exactly {u, false}
+			TaskBucket::setValidationCondition(task, KeyBackedTag(tag.get(), p).key, Codec<UidAndAbortedFlagT>::pack({u, false}).pack());
+			return Void();
+		});
+	}
+
+	KeyBackedProperty<std::string> tag() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	UID getUid() { return uid; }
+
+	Key getUidAsKey() { return BinaryWriter::toValue(uid, Unversioned()); }
+
+	void clear(Reference<ReadYourWritesTransaction> tr) {
+		tr->clear(configSpace.range());
+	}
+
+protected:
+	UID uid;
+	Key prefix;
+	Subspace configSpace;
+};
+
+class BackupConfig : public KeyBackedConfig {
+public:
+	BackupConfig(UID uid = UID()) : KeyBackedConfig(fileBackupPrefixRange.begin, uid) {}
+	BackupConfig(Reference<Task> task) : KeyBackedConfig(fileBackupPrefixRange.begin, task) {}
+
+	// rangeFileMap maps a keyrange file's End to its Begin and Filename
+	typedef std::pair<Key, Key> KeyAndFilenameT;
+	typedef KeyBackedMap<Key, KeyAndFilenameT> RangeFileMapT;
+	RangeFileMapT rangeFileMap() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedBinaryValue<int64_t> rangeBytesWritten() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedBinaryValue<int64_t> logBytesWritten() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<EBackupState> stateEnum() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<std::string> backupContainer() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Stop differntial logging if already started or don't start after completing KV ranges
+	KeyBackedProperty<bool> stopWhenDone() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<Version> stopVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<std::vector<KeyRange>> backupRanges() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange) {
+		Key mutationLogsDestKey = uidPrefixKey(backupLogKeys.begin, getUid());
+		tr->set(logRangesEncodeKey(backupRange.begin, getUid()), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
+	}
+};
 #endif
