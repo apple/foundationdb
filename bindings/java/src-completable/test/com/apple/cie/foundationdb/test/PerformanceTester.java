@@ -352,7 +352,7 @@ public class PerformanceTester extends AbstractTester {
             long start = System.nanoTime();
             for (int i = 0; i < count; i++) {
                 int keyIndex = randomKeyIndex();
-                tr.getRange(key(keyIndex), key(keyIndex + 1)).asList().join();
+                tr.getRange(key(keyIndex), key(keyIndex + 1), 2).asList().join();
             }
             long end = System.nanoTime();
 

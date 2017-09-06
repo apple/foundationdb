@@ -218,6 +218,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 		std::vector<LocalityData>							unavailableLocals;
 		LocalitySetRef																					logServerSet;
 		LocalityMap<std::pair<WorkerInterface, ProcessClass>>*	logServerMap;
+		UID 		functionId = g_nondeterministic_random->randomUniqueID();
 		bool		bCompleted = false;
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<std::pair<WorkerInterface, ProcessClass>>());
@@ -230,7 +231,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			}
 			else {
 				if (it.second.interf.locality.dataHallId().present())
-					TraceEvent(SevWarn,"GWFTADNotAvailable", id)
+					TraceEvent(SevWarn,"GWFTADNotAvailable", functionId)
 						.detail("Fitness", fitness)
 						.detailext("Zone", it.second.interf.locality.zoneId())
 						.detailext("DataHall", it.second.interf.locality.dataHallId())
@@ -243,7 +244,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 						.detail("Locality", it.second.interf.locality.toString())
 						.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
 						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-						.detail("DesiredLogs", conf.getDesiredLogs());
+						.detail("DesiredLogs", conf.getDesiredLogs())
+						.detail("InterfaceId", id);
 				unavailableLocals.push_back(it.second.interf.locality);
 			}
 		}
@@ -258,12 +260,13 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 				logServerMap->add(worker.first.locality, &worker);
 			}
 			if (logServerSet->size() < conf.tLogReplicationFactor) {
-				TraceEvent(SevWarn,"GWFTADTooFew", id)
+				TraceEvent(SevWarn,"GWFTADTooFew", functionId)
 					.detail("Fitness", fitness)
 					.detail("Processes", logServerSet->size())
 					.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
 					.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-					.detail("DesiredLogs", conf.getDesiredLogs());
+					.detail("DesiredLogs", conf.getDesiredLogs())
+					.detail("InterfaceId", id);
 			}
 			else if (logServerSet->size() <= conf.getDesiredLogs()) {
 				ASSERT(conf.tLogPolicy);
@@ -275,12 +278,13 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 					break;
 				}
 				else {
-					TraceEvent(SevWarn,"GWFTADNotAcceptable", id)
+					TraceEvent(SevWarn,"GWFTADNotAcceptable", functionId)
 						.detail("Fitness", fitness)
 						.detail("Processes", logServerSet->size())
 						.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
 						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-						.detail("DesiredLogs", conf.getDesiredLogs());
+						.detail("DesiredLogs", conf.getDesiredLogs())
+						.detail("InterfaceId", id);
 				}
 			}
 			// Try to select the desired size, if larger
@@ -300,7 +304,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 						results.push_back(*object);
 						tLocalities.push_back(object->first.locality);
 					}
-					TraceEvent("GWFTADBestResults", id)
+					TraceEvent("GWFTADBestResults", functionId)
 						.detail("Fitness", fitness)
 						.detail("Processes", logServerSet->size())
 						.detail("BestCount", bestSet.size())
@@ -308,17 +312,19 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 						.detail("BestDataHalls", ::describeDataHalls(tLocalities))
 						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
 						.detail("TotalResults", results.size())
-						.detail("DesiredLogs", conf.getDesiredLogs());
+						.detail("DesiredLogs", conf.getDesiredLogs())
+						.detail("InterfaceId", id);
 					bCompleted = true;
 					break;
 				}
 				else {
-					TraceEvent(SevWarn,"GWFTADNoBest", id)
+					TraceEvent(SevWarn,"GWFTADNoBest", functionId)
 						.detail("Fitness", fitness)
 						.detail("Processes", logServerSet->size())
 						.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
 						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-						.detail("DesiredLogs", conf.getDesiredLogs());
+						.detail("DesiredLogs", conf.getDesiredLogs())
+						.detail("InterfaceId", id);
 				}
 			}
 		}
@@ -331,7 +337,7 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 					tLocalities.push_back(object->first.locality);
 				}
 
-				TraceEvent(SevWarn, "GetTLogTeamFailed")
+				TraceEvent(SevWarn, "GetTLogTeamFailed", functionId)
 					.detail("Policy", conf.tLogPolicy->info())
 					.detail("Processes", logServerSet->size())
 					.detail("Workers", id_worker.size())
@@ -344,7 +350,8 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 					.detail("DesiredLogs", conf.getDesiredLogs())
 					.detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
 					.detail("checkStable", checkStable)
-					.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
+					.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS)
+					.detail("InterfaceId", id).backtrace();
 
 			// Free the set
 			logServerSet->clear();
@@ -356,14 +363,25 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 			id_used[result.first.locality.processId()]++;
 		}
 
-		TraceEvent("GetTLogTeamDone")
+		TraceEvent("GetTLogTeamDone", functionId)
 			.detail("Completed", bCompleted).detail("Policy", conf.tLogPolicy->info())
 			.detail("Results", results.size()).detail("Processes", logServerSet->size())
 			.detail("Workers", id_worker.size())
 			.detail("Replication", conf.tLogReplicationFactor)
 			.detail("Desired", conf.getDesiredLogs())
 			.detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
-			.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS);
+			.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS)
+			.detail("InterfaceId", id);
+
+		for (auto& result : results) {
+			TraceEvent("GetTLogTeamWorker", functionId)
+				.detail("Class", result.second.toString())
+				.detail("Address", result.first.address())
+				.detailext("Zone", result.first.locality.zoneId())
+				.detailext("DataHall", result.first.locality.dataHallId())
+				.detail("isExcludedServer", conf.isExcludedServer(result.first.address()))
+				.detail("isAvailable", IFailureMonitor::failureMonitor().getState(result.first.storage.getEndpoint()).isAvailable());
+		}
 
 		// Free the set
 		logServerSet->clear();

@@ -41,7 +41,7 @@ ACTOR Future<Void> _test() {
 	// tr->setVersion(1);
 
 	Version ver = wait( tr->getReadVersion() );
-	printf("%ld\n", ver);
+	printf("%lld\n", ver);
 
 	state std::vector< Future<Version> > versions;
 

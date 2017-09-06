@@ -1099,6 +1099,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				if(!statefulProcesses[itr->first.address()].count(id)) {
 					TraceEvent("ConsistencyCheck_ExtraDataStore").detail("Address", itr->first.address()).detail("DataStoreID", id);
 					if(g_network->isSimulated()) {
+						TraceEvent("ConsistencyCheck_RebootProcess").detail("Address", itr->first.address()).detail("DataStoreID", id);
 						g_simulator.rebootProcess(g_simulator.getProcessByAddress(itr->first.address()), ISimulator::RebootProcess);
 					}
 

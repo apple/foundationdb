@@ -419,8 +419,8 @@ public:
 		}
 
 		if( error.code() != error_code_actor_cancelled ) {
-			if (!self->stopped.isSet()) self->stopped.send(Void());
-			if (!self->error.isSet()) self->error.send(Never());
+			if (self->stopped.canBeSet()) self->stopped.send(Void());
+			if (self->error.canBeSet()) self->error.send(Never());
 			delete self;
 		}
 	}

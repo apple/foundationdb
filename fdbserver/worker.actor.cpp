@@ -185,7 +185,7 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 	if( storeType == KeyValueStoreType::SSD_BTREE_V1 )
 		return joinPath( folder, sample_filename );
 	else if ( storeType == KeyValueStoreType::SSD_BTREE_V2 )
-		return joinPath(folder, sample_filename); 
+		return joinPath(folder, sample_filename);
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
 
@@ -196,7 +196,7 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 	if( storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath( folder, prefix + id.toString() + ".fdb" );
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
-		return joinPath(folder, prefix + id.toString() + ".sqlite"); 
+		return joinPath(folder, prefix + id.toString() + ".sqlite");
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, prefix + id.toString() + "-" );
 
@@ -356,6 +356,7 @@ void startRole(UID roleId, UID workerId, std::string as, std::map<std::string, s
 	g_roles.insert({as, roleId.shortString()});
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	if (g_network->isSimulated()) g_simulator.addRole(g_network->getLocalAddress(), as);
 }
 
 void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
@@ -387,6 +388,7 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 	g_roles.erase({as, id.shortString()});
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	if (g_network->isSimulated()) g_simulator.removeRole(g_network->getLocalAddress(), as);
 }
 
 ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
@@ -510,7 +512,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		if( metricsConnFile.size() > 0) {
 			try {
 				state Reference<Cluster> cluster = Cluster::createCluster( metricsConnFile, Cluster::API_VERSION_LATEST );
-				metricsLogger = runMetrics( cluster->createDatabase(LiteralStringRef("DB")), KeyRef(metricsPrefix) );
+				metricsLogger = runMetrics( cluster->createDatabase(LiteralStringRef("DB"), locality), KeyRef(metricsPrefix) );
 			} catch(Error &e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
@@ -524,7 +526,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	errorForwarders.add( registrationClient( ccInterface, interf, processClass ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
-	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo ) );
+	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 
 	filesClosed.add(stopping.getFuture());
 
@@ -622,7 +624,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					Reference<IAsyncFile> checkFile = wait( IAsyncFileSystem::filesystem()->open( joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600 ) );
 					Void _ = wait( checkFile->sync() );
 				}
-			
+
 				if(g_network->isSimulated()) {
 					TraceEvent("SimulatedReboot").detail("Deletion", rebootReq.deleteData );
 					if( rebootReq.deleteData ) {
@@ -661,7 +663,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
 					details["StorageEngine"] = req.storeType.toString();
-					
+
 					//FIXME: start role for every tlog instance, rather that just for the shared actor, also use a different role type for the shared actor
 					startRole( logId, interf.id(), "SharedTLog", details );
 
