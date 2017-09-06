@@ -132,11 +132,12 @@ public:
 	}
 
 	ACTOR Future<Void> performSetup(Database cx, ApiCorrectnessWorkload *self) {
-		//Choose a random transaction type (NativeAPI, ReadYourWrites, ThreadSafe)
+		//Choose a random transaction type (NativeAPI, ReadYourWrites, ThreadSafe, MultiVersion)
 		std::vector<TransactionType> types;
 		types.push_back(NATIVE);
 		types.push_back(READ_YOUR_WRITES);
 		types.push_back(THREAD_SAFE);
+		types.push_back(MULTI_VERSION);
 
 		Void _ = wait(self->chooseTransactionFactory(cx, types));
 

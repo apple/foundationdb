@@ -500,8 +500,8 @@ struct RunResult getSingleKeyRange(struct ResultSet *rs, FDBTransaction *tr) {
 		FDBFuture *f = fdb_transaction_get_range(tr,
 			keys[key], keySize, 1, 0,
 			keys[key + 1], keySize, 1, 0,
-			0, 0,
-			FDB_STREAMING_MODE_WANT_ALL, 1, 0, 0);
+			2, 0,
+			FDB_STREAMING_MODE_EXACT, 1, 0, 0);
 
 		e = maybeLogError(fdb_future_block_until_ready(f), "waiting for single key range", rs);
 		if(e) {
@@ -516,7 +516,7 @@ struct RunResult getSingleKeyRange(struct ResultSet *rs, FDBTransaction *tr) {
 		}
 
 		if(outCount != 1) {
-			logError(4100, "non-1 number of keys returned in single key range read", rs);
+			logError(4100, "more than one key returned in single key range read", rs);
 			fdb_future_destroy(f);
 			return RES(0, 4100);
 		}
