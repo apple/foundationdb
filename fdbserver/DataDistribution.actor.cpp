@@ -997,16 +997,22 @@ struct DDTeamCollection {
 				state int teamsToBuild = desiredTeams - teamCount;
 
 				state vector<std::vector<UID>> builtTeams;
-				int addedTeams = wait( self->addAllTeams( self, desiredServerVector, &builtTeams, teamsToBuild ) );
 
-				if( addedTeams < teamsToBuild ) {
-					for( int i = 0; i < builtTeams.size(); i++ ) {
-						std::sort(builtTeams[i].begin(), builtTeams[i].end());
-						self->addTeam( builtTeams[i].begin(), builtTeams[i].end() );
+				if (self->teamSize <= 3) {
+					int addedTeams = wait( self->addAllTeams( self, desiredServerVector, &builtTeams, teamsToBuild ) );
+
+					if( addedTeams < teamsToBuild ) {
+						for( int i = 0; i < builtTeams.size(); i++ ) {
+							std::sort(builtTeams[i].begin(), builtTeams[i].end());
+							self->addTeam( builtTeams[i].begin(), builtTeams[i].end() );
+						}
+						TraceEvent("AddAllTeams", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", builtTeams.size());
 					}
-					TraceEvent("AddAllTeams", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", builtTeams.size());
-				}
-				else {
+					else {
+						int addedTeams = self->addTeamsBestOf( teamsToBuild );
+						TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
+					}
+				} else {
 					int addedTeams = self->addTeamsBestOf( teamsToBuild );
 					TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
 				}
