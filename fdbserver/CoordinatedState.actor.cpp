@@ -300,8 +300,19 @@ struct MovableCoordinatedStateImpl {
 	}
 };
 
+void MovableCoordinatedState::operator=(MovableCoordinatedState&& av) { 
+	if(impl) {
+		delete impl;
+	}
+	impl = av.impl; 
+	av.impl = 0; 
+}
 MovableCoordinatedState::MovableCoordinatedState( class ServerCoordinators const& coord ) : impl( new MovableCoordinatedStateImpl(coord) ) {}
-MovableCoordinatedState::~MovableCoordinatedState() { delete impl; }
+MovableCoordinatedState::~MovableCoordinatedState() { 
+	if(impl) {
+		delete impl; 
+	}
+}
 Future<Value> MovableCoordinatedState::read() { return MovableCoordinatedStateImpl::read(impl); }
 Future<Void> MovableCoordinatedState::onConflict() { return impl->onConflict(); }
 Future<Void> MovableCoordinatedState::setExclusive(Value v) { return impl->setExclusive(v); }

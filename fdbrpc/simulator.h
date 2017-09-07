@@ -89,6 +89,7 @@ public:
 				case ProcessClass::TesterClass: return false;
 				case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
+				case ProcessClass::LogRouterClass: return false;
 				default: return false;
 			}
 		}
@@ -207,8 +208,8 @@ public:
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	class ClusterConnectionString* extraDB;
 	IRepPolicyRef storagePolicy;
-	IRepPolicyRef	tLogPolicy;
-	int						tLogWriteAntiQuorum;
+	IRepPolicyRef tLogPolicy;
+	int tLogWriteAntiQuorum;
 
 	//Used by workloads that perform reconfigurations
 	int testerCount;

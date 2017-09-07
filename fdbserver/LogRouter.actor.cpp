@@ -384,8 +384,8 @@ ACTOR Future<Void> logRouterCore(
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, TLogInterface myInterface, int logSet) {
 	loop{
-		if (db->get().recoveryCount >= recoveryCount && logSet < db->get().logSystemConfig.tLogs.size() &&
-			!std::count(db->get().logSystemConfig.tLogs[logSet].logRouters.begin(), db->get().logSystemConfig.tLogs[logSet].logRouters.end(), myInterface.id())) {
+		if (db->get().recoveryCount >= recoveryCount && ( logSet >= db->get().logSystemConfig.expectedLogSets || ( logSet < db->get().logSystemConfig.tLogs.size() &&
+			!std::count(db->get().logSystemConfig.tLogs[logSet].logRouters.begin(), db->get().logSystemConfig.tLogs[logSet].logRouters.end(), myInterface.id()) ) )) {
 			throw worker_removed();
 		}
 		Void _ = wait(db->onChange());

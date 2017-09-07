@@ -65,7 +65,11 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs") && isInteger(value) ) {
+			out[p+key] = value;
+		}
+
+		if( key == "primary_dc" || key == "remote_dc" || key == "primary_satellite_dcs" || key == "remote_satellite_dcs" ) {
 			out[p+key] = value;
 		}
 
@@ -87,48 +91,40 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		return out;
 	}
 
-	std::string redundancy, log_replicas, remote_replicas;
+	std::string redundancy, log_replicas;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
-	IRepPolicyRef remoteTLogPolicy;
-	//FIXME: add modes for real remote policies
-
+	
 	bool redundancySpecified = true;
 	if (mode == "single") {
 		redundancy="1";
 		log_replicas="1";
-		remote_replicas="1";
-		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
+		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyOne());
 
 	} else if(mode == "double" || mode == "fast_recovery_double") {
 		redundancy="2";
 		log_replicas="2";
-		remote_replicas="2";
-		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "triple" || mode == "fast_recovery_triple") {
 		redundancy="3";
 		log_replicas="3";
-		remote_replicas="3";
-		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "two_datacenter") {
 		redundancy="3";
 		log_replicas="3";
-		remote_replicas="3";
-		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "three_datacenter") {
 		redundancy="3";
 		log_replicas="3";
-		remote_replicas="3";
-		storagePolicy = tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAnd({
+		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAnd({
 			IRepPolicyRef(new PolicyAcross(3, "dcid", IRepPolicyRef(new PolicyOne()))),
 			IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())))
 		}));
 	} else if(mode == "three_data_hall") {
 		redundancy="3";
 		log_replicas="4";
-		remote_replicas="4";
 		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "data_hall", IRepPolicyRef(new PolicyOne())));
-		tLogPolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
+		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
 	} else
@@ -137,7 +133,6 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		out[p+"storage_replicas"] =
 			out[p+"storage_quorum"] = redundancy;
 		out[p+"log_replicas"] = log_replicas;
-		out[p+"remote_log_replication"] = remote_replicas;
 		out[p+"log_anti_quorum"] = "0";
 
 		BinaryWriter policyWriter(IncludeVersion());
@@ -147,11 +142,92 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		policyWriter = BinaryWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, tLogPolicy);
 		out[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
+		return out;
+	}
+
+	std::string remote_redundancy, remote_log_replicas;
+	IRepPolicyRef remoteStoragePolicy;
+	IRepPolicyRef remoteTLogPolicy;
+	bool remoteRedundancySpecified = true;
+	if (mode == "remote_single") {
+		remote_redundancy="1";
+		remote_log_replicas="1";
+		remoteStoragePolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
+	} else if(mode == "remote_double") {
+		remote_redundancy="2";
+		remote_log_replicas="2";
+		remoteStoragePolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+	} else if(mode == "remote_triple") {
+		remote_redundancy="3";
+		remote_log_replicas="3";
+		remoteStoragePolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+	} else if(mode == "remote_three_data_hall") {
+		remote_redundancy="3";
+		remote_log_replicas="4";
+		remoteStoragePolicy = IRepPolicyRef(new PolicyAcross(3, "data_hall", IRepPolicyRef(new PolicyOne())));
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+	} else
+		remoteRedundancySpecified = false;
+	if (remoteRedundancySpecified) {
+		out[p+"remote_storage_replicas"] =
+			out[p+"remote_storage_quorum"] = remote_redundancy;
+		out[p+"remote_log_replicas"] = 
+			out[p+"log_routers"] = remote_log_replicas;
+
+		BinaryWriter policyWriter(IncludeVersion());
+		serializeReplicationPolicy(policyWriter, remoteStoragePolicy);
+		out[p+"remote_storage_policy"] = policyWriter.toStringRef().toString();
 
 		policyWriter = BinaryWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
-		out[p+"remote_replication_policy"] = policyWriter.toStringRef().toString();
+		out[p+"remote_log_policy"] = policyWriter.toStringRef().toString();
+		return out;
+	}
 
+	std::string satellite_log_replicas, satellite_anti_quorum, satellite_usable_dcs;
+	IRepPolicyRef satelliteTLogPolicy;
+	bool satelliteRedundancySpecified = true;
+	if (mode == "one_satellite_single") {
+		satellite_anti_quorum="0";
+		satellite_usable_dcs="1";
+		satellite_log_replicas="1";
+		satelliteTLogPolicy = IRepPolicyRef(new PolicyOne());
+	} else if(mode == "one_satellite_double") {
+		satellite_anti_quorum="0";
+		satellite_usable_dcs="1";
+		satellite_log_replicas="2";
+		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+	} else if(mode == "one_satellite_triple") {
+		satellite_anti_quorum="0";
+		satellite_usable_dcs="1";
+		satellite_log_replicas="3";
+		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+	} else if(mode == "two_satellite_safe") {
+		satellite_anti_quorum="0";
+		satellite_usable_dcs="2";
+		satellite_log_replicas="4";
+		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+	} else if(mode == "two_satellite_fast") {
+		satellite_anti_quorum="2";
+		satellite_usable_dcs="2";
+		satellite_log_replicas="4";
+		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+	} else
+		satelliteRedundancySpecified = false;
+	if (satelliteRedundancySpecified) {
+		out[p+"satellite_anti_quorum"] = satellite_anti_quorum;
+		out[p+"satellite_usable_dcs"] = satellite_usable_dcs;
+		out[p+"satellite_log_replicas"] = satellite_log_replicas;
+
+		BinaryWriter policyWriter(IncludeVersion());
+		serializeReplicationPolicy(policyWriter, satelliteTLogPolicy);
+		out[p+"satellite_log_policy"] = policyWriter.toStringRef().toString();
 		return out;
 	}
 

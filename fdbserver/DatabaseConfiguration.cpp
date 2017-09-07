@@ -34,11 +34,23 @@ void DatabaseConfiguration::resetInternal() {
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
-	storagePolicy = IRepPolicyRef();
-	tLogPolicy = IRepPolicyRef();
-	remoteTLogCount = 0;
-	remoteTLogReplicationFactor = 0;
-	remoteTLogPolicy = IRepPolicyRef();
+	primaryDcId = remoteDcId = Optional<Standalone<StringRef>>();
+	tLogPolicy = storagePolicy = remoteTLogPolicy = remoteStoragePolicy = satelliteTLogPolicy = IRepPolicyRef();
+
+	remoteDesiredTLogCount = remoteTLogReplicationFactor = remoteDurableStorageQuorum = remoteStorageTeamSize = satelliteDesiredTLogCount = satelliteTLogReplicationFactor = satelliteTLogWriteAntiQuorum = satelliteTLogUsableDcs = logRouterCount = 0;
+	primarySatelliteDcIds.clear();
+	remoteSatelliteDcIds.clear();
+}
+
+void parse( std::vector<Optional<Standalone<StringRef>>>* dcs, ValueRef const& v ) {
+	int lastBegin = 0;
+	for(int i = 0; i < v.size(); i++) {
+		if(v[i] == ',') {
+			dcs->push_back(v.substr(lastBegin,i));
+			lastBegin = i + 1;
+		}
+	}
+	dcs->push_back(v.substr(lastBegin));
 }
 
 void parse( int* i, ValueRef const& v ) {
@@ -53,8 +65,10 @@ void parseReplicationPolicy(IRepPolicyRef* policy, ValueRef const& v) {
 
 void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	storagePolicy = IRepPolicyRef(new PolicyAcross(storageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
+	remoteStoragePolicy = IRepPolicyRef(new PolicyAcross(remoteStorageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
 	tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
 	remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(satelliteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
 }
 
 bool DatabaseConfiguration::isValid() const {
@@ -74,9 +88,19 @@ bool DatabaseConfiguration::isValid() const {
 		autoDesiredTLogCount >= 1 &&
 		storagePolicy &&
 		tLogPolicy &&
-		remoteTLogCount >= 0 &&
-		remoteTLogReplicationFactor >=0 &&
-		remoteTLogPolicy;
+		remoteDesiredTLogCount >= 0 &&
+		remoteTLogReplicationFactor >= 0 &&
+		remoteTLogPolicy &&
+		( remoteTLogReplicationFactor == 0 || ( primaryDcId.present() && remoteDcId.present() && remoteDurableStorageQuorum >= 1 && logRouterCount >= 1 ) ) &&
+		remoteStoragePolicy &&
+		remoteDurableStorageQuorum <= remoteStorageTeamSize &&
+		satelliteDesiredTLogCount >= 0 &&
+		satelliteTLogReplicationFactor >= 0 &&
+		satelliteTLogWriteAntiQuorum >= 0 &&
+		satelliteTLogUsableDcs >= 0 &&
+		( satelliteTLogReplicationFactor == 0 || ( primarySatelliteDcIds.size() && remoteSatelliteDcIds.size() && remoteTLogReplicationFactor > 0 ) ) &&
+		satelliteTLogPolicy &&
+		logRouterCount >= 0;
 }
 
 std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
@@ -108,6 +132,56 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 			result["storage_engine"] = "memory";
 		else
 			result["storage_engine"] = "custom";
+
+		if(primaryDcId.present()) {
+			result["primary_dc"] = printable(primaryDcId.get());
+		}
+		if(remoteDcId.present()) {
+			result["remote_dc"] = printable(remoteDcId.get());
+		}
+		if(primarySatelliteDcIds.size()) {
+			std::string primaryDcStr = "";
+			bool first = true;
+			for(auto& it : primarySatelliteDcIds) {
+				if(it.present()) {
+					if(!first) {
+						primaryDcStr += ",";
+						first = false;
+					}
+					primaryDcStr += printable(it.get());
+				}
+			}
+			result["primary_satellite_dcs"] = primaryDcStr;
+		}
+		if(remoteSatelliteDcIds.size()) {
+			std::string remoteDcStr = "";
+			bool first = true;
+			for(auto& it : remoteSatelliteDcIds) {
+				if(it.present()) {
+					if(!first) {
+						remoteDcStr += ",";
+						first = false;
+					}
+					remoteDcStr += printable(it.get());
+				}
+			}
+			result["remote_satellite_dcs"] = remoteDcStr;
+		}
+
+		if(satelliteTLogReplicationFactor > 0) {
+			result["satellite_replication"] = format("%d", satelliteTLogReplicationFactor);
+		}
+
+		if( remoteDurableStorageQuorum == remoteStorageTeamSize && remoteDurableStorageQuorum > 0) {
+			if( remoteTLogReplicationFactor == 1 && remoteDurableStorageQuorum == 1 )
+				result["remote_redundancy_mode"] = "remote_single";
+			else if( remoteTLogReplicationFactor == 2 && remoteDurableStorageQuorum == 2 )
+				result["remote_redundancy_mode"] = "remote_double";
+			else if( remoteTLogReplicationFactor == 3 && remoteDurableStorageQuorum == 3 )
+				result["remote_redundancy_mode"] = "remote_triple";
+			else
+				result["remote_redundancy_mode"] = "custom";
+		}
 	}
 
 	return result;
@@ -144,9 +218,22 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);
 	else if (ck == LiteralStringRef("log_replication_policy")) parseReplicationPolicy(&tLogPolicy, value);
-	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteTLogCount, value);
-	else if (ck == LiteralStringRef("remote_log_replication")) parse(&remoteTLogReplicationFactor, value);
-	else if (ck == LiteralStringRef("remote_replication_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
+	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
+	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
+	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
+	else if (ck == LiteralStringRef("remote_storage_policy")) parseReplicationPolicy(&remoteStoragePolicy, value);
+	else if (ck == LiteralStringRef("satellite_log_policy")) parseReplicationPolicy(&satelliteTLogPolicy, value);
+	else if (ck == LiteralStringRef("remote_storage_quorum")) parse(&remoteDurableStorageQuorum, value);
+	else if (ck == LiteralStringRef("remote_storage_replicas")) parse(&remoteStorageTeamSize, value);
+	else if (ck == LiteralStringRef("satellite_logs")) parse(&satelliteDesiredTLogCount, value);
+	else if (ck == LiteralStringRef("satellite_log_replicas")) parse(&satelliteTLogReplicationFactor, value);
+	else if (ck == LiteralStringRef("satellite_anti_quorum")) parse(&satelliteTLogWriteAntiQuorum, value);
+	else if (ck == LiteralStringRef("satellite_usable_dcs")) parse(&satelliteTLogUsableDcs, value);
+	else if (ck == LiteralStringRef("primary_dc")) primaryDcId = value;
+	else if (ck == LiteralStringRef("remote_dc")) remoteDcId = value;
+	else if (ck == LiteralStringRef("primary_satellite_dcs")) parse(&primarySatelliteDcIds, value);
+	else if (ck == LiteralStringRef("remote_satellite_dcs")) parse(&remoteSatelliteDcIds, value);
+	else if (ck == LiteralStringRef("log_routers")) parse(&logRouterCount, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect
 }

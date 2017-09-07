@@ -437,9 +437,7 @@ struct DDTeamCollection {
 	PromiseStream<Future<Void>> addActor;
 	Database cx;
 	UID masterId;
-	int teamSize;
-	IRepPolicyRef replicationPolicy;
-	KeyValueStoreType storeType;
+	DatabaseConfiguration configuration;
 
 	bool doBuildTeams;
 	Future<Void> teamBuilder;
@@ -479,12 +477,10 @@ struct DDTeamCollection {
 		MoveKeysLock const& lock,
 		PromiseStream<RelocateShard> const& output,
 		Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
-		int teamSize,
-		IRepPolicyRef replicationPolicy,
-		KeyValueStoreType storeType,
+		DatabaseConfiguration configuration,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges )
 		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
-		 teamSize( teamSize ), replicationPolicy(replicationPolicy), storeType( storeType ), serverChanges(serverChanges),
+		 configuration(configuration), serverChanges(serverChanges),
 		 initialFailureReactionDelay( delay( BUGGIFY ? 0 : SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution  ) ), healthyTeamCount( 0 ),
 		 initializationDoneActor(logOnCompletion(initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
 		 unhealthyServers(0)
@@ -682,10 +678,10 @@ struct DDTeamCollection {
 
 	void addSubsetOfEmergencyTeams() {
 		for( int i = 0; i < teams.size(); i++ ) {
-			if( teams[i]->servers.size() > teamSize ) {
+			if( teams[i]->servers.size() > configuration.storageTeamSize ) {
 				auto& serverIds = teams[i]->getServerIDs();
 				bool foundTeam = false;
-				for( int j = 0; j < std::max( 1, (int)(serverIds.size() - teamSize + 1) ) && !foundTeam; j++ ) {
+				for( int j = 0; j < std::max( 1, (int)(serverIds.size() - configuration.storageTeamSize + 1) ) && !foundTeam; j++ ) {
 					auto& serverTeams = server_info[serverIds[j]]->teams;
 					for( int k = 0; k < serverTeams.size(); k++ ) {
 						auto &testTeam = serverTeams[k]->getServerIDs();
@@ -703,7 +699,7 @@ struct DDTeamCollection {
 					}
 				}
 				if( !foundTeam ) {
-					addTeam(serverIds.begin(), serverIds.begin() + teamSize );
+					addTeam(serverIds.begin(), serverIds.begin() + configuration.storageTeamSize );
 				}
 			}
 		}
@@ -724,7 +720,7 @@ struct DDTeamCollection {
 
 	void evaluateTeamQuality() {
 		int teamCount = teams.size(), serverCount = allServers.size();
-		double teamsPerServer = (double)teamCount * teamSize / serverCount;
+		double teamsPerServer = (double)teamCount * configuration.storageTeamSize / serverCount;
 
 		ASSERT( serverCount == server_info.size() );
 
@@ -801,8 +797,8 @@ struct DDTeamCollection {
 		Void _ = wait( yield( TaskDataDistributionLaunch ) );
 
 		// Add team, if valid
-		if(history->size() == self->teamSize) {
-			auto valid = self->replicationPolicy->validate(*history, processes);
+		if(history->size() == self->configuration.storageTeamSize) {
+			auto valid = self->configuration.storagePolicy->validate(*history, processes);
 			if(!valid) {
 				return Void();
 			}
@@ -858,8 +854,8 @@ struct DDTeamCollection {
 			}
 		}
 
-		if(totalServers.size() < teamSize ) {
-			TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId).detail("Reason","Not enough servers for a team").detail("Servers",totalServers.size()).detail("teamSize", teamSize);
+		if(totalServers.size() < configuration.storageTeamSize ) {
+			TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId).detail("Reason","Not enough servers for a team").detail("Servers",totalServers.size()).detail("teamSize", configuration.storageTeamSize);
 			return addedTeams;
 		}
 
@@ -894,7 +890,7 @@ struct DDTeamCollection {
 			int maxAttempts = SERVER_KNOBS->BEST_OF_AMT;
 			for( int i = 0; i < maxAttempts && i < 100; i++) {
 				team.clear();
-				auto success = totalServers.selectReplicas(replicationPolicy, forcedAttributes, team);
+				auto success = totalServers.selectReplicas(configuration.storagePolicy, forcedAttributes, team);
 				if(!success) {
 					break;
 				}
@@ -902,7 +898,7 @@ struct DDTeamCollection {
 				if(forcedAttributes.size() > 0) {
 					team.push_back((UID*)totalServers.getObject(forcedAttributes[0]));
 				}
-				if( team.size() != teamSize) {
+				if( team.size() != configuration.storageTeamSize) {
 					maxAttempts += 1;
 				}
 
@@ -917,7 +913,7 @@ struct DDTeamCollection {
 				}
 			}
 
-			if( bestTeam.size() == teamSize) {
+			if( bestTeam.size() == configuration.storageTeamSize) {
 				vector<UID> processIDs;
 
 				for (auto process = bestTeam.begin(); process < bestTeam.end(); process++) {
@@ -935,7 +931,7 @@ struct DDTeamCollection {
 				TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId).detail("Reason","Unable to make desiredTeams");
 				break;
 			}
-			if(++loopCount > 2*teamsToBuild*(teamSize+1) ) {
+			if(++loopCount > 2*teamsToBuild*(configuration.storageTeamSize+1) ) {
 				break;
 			}
 		}
@@ -967,7 +963,7 @@ struct DDTeamCollection {
 		uniqueMachines = machines.size();
 
 		// If there are too few machines to even build teams or there are too few represented datacenters, build no new teams
-		if( uniqueMachines >= self->teamSize ) {
+		if( uniqueMachines >= self->configuration.storageTeamSize ) {
 			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER*serverCount;
 
 			// Count only properly sized teams against the desired number of teams. This is to prevent "emergency" merged teams (see MoveKeys)
@@ -976,13 +972,13 @@ struct DDTeamCollection {
 			// Also exclude teams who have members in the wrong configuration, since we don't want these teams either
 			int teamCount = 0;
 			for(int i = 0; i < self->teams.size(); i++) {
-				if( self->teams[i]->getServerIDs().size() == self->teamSize && !self->teams[i]->isWrongConfiguration() ) {
+				if( self->teams[i]->getServerIDs().size() == self->configuration.storageTeamSize && !self->teams[i]->isWrongConfiguration() ) {
 					teamCount++;
 				}
 			}
 
 			TraceEvent("BuildTeamsBegin", self->masterId).detail("DesiredTeams", desiredTeams).detail("UniqueMachines", uniqueMachines)
-				.detail("TeamSize", self->teamSize).detail("Servers", serverCount)
+				.detail("TeamSize", self->configuration.storageTeamSize).detail("Servers", serverCount)
 				.detail("CurrentTrackedTeams", self->teams.size()).detail("TeamCount", teamCount);
 
 			if( desiredTeams > teamCount ) {
@@ -996,18 +992,23 @@ struct DDTeamCollection {
 				state int teamsToBuild = desiredTeams - teamCount;
 
 				state vector<std::vector<UID>> builtTeams;
-				int addedTeams = wait( self->addAllTeams( self, desiredServerVector, &builtTeams, teamsToBuild ) );
-
-				if( addedTeams < teamsToBuild ) {
-					for( int i = 0; i < builtTeams.size(); i++ ) {
-						std::sort(builtTeams[i].begin(), builtTeams[i].end());
-						self->addTeam( builtTeams[i].begin(), builtTeams[i].end() );
-					}
-					TraceEvent("AddAllTeams", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", builtTeams.size());
-				}
-				else {
+				if( self->configuration.storageTeamSize > 3) {
 					int addedTeams = self->addTeamsBestOf( teamsToBuild );
 					TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
+				} else {
+					int addedTeams = wait( self->addAllTeams( self, desiredServerVector, &builtTeams, teamsToBuild ) );
+
+					if( addedTeams < teamsToBuild ) {
+						for( int i = 0; i < builtTeams.size(); i++ ) {
+							std::sort(builtTeams[i].begin(), builtTeams[i].end());
+							self->addTeam( builtTeams[i].begin(), builtTeams[i].end() );
+						}
+						TraceEvent("AddAllTeams", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", builtTeams.size());
+					}
+					else {
+						int addedTeams = self->addTeamsBestOf( teamsToBuild );
+						TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
+					}
 				}
 			}
 		}
@@ -1116,7 +1117,7 @@ struct DDTeamCollection {
 ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistributionTeam> team) {
 	state int lastServersLeft = team->getServerIDs().size();
 	state bool lastAnyUndesired = false;
-	state bool wrongSize = team->getServerIDs().size() != self->teamSize;
+	state bool wrongSize = team->getServerIDs().size() != self->configuration.storageTeamSize;
 	state bool lastReady = self->initialFailureReactionDelay.isReady();
 	state bool lastHealthy = team->isHealthy();
 	state bool lastOptimal = team->isOptimal();
@@ -1156,12 +1157,12 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 			}
 
 			int serversLeft = teamLocality->size();
-			bool matchesPolicy = self->replicationPolicy->validate(teamLocality->getEntries(), teamLocality);
+			bool matchesPolicy = self->configuration.storagePolicy->validate(teamLocality->getEntries(), teamLocality);
 
 			if( !self->initialFailureReactionDelay.isReady() )
 				change.push_back( self->initialFailureReactionDelay );
 
-			bool recheck = lastReady != self->initialFailureReactionDelay.isReady() && ( !matchesPolicy || anyUndesired || team->getServerIDs().size() != self->teamSize );
+			bool recheck = lastReady != self->initialFailureReactionDelay.isReady() && ( !matchesPolicy || anyUndesired || team->getServerIDs().size() != self->configuration.storageTeamSize );
 			lastReady = self->initialFailureReactionDelay.isReady();
 
 			if( serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired || anyWrongConfiguration != lastWrongConfiguration || wrongSize || recheck ) {
@@ -1170,7 +1171,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 					.detail("lastServersLeft", lastServersLeft).detail("ContainsUndesiredServer", anyUndesired)
 					.detail("HealthyTeamsCount", self->healthyTeamCount).detail("IsWrongConfiguration", anyWrongConfiguration);
 
-				bool healthy = matchesPolicy && !anyUndesired && team->getServerIDs().size() == self->teamSize && team->getServerIDs().size() == serversLeft;
+				bool healthy = matchesPolicy && !anyUndesired && team->getServerIDs().size() == self->configuration.storageTeamSize && team->getServerIDs().size() == serversLeft;
 				team->setHealthy( healthy );	// Unhealthy teams won't be chosen by bestTeam
 
 				team->setWrongConfiguration( anyWrongConfiguration );
@@ -1216,7 +1217,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 				wrongSize = false;
 
 				state int lastPriority = team->getPriority();
-				if( serversLeft < self->teamSize ) {
+				if( serversLeft < self->configuration.storageTeamSize ) {
 					if( serversLeft == 0 )
 						team->setPriority( PRIORITY_TEAM_0_LEFT );
 					else if( serversLeft == 1 )
@@ -1226,7 +1227,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 					else
 						team->setPriority( PRIORITY_TEAM_UNHEALTHY );
 				}
-				else if ( team->getServerIDs().size() != self->teamSize )
+				else if ( team->getServerIDs().size() != self->configuration.storageTeamSize )
 					team->setPriority( PRIORITY_TEAM_UNHEALTHY );
 				else if( anyUndesired )
 					team->setPriority( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
@@ -1444,8 +1445,8 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection *self, TCServerInfo *server) {
 	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution)));
-	if(type == self->storeType)
-		Void _ = wait(Never());
+	if(type == self->configuration.storageServerStoreType && ( server->lastKnownInterface.locality.dcId() == self->configuration.primaryDcId || server->lastKnownInterface.locality.dcId() == self->configuration.remoteDcId ) )
+		Void _ = wait(Future<Void>(Never()));
 
 	return type;
 }
@@ -1469,7 +1470,7 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
 	state Future<KeyValueStoreType> storeTracker = keyValueStoreTypeTracker( self, server );
-	state bool hasWrongStoreType = false;
+	state bool hasWrongStoreTypeOrDC = false;
 
 	changes.send( std::make_pair(server->id, server->lastKnownInterface) );
 
@@ -1525,7 +1526,7 @@ ACTOR Future<Void> storageServerTracker(
 			}
 
 			//If this storage server has the wrong key-value store type, then mark it undesired so it will be replaced with a server having the correct type
-			if(hasWrongStoreType) {
+			if(hasWrongStoreTypeOrDC) {
 				TraceEvent(SevWarn, "UndesiredStorageServer", masterId).detail("Server", server->id).detail("StoreType", "?");
 				status.isUndesired = true;
 				status.isWrongConfiguration = true;
@@ -1547,7 +1548,7 @@ ACTOR Future<Void> storageServerTracker(
 			failureTracker = storageServerFailureTracker( cx, server->lastKnownInterface, statusMap, &status, serverFailures, &self->unhealthyServers, masterId );
 
 			//We need to recruit new storage servers if the key value store type has changed
-			if(hasWrongStoreType)
+			if(hasWrongStoreTypeOrDC)
 				self->restartRecruiting.trigger();
 
 			if( lastIsUndesired && !status.isUndesired )
@@ -1583,7 +1584,7 @@ ACTOR Future<Void> storageServerTracker(
 
 					//Restart the storeTracker for the new interface
 					storeTracker = keyValueStoreTypeTracker(self, server);
-					hasWrongStoreType = false;
+					hasWrongStoreTypeOrDC = false;
 					self->restartTeamBuilder.trigger();
 					if(restartRecruiting)
 						self->restartRecruiting.trigger();
@@ -1595,11 +1596,11 @@ ACTOR Future<Void> storageServerTracker(
 					TraceEvent("KeyValueStoreTypeChanged", masterId)
 						.detail("ServerID", server->id)
 						.detail("StoreType", type.toString())
-						.detail("DesiredType", self->storeType.toString());
+						.detail("DesiredType", self->configuration.storageServerStoreType.toString());
 					TEST(true); //KeyValueStore type changed
 
 					storeTracker = Never();
-					hasWrongStoreType = true;
+					hasWrongStoreTypeOrDC = true;
 				}
 				when( Void _ = wait( server->wakeUpTracker.getFuture() ) ) {
 					server->wakeUpTracker = Promise<Void>();
@@ -1649,7 +1650,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection *self, RecruitStorageRepl
 
 	state UID interfaceId = g_random->randomUniqueID();
 	InitializeStorageRequest isr;
-	isr.storeType = self->storeType;
+	isr.storeType = self->configuration.storageServerStoreType;
 	isr.seedTag = invalidTag;
 	isr.reqId = g_random->randomUniqueID();
 	isr.interfaceId = interfaceId;
@@ -1721,6 +1722,9 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection *self, Reference<AsyncVar<
 				rsr.excludeAddresses.push_back(it);
 			}
 
+			rsr.includeDCs.push_back(self->configuration.primaryDcId);
+			rsr.includeDCs.push_back(self->configuration.remoteDcId);
+
 			TraceEvent(rsr.criticalRecruitment ? SevWarn : SevInfo, "DDRecruiting").detail("State", "Sending request to CC")
 			.detail("Exclusions", rsr.excludeAddresses.size()).detail("Critical", rsr.criticalRecruitment);
 
@@ -1760,13 +1764,11 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	MoveKeysLock lock,
 	PromiseStream<RelocateShard> output,
-	UID masterId, int teamSize,
-	IRepPolicyRef replicationPolicy,
-	KeyValueStoreType storeType,
+	UID masterId, DatabaseConfiguration configuration,
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
 	Future<Void> readyToStart )
 {
-	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, teamSize, replicationPolicy, storeType, serverChanges );
+	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, configuration, serverChanges );
 
 	state Future<Void> loggingTrigger = Void();
 	state PromiseStream<Void> serverRemoved;
@@ -2095,7 +2097,7 @@ ACTOR Future<Void> dataDistribution(
 					TraceEvent("DDInitGotInitialDD", mi.id()).detail("b","").detail("e", "").detail("src", "[no items]").detail("dest", "[no items]").trackLatest("InitialDD");
 				}
 
-				if (initData->mode) break;
+				if (initData->mode && false) break; //FIXME: re-enable data distribution
 				TraceEvent("DataDistributionDisabled", mi.id());
 
 				TraceEvent("MovingData", mi.id())
@@ -2129,7 +2131,7 @@ ACTOR Future<Void> dataDistribution(
 			actors.push_back( popOldTags( cx, logSystem, recoveryCommitVersion) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, shardsAffectedByTeamFailure, output, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, getShardMetrics, tci, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, configuration.storageTeamSize, configuration.durableStorageQuorum, lastLimited ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tci, cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration.storageTeamSize, configuration.storagePolicy, configuration.storageServerStoreType, serverChanges, readyToStart.getFuture() ), "DDTeamCollection", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tci, cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, serverChanges, readyToStart.getFuture() ), "DDTeamCollection", mi.id(), &normalDDQueueErrors() ) );
 
 			Void _ = wait( waitForAll( actors ) );
 			return Void();
@@ -2154,15 +2156,17 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 		false
 	);
 
+	DatabaseConfiguration conf;
+	conf.storageTeamSize = teamSize;
+	conf.storagePolicy = policy;
+
 	DDTeamCollection* collection = new DDTeamCollection(
 		database,
 		UID(0, 0),
 		MoveKeysLock(),
 		PromiseStream<RelocateShard>(),
 		Reference<ShardsAffectedByTeamFailure>(new ShardsAffectedByTeamFailure()),
-		teamSize,
-		policy,
-		KeyValueStoreType(),
+		conf,
 		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>>()
 	);
 

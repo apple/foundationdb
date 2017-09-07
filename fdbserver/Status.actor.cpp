@@ -1141,7 +1141,7 @@ static StatusObject configurationFetcher(Optional<DatabaseConfiguration> conf, S
 			else if (configuration.autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS)
 				statusObj["auto_logs"] = configuration.autoDesiredTLogCount;
 
-			statusObj["remote_logs"] = configuration.remoteTLogCount;
+			statusObj["remote_logs"] = configuration.remoteDesiredTLogCount;
 
 			if(configuration.storagePolicy) {
 				statusObj["storage_policy"] = configuration.storagePolicy->info();

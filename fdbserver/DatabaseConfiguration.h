@@ -42,13 +42,20 @@ struct DatabaseConfiguration {
 
 	std::string toString() const;
 	std::map<std::string, std::string> toMap() const;
+	int expectedLogSets() {
+		int result = 1;
+		if( satelliteTLogReplicationFactor > 0) {
+			result++;
+		}
+		if( remoteTLogReplicationFactor > 0) {
+			result++;
+		}
+		return result;
+	}
 
 	// SOMEDAY: think about changing storageTeamSize to durableStorageQuorum
 	int32_t minMachinesRequired() const { return std::max(tLogReplicationFactor*2, storageTeamSize); }
 	int32_t maxMachineFailuresTolerated() const { return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, durableStorageQuorum - 1); }
-
-	// Redundancy Levels
-	IRepPolicyRef storagePolicy;
 
 	// MasterProxy Servers
 	int32_t masterProxyCount;
@@ -59,20 +66,40 @@ struct DatabaseConfiguration {
 	int32_t autoResolverCount;
 
 	// TLogs
+	IRepPolicyRef tLogPolicy;
 	int32_t desiredTLogCount;
 	int32_t autoDesiredTLogCount;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	KeyValueStoreType tLogDataStoreType;
-	IRepPolicyRef tLogPolicy;
-	int32_t remoteTLogCount;
-	int32_t remoteTLogReplicationFactor;
-	IRepPolicyRef remoteTLogPolicy;
+	Optional<Standalone<StringRef>> primaryDcId;
 
-	// Storage servers
+	// Storage Servers
+	IRepPolicyRef storagePolicy;
 	int32_t durableStorageQuorum;
 	int32_t storageTeamSize;
 	KeyValueStoreType storageServerStoreType;
+
+	// Remote TLogs
+	int32_t remoteDesiredTLogCount;
+	int32_t remoteTLogReplicationFactor;
+	int32_t logRouterCount;
+	IRepPolicyRef remoteTLogPolicy;
+	Optional<Standalone<StringRef>> remoteDcId;
+
+	// Remote Storage Servers
+	IRepPolicyRef remoteStoragePolicy;
+	int32_t remoteDurableStorageQuorum;
+	int32_t remoteStorageTeamSize;
+
+	// Satellite TLogs
+	IRepPolicyRef satelliteTLogPolicy;
+	int32_t satelliteDesiredTLogCount;
+	int32_t satelliteTLogReplicationFactor;
+	int32_t satelliteTLogWriteAntiQuorum;
+	int32_t satelliteTLogUsableDcs;
+	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
+	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 
 	// Excluded servers (no state should be here)
 	bool isExcludedServer( NetworkAddress ) const;

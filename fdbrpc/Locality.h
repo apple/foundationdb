@@ -26,9 +26,9 @@
 
 struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, InvalidClass = -1 };
+	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, LogRouterClass, InvalidClass = -1 };
 	enum Fitness { BestFit, GoodFit, BestOtherFit, UnsetFit, WorstFit, NeverAssign };
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -46,6 +46,7 @@ public:
 		else if (s=="unset") _class = UnsetClass;
 		else if (s=="stateless") _class = StatelessClass;
 		else if (s=="log") _class = LogClass;
+		else if (s=="router") _class = LogRouterClass;
 		else _class = InvalidClass;
 	}
 
@@ -59,6 +60,7 @@ public:
 		else if (classStr=="unset") _class = UnsetClass;
 		else if (classStr=="stateless") _class = StatelessClass;
 		else if (classStr=="log") _class = LogClass;
+		else if (classStr=="router") _class = LogRouterClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -87,6 +89,7 @@ public:
 			case TesterClass: return "test";
 			case StatelessClass: return "stateless";
 			case LogClass: return "log";
+			case LogRouterClass: return "router";
 			default: return "invalid";
 		}
 	}
