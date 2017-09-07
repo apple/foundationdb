@@ -864,7 +864,6 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 
 		state FileBackupAgent fba;
 		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr));
-		state Standalone<RangeResultRef> backupTagNames = wait( tr->getRange(fba.tagNames.range(), 10000));
 		state std::vector<Future<Version>> tagLastRestorableVersions;
 		state std::vector<Future<int>> tagStates;
 		state std::vector<Future<std::string>> tagContainers;
@@ -1222,12 +1221,17 @@ ACTOR Future<Void> submitBackup(Database db, std::string destinationDir, Standal
 		}
 
 		if (dryRun) {
-			state UID logUid = wait(backupAgent.getLogUid(db, StringRef(tagName)));
-			state int backupStatus = wait(backupAgent.getStateValue(db, logUid));
+			state KeyBackedTag tag = makeBackupTag(tagName);
+			Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db));
 
-			// Throw error if a backup is currently running until we support parallel backups
-			if (BackupAgentBase::isRunnable((BackupAgentBase::enumState)backupStatus)) {
-				throw backup_duplicate();
+			if (uidFlag.present()) {
+				BackupConfig config(uidFlag.get().first);
+				EBackupState backupStatus = wait(config.stateEnum().getOrThrow(db));
+
+				// Throw error if a backup is currently running until we support parallel backups
+				if (BackupAgentBase::isRunnable((BackupAgentBase::enumState)backupStatus)) {
+					throw backup_duplicate();
+				}
 			}
 
 			if (waitForCompletion) {

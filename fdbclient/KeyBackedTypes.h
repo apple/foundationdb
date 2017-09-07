@@ -132,6 +132,15 @@ public:
 		});
 	}
 
+	Future<Optional<T>> get(Database cx, bool snapshot = false) const {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return get(tr, snapshot);
+		});
+	}
+
 	Future<T> getOrThrow(Database cx, bool snapshot = false, Error err = key_not_found()) const {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

@@ -220,7 +220,6 @@ public:
 		subspace( std::move(r.subspace) ),
 		config( std::move(r.config) ),
 		errors( std::move(r.errors) ),
-		tagNames( std::move(r.tagNames) ),
 		lastRestorable( std::move(r.lastRestorable) ),
 		taskBucket( std::move(r.taskBucket) ),
 		futureBucket( std::move(r.futureBucket) ) {}
@@ -229,7 +228,6 @@ public:
 		subspace = std::move(r.subspace);
 		config = std::move(r.config);
 		errors = std::move(r.errors);
-		tagNames = std::move(r.tagNames);
 		lastRestorable = std::move(r.lastRestorable),
 		taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
@@ -291,21 +289,6 @@ public:
 
 	Future<std::string> getStatus(Database cx, int errorLimit, std::string tagName);
 
-	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<int> getStateValue(Database cx, UID logUid) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateValue(tr, logUid); });
-	}
-
-	Future<Version> getStateStopVersion(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<Version> getStateStopVersion(Database cx, UID logUid) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateStopVersion(tr, logUid); });
-	}
-
-	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName);
-	Future<UID> getLogUid(Database cx, Key tagName) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLogUid(tr, tagName); });
-	}
-
 	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
@@ -334,7 +317,6 @@ public:
 	Subspace subspace;
 	Subspace config;
 	Subspace errors;
-	Subspace tagNames;
 	Subspace lastRestorable;
 
 	Reference<TaskBucket> taskBucket;

@@ -315,8 +315,6 @@ ACTOR Future<std::string> RestoreConfig::getFullStatus_impl(RestoreConfig restor
 
 FileBackupAgent::FileBackupAgent()
 	: subspace(Subspace(fileBackupPrefixRange.begin))
-	// tagNames has tagName => logUID
-	, tagNames(subspace.get(BackupAgentBase::keyTagName))
 	// The other subspaces have logUID -> value
 	, config(subspace.get(BackupAgentBase::keyConfig))
 	, errors(subspace.get(BackupAgentBase::keyErrors))
@@ -3349,7 +3347,6 @@ public:
 		// Point the tag to this new uid
 		tag.set(tr, {uid, false});
 
-		tr->set(backupAgent->tagNames.pack(tagName), config.getUidAsKey());
 		backupAgent->lastBackupTimestamp().set(tr, nowStr);
 
 		// Set the backup keys
@@ -3600,28 +3597,6 @@ public:
 		return statusText;
 	}
 
-	ACTOR static Future<int> getStateValue(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid) {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		EBackupState state = wait(BackupConfig(logUid).stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
-		return state;
-	}
-
-	ACTOR static Future<Version> getStateStopVersion(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, UID logUid) {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		Version stopVersion = wait(BackupConfig(logUid).stopVersion().getD(tr, -1));
-		return stopVersion;
-	}
-
-	ACTOR static Future<UID> getLogUid(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Optional<Value> logUid = wait(tr->get(backupAgent->tagNames.pack(tagName)));
-
-		return (logUid.present()) ? BinaryReader::fromStringRef<UID>(logUid.get(), Unversioned()) : UID();
-	}
-
 	ACTOR static Future<Version> getLastRestorable(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -3840,18 +3815,6 @@ Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> t
 
 Future<std::string> FileBackupAgent::getStatus(Database cx, int errorLimit, std::string tagName) {
 	return FileBackupAgentImpl::getStatus(this, cx, errorLimit, tagName);
-}
-
-Future<int> FileBackupAgent::getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return FileBackupAgentImpl::getStateValue(this, tr, logUid);
-}
-
-Future<Version> FileBackupAgent::getStateStopVersion(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return FileBackupAgentImpl::getStateStopVersion(this, tr, logUid);
-}
-
-Future<UID> FileBackupAgent::getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName) {
-	return FileBackupAgentImpl::getLogUid(this, tr, tagName);
 }
 
 Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName) {
