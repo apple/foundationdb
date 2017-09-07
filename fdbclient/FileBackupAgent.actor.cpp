@@ -725,14 +725,6 @@ namespace fileBackup {
 		return Void();
 	}
 
-	ACTOR static Future<std::string> getPath(Reference<ReadYourWritesTransaction> tr, UID uid) {
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state std::string dir = wait(BackupConfig(uid).backupContainer().getD(tr, ""));
-
-		return dir;
-	}
-
 	ACTOR template <class Tr>
 	Future<Void> checkTaskVersion(Tr tr, Reference<Task> task, StringRef name, uint32_t version) {
 		uint32_t taskVersion = task->getVersion();
@@ -1514,7 +1506,6 @@ namespace fileBackup {
 			state Key configPath = uidPrefixKey(logRangesRange.begin, uid);
 			state Key logsPath = uidPrefixKey(backupLogKeys.begin, uid);
 
-			backup.clear(tr);
 			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
 			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
@@ -3269,11 +3260,9 @@ public:
 
 				state BackupConfig config(oldUidAndAborted.get().first);
 				state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
-				Optional<EBackupState> configState = wait(config.stateEnum().get(tr));
-				ASSERT(configState.present() && configState.get() == status);
 
 				// Break, if no longer runnable
-				if (!FileBackupAgent::isRunnable((BackupAgentBase::enumState)status)) {
+				if (!FileBackupAgent::isRunnable(status)) {
 					return status;
 				}
 
@@ -3488,12 +3477,13 @@ public:
 	ACTOR static Future<Void> discontinueBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state UID uid = wait(backupAgent->getLogUid(tr, tagName));
 
-		state BackupConfig config(uid);
+		state KeyBackedTag tag = makeBackupTag(tagName.toString());
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr));
+		state BackupConfig config(current.first);
 		state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 
-		if (!FileBackupAgent::isRunnable((BackupAgentBase::enumState)status)) {
+		if (!FileBackupAgent::isRunnable(status)) {
 			throw backup_unneeded();
 		}
 
@@ -3503,7 +3493,6 @@ public:
 			throw backup_duplicate();
 		}
 
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		config.stopWhenDone().set(tr, true);
 
 		return Void();
@@ -3514,12 +3503,9 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
-		state Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
-		if (!current.present()) {
-			throw backup_error();
-		}
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr));
 
-		state BackupConfig config(current.get().first);
+		state BackupConfig config(current.first);
 		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
@@ -3558,7 +3544,7 @@ public:
 				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
-					state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
+					EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 					backupState = status;
 				}
 
@@ -3566,7 +3552,7 @@ public:
 					statusText += "No previous backups found.\n";
 				} else {
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
-					state std::string outContainer = wait(backupAgent->getLastBackupContainer(tr, config.getUid()));
+					state std::string outContainer = wait(config.backupContainer().getOrThrow(tr));
 					state Version stopVersion = wait(config.stopVersion().getD(tr, -1));
 
 					switch (backupState) {
@@ -3744,16 +3730,17 @@ public:
 	//the tagname of the backup must be the same as the restore.
 	ACTOR static Future<Version> atomicRestore(FileBackupAgent* backupAgent, Database cx, Key tagName, KeyRange range, Key addPrefix, Key removePrefix) {
 		state Reference<ReadYourWritesTransaction> ryw_tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
-		state UID logUid;
+		state BackupConfig backupConfig;
 		loop {
 			try {
 				ryw_tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				ryw_tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				UID _logUid = wait(backupAgent->getLogUid(ryw_tr, tagName));
-				logUid = _logUid;
-				state int status = wait(backupAgent->getStateValue(ryw_tr, logUid));
+				state KeyBackedTag tag = makeBackupTag(tagName.toString());
+				UidAndAbortedFlagT uidFlag = wait(tag.getOrThrow(ryw_tr));
+				backupConfig = BackupConfig(uidFlag.first);
+				state EBackupState status = wait(backupConfig.stateEnum().getOrThrow(ryw_tr));
 
-				if ( (BackupAgentBase::enumState)status != BackupAgentBase::STATE_DIFFERENTIAL ) {
+				if (status != BackupAgentBase::STATE_DIFFERENTIAL ) {
 					throw backup_duplicate();
 				}
 
@@ -3808,8 +3795,8 @@ public:
 			}
 		}
 
-		std::string lastBackupContainer = wait(backupAgent->getLastBackupContainer(cx, logUid));
-		
+		std::string lastBackupContainer = wait(backupConfig.backupContainer().getOrThrow(cx));
+
 		Version ver = wait( restore(backupAgent, cx, tagName, KeyRef(lastBackupContainer), true, -1, true, range, addPrefix, removePrefix, true, randomUid) );
 		return ver;
 	}
@@ -3859,14 +3846,6 @@ Future<int> FileBackupAgent::getStateValue(Reference<ReadYourWritesTransaction> 
 	return FileBackupAgentImpl::getStateValue(this, tr, logUid);
 }
 
-Future<int64_t> FileBackupAgent::getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return BackupConfig(logUid).rangeBytesWritten().getD(tr);
-}
-
-Future<int64_t> FileBackupAgent::getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return BackupConfig(logUid).logBytesWritten().getD(tr);
-}
-
 Future<Version> FileBackupAgent::getStateStopVersion(Reference<ReadYourWritesTransaction> tr, UID logUid) {
 	return FileBackupAgentImpl::getStateStopVersion(this, tr, logUid);
 }
@@ -3897,8 +3876,4 @@ std::string FileBackupAgent::getLogFilename(Version beginVer, Version endVer, in
 
 Future<std::string> FileBackupAgent::getBackupInfo(std::string container, Version* defaultVersion) {
 	return FileBackupAgentImpl::getBackupInfo(IBackupContainer::openContainer(container), defaultVersion);
-}
-
-Future<std::string> FileBackupAgent::getLastBackupContainer(Reference<ReadYourWritesTransaction> tr, UID logUid) {
-	return fileBackup::getPath(tr, logUid);
 }

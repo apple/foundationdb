@@ -863,6 +863,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			totalBlobStats.create(p.first + ".$sum") = p.second;
 
 		state FileBackupAgent fba;
+		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr));
 		state Standalone<RangeResultRef> backupTagNames = wait( tr->getRange(fba.tagNames.range(), 10000));
 		state std::vector<Future<Version>> tagLastRestorableVersions;
 		state std::vector<Future<int>> tagStates;
@@ -871,14 +872,26 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<int64_t>> tagLogBytes;
 		state int i = 0;
 
-		for(i = 0; i < backupTagNames.size(); i++) {
-			Standalone<KeyRef> tagName = fba.tagNames.unpack(backupTagNames[i].key).getString(0);
-			UID tagUID = BinaryReader::fromStringRef<UID>(backupTagNames[i].value, Unversioned());
-			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, tagName));
-			tagStates.push_back(fba.getStateValue(tr, tagUID));
-			tagContainers.push_back(fba.getLastBackupContainer(tr, tagUID));
-			tagRangeBytes.push_back(fba.getRangeBytesWritten(tr, tagUID));
-			tagLogBytes.push_back(fba.getLogBytesWritten(tr, tagUID));
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		for (KeyBackedTag eachTag : backupTags) {
+			state KeyBackedTag tag = eachTag;
+			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag.getOrThrow(tr));
+			state BackupConfig config(uidAndAbortedFlag.first);
+
+			EBackupState status = wait(config.stateEnum().getOrThrow(tr));
+			tagStates.push_back(status);
+
+			int64_t rangeBytesWritten = wait(config.rangeBytesWritten().getD(tr, 0));
+			tagRangeBytes.push_back(rangeBytesWritten);
+
+			int64_t logBytesWritten = wait(config.logBytesWritten().getD(tr, 0));
+			tagLogBytes.push_back(logBytesWritten);
+
+			std::string backupContainer = wait(config.backupContainer().getOrThrow(tr));
+			tagContainers.push_back(backupContainer);
+
+			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag.tagName)));
 		}
 
 		Void _ = wait( waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) && waitForAll(tagRangeBytes) && waitForAll(tagLogBytes));
@@ -886,16 +899,15 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
 		layerRoot.create("tags.timestamp") = now();
 
-		for (int j = 0; j < backupTagNames.size(); j++) {
-			std::string tagName = fba.tagNames.unpack(backupTagNames[j].key).getString(0).toString();
-
+		int j = 0;
+		for (KeyBackedTag eachTag : backupTags) {
 			Version last_restorable_version = tagLastRestorableVersions[j].get();
 			double last_restorable_seconds_behind = ((double)readVer - last_restorable_version) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 			BackupAgentBase::enumState status = (BackupAgentBase::enumState)tagStates[j].get();
 			const char *statusText = fba.getStateText(status);
 
 			// The object for this backup tag inside this instance's subdocument
-			JSONDoc tagRoot = tagsRoot.subDoc(tagName);
+			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName);
 			tagRoot.create("current_container") = tagContainers[j].get();
 			tagRoot.create("current_status") = statusText;
 			tagRoot.create("last_restorable_version") = tagLastRestorableVersions[j].get();
@@ -904,6 +916,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
+
+			j++;
 		}
 	}
 	else if(exe == EXE_DR_AGENT) {
@@ -1237,12 +1251,12 @@ ACTOR Future<Void> submitBackup(Database db, std::string destinationDir, Standal
 		}
 
 		else {
-			Void _ = wait(backupAgent.submitBackup(db, KeyRef(destinationDir), KeyRef(tagName), backupRanges, stopWhenDone));
+			Void _ = wait(backupAgent.submitBackup(db, KeyRef(destinationDir), tagName, backupRanges, stopWhenDone));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
 				printf("Submitted and now waiting for the backup on tag `%s' to complete.\n", printable(StringRef(tagName)).c_str());
-				int _ = wait(backupAgent.waitBackup(db, StringRef(tagName)));
+				int _ = wait(backupAgent.waitBackup(db, tagName));
 			}
 			else {
 				// Check if a backup agent is running
@@ -1421,7 +1435,7 @@ ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDon
 	{
 		state FileBackupAgent backupAgent;
 
-		int status = wait(backupAgent.waitBackup(db, StringRef(tagName), stopWhenDone));
+		int status = wait(backupAgent.waitBackup(db, tagName, stopWhenDone));
 
 		printf("The backup on tag `%s' %s.\n", printable(StringRef(tagName)).c_str(),
 			BackupAgentBase::getStateText((BackupAgentBase::enumState) status));
@@ -1446,7 +1460,7 @@ ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool wait
 		// Wait for the backup to complete, if requested
 		if (waitForCompletion) {
 			printf("Discontinued and now waiting for the backup on tag `%s' to complete.\n", printable(StringRef(tagName)).c_str());
-			int _ = wait(backupAgent.waitBackup(db, StringRef(tagName)));
+			int _ = wait(backupAgent.waitBackup(db, tagName));
 		}
 		else {
 			printf("The backup on tag `%s' was successfully discontinued.\n", printable(StringRef(tagName)).c_str());

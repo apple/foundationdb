@@ -143,11 +143,13 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 			try {
 				if (BUGGIFY) {
-					TraceEvent("BARW_doBackup waitForRestorable", randomID).detail("tag", printable(tag));
+					state KeyBackedTag backupTag = makeBackupTag(tag.toString());
+					TraceEvent("BARW_doBackup waitForRestorable", randomID).detail("tag", backupTag.tagName);
 					// Wait until the backup is in a restorable state
-					state int resultWait = wait(backupAgent->waitBackup(cx, tag.toString(), false));
-					state UID logUid = wait(backupAgent->getLogUid(cx, tag));
-						state std::string lastBackupContainer = wait(backupAgent->getLastBackupContainer(cx, logUid));
+					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false));
+					UidAndAbortedFlagT uidFlag = wait(backupTag.getOrThrow(cx));
+					state UID logUid = uidFlag.first;
+					state std::string lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getOrThrow(cx));
 
 					state std::string restorableFile = joinPath(lastBackupContainer, "restorable");
 					TraceEvent("BARW_lastBackupContainer", randomID).detail("backupTag", printable(tag)).detail("lastBackupContainer", lastBackupContainer)
@@ -291,8 +293,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 			TraceEvent("BARW_doBackupDone", randomID).detail("backupTag", printable(self->backupTag)).detail("abortAndRestartAfter", self->abortAndRestartAfter);
 
-			state UID logUid = wait(backupAgent.getLogUid(cx, self->backupTag));
-			state std::string lastBackupContainer = wait(backupAgent.getLastBackupContainer(cx, logUid));
+			state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
+			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx));
+			state UID logUid = uidFlag.first;
+			state std::string lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getOrThrow(cx));
 
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {

@@ -307,21 +307,11 @@ public:
 	}
 
 	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
-	Future<Version> getLastRestorable(Database cx, Key tagName) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLastRestorable(tr, tagName); });
-	}
-
-	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
 	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
 
-	Future<std::string> getLastBackupContainer(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<std::string> getLastBackupContainer(Database cx, UID logUid) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLastBackupContainer(tr, logUid); });
-	}
 	static Future<std::string> getBackupInfo(std::string backupContainer, Version* defaultVersion = NULL);
 
 	static std::string getTempFilename();

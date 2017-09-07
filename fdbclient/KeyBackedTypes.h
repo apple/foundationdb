@@ -119,11 +119,25 @@ public:
 	}
 	// Get property's value or throw error if it doesn't exist
 	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, Error err = key_not_found()) const {
+		auto keyCopy = key;
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
-			if (!val.present())
+			if (!val.present()) {
+				TraceEvent(SevError, "KeyBackedProperty keyNotFound")
+						.detail("key", printable(keyCopy))
+						.detail("err", err.code());
 				throw err;
+			}
 
 			return val.get();
+		});
+	}
+
+	Future<T> getOrThrow(Database cx, bool snapshot = false, Error err = key_not_found()) const {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return getOrThrow(tr, snapshot, err);
 		});
 	}
 
