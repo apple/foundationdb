@@ -97,6 +97,7 @@ struct VersionStampWorkload : TestWorkload {
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		state ReadYourWritesTransaction tr(cx);
+		state Version readVersion = wait(tr.getReadVersion());
 		loop{
 			try {
 				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(LiteralStringRef(""), LiteralStringRef("V")), self->nodeCount + 1));
@@ -113,6 +114,8 @@ struct VersionStampWorkload : TestWorkload {
 					memcpy(mutateString(parsedVersionstamp), it.value.begin(), 10);
 					parsedVersion = bigEndian64(parsedVersion);
 					ASSERT(commitVersion == parsedVersion);
+					//TraceEvent("VST_check0").detail("parsedVersion", parsedVersion).detail("readVersion", readVersion).detail("key", printable(it.key));
+					ASSERT(parsedVersion < readVersion);
 					ASSERT(commitVersionstamp.compare(parsedVersionstamp) == 0);
 				}
 
@@ -131,6 +134,7 @@ struct VersionStampWorkload : TestWorkload {
 					parsedVersion = bigEndian64(parsedVersion);
 					//TraceEvent("VST_check2").detail("itKey", printable(it.key)).detail("vsKey", printable(vsKey)).detail("commitVersion", commitVersion).detail("parsedVersion", parsedVersion);
 					ASSERT(commitVersion == parsedVersion);
+					ASSERT(parsedVersion < readVersion);
 					ASSERT(commitVersionstamp.compare(parsedVersionstamp) == 0);
 				}
 				break;
@@ -148,10 +152,16 @@ struct VersionStampWorkload : TestWorkload {
 		state double startTime = now();
 		state double lastTime = now();
 
+		if (g_simulator.extraDB != NULL) {
+			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
+			state Database extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+		}
+
 		loop{
 			Void _ = wait(poisson(&lastTime, delay));
 
-			state ReadYourWritesTransaction tr(cx);
+
 			state Key key = self->keyForIndex(g_random->randomInt(0, self->nodeCount));
 			state Value value = std::string(g_random->randomInt(10, 1000), 'x');
 			state Key versionStampKey = self->versionStampKeyForIndex(g_random->randomInt(0, self->nodeCount));
@@ -159,6 +169,7 @@ struct VersionStampWorkload : TestWorkload {
 			state Key endOfRange = self->endOfRange(prefix);
 			state KeyRangeRef range(prefix, endOfRange);
 			loop{
+				state ReadYourWritesTransaction tr(g_simulator.extraDB != NULL ? (g_random->random01() < 0.5 ? extraDB : cx) : cx);
 				//TraceEvent("VST_commit").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("clear", printable(range));
 				try {
 					tr.atomicOp(key, value, MutationRef::SetVersionstampedValue);
@@ -166,7 +177,7 @@ struct VersionStampWorkload : TestWorkload {
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
 					Void _ = wait(tr.commit());
-					//TraceEvent("VST_commit_success").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("clear", printable(range));
+					//TraceEvent("VST_commit_success").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("clear", printable(range)).detail("version", tr.getCommittedVersion());
 					Standalone<StringRef> trVs = wait(fTrVs);
 					std::pair<Version, Standalone<StringRef>> committedVersionPair = std::make_pair(tr.getCommittedVersion(), trVs);
 					self->key_commit[key] = committedVersionPair;
