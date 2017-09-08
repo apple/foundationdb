@@ -121,11 +121,6 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	// lastError is a pair of error message and timestamp expressed as an int64_t
-	KeyBackedProperty<std::pair<Value, int64_t>> lastError() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
-	}
-
 	Future<bool> isRunnable(Reference<ReadYourWritesTransaction> tr) {
 		return map(stateEnum().getD(tr), [](ERestoreState s) -> bool { return   s != ERestoreState::ABORTED
 																			&& s != ERestoreState::COMPLETED
@@ -138,17 +133,9 @@ public:
 			TraceEvent(SevError, "FileRestoreErrorNoUID").error(e).detail("Description", details);
 			return Void();
 		}
-		// Lambda might outlive 'this' so save uid, capture by value, and make a new RestoreConfig from it later.
-		UID u = uid;
-		return runRYWTransaction(cx, [u, cx, e, details, taskInstance](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			TraceEvent(SevWarn, "FileRestoreError").error(e).detail("RestoreUID", u).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
-			std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
-			RestoreConfig restore(u);
-			restore.lastError().set(tr, {StringRef(msg), (int64_t)now()});
-			return Void();
-		});
+		TraceEvent(SevWarn, "FileRestoreError").error(e).detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
+		return lastError().set(cx, {msg, (int64_t)now()});
 	}
 
 	Key mutationLogPrefix() {
@@ -249,7 +236,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	state Future<StringRef> status = restore.stateText(tr);
 	state Future<Version> lag = restore.getApplyVersionLag(tr);
 	state Future<std::string> tag = restore.tag().getD(tr);
-	state Future<std::pair<Value, int64_t>> lastError = restore.lastError().getD(tr);
+	state Future<std::pair<std::string, int64_t>> lastError = restore.lastError().getD(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	state UID uid = restore.getUid();
@@ -257,7 +244,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 
 	std::string errstr = "None";
 	if(lastError.get().second != 0)
-		errstr = format("'%s' %llds ago.\n", lastError.get().first.toString().c_str(), (int64_t)now() - lastError.get().second);
+		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(), (int64_t)now() - lastError.get().second);
 
 	TraceEvent("FileRestoreProgress")
 		.detail("UID", uid)
@@ -317,7 +304,6 @@ FileBackupAgent::FileBackupAgent()
 	: subspace(Subspace(fileBackupPrefixRange.begin))
 	// The other subspaces have logUID -> value
 	, config(subspace.get(BackupAgentBase::keyConfig))
-	, errors(subspace.get(BackupAgentBase::keyErrors))
 	, taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, true))
 	, futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, true))
 {
@@ -640,18 +626,8 @@ namespace fileBackup {
 		}
 	}
 
-	bool copyDefaultParameters(Reference<Task> source, Reference<Task> dest) {
-		if (source) {
-			copyParameter(source, dest, BackupAgentBase::keyErrors);
-
-			return true;
-		}
-
-		return false;
-	}
-
 	// This is used to open files during BACKUP tasks.
-	ACTOR static Future<Reference<IAsyncFile>> doOpenBackupFile(bool writeMode, std::string backupContainer, std::string fileName, Key keyErrors, Database cx) {
+	ACTOR static Future<Reference<IAsyncFile>> doOpenBackupFile(bool writeMode, std::string backupContainer, std::string fileName, BackupConfig config, Database cx) {
 		try
 		{
 			Reference<IBackupContainer> container = IBackupContainer::openContainer(backupContainer);
@@ -661,16 +637,16 @@ namespace fileBackup {
 		}
 		catch (Error &e) {
 			state Error err = e;
-			Void _ = wait(logError(cx, keyErrors, format("ERROR: Failed to open file `%s' because of error %s", fileName.c_str(), err.what())));
+			Void _ = wait(config.logError(cx, e, format("ERROR: Failed to open file `%s' because of error %s", fileName.c_str(), err.what())));
 			throw err;
 		}
 	}
 
-	static Future<Reference<IAsyncFile>> openBackupFile(bool writeMode, std::string backupContainer, std::string fileName, Key keyErrors, Database cx) {
-		return doOpenBackupFile(writeMode, backupContainer, fileName, keyErrors, cx);
+	static Future<Reference<IAsyncFile>> openBackupFile(bool writeMode, std::string backupContainer, std::string fileName, BackupConfig config, Database cx) {
+		return doOpenBackupFile(writeMode, backupContainer, fileName, config, cx);
 	}
 
-	ACTOR Future<Void> truncateCloseFile(Database cx, Key keyErrors, std::string backupContainer, std::string fileName, Reference<IAsyncFile> file, int64_t truncateSize = -1) {
+	ACTOR Future<Void> truncateCloseFile(Database cx, BackupConfig config, std::string backupContainer, std::string fileName, Reference<IAsyncFile> file, int64_t truncateSize = -1) {
 		if (truncateSize == -1) {
 			int64_t size = wait(file->size());
 			truncateSize = size;
@@ -693,7 +669,7 @@ namespace fileBackup {
 				throw;
 
 			state Error err = e;
-			Void _ = wait(logError(cx, keyErrors, format("ERROR: Failed to write to file `%s' in container '%s' because of error %s", fileName.c_str(), backupContainer.c_str(), err.what())));
+			Void _ = wait(config.logError(cx, err, format("ERROR: Failed to write to file `%s' in container '%s' because of error %s", fileName.c_str(), backupContainer.c_str(), err.what())));
 			throw err;
 		}
 
@@ -704,41 +680,30 @@ namespace fileBackup {
 				throw;
 			TraceEvent("FBA_TruncateCloseFileSyncError").error(e);
 
-			state Transaction tr(cx);
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					Tuple t;
-					t.append(std::numeric_limits<Version>::max());
-					t.append(StringRef());
-					tr.set(t.pack().withPrefix(keyErrors), format("WARNING: Cannot sync file `%s' in container '%s'", fileName.c_str(), backupContainer.c_str()));
-					Void _ = wait( tr.commit() );
-					break;
-				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e));
-				}
-			}
+			Void _ = wait(config.logError(cx, e, format("WARNING: Cannot sync file `%s' in container '%s'", fileName.c_str(), backupContainer.c_str())));
 		}
 		file = Reference<IAsyncFile>();
 		return Void();
 	}
 
-	ACTOR template <class Tr>
-	Future<Void> checkTaskVersion(Tr tr, Reference<Task> task, StringRef name, uint32_t version) {
+	ACTOR Future<Void> checkTaskVersion(Database cx, Reference<Task> task, StringRef name, uint32_t version) {
 		uint32_t taskVersion = task->getVersion();
 		if (taskVersion > version) {
-			TraceEvent(SevError, "BA_BackupRangeTaskFunc_execute").detail("taskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
-			Void _ = wait(logError(tr, task->params[FileBackupAgent::keyErrors],
-				format("ERROR: %s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version)));
+			state Error err = task_invalid_version();
 
-			throw task_invalid_version();
+			TraceEvent(SevError, "BA_BackupRangeTaskFunc_execute").detail("taskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
+			if (KeyBackedConfig::TaskParams.uid().exists(task)) {
+				std::string msg = format("ERROR: %s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version);
+				Void _ = wait(BackupConfig(task).logError(cx, err, msg));
+			}
+
+			throw err;
 		}
 
 		return Void();
 	}
 
-	ACTOR static Future<Void> writeRestoreFile(Reference<ReadYourWritesTransaction> tr, Key keyErrors, BackupConfig config,
-		Version stopVersion)
+	ACTOR static Future<Void> writeRestoreFile(Reference<ReadYourWritesTransaction> tr, BackupConfig config, Version stopVersion)
 	{
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -748,7 +713,7 @@ namespace fileBackup {
 		state std::string tagName = wait(config.tag().getOrThrow(tr));
 		state std::string filename = "restorable";
 		state std::string tempFileName = FileBackupAgent::getTempFilename();
-		state Reference<IAsyncFile> f = wait(openBackupFile(true, backupContainer, tempFileName, keyErrors, tr->getDatabase()));
+		state Reference<IAsyncFile> f = wait(openBackupFile(true, backupContainer, tempFileName, config, tr->getDatabase()));
 
 		if (f) {
 			state int64_t offset = wait(f->size());
@@ -786,16 +751,16 @@ namespace fileBackup {
 					throw;
 
 				state Error err = e;
-				Void _ = wait(logError(tr->getDatabase(), keyErrors, format("ERROR: Failed to write to file `%s' because of error %s", filename.c_str(), err.what())));
+				Void _ = wait(config.logError(tr->getDatabase(), err, format("ERROR: Failed to write to file `%s' because of error %s", filename.c_str(), err.what())));
 
 				throw err;
 			}
-			Void _ = wait(truncateCloseFile(tr->getDatabase(), keyErrors, backupContainer, filename, f, offset + msg.size()));
+			Void _ = wait(truncateCloseFile(tr->getDatabase(), config, backupContainer, filename, f, offset + msg.size()));
 			Void _ = wait(IBackupContainer::openContainer(backupContainer)->renameFile(tempFileName, filename));
 			tr->set(FileBackupAgent().lastRestorable.get(StringRef(tagName)).pack(), BinaryWriter::toValue(stopVersion, Unversioned()));
 		}
 		else {
-			Void _ = wait(logError(tr, keyErrors, "ERROR: Failed to open restorable file for unknown reason."));
+			Void _ = wait(config.logError(tr->getDatabase(), io_error(), "ERROR: Failed to open restorable file for unknown reason."));
 			throw io_error();
 		}
 
@@ -892,8 +857,6 @@ namespace fileBackup {
 			// Get backup config from parent task and bind to new task
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
-			copyDefaultParameters(parentTask, task);
-
 			Params.beginKey().set(task, begin);
 			Params.endKey().set(task, end);
 			Params.addBackupRangeTasks().set(task, false);
@@ -906,7 +869,7 @@ namespace fileBackup {
 			return LiteralStringRef("OnSetAddTask");
 		}
 
-		ACTOR static Future<Void> endKeyRangeFile(Database cx, Key keyErrors, RangeFileWriter *rangeFile, std::string backupContainer, std::string *outFileName, Key endKey, Version atVersion) {
+		ACTOR static Future<Void> endKeyRangeFile(Database cx, BackupConfig config, RangeFileWriter *rangeFile, std::string backupContainer, std::string *outFileName, Key endKey, Version atVersion) {
 			ASSERT(outFileName != nullptr);
 
 			if (!rangeFile->file){
@@ -916,7 +879,7 @@ namespace fileBackup {
 			Void _ = wait(rangeFile->writeKey(endKey));
 
 			state std::string finalName = FileBackupAgent::getDataFilename(atVersion, rangeFile->offset, rangeFile->blockSize);
-			Void _ = wait(truncateCloseFile(cx, keyErrors, backupContainer, finalName, rangeFile->file, rangeFile->offset));
+			Void _ = wait(truncateCloseFile(cx, config, backupContainer, finalName, rangeFile->file, rangeFile->offset));
 
 			Void _ = wait(IBackupContainer::openContainer(backupContainer)->renameFile(*outFileName, finalName));
 			*outFileName = finalName;
@@ -986,11 +949,11 @@ namespace fileBackup {
 
 							bool isFinished = wait(taskBucket->isFinished(cx, task));
 							if (isFinished){
-								Void _ = wait(truncateCloseFile(cx, task->params[FileBackupAgent::keyErrors], backupContainer, outFileName, outFile));
+								Void _ = wait(truncateCloseFile(cx, backup, backupContainer, outFileName, outFile));
 								return Void();
 							}
 							state Key nextKey = keyAfter(lastKey);
-							Void _ = wait(endKeyRangeFile(cx, task->params[FileBackupAgent::keyErrors], &rangeFile, backupContainer, &outFileName, nextKey, outVersion));
+							Void _ = wait(endKeyRangeFile(cx, backup, &rangeFile, backupContainer, &outFileName, nextKey, outVersion));
 
 							// outFileName has now been modified to be the file's final (non temporary) name.
 							bool keepGoing = wait(recordRangeFile(backup, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outFileName));
@@ -1009,7 +972,7 @@ namespace fileBackup {
 						}
 
 						outFileName = FileBackupAgent::getTempFilename();
-						Reference<IAsyncFile> f = wait(openBackupFile(true, backupContainer, outFileName, task->params[FileBackupAgent::keyErrors], cx));
+						Reference<IAsyncFile> f = wait(openBackupFile(true, backupContainer, outFileName, backup, cx));
 						outFile = f;
 						outVersion = values.second;
 
@@ -1036,11 +999,11 @@ namespace fileBackup {
 						if (outFile) {
 							bool isFinished = wait(taskBucket->isFinished(cx, task));
 							if (isFinished){
-								Void _ = wait(truncateCloseFile(cx, task->params[FileBackupAgent::keyErrors], backupContainer, outFileName, outFile));
+								Void _ = wait(truncateCloseFile(cx, backup, backupContainer, outFileName, outFile));
 								return Void();
 							}
 							try {
-								Void _ = wait(endKeyRangeFile(cx, task->params[FileBackupAgent::keyErrors], &rangeFile, backupContainer, &outFileName, endKey, outVersion));
+								Void _ = wait(endKeyRangeFile(cx, backup, &rangeFile, backupContainer, &outFileName, endKey, outVersion));
 
 								// outFileName has now been modified to be the file's final (non temporary) name.
 								bool keepGoing = wait(recordRangeFile(backup, cx, task, taskBucket, KeyRangeRef(beginKey, endKey), outFileName));
@@ -1054,7 +1017,7 @@ namespace fileBackup {
 									throw e2;
 								}
 
-								Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error %s", outFileName.c_str(), e2.what())));
+								Void _ = wait(backup.logError(cx, e2, format("ERROR: Failed to write to file `%s' because of error %s", outFileName.c_str(), e2.what())));
 								throw e2;
 							}
 						}
@@ -1062,7 +1025,7 @@ namespace fileBackup {
 						return Void();
 					}
 
-					Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error %s", outFileName.c_str(), err.what())));
+					Void _ = wait(backup.logError(cx, err, format("ERROR: Failed to write to file `%s' because of error %s", outFileName.c_str(), err.what())));
 
 					throw err;
 				}
@@ -1125,7 +1088,7 @@ namespace fileBackup {
 		static const uint32_t version;
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr, task, FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version));
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version));
 
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1148,8 +1111,6 @@ namespace fileBackup {
 
 			// Get backup config from parent task and bind to new task
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			copyDefaultParameters(parentTask, task);
 
 			if (!waitFor) {
 				return taskBucket->addTask(tr, task);
@@ -1196,7 +1157,7 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 
-		ACTOR static Future<Version> dumpData(Database cx, Reference<Task> task, PromiseStream<RCGroup> results, LogFileWriter *outFile,
+		ACTOR static Future<Version> dumpData(Database cx, BackupConfig config, PromiseStream<RCGroup> results, LogFileWriter *outFile,
 			std::string fileName, FlowLock* lock, double timeout) {
 			loop{
 				try{
@@ -1225,7 +1186,7 @@ namespace fileBackup {
 					}
 
 					state Error err = e;
-					Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error %s", fileName.c_str(), err.what())));
+					Void _ = wait(config.logError(cx, err, format("ERROR: Failed to write to file `%s' because of error %s", fileName.c_str(), err.what())));
 
 					throw err;
 				}
@@ -1274,7 +1235,7 @@ namespace fileBackup {
 			}
 
 			state std::string tempFileName = FileBackupAgent::getTempFilename();
-			state Reference<IAsyncFile> outFile = wait(openBackupFile(true, backupContainer, tempFileName, task->params[FileBackupAgent::keyErrors], cx));
+			state Reference<IAsyncFile> outFile = wait(openBackupFile(true, backupContainer, tempFileName, config, cx));
 			// Block size must be at least large enough for 1 max size key, 1 max size value, and overhead, so conservatively 125k.
 			state LogFileWriter logFile(outFile, (BUGGIFY ? g_random->randomInt(125e3, 4e6) : CLIENT_KNOBS->BACKUP_LOGFILE_BLOCK_SIZE));
 			state size_t idx;
@@ -1292,7 +1253,7 @@ namespace fileBackup {
 			for (idx = 0; idx < ranges.size(); ++idx) {
 				active[idx].send(Void());
 
-				Version stopVersion = wait(dumpData(cx, task, results[idx], &logFile, tempFileName, lock.getPtr(), timeout));
+				Version stopVersion = wait(dumpData(cx, config, results[idx], &logFile, tempFileName, lock.getPtr(), timeout));
 
 				if( stopVersion != invalidVersion || now() >= timeout) {
 					if(stopVersion != invalidVersion)
@@ -1318,8 +1279,6 @@ namespace fileBackup {
 
 			// Get backup config from parent task and bind to new task
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			copyDefaultParameters(parentTask, task);
 
 			Params.beginVersion().set(task, beginVersion);
 			Params.endVersion().set(task, endVersion);
@@ -1391,7 +1350,7 @@ namespace fileBackup {
 		ACTOR static Future<Void> endLogFile(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task, Reference<IAsyncFile> tempFile, std::string tempFileName, std::string logFileName, int64_t size, std::string backupContainer) {
 			try {
 				if (tempFile) {
-					Void _ = wait(truncateCloseFile(cx, task->params[FileBackupAgent::keyErrors], backupContainer, logFileName, tempFile, size));
+					Void _ = wait(truncateCloseFile(cx, BackupConfig(task), backupContainer, logFileName, tempFile, size));
 				}
 
 				bool isFinished = wait(taskBucket->isFinished(cx, task));
@@ -1425,7 +1384,7 @@ namespace fileBackup {
 		} Params;
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr, task, BackupLogsTaskFunc::name, BackupLogsTaskFunc::version));
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupLogsTaskFunc::name, BackupLogsTaskFunc::version));
 
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 			state Reference<TaskFuture> allPartsDone;
@@ -1468,8 +1427,6 @@ namespace fileBackup {
 			// Get backup config from parent task and bind to new task
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
 
-			copyDefaultParameters(parentTask, task);
-
 			Params.beginVersion().set(task, beginVersion);
 
 			if (!waitFor) {
@@ -1496,7 +1453,7 @@ namespace fileBackup {
 		StringRef getName() const { return name; };
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr, task, FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version));
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version));
 
 			state BackupConfig backup(task);
 			state UID uid = backup.getUid();
@@ -1518,8 +1475,6 @@ namespace fileBackup {
 
 			// Get backup config from parent task and bind to new task
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			copyDefaultParameters(parentTask, task);
 
 			if (!waitFor) {
 				return taskBucket->addTask(tr, task);
@@ -1547,7 +1502,7 @@ namespace fileBackup {
 		} Params;
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr, task, BackupDiffLogsTaskFunc::name, BackupDiffLogsTaskFunc::version));
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupDiffLogsTaskFunc::name, BackupDiffLogsTaskFunc::version));
 
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1590,8 +1545,6 @@ namespace fileBackup {
 
 			// Get backup config from parent task and bind to new task
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			copyDefaultParameters(parentTask, task);
 
 			Params.beginVersion().set(task, beginVersion);
 
@@ -1789,7 +1742,7 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr, task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
 
 			state BackupConfig config(task);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1802,7 +1755,7 @@ namespace fileBackup {
 			state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 			state Reference<TaskFuture> allPartsDone;
 
-			Void _ = wait(writeRestoreFile(tr, task->params[FileBackupAgent::keyErrors], config, restoreVersion));
+			Void _ = wait(writeRestoreFile(tr, config, restoreVersion));
 
 			TraceEvent("FBA_Complete").detail("restoreVersion", restoreVersion).detail("differential", stopWhenDone);
 
@@ -1832,8 +1785,6 @@ namespace fileBackup {
 
 			// Get backup config from parent task and bind to new task
 			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			copyDefaultParameters(parentTask, task);
 
 			if (!waitFor) {
 				return taskBucket->addTask(tr, task);
@@ -1916,7 +1867,7 @@ namespace fileBackup {
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, UID uid, Key keyErrors, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, UID uid, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1927,8 +1878,6 @@ namespace fileBackup {
 			state BackupConfig config(uid);
 			// Bind backup config to the new task
 			Void _ = wait(config.toTask(tr, task));
-
-			task->params[BackupAgentBase::keyErrors] = keyErrors;
 
 			if (!waitFor) {
 				return taskBucket->addTask(tr, task);
@@ -2199,7 +2148,7 @@ namespace fileBackup {
 
 	struct RestoreCompleteTaskFunc : TaskFuncBase {
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr, task, name, version));
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 
 			state RestoreConfig restore(task);
 			restore.stateEnum().set(tr, ERestoreState::COMPLETED);
@@ -2303,7 +2252,7 @@ namespace fileBackup {
 						state Future<Key> addPrefix = restore.addPrefix().getD(tr);
 						state Future<Key> removePrefix = restore.removePrefix().getD(tr);
 
-						Void _ = wait(success(url) && success(restoreRange) && success(addPrefix) && success(removePrefix) && checkTaskVersion(tr, task, name, version));
+						Void _ = wait(success(url) && success(restoreRange) && success(addPrefix) && success(removePrefix) && checkTaskVersion(tr->getDatabase(), task, name, version));
 						bool go = wait(taskBucket->keepRunning(tr, task));
 						if(!go)
 							return Void();
@@ -2543,7 +2492,7 @@ namespace fileBackup {
 
 						state Value url = wait(restore.sourceURL().getD(tr));
 
-						Void _ = wait(checkTaskVersion(tr, task, name, version));
+						Void _ = wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 						bool go = wait(taskBucket->keepRunning(tr, task));
 						if(!go)
 							return Void();
@@ -2707,7 +2656,7 @@ namespace fileBackup {
 				state Version beginVersion = Params.beginVersion().get(task);
 				state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-				Void _ = wait(checkTaskVersion(tr, task, name, version));
+				Void _ = wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 				state int64_t remainingInBatch = Params.remainingInBatch().get(task);
 				state bool addingToExistingBatch = remainingInBatch > 0;
 
@@ -3073,7 +3022,7 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					Void _ = wait(checkTaskVersion(tr, task, name, version));
+					Void _ = wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 					state Version restoreVersion = wait(restore.restoreVersion().getD(tr));
 					bool go = wait(taskBucket->keepRunning(tr, task));
 					if(!go)
@@ -3340,8 +3289,6 @@ public:
 			}
 		}
 
-		// Clear the backup ranges for the tag
-		tr->clear(backupAgent->errors.range());
 		config.clear(tr);
 
 		// Point the tag to this new uid
@@ -3356,7 +3303,7 @@ public:
 		config.stopWhenDone().set(tr, stopWhenDone);
 		config.backupRanges().set(tr, normalizedRanges);
 
-		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, uid, backupAgent->errors.pack(uid.toString()), TaskCompletionKey::noSignal()));
+		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
 
 		return Void();
 	}
@@ -3572,19 +3519,11 @@ public:
 				}
 
 				// Append the errors, if requested
-				if (errorLimit > 0) {
-					Standalone<RangeResultRef> values = wait(tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(config.getUid(), Unversioned())).range(), errorLimit, false, true));
-
-					// Display the errors, if any
-					if (values.size() > 0) {
-						// Inform the user that the list of errors is complete or partial
-						statusText += (values.size() < errorLimit)
-							? "WARNING: Some backup agents have reported issues:\n"
-							: "WARNING: Some backup agents have reported issues (printing " + std::to_string(errorLimit) + "):\n";
-
-						for (auto &s : values) {
-							statusText += "   " + printable(s.value) + "\n";
-						}
+				if (errorLimit > 0 && config.getUid().isValid()) {
+					Optional<std::pair<std::string, int64_t>> errMsg = wait(config.lastError().get(tr));
+					if (errMsg.present()) {
+						statusText += "WARNING: Some backup agents have reported issues:\n";
+						statusText += format("[%lld]: %s\n", errMsg.get().second, errMsg.get().first.c_str());
 					}
 				}
 				break;

@@ -153,6 +153,19 @@ public:
 	void set(Reference<ReadYourWritesTransaction> tr, T const &val) {
 		return tr->set(key, Codec<T>::pack(val).pack());
 	}
+
+	Future<Void> set(Database cx, T const &val) {
+		auto _key = key;
+		auto _val = Codec<T>::pack(val).pack();
+		return runRYWTransaction(cx, [_key, _val](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->set(_key, _val);
+
+			return Future<Void>(Void());
+		});
+	}
+
 	void clear(Reference<ReadYourWritesTransaction> tr) {
 		return tr->clear(key);
 	}

@@ -219,7 +219,6 @@ public:
 	FileBackupAgent( FileBackupAgent&& r ) noexcept(true) :
 		subspace( std::move(r.subspace) ),
 		config( std::move(r.config) ),
-		errors( std::move(r.errors) ),
 		lastRestorable( std::move(r.lastRestorable) ),
 		taskBucket( std::move(r.taskBucket) ),
 		futureBucket( std::move(r.futureBucket) ) {}
@@ -227,7 +226,6 @@ public:
 	void operator=( FileBackupAgent&& r ) noexcept(true) {
 		subspace = std::move(r.subspace);
 		config = std::move(r.config);
-		errors = std::move(r.errors);
 		lastRestorable = std::move(r.lastRestorable),
 		taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
@@ -316,7 +314,6 @@ public:
 
 	Subspace subspace;
 	Subspace config;
-	Subspace errors;
 	Subspace lastRestorable;
 
 	Reference<TaskBucket> taskBucket;
@@ -580,6 +577,11 @@ public:
 		tr->clear(configSpace.range());
 	}
 
+	// lastError is a pair of error message and timestamp expressed as an int64_t
+	KeyBackedProperty<std::pair<std::string, int64_t>> lastError() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 protected:
 	UID uid;
 	Key prefix;
@@ -630,6 +632,16 @@ public:
 	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange) {
 		Key mutationLogsDestKey = uidPrefixKey(backupLogKeys.begin, getUid());
 		tr->set(logRangesEncodeKey(backupRange.begin, getUid()), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
+	}
+
+	Future<Void> logError(Database cx, Error e, std::string details, void *taskInstance = nullptr) {
+		if(!uid.isValid()) {
+			TraceEvent(SevError, "FileBackupErrorNoUID").error(e).detail("Description", details);
+			return Void();
+		}
+		TraceEvent(SevWarn, "FileBackupError").error(e).detail("BackupUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
+		return lastError().set(cx, {msg, (int64_t)now()});
 	}
 };
 #endif
