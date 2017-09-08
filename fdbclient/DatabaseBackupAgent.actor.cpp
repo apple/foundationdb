@@ -1410,6 +1410,7 @@ public:
 
 		TraceEvent("DBA_switchover_locked").detail("version", commitVersion);
 
+		// Wait for the destination to apply mutations up to the lock commit before switching over.
 		state ReadYourWritesTransaction tr2(dest);
 		loop {
 			try {
@@ -1458,6 +1459,27 @@ public:
 		int _ = wait( drAgent.waitSubmitted(backupAgent->taskBucket->src, tagName) );
 
 		TraceEvent("DBA_switchover_started");
+
+		loop {
+			try {
+				tr2.reset();
+				tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Version destVersion = wait(tr2.getReadVersion());
+				if (destVersion <= commitVersion) {
+					TraceEvent("DBA_switchover_version_upgrade").detail("src", commitVersion).detail("dest", destVersion);
+					TEST(true);  // Forcing dest backup cluster to higher version
+					tr2.set(minRequiredCommitVersionKey, BinaryWriter::toValue(commitVersion+1, Unversioned()));
+					Void _ = wait(tr2.commit());
+				} else {
+					break;
+				}
+			} catch( Error &e ) {
+				Void _ = wait(tr2.onError(e));
+			}
+		}
+
+		TraceEvent("DBA_switchover_version_upgraded");
 
 		Void _ = wait( backupAgent->unlockBackup(dest, tagName) );
 
