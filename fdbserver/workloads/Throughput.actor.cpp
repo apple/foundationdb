@@ -372,7 +372,7 @@ struct ThroughputWorkload : TestWorkload {
 		double ierror = (self->totalLatencyIntegral - self->totalTransactionsIntegral * self->targetLatency) / 
 			self->totalTransactionsIntegral * (after-self->startT);
 
-		double desiredSuccessors = 1 - error*self->Pgain - ierror*self->Igain;
+		double desiredSuccessors = 1 - (error*self->Pgain + ierror*self->Igain) / self->targetLatency;
 
 		//if (g_random->random01() < .001) TraceEvent("ThroughputControl").detail("Error", error).detail("IError", ierror).detail("DesiredSuccessors", desiredSuccessors).detail("ActiveActors", self->activeActors);
 
