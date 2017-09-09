@@ -66,8 +66,13 @@ private:
 class IndirectShadowPagerSnapshot : public IPagerSnapshot, ReferenceCounted<IndirectShadowPagerSnapshot> {
 public:
 	IndirectShadowPagerSnapshot(IndirectShadowPager *pager, Version version) : pager(pager), version(version) {}
+
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID);
 	virtual void invalidateReturnedPages();
+
+	virtual ~IndirectShadowPagerSnapshot() {
+		invalidateReturnedPages();
+	}
 
 	virtual void addref() {
 		ReferenceCounted<IndirectShadowPagerSnapshot>::addref();
