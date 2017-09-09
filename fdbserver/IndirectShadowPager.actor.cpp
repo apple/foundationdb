@@ -536,6 +536,7 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 	Void _ = wait(pager->writeActors.signalAndCollapse());
 
 	state uint8_t *buf = new (snapshot->arena) uint8_t[IndirectShadowPage::PAGE_BYTES];
+	// TODO:  Use readZeroCopy but fall back ton read().  Releasing pages should releaseZeroCopy for successful zero copy reads
 	int read = wait(pager->dataFile->read(buf, IndirectShadowPage::PAGE_BYTES, physicalPageID * IndirectShadowPage::PAGE_BYTES));
 	ASSERT(read == IndirectShadowPage::PAGE_BYTES);
 
