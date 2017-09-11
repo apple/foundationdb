@@ -771,6 +771,36 @@ namespace fileBackup {
 		return Void();
 	}
 
+	std::function<void(Reference<Task>)> NOP_SETUP_TASK_FN = [](Reference<Task> task) { /* NOP */ };
+	ACTOR static Future<Key> addBackupTask(StringRef name,
+										   uint32_t version,
+										   Reference<ReadYourWritesTransaction> tr,
+										   Reference<TaskBucket> taskBucket,
+										   TaskCompletionKey completionKey,
+										   BackupConfig config,
+										   Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
+										   std::function<void(Reference<Task>)> setupTaskFn = NOP_SETUP_TASK_FN,
+										   int priority = 0) {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		Key doneKey = wait(completionKey.get(tr, taskBucket));
+		state Reference<Task> task(new Task(name, version, doneKey, priority));
+
+		// Bind backup config to new task
+		Void _ = wait(config.toTask(tr, task));
+
+		// Set task specific params
+		setupTaskFn(task);
+
+		if (!waitFor) {
+			return taskBucket->addTask(tr, task);
+		}
+		Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
+
+		return LiteralStringRef("OnSetAddTask");
+	}
+
 	struct BackupRangeTaskFunc : TaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
@@ -851,22 +881,18 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Key begin, Key end, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), int priority = 0) {
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			state Reference<Task> task(new Task(BackupRangeTaskFunc::name, BackupRangeTaskFunc::version, doneKey, priority));
-
-			// Get backup config from parent task and bind to new task
-			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			Params.beginKey().set(task, begin);
-			Params.endKey().set(task, end);
-			Params.addBackupRangeTasks().set(task, false);
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
-			return LiteralStringRef("OnSetAddTask");
+			Key key = wait(addBackupTask(BackupRangeTaskFunc::name,
+										 BackupRangeTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(parentTask),
+										 waitFor,
+										 [=](Reference<Task> task) {
+											 Params.beginKey().set(task, begin);
+											 Params.endKey().set(task, end);
+											 Params.addBackupRangeTasks().set(task, false);
+										 },
+										 priority));
+			return key;
 		}
 
 		ACTOR static Future<Void> endKeyRangeFile(Database cx, BackupConfig config, RangeFileWriter *rangeFile, std::string backupContainer, std::string *outFileName, Key endKey, Version atVersion) {
@@ -1105,19 +1131,11 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			// After the BackupRangeTask completes, set the stop key which will stop the BackupLogsTask
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			state Reference<Task> task(new Task(FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version, doneKey));
-
-			// Get backup config from parent task and bind to new task
-			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
-			return LiteralStringRef("OnSetAddTask");
+			Key key = wait(addBackupTask(FinishFullBackupTaskFunc::name,
+										 FinishFullBackupTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(parentTask), waitFor));
+			return key;
 		}
 
 		StringRef getName() const { return name; };
@@ -1274,22 +1292,17 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, Version endVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			state Reference<Task> task(new Task(BackupLogRangeTaskFunc::name, BackupLogRangeTaskFunc::version, doneKey, 1));
-
-			// Get backup config from parent task and bind to new task
-			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			Params.beginVersion().set(task, beginVersion);
-			Params.endVersion().set(task, endVersion);
-			Params.addBackupLogRangeTasks().set(task, false);
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
-			return LiteralStringRef("OnSetAddTask");
+			Key key = wait(addBackupTask(BackupLogRangeTaskFunc::name,
+										 BackupLogRangeTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(parentTask),
+										 waitFor,
+										 [=](Reference<Task> task) {
+											 Params.beginVersion().set(task, beginVersion);
+											 Params.endVersion().set(task, endVersion);
+											 Params.addBackupLogRangeTasks().set(task, false);
+										 }));
+			return key;
 		}
 
 		ACTOR static Future<Void> startBackupLogRangeInternal(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task, Reference<TaskFuture> taskFuture, Version beginVersion, Version endVersion ) {
@@ -1421,20 +1434,15 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			state Reference<Task> task(new Task(BackupLogsTaskFunc::name, BackupLogsTaskFunc::version, doneKey, 1));
-
-			// Get backup config from parent task and bind to new task
-			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			Params.beginVersion().set(task, beginVersion);
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
-			return LiteralStringRef("OnSetAddTask");
+			Key key = wait(addBackupTask(BackupLogsTaskFunc::name,
+										 BackupLogsTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(parentTask),
+										 waitFor,
+										 [=](Reference<Task> task) {
+											 Params.beginVersion().set(task, beginVersion);
+										 }));
+			return key;
 		}
 
 		StringRef getName() const { return name; };
@@ -1470,18 +1478,11 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			state Reference<Task> task(new Task(FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version, doneKey));
-
-			// Get backup config from parent task and bind to new task
-			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
-			return LiteralStringRef("OnSetAddTask");
+			Key key = wait(addBackupTask(FinishedFullBackupTaskFunc::name,
+										 FinishedFullBackupTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(parentTask), waitFor));
+			return key;
 		}
 
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
@@ -1540,20 +1541,15 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			state Reference<Task> task(new Task(BackupDiffLogsTaskFunc::name, BackupDiffLogsTaskFunc::version, doneKey, 1));
-
-			// Get backup config from parent task and bind to new task
-			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			Params.beginVersion().set(task, beginVersion);
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
-			return LiteralStringRef("OnSetAddTask");
+			Key key = wait(addBackupTask(BackupDiffLogsTaskFunc::name,
+										 BackupDiffLogsTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(parentTask),
+										 waitFor,
+										 [=](Reference<Task> task) {
+											 Params.beginVersion().set(task, beginVersion);
+										 }));
+			return key;
 		}
 
 		StringRef getName() const { return name; };
@@ -1780,18 +1776,11 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			state Reference<Task> task(new Task(BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version, doneKey));
-
-			// Get backup config from parent task and bind to new task
-			Void _ = wait(BackupConfig(parentTask).toTask(tr, task));
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
-			return LiteralStringRef("OnSetAddTask");
+			Key key = wait(addBackupTask(BackupRestorableTaskFunc::name,
+										 BackupRestorableTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(parentTask), waitFor));
+			return key;
 		}
 
 		StringRef getName() const { return name; };
@@ -1869,22 +1858,11 @@ namespace fileBackup {
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, UID uid, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>())
 		{
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			state Reference<Task> task(new Task(StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version, doneKey));
-
-			state BackupConfig config(uid);
-			// Bind backup config to the new task
-			Void _ = wait(config.toTask(tr, task));
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task));
-			return LiteralStringRef("OnSetAddTask");
+			Key key = wait(addBackupTask(StartFullBackupTaskFunc::name,
+										 StartFullBackupTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(uid), waitFor));
+			return key;
 		}
 
 		StringRef getName() const { return name; };
