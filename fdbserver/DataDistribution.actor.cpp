@@ -478,11 +478,12 @@ struct DDTeamCollection {
 		PromiseStream<RelocateShard> const& output,
 		Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 		DatabaseConfiguration configuration,
-		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges )
+		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges,
+		Future<Void> readyToStart )
 		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
 		 configuration(configuration), serverChanges(serverChanges),
 		 initialFailureReactionDelay( delay( BUGGIFY ? 0 : SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution  ) ), healthyTeamCount( 0 ),
-		 initializationDoneActor(logOnCompletion(initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
+		 initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
 		 unhealthyServers(0)
 	{
 		TraceEvent("DDTrackerStarting", masterId)
@@ -992,6 +993,7 @@ struct DDTeamCollection {
 				state int teamsToBuild = desiredTeams - teamCount;
 
 				state vector<std::vector<UID>> builtTeams;
+
 				if( self->configuration.storageTeamSize > 3) {
 					int addedTeams = self->addTeamsBestOf( teamsToBuild );
 					TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
@@ -1768,8 +1770,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
 	Future<Void> readyToStart )
 {
-	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, configuration, serverChanges );
-
+	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, configuration, serverChanges, readyToStart );
 	state Future<Void> loggingTrigger = Void();
 	state PromiseStream<Void> serverRemoved;
 	state Future<Void> interfaceChanges;
@@ -1874,54 +1875,6 @@ ACTOR Future<bool> isDataDistributionEnabled( Database cx ) {
 				return true;
 			return false;
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
-		}
-	}
-}
-
-ACTOR Future<int> disableDataDistribution( Database cx ) {
-	state Transaction tr(cx);
-	state int oldMode = -1;
-	state BinaryWriter wr(Unversioned());
-	wr << 0;
-
-	loop {
-		try {
-			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
-			if (oldMode < 0) {
-				oldMode = 1;
-				if (old.present()) {
-					BinaryReader rd(old.get(), Unversioned());
-					rd >> oldMode;
-				}
-			}
-			// SOMEDAY: Write a wrapper in MoveKeys.h
-			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << dataDistributionModeLock;
-			tr.set( moveKeysLockOwnerKey, wrMyOwner.toStringRef() );
-			tr.set( dataDistributionModeKey, wr.toStringRef() );
-
-			Void _ = wait( tr.commit() );
-			return oldMode;
-		} catch (Error& e) {
-			TraceEvent("disableDDModeRetrying").error(e);
-			Void _ = wait ( tr.onError(e) );
-		}
-	}
-}
-
-ACTOR Future<Void> enableDataDistribution( Database cx, int mode ) {
-	state Transaction tr(cx);
-	state BinaryWriter wr(Unversioned());
-	wr << mode;
-
-	loop {
-		try {
-			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
-			tr.set( dataDistributionModeKey, wr.toStringRef() );
-			Void _ = wait( tr.commit() );
-			return Void();
-		} catch (Error& e) {
-			TraceEvent("enableDDModeRetrying").error(e);
 			Void _ = wait( tr.onError(e) );
 		}
 	}
@@ -2167,7 +2120,8 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 		PromiseStream<RelocateShard>(),
 		Reference<ShardsAffectedByTeamFailure>(new ShardsAffectedByTeamFailure()),
 		conf,
-		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>>()
+		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>>(),
+		Future<Void>(Void())
 	);
 
 	for(int id = 1; id <= processCount; id++) {

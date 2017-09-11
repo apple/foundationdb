@@ -24,10 +24,11 @@ and add it to your classpath.<br>
 <br>
 <h3>Getting started</h3>
 To start using FoundationDB from Java, create an instance of the 
-{@link FDB FoundationDB API interface} with the version of the
+{@link com.apple.cie.foundationdb.FDB FoundationDB API interface} with the version of the
 API that you want to use (this release of the FoundationDB Java API supports only version {@code 500}).
-With this API object you can then open {@link Cluster}s and
-{@link Database}s and start using {@link Transaction}s.
+With this API object you can then open {@link com.apple.cie.foundationdb.Cluster Cluster}s and
+{@link com.apple.cie.foundationdb.Database Database}s and start using
+{@link com.apple.cie.foundationdb.Transaction Transactions}s.
 Here we give an example. The example relies on a cluster file at the
 <a href="/documentation/api-general.html#default-cluster-file">default location</a> 
 for your platform and a running server.<br>
@@ -77,7 +78,7 @@ for information about how Tuples sort and can be used to efficiently model data.
 The {@link com.apple.cie.foundationdb.directory Directory API} is provided with the core
 Java API for FoundationDB. This layer is provided in some form in all official
 language bindings. The FoundationDB API provides directories as a tool for
-managing related {@link Subspace}s. Directories are a
+managing related {@link com.apple.cie.foundationdb.subspace.Subspace Subspace}s. Directories are a
 recommended approach for administering applications. Each application should 
 create or open at least one directory to manage its subspaces. Directories are 
 identified by hierarchical paths analogous to the paths in a Unix-like file system. 

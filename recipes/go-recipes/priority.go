@@ -21,31 +21,31 @@
 package main
 
 import (
-        "log"
-        "fmt"
+	"log"
+	"fmt"
 	"math/rand"
-        "github.com/FoundationDB/fdb-go/fdb"
-        "github.com/FoundationDB/fdb-go/fdb/directory"
-        "github.com/FoundationDB/fdb-go/fdb/subspace"
-        "github.com/FoundationDB/fdb-go/fdb/tuple"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
-        _, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-                tr.ClearRange(sub)
-                return nil, nil
-        })
-        return err
+	_, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
+		tr.ClearRange(sub)
+		return nil, nil
+	})
+	return err
 }
 
 func _pack(t interface{}) []byte {
-        return tuple.Tuple{t}.Pack()
+	return tuple.Tuple{t}.Pack()
 }
 
 func _unpack(t []byte) tuple.Tuple {
-        i, e := tuple.Unpack(t)
-        if e != nil {return nil}
-        return i
+	i, e := tuple.Unpack(t)
+	if e != nil {return nil}
+	return i
 }
 
 type Priority struct {
@@ -100,7 +100,7 @@ func (prty Priority) Peek(trtr fdb.Transactor, max bool) interface{} {
 
 
 func main() {
-	fdb.MustAPIVersion(300)
+	fdb.MustAPIVersion(500)
 
 	db := fdb.MustOpenDefault()
 
@@ -131,13 +131,3 @@ func main() {
 	fmt.Println(p.Pop(db, false))
 	fmt.Println(p.Pop(db, false))
 }
-
-
-
-
-
-
-
-
-
-

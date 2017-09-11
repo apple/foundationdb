@@ -139,6 +139,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 	state Transaction tr( cx );
 	if (use_system_priority)
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
 		try {
 			Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );

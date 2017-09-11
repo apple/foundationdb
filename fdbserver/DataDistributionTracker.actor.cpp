@@ -376,15 +376,6 @@ Future<Void> shardMerger(
 	TEST(true);  // shard to be merged
 	ASSERT( keys.begin > allKeys.begin );
 
-	// We must not merge the keyServers shard
-	if (keys.begin == keyServersPrefix) {
-		TraceEvent(SevError, "LastShardMerge", self->masterId)
-			.detail("ShardKeyBegin", printable(keys.begin))
-			.detail("ShardKeyEnd", printable(keys.end))
-			.detail("TrackerID", trackerId);
-		ASSERT(false);
-	}
-
 	// This will merge shards both before and after "this" shard in keyspace.
 	int shardsMerged = 1;
 	bool forwardComplete = false;
@@ -394,7 +385,7 @@ Future<Void> shardMerger(
 	loop {
 		Optional<StorageMetrics> newMetrics;
 		if( !forwardComplete ) {
-			if( nextIter->range().end == keyServersPrefix ) {
+			if( nextIter->range().end == allKeys.end ) {
 				forwardComplete = true;
 				continue;
 			}
@@ -610,14 +601,6 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self,
 	state int lastBegin = -1;
 	state vector<UID> last;
 
-	//The ending shard does not have a shardTracker, so instead just track the size of the shard
-	Reference<AsyncVar<Optional<StorageMetrics>>> endShardSize( new AsyncVar<Optional<StorageMetrics>>() );
-	KeyRangeRef endShardRange( keyServersPrefix, allKeys.end );
-	ShardTrackedData endShardData;
-	endShardData.stats = endShardSize;
-	endShardData.trackBytes = trackShardBytes( self, endShardRange, endShardSize, g_random->randomUniqueID(), false );
-	self->shards.insert( endShardRange, endShardData );
-
 	state int s;
 	for(s=0; s<initData->shards.size(); s++) {
 		state InitialDataDistribution::Team src = initData->shards[s].value.first;
@@ -637,8 +620,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self,
 
 			if (lastBegin >= 0) {
 				state KeyRangeRef keys( initData->shards[lastBegin].begin, initData->shards[s].begin );
-				if (keys.begin < keyServersPrefix) // disallow spliting of keyServers shard
-					restartShardTrackers( self, keys );
+				restartShardTrackers( self, keys );
 				shardsAffectedByTeamFailure->defineShard( keys );
 				shardsAffectedByTeamFailure->moveShard( keys, last );
 			}
@@ -648,7 +630,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self,
 		Void _ = wait( yield( TaskDataDistribution ) );
 	}
 
-	Future<Void> initialSize = changeSizes( self, KeyRangeRef(allKeys.begin, keyServersPrefix), 0 );
+	Future<Void> initialSize = changeSizes( self, KeyRangeRef(allKeys.begin, allKeys.end), 0 );
 	self->readyToStart.send(Void());
 	Void _ = wait( initialSize );
 	self->maxShardSizeUpdater = updateMaxShardSize( self->cx->dbName, self->dbSizeEstimate, self->maxShardSize );

@@ -98,7 +98,6 @@ public abstract class AbstractTester {
         }
         if (args.useExternalClient()) {
             fdb.options().setDisableLocalClient();
-            // TODO: set external client directory
         }
 
         try {

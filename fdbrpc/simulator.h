@@ -109,6 +109,7 @@ public:
 		ProcessInfo* machineProcess;
 		std::vector<ProcessInfo*> processes;
 		std::map<std::string, Future<Reference<IAsyncFile>>> openFiles;
+		std::set<std::string> deletingFiles;
 		std::set<std::string> closingFiles;
 		Optional<Standalone<StringRef>>	zoneId;
 
@@ -149,18 +150,83 @@ public:
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual void displayWorkers() const;
+
+	virtual void addRole(NetworkAddress const& address, std::string const& role) {
+		roleAddresses[address][role] ++;
+		TraceEvent("RoleAdd").detail("Address", address).detail("Role", role).detail("Roles", roleAddresses[address].size()).detail("Value", roleAddresses[address][role]);
+	}
+
+	virtual void removeRole(NetworkAddress const& address, std::string const& role) {
+		auto addressIt = roleAddresses.find(address);
+		if (addressIt != roleAddresses.end()) {
+			auto rolesIt = addressIt->second.find(role);
+			if (rolesIt != addressIt->second.end()) {
+				if (rolesIt->second > 1) {
+					rolesIt->second --;
+					TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", rolesIt->second).detail("Result", "Decremented Role");
+				}
+				else {
+					addressIt->second.erase(rolesIt);
+					if (addressIt->second.size()) {
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", addressIt->second.size()).detail("Value", 0).detail("Result", "Removed Role");
+					}
+					else {
+						roleAddresses.erase(addressIt);
+						TraceEvent("RoleRemove").detail("Address", address).detail("Role", role).detail("Roles", 0).detail("Value", 0).detail("Result", "Removed Address");
+					}
+				}
+			}
+			else {
+				TraceEvent(SevWarn,"RoleRemove").detail("Address", address).detail("Role", role).detail("Result", "Role Missing");
+			}
+		}
+		else {
+			TraceEvent(SevWarn,"RoleRemove").detail("Address", address).detail("Role", role).detail("Result", "Address Missing");
+		}
+	}
+
+	virtual std::string getRoles(NetworkAddress const& address, bool skipWorkers = true) const {
+		auto addressIt = roleAddresses.find(address);
+		std::string roleText;
+		if (addressIt != roleAddresses.end()) {
+			for (auto& roleIt : addressIt->second) {
+				if ((!skipWorkers) || (roleIt.first != "Worker"))
+					roleText += roleIt.first + ((roleIt.second > 1) ? format("-%d ", roleIt.second) : " ");
+			}
+		}
+		if (roleText.empty())
+				roleText = "[unset]";
+		return roleText;
+	}
 
 	virtual void excludeAddress(NetworkAddress const& address) {
-		excludedAddresses.insert(address);
+		excludedAddresses[address]++;
+		TraceEvent("ExcludeAddress").detail("Address", address).detail("Value", excludedAddresses[address]);
 	}
+
 	virtual void includeAddress(NetworkAddress const& address) {
-		excludedAddresses.erase(address);
+		auto addressIt = excludedAddresses.find(address);
+		if (addressIt != excludedAddresses.end()) {
+			if (addressIt->second > 1) {
+				addressIt->second --;
+				TraceEvent("IncludeAddress").detail("Address", address).detail("Value", addressIt->second).detail("Result", "Decremented");
+			}
+			else {
+				excludedAddresses.erase(addressIt);
+				TraceEvent("IncludeAddress").detail("Address", address).detail("Value", 0).detail("Result", "Removed");
+			}
+		}
+		else {
+			TraceEvent(SevWarn,"IncludeAddress").detail("Address", address).detail("Result", "Missing");
+		}
 	}
 	virtual void includeAllAddresses() {
+		TraceEvent("IncludeAddressAll").detail("AddressTotal", excludedAddresses.size());
 		excludedAddresses.clear();
 	}
 	virtual bool isExcluded(NetworkAddress const& address) const {
-		return excludedAddresses.count(address) == 0;
+		return excludedAddresses.find(address) != excludedAddresses.end();
 	}
 
 	virtual void disableSwapToMachine(Optional<Standalone<StringRef>> zoneId ) {
@@ -229,7 +295,8 @@ protected:
 
 private:
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
-	std::set<NetworkAddress> excludedAddresses;
+	std::map<NetworkAddress, int> excludedAddresses;
+	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
 	bool allSwapsDisabled;
 };
 

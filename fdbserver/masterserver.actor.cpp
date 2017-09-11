@@ -24,9 +24,9 @@
 #include "flow/Trace.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
 #include "ConflictSet.h"
-#include "flow/Notified.h"
 #include "DataDistribution.h"
 #include "Knobs.h"
 #include <iterator>
@@ -495,7 +495,7 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 				}
 			}
 		}
-		when ( ReplyPromise<vector<StorageServerInterface>> req = waitNext( parent->provisionalProxies[0].getKeyServersLocations.getFuture() ) ) {
+		when ( ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> req = waitNext( parent->provisionalProxies[0].getKeyServersLocations.getFuture() ) ) {
 			req.send(Never());
 		}
 		when ( Void _ = wait( waitFailure ) ) { throw worker_removed(); }

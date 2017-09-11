@@ -128,6 +128,10 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 		throw internal_error();
 	}
 
+	if(!self->interfaceChanged.isValid()) {
+		self->interfaceChanged = self->interf->onChange();
+	}
+
 	loop {
 		try {
 			while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
@@ -148,7 +152,9 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					//TraceEvent("SPC_getMoreB", self->randomID).detail("has", self->hasMessage()).detail("end", res.end).detail("popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
-				when( Void _ = wait( self->interf->onChange() ) ) {
+				when( Void _ = wait( self->interfaceChanged ) ) {
+					self->interfaceChanged = self->interf->onChange();
+					self->randomID = g_random->randomUniqueID();
 					self->sequence = 0;
 					self->futureResults.clear();
 				}
@@ -159,6 +165,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 				return Void();
 			} else if(e.code() == error_code_timed_out) {
 				TraceEvent("PeekCursorTimedOut", self->randomID);
+				self->interfaceChanged = self->interf->onChange();
 				self->randomID = g_random->randomUniqueID();
 				self->sequence = 0;
 				self->futureResults.clear();

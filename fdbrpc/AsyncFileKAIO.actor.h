@@ -504,7 +504,7 @@ private:
 		}
 
 		void setIOTimeout(double timeout) {
-			ioTimeout = timeout;
+			ioTimeout = fabs(timeout);
 			timeoutWarnOnly = timeout < 0;
 		}
 

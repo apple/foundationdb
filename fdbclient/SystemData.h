@@ -34,7 +34,7 @@ extern const KeyRangeRef allKeys; // '' to systemKeys.end
 extern const KeyRef afterAllKeys;
 
 //    "\xff/keyServers/[[begin]]" := "[[vector<serverID>, vector<serverID>]]"
-extern const KeyRangeRef keyServersKeys;
+extern const KeyRangeRef keyServersKeys, keyServersKeyServersKeys;
 extern const KeyRef keyServersPrefix, keyServersEnd, keyServersKeyServersKey;
 const Key keyServersKey( const KeyRef& k );
 const KeyRef keyServersKey( const KeyRef& k, Arena& arena );

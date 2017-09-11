@@ -947,6 +947,7 @@ ACTOR static Future<double> doGrvProbe(Transaction *tr, Optional<FDBTransactionO
 
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			if(priority.present()) {
 				tr->setOption(priority.get());
 			}
@@ -969,6 +970,7 @@ ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction *tr
 	state double start = timer_monotonic();
 
 	loop {
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Optional<Standalone<StringRef> > _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
 			return timer_monotonic() - start;
@@ -993,6 +995,7 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *
 
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->makeSelfConflicting();
 			Void _ = wait(tr->commit());
@@ -1022,9 +1025,7 @@ ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, cons
 	return Void();
 }
 
-ACTOR static Future<StatusObject> latencyProbeFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, StatusArray *messages, std::set<std::string> *incomplete_reasons) {
-	Database cx = openDBOnServer(db, TaskDefaultEndpoint, true, true); // Open a new database connection that is lock-aware
-
+ACTOR static Future<StatusObject> latencyProbeFetcher(Database cx, StatusArray *messages, std::set<std::string> *incomplete_reasons) {
 	state Transaction trImmediate(cx);
 	state Transaction trDefault(cx);
 	state Transaction trBatch(cx);
@@ -1787,9 +1788,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (configuration.present()){
 			// Do the latency probe by itself to avoid interference from other status activities
-			state Future<StatusObject> latencyProbe = latencyProbeFetcher(db, &messages, &status_incomplete_reasons);
-
-			StatusObject latencyProbeResults = wait(latencyProbe);
+			StatusObject latencyProbeResults = wait(latencyProbeFetcher(cx, &messages, &status_incomplete_reasons));
 
 			statusObj["database_available"] = latencyProbeResults.count("immediate_priority_transaction_start_seconds") && latencyProbeResults.count("read_seconds") && latencyProbeResults.count("commit_seconds");
 			if (!latencyProbeResults.empty()) {

@@ -27,8 +27,8 @@
 #elif !defined(FDBSERVER_ORDERER_ACTOR_H)
 	#define FDBSERVER_ORDERER_ACTOR_H
 
+#include "fdbclient/Notified.h"
 #include "flow/actorcompiler.h"
-#include "flow/Notified.h"
 
 template <class Seq>
 class Orderer {

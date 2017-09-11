@@ -33,7 +33,7 @@ struct MasterProxyInterface {
 	RequestStream< struct CommitTransactionRequest > commit;
 	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 															     //   (at some point between when this request is sent and when its response is received, the latest version reported committed)
-	RequestStream< ReplyPromise<vector<StorageServerInterface>> > getKeyServersLocations;
+	RequestStream< ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> > getKeyServersLocations;
 	RequestStream< struct GetStorageServerRejoinInfoRequest > getStorageServerRejoinInfo;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;

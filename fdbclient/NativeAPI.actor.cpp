@@ -602,7 +602,7 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 		attempts++;
 		auto r = locationCache.randomRange();
 		Key begin = r.begin(), end = r.end();  // insert invalidates r, so can't be passed a mere reference into it
-		if( begin >= keyServersPrefix )
+		if( begin >= keyServersPrefix && attempts > maxEvictionAttempts / 2)
 			continue;
 		locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
 	}
@@ -754,8 +754,8 @@ Reference<Cluster> Cluster::createCluster(std::string connFileName, int apiVersi
 	return Reference<Cluster>(new Cluster( rccf, apiVersion));
 }
 
-Future<Database> Cluster::createDatabase( Standalone<StringRef> dbName ) {
-	return DatabaseContext::createDatabase( clusterInterface, Reference<Cluster>::addRef( this ), dbName, LocalityData() );
+Future<Database> Cluster::createDatabase( Standalone<StringRef> dbName, LocalityData locality ) {
+	return DatabaseContext::createDatabase( clusterInterface, Reference<Cluster>::addRef( this ), dbName, locality );
 }
 
 Future<Void> Cluster::onConnected() {
@@ -1102,22 +1102,33 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 
 	state vector<StorageServerInterface> serverInterfaces;
 	state KeyRangeRef range;
-
+	
 	// We assume that not only /FF/keyServers but /FF/serverList is present on the keyServersLocations since we now need both of them to terminate our search. Currently this is guaranteed because nothing after /FF/keyServers is split.
 	if ( ( key.startsWith( serverListPrefix) && (!isBackward || key.size() > serverListPrefix.size()) ) ||
 		( key.startsWith( keyServersPrefix ) && (!isBackward || key.size() > keyServersPrefix.size()) )) {
 		if( info.debugID.present() )
-			g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Before");
+			g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Before");	
 		loop {
 			choose {
 				when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( vector<StorageServerInterface> s = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, ReplyPromise<vector<StorageServerInterface>>(), info.taskID ) ) ) {
+				when ( vector<pair<KeyRangeRef, vector<StorageServerInterface>>> keyServersShards = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>>(), info.taskID ) ) ) {
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
-					ASSERT( s.size() );  // There should always be storage servers, except on version 0 which should not get to this function
-					range = KeyRangeRef( keyServersPrefix, allKeys.end );
-					serverInterfaces = s;
-					break;
+					ASSERT( keyServersShards.size() );  // There should always be storage servers, except on version 0 which should not get to this function
+
+					Reference<LocationInfo> cachedLocation;
+					for (pair<KeyRangeRef, vector<StorageServerInterface>> keyServersShard : keyServersShards) {
+						auto locationInfo = cx->setCachedLocation(keyServersShard.first, keyServersShard.second);
+
+						if (isBackward ? (keyServersShard.first.begin < key && keyServersShard.first.end >= key) : keyServersShard.first.contains(key)) {
+							range = keyServersShard.first;
+							cachedLocation = locationInfo;
+						}
+					}
+
+					ASSERT(isBackward ? (range.begin < key && range.end >= key) : range.contains(key));
+
+					return make_pair(range, cachedLocation);
 				}
 			}
 		}
@@ -1654,6 +1665,15 @@ Future<Key> resolveKey( Database const& cx, KeySelector const& key, Version cons
 ACTOR Future<Standalone<RangeResultRef>> getRangeFallback( Database cx, Version version,
 	KeySelector begin, KeySelector end, GetRangeLimits limits, bool reverse, TransactionInfo info )
 {
+	if(version == latestVersion) {
+		state Transaction transaction(cx);
+		transaction.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
+		transaction.setOption(FDBTransactionOptions::LOCK_AWARE);
+		transaction.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		Version ver = wait( transaction.getReadVersion() );
+		version = ver;
+	}
+
 	Future<Key> fb = resolveKey(cx, begin, version, info);
 	state Future<Key> fe = resolveKey(cx, end, version, info);
 
@@ -1849,15 +1869,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Future<Version> 
 				cx->invalidateCache( beginServer.second );
 
 				if (e.code() == error_code_wrong_shard_server) {
-					if (version == latestVersion) {
-						// latestVersion queries are only for keyServersPrefix/*, which shard is guaranteed not to split,
-						//   so we should always be able to use the fast path--try again
-						TEST(true); //Latest version retry fast path
-						TraceEvent("LatestVersionRetryFastPath").detail("KeyBegin", printable(begin.getKey())).detail("KeyEnd", printable(end.getKey()));
-					} else {
 						Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info ) );
 						return result;
-					}
 				}
 
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));

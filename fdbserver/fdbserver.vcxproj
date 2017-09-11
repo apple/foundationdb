@@ -48,7 +48,6 @@
     <ClCompile Include="Knobs.cpp" />
     <ActorCompiler Include="QuietDatabase.actor.cpp" />
     <ActorCompiler Include="networktest.actor.cpp" />
-    <ActorCompiler Include="MetricLogger.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp" />
     <ActorCompiler Include="Resolver.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />

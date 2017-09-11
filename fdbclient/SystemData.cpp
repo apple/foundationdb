@@ -33,7 +33,8 @@ const KeyRef afterAllKeys = LiteralStringRef("\xff\xff\x00");
 const KeyRangeRef keyServersKeys( LiteralStringRef("\xff/keyServers/"), LiteralStringRef("\xff/keyServers0") );
 const KeyRef keyServersPrefix = keyServersKeys.begin;
 const KeyRef keyServersEnd = keyServersKeys.end;
-const KeyRef keyServersKeyServersKey = LiteralStringRef("\xff/keyServers/\xff/keyServers/");
+const KeyRangeRef keyServersKeyServersKeys ( LiteralStringRef("\xff/keyServers/\xff/keyServers/"), LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
+const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
 const Key keyServersKey( const KeyRef& k ) {
 	return k.withPrefix( keyServersPrefix );
