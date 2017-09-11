@@ -152,13 +152,13 @@ public:
 
 	std::pair<WorkerInterface, ProcessClass> getStorageWorker( RecruitStorageRequest const& req ) {
 		std::set<Optional<Standalone<StringRef>>> excludedMachines( req.excludeMachines.begin(), req.excludeMachines.end() );
-		std::set<Optional<Standalone<StringRef>>> excludedDCs( req.excludeDCs.begin(), req.excludeDCs.end() );
+		std::set<Optional<Standalone<StringRef>>> includeDCs( req.includeDCs.begin(), req.includeDCs.end() );
 		std::set<AddressExclusion> excludedAddresses( req.excludeAddresses.begin(), req.excludeAddresses.end() );
 
 		for( auto& it : id_worker )
 			if( workerAvailable( it.second, false ) &&
 					!excludedMachines.count(it.second.interf.locality.zoneId()) &&
-					!excludedDCs.count(it.second.interf.locality.dcId()) &&
+					(includeDCs.size() == 0 || includeDCs.count(it.second.interf.locality.dcId())) &&
 					!addressExcluded(excludedAddresses, it.second.interf.address()) &&
 					it.second.processClass.machineClassFitness( ProcessClass::Storage ) <= ProcessClass::UnsetFit ) {
 				return std::make_pair(it.second.interf, it.second.processClass);
@@ -171,7 +171,7 @@ public:
 				ProcessClass::Fitness fit = it.second.processClass.machineClassFitness( ProcessClass::Storage );
 				if( workerAvailable( it.second, false ) &&
 						!excludedMachines.count(it.second.interf.locality.zoneId()) &&
-						!excludedDCs.count(it.second.interf.locality.dcId()) &&
+						(includeDCs.size() == 0 || includeDCs.count(it.second.interf.locality.dcId())) &&
 						!addressExcluded(excludedAddresses, it.second.interf.address()) &&
 						fit < bestFit ) {
 					bestFit = fit;
@@ -652,13 +652,13 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 		if(oldMasterFit < newMasterFit) return false;
 
 		std::vector<ProcessClass> tlogProcessClasses;
-		for(auto& it : dbi.logSystemConfig.tLogs ) {
+		for(auto& it : dbi.logSystemConfig.tLogs[0].tLogs ) {
 			auto tlogWorker = id_worker.find(it.interf().locality.processId());
 			if ( tlogWorker == id_worker.end() )
 				return false;
 			tlogProcessClasses.push_back(tlogWorker->second.processClass);
 		}
-		AcrossDatacenterFitness oldAcrossFit(dbi.logSystemConfig.tLogs, tlogProcessClasses);
+		AcrossDatacenterFitness oldAcrossFit(dbi.logSystemConfig.tLogs[0].tLogs, tlogProcessClasses);
 		AcrossDatacenterFitness newAcrossFit(getWorkersForTlogsAcrossDatacenters(db.config, id_used, true));
 
 		if(oldAcrossFit < newAcrossFit) return false;

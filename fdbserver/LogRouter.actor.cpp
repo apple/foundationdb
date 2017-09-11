@@ -27,7 +27,6 @@
 #include "ServerDBInfo.h"
 #include "LogSystem.h"
 #include "fdbclient/SystemData.h"
-#include "flow/Notified.h"
 #include "ApplyMetadataMutation.h"
 #include "RecoveryState.h"
 #include "fdbclient/Atomic.h"

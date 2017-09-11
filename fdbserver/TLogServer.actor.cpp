@@ -179,6 +179,63 @@ private:
 	}
 };
 
+KeyRange prefixRange( KeyRef prefix ) {
+	Key end = strinc(prefix);
+	return KeyRangeRef( prefix, end );
+}
+
+////// Persistence format (for self->persistentData)
+
+// Immutable keys
+static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/4") );
+static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/3"), LiteralStringRef("FoundationDB/LogServer/2/5") );
+static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
+
+// Updated on updatePersistentData()
+static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef( LiteralStringRef( "version/" ), LiteralStringRef( "version0" ) );
+static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
+static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
+
+static Key persistTagMessagesKey( UID id, Tag tag, Version version ) {
+	BinaryWriter wr( Unversioned() );
+	wr.serializeBytes(persistTagMessagesKeys.begin);
+	wr << id;
+	wr << tag;
+	wr << bigEndian64( version );
+	return wr.toStringRef();
+}
+
+static Key persistTagPoppedKey( UID id, Tag tag ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( persistTagPoppedKeys.begin );
+	wr << id;
+	wr << tag;
+	return wr.toStringRef();
+}
+
+static Value persistTagPoppedValue( Version popped ) {
+	return BinaryWriter::toValue( popped, Unversioned() );
+}
+
+static Tag decodeTagPoppedKey( KeyRef id, KeyRef key ) {
+	Tag s;
+	BinaryReader rd( key.removePrefix(persistTagPoppedKeys.begin).removePrefix(id), Unversioned() );
+	rd >> s;
+	return s;
+}
+
+static Version decodeTagPoppedValue( ValueRef value ) {
+	return BinaryReader::fromStringRef<Version>( value, Unversioned() );
+}
+
+static StringRef stripTagMessagesKey( StringRef key ) {
+	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size() );
+}
+
+static Version decodeTagMessagesKey( StringRef key ) {
+	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessagesKey(key), Unversioned() ) );
+}
+
 struct TLogData : NonCopyable {
 	AsyncTrigger newLogData;
 	Deque<UID> queueOrder;
@@ -396,63 +453,6 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 
 	reply.send( result );
 	return Void();
-}
-
-KeyRange prefixRange( KeyRef prefix ) {
-	Key end = strinc(prefix);
-	return KeyRangeRef( prefix, end );
-}
-
-////// Persistence format (for self->persistentData)
-
-// Immutable keys
-static const KeyValueRef persistFormat( LiteralStringRef( "Format" ), LiteralStringRef("FoundationDB/LogServer/2/4") );
-static const KeyRangeRef persistFormatReadableRange( LiteralStringRef("FoundationDB/LogServer/2/3"), LiteralStringRef("FoundationDB/LogServer/2/5") );
-static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRef( "DbRecoveryCount/" ), LiteralStringRef( "DbRecoveryCount0" ) );
-
-// Updated on updatePersistentData()
-static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef( LiteralStringRef( "version/" ), LiteralStringRef( "version0" ) );
-static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
-static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
-
-static Key persistTagMessagesKey( UID id, Tag tag, Version version ) {
-	BinaryWriter wr( Unversioned() );
-	wr.serializeBytes(persistTagMessagesKeys.begin);
-	wr << id;
-	wr << tag;
-	wr << bigEndian64( version );
-	return wr.toStringRef();
-}
-
-static Key persistTagPoppedKey( UID id, Tag tag ) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( persistTagPoppedKeys.begin );
-	wr << id;
-	wr << tag;
-	return wr.toStringRef();
-}
-
-static Value persistTagPoppedValue( Version popped ) {
-	return BinaryWriter::toValue( popped, Unversioned() );
-}
-
-static Tag decodeTagPoppedKey( KeyRef id, KeyRef key ) {
-	Tag s;
-	BinaryReader rd( key.removePrefix(persistTagPoppedKeys.begin).removePrefix(id), Unversioned() );
-	rd >> s;
-	return s;
-}
-
-static Version decodeTagPoppedValue( ValueRef value ) {
-	return BinaryReader::fromStringRef<Version>( value, Unversioned() );
-}
-
-static StringRef stripTagMessagesKey( StringRef key ) {
-	return key.substr( sizeof(UID) + sizeof(Tag) + persistTagMessagesKeys.begin.size() );
-}
-
-static Version decodeTagMessagesKey( StringRef key ) {
-	return bigEndian64( BinaryReader::fromStringRef<Version>( stripTagMessagesKey(key), Unversioned() ) );
 }
 
 void updatePersistentPopped( TLogData* self, Reference<LogData> logData, Tag tag, LogData::TagData& data ) {
