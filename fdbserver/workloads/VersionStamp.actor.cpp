@@ -102,6 +102,23 @@ struct VersionStampWorkload : TestWorkload {
 		return true;
 	}
 
+	static std::pair<Version, Standalone<StringRef>> versionFromValue(const Standalone<StringRef>& value) {
+		Version parsedVersion;
+		Standalone<StringRef> parsedVersionstamp = makeString(10);
+		memcpy(&parsedVersion, value.begin(), sizeof(Version));
+		memcpy(mutateString(parsedVersionstamp), value.begin(), 10);
+		return {bigEndian64(parsedVersion), parsedVersionstamp};
+	}
+
+	// `key` needs to be the non-prefixed key, as we use a fixed offset for the versionstamp location.
+	static std::pair<Version, Standalone<StringRef>> versionFromKey(const Standalone<StringRef>& key) {
+		Version parsedVersion;
+		Standalone<StringRef> parsedVersionstamp = makeString(10);
+		memcpy(&parsedVersion, &(key.begin())[24], sizeof(Version));
+		memcpy(mutateString(parsedVersionstamp), &(key.begin())[24], 10);
+		return {bigEndian64(parsedVersion), parsedVersionstamp};
+	}
+
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
 		state ReadYourWritesTransaction tr(cx);
 		state Version readVersion = wait(tr.getReadVersion());
@@ -115,11 +132,9 @@ struct VersionStampWorkload : TestWorkload {
 				}
 				for (auto it : result) {
 					const Standalone<StringRef> key = it.key.removePrefix(self->vsValuePrefix);
-					Version parsedVersion = 0;
-					Standalone<StringRef> parsedVersionstamp = makeString(10);
-					memcpy(&parsedVersion, it.value.begin(), sizeof(Version));
-					memcpy(mutateString(parsedVersionstamp), it.value.begin(), 10);
-					parsedVersion = bigEndian64(parsedVersion);
+					Version parsedVersion;
+					Standalone<StringRef> parsedVersionstamp;
+					std::tie(parsedVersion, parsedVersionstamp) = versionFromValue(it.value);
 
 					TraceEvent("VST_check0a").detail("itKey", printable(it.key)).detail("itValue", printable(it.value)).detail("parsedVersion", parsedVersion);
 					const auto& all_values_iter = self->key_commit.find(key);
@@ -148,11 +163,9 @@ struct VersionStampWorkload : TestWorkload {
 				TraceEvent("VST_check1").detail("size", result.size()).detail("vsKey_commit_size", self->versionStampKey_commit.size());
 				for (auto it : result) {
 					const Standalone<StringRef> key = it.key.removePrefix(self->vsKeyPrefix);
-					Version parsedVersion = 0;
-					Standalone<StringRef> parsedVersionstamp = makeString(10);
-					memcpy(&parsedVersion, &(key.begin())[24], sizeof(Version));
-					memcpy(mutateString(parsedVersionstamp), &(key.begin())[24], 10);
-					parsedVersion = bigEndian64(parsedVersion);
+					Version parsedVersion;
+					Standalone<StringRef> parsedVersionstamp;
+					std::tie(parsedVersion, parsedVersionstamp) = versionFromKey(key);
 
 					const Key vsKey = key.substr(4, 16);
 					TraceEvent("VST_check1a").detail("itKey", printable(it.key)).detail("vsKey", printable(vsKey)).detail("itValue", printable(it.value)).detail("parsedVersion", parsedVersion);
@@ -202,29 +215,76 @@ struct VersionStampWorkload : TestWorkload {
 			state Key key = self->keyForIndex(g_random->randomInt(0, self->nodeCount));
 			state Value value = std::string(g_random->randomInt(10, 100), 'x');
 			state Key versionStampKey = self->versionStampKeyForIndex(g_random->randomInt(0, self->nodeCount));
-			state StringRef prefix = versionStampKey.substr(0, 20);
+			state StringRef prefix = versionStampKey.substr(0, 20+self->vsKeyPrefix.size());
 			state Key endOfRange = self->endOfRange(prefix);
 			state KeyRangeRef range(prefix, endOfRange);
+			state Standalone<StringRef> committedVersionStamp;
+			state Version committedVersion;
 			loop{
-				state ReadYourWritesTransaction tr(g_simulator.extraDB != NULL ? (g_random->random01() < 0.5 ? extraDB : cx) : cx);
-				//TraceEvent("VST_commit").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("clear", printable(range));
+				state bool error = false;
+				state ReadYourWritesTransaction tr(g_simulator.extraDB != nullptr ? (g_random->random01() < 0.5 ? extraDB : cx) : cx);
+				TraceEvent("VST_commit_begin").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("clear", printable(range));
 				try {
 					tr.atomicOp(key, value, MutationRef::SetVersionstampedValue);
 					tr.clear(range);
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
 					Void _ = wait(tr.commit());
-					Standalone<StringRef> trVs = wait(fTrVs);
-					std::pair<Version, Standalone<StringRef>> committedVersionPair = std::make_pair(tr.getCommittedVersion(), trVs);
-					Standalone<StringRef> vsKeyKey = versionStampKey.removePrefix(self->vsKeyPrefix).substr(4, 16);
-					TraceEvent("VST_commit_success").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("vsKeyKey", printable(vsKeyKey)).detail("clear", printable(range)).detail("version", tr.getCommittedVersion()).detail("vsValue", printable(committedVersionPair.second));
-					self->key_commit[key.removePrefix(self->vsValuePrefix)].push_back(committedVersionPair);
-					self->versionStampKey_commit[vsKeyKey].push_back(committedVersionPair);
-					break;
+
+					committedVersion = tr.getCommittedVersion();
+					Standalone<StringRef> committedVersionStamp_ = wait(fTrVs);
+					committedVersionStamp = committedVersionStamp_;
 				}
 				catch (Error &e) {
-					Void _ = wait(tr.onError(e));
+					// There's a senseless amount of duplication in this block, because Flow doesn't save `e` across suspend/resume points.
+					if (e.code() == error_code_commit_unknown_result) {
+						TraceEvent("VST_commit_unknown_result").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).error(e);
+						Void _ = wait(tr.onError(e));
+						loop {
+							try {
+								tr.reset();
+								Optional<Value> vs_value = wait(tr.get(key));
+								if (!vs_value.present()) {
+									error = true;
+									break;
+								}
+								const Version value_version = versionFromValue(vs_value.get()).first;
+								TraceEvent("VST_commit_unknown_read").detail("vs_value", vs_value.present() ? printable(vs_value.get()) : "did not exist");
+								const auto& value_ts = self->key_commit[key.removePrefix(self->vsValuePrefix)];
+								const auto& iter = std::find_if(value_ts.cbegin(), value_ts.cend(),
+								    [value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
+								      return value_version == pair.first;
+								    });
+								if (iter == value_ts.cend()) {
+									// The commit was successful, and thus we need to record the new data.
+									committedVersion = value_version;
+									committedVersionStamp = vs_value.get().substr(0,10);
+								} else {
+									error = true;
+									break;
+								}
+								break;
+							} catch (Error &e) {
+								Void _ = wait(tr.onError(e));
+							}
+						}
+						if (error) {
+							TraceEvent("VST_commit_failed").detail("key", printable(key)).detail("vsKey", printable(versionStampKey));
+							continue;
+						}
+					} else {
+						TraceEvent("VST_commit_failed").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).error(e);
+						Void _ = wait(tr.onError(e));
+						continue;
+					}
 				}
+
+				const Standalone<StringRef> vsKeyKey = versionStampKey.removePrefix(self->vsKeyPrefix).substr(4, 16);
+				const auto& committedVersionPair = std::make_pair(committedVersion, committedVersionStamp);
+				TraceEvent("VST_commit_success").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("vsKeyKey", printable(vsKeyKey)).detail("clear", printable(range)).detail("version", tr.getCommittedVersion()).detail("vsValue", printable(committedVersionPair.second));
+				self->key_commit[key.removePrefix(self->vsValuePrefix)].push_back(committedVersionPair);
+				self->versionStampKey_commit[vsKeyKey].push_back(committedVersionPair);
+				break;
 			}
 
 			if (now() - startTime > self->testDuration)
