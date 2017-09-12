@@ -1003,7 +1003,7 @@ public:
 			if (processInfo->isAvailableClass()) {
 				// Ignore excluded machines
 				if (processInfo->excluded)
-					;
+					processesDead.push_back(processInfo);
 				// Mark all of the unavailable as dead
 				else if (!processInfo->isAvailable())
 					processesDead.push_back(processInfo);
@@ -1327,7 +1327,15 @@ public:
 				TraceEvent(SevWarn, "DcKillChanged").detailext("DataCenter", dcId).detail("KillType", kt).detail("OrigKillType", ktOrig);
 			}
 			else {
-				TraceEvent("DeadDataCenter").detailext("DataCenter", dcId).detail("KillType", kt).detail("DcZones", datacenterZones.size()).detail("DcProcesses", dcProcesses).detail("ProcessesDead", processesDead.size()).detail("ProcessesLeft", processesLeft.size()).detail("tLogPolicy", storagePolicy->info()).detail("storagePolicy", storagePolicy->info());
+				TraceEvent("DeadDataCenter").detailext("DataCenter", dcId).detail("KillType", kt).detail("DcZones", datacenterZones.size()).detail("DcProcesses", dcProcesses).detail("ProcessesDead", processesDead.size()).detail("ProcessesLeft", processesLeft.size()).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info());
+				for (auto process : processesLeft) {
+					auto zoneId = process->locality.zoneId();
+					TraceEvent("DeadDcSurvivors", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("SurvivingProcess", describe(*process));
+				}
+				for (auto process : processesDead) {
+					auto zoneId = process->locality.zoneId();
+					TraceEvent("DeadDcVictims", zoneId).detailext("ZoneId", zoneId).detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("VictimProcess", describe(*process));
+				}
 			}
 		}
 
