@@ -368,8 +368,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for (int i = 0; i < alive.size(); i++) {
 				if (!alive[i].isReady()) {
 					changes.push_back( ready(alive[i]) );
-				} else {
-					changes.push_back( self->logServers[i]->onChange() );
+				} else if (alive[i].isReady() && alive[i].isError() &&
+									 alive[i].getError().code() == error_code_tlog_stopped) {
+					// All commits must go to all TLogs.  If any TLog is stopped, then our epoch has ended.
+					return Never();
 				}
 			}
 			ASSERT(changes.size() != 0);
