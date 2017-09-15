@@ -64,15 +64,16 @@ struct ClusterControllerFullInterface {
 
 struct RecruitFromConfigurationRequest {
 	DatabaseConfiguration configuration;
+	bool recruitSeedServers;
 	ReplyPromise< struct RecruitFromConfigurationReply > reply;
 
 	RecruitFromConfigurationRequest() {}
-	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration)
-		: configuration(configuration) {}
+	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers)
+		: configuration(configuration), recruitSeedServers(recruitSeedServers) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & configuration & reply;
+		ar & configuration & recruitSeedServers & reply;
 	}
 };
 
@@ -80,10 +81,11 @@ struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> tLogs;
 	vector<WorkerInterface> proxies;
 	vector<WorkerInterface> resolvers;
+	vector<WorkerInterface> storageServers;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & proxies & resolvers;
+		ar & tLogs & proxies & resolvers & storageServers;
 	}
 };
 

@@ -211,15 +211,56 @@ public:
 		throw no_more_servers();
 	}
 
-std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDatacenters( DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false )
+	std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForSeedServers( DatabaseConfiguration const& conf ) {
+		std::map<ProcessClass::Fitness, vector<std::pair<WorkerInterface, ProcessClass>>> fitness_workers;
+		std::vector<std::pair<WorkerInterface, ProcessClass>> results;
+		LocalitySetRef logServerSet = Reference<LocalitySet>(new LocalityMap<std::pair<WorkerInterface, ProcessClass>>());
+		LocalityMap<std::pair<WorkerInterface, ProcessClass>>* logServerMap = (LocalityMap<std::pair<WorkerInterface, ProcessClass>>*) logServerSet.getPtr();
+		bool bCompleted = false;
+
+		for( auto& it : id_worker ) {
+			auto fitness = it.second.processClass.machineClassFitness( ProcessClass::Storage );
+			if( workerAvailable(it.second, false) && !conf.isExcludedServer(it.second.interf.address()) && fitness != ProcessClass::NeverAssign ) {
+				fitness_workers[ fitness ].push_back(std::make_pair(it.second.interf, it.second.processClass));
+			}
+		}
+
+		for( auto& it : fitness_workers ) {
+			for (auto& worker : it.second ) {
+				logServerMap->add(worker.first.locality, &worker);
+			}
+
+			std::vector<LocalityEntry> bestSet;
+			if( logServerSet->selectReplicas(conf.storagePolicy, bestSet) ) {
+				results.reserve(bestSet.size());
+				for (auto& entry : bestSet) {
+					auto object = logServerMap->getObject(entry);
+					results.push_back(*object);
+				}
+				bCompleted = true;
+				break;
+			}
+		}
+
+		logServerSet->clear();
+		logServerSet.clear();
+
+		if (!bCompleted) {
+			throw no_more_servers();
+		}
+
+		return results;
+	}
+
+	std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDatacenters( DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false )
 	{
 		std::map<ProcessClass::Fitness, vector<std::pair<WorkerInterface, ProcessClass>>> fitness_workers;
-		std::vector<std::pair<WorkerInterface, ProcessClass>>		results;
-		std::vector<LocalityData>							unavailableLocals;
-		LocalitySetRef																					logServerSet;
-		LocalityMap<std::pair<WorkerInterface, ProcessClass>>*	logServerMap;
-		UID 		functionId = g_nondeterministic_random->randomUniqueID();
-		bool		bCompleted = false;
+		std::vector<std::pair<WorkerInterface, ProcessClass>> results;
+		std::vector<LocalityData> unavailableLocals;
+		LocalitySetRef logServerSet;
+		LocalityMap<std::pair<WorkerInterface, ProcessClass>>* logServerMap;
+		UID functionId = g_nondeterministic_random->randomUniqueID();
+		bool bCompleted = false;
 
 		logServerSet = Reference<LocalitySet>(new LocalityMap<std::pair<WorkerInterface, ProcessClass>>());
 		logServerMap = (LocalityMap<std::pair<WorkerInterface, ProcessClass>>*) logServerSet.getPtr();
@@ -569,6 +610,12 @@ std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDa
 	RecruitFromConfigurationReply findWorkersForConfiguration( RecruitFromConfigurationRequest const& req ) {
 		RecruitFromConfigurationReply result;
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
+
+		if(req.recruitSeedServers) {
+			auto storageServers = getWorkersForSeedServers(req.configuration);
+			for(int i = 0; i < storageServers.size(); i++)
+				result.storageServers.push_back(storageServers[i].first);
+		}
 
 		id_used[masterProcessId]++;
 		auto tlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used );
