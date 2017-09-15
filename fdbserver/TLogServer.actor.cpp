@@ -1284,7 +1284,7 @@ ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
 	}
 }
 
-ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> oldLog, PromiseStream<InitializeTLogRequest> tlogRequests ) {
+ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> oldLog, Promise<Void> recovered, PromiseStream<InitializeTLogRequest> tlogRequests ) {
 	state double startt = now();
 	state Reference<LogData> logData;
 	state KeyRange tagKeys;
@@ -1336,6 +1336,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.confirmRunning );
 
 		//FIXME: need for upgrades from 4.X to 5.0, remove once this upgrade path is no longer needed
+		if(recovered.canBeSet()) recovered.send(Void());
 		oldLog.send(Void());
 		while(!tlogRequests.isEmpty()) {
 			tlogRequests.getFuture().pop().reply.sendError(recruitment_failed());
@@ -1725,7 +1726,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 }
 
 // New tLog (if !recoverFrom.size()) or restore from network
-ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk, Promise<Void> oldLog )
+ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered )
 {
 	state TLogData self( tlogId, persistentData, persistentQueue, db );
 	state Future<Void> error = actorCollection( self.sharedActors.getFuture() );
@@ -1734,10 +1735,12 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 
 	try {
 		if(restoreFromDisk) {
-			Void _ = wait( restorePersistentState( &self, locality, oldLog, tlogRequests ) );
+			Void _ = wait( restorePersistentState( &self, locality, oldLog, recovered, tlogRequests ) );
 		} else {
 			Void _ = wait( checkEmptyQueue(&self) );
 		}
+
+		if(recovered.canBeSet()) recovered.send(Void());
 
 		self.sharedActors.send( cleanupPeekTrackers(&self) );
 		self.sharedActors.send( commitQueue(&self) );
@@ -1758,6 +1761,8 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		}
 	} catch (Error& e) {
 		TraceEvent("TLogError", tlogId).error(e, true);
+		if(recovered.canBeSet()) recovered.send(Void());
+
 		while(!tlogRequests.isEmpty()) {
 			tlogRequests.getFuture().pop().reply.sendError(recruitment_failed());
 		}
