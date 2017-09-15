@@ -792,6 +792,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for(int i=0; i<logServers.size(); i++) {
 				if (tLogReply[i].isValid() && !tLogReply[i].isReady()) {
 					changes.push_back( ready(tLogReply[i]) );
+					if(buggify_lock_minimal_tlogs) {
+						changes.push_back( logFailed[i]->onChange() );
+					}
 				} else {
 					changes.push_back( logFailed[i]->onChange() );
 					changes.push_back( logServers[i]->onChange() );
