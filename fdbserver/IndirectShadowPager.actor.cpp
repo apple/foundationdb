@@ -23,12 +23,6 @@
 
 #include "flow/UnitTest.h"
 
-#ifdef REDWOOD_DEBUG
-  #define debug_printf printf
-#else
-  #define debug_printf(...)
-#endif
-
 IndirectShadowPage::IndirectShadowPage() : allocated(true) {
 	data = (uint8_t*)FastAllocator<4096>::allocate();
 }
@@ -526,7 +520,7 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 	--itr;
 
 	state PhysicalPageID physicalPageID = itr->second;
-	debug_printf("Reading %d at v%d from %d\n", pageID, version, physicalPageID);
+	//debug_printf("Reading %d at v%d from %d\n", pageID, version, physicalPageID);
 	
 	ASSERT(physicalPageID != PagerFile::INVALID_PAGE);
 	++pager->readCounts[physicalPageID].first;

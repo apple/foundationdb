@@ -31,12 +31,6 @@
 #include <vector>
 #include "fdbclient/CommitTransaction.h"
 
-#ifdef REDWOOD_DEBUG
-  #define debug_printf(args...) fprintf(stdout, args)
-#else
-  #define debug_printf(...)
-#endif
-
 struct SimpleFixedSizeMapRef {
 	typedef std::vector<KeyValue> KVPairsT;
 
@@ -116,7 +110,8 @@ struct SimpleFixedSizeMapRef {
 		return pages;
 	}
 
-	std::string toString() const;
+	// Stringify the map with context of whether it's about to be written or was read, page id, and version.
+	std::string toString(bool writing, LogicalPageID id, Version ver) const;
 
 	KVPairsT entries;
 	uint8_t flags;
@@ -323,7 +318,7 @@ public:
 private:
 	void writePage(LogicalPageID id, Reference<IPage> page, Version ver) {
 		FixedSizeMap map = FixedSizeMap::decode(StringRef(page->begin(), page->size()));
-		debug_printf("Writing page: id=%d ver=%lld %s\n", id, ver, map.toString().c_str());
+		debug_printf("Writing page: id=%d ver=%lld\n%s\n", id, ver, map.toString(true, id, ver).c_str());
 		m_pager->writePage(id, page, ver);
 	}
 
@@ -573,7 +568,7 @@ private:
 		state FixedSizeMap map;
 		Reference<const IPage> rawPage = wait(snapshot->getPhysicalPage(root));
 		map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
-		debug_printf("%s Read page %d: %s\n", printPrefix.c_str(), root, map.toString().c_str());
+		debug_printf("%s Read page %d @%lld:\n%s\n", printPrefix.c_str(), root, snapshot->getVersion(), map.toString(false, root, snapshot->getVersion()).c_str());
 
 		if(map.flags & EPageFlags::IS_LEAF) {
 			VersionedChildrenT results;
@@ -729,6 +724,8 @@ private:
 			for(int i=logicalPages.size(); i<pages.size(); i++)
 				logicalPages.push_back(self->m_pager->allocateLogicalPage() );
 
+			if(pages.size() == 1)
+				minVersion = 0;
 			// Write each page using its assigned page ID
 			debug_printf("%s Writing %lu replacement pages for %d at version %lld\n", printPrefix.c_str(), pages.size(), root, minVersion);
 			for(int i=0; i<pages.size(); i++)
@@ -918,18 +915,193 @@ private:
 	Version m_lastCommittedVersion;
 	int m_pageSize;
 
+	// InternalCursor is for seeking to and iterating over the low level records in the tree
+	// which combine in groups of 1 or more to represent user visible KV pairs.
+	class InternalCursor : public ReferenceCounted<InternalCursor> {
+	public:
+		InternalCursor() {}
+		InternalCursor(Reference<IPagerSnapshot> pages, LogicalPageID root) : m_pages(pages), m_root(root) {
+			m_path.reserve(6);
+		}
+
+		Reference<InternalCursor> clone() const {
+			Reference<InternalCursor> c(new InternalCursor(m_pages, m_root));
+			c->m_path = m_path;
+			c->kvv = kvv;
+			return c;
+		}
+
+		bool valid() const {
+			return kvv.valid();
+		}
+
+		Future<Void> seekLessThanOrEqual(Key key) {
+			return seekEqualOrLTGT_impl(Reference<InternalCursor>::addRef(this), key, true);
+		}
+		Future<Void> seekEqualOrGreaterThan(Key key) {
+			return seekEqualOrLTGT_impl(Reference<InternalCursor>::addRef(this), key, false);
+		}
+
+		Future<Void> move(bool fwd) {
+			return move_impl(Reference<InternalCursor>::addRef(this), fwd);
+		}
+
+		KeyVersionValue kvv;  // The decoded current internal record in the tree
+
+		std::string toString() const {
+			return format("cursor(0x%p) %s %s", this, pathToString().c_str(), valid() ? kvv.toString().c_str() : "<>");
+		}
+
+		void addref() { ReferenceCounted<InternalCursor>::addref(); }
+		void delref() { ReferenceCounted<InternalCursor>::delref(); }
+
+	private:
+		Reference<IPagerSnapshot> m_pages;
+		LogicalPageID m_root;
+
+		struct PageEntryLocation {
+			PageEntryLocation() : index(-1) {}
+			PageEntryLocation(Reference<const IPage> page, LogicalPageID id, int index = -1)
+				: page(page), pageNumber(id), index(index), map(FixedSizeMap::decode(page->asStringRef())) {}
+
+			Reference<const IPage> page;
+			LogicalPageID pageNumber;    // This is really just for debugging
+			int index;
+			FixedSizeMap map;  // TODO:  Get rid of this once page can be read without deserialization.
+		};
+
+		typedef std::vector<PageEntryLocation> TraversalPathT;
+		TraversalPathT m_path;
+
+		ACTOR static Future<Void> pushPage(Reference<InternalCursor> self, LogicalPageID id) {
+			Reference<const IPage> rawPage = wait(self->m_pages->getPhysicalPage(id));
+			self->m_path.emplace_back(rawPage, id);
+			//debug_printf("pushPage(): Read page %d @%lld:\n%s\n", id, self->m_pages->getVersion(), self->m_path.back().map.toString(false, id, self->m_pages->getVersion()).c_str());
+			return Void();
+		}
+
+		ACTOR static Future<Void> reset(Reference<InternalCursor> self) {
+			if(self->m_path.empty()) {
+				Void _ = wait(pushPage(self, self->m_root));
+			}
+			else {
+				self->m_path.resize(1);
+			}
+			return Void();
+		}
+
+		ACTOR static Future<Void> seekEqualOrLTGT_impl(Reference<InternalCursor> self, Key key, bool lt) {
+			state TraversalPathT &path = self->m_path;
+			state const char *mode = lt ? "LT" : "GT";
+			Void _ = wait(reset(self));
+
+			loop {
+				state PageEntryLocation *p = &path.back();
+
+				if(p->map.entries.empty()) {
+					ASSERT(path.size() == 1);  // This must be the root page.
+					self->kvv.version = invalidVersion;
+					debug_printf("seek%sE(%s): path: %s\n", mode, KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
+					debug_printf("seek%sE(%s): Returning invalid, found empty page\n", mode, KeyVersionValue::unpack(key).toString().c_str());
+					return Void();
+				}
+
+				p->index = p->map.findLastLessOrEqual(key);
+				debug_printf("seek%sE(%s): path: %s\n", mode, KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
+
+				if(p->map.flags & EPageFlags::IS_LEAF) {
+					// It is possible for key to be between the page's lower bound and the first record in the page,
+					// in which case we must move back if we want less-than and forward if we want greater-than.
+					// We must also move forward if seeking for greater-than and we found a valid index but
+					// the record is < key
+					if(p->index < 0 || (!lt && p->map.entries[p->index].key < key)) {
+						Void _ = wait(self->move(!lt));
+					}
+					else {
+						self->kvv = KeyVersionValue::unpack(path.back().map.entries[p->index]);
+					}
+					debug_printf("seek%sE(%s): path: %s\n", mode, KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
+					debug_printf("seek%sE(%s): Returning kvv = %s\n", mode, KeyVersionValue::unpack(key).toString().c_str(), self->kvv.toString().c_str());
+					return Void();
+				}
+				else {
+					if(p->index < 0)
+						p->index = 0;
+					Void _ = wait(pushPage(self, (LogicalPageID)*(uint32_t *)path.back().map.entries[path.back().index].value.begin()));
+				}
+			}
+		}
+
+		std::string pathToString() const {
+			std::string s = format("@%lld: ", m_pages->getVersion());
+			for(auto &p : m_path) {
+				s.append(format(" [%d, %d/%d] ", p.pageNumber, p.index, p.map.entries.size() - 1));
+			}
+			return s;
+		}
+
+		// Move one 'internal' key/value/version/valueindex/value record.
+		// Iterating with this funciton will "see" all parts of all values and clears at all versions.
+		ACTOR static Future<Void> move_impl(Reference<InternalCursor> self, bool fwd) {
+			state TraversalPathT &path = self->m_path;
+			state const char *dir = fwd ? "forward" : "backward";
+
+			debug_printf("move(%s): start:         %s\n", dir, self->pathToString().c_str());
+
+			int i = path.size();
+			// Find the closest path part to the end where the index can be moved in the correct direction.
+			while(--i >= 0) {
+				if(fwd ? (path[i].index + 1 < path[i].map.entries.size()) : (path[i].index > 0))
+					break;
+			}
+
+			// If no path part could be moved without going out of range then the
+			// new cursor position is either before the first record or after the last.
+			// Leave the path steps in place and modify the final index to -1 or <size>
+			// A move in the opposite direction will bring the cursor back in range to the
+			// first or last record in the tree.
+			if(i < 0) {
+				path.back().index = fwd ? path.back().map.entries.size() : -1;
+				self->kvv = KeyVersionValue();
+				debug_printf("move(%s): End of database reached.\n", dir);
+				return Void();
+			}
+
+			path.resize(i + 1);
+			state PageEntryLocation *p = &(path.back());
+			p->index += (fwd ? 1 : -1);
+
+			debug_printf("move(%s): after ascent:  %s\n", dir, self->pathToString().c_str());
+
+			// While we're not at a leaf, go down a level
+			// Each movement down will start on the far left or far right depending on fwd
+			while(!(p->map.flags & EPageFlags::IS_LEAF)) {
+				Void _ = wait(pushPage(self, (LogicalPageID)*(uint32_t *)p->map.entries[p->index].value.begin()));
+				p = &(path.back());
+				p->index = fwd ? 0 : p->map.entries.size() - 1;
+			}
+
+			debug_printf("move(%s): after descent: %s\n", dir, self->pathToString().c_str());
+			self->kvv = KeyVersionValue::unpack(p->map.entries[p->index]);
+			debug_printf("move(%s): Returning kvv = %s\n", dir, self->kvv.toString().c_str());
+
+			return Void();
+		}
+	};
+
+	// Cursor is for reading and interating over user visible KV pairs at a specific version
 	class Cursor : public IStoreCursor, public ReferenceCounted<Cursor> {
 	public:
 		Cursor(Version version, IPager *pager, LogicalPageID root)
-		  : m_version(version), m_pager(pager->getReadSnapshot(version)), m_root(root) {
+		  : m_version(version), m_pagerSnapshot(pager->getReadSnapshot(version)), m_icursor(new InternalCursor(m_pagerSnapshot, root)) {
 		}
 		virtual ~Cursor() {}
 
 		virtual Future<Void> findEqual(KeyRef key) { return find_impl(Reference<Cursor>::addRef(this), key, 0); }
-		virtual Future<Void> findFirstGreaterOrEqual(KeyRef key, int prefetchNextBytes) NOT_IMPLEMENTED
-		virtual Future<Void> findLastLessOrEqual(KeyRef key, int prefetchPriorBytes) NOT_IMPLEMENTED
+		virtual Future<Void> findFirstEqualOrGreater(KeyRef key, int prefetchNextBytes) { return find_impl(Reference<Cursor>::addRef(this), key, 1); }
+		virtual Future<Void> findLastLessOrEqual(KeyRef key, int prefetchPriorBytes) { return find_impl(Reference<Cursor>::addRef(this), key, -1); }
 
-		virtual Future<Void> next(bool needValue) NOT_IMPLEMENTED
+		virtual Future<Void> next(bool needValue) { return next_impl(Reference<Cursor>::addRef(this), needValue); }
 		virtual Future<Void> prev(bool needValue) NOT_IMPLEMENTED
 
 		virtual bool isValid() {
@@ -945,124 +1117,133 @@ private:
 		}
 
 		virtual void invalidateReturnedStrings() {
-			m_pager->invalidateReturnedPages();
+			m_pagerSnapshot->invalidateReturnedPages();
 		}
-
-		Version m_version;
-		Reference<IPagerSnapshot> m_pager;
-		Optional<KeyValueRef> m_kv; // The current user-level key/value in the tree
-		Arena m_arena;
-		LogicalPageID m_root;
-		KeyVersionValue m_current;  // The current internal record in the tree
-
-		struct PageEntryLocation {
-			PageEntryLocation() : index(-1) {}
-			Reference<const IPage> page;
-			FixedSizeMap map;
-			int index;
-		};
-
-		std::vector<PageEntryLocation> m_path;
 
 		void addref() { ReferenceCounted<Cursor>::addref(); }
 		void delref() { ReferenceCounted<Cursor>::delref(); }
 
-		// Move one 'internal' key/value/version/valueindex/value record.
-		// Iterating with this funciton will "see" all parts of all values and clears at all versions.
-		ACTOR static Future<Void> moveInternal(Reference<Cursor> self, bool fwd) {
-			state std::vector<PageEntryLocation> &path = self->m_path;
-			state KeyVersionValue &kvv = self->m_current;
-
-			// Try to move to the next index at the bottom of path.
-			// If the next index is out of bounds, pop last path location and try again.
-			while(!path.empty()) {
-				PageEntryLocation &loc = path.back();
-				if(fwd)
-					++loc.index;
-				else
-					--loc.index;
-				// If we've moved too far then pop the last path page, otherwise we're done
-				// retracing the path.
-				if(fwd ? (loc.index >= loc.map.entries.size()) : (loc.index < 0)) {
-					path.pop_back();
-				}
-				else
-					break;
-			}
-
-			// If the path is empty then we've reached an end of the database.
-			if(path.empty()) {
-				kvv = KeyVersionValue();
-				return Void();
-			}
-
-			// Now, traverse downward to a leaf.
-			while(!(path.back().map.flags & EPageFlags::IS_LEAF)) {
-				PageEntryLocation &last = path.back();
-				state LogicalPageID pageNumber = *(uint32_t *)last.map.entries[last.index].value.begin();
-				debug_printf("moveInternal(%d): Reading page %d\n", fwd, pageNumber);
-				Reference<const IPage> rawPage = wait(self->m_pager->getPhysicalPage(pageNumber));
-				path.emplace_back();
-				PageEntryLocation &next = path.back();
-				next.page = rawPage;
-				next.map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
-				debug_printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, next.map.toString().c_str());
-				next.index = fwd ? 0 : next.map.entries.size() - 1;
-			}
-
-			PageEntryLocation &cur = path.back();
-			kvv = KeyVersionValue::unpack(cur.map.entries[cur.index]);
-
-			return Void();
-		}
+	private:
+		Version m_version;
+		Reference<IPagerSnapshot> m_pagerSnapshot;
+		Reference<InternalCursor> m_icursor;
+		Optional<KeyValueRef> m_kv; // The current user-level key/value in the tree
+		Arena m_arena;
 
 		// find key in tree closest to or equal to key.
 		// for less than or equal use cmp < 0
 		// for greater than or equal use cmp > 0
 		// for equal use cmp == 0
 		ACTOR static Future<Void> find_impl(Reference<Cursor> self, KeyRef key, int cmp) {
-			state std::vector<PageEntryLocation> &path = self->m_path;
-			state LogicalPageID pageNumber = self->m_root;
+			state Reference<InternalCursor> &icur = self->m_icursor;
 
-			state KeyVersionValue target(key, self->m_version, 0);
-			state Key targetPacked = target.pack().key;
+			// Search for the last key at or before (key, version, max_value_index)
+			state KeyVersionValue target(key, self->m_version, std::numeric_limits<int>::max());
+			state Key record = target.pack().key;
 
-			loop {
-				debug_printf("findEqual: Reading page %d\n", pageNumber);
-				Reference<const IPage> rawPage = wait(self->m_pager->getPhysicalPage(pageNumber));
-				path.emplace_back();
-				PageEntryLocation &loc = path.back();
-				loc.page = rawPage;
-				loc.map = FixedSizeMap::decode(StringRef(rawPage->begin(), rawPage->size()));
-				debug_printf("Read page %d @%lld: %s\n", pageNumber, self->m_version, loc.map.toString().c_str());
+			Void _ = wait(cmp <= 0 ? icur->seekLessThanOrEqual(record) : icur->seekEqualOrGreaterThan(record));
+			if(!icur->valid()) {
+				self->m_kv = Optional<KeyValueRef>();
+				return Void();
+			}
 
-				// Special case of empty page (which should only happen for root)
-				if(loc.map.entries.empty()) {
-					ASSERT(pageNumber == self->m_root);
+			// If we found the target key, return it as it is valid for any cmp option
+			if(icur->kvv.value.present() && icur->kvv.key == key) {
+				debug_printf("Reading full kv pair starting from: %s\n", icur->kvv.toString().c_str());
+				Void _ = wait(self->readFullKVPair(self));
+				return Void();
+			}
+
+			// FindEqual, so if we're still here we didn't find it.
+			if(cmp == 0) {
+				self->m_kv = Optional<KeyValueRef>();
+				return Void();
+			}
+
+			if(cmp > 0) {
+				debug_printf("find: GTE path\n");
+				// Move forward record by record to find the next record which is the latest version
+				// of its key at or before m_version and is present.  To determine that we've reached
+				// such a record we have to go one record "too far".
+				while(1) {
+					// While version is greater than the target or the value is not present, move forward
+					while(icur->valid() && (icur->kvv.version > self->m_version || !icur->kvv.value.present()))
+						Void _ = wait(icur->move(true));
+
+					// If we reached the end of the database, we're done.
+					if(!icur->kvv.valid()) {
+						self->m_kv = Optional<KeyValueRef>();
+						return Void();
+					}
+
+					// Now we are at a record with a version we might be able to return.  First,
+					// we must move forward until either the end of the tree, a version too new,
+					// or a different key is found.
+					while(icur->valid() && icur->kvv.version <= self->m_version && icur->kvv.key == icur->kvv.key) {
+						Void _ = wait(icur->move(true));
+					}
+
+					// Save icur as inext as that's where we'll start reading for the next record
+					state Reference<InternalCursor> inext = icur->clone();
+
+					// Now we have to back up one record
+					Void _ = wait(icur->move(false));
+
+					ASSERT(icur->valid());
+
+					// If the value exists, return it.
+					if(icur->kvv.value.present()) {
+						Void _ = wait(self->readFullKVPair(self));
+						icur = inext;
+						inext.clear();
+						return Void();
+					}
+				}
+			}
+
+			if(cmp < 0) {
+				ASSERT(false);
+			}
+
+			return Void();
+		}
+
+		// Precondition:  The internal cursor should be just past the last returned/found record.
+		ACTOR static Future<Void> next_impl(Reference<Cursor> self, bool needValue) {
+			state Reference<InternalCursor> &icur = self->m_icursor;
+
+			// Move forward record by record to find the next record which is the latest version
+			// of its key at or before m_version and is present.  To determine that we've reached
+			// such a record we have to go one record "too far".
+			while(1) {
+				// While version is greater than the target or the value is not present, move forward
+				while(icur->valid() && (icur->kvv.version > self->m_version || !icur->kvv.value.present()))
+					Void _ = wait(icur->move(true));
+
+				// If we reached the end of the database, we're done.
+				if(!icur->kvv.valid()) {
 					self->m_kv = Optional<KeyValueRef>();
 					return Void();
 				}
 
-				if(loc.map.flags & EPageFlags::IS_LEAF) {
-					if(cmp == 0) {
-						loc.index = loc.map.findLastLessOrEqual(targetPacked);
-						if(loc.index >= 0) {
-							self->m_current = KeyVersionValue::unpack(loc.map.entries[loc.index]);
-							if(key == self->m_current.key && self->m_current.value.present()) {
-								Void _ = wait(self->readFullKVPair(self));
-								return Void();
-							}
-						}
-
-						self->m_kv = Optional<KeyValueRef>();
-						return Void();
-					}
-					ASSERT(false);
+				// Now we are at a record with a version we might be able to return.  First,
+				// we must move forward until either the end of the tree, a version too new,
+				// or a different key is found.
+				while(icur->valid() && icur->kvv.version <= self->m_version && icur->kvv.key == icur->kvv.key) {
+					Void _ = wait(icur->move(true));
 				}
-				else {
-					loc.index = loc.map.findLastLessOrEqual(targetPacked);
-					loc.index = std::max(loc.index, 0);
-					pageNumber = *(uint32_t *)loc.map.entries[loc.index].value.begin();
+
+				// Save icur as inext as that's where we'll start reading for the next record
+				state Reference<InternalCursor> inext = icur->clone();
+
+				// Now we have to back up one record
+				Void _ = wait(icur->move(false));
+
+				// If the value exists, return it.
+				if(icur->kvv.value.present()) {
+					Void _ = wait(self->readFullKVPair(self));
+					icur = inext;
+					return Void();
 				}
 			}
 		}
@@ -1070,10 +1251,11 @@ private:
 		// Read all of the current value, if it is split across multiple kv pairs, and set m_kv.
 		// m_current must be at either the first or the last value part.
 		ACTOR static Future<Void> readFullKVPair(Reference<Cursor> self) {
-			state KeyVersionValue &kvv = self->m_current;
+			state KeyVersionValue &kvv = self->m_icursor->kvv;
 			// Initialize the optional kv to a KeyValueRef and get a reference to it.
 			state KeyValueRef &kv = (self->m_kv = KeyValueRef()).get();
 			kv.key = KeyRef(self->m_arena, kvv.key);
+			debug_printf("readFullKVPair:  starting from %s\n", kvv.toString().c_str());
 			state Version valueVersion = kvv.version;
 
 			// Unsplit value
@@ -1092,7 +1274,7 @@ private:
 					ASSERT(kvv.value.present());
 					parts.push_back(kvv.value.get());
 					size += kvv.value.get().size();
-					Void _ = wait(self->moveInternal(self, true));
+					Void _ = wait(self->m_icursor->move(true));
 					if(!kvv.valid() || kvv.version != valueVersion || kvv.key != kv.key)
 						break;
 				}
@@ -1107,13 +1289,16 @@ private:
 
 			// If we find any other valueIndex we must assume we're at the last segment and must iterate backward.
 			ASSERT(kvv.value.present());
-			kv.value = makeString(kvv.valueIndex + kvv.value.get().size());
+			kv.value = makeString(kvv.valueIndex + kvv.value.get().size(), self->m_arena);
+
 			while(1) {
 				ASSERT(kvv.value.present());
+				ASSERT(kvv.valueIndex >= 0);
+				ASSERT(kvv.valueIndex + kvv.value.get().size() <= kv.value.size());
 				memcpy(mutateString(kv.value) + kvv.valueIndex, kvv.value.get().begin(), kvv.value.get().size());
-				Void _ = wait(self->moveInternal(self, false));
-				if(!kvv.valid() || kvv.key != kv.key)
+				if(kvv.valueIndex == 0)
 					break;
+				Void _ = wait(self->m_icursor->move(false));
 			}
 
 			return Void();
@@ -1137,7 +1322,66 @@ KeyValue randomKV(int keySize = 10, int valueSize = 5) {
 	return kv;
 }
 
-TEST_CASE("/redwood/correctness/memory/set") {
+ACTOR Future<int> randomRangeVerify(VersionedBTree *btree, Version v, std::map<std::pair<std::string, Version>, Optional<std::string>> *written) {
+	state int errors = 0;
+	state Key start = LiteralStringRef("a");//randomKV().key;
+	state Key end = LiteralStringRef("z"); //randomKV().key;
+	if(end <= start)
+		end = keyAfter(start);
+	printf("Range read %s to %s @%lld\n", start.toString().c_str(), end.toString().c_str(), v);
+
+	state Reference<IStoreCursor> cur = btree->readAtVersion(v);
+
+	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =    written->lower_bound(std::make_pair(start.toString(), v));
+	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->upper_bound(std::make_pair(end.toString(),   0));
+
+	Void _ = wait(cur->findFirstEqualOrGreater(start, 0));
+
+	while(cur->isValid() && cur->getKey() < end) {
+		debug_printf("(%s, %s) %s -> %d\n", start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().size());
+		// Find the next written kv pair that would be present at this version
+		state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast = i;
+		while(1) {
+			while(i != iEnd) {
+				printf("written: ver %lld key %s val %d bytes\n",
+					   i->first.second,
+					   i->first.first.c_str(),
+					   i->second.present() ? i->second.get().size() : -1);
+				++i;
+				if(i == iEnd)
+					break;
+				if(i->first.first != iLast->first.first)
+					break;
+				if(i->first.second > v)
+					break;
+				iLast = i;
+			}
+			if(iLast->first.second <= v && iLast->second.present())
+				break;
+			iLast = i;
+		}
+		if(iLast == iEnd) {
+			errors += 1;
+			printf("Range check: Tree key '%s' vs nothing in written map.\n", cur->getKey().toString().c_str());
+			break;
+		}
+		if(cur->getKey() != iLast->first.first) {
+			errors += 1;
+			printf("Range check: Tree key '%s' vs written '%s'\n", cur->getKey().toString().c_str(), iLast->first.first.c_str());
+			break;
+		}
+		if(cur->getValue() != iLast->second.get()) {
+			errors += 1;
+			printf("Range check: Tree key '%s' has tree value '%s' vs written '%s'\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
+			break;
+		}
+		Void _ = wait(cur->next(true));
+	}
+
+	return errors;
+}
+
+TEST_CASE("/redwood/correctness") {
 	state bool useDisk = true;
 
 	state IPager *pager;
@@ -1161,7 +1405,7 @@ TEST_CASE("/redwood/correctness/memory/set") {
 	state std::map<std::pair<std::string, Version>, Optional<std::string>> written;
 	state std::set<Key> keys;
 
-	Version lastVer = wait(btree->getLatestVersion());
+	state Version lastVer = wait(btree->getLatestVersion());
 	printf("Starting from version: %lld\n", lastVer);
 
 	state Version version = lastVer + 1;
@@ -1182,7 +1426,7 @@ TEST_CASE("/redwood/correctness/memory/set") {
 			debug_printf("    Version %lld will have %d changes\n", version, changes);
 			while(changes--) {
 				if(g_random->random01() < .10) {
-					// Delete a random key
+					// Delete a random range
 					Key start = randomKV().key;
 					Key end = randomKV().key;
 					if(end <= start)
@@ -1192,6 +1436,7 @@ TEST_CASE("/redwood/correctness/memory/set") {
 					auto w = keys.lower_bound(start);
 					auto wEnd = keys.lower_bound(end);
 					while(w != wEnd) {
+						debug_printf("   Clearing key '%s' @%lld\n", w->toString().c_str(), version);
 						written[std::make_pair(w->toString(), version)] = Optional<std::string>();
 						++w;
 					}
@@ -1229,10 +1474,11 @@ TEST_CASE("/redwood/correctness/memory/set") {
 			btree = new VersionedBTree(pager, pageSize);
 			Void _ = wait(btree->init());
 
-			Version lastVer = wait(btree->getLatestVersion());
-			ASSERT(lastVer == version);
+			Version v = wait(btree->getLatestVersion());
+			ASSERT(v == version);
 		}
 
+		// Read back every key at every version set or cleared and verify the result.
 		while(i != iEnd) {
 			state std::string key = i->first.first;
 			state Version ver = i->first.second;
@@ -1240,7 +1486,8 @@ TEST_CASE("/redwood/correctness/memory/set") {
 
 			state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
 
-			Void _ = wait(cur->findEqual(i->first.first));
+			debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
+			Void _ = wait(cur->findEqual(key));
 
 			if(val.present()) {
 				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
@@ -1259,6 +1506,14 @@ TEST_CASE("/redwood/correctness/memory/set") {
 				}
 			}
 			++i;
+		}
+
+		// For every version written thus far, range read a random range and verify the results.
+		state Version iVersion = lastVer;
+		while(iVersion < version) {
+			int e = wait(randomRangeVerify(btree, iVersion, &written));
+			errors += e;
+			++iVersion;
 		}
 
 		printf("%d sets, %d errors\n", (int)written.size(), errors);
@@ -1321,13 +1576,15 @@ TEST_CASE("/redwood/performance/set") {
 	return Void();
 }
 
-std::string SimpleFixedSizeMapRef::toString() const {
+std::string SimpleFixedSizeMapRef::toString(bool writing, LogicalPageID id, Version ver) const {
 	std::string result;
-	result.append(format("flags=0x%x data: ", flags));
-	for(auto const &kv : entries) {
-		result.append(" ");
+	const char *context = writing ? "Writing" : "Reading";
+	result.append(format("\t%s Page %d @%lld: flags=0x%x\n", context, id, ver, flags));
+	for(int i = 0; i < entries.size(); ++i) {
+		auto const &kv = entries[i];
 		Tuple t = Tuple::unpack(kv.key);
-		result.append("[");
+		result.append(format("\t%s Page %d @%lld: %d/%d [", context, id, ver, i, entries.size() - 1));
+
 		for(int i = 0; i < t.size(); ++i) {
 			if(i != 0)
 				result.append(",");
@@ -1341,7 +1598,7 @@ std::string SimpleFixedSizeMapRef::toString() const {
 			result.append(format("'%s'", printable(StringRef(kv.value)).c_str()));
 		else
 			result.append(format("%u", *(const uint32_t *)kv.value.begin()));
-		result.append("]");
+		result.append("]\n");
 	}
 
 	return result;

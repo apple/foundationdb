@@ -70,6 +70,10 @@ public:
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID);
 	virtual void invalidateReturnedPages();
 
+	virtual Version getVersion() const {
+		return version;
+	}
+
 	virtual ~IndirectShadowPagerSnapshot() {
 		invalidateReturnedPages();
 	}

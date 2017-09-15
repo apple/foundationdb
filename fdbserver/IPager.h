@@ -29,6 +29,14 @@
 
 //#define REDWOOD_DEBUG 1
 
+#ifdef REDWOOD_DEBUG
+  #define debug_printf(args...) fprintf(stderr, args)
+#else
+  #define debug_printf(...)
+#endif
+
+#define debug_printf_always(args...) fprintf(stderr, args)
+
 typedef uint32_t LogicalPageID; // uint64_t?
 
 class IPage {
@@ -38,6 +46,10 @@ public:
 
 	// Must return the same size for all pages created by the same pager instance
 	virtual int size() const = 0;
+
+	StringRef asStringRef() const {
+		return StringRef(begin(), size());
+	}
 
 	virtual ~IPage() {}
 
@@ -49,6 +61,7 @@ class IPagerSnapshot {
 public:
 	virtual Future<Reference<const IPage>> getPhysicalPage(LogicalPageID pageID) = 0;
 	virtual void invalidateReturnedPages() = 0;
+	virtual Version getVersion() const = 0;
 
 	virtual ~IPagerSnapshot() {}
 
