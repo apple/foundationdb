@@ -29,13 +29,14 @@
 
 //#define REDWOOD_DEBUG 1
 
-#ifdef REDWOOD_DEBUG
-  #define debug_printf(args...) fprintf(stderr, args)
+#define debug_printf_always(args...) fprintf(stdout, args)
+
+#if REDWOOD_DEBUG
+  #define debug_printf debug_printf_always
 #else
   #define debug_printf(...)
 #endif
 
-#define debug_printf_always(args...) fprintf(stderr, args)
 
 typedef uint32_t LogicalPageID; // uint64_t?
 
