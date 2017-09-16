@@ -944,10 +944,7 @@ private:
 		}
 
 		Future<Void> seekLessThanOrEqual(Key key) {
-			return seekEqualOrLTGT_impl(Reference<InternalCursor>::addRef(this), key, true);
-		}
-		Future<Void> seekEqualOrGreaterThan(Key key) {
-			return seekEqualOrLTGT_impl(Reference<InternalCursor>::addRef(this), key, false);
+			return seekLessThanOrEqual_impl(Reference<InternalCursor>::addRef(this), key);
 		}
 
 		Future<Void> move(bool fwd) {
@@ -998,9 +995,8 @@ private:
 			return Void();
 		}
 
-		ACTOR static Future<Void> seekEqualOrLTGT_impl(Reference<InternalCursor> self, Key key, bool lt) {
+		ACTOR static Future<Void> seekLessThanOrEqual_impl(Reference<InternalCursor> self, Key key) {
 			state TraversalPathT &path = self->m_path;
-			state const char *mode = lt ? "LT" : "GT";
 			Void _ = wait(reset(self));
 
 			loop {
@@ -1009,27 +1005,25 @@ private:
 				if(p->map.entries.empty()) {
 					ASSERT(path.size() == 1);  // This must be the root page.
 					self->kvv.version = invalidVersion;
-					debug_printf("seek%sE(%s): path: %s\n", mode, KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
-					debug_printf("seek%sE(%s): Returning invalid, found empty page\n", mode, KeyVersionValue::unpack(key).toString().c_str());
+					debug_printf("seekLTE(%s): path: %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
+					debug_printf("seekLTE(%s): Returning invalid, found empty page\n", KeyVersionValue::unpack(key).toString().c_str());
 					return Void();
 				}
 
 				p->index = p->map.findLastLessOrEqual(key);
-				debug_printf("seek%sE(%s): path: %s\n", mode, KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
+				debug_printf("seekLTE(%s): path: %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
 
 				if(p->map.flags & EPageFlags::IS_LEAF) {
 					// It is possible for key to be between the page's lower bound and the first record in the page,
-					// in which case we must move back if we want less-than and forward if we want greater-than.
-					// We must also move forward if seeking for greater-than and we found a valid index but
-					// the record is < key
-					if(p->index < 0 || (!lt && p->map.entries[p->index].key < key)) {
-						Void _ = wait(self->move(!lt));
+					// in which case we must move backward to get the last actual record before key
+					if(p->index < 0) {
+						Void _ = wait(self->move(false));
 					}
 					else {
 						self->kvv = KeyVersionValue::unpack(path.back().map.entries[p->index]);
 					}
-					debug_printf("seek%sE(%s): path: %s\n", mode, KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
-					debug_printf("seek%sE(%s): Returning kvv = %s\n", mode, KeyVersionValue::unpack(key).toString().c_str(), self->kvv.toString().c_str());
+					debug_printf("seekLTE(%s): path: %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
+					debug_printf("seekLTE(%s): Returning kvv = %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->kvv.toString().c_str());
 					return Void();
 				}
 				else {
