@@ -949,6 +949,10 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			TraceEvent("TestParserTest").detail("ParsedSimBackupAgents", spec.simBackupAgents);
 		} else if( attrib == "extraDB" ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
+		} else if( attrib == "minimumReplication" ) {
+			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
+		} else if( attrib == "buggify" ) {
+			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		} else if( attrib == "checkOnly" ) {
 			if(value == "true")
 				spec.phases = TestWorkload::CHECK;

@@ -802,6 +802,45 @@ extern bool g_crashOnError;
 	}
 #endif
 
+Optional<bool> checkBuggifyOverride(const char *testFile) {
+	std::ifstream ifs;
+	ifs.open(testFile, std::ifstream::in);
+	if (!ifs.good())
+		return 0;
+
+	std::string cline;
+
+	while (ifs.good()) {
+		getline(ifs, cline);
+		std::string line = removeWhitespace(std::string(cline));
+		if (!line.size() || line.find(';') == 0)
+			continue;
+
+		size_t found = line.find('=');
+		if (found == std::string::npos)
+			// hmmm, not good
+			continue;
+		std::string attrib = removeWhitespace(line.substr(0, found));
+		std::string value = removeWhitespace(line.substr(found + 1));
+
+		if (attrib == "buggify") {
+			if( !strcmp( value.c_str(), "on" ) ) {
+				ifs.close();
+				return true;
+			} else if( !strcmp( value.c_str(), "off" ) ) {
+				ifs.close();
+				return false;
+			} else {
+				fprintf(stderr, "ERROR: Unknown buggify override state `%s'\n", value.c_str());
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
+	}
+
+	ifs.close();
+	return Optional<bool>();
+}
+
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
@@ -1359,6 +1398,11 @@ int main(int argc, char* argv[]) {
 		else
 			g_debug_random = new DeterministicRandom(platform::getRandomSeed());
 
+		if(role==Simulation) {
+			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
+			if(buggifyOverride.present())
+				buggifyEnabled = buggifyOverride.get();
+		}
 		enableBuggify( buggifyEnabled );
 
 		delete FLOW_KNOBS;

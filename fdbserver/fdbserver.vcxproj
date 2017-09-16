@@ -119,6 +119,7 @@
     <ActorCompiler Include="workloads\Increment.actor.cpp" />
     <ActorCompiler Include="workloads\FuzzApiCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\LockDatabase.actor.cpp" />
+    <ActorCompiler Include="workloads\LowLatency.actor.cpp" />
     <ClCompile Include="workloads\MemoryKeyValueStore.cpp" />
     <ActorCompiler Include="workloads\RyowCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\IndexScan.actor.cpp" />
