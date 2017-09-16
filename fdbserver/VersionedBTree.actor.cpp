@@ -1149,14 +1149,10 @@ private:
 			state KeyVersionValue target(key, self->m_version, std::numeric_limits<int>::max());
 			state Key record = target.pack().key;
 
-			Void _ = wait(cmp <= 0 ? icur->seekLessThanOrEqual(record) : icur->seekEqualOrGreaterThan(record));
-			if(!icur->valid()) {
-				self->m_kv = Optional<KeyValueRef>();
-				return Void();
-			}
+			Void _ = wait(icur->seekLessThanOrEqual(record));
 
 			// If we found the target key, return it as it is valid for any cmp option
-			if(icur->kvv.value.present() && icur->kvv.key == key) {
+			if(icur->valid() && icur->kvv.value.present() && icur->kvv.key == key) {
 				debug_printf("Reading full kv pair starting from: %s\n", icur->kvv.toString().c_str());
 				Void _ = wait(self->readFullKVPair(self));
 				return Void();
@@ -1168,22 +1164,35 @@ private:
 				return Void();
 			}
 
+			// FindEqualOrGreaterThan, so if we're here we have to go to the next present record at the target version.
 			if(cmp > 0) {
+				// icur is at a record < key, possibly before the start of the tree so move forward at least once.
+				loop {
+					Void _ = wait(icur->move(true));
+					if(!icur->valid() || icur->kvv.key > key)
+						break;
+				}
+				// Get the next present key at the target version.  Handles invalid cursor too.
 				Void _ = wait(self->next(true)); // TODO:  Have a needValue argument here
 			}
-
-			if(cmp < 0) {
+			else if(cmp < 0) {
 				ASSERT(false);
 			}
 
 			return Void();
 		}
 
-		// Precondition:  The internal cursor should be just past the last returned/found record.
 		ACTOR static Future<Void> next_impl(Reference<Cursor> self, bool needValue) {
 			state Reference<InternalCursor> &i = self->m_icursor;
 
 			debug_printf("next(): cursor %s\n", i->toString().c_str());
+
+			// Make sure we are one record past the last user key
+			if(self->m_kv.present()) {
+				while(i->valid() && i->kvv.key <= self->m_kv.get().key) {
+					Void _ = wait(i->move(true));
+				}
+			}
 
 			state Version v = self->m_pagerSnapshot->getVersion();
 			state Reference<InternalCursor> iLast;
@@ -1200,6 +1209,7 @@ private:
 						|| i->kvv.version > v
 					)
 				) {
+					// Assume that next is the most likely next move, so save the one-too-far cursor position.
 					std::swap(i, iLast);
 					Void _ = wait(readFullKVPair(self));
 					std::swap(i, iLast);
@@ -1285,17 +1295,17 @@ KeyValue randomKV(int keySize = 10, int valueSize = 5) {
 	return kv;
 }
 
-ACTOR Future<int> randomRangeVerify(VersionedBTree *btree, Version v, std::map<std::pair<std::string, Version>, Optional<std::string>> *written) {
+ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<std::pair<std::string, Version>, Optional<std::string>> *written) {
 	state int errors = 0;
 	state Key start = randomKV().key;
 	state Key end = randomKV().key;
 	if(end <= start)
 		end = keyAfter(start);
-	debug_printf("VerifyRange %s to %s @%lld\n", start.toString().c_str(), end.toString().c_str(), v);
+	debug_printf("VerifyRange '%s' to '%s' @%lld\n", printable(start).c_str(), printable(end).c_str(), v);
 
 	state Reference<IStoreCursor> cur = btree->readAtVersion(v);
 
-	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =    written->lower_bound(std::make_pair(start.toString(), v));
+	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =    written->lower_bound(std::make_pair(start.toString(), 0));
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->upper_bound(std::make_pair(end.toString(),   0));
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
@@ -1321,18 +1331,18 @@ ACTOR Future<int> randomRangeVerify(VersionedBTree *btree, Version v, std::map<s
 
 		if(iLast == iEnd) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) failed: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
 			break;
 		}
 
 		if(cur->getKey() != iLast->first.first) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) failed: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
+			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), iLast->first.first.c_str());
 			break;
 		}
 		if(cur->getValue() != iLast->second.get()) {
 			errors += 1;
-			printf("VerifyRange(@%lld, %s, %s) failed: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
+			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
 			break;
 		}
 		Void _ = wait(cur->next(true));
@@ -1357,8 +1367,9 @@ ACTOR Future<int> randomRangeVerify(VersionedBTree *btree, Version v, std::map<s
 
 	if(iLast != iEnd) {
 		errors += 1;
-		printf("VerifyRange(@%lld, %s, %s) failed: Tree range ended but written has @%lld '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
+		printf("VerifyRange(@%lld, %s, %s) ERROR: Tree range ended but written has @%lld '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
+
 	return errors;
 }
 
@@ -1467,23 +1478,23 @@ TEST_CASE("/redwood/correctness") {
 
 			state Reference<IStoreCursor> cur = btree->readAtVersion(ver);
 
-			debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
+			//debug_printf("Verifying @%lld '%s'\n", ver, key.c_str());
 			Void _ = wait(cur->findEqual(key));
 
 			if(val.present()) {
 				if(!(cur->isValid() && cur->getKey() == key && cur->getValue() == val.get())) {
 					++errors;
 					if(!cur->isValid())
-						printf("Verify failed: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
+						printf("Verify ERROR: key_not_found: '%s' -> '%s' @%lld\n", key.c_str(), val.get().c_str(), ver);
 					else if(cur->getKey() != key)
-						printf("Verify failed: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
+						printf("Verify ERROR: key_incorrect: found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), key.c_str(), ver);
 					else if(cur->getValue() != val.get())
-						printf("Verify failed: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
+						printf("Verify ERROR: value_incorrect: for '%s' found '%s' expected '%s' @%lld\n", cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), val.get().c_str(), ver);
 				}
 			} else {
 				if(cur->isValid() && cur->getKey() == key) {
 					++errors;
-					printf("Verify failed: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
+					printf("Verify ERROR: cleared_key_found: '%s' -> '%s' @%lld\n", key.c_str(), cur->getValue().toString().c_str(), ver);
 				}
 			}
 			++i;
@@ -1492,7 +1503,7 @@ TEST_CASE("/redwood/correctness") {
 		// For every version written thus far, range read a random range and verify the results.
 		state Version iVersion = lastVer;
 		while(iVersion < version) {
-			int e = wait(randomRangeVerify(btree, iVersion, &written));
+			int e = wait(verifyRandomRange(btree, iVersion, &written));
 			errors += e;
 			++iVersion;
 		}
