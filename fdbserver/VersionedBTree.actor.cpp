@@ -1083,12 +1083,12 @@ private:
 		}
 		virtual ~Cursor() {}
 
-		virtual Future<Void> findEqual(KeyRef key) { return find_impl(Reference<Cursor>::addRef(this), key, 0); }
-		virtual Future<Void> findFirstEqualOrGreater(KeyRef key, int prefetchNextBytes) { return find_impl(Reference<Cursor>::addRef(this), key, 1); }
-		virtual Future<Void> findLastLessOrEqual(KeyRef key, int prefetchPriorBytes) { return find_impl(Reference<Cursor>::addRef(this), key, -1); }
+		virtual Future<Void> findEqual(KeyRef key) { return find_impl(Reference<Cursor>::addRef(this), key, true, 0); }
+		virtual Future<Void> findFirstEqualOrGreater(KeyRef key, bool needValue, int prefetchNextBytes) { return find_impl(Reference<Cursor>::addRef(this), key, needValue, 1); }
+		virtual Future<Void> findLastLessOrEqual(KeyRef key, bool needValue, int prefetchPriorBytes) { return find_impl(Reference<Cursor>::addRef(this), key, needValue, -1); }
 
 		virtual Future<Void> next(bool needValue) { return next_impl(Reference<Cursor>::addRef(this), needValue); }
-		virtual Future<Void> prev(bool needValue) NOT_IMPLEMENTED
+		virtual Future<Void> prev(bool needValue) { return prev_impl(Reference<Cursor>::addRef(this), needValue); }
 
 		virtual bool isValid() {
 			return m_kv.present();
@@ -1120,14 +1120,17 @@ private:
 		// for less than or equal use cmp < 0
 		// for greater than or equal use cmp > 0
 		// for equal use cmp == 0
-		ACTOR static Future<Void> find_impl(Reference<Cursor> self, KeyRef key, int cmp) {
+		ACTOR static Future<Void> find_impl(Reference<Cursor> self, KeyRef key, bool needValue, int cmp) {
 			state InternalCursor &icur = self->m_icursor;
 
 			// Search for the last key at or before (key, version, max_value_index)
 			state KeyVersionValue target(key, self->m_version, std::numeric_limits<int>::max());
 			state Key record = target.pack().key;
+			self->m_kv = Optional<KeyValueRef>();
+			state const char *mode = cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT");
 
 			Void _ = wait(icur.seekLessThanOrEqual(record));
+			debug_printf("find%sE('%s'): %s\n", mode, target.toString().c_str(), icur.kvv.toString().c_str());
 
 			// If we found the target key, return it as it is valid for any cmp option
 			if(icur.valid() && icur.kvv.value.present() && icur.kvv.key == key) {
@@ -1138,7 +1141,6 @@ private:
 
 			// FindEqual, so if we're still here we didn't find it.
 			if(cmp == 0) {
-				self->m_kv = Optional<KeyValueRef>();
 				return Void();
 			}
 
@@ -1151,16 +1153,18 @@ private:
 						break;
 				}
 				// Get the next present key at the target version.  Handles invalid cursor too.
-				Void _ = wait(self->next(true)); // TODO:  Have a needValue argument here
+				Void _ = wait(self->next(needValue));
 			}
 			else if(cmp < 0) {
-				ASSERT(false);
+				// Move to previous present kv pair at the target version
+				Void _ = wait(self->prev(needValue));
 			}
 
 			return Void();
 		}
 
 		ACTOR static Future<Void> next_impl(Reference<Cursor> self, bool needValue) {
+			// TODO: use needValue
 			state InternalCursor &i = self->m_icursor;
 
 			debug_printf("next(): cursor %s\n", i.toString().c_str());
@@ -1192,6 +1196,45 @@ private:
 					Void _ = wait(readFullKVPair(self));
 					std::swap(i, iLast);
 					return Void();
+				}
+			}
+
+			self->m_kv = Optional<KeyValueRef>();
+			return Void();
+		}
+
+		ACTOR static Future<Void> prev_impl(Reference<Cursor> self, bool needValue) {
+			// TODO:  use needValue
+			state InternalCursor &i = self->m_icursor;
+
+			debug_printf("prev(): cursor %s\n", i.toString().c_str());
+
+			// Make sure we are one record before the last user key
+			if(self->m_kv.present()) {
+				while(i.valid() && i.kvv.key >= self->m_kv.get().key) {
+					Void _ = wait(i.move(false));
+				}
+			}
+
+			state Version v = self->m_pagerSnapshot->getVersion();
+			while(i.valid()) {
+				// Once we reach a present value at or before v, return or skip it.
+				if(i.kvv.version <= v) {
+					// If it's present, return it
+					if(i.kvv.value.present()) {
+						Void _ = wait(readFullKVPair(self));
+						return Void();
+					}
+					// Value wasn't present as of the latest version <= v, so move backward to a new key
+					state Key clearedKey = i.kvv.key;
+					while(1) {
+						Void _ = wait(i.move(false));
+						if(!i.valid() || i.kvv.key != clearedKey)
+							break;
+					}
+				}
+				else {
+					Void _ = wait(i.move(false));
 				}
 			}
 
@@ -1281,13 +1324,19 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 		end = keyAfter(start);
 	debug_printf("VerifyRange '%s' to '%s' @%lld\n", printable(start).c_str(), printable(end).c_str(), v);
 
-	state Reference<IStoreCursor> cur = btree->readAtVersion(v);
-
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator i =    written->lower_bound(std::make_pair(start.toString(), 0));
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iEnd = written->upper_bound(std::make_pair(end.toString(),   0));
 	state std::map<std::pair<std::string, Version>, Optional<std::string>>::const_iterator iLast;
 
-	Void _ = wait(cur->findFirstEqualOrGreater(start, 0));
+	state Reference<IStoreCursor> cur = btree->readAtVersion(v);
+
+	// Randomly use the cursor for something else first.
+	if(g_random->coinflip()) {
+		Void _ = wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKV().key, true, 0) : cur->findLastLessOrEqual(randomKV().key, true, 0));
+	}
+	Void _ = wait(cur->findFirstEqualOrGreater(start, true, 0));
+
+	state std::vector<KeyValue> results;
 
 	while(cur->isValid() && cur->getKey() < end) {
 		// Find the next written kv pair that would be present at this version
@@ -1323,6 +1372,8 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 			printf("VerifyRange(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), iLast->second.get().c_str());
 			break;
 		}
+
+		results.push_back(KeyValue(KeyValueRef(cur->getKey(), cur->getValue())));
 		Void _ = wait(cur->next(true));
 	}
 
@@ -1347,6 +1398,48 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 		errors += 1;
 		printf("VerifyRange(@%lld, %s, %s) ERROR: Tree range ended but written has @%lld '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
+
+	// Randomly use a new cursor for the revere range read
+	if(g_random->coinflip()) {
+		cur = btree->readAtVersion(v);
+	}
+
+	// Now read the range from the tree in reverse order and compare to the saved results
+	Void _ = wait(cur->findLastLessOrEqual(end, true, 0));
+	if(cur->isValid() && cur->getKey() == end)
+		Void _ = wait(cur->prev(true));
+
+	state std::vector<KeyValue>::const_reverse_iterator r = results.rbegin();
+
+	while(cur->isValid() && cur->getKey() >= start) {
+		if(r == results.rend()) {
+			errors += 1;
+			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs nothing in written map.\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str());
+			break;
+		}
+
+		if(cur->getKey() != r->key) {
+			errors += 1;
+			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), r->key.toString().c_str());
+			break;
+		}
+		if(cur->getValue() != r->value) {
+			errors += 1;
+			printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree key '%s' has tree value '%s' vs written '%s'\n", v, start.toString().c_str(), end.toString().c_str(), cur->getKey().toString().c_str(), cur->getValue().toString().c_str(), r->value.toString().c_str());
+			break;
+		}
+
+		++r;
+		Void _ = wait(cur->prev(true));
+	}
+
+	if(r != results.rend()) {
+		errors += 1;
+		printf("VerifyRangeReverse(@%lld, %s, %s) ERROR: Tree range ended but written has '%s'\n", v, start.toString().c_str(), end.toString().c_str(), r->key.toString().c_str());
+	}
+
+	if(errors > 0)
+		throw internal_error();
 
 	return errors;
 }

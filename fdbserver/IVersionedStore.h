@@ -30,8 +30,8 @@
 class IStoreCursor {
 public:
 	virtual Future<Void> findEqual(KeyRef key) = 0;
-	virtual Future<Void> findFirstEqualOrGreater(KeyRef key, int prefetchNextBytes) = 0;
-	virtual Future<Void> findLastLessOrEqual(KeyRef key, int prefetchPriorBytes) = 0;
+	virtual Future<Void> findFirstEqualOrGreater(KeyRef key, bool needValue, int prefetchNextBytes) = 0;
+	virtual Future<Void> findLastLessOrEqual(KeyRef key, bool needValue, int prefetchPriorBytes) = 0;
 	virtual Future<Void> next(bool needValue) = 0;
 	virtual Future<Void> prev(bool needValue) = 0;
 
