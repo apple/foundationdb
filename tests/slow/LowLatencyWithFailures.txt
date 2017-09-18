@@ -1,0 +1,20 @@
+testTitle=Clogged
+    testName=Cycle
+    transactionsPerSecond=1000.0
+    testDuration=300.0
+    expectedRate=0
+
+    testName=LowLatency
+    testDuration=300.0
+    maxLatency=50.0
+
+    testName=Attrition
+    machinesToKill=1
+    machinesToLeave=3
+    reboot=true
+    testDuration=300.0
+    waitForVersion=true
+    allowFaultInjection=false
+    killDc=false
+
+minimumReplication=2

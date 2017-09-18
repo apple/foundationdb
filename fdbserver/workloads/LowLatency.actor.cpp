@@ -37,7 +37,7 @@ struct LowLatencyWorkload : TestWorkload {
 		: TestWorkload(wcx), operations("Operations"), retries("Retries") , ok(true)
 	{
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 600.0 );
-		maxLatency = getOption( options, LiteralStringRef("maxLatency"), 15.0 );
+		maxLatency = getOption( options, LiteralStringRef("maxLatency"), 16.0 );
 		checkDelay = getOption( options, LiteralStringRef("checkDelay"), 1.0 );
 	}
 
