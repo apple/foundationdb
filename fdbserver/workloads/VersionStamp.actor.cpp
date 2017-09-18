@@ -36,6 +36,7 @@ struct VersionStampWorkload : TestWorkload {
 	bool failIfDataLost;
 	Key vsKeyPrefix;
 	Key vsValuePrefix;
+	bool validateExtraDB;
 	std::map<Key, std::vector<std::pair<Version, Standalone<StringRef>>>> key_commit;
 	std::map<Key, std::vector<std::pair<Version, Standalone<StringRef>>>> versionStampKey_commit;
 
@@ -50,6 +51,7 @@ struct VersionStampWorkload : TestWorkload {
 		const Key prefix = getOption(options, LiteralStringRef("prefix"), LiteralStringRef("VS_"));
 		vsKeyPrefix = LiteralStringRef("K_").withPrefix(prefix);
 		vsValuePrefix = LiteralStringRef("V_").withPrefix(prefix);
+		validateExtraDB = getOption(options, LiteralStringRef("validateExtraDB"), false);
 	}
 
 	virtual std::string description() { return "VersionStamp"; }
@@ -120,16 +122,25 @@ struct VersionStampWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(Database cx, VersionStampWorkload* self) {
+		if (self->validateExtraDB) {
+			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
+			cx = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+		}
 		state ReadYourWritesTransaction tr(cx);
 		state Version readVersion = wait(tr.getReadVersion());
 		loop{
 			try {
 				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				ASSERT(result.size() <= self->nodeCount);
-				TraceEvent("VST_check0").detail("size", result.size()).detail("nodeCount", self->nodeCount).detail("key_commit", self->key_commit.size()).detail("readVersion", readVersion);
+				if (self->key_commit.size() > 0) {
+					ASSERT(result.size() > 0);  // Even with failIfDataLost, we still shouldn't lose everything.
+				}
 				if (self->failIfDataLost) {
 					ASSERT(result.size() == self->key_commit.size());
 				}
+
+				TraceEvent("VST_check0").detail("size", result.size()).detail("nodeCount", self->nodeCount).detail("key_commit", self->key_commit.size()).detail("readVersion", readVersion);
 				for (auto it : result) {
 					const Standalone<StringRef> key = it.key.removePrefix(self->vsValuePrefix);
 					Version parsedVersion;
@@ -145,7 +156,6 @@ struct VersionStampWorkload : TestWorkload {
 							[parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) { return pair.first == parsedVersion; });
 					ASSERT(value_pair_iter != all_values.cend());  // The key exists, but we never wrote the timestamp.
 					if (self->failIfDataLost) {
-						// multimap promises that key_range[end-1] is the most recently inserted value
 						auto last_element_iter = all_values.cend();  last_element_iter--;
 						ASSERT(value_pair_iter == last_element_iter);
 					}
@@ -159,6 +169,9 @@ struct VersionStampWorkload : TestWorkload {
 
 				Standalone<RangeResultRef> result = wait(tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
 				ASSERT(result.size() <= self->nodeCount);
+				if (self->failIfDataLost) {
+					ASSERT(result.size() == self->versionStampKey_commit.size());
+				}
 
 				TraceEvent("VST_check1").detail("size", result.size()).detail("vsKey_commit_size", self->versionStampKey_commit.size());
 				for (auto it : result) {
@@ -177,7 +190,6 @@ struct VersionStampWorkload : TestWorkload {
 					    [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) { return pair.first == parsedVersion; });
 					ASSERT(value_pair_iter != all_values.cend());  // The key exists, but we never wrote the timestamp.
 					if (self->failIfDataLost) {
-						// multimap promises that key_range[end-1] is the most recently inserted value
 						auto last_element_iter = all_values.cend();  last_element_iter--;
 						ASSERT(value_pair_iter == last_element_iter);
 					}
@@ -194,6 +206,7 @@ struct VersionStampWorkload : TestWorkload {
 				Void _ = wait(tr.onError(e));
 			}
 		}
+		TraceEvent("VST_check_end");
 		return true;
 	}
 
@@ -236,6 +249,10 @@ struct VersionStampWorkload : TestWorkload {
 					committedVersionStamp = committedVersionStamp_;
 				}
 				catch (Error &e) {
+					if (e.code() == error_code_database_locked) {
+						TraceEvent("VST_commit_database_locked");
+						break;
+					}
 					// There's a senseless amount of duplication in this block, because Flow doesn't save `e` across suspend/resume points.
 					if (e.code() == error_code_commit_unknown_result) {
 						TraceEvent("VST_commit_unknown_result").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).error(e);
@@ -243,6 +260,7 @@ struct VersionStampWorkload : TestWorkload {
 						loop {
 							try {
 								tr.reset();
+								tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 								Optional<Value> vs_value = wait(tr.get(key));
 								if (!vs_value.present()) {
 									error = true;
