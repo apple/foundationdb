@@ -365,7 +365,8 @@ private:
 	}
 
 	void rollRandomClose() {
-		if (g_simulator.enableConnectionFailures && g_random->random01() < .00001) {
+		if (now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && g_random->random01() < .00001) {
+			g_simulator.lastConnectionFailure = now();
 			double a = g_random->random01(), b = g_random->random01();
 			TEST(true);  // Simulated connection failure
 			TraceEvent("ConnectionFailure", dbgid).detail("MyAddr", process->address).detail("PeerAddr", peerProcess->address).detail("SendClosed", a > .33).detail("RecvClosed", a < .66).detail("Explicit", b < .3);
@@ -431,7 +432,7 @@ public:
 		if(openCount == 2000) {
 			TraceEvent(SevWarnAlways, "DisableConnectionFailures_TooManyFiles");
 			g_simulator.speedUpSimulation = true;
-			g_simulator.enableConnectionFailures = false;
+			g_simulator.connectionFailuresDisableDuration = 1e6;
 		}
 
 		Void _ = wait( g_simulator.onMachine( currentProcess ) );
@@ -1516,7 +1517,7 @@ public:
 void startNewSimulator() {
 	ASSERT( !g_network );
 	g_network = g_pSimulator = new Sim2();
-	g_simulator.enableConnectionFailures = g_random->random01() < 0.5;
+	g_simulator.connectionFailuresDisableDuration = g_random->random01() < 0.5 ? 0 : 1e6;
 }
 
 static double networkLatency() {
@@ -1558,7 +1559,7 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 
 //Simulates delays for performing operations on disk
 Future<Void> waitUntilDiskReady( Reference<DiskParameters> diskParameters, int64_t size, bool sync ) {
-	if(!g_simulator.enableConnectionFailures)
+	if(g_simulator.connectionFailuresDisableDuration > 1e4)
 		return delay(0.0001);
 
 	if( diskParameters->nextOperation < now() ) diskParameters->nextOperation = now();

@@ -12,4 +12,4 @@ valueBytes=128
 discardEdgeMeasurements=false
 warmingDelay=10.0
 simCheckRelocationDuration=true
-simEnableConnectionFailures=false
+connectionFailuresDisableDuration=100000

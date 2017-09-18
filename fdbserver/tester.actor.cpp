@@ -740,10 +740,10 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 									double quiescentWaitTimeout, double softTimeLimit, double databasePingDelay) {
 	state TestSpec spec;
 
-	state bool connectionFailures;
+	state double connectionFailures;
 	if( g_network->isSimulated() ) {
-		connectionFailures = g_simulator.enableConnectionFailures;
-		g_simulator.enableConnectionFailures = false;
+		connectionFailures = g_simulator.connectionFailuresDisableDuration;
+		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
 	}
 	
@@ -763,7 +763,7 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 		DistributedTestResults testResults = wait(runWorkload(cx, testers, database, spec));
 		if(testResults.ok() || lastRun) {
 			if( g_network->isSimulated() ) {
-				g_simulator.enableConnectionFailures = connectionFailures;
+				g_simulator.connectionFailuresDisableDuration = connectionFailures;
 			}
 			return Void();
 		}
@@ -934,11 +934,14 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 		} else if( attrib == "simCheckRelocationDuration" ) {
 			spec.simCheckRelocationDuration = (value == "true");
 			TraceEvent("TestParserTest").detail("ParsedSimCheckRelocationDuration", spec.simCheckRelocationDuration);
-		} else if( attrib == "simEnableConnectionFailures" ) {
-			spec.simEnableConnectionFailures = (value == "true");
-			if(g_network->isSimulated() && !spec.simEnableConnectionFailures)
-				g_simulator.enableConnectionFailures = false;
-			TraceEvent("TestParserTest").detail("ParsedSimEnableConnectionFailures", spec.simEnableConnectionFailures);
+		} else if( attrib == "connectionFailuresDisableDuration" ) {
+			double connectionFailuresDisableDuration;
+			sscanf( value.c_str(), "%lf", &connectionFailuresDisableDuration );
+			ASSERT( connectionFailuresDisableDuration >= 0 );
+			spec.simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
+			if(g_network->isSimulated())
+				g_simulator.connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
+			TraceEvent("TestParserTest").detail("ParsedSimConnectionFailuresDisableDuration", spec.simConnectionFailuresDisableDuration);
 		} else if( attrib == "simBackupAgents" ) {
 			if (value == "BackupToFile")
 				spec.simBackupAgents = ISimulator::BackupToFile;

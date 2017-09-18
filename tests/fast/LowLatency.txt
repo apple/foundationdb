@@ -16,6 +16,6 @@ testTitle=Clogged
     allowFaultInjection=false
     killDc=false
 
-simEnableConnectionFailures=false
+connectionFailuresDisableDuration=100000
 buggify=off
 minimumReplication=2

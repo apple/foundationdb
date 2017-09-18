@@ -1064,7 +1064,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		// with independant sets of data. This case will validated that no code is relying on the old
 		// quorum=(RF-AQ) logic, and now goes through the policy engine instead.
 		TEST(can_omit >= prevState.tLogReplicationFactor - prevState.tLogWriteAntiQuorum);  // Locking a subset of the TLogs while ending an epoch.
-		const bool reboot_a_tlog = g_simulator.enableConnectionFailures && BUGGIFY && g_random->random01() < 0.25;
+		const bool reboot_a_tlog = g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY && g_random->random01() < 0.25;
 		TraceEvent(SevInfo, "MasterRecoveryTLogLocking", dbgid)
 		    .detail("locks", tlogs.size() - can_omit)
 		    .detail("skipped", can_omit)
@@ -1079,6 +1079,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 		if (reboot_a_tlog) {
+			g_simulator.lastConnectionFailure = g_network->now();
 			for (int i = 0; i < tlogs.size() - can_omit; i++) {
 				const int index = tlogs[i].second;
 				if (logServers[index]->get().present()) {

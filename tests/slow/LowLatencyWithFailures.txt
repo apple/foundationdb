@@ -17,4 +17,5 @@ testTitle=Clogged
     allowFaultInjection=false
     killDc=false
 
+connectionFailuresDisableDuration=60
 minimumReplication=2
