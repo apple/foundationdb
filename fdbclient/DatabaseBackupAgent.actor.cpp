@@ -1527,6 +1527,7 @@ public:
 					throw backup_unneeded();
 				}
 
+				state Version current = wait(tr->getReadVersion());
 				Optional<Value> _backupUid = wait(tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId)));
 				backupUid = _backupUid.get();
 
@@ -1534,7 +1535,19 @@ public:
 				tr->clear(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).range());
 
 				// Clearing the end version of apply mutation cancels ongoing apply work
-				tr->clear(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsEndRange.begin));
+				const auto& log_uid = BinaryWriter::toValue(logUid, Unversioned());
+				tr->clear(log_uid.withPrefix(applyMutationsEndRange.begin));
+
+				// Ensure that we're at a version higher than the data that we've written.
+				Optional<Value> lastApplied = wait(tr->get(log_uid.withPrefix(applyMutationsBeginRange.begin)));
+				if (lastApplied.present()) {
+					Version applied = BinaryReader::fromStringRef<Version>(lastApplied.get(), Unversioned());
+					if (current < applied) {
+						TraceEvent("DBA_abort_version_upgrade").detail("src", applied).detail("dest", current);
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(applied+1, Unversioned()));
+					}
+				}
 
 				Key logsPath = uidPrefixKey(applyLogKeys.begin, logUid);
 				tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
