@@ -380,7 +380,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				Standalone<RangeResultRef> logValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
-				// Error if the log/mutation keyspace for the backup tag  is not empty
+				// Error if the log/mutation keyspace for the backup tag is not empty
 				if (logValues.size() > 0) {
 					displaySystemKeys++;
 					printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n", logValues.size(), printable(backupLogValuesKey).c_str());
