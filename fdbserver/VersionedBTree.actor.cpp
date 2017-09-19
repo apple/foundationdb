@@ -188,7 +188,8 @@ struct KeyVersionValue {
 	}
 
 	std::string toString() const {
-		return format("'%s' -> '%s' @%lld [%lld]", key.toString().c_str(), value.present() ? value.get().toString().c_str() : "<cleared>", version, valueIndex);
+		//return format("'%s' -> '%s' @%lld [%lld]", key.toString().c_str(), value.present() ? value.get().toString().c_str() : "<cleared>", version, valueIndex);
+		return format("'%s' -> %d bytes @%lld [%lld]", key.toString().c_str(), value.present() ? (int)value.get().size() : -1, version, valueIndex);
 	}
 };
 
@@ -627,7 +628,7 @@ private:
 					//                ( (page_size - map_overhead) / min_kvpairs_per_leaf ) - kvpair_overhead_est - keybytes
 					int maxPartSize = ((self->m_pageSize - 1 - 4) / 3) - 21 - iMutationBoundary->first.size();
 					ASSERT(maxPartSize > 0);
-					if(m.isClear() || m.value.size() < maxPartSize) {
+					if(m.isClear() || m.value.size() <= maxPartSize) {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
 						merged.push_back(iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack());
@@ -1399,6 +1400,7 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 		printf("VerifyRange(@%lld, %s, %s) ERROR: Tree range ended but written has @%lld '%s'\n", v, start.toString().c_str(), end.toString().c_str(), iLast->first.second, iLast->first.first.c_str());
 	}
 
+	debug_printf("VerifyRangeReverse '%s' to '%s' @%lld\n", printable(start).c_str(), printable(end).c_str(), v);
 	// Randomly use a new cursor for the revere range read
 	if(g_random->coinflip()) {
 		cur = btree->readAtVersion(v);
