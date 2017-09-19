@@ -708,14 +708,14 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("memory");
 	}
 
-	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt( 1, 6 ), 3));
+	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt( 0, 6 ), 3));
 	//replication_type = 1;  //ahm
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
 		int storage_servers = g_random->randomInt(1,5);
 		int replication_factor = g_random->randomInt(1,5);
-		int anti_quorum = g_random->randomInt(0, db.tLogReplicationFactor);
+		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d storage_quorum:=%d "
 		                  "log_replicas:=%d log_anti_quorum:=%1 "
