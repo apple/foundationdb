@@ -194,7 +194,10 @@ public:
 		int numEquivalent = 1;
 		for( auto& it : id_worker ) {
 			auto fit = it.second.processClass.machineClassFitness( ProcessClass::Master );
-			if( workerAvailable(it.second, checkStable) && !conf.isExcludedServer(it.second.interf.address()) && fit != ProcessClass::NeverAssign ) {
+			if(conf.isExcludedServer(it.second.interf.address())) {
+				fit = std::max(fit, ProcessClass::WorstFit);
+			}
+			if( workerAvailable(it.second, checkStable) && fit != ProcessClass::NeverAssign ) {
 				if( fit < bestFit ) {
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 					bestFit = fit;
@@ -803,7 +806,6 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				iMaster = newMaster.get();
 
 				db->masterRegistrationCount = 0;
-				db->config = DatabaseConfiguration();
 				db->forceMasterFailure = Promise<Void>();
 
 				auto dbInfo = ServerDBInfo( LiteralStringRef("DB") );
