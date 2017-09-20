@@ -157,8 +157,10 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1regi
 	// Here we cache a thread-local reference to jenv
 	g_thread_jenv = jenv;
 	fdb_error_t err = fdb_future_set_callback( f, &callCallback, callback );
-	if( err )
+	if( err ) {
+		jenv->DeleteGlobalRef( callback );
 		safeThrow( jenv, getThrowable( jenv, err ) );
+	}
 }
 
 JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1blockUntilReady(JNIEnv *jenv, jobject, jlong future) {
@@ -309,7 +311,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 			return JNI_NULL;
 		}
 
-		jenv->SetByteArrayRegion(lastKey, kvs[count - 1].key, kvs[count - 1].key_length, (const jbyte *)keyvalues_barr);
+		jenv->SetByteArrayRegion(lastKey, 0, kvs[count - 1].key_length, (jbyte *)kvs[count - 1].key);
 	}
 
 	jobject result = jenv->NewObject(resultCls, resultCtorId, lastKey, count, (jboolean)more);
@@ -351,12 +353,6 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
-	uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(keyValueArray, NULL); 
-	if (!keyvalues_barr) {
-		throwRuntimeEx( jenv, "Error getting handle to native resources" );
-		return JNI_NULL;
-	}
-
 	jintArray lengthArray = jenv->NewIntArray(count * 2);
 	if( !lengthArray ) {
 		if( !jenv->ExceptionOccurred() )
@@ -373,16 +369,15 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 
 	int offset = 0;
 	for(int i = 0; i < count; i++) {
-		memcpy(keyvalues_barr + offset, kvs[i].key, kvs[i].key_length);
+		jenv->SetByteArrayRegion(keyValueArray, offset, kvs[i].key_length, (jbyte *)kvs[i].key);
 		length_barr[ i * 2 ] = kvs[i].key_length;
 		offset += kvs[i].key_length;
 
-		memcpy(keyvalues_barr + offset, kvs[i].value, kvs[i].value_length);
+		jenv->SetByteArrayRegion(keyValueArray, offset, kvs[i].value_length, (jbyte *)kvs[i].value);
 		length_barr[ (i * 2) + 1 ] = kvs[i].value_length;
 		offset += kvs[i].value_length;
 	}
 
-	jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 	jenv->ReleaseIntArrayElements(lengthArray, length_barr, 0);
 
 	jobject result = jenv->NewObject(resultCls, resultCtorId, keyValueArray, lengthArray, (jboolean)more);
@@ -875,6 +870,8 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	int size = jenv->GetArrayLength( key );
 
 	FDBFuture *f = fdb_transaction_get_addresses_for_key( tr, barr, size );
+
+	jenv->ReleaseByteArrayElements( key, (jbyte *)barr, JNI_ABORT );
 	return (jlong)f;
 }
 
@@ -919,6 +916,8 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	}
 	int size = jenv->GetArrayLength( key );
 	FDBFuture *f = fdb_transaction_watch( tr, barr, size );
+
+	jenv->ReleaseByteArrayElements( key, (jbyte *)barr, JNI_ABORT );
 	return (jlong)f;
 }
 
