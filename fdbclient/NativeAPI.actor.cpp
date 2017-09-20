@@ -1345,7 +1345,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
 				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
-				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize));
+				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize, key));
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
@@ -1375,7 +1375,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				if (trLogInfo)
-					trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_GET, startTimeD, static_cast<int>(e.code())));
+					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, static_cast<int>(e.code()), key));
 				throw e;
 			}
 		}
@@ -1890,13 +1890,13 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeWrapper(Database cx, Reference<
 			int rangeSize = 0;
 			for (const KeyValueRef &res : ret.contents())
 				rangeSize += res.key.size() + res.value.size();
-			trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, latency, rangeSize));
+			trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, latency, rangeSize, begin.getKey(), end.getKey()));
 		}
 		return ret;
 	}
 	catch (Error &e) {
 		if (trLogInfo)
-			trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_GET_RANGE, startTime, static_cast<int>(e.code())));
+			trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()), begin.getKey(), end.getKey()));
 		throw;
 	}
 }
@@ -2519,7 +2519,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req->transaction.mutations.size(), req->transaction.mutations.expectedSize()));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req->transaction.mutations.size(), req->transaction.mutations.expectedSize(), req));
 					return Void();
 				} else {
 					if (info.debugID.present())
@@ -2557,7 +2557,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if (e.code() != error_code_past_version && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
 				TraceEvent(SevError, "tryCommitError").error(e);
 			if (trLogInfo)
-				trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_COMMIT, startTime, static_cast<int>(e.code())));
+				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
 			throw;
 		}
 	}
