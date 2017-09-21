@@ -319,8 +319,8 @@ private:
 	void writePage(LogicalPageID id, Reference<IPage> page, Version ver) {
 #if REDWOOD_DEBUG
 		FixedSizeMap map = FixedSizeMap::decode(StringRef(page->begin(), page->size()));
-			debug_printf_always("Writing page: id=%d ver=%lld\n%s\n", id, ver, map.toString(true, id, ver).c_str());
-			debug_printf_always("%s\n", map.toString(true, id, ver).c_str());
+			debug_printf("Writing page: id=%d ver=%lld\n%s\n", id, ver, map.toString(true, id, ver).c_str());
+			debug_printf("%s\n", map.toString(true, id, ver).c_str());
 #endif
 		m_pager->writePage(id, page, ver);
 	}
@@ -1335,7 +1335,8 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 	// Randomly use the cursor for something else first.
 	if(g_random->coinflip()) {
-		Void _ = wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKV().key, true, 0) : cur->findLastLessOrEqual(randomKV().key, true, 0));
+		state Key randomKey = randomKV().key;
+		Void _ = wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
 	}
 	Void _ = wait(cur->findFirstEqualOrGreater(start, true, 0));
 
