@@ -30,6 +30,7 @@
 #include <map>
 #include <vector>
 #include "fdbclient/CommitTransaction.h"
+#include "IKeyValueStore.h"
 
 struct SimpleFixedSizeMapRef {
 	typedef std::vector<KeyValue> KVPairsT;
@@ -259,6 +260,10 @@ public:
 		return m_pager->getLatestVersion();
 	}
 
+	Version getLastCommittedVersion() {
+		return m_lastCommittedVersion;
+	}
+
 	VersionedBTree(IPager *pager, int target_page_size = -1)
 	  : m_pager(pager),
 		m_writeVersion(invalidVersion),
@@ -270,7 +275,7 @@ public:
 			m_pageSize = target_page_size;
 	}
 
-	ACTOR static Future<Void> init(VersionedBTree *self) {
+	ACTOR static Future<Void> init_impl(VersionedBTree *self) {
 		self->m_root = 0;
 		state Version latest = wait(self->m_pager->getLatestVersion());
 		if(latest == 0) {
@@ -286,7 +291,7 @@ public:
 		return Void();
 	}
 
-	Future<Void> init() { return init(this); }
+	Future<Void> init() { return init_impl(this); }
 
 	virtual ~VersionedBTree() {
 	}
@@ -308,7 +313,6 @@ public:
 	virtual void setWriteVersion(Version v) {
 		ASSERT(v >= m_writeVersion);
 		m_writeVersion = v;
-		//m_pager->setLatestVersion(v);
 	}
 
 	virtual Future<Void> commit() {
@@ -1305,6 +1309,161 @@ private:
 
 KeyVersionValue VersionedBTree::beginKey(StringRef(), 0);
 KeyVersionValue VersionedBTree::endKey(LiteralStringRef("\xff\xff\xff\xff"), 0);
+
+class KeyValueStoreMVBTree : public IKeyValueStore {
+public:
+	KeyValueStoreMVBTree(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
+		m_pager = new IndirectShadowPager(filePrefix);
+		m_tree = new VersionedBTree(m_pager, m_pager->getUsablePageSize());
+		m_init = init_impl(this);
+		m_lastCommit = m_init;
+	}
+
+	ACTOR Future<Void> init_impl(KeyValueStoreMVBTree *self) {
+		Void _ = wait(self->m_tree->init());
+		Version v = wait(self->m_tree->getLatestVersion());
+		self->m_tree->setWriteVersion(v + 1);
+		return Void();
+	}
+
+	ACTOR Future<Void> close_impl(KeyValueStoreMVBTree *self) {
+		// TODO:  Close btree
+		Future<Void> closedFuture = self->m_pager->onClosed();
+		self->m_pager->close();
+		Void _ = wait(closedFuture);
+		self->m_closed.send(Void());
+		return Void();
+	}
+
+	virtual void close() {
+		if(!m_closing.isValid())
+			m_closing = close_impl(this);
+	}
+
+	virtual void dispose() {
+		close();
+	}
+
+	virtual Future< Void > onClosed() {
+		return m_closed.getFuture();
+	}
+
+	ACTOR static Future<Void> commit_impl(KeyValueStoreMVBTree *self) {
+		Void _ = wait(self->m_lastCommit);
+		state Promise<Void> committed;
+		self->m_lastCommit = committed.getFuture();
+		Void _ = wait(self->m_tree->commit());
+		Version v = wait(self->m_tree->getLatestVersion());
+		self->m_tree->setWriteVersion(v + 1);
+		committed.send(Void());
+		return Void();
+	}
+
+	Future<Void> commit(bool sequential = false) {
+		return m_tree->commit();
+	}
+
+	virtual KeyValueStoreType getType() {
+		return KeyValueStoreType::SSD_MVBTREE;
+	}
+
+	virtual StorageBytes getStorageBytes() {
+		return m_pager->getStorageBytes();
+	}
+
+	virtual Future< Void > getError() { return Never(); };
+
+	void clear(KeyRangeRef range, const Arena* arena = 0) {
+		m_tree->clear(range);
+	}
+
+    virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) {
+		m_tree->set(keyValue);
+	}
+
+	ACTOR static Future< Standalone< VectorRef< KeyValueRef > > > readRange_impl(KeyValueStoreMVBTree *self, KeyRangeRef keys, int rowLimit, int byteLimit) {
+		state Standalone<VectorRef<KeyValueRef>> result;
+		state int accumulatedBytes = 0;
+		ASSERT( byteLimit > 0 );
+
+		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
+		if(rowLimit >= 0) {
+			Void _ = wait(cur->findFirstEqualOrGreater(keys.begin, true, 0));
+			while(cur->isValid() && cur->getKey() < keys.end) {
+				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
+				accumulatedBytes += kv.expectedSize();
+				result.push_back(result.arena(), kv);
+				if(rowLimit-- == 0 || accumulatedBytes >= byteLimit)
+					break;
+				Void _ = wait(cur->next(true));
+			}
+		} else {
+			Void _ = wait(cur->findLastLessOrEqual(keys.end, true, 0));
+			if(cur->isValid() && cur->getKey() == keys.end)
+				Void _ = wait(cur->prev(true));
+
+			while(cur->isValid() && cur->getKey() >= keys.begin) {
+				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
+				accumulatedBytes += kv.expectedSize();
+				result.push_back(result.arena(), kv);
+				if(rowLimit-- == 0 || accumulatedBytes >= byteLimit)
+					break;
+				Void _ = wait(cur->prev(true));
+			}
+		}
+		return result;
+	}
+
+	virtual Future< Standalone< VectorRef< KeyValueRef > > > readRange(KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30) {
+		return readRange_impl(this, keys, rowLimit, byteLimit);
+	}
+
+	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreMVBTree *self, KeyRef key, Optional< UID > debugID) {
+		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
+
+		Void _ = wait(cur->findEqual(key));
+		if(cur->isValid())
+			return cur->getValue();
+		return Optional<Value>();
+	}
+
+	virtual Future< Optional< Value > > readValue(KeyRef key, Optional< UID > debugID = Optional<UID>()) {
+		return readValue_impl(this, key, debugID);
+	}
+
+	ACTOR static Future< Optional<Value> > readValuePrefix_impl(KeyValueStoreMVBTree *self, KeyRef key, int maxLength, Optional< UID > debugID) {
+		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
+
+		Void _ = wait(cur->findEqual(key));
+		if(cur->isValid()) {
+			Value v = cur->getValue();
+			int len = std::min(v.size(), maxLength);
+			return Value(cur->getValue().substr(0, len));
+		}
+		return Optional<Value>();
+	}
+
+	virtual Future< Optional< Value > > readValuePrefix(KeyRef key, int maxLength, Optional< UID > debugID = Optional<UID>()) {
+		return readValuePrefix_impl(this, key, maxLength, debugID);
+	}
+
+	virtual ~KeyValueStoreMVBTree() {
+	};
+
+private:
+	std::string m_filePrefix;
+	IPager *m_pager;
+	VersionedBTree *m_tree;
+	Future<Void> m_init;
+	Future<Void> m_closing;
+	Promise<Void> m_closed;
+	Future<Void> m_lastCommit;
+};
+
+IKeyValueStore* keyValueStoreMVBTree( std::string const& filename, UID logID) {
+	return new KeyValueStoreMVBTree(filename, logID);
+}
+
 
 KeyValue randomKV(int keySize = 10, int valueSize = 5) {
 	int kLen = g_random->randomInt(1, keySize);

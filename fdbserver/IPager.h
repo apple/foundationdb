@@ -79,6 +79,8 @@ public:
 	// For a given pager instance, separate calls to this function must return the same value.
 	virtual int getUsablePageSize() = 0;
 	
+	virtual StorageBytes getStorageBytes() = 0;
+
 	// Permitted to fail (ASSERT) during recovery.
 	virtual Reference<IPagerSnapshot> getReadSnapshot(Version version) = 0;
 

@@ -288,6 +288,13 @@ IndirectShadowPager::IndirectShadowPager(std::string basename)
 	housekeeping = forwardError(housekeeper(this), errorPromise);
 }
 
+StorageBytes IndirectShadowPager::getStorageBytes() {
+	int64_t free;
+	int64_t total;
+	g_network->getDiskBytes(parentDirectory(basename), free, total);
+	return StorageBytes(free, total, pagerFile.size(), free + IndirectShadowPage::PAGE_BYTES * pagerFile.getFreePages());
+}
+
 Reference<IPage> IndirectShadowPager::newPageBuffer() {
 	return Reference<IPage>(new IndirectShadowPage());
 }
@@ -793,6 +800,10 @@ uint64_t PagerFile::size() {
 
 uint32_t PagerFile::getPagesAllocated() {
 	return pagesAllocated;
+}
+
+uint32_t PagerFile::getFreePages() {
+	return freePages.size();
 }
 
 void PagerFile::init(uint64_t fileSize, uint32_t pagesAllocated) {

@@ -93,6 +93,11 @@ public:
 	virtual void forgetVersions(Version begin, Version end);
 	virtual Future<Void> commit();
 
+	virtual StorageBytes getStorageBytes() {
+		// TODO:  Get actual values for used and free memory
+		return StorageBytes();
+	}
+
 	virtual void setLatestVersion(Version version);
 	virtual Future<Version> getLatestVersion();	
 	

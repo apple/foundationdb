@@ -104,6 +104,7 @@ public:
 
 	uint64_t size();
 	uint32_t getPagesAllocated();
+	uint32_t getFreePages();
 
 	void init(uint64_t fileSize, uint32_t pagesAllocated);
 	void startVacuuming();
@@ -144,7 +145,9 @@ public:
 
 	virtual void setLatestVersion(Version version);
 	virtual Future<Version> getLatestVersion();	
-	
+
+	virtual StorageBytes getStorageBytes();
+
 	virtual Future<Void> getError();
 	virtual Future<Void> onClosed();
 	virtual void dispose();
