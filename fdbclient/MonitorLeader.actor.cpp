@@ -306,16 +306,14 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 	getLeader.makeWellKnownEndpoint( WLTOKEN_CLIENTLEADERREG_GETLEADER, TaskCoordination );
 }
 
-ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees, int index ) {
+ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info ) {
 	loop {
-		auto const& nom = nominees->get()[index];
-		Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, nom.present() ? nom.get().changeID : UID() ), TaskCoordinationReply ) );
+		Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
 		TraceEvent("GetLeaderReply").detail("Coordinator", coord.getLeader.getEndpoint().address).detail("Nominee", li.present() ? li.get().changeID : UID());
 
-		if (li != nominees->get()[index]) {
-			vector<Optional<LeaderInfo>> v = nominees->get();
-			v[index] = li;
-			nominees->set(v);
+		if (li != *info) {
+			*info = li;
+			nomineeChange->trigger();
 
 			if( li.present() && li.get().forward )
 				Void _ = wait( Future<Void>(Never()) );
@@ -345,22 +343,22 @@ Optional<LeaderInfo> getLeader( vector<Optional<LeaderInfo>> nominees ) {
 }
 
 ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Value>> outSerializedLeaderInfo ) {
-	state ActorCollection ac(false);
 	state Reference<ClusterConnectionFile> intermediateConnFile = connFile;
 	state bool hasConnected = false;
 
 	loop {
-		ac.clear(false);
 		state ClientCoordinators coordinators( intermediateConnFile );
-		state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees( new AsyncVar<vector<Optional<LeaderInfo>>>() );
+		state AsyncTrigger nomineeChange;
 
-		nominees->set( vector<Optional<LeaderInfo>>( coordinators.clientLeaderServers.size() ) );
-
+		std::vector<Future<Void>> actors;
+		state Future<Void> allActors;
+		state std::vector<Optional<LeaderInfo>> nominees;
+		nominees.resize(coordinators.clientLeaderServers.size());
 		for(int i=0; i<coordinators.clientLeaderServers.size(); i++)
-			ac.add( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], nominees, i ) );
-
+			actors.push_back( monitorNominee( coordinators.clusterKey, coordinators.clientLeaderServers[i], &nomineeChange, &nominees[i] ) );
+		allActors = waitForAll(actors);
 		loop {
-			state Optional<LeaderInfo> leader = getLeader(nominees->get());
+			state Optional<LeaderInfo> leader = getLeader(nominees);
 			TraceEvent("MonitorLeaderChange").detail("NewLeader", leader.present() ? leader.get().changeID : UID());
 			if (leader.present()) {
 				if( leader.get().forward ) {
@@ -386,7 +384,7 @@ ACTOR Future<Void> monitorLeaderInternal( Reference<ClusterConnectionFile> connF
 			//else
 			//	outSerializedLeaderInfo->set( Value() );  // or keep talking to the last known leader??
 
-			Void _ = wait( nominees->onChange() || ac.getResult() );
+			Void _ = wait( nomineeChange.onTrigger() || allActors );
 		}
 	}
 }
