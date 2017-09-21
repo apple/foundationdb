@@ -118,23 +118,47 @@ public:
 		return tag(f,length);
 	}
 
-	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
-		++countFileCacheWrites;
-		++countCacheWrites;
-		auto f = read_write_impl(this, const_cast<void*>(data), length, offset, true);
+	ACTOR static Future<Void> write_impl( AsyncFileCached *self, void const* data, int length, int64_t offset ) {
+		// If there is a truncate in progress before the the write position then we must 
+		// wait for it to complete.
+		if(length + offset > self->currentTruncateSize)
+			Void _ = wait(self->currentTruncate);
+		++self->countFileCacheWrites;
+		++self->countCacheWrites;
+		Future<Void> f = read_write_impl(self, const_cast<void*>(data), length, offset, true);
 		if (!f.isReady()) {
-			++countFileCacheWritesBlocked;
-			++countCacheWritesBlocked;
+			++self->countFileCacheWritesBlocked;
+			++self->countCacheWritesBlocked;
 		}
-		return f;
+		Void r = wait(f);
+		return r;
+	}
+
+	virtual Future<Void> write( void const* data, int length, int64_t offset ) {
+		return write_impl(this, data, length, offset);
 	}
 
 	virtual Future<Void> readZeroCopy( void** data, int* length, int64_t offset );
 	virtual void releaseZeroCopy( void* data, int length, int64_t offset );
 
-	virtual Future<Void> truncate( int64_t size );
+	Future<Void> truncate_impl( int64_t size );
 
-	ACTOR Future<Void> truncate_impl( AsyncFileCached* self, int64_t size, Future<Void> truncates ) {
+	// Enforces ordering of truncates and maintains currentTruncate and currentTruncateSize
+	// so writers can wait behind truncates that would affect them.
+	ACTOR static Future<Void> wait_then_truncate(AsyncFileCached *self, int64_t size) {
+		Void _ = wait(self->currentTruncate);
+		self->currentTruncateSize = size;
+		self->currentTruncate = self->truncate_impl(size);
+		Void _ = wait(self->currentTruncate);
+		return Void();
+	}
+
+	virtual Future<Void> truncate( int64_t size ) {
+		return wait_then_truncate(this, size);
+	}
+
+
+	ACTOR Future<Void> truncate_underlying( AsyncFileCached* self, int64_t size, Future<Void> truncates ) {
 		Void _ = wait( truncates );
 		Void _ = wait( self->uncached->truncate( size ) );
 		return Void();
@@ -186,6 +210,8 @@ private:
 	std::unordered_map<int64_t, AFCPage*> pages;
 	std::vector<AFCPage*> flushable;
 	Reference<EvictablePageCache> pageCache;
+	Future<Void> currentTruncate;
+	int64_t currentTruncateSize;
 
 	Int64MetricHandle countFileCacheFinds;
 	Int64MetricHandle countFileCacheReads;
@@ -204,7 +230,7 @@ private:
 	Int64MetricHandle countCacheReadBytes;
 
 	AsyncFileCached( Reference<IAsyncFile> uncached, const std::string& filename, int64_t length, Reference<EvictablePageCache> pageCache ) 
-		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache) {
+		: uncached(uncached), filename(filename), length(length), prevLength(length), pageCache(pageCache), currentTruncate(Void()), currentTruncateSize(0) {
 		if( !g_network->isSimulated() ) {
 			countFileCacheWrites.init(         LiteralStringRef("AsyncFile.CountFileCacheWrites"), filename);
 			countFileCacheReads.init(          LiteralStringRef("AsyncFile.CountFileCacheReads"), filename);
@@ -260,8 +286,6 @@ private:
 	}
 
 	static Future<Void> read_write_impl( AsyncFileCached* self, void* data, int length, int64_t offset, bool writing );
-
-	static Future<Void> truncate_impl( AsyncFileCached* self, int64_t size );
 
 	void remove_page( AFCPage* page );
 };

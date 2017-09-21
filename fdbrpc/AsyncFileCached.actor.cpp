@@ -146,7 +146,7 @@ void AsyncFileCached::releaseZeroCopy( void* data, int length, int64_t offset ) 
 	p->second->releaseZeroCopy();
 }
 
-Future<Void> AsyncFileCached::truncate( int64_t size ) {
+Future<Void> AsyncFileCached::truncate_impl( int64_t size ) {
 	++countFileCacheWrites;
 	++countCacheWrites;
 
@@ -196,7 +196,7 @@ Future<Void> AsyncFileCached::truncate( int64_t size ) {
 			++p;
 	}
 
-	return truncate_impl( this, size, waitForAll( actors ) );
+	return truncate_underlying( this, size, waitForAll( actors ) );
 }
 
 Future<Void> AsyncFileCached::flush() {
