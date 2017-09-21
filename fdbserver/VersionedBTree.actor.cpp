@@ -52,14 +52,12 @@ struct SimpleFixedSizeMapRef {
 					- entries.begin() - 1;
 	}
 
-	template<typename Allocator>
-	static Reference<IPage> emptyPage(uint8_t newFlags, Allocator const &newPageFn) {
-		Reference<IPage> page = newPageFn();
+	static void writeEmptyPage(Reference<IPage> page, uint8_t newFlags, int pageSize) {
 		BinaryWriter bw(AssumeVersion(currentProtocolVersion));
 		bw << newFlags;
 		bw << KVPairsT();
+		ASSERT(bw.getLength() <= pageSize);
 		memcpy(page->mutate(), bw.getData(), bw.getLength());
-		return page;
 	}
 
 	// Returns a vector of pairs of lower boundary key indices within kvPairs and encoded pages.
@@ -276,9 +274,10 @@ public:
 		self->m_root = 0;
 		state Version latest = wait(self->m_pager->getLatestVersion());
 		if(latest == 0) {
-			IPager *pager = self->m_pager;
 			++latest;
-			self->writePage(self->m_root, FixedSizeMap::emptyPage(EPageFlags::IS_LEAF, [pager](){ return pager->newPageBuffer(); }), latest);
+			Reference<IPage> page = self->m_pager->newPageBuffer();
+			FixedSizeMap::writeEmptyPage(page, EPageFlags::IS_LEAF, self->m_pageSize);
+			self->writePage(self->m_root, page, latest);
 			self->m_pager->setLatestVersion(latest);
 			Void _ = wait(self->m_pager->commit());
 		}
@@ -318,8 +317,11 @@ public:
 
 private:
 	void writePage(LogicalPageID id, Reference<IPage> page, Version ver) {
+#if REDWOOD_DEBUG
 		FixedSizeMap map = FixedSizeMap::decode(StringRef(page->begin(), page->size()));
-		debug_printf("Writing page: id=%d ver=%lld\n%s\n", id, ver, map.toString(true, id, ver).c_str());
+			debug_printf_always("Writing page: id=%d ver=%lld\n%s\n", id, ver, map.toString(true, id, ver).c_str());
+			debug_printf_always("%s\n", map.toString(true, id, ver).c_str());
+#endif
 		m_pager->writePage(id, page, ver);
 	}
 
