@@ -401,7 +401,7 @@ void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> conte
 	}
 
 	logPageTableUpdate(pageID, updateVersion, physicalPageID);
-	Future<Void> write = dataFile->write(contents->begin(), IndirectShadowPage::PAGE_BYTES, physicalPageID * IndirectShadowPage::PAGE_BYTES);
+	Future<Void> write = holdWhile(contents, dataFile->write(contents->begin(), IndirectShadowPage::PAGE_BYTES, physicalPageID * IndirectShadowPage::PAGE_BYTES));
 
 	if(write.isError()) {
 		if(errorPromise.canBeSet()) {
