@@ -971,22 +971,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			return valid;
 		};
 
-		// Step 1:  Check that there aren't already enough locked TLogs.
-		// This isn't needed for correctness, but prevents us from doing a lot of unnecessary work below.
-		// TODO: Once toolchain supports C++17, use std::not_fn().
-		auto not_locking_completed = [&locking_completed](int index) { return !locking_completed(index); };
-		if (!can_obtain_quorum(not_locking_completed)) {
-			TraceEvent(SevInfo, "MasterRecoveryTLogLockingAlreadySucceeded", dbgid);
-			return;
-		}
-
-		// Step 2: Verify that if all the failed TLogs come back, they can't form a quorum.
+		// Step 1: Verify that if all the failed TLogs come back, they can't form a quorum.
 		if (can_obtain_quorum(locking_failed)) {
 			TraceEvent(SevInfo, "MasterRecoveryTLogLockingImpossible", dbgid);
 			return;
 		}
 
-		// Step 3: It's possible for us to succeed, but we need to lock additional logs.
+		// Step 2: It's possible for us to succeed, but we need to lock additional logs.
 		//
 		// First, we need an accurate picture of what TLogs we're capable of locking. We can't tell the
 		// difference between a temporarily failed TLog and a permanently failed TLog. Thus, we assume
