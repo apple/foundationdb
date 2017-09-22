@@ -341,6 +341,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
+    Void _ = wait( quorum( alive, std::min(self->tLogReplicationFactor, (int)alive.size() - self->tLogWriteAntiQuorum) ) );
+
 		loop {
 			LocalityGroup locked;
 			std::vector<LocalityData> unlocked, unused;
@@ -963,7 +965,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 			bool valid = filter_true.validate(prevState.tLogPolicy);
-			if (!valid && prevState.tLogWriteAntiQuorum > 0) {
+			if (!valid && prevState.tLogWriteAntiQuorum > 0 && false /* TODO(alexmiller) */ ) {
 				valid = !validateAllCombinations(unused, filter_true, prevState.tLogPolicy, filter_false, prevState.tLogWriteAntiQuorum, false);
 			}
 			return valid;
@@ -1053,7 +1055,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
-		if (prevState.tLogReplicationFactor - prevState.tLogWriteAntiQuorum == 1) {
+		if (prevState.tLogReplicationFactor /* - prevState.tLogWriteAntiQuorum*/ == 1) {
 			ASSERT(can_omit == 0);
 		}
 		// Our previous check of making sure there aren't too many failed logs should have prevented this.
