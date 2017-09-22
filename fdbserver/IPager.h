@@ -37,6 +37,7 @@
   #define debug_printf(...)
 #endif
 
+#define BEACON fprintf(stderr, "%s: %s line %d \n", __FUNCTION__, __FILE__, __LINE__)
 
 typedef uint32_t LogicalPageID; // uint64_t?
 

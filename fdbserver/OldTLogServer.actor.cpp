@@ -950,7 +950,8 @@ namespace oldTLog {
 
 	ACTOR Future<Void> initPersistentState( TLogData* self ) {
 		// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
-		IKeyValueStore *storage = self->persistentData;
+		state IKeyValueStore *storage = self->persistentData;
+		Void _ = wait(storage->init());
 		storage->set( persistFormat );
 		storage->set( KeyValueRef( persistID, BinaryWriter::toValue( self->dbgid, Unversioned() ) ) );
 		storage->set( KeyValueRef( persistCurrentVersionKey, BinaryWriter::toValue(self->version.get(), Unversioned()) ) );
@@ -964,7 +965,8 @@ namespace oldTLog {
 	ACTOR Future<Void> restorePersistentState( TLogData* self, Promise<DBRecoveryCount> outRecoveryCount, bool processQueue, TLogInterface myInterface ) {
 		state double startt = now();
 		// PERSIST: Read basic state from persistentData; replay persistentQueue but don't erase it
-		IKeyValueStore *storage = self->persistentData;
+		state IKeyValueStore *storage = self->persistentData;
+		Void _ = wait(storage->init());
 
 		TraceEvent("TLogRestorePersistentState", self->dbgid).detail("pq", processQueue);
 

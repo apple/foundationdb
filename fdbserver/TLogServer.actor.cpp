@@ -1089,7 +1089,8 @@ ACTOR Future<Void> tLogCommit(
 
 ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logData ) {
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
-	IKeyValueStore *storage = self->persistentData;
+	state IKeyValueStore *storage = self->persistentData;
+	Void _ = wait(storage->init());
 	storage->set( persistFormat );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(logData->version.get(), Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistRecoveryCountKeys.begin), BinaryWriter::toValue(logData->recoveryCount, Unversioned()) ) );
@@ -1292,7 +1293,8 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 	TraceEvent("TLogRestorePersistentState", self->dbgid);
 
-	IKeyValueStore *storage = self->persistentData;
+	state IKeyValueStore *storage = self->persistentData;
+	Void _ = wait(storage->init());
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fVers = storage->readRange(persistCurrentVersionKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);

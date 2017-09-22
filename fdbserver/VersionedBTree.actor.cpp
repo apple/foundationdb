@@ -1310,23 +1310,27 @@ private:
 KeyVersionValue VersionedBTree::beginKey(StringRef(), 0);
 KeyVersionValue VersionedBTree::endKey(LiteralStringRef("\xff\xff\xff\xff"), 0);
 
-class KeyValueStoreMVBTree : public IKeyValueStore {
+class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
-	KeyValueStoreMVBTree(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
+	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
 		m_pager = new IndirectShadowPager(filePrefix);
 		m_tree = new VersionedBTree(m_pager, m_pager->getUsablePageSize());
 		m_init = init_impl(this);
 		m_lastCommit = m_init;
 	}
 
-	ACTOR Future<Void> init_impl(KeyValueStoreMVBTree *self) {
+	virtual Future<Void> init() {
+		return m_init;
+	}
+
+	ACTOR Future<Void> init_impl(KeyValueStoreRedwoodUnversioned *self) {
 		Void _ = wait(self->m_tree->init());
 		Version v = wait(self->m_tree->getLatestVersion());
 		self->m_tree->setWriteVersion(v + 1);
 		return Void();
 	}
 
-	ACTOR Future<Void> close_impl(KeyValueStoreMVBTree *self) {
+	ACTOR Future<Void> close_impl(KeyValueStoreRedwoodUnversioned *self) {
 		// TODO:  Close btree
 		Future<Void> closedFuture = self->m_pager->onClosed();
 		self->m_pager->close();
@@ -1348,7 +1352,7 @@ public:
 		return m_closed.getFuture();
 	}
 
-	ACTOR static Future<Void> commit_impl(KeyValueStoreMVBTree *self) {
+	ACTOR static Future<Void> commit_impl(KeyValueStoreRedwoodUnversioned *self) {
 		Void _ = wait(self->m_lastCommit);
 		state Promise<Void> committed;
 		self->m_lastCommit = committed.getFuture();
@@ -1360,11 +1364,11 @@ public:
 	}
 
 	Future<Void> commit(bool sequential = false) {
-		return m_tree->commit();
+		return commit_impl(this);
 	}
 
 	virtual KeyValueStoreType getType() {
-		return KeyValueStoreType::SSD_MVBTREE;
+		return KeyValueStoreType::SSD_REDWOOD_V1;
 	}
 
 	virtual StorageBytes getStorageBytes() {
@@ -1381,7 +1385,8 @@ public:
 		m_tree->set(keyValue);
 	}
 
-	ACTOR static Future< Standalone< VectorRef< KeyValueRef > > > readRange_impl(KeyValueStoreMVBTree *self, KeyRangeRef keys, int rowLimit, int byteLimit) {
+	ACTOR static Future< Standalone< VectorRef< KeyValueRef > > > readRange_impl(KeyValueStoreRedwoodUnversioned *self, KeyRangeRef keys, int rowLimit, int byteLimit) {
+		Void _ = wait(self->m_init);
 		state Standalone<VectorRef<KeyValueRef>> result;
 		state int accumulatedBytes = 0;
 		ASSERT( byteLimit > 0 );
@@ -1418,7 +1423,8 @@ public:
 		return readRange_impl(this, keys, rowLimit, byteLimit);
 	}
 
-	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreMVBTree *self, KeyRef key, Optional< UID > debugID) {
+	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreRedwoodUnversioned *self, KeyRef key, Optional< UID > debugID) {
+		Void _ = wait(self->m_init);
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
 		Void _ = wait(cur->findEqual(key));
@@ -1431,7 +1437,8 @@ public:
 		return readValue_impl(this, key, debugID);
 	}
 
-	ACTOR static Future< Optional<Value> > readValuePrefix_impl(KeyValueStoreMVBTree *self, KeyRef key, int maxLength, Optional< UID > debugID) {
+	ACTOR static Future< Optional<Value> > readValuePrefix_impl(KeyValueStoreRedwoodUnversioned *self, KeyRef key, int maxLength, Optional< UID > debugID) {
+		Void _ = wait(self->m_init);
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
 
 		Void _ = wait(cur->findEqual(key));
@@ -1447,7 +1454,7 @@ public:
 		return readValuePrefix_impl(this, key, maxLength, debugID);
 	}
 
-	virtual ~KeyValueStoreMVBTree() {
+	virtual ~KeyValueStoreRedwoodUnversioned() {
 	};
 
 private:
@@ -1460,8 +1467,8 @@ private:
 	Future<Void> m_lastCommit;
 };
 
-IKeyValueStore* keyValueStoreMVBTree( std::string const& filename, UID logID) {
-	return new KeyValueStoreMVBTree(filename, logID);
+IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID) {
+	return new KeyValueStoreRedwoodUnversioned(filename, logID);
 }
 
 
@@ -1611,9 +1618,10 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 TEST_CASE("/redwood/correctness") {
 	state bool useDisk = true;
 
+	state std::string pagerFile = "testPager";
 	state IPager *pager;
 	if(useDisk)
-		pager = new IndirectShadowPager("pagerfile");
+		pager = new IndirectShadowPager(pagerFile);
 	else
 		pager = createMemoryPager();
 
@@ -1696,7 +1704,7 @@ TEST_CASE("/redwood/correctness") {
 			pager->close();
 			Void _ = wait(closedFuture);
 
-			pager = new IndirectShadowPager("pagerfile");
+			pager = new IndirectShadowPager(pagerFile);
 
 			btree = new VersionedBTree(pager, pageSize);
 			Void _ = wait(btree->init());

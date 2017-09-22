@@ -68,7 +68,7 @@ T bigEndian(T val) {
 ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 	try {
 		TraceEvent("PagerRecovering").detail("Basename", pager->basename);
-		pager->pageTableLog = openKVStore(KeyValueStoreType::MEMORY, pager->basename, UID(), 1e9);
+		pager->pageTableLog = keyValueStoreMemory(pager->basename, UID(), 1e9, "pagerlog");
 
 		// TODO: this can be done synchronously with the log recovery
 		int64_t flags = IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK;

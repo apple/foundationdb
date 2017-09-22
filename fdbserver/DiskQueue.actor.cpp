@@ -111,8 +111,8 @@ private:
 
 class RawDiskQueue_TwoFiles {
 public:
-	RawDiskQueue_TwoFiles( std::string basename, UID dbgid )
-		: basename(basename), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
+	RawDiskQueue_TwoFiles( std::string basename, std::string fileExtension, UID dbgid )
+		: basename(basename), fileExtension(fileExtension), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
 		readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
 		dbg_file0BeginSeq(0), fileExtensionBytes(10<<20), readingBuffer( dbgid ),
 		readyToPush(Void())
@@ -180,7 +180,8 @@ public:
 	File files[2];  // After readFirstAndLastPages(), files[0] is logically before files[1] (pushes are always into files[1])
 
 	std::string basename;
-	std::string filename(int i) const { return basename + format("%d.fdq", i); }
+	std::string fileExtension;
+	std::string filename(int i) const { return basename + format("%d.%s", i, fileExtension.c_str()); }
 
 	UID dbgid;
 	int64_t dbg_file0BeginSeq;
@@ -636,8 +637,8 @@ public:
 
 class DiskQueue : public IDiskQueue {
 public:
-	DiskQueue( std::string basename, UID dbgid )
-		: rawQueue( new RawDiskQueue_TwoFiles(basename, dbgid) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
+	DiskQueue( std::string basename, std::string fileExtension, UID dbgid )
+		: rawQueue( new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
 		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), lastCommittedSeq(0), warnAlwaysForMemory(true)
 	{
 	}
@@ -1029,7 +1030,7 @@ private:
 class DiskQueue_PopUncommitted : public IDiskQueue {
 
 public:
-	DiskQueue_PopUncommitted( std::string basename, UID dbgid ) : queue(new DiskQueue(basename, dbgid)), pushed(0), popped(0), committed(0) { };
+	DiskQueue_PopUncommitted( std::string basename, std::string fileExtension, UID dbgid ) : queue(new DiskQueue(basename, fileExtension, dbgid)), pushed(0), popped(0), committed(0) { };
 
 	//IClosable
 	Future<Void> getError() { return queue->getError(); }
@@ -1097,6 +1098,6 @@ private:
 	}
 };
 
-IDiskQueue* openDiskQueue( std::string basename, UID dbgid ) {
-	return new DiskQueue_PopUncommitted( basename, dbgid );
+IDiskQueue* openDiskQueue( std::string basename,  std::string ext, UID dbgid) {
+	return new DiskQueue_PopUncommitted( basename, ext, dbgid);
 }

@@ -175,9 +175,12 @@ ACTOR Future<Void> loadedPonger( FutureStream<LoadedPingRequest> pings ) {
 StringRef fileStoragePrefix = LiteralStringRef("storage-");
 StringRef fileLogDataPrefix = LiteralStringRef("log-");
 StringRef fileLogQueuePrefix = LiteralStringRef("logqueue-");
+StringRef tlogQueueExtension = LiteralStringRef("fdq");
+
 std::pair<KeyValueStoreType, std::string> bTreeV1Suffix  = std::make_pair( KeyValueStoreType::SSD_BTREE_V1, ".fdb" );
 std::pair<KeyValueStoreType, std::string> bTreeV2Suffix = std::make_pair(KeyValueStoreType::SSD_BTREE_V2,   ".sqlite");
 std::pair<KeyValueStoreType, std::string> memorySuffix = std::make_pair( KeyValueStoreType::MEMORY,         "-0.fdq" );
+std::pair<KeyValueStoreType, std::string> redwoodSuffix = std::make_pair( KeyValueStoreType::SSD_REDWOOD_V1,   ".redwood" );
 
 std::string validationFilename = "_validate";
 
@@ -188,7 +191,9 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 		return joinPath(folder, sample_filename);
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
-
+	
+	else if ( storeType == KeyValueStoreType::SSD_REDWOOD_V1 )
+		return joinPath(folder, sample_filename);
 	UNREACHABLE();
 }
 
@@ -199,6 +204,8 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 		return joinPath(folder, prefix + id.toString() + ".sqlite");
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, prefix + id.toString() + "-" );
+	else if (storeType == KeyValueStoreType::SSD_REDWOOD_V1)
+		return joinPath(folder, prefix + id.toString() + ".redwood");
 
 	UNREACHABLE();
 }
@@ -245,6 +252,8 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	result.insert( result.end(), result1.begin(), result1.end() );
 	auto result2 = getDiskStores( folder, memorySuffix.second, memorySuffix.first );
 	result.insert( result.end(), result2.begin(), result2.end() );
+	auto result3 = getDiskStores( folder, redwoodSuffix.second, redwoodSuffix.first);
+	result.insert( result.end(), result3.begin(), result3.end() );
 	return result;
 }
 
@@ -591,7 +600,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 			} else if( s.storedComponent == DiskStore::TLogData ) {
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				IDiskQueue* queue = openDiskQueue(
-					joinPath( folder, fileLogQueuePrefix.toString() + s.storeID.toString() + "-" ), s.storeID );
+					joinPath( folder, fileLogQueuePrefix.toString() + s.storeID.toString() + "-"), tlogQueueExtension.toString(), s.storeID);
 				filesClosed.add( kv->onClosed() );
 				filesClosed.add( queue->onClosed() );
 
@@ -669,7 +678,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 					std::string filename = filenameFromId( req.storeType, folder, fileLogDataPrefix.toString(), logId );
 					IKeyValueStore* data = openKVStore( req.storeType, filename, logId, memoryLimit );
-					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + logId.toString() + "-" ), logId );
+					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + logId.toString() + "-" ), tlogQueueExtension.toString(), logId );
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
 					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>() );
@@ -794,6 +803,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 						}
 						else if (d.storeType == KeyValueStoreType::SSD_BTREE_V2) {
 							included = fileExists(d.filename + ".sqlite-wal");
+						}
+						else if (d.storeType == KeyValueStoreType::SSD_REDWOOD_V1) {
+							included = fileExists(d.filename + "0.pagerlog") && fileExists(d.filename + "1.pagerlog");
 						}
 						else {
 							ASSERT(d.storeType == KeyValueStoreType::MEMORY);

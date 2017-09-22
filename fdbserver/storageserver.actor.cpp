@@ -156,6 +156,7 @@ struct StorageServerDisk {
 	void writeKeyValue( KeyValueRef kv );
 	void clearRange( KeyRangeRef keys );
 
+	Future<Void> init() { return storage->init(); }
 	Future<Void> commit() { return storage->commit(); }
 
 	// SOMEDAY: Put readNextKeyInclusive in IKeyValueStore
@@ -3164,6 +3165,7 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	self.folder = folder;
 
 	try {
+		Void _ = wait( self.storage.init() );
 		self.storage.makeNewStorageServerDurable();
 		Void _ = wait( self.storage.commit() );
 
