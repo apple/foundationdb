@@ -331,17 +331,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	ACTOR static Future<Void> confirmEpochLive_internal(TagPartitionedLogSystem* self, Optional<UID> debugID) {
 		state vector<Future<Void>> alive;
+		int numPresent = 0;
 		for(auto& t : self->logServers) {
 			if( t->get().present() ) {
 				alive.push_back( brokenPromiseToNever(
 				    t->get().interf().confirmRunning.getReply( TLogConfirmRunningRequest(debugID),
 				                                               TaskTLogConfirmRunningReply ) ) );
+				numPresent++;
 			} else {
 				alive.push_back( Never() );
 			}
 		}
 
-    Void _ = wait( quorum( alive, std::min(self->tLogReplicationFactor, (int)alive.size() - self->tLogWriteAntiQuorum) ) );
+		Void _ = wait( quorum( alive, std::min(self->tLogReplicationFactor, numPresent - self->tLogWriteAntiQuorum) ) );
 
 		loop {
 			LocalityGroup locked;
@@ -965,7 +967,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 			bool valid = filter_true.validate(prevState.tLogPolicy);
-			if (!valid && prevState.tLogWriteAntiQuorum > 0 && false /* TODO(alexmiller) */ ) {
+			if (!valid && prevState.tLogWriteAntiQuorum > 0 ) {
 				valid = !validateAllCombinations(unused, filter_true, prevState.tLogPolicy, filter_false, prevState.tLogWriteAntiQuorum, false);
 			}
 			return valid;
@@ -1046,7 +1048,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
-		if (prevState.tLogReplicationFactor /* - prevState.tLogWriteAntiQuorum*/ == 1) {
+		if (prevState.tLogReplicationFactor - prevState.tLogWriteAntiQuorum == 1) {
 			ASSERT(can_omit == 0);
 		}
 		// Our previous check of making sure there aren't too many failed logs should have prevented this.
