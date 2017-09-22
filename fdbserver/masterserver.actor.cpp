@@ -77,6 +77,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
+	bool hasConfiguration;
 
 	ServerCoordinators coordinators;
 
@@ -138,7 +139,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  version(invalidVersion),
 		  lastVersionTime(0),
 		  txnStateStore(0),
-		  memoryLimit(2e9)
+		  memoryLimit(2e9),
+		  hasConfiguration(false)
 	{
 	}
 	~MasterData() { if(txnStateStore) txnStateStore->close(); }
@@ -357,7 +359,7 @@ Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& lo
 	masterReq.proxies = proxies;
 	masterReq.resolvers = resolvers;
 	masterReq.recoveryCount = recoveryCount;
-	masterReq.configuration = self->configuration;
+	if(self->hasConfiguration) masterReq.configuration = self->configuration;
 	masterReq.registrationCount = ++self->registrationCount;
 	masterReq.priorCommittedLogServers = priorCommittedLogServers;
 	masterReq.recoveryState = self->recoveryState;
@@ -540,6 +542,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	Standalone<VectorRef<KeyValueRef>> rawConf = wait( self->txnStateStore->readRange( configKeys ) );
 	self->configuration.fromKeyValues( rawConf );
 	self->originalConfiguration = self->configuration;
+	self->hasConfiguration = true;
 	TraceEvent("MasterRecoveredConfig", self->dbgid).detail("conf", self->configuration.toString()).trackLatest("RecoveredConfig");
 
 	//auto kvs = self->txnStateStore->readRange( systemKeys );
@@ -627,6 +630,7 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 		.detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
 		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+	self->hasConfiguration = false;
 
 	if(BUGGIFY)
 		Void _ = wait( delay(10.0) );

@@ -1265,7 +1265,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
-	db->config = req.configuration;
+	if(req.configuration.present()) db->config = req.configuration.get();
 
 	bool isChanged = false;
 	auto dbInfo = self->db.serverInfo->get();

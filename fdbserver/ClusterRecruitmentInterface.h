@@ -152,7 +152,7 @@ struct RegisterMasterRequest {
 	vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
-	DatabaseConfiguration configuration;
+	Optional<DatabaseConfiguration> configuration;
 	vector<UID> priorCommittedLogServers;
 	int recoveryState;
 	
