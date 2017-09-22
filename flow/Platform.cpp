@@ -1542,12 +1542,12 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	INJECT_FAULT( io_error, "renameFile" );
 #ifdef _WIN32
 	if (MoveFile( fromPath.c_str(), toPath.c_str() )) {
-		renamedFile();
+		//renamedFile();
 		return;
 	}
 #elif (defined(__linux__) || defined(__APPLE__))
 	if (!rename( fromPath.c_str(), toPath.c_str() )) {
-		renamedFile();
+		//renamedFile();
 		return;
 	}
 #else
