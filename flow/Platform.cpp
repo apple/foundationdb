@@ -1547,6 +1547,7 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	}
 #elif (defined(__linux__) || defined(__APPLE__))
 	if (!rename( fromPath.c_str(), toPath.c_str() )) {
+		//FIXME: We cannot inject faults after renaming the file, because we could end up with two asyncFileNonDurable open for the same file
 		//renamedFile();
 		return;
 	}
