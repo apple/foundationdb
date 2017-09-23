@@ -218,8 +218,6 @@ public:
 	// A write is considered part of (a change leading to) the version determined by the previous call to setWriteVersion()
 	// A write shall not become durable until the following call to commit() begins, and shall be durable once the following call to commit() returns
 	virtual void set(KeyValueRef keyValue) {
-		ASSERT(m_writeVersion != invalidVersion);
-
 		SingleKeyMutationsByVersion &changes = insertMutationBoundary(keyValue.key)->second.startKeyMutations;
 
 		// Add the set if the changes set is empty or the last entry isn't a set to exactly the same value
@@ -228,8 +226,6 @@ public:
 		}
 	}
 	virtual void clear(KeyRangeRef range) {
-		ASSERT(m_writeVersion != invalidVersion);
-
 		MutationBufferT::iterator iBegin = insertMutationBoundary(range.begin);
 		MutationBufferT::iterator iEnd = insertMutationBoundary(range.end);
 
@@ -260,6 +256,10 @@ public:
 		return m_pager->getLatestVersion();
 	}
 
+	Version getWriteVersion() {
+		return m_writeVersion;
+	}
+
 	Version getLastCommittedVersion() {
 		return m_lastCommittedVersion;
 	}
@@ -268,11 +268,13 @@ public:
 	  : m_pager(pager),
 		m_writeVersion(invalidVersion),
 		m_pageSize(pager->getUsablePageSize()),
-		m_lastCommittedVersion(invalidVersion)
+		m_lastCommittedVersion(invalidVersion),
+		m_pBuffer(nullptr),
+		m_latestCommit(Void())
 	{
-
 		if(target_page_size > 0 && target_page_size < m_pageSize)
 			m_pageSize = target_page_size;
+		m_init = init_impl(this);
 	}
 
 	ACTOR static Future<Void> init_impl(VersionedBTree *self) {
@@ -287,11 +289,10 @@ public:
 			Void _ = wait(self->m_pager->commit());
 		}
 		self->m_lastCommittedVersion = latest;
-		self->initMutationBuffer();
 		return Void();
 	}
 
-	Future<Void> init() { return init_impl(this); }
+	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
 	}
@@ -311,11 +312,27 @@ public:
 
 	// Must be nondecreasing
 	virtual void setWriteVersion(Version v) {
-		ASSERT(v >= m_writeVersion);
+		ASSERT(v > m_lastCommittedVersion);
+		// If there was no current mutation buffer, create one in the buffer map and update m_pBuffer
+		if(m_pBuffer == nullptr) {
+			// When starting a new mutation buffer its start version must be greater than the last write version
+			ASSERT(v > m_writeVersion);
+			m_pBuffer = &m_mutationBuffers[v];
+			// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
+			// because now all existing keys are within some range in the mutation map.
+			(*m_pBuffer)[beginKey.key];
+			(*m_pBuffer)[endKey.key];
+		}
+		else {
+			// It's OK to set the write version to the same version repeatedly so long as m_pBuffer is not null
+			ASSERT(v >= m_writeVersion);
+		}
 		m_writeVersion = v;
 	}
 
 	virtual Future<Void> commit() {
+		if(m_pBuffer == nullptr)
+			return m_latestCommit;
 		return commit_impl(this);
 	}
 
@@ -451,33 +468,27 @@ private:
 #endif
 	}
 
-	void printMutationBuffer() const {
-		return printMutationBuffer(m_buffer.begin(), m_buffer.end());
+	void printMutationBuffer(MutationBufferT *buf) const {
+		return printMutationBuffer(buf->begin(), buf->end());
 	}
 
-	void initMutationBuffer() {
-		// Create range representing the entire keyspace.  This reduces edge cases to applying mutations
-		// because now all existing keys are within some range in the mutation map.
-		m_buffer.clear();
-		m_buffer[beginKey.key];
-		m_buffer[endKey.key];
-	}
-
-		// Find or create a mutation buffer boundary for bound and return an iterator to it
+	// Find or create a mutation buffer boundary for bound and return an iterator to it
 	MutationBufferT::iterator insertMutationBoundary(Key boundary) {
+		ASSERT(m_pBuffer != nullptr);
+
 		// Find the first split point in buffer that is >= key
-		MutationBufferT::iterator ib = m_buffer.lower_bound(boundary);
+		MutationBufferT::iterator ib = m_pBuffer->lower_bound(boundary);
 
 		// Since the initial state of the mutation buffer contains the range '' through
 		// the maximum possible key, our search had to have found something.
-		ASSERT(ib != m_buffer.end());
+		ASSERT(ib != m_pBuffer->end());
 
 		// If we found the boundary we are looking for, return its iterator
 		if(ib->first == boundary)
 			return ib;
 
 		// ib is our insert hint.  Insert the new boundary and set ib to its entry
-		ib = m_buffer.insert(ib, {boundary, RangeMutation()});
+		ib = m_pBuffer->insert(ib, {boundary, RangeMutation()});
 
 		// ib is certainly > begin() because it is guaranteed that the empty string
 		// boundary exists and the only way to have found that is to look explicitly
@@ -524,7 +535,7 @@ private:
 	}
 
 	// Returns list of (version, list of (lower_bound, list of children) )
-	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, Key upperBoundKey) {
+	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, Key upperBoundKey) {
 		state std::string printPrefix = format("commit subtree root=%lld lower='%s' upper='%s'", root, printable(lowerBoundKey).c_str(), printable(upperBoundKey).c_str());
 		debug_printf("%s\n", printPrefix.c_str());
 
@@ -536,8 +547,8 @@ private:
 		state KeyVersionValue upperBoundKVV = KeyVersionValue::unpack(upperBoundKey);
 
 		// Find the slice of the mutation buffer that is relevant to this subtree
-		state MutationBufferT::const_iterator iMutationBoundary = self->m_buffer.lower_bound(lowerBoundKVV.key);
-		state MutationBufferT::const_iterator iMutationBoundaryEnd = self->m_buffer.lower_bound(upperBoundKVV.key);
+		state MutationBufferT::const_iterator iMutationBoundary = mutationBuffer->lower_bound(lowerBoundKVV.key);
+		state MutationBufferT::const_iterator iMutationBoundaryEnd = mutationBuffer->lower_bound(upperBoundKVV.key);
 
 		// If the lower bound key and the upper bound key are the same then there can't be any changes to
 		// this subtree since changes would happen after the upper bound key as the mutated versions would
@@ -549,7 +560,7 @@ private:
 
 		// If the mutation buffer key found is greater than the lower bound key then go to the previous mutation
 		// buffer key because it may cover deletion of some keys at the start of this subtree.
-		if(iMutationBoundary != self->m_buffer.begin() && iMutationBoundary->first > lowerBoundKVV.key) {
+		if(iMutationBoundary != mutationBuffer->begin() && iMutationBoundary->first > lowerBoundKVV.key) {
 			--iMutationBoundary;
 		}
 		else {
@@ -768,7 +779,7 @@ private:
 
 				ASSERT(childLowerBound <= childUpperBound);
 
-				m_futureChildren.push_back(self->commitSubtree(self, snapshot, *(uint32_t*)map.entries[i].value.begin(), childLowerBound, childUpperBound));
+				m_futureChildren.push_back(self->commitSubtree(self, mutationBuffer, snapshot, *(uint32_t*)map.entries[i].value.begin(), childLowerBound, childUpperBound));
 			}
 
 			Void _ = wait(waitForAll(m_futureChildren));
@@ -900,28 +911,55 @@ private:
 	}
 
 	ACTOR static Future<Void> commit_impl(VersionedBTree *self) {
+		state MutationBufferT *mutations = self->m_pBuffer;
+
+		// No more mutations are allowed to be written to this mutation buffer we will commit
+		// at m_writeVersion, which we must save locally because it could change during commit.
+		self->m_pBuffer = nullptr;
+		state Version writeVersion = self->m_writeVersion;
+
+		// The latest mutation buffer start version is the one we will now (or eventually) commit.
+		state Version mutationBufferStartVersion = self->m_mutationBuffers.rbegin()->first;
+
+		// Replace the lastCommit future with a new one and then wait on the old one
+		state Promise<Void> committed;
+		Future<Void> previousCommit = self->m_latestCommit;
+		self->m_latestCommit = committed.getFuture();
+
+		// Wait for the latest commit that started to be finished.
+		Void _ = wait(previousCommit);
+
+		// Get the latest version from the pager, which is what we will read at
 		Version latestVersion = wait(self->m_pager->getLatestVersion());
 
 		debug_printf("BEGINNING COMMIT.\n");
-		self->printMutationBuffer();
+		self->printMutationBuffer(mutations);
 
-		VersionedChildrenT _ = wait(commitSubtree(self, self->m_pager->getReadSnapshot(latestVersion), self->m_root, beginKey.pack().key, endKey.pack().key));
+		VersionedChildrenT _ = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_root, beginKey.pack().key, endKey.pack().key));
 
-		self->m_pager->setLatestVersion(self->m_writeVersion);
+		self->m_pager->setLatestVersion(writeVersion);
 		Void _ = wait(self->m_pager->commit());
-		self->m_lastCommittedVersion = self->m_writeVersion;
 
-		self->initMutationBuffer();
+		// Now that everything is committed we must delete the mutation buffer.
+		// Our buffer's start version should be the oldest mutation buffer version in the map.
+		ASSERT(mutationBufferStartVersion == self->m_mutationBuffers.begin()->first);
+		self->m_mutationBuffers.erase(self->m_mutationBuffers.begin());
+
+		self->m_lastCommittedVersion = writeVersion;
+		committed.send(Void());
 
 		return Void();
 	}
 
 	IPager *m_pager;
-	MutationBufferT m_buffer;
+	MutationBufferT *m_pBuffer;
+	std::map<Version, MutationBufferT> m_mutationBuffers;
 
 	Version m_writeVersion;
 	Version m_lastCommittedVersion;
+	Future<Void> m_latestCommit;
 	int m_pageSize;
+	Future<Void> m_init;
 
 	// InternalCursor is for seeking to and iterating over the low level records in the tree
 	// which combine in groups of 1 or more to represent user visible KV pairs.
@@ -937,7 +975,7 @@ private:
 			return kvv.valid();
 		}
 
-		Future<Void> seekLessThanOrEqual(Key key) {
+		Future<Void> seekLessThanOrEqual(KeyRef key) {
 			return seekLessThanOrEqual_impl(this, key);
 		}
 
@@ -986,7 +1024,7 @@ private:
 			return Void();
 		}
 
-		ACTOR static Future<Void> seekLessThanOrEqual_impl(InternalCursor *self, Key key) {
+		ACTOR static Future<Void> seekLessThanOrEqual_impl(InternalCursor *self, KeyRef key) {
 			state TraversalPathT &path = self->m_path;
 			Void _ = wait(reset(self));
 
@@ -1331,6 +1369,7 @@ public:
 	}
 
 	ACTOR Future<Void> close_impl(KeyValueStoreRedwoodUnversioned *self) {
+		self->m_init.cancel();
 		// TODO:  Close btree
 		Future<Void> closedFuture = self->m_pager->onClosed();
 		self->m_pager->close();
@@ -1353,12 +1392,17 @@ public:
 	}
 
 	ACTOR static Future<Void> commit_impl(KeyValueStoreRedwoodUnversioned *self) {
-		Void _ = wait(self->m_lastCommit);
+		// Replace last commit with a new future for this commit and then wait on the previous one.
+		Future<Void> previousCommit = self->m_lastCommit;
 		state Promise<Void> committed;
 		self->m_lastCommit = committed.getFuture();
-		Void _ = wait(self->m_tree->commit());
-		Version v = wait(self->m_tree->getLatestVersion());
-		self->m_tree->setWriteVersion(v + 1);
+		Void _ = wait(previousCommit);
+
+		// Start the commit, then set a new write version before waiting on the commit.
+		Future<Void> c = self->m_tree->commit();
+		self->m_tree->setWriteVersion(self->m_tree->getWriteVersion() + 1);
+		Void _ = wait(c);
+
 		committed.send(Void());
 		return Void();
 	}
@@ -1382,6 +1426,7 @@ public:
 	}
 
     virtual void set( KeyValueRef keyValue, const Arena* arena = NULL ) {
+		//printf("SET write version %lld %s\n", m_tree->getWriteVersion(), printable(keyValue).c_str());
 		m_tree->set(keyValue);
 	}
 
@@ -1398,7 +1443,7 @@ public:
 				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
 				accumulatedBytes += kv.expectedSize();
 				result.push_back(result.arena(), kv);
-				if(rowLimit-- == 0 || accumulatedBytes >= byteLimit)
+				if(--rowLimit == 0 || accumulatedBytes >= byteLimit)
 					break;
 				Void _ = wait(cur->next(true));
 			}
@@ -1411,7 +1456,7 @@ public:
 				KeyValueRef kv(KeyRef(result.arena(), cur->getKey()), ValueRef(result.arena(), cur->getValue()));
 				accumulatedBytes += kv.expectedSize();
 				result.push_back(result.arena(), kv);
-				if(rowLimit-- == 0 || accumulatedBytes >= byteLimit)
+				if(--rowLimit == 0 || accumulatedBytes >= byteLimit)
 					break;
 				Void _ = wait(cur->prev(true));
 			}
