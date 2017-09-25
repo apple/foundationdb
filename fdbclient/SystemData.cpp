@@ -306,6 +306,9 @@ const UID dataDistributionModeLock = UID(6345,3425);
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
 
+// Keyspace to maintain wall clock to version map
+const KeyRangeRef timeKeeperPrefixRange(LiteralStringRef("\xff\x02/timeKeeper/"), LiteralStringRef("\xff\x02/timeKeeper0"));
+
 // Backup Log Mutation constant variables
 const KeyRef backupEnabledKey = LiteralStringRef("\xff/backupEnabled");
 const KeyRangeRef backupLogKeys(LiteralStringRef("\xff\x02/blog/"), LiteralStringRef("\xff\x02/blog0"));

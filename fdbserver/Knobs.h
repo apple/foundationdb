@@ -302,6 +302,10 @@ public:
 	double STATUS_MIN_TIME_BETWEEN_REQUESTS;
 	int CONFIGURATION_ROWS_TO_FETCH;
 
+	// Timekeeper
+	int64_t TIME_KEEPER_DELAY;
+	int64_t TIME_KEEPER_MAX_ENTRIES;
+
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
 };
 

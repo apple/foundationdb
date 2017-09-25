@@ -37,6 +37,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbclient/KeyBackedTypes.h"
 
 void failAfter( Future<Void> trigger, Endpoint e );
 
@@ -1354,6 +1355,41 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	TEST(true); // Received an old worker registration request.
 }
 
+// This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid running
+// out of space, it limits the max number of entries and clears old entries on each update. This mapping is used from
+// backup and restore to get the version information for a timestamp.
+ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+	TraceEvent(SevInfo, "TimeKeeper Started");
+	loop {
+		try {
+			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+				Version v = wait(tr->getReadVersion());
+				int64_t currentTime = (int64_t)now();
+				versionMap.set(tr, currentTime, v);
+
+				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
+				if (ttl > 0) {
+					versionMap.erase(tr, 0, ttl);
+				}
+
+				Void _ = wait(tr->commit());
+			} catch (Error &e) {
+				Void _ = wait(tr->onError(e));
+			}
+		} catch (Error &e) {
+			// Failed to update time-version map even after retries, just ignore this iteration
+			TraceEvent(SevWarn, "TimeKeeper Failed").detail("cause", e.what());
+		}
+
+		Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));
+	}
+}
+
 ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 								ClusterControllerData *self,
 								ServerCoordinators coordinators)
@@ -1549,6 +1585,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
 	addActor.send( self.updateWorkerList.init( self.db.db ) );
 	addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
+	addActor.send( timeKeeper(&self) );
 	addActor.send( monitorProcessClasses(&self) );
 	addActor.send( monitorClientTxnInfoConfigs(&self.db) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
