@@ -116,7 +116,7 @@ struct RegisterWorkerRequest {
 	WorkerInterface wi;
 	ProcessClass processClass;
 	Generation generation;
-	ReplyPromise<Void> reply;
+	ReplyPromise<Optional<ProcessClass>> reply;
 
 	RegisterWorkerRequest() {}
 	RegisterWorkerRequest(WorkerInterface wi, ProcessClass processClass,  Generation generation) : 

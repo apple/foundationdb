@@ -42,7 +42,7 @@ void failAfter( Future<Void> trigger, Endpoint e );
 
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
-	ReplyPromise<Void> reply;
+	ReplyPromise<Optional<ProcessClass>> reply;
 	Generation gen;
 	int reboots;
 	WorkerInterface interf;
@@ -50,7 +50,7 @@ struct WorkerInfo : NonCopyable {
 	ProcessClass processClass;
 
 	WorkerInfo() : gen(-1), reboots(0) {}
-	WorkerInfo( Future<Void> watcher, ReplyPromise<Void> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
+	WorkerInfo( Future<Void> watcher, ReplyPromise<Optional<ProcessClass>> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
 		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass) {}
 
 	WorkerInfo( WorkerInfo&& r ) noexcept(true) : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
@@ -1054,7 +1054,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 				}
 			}
 			when( Void _ = wait( failed ) ) {  // remove workers that have failed
-				cluster->id_worker[ worker.locality.processId() ].reply.send( Void() );
+				cluster->id_worker[ worker.locality.processId() ].reply.send( Optional<ProcessClass>() );
 				cluster->id_worker.erase( worker.locality.processId() );
 
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
@@ -1342,7 +1342,9 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		}
 
 		info->second.initialClass = req.processClass;
-		info->second.reply.send( Never() );
+		if (!info->second.reply.isSet()) {
+			info->second.reply.send( Never() );
+		}
 		info->second.reply = req.reply;
 		info->second.gen = req.generation;
 
@@ -1474,11 +1476,17 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 
 					for( auto& w : self->id_worker ) {
 						auto classIter = self->id_class.find(w.first);
+						ProcessClass newProcessClass;
 
 						if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || w.second.initialClass.classType() == ProcessClass::UnsetClass) ) {
-							w.second.processClass = classIter->second;
+							newProcessClass = classIter->second;
 						} else {
-							w.second.processClass = w.second.initialClass;
+							newProcessClass = w.second.initialClass;
+						}
+
+						if (newProcessClass != w.second.processClass) {
+							w.second.reply.send( Optional<ProcessClass>(classIter->second) );
+							w.second.processClass = newProcessClass;
 						}
 					}
 

@@ -153,6 +153,9 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 					break;
 				}
 				when (Void _ = wait(candidacies)) { ASSERT(false); }
+				when (Void _ = wait( asyncProcessClass->onChange() )) {
+					break;
+				}
 			}
 		}
 
