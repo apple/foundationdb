@@ -940,12 +940,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		// For any given index, only one of the following will be true.
 		auto locking_completed = [&logFailed, tLogReply](int index) {
 			const auto& entry = tLogReply->at(index);
-			return entry.isValid() && entry.isReady() && !entry.isError();
+			return !logFailed[index]->get() && entry.isValid() && entry.isReady() && !entry.isError();
 		};
 		auto locking_failed = [&logFailed, tLogReply](int index) {
 			const auto& entry = tLogReply->at(index);
-			return (logFailed[index]->get() && !(entry.isValid() && entry.isReady() && !entry.isError())) ||
-			       (entry.isValid() && entry.isReady() && entry.isError());
+			return logFailed[index]->get() || (entry.isValid() && entry.isReady() && entry.isError());
 		};
 		auto locking_pending = [&logFailed, tLogReply](int index) {
 			const auto& entry = tLogReply->at(index);
@@ -1015,10 +1014,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		// the right is logs that can't be locked.  This makes us prefer locking already-locked TLogs,
 		// which is how we respect the decisions made in the previous execution.
 		auto idx_to_order = [&locking_completed, &locking_failed, &locking_pending, &locking_skipped](int index) {
-			if (locking_completed(index)) return 0;
-			if (locking_pending(index)) return 1;
-			if (locking_skipped(index)) return 2;
-			if (locking_failed(index)) return 3;
+			bool complete = locking_completed(index);
+			bool pending = locking_pending(index);
+			bool skipped = locking_skipped(index);
+			bool failed = locking_failed(index);
+
+			ASSERT( complete + pending + skipped + failed == 1 );
+
+			if (complete) return 0;
+			if (pending) return 1;
+			if (skipped) return 2;
+			if (failed) return 3;
+
 			ASSERT(false);  // Programmer error.
 			return -1;
 		};
