@@ -484,7 +484,7 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 	return Void();
 }
 
-ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<struct ServerDBInfo>> dbInfo ) {
+ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<struct ServerDBInfo>> dbInfo, LocalityData locality ) {
 	state WorkloadInterface workIface;
 	state bool replied = false;
 	state Database cx;
@@ -501,7 +501,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 
 		if( database.size() ) {
 			Reference<Cluster> cluster = Cluster::createCluster(ccf->getFilename(), -1);
-			Database _cx = wait(cluster->createDatabase(database));
+			Database _cx = wait(cluster->createDatabase(database, locality));
 			cx = _cx;
 
 			Void _ = wait( delay(1.0) );
@@ -544,7 +544,7 @@ ACTOR Future<Void> testerServerWorkload( WorkloadRequest work, Reference<Cluster
 	return Void();
 }
 
-ACTOR Future<Void> testerServerCore( TesterInterface interf, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<struct ServerDBInfo>> dbInfo ) {
+ACTOR Future<Void> testerServerCore( TesterInterface interf, Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<struct ServerDBInfo>> dbInfo, LocalityData locality ) {
 	state PromiseStream<Future<Void>> addWorkload;
 	state Future<Void> workerFatalError = actorCollection(addWorkload.getFuture());
 
@@ -552,7 +552,7 @@ ACTOR Future<Void> testerServerCore( TesterInterface interf, Reference<ClusterCo
 	loop choose {
 		when (Void _ = wait(workerFatalError)) {}
 		when (WorkloadRequest work = waitNext( interf.recruitments.getFuture() )) {
-			addWorkload.send(testerServerWorkload(work, ccf, dbInfo));
+			addWorkload.send(testerServerWorkload(work, ccf, dbInfo, locality));
 		}
 	}
 }
@@ -740,10 +740,10 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 									double quiescentWaitTimeout, double softTimeLimit, double databasePingDelay) {
 	state TestSpec spec;
 
-	state bool connectionFailures;
+	state double connectionFailures;
 	if( g_network->isSimulated() ) {
-		connectionFailures = g_simulator.enableConnectionFailures;
-		g_simulator.enableConnectionFailures = false;
+		connectionFailures = g_simulator.connectionFailuresDisableDuration;
+		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
 	}
 	
@@ -763,7 +763,7 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 		DistributedTestResults testResults = wait(runWorkload(cx, testers, database, spec));
 		if(testResults.ok() || lastRun) {
 			if( g_network->isSimulated() ) {
-				g_simulator.enableConnectionFailures = connectionFailures;
+				g_simulator.connectionFailuresDisableDuration = connectionFailures;
 			}
 			return Void();
 		}
@@ -934,11 +934,14 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 		} else if( attrib == "simCheckRelocationDuration" ) {
 			spec.simCheckRelocationDuration = (value == "true");
 			TraceEvent("TestParserTest").detail("ParsedSimCheckRelocationDuration", spec.simCheckRelocationDuration);
-		} else if( attrib == "simEnableConnectionFailures" ) {
-			spec.simEnableConnectionFailures = (value == "true");
-			if(g_network->isSimulated() && !spec.simEnableConnectionFailures)
-				g_simulator.enableConnectionFailures = false;
-			TraceEvent("TestParserTest").detail("ParsedSimEnableConnectionFailures", spec.simEnableConnectionFailures);
+		} else if( attrib == "connectionFailuresDisableDuration" ) {
+			double connectionFailuresDisableDuration;
+			sscanf( value.c_str(), "%lf", &connectionFailuresDisableDuration );
+			ASSERT( connectionFailuresDisableDuration >= 0 );
+			spec.simConnectionFailuresDisableDuration = connectionFailuresDisableDuration;
+			if(g_network->isSimulated())
+				g_simulator.connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
+			TraceEvent("TestParserTest").detail("ParsedSimConnectionFailuresDisableDuration", spec.simConnectionFailuresDisableDuration);
 		} else if( attrib == "simBackupAgents" ) {
 			if (value == "BackupToFile")
 				spec.simBackupAgents = ISimulator::BackupToFile;
@@ -949,6 +952,10 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			TraceEvent("TestParserTest").detail("ParsedSimBackupAgents", spec.simBackupAgents);
 		} else if( attrib == "extraDB" ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
+		} else if( attrib == "minimumReplication" ) {
+			TraceEvent("TestParserTest").detail("ParsedMinimumReplication", "");
+		} else if( attrib == "buggify" ) {
+			TraceEvent("TestParserTest").detail("ParsedBuggify", "");
 		} else if( attrib == "checkOnly" ) {
 			if(value == "true")
 				spec.phases = TestWorkload::CHECK;
@@ -985,7 +992,7 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 	return result;
 }
 
-ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration ) {
+ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
 	state Standalone<StringRef> database = LiteralStringRef("DB");
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo> );
@@ -1016,7 +1023,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		databasePingDelay = 0.0;
 	
 	if (useDB) {
-		Database _cx = wait( DatabaseContext::createDatabase( ci, Reference<Cluster>(), database, LocalityData() ) ); // FIXME: Locality!
+		Database _cx = wait( DatabaseContext::createDatabase( ci, Reference<Cluster>(), database, locality ) );
 		cx = _cx;
 	} else
 		database = LiteralStringRef("");
@@ -1071,7 +1078,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, 
 		Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector<TestSpec> tests, test_location_t at, 
-		int minTestersExpected, StringRef startingConfiguration ) {
+		int minTestersExpected, StringRef startingConfiguration, LocalityData locality ) {
 	state int flags = at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::FLAG_TESTER_CLASS;
 	state Future<Void> testerTimeout = delay(60.0); // wait 60 sec for testers to show up
 	state vector<std::pair<WorkerInterface, ProcessClass>> workers;
@@ -1097,12 +1104,12 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	for(int i=0; i<workers.size(); i++)
 		ts.push_back(workers[i].first.testerInterface);
 
-	Void _ = wait( runTests( cc, ci, ts, tests, startingConfiguration) );
+	Void _ = wait( runTests( cc, ci, ts, tests, startingConfiguration, locality) );
 	return Void();
 }
 
 ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_type_t whatToRun, test_location_t at, 
-		int minTestersExpected, std::string fileName, StringRef startingConfiguration ) {
+		int minTestersExpected, std::string fileName, StringRef startingConfiguration, LocalityData locality ) {
 	state vector<TestSpec> testSpecs;
 	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
 	Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
@@ -1147,10 +1154,10 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 		Reference<AsyncVar<ServerDBInfo>> db( new AsyncVar<ServerDBInfo> );
 		vector<TesterInterface> iTesters(1);
 		actors.push_back( reportErrors(monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), db ), "monitorServerDBInfo") );  // FIXME: Locality
-		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db ), "testerServerCore") );
-		tests = runTests( cc, ci, iTesters, testSpecs, startingConfiguration );
+		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "testerServerCore") );
+		tests = runTests( cc, ci, iTesters, testSpecs, startingConfiguration, locality );
 	} else {
-		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration), "runTests");
+		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality), "runTests");
 	}
 
 	choose {

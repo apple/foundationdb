@@ -997,16 +997,22 @@ struct DDTeamCollection {
 				state int teamsToBuild = desiredTeams - teamCount;
 
 				state vector<std::vector<UID>> builtTeams;
-				int addedTeams = wait( self->addAllTeams( self, desiredServerVector, &builtTeams, teamsToBuild ) );
 
-				if( addedTeams < teamsToBuild ) {
-					for( int i = 0; i < builtTeams.size(); i++ ) {
-						std::sort(builtTeams[i].begin(), builtTeams[i].end());
-						self->addTeam( builtTeams[i].begin(), builtTeams[i].end() );
+				if (self->teamSize <= 3) {
+					int addedTeams = wait( self->addAllTeams( self, desiredServerVector, &builtTeams, teamsToBuild ) );
+
+					if( addedTeams < teamsToBuild ) {
+						for( int i = 0; i < builtTeams.size(); i++ ) {
+							std::sort(builtTeams[i].begin(), builtTeams[i].end());
+							self->addTeam( builtTeams[i].begin(), builtTeams[i].end() );
+						}
+						TraceEvent("AddAllTeams", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", builtTeams.size());
 					}
-					TraceEvent("AddAllTeams", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", builtTeams.size());
-				}
-				else {
+					else {
+						int addedTeams = self->addTeamsBestOf( teamsToBuild );
+						TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
+					}
+				} else {
 					int addedTeams = self->addTeamsBestOf( teamsToBuild );
 					TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
 				}
@@ -1873,54 +1879,6 @@ ACTOR Future<bool> isDataDistributionEnabled( Database cx ) {
 				return true;
 			return false;
 		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
-		}
-	}
-}
-
-ACTOR Future<int> disableDataDistribution( Database cx ) {
-	state Transaction tr(cx);
-	state int oldMode = -1;
-	state BinaryWriter wr(Unversioned());
-	wr << 0;
-
-	loop {
-		try {
-			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
-			if (oldMode < 0) {
-				oldMode = 1;
-				if (old.present()) {
-					BinaryReader rd(old.get(), Unversioned());
-					rd >> oldMode;
-				}
-			}
-			// SOMEDAY: Write a wrapper in MoveKeys.h
-			BinaryWriter wrMyOwner(Unversioned()); wrMyOwner << dataDistributionModeLock;
-			tr.set( moveKeysLockOwnerKey, wrMyOwner.toStringRef() );
-			tr.set( dataDistributionModeKey, wr.toStringRef() );
-
-			Void _ = wait( tr.commit() );
-			return oldMode;
-		} catch (Error& e) {
-			TraceEvent("disableDDModeRetrying").error(e);
-			Void _ = wait ( tr.onError(e) );
-		}
-	}
-}
-
-ACTOR Future<Void> enableDataDistribution( Database cx, int mode ) {
-	state Transaction tr(cx);
-	state BinaryWriter wr(Unversioned());
-	wr << mode;
-
-	loop {
-		try {
-			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
-			tr.set( dataDistributionModeKey, wr.toStringRef() );
-			Void _ = wait( tr.commit() );
-			return Void();
-		} catch (Error& e) {
-			TraceEvent("enableDDModeRetrying").error(e);
 			Void _ = wait( tr.onError(e) );
 		}
 	}

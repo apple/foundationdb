@@ -1,4 +1,4 @@
 testTitle=FastTriggeredWatchesTest
     testName=FastTriggeredWatches
-simEnableConnectionFailures=false
+connectionFailuresDisableDuration=100000
 timeout=700

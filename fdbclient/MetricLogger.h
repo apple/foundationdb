@@ -1,5 +1,5 @@
 /*
- * OSTest.java
+ * MetricLogger.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,21 +18,8 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+#pragma once
 
-import java.io.InputStream;
+#include "NativeAPI.h"
 
-public class OSTest {
-
-	/**
-	 * @param args
-	 */
-	public static void main(String[] args) {
-		System.out.println("OS name: " + System.getProperty("os.name"));
-		System.out.println("OS arch: " + System.getProperty("os.arch"));
-
-		InputStream stream = OSTest.class.getResourceAsStream("/lib/linux/amd64/libfdb_java.so");
-		System.out.println("Stream: " + stream);
-	}
-
-}
+Future<Void> runMetrics( Future<Database> const& fcx, Key const& metricsPrefix );

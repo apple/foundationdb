@@ -204,6 +204,22 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				}
 			}
 		}
+		if( nextMetric > 1e8 ) {
+			for(int i=alternatives->countBest(); i<alternatives->size(); i++) {
+				RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
+				if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
+					auto& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
+					double thisMetric = qd.smoothOutstanding.smoothTotal();
+					double thisTime = qd.latency;
+				
+					if( thisMetric < nextMetric ) {
+						nextAlt = i;
+						nextMetric = thisMetric;
+						nextTime = thisTime;
+					}
+				}
+			}
+		}
 
 		if(nextTime < 1e9) {
 			if(bestTime > FLOW_KNOBS->INSTANT_SECOND_REQUEST_MULTIPLIER*(model->secondMultiplier*(nextTime) + FLOW_KNOBS->BASE_SECOND_REQUEST_TIME)) {

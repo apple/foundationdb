@@ -19,8 +19,6 @@
  */
 
 #include "test.h"
-
-#define FDB_API_VERSION 500
 #include <foundationdb/fdb_c.h>
 #include <foundationdb/fdb_c_options.g.h>
 
@@ -32,58 +30,9 @@
 
 pthread_t netThread;
 
-void preload(FDBTransaction *tr, int numKeys) {
-	fdb_transaction_clear_range(tr, (uint8_t*)"", 0, (uint8_t*)"\xff", 1);
-
-	uint32_t i;
-	for(i = 0; i < numKeys; ++i) {
-		uint32_t k = htonl(i);
-		fdb_transaction_set(tr, (uint8_t*)&k, 4, (uint8_t*)&k, 4);
-	}
-}
-
-void* runNetwork() {
-	checkError(fdb_run_network(), "run network", NULL);
-	return NULL;
-}
-
-FDBDatabase* openDatabase(struct ResultSet *rs) {
-	checkError(fdb_setup_network(), "setup network", rs);
-	pthread_create(&netThread, NULL, &runNetwork, NULL);
-
-	FDBFuture *f = fdb_create_cluster(NULL);
-	checkError(fdb_future_block_until_ready(f), "block for cluster", rs);
-
-	FDBCluster *cluster;
-	checkError(fdb_future_get_cluster(f, &cluster), "get cluster", rs);
-
-	fdb_future_destroy(f);
-
-	f = fdb_cluster_create_database(cluster, (uint8_t*)"DB", 2);
-	checkError(fdb_future_block_until_ready(f), "block for database", rs);
-
-	FDBDatabase *db;
-	checkError(fdb_future_get_database(f, &db), "get database", rs);
-
-	fdb_future_destroy(f);
-	fdb_cluster_destroy(cluster);
-
-	return db;
-}
-
 int numKeys = 10000;
 int keySize = 16;
 uint8_t** keys;
-
-void populateKeys() {
-	keys = (uint8_t**)malloc(sizeof(uint8_t*)*(numKeys+1)); // This and its contents are never deallocated
-
-	uint32_t i;
-	for(i = 0; i <= numKeys; ++i) {
-		keys[i] = malloc(keySize);
-		sprintf((char*)keys[i], "%0*d", keySize, i);
-	}
-}
 
 void insertData(FDBTransaction *tr) {
 	fdb_transaction_clear_range(tr, (uint8_t*)"", 0, (uint8_t*)"\xff", 1);
@@ -265,8 +214,8 @@ int interleavedSetsGets(FDBTransaction *tr, struct ResultSet *rs) {
 	return 10000 / (end - start);
 }
 
-struct ResultSet* runTests(struct ResultSet *rs) {
-	FDBDatabase *db = openDatabase(rs);
+void runTests(struct ResultSet *rs) {
+	FDBDatabase *db = openDatabase(rs, &netThread);
 
 	FDBTransaction *tr;
 	checkError(fdb_database_create_transaction(db, &tr), "create transaction", rs);
@@ -289,18 +238,20 @@ struct ResultSet* runTests(struct ResultSet *rs) {
 
 	fdb_database_destroy(db);
 	fdb_stop_network();
-
-	return rs;
 }
 
 int main(int argc, char **argv) {
+	srand(time(NULL));
 	struct ResultSet *rs = newResultSet();
 	checkError(fdb_select_api_version(500), "select API version", rs);
 	printf("Running RYW Benchmark test at client version: %s\n", fdb_get_client_version());
 
-	populateKeys();
+	keys = generateKeys(numKeys, keySize);
 	runTests(rs);
 	writeResultSet(rs);
 	freeResultSet(rs);
+	freeKeys(keys, numKeys);
+
+	return 0;
 }
 

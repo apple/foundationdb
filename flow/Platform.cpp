@@ -484,11 +484,6 @@ const char* getInterfaceName(uint32_t _ip) {
 void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
 					   uint64_t& outSegs, uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
-	bytesSent = 0;
-	bytesReceived = 0;
-	outSegs = 0;
-	retransSegs = 0;
-
 	const char* ifa_name = getInterfaceName(ip);
 	if (!ifa_name)
 		return;
@@ -500,8 +495,8 @@ void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived
 	std::string iface;
 	std::string ignore;
 
-	bytesSent = 0;
-	bytesReceived = 0;
+	uint64_t bytesSentSum = 0;
+	uint64_t bytesReceivedSum = 0;
 
 	while (dev_stream.good()) {
 		dev_stream >> iface;
@@ -513,11 +508,18 @@ void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived
 			for (int i = 0; i < 7; i++) dev_stream >> ignore;
 			dev_stream >> sent;
 
-			bytesSent += sent;
-			bytesReceived += received;
+			bytesSentSum += sent;
+			bytesReceivedSum += received;
 
 			dev_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 		}
+	}
+
+	if(bytesSentSum > 0) {
+		bytesSent = bytesSentSum;
+	}
+	if(bytesReceivedSum > 0) {
+		bytesReceived = bytesReceivedSum;
 	}
 
 	std::ifstream snmp_stream("/proc/net/snmp", std::ifstream::in);
@@ -558,6 +560,8 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
 
 void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
 	INJECT_FAULT( platform_error, "getDiskStatistics" );
+	currentIOs = 0;
+
 	struct stat buf;
 	if (stat(directory.c_str(), &buf)) {
 		TraceEvent(SevError, "GetDiskStatisticsStatError").detail("Directory", directory).GetLastError();
@@ -653,12 +657,6 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	}
 
 	if(!g_network->isSimulated()) TraceEvent(SevWarnAlways, "DeviceNotFound").detail("Directory", directory);
-	currentIOs = 0;
-	busyTicks = 0;
-	reads = 0;
-	writes = 0;
-	writeSectors = 0;
-	readSectors = 0;
 }
 
 dev_t getDeviceId(std::string path) {
@@ -685,10 +683,6 @@ dev_t getDeviceId(std::string path) {
 void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
 					   uint64_t& outSegs, uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" );
-	bytesSent = 0;
-	bytesReceived = 0;
-	outSegs = 0;
-	retransSegs = 0;
 
 	const char* ifa_name = getInterfaceName(ip);
 	if (!ifa_name)
@@ -732,6 +726,7 @@ void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived
 				bytesSent = if2m->ifm_data.ifi_obytes;
 				bytesReceived = if2m->ifm_data.ifi_ibytes;
 				outSegs = if2m->ifm_data.ifi_opackets;
+				retransSegs = 0;
 				break;
 			}
 		}
@@ -758,8 +753,6 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 	INJECT_FAULT( platform_error, "getDiskStatistics" );
 	currentIOs = 0;
 	busyTicks = 0;
-	reads = 0;
-	writes = 0;
 	writeSectors = 0;
 	readSectors = 0;
 
@@ -1115,10 +1108,10 @@ SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, System
 			returnStats.machineCPUSeconds = (100 - DisplayValue.doubleValue) * returnStats.elapsed / 100.0;
 	}
 #elif defined(__unixish__)
-	uint64_t machineNowSent, machineNowReceived;
-	uint64_t machineOutSegs, machineRetransSegs;
-	uint64_t currentIOs, nowBusyTicks, nowReads, nowWrites, nowWriteSectors, nowReadSectors;
-	uint64_t clockIdleTime, clockTotalTime;
+	uint64_t machineNowSent = (*statState)->machineLastSent;
+	uint64_t machineNowReceived = (*statState)->machineLastReceived;
+	uint64_t machineOutSegs = (*statState)->machineLastOutSegs;
+	uint64_t machineRetransSegs = (*statState)->machineLastRetransSegs;
 
 	getNetworkTraffic(ip, machineNowSent, machineNowReceived, machineOutSegs, machineRetransSegs);
 	if( returnStats.initialized ) {
@@ -1131,6 +1124,13 @@ SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, System
 	(*statState)->machineLastReceived = machineNowReceived;
 	(*statState)->machineLastOutSegs = machineOutSegs;
 	(*statState)->machineLastRetransSegs = machineRetransSegs;
+
+	uint64_t currentIOs;
+	uint64_t nowBusyTicks = (*statState)->lastBusyTicks;
+	uint64_t nowReads = (*statState)->lastReads;
+	uint64_t nowWrites = (*statState)->lastWrites;
+	uint64_t nowWriteSectors = (*statState)->lastWriteSectors; 
+	uint64_t nowReadSectors = (*statState)->lastReadSectors;
 
 	if(dataFolder != "") {
 		getDiskStatistics(dataFolder, currentIOs, nowBusyTicks, nowReads, nowWrites, nowWriteSectors, nowReadSectors);
@@ -1150,6 +1150,9 @@ SystemStatistics getSystemStatistics(std::string dataFolder, uint32_t ip, System
 		(*statState)->lastWriteSectors = nowWriteSectors;
 		(*statState)->lastReadSectors = nowReadSectors;
 	}
+
+	uint64_t clockIdleTime = (*statState)->lastClockIdleTime;
+	uint64_t clockTotalTime = (*statState)->lastClockTotalTime;
 
 	getMachineLoad(clockIdleTime, clockTotalTime);
 	returnStats.machineCPUSeconds = clockTotalTime - (*statState)->lastClockTotalTime != 0 ? ( 1 - ((clockIdleTime - (*statState)->lastClockIdleTime) / ((double)(clockTotalTime - (*statState)->lastClockTotalTime)))) * returnStats.elapsed : 0;
@@ -1539,12 +1542,13 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	INJECT_FAULT( io_error, "renameFile" );
 #ifdef _WIN32
 	if (MoveFile( fromPath.c_str(), toPath.c_str() )) {
-		renamedFile();
+		//renamedFile();
 		return;
 	}
 #elif (defined(__linux__) || defined(__APPLE__))
 	if (!rename( fromPath.c_str(), toPath.c_str() )) {
-		renamedFile();
+		//FIXME: We cannot inject faults after renaming the file, because we could end up with two asyncFileNonDurable open for the same file
+		//renamedFile();
 		return;
 	}
 #else

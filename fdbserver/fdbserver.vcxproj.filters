@@ -247,6 +247,9 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
+    <ActorCompiler Include="workloads\LowLatency.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SkipList.cpp" />

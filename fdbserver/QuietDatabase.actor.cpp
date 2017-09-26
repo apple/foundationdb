@@ -139,6 +139,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 	state Transaction tr( cx );
 	if (use_system_priority)
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
 		try {
 			Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
@@ -332,7 +333,7 @@ ACTOR Future<Void> disableConnectionFailuresAfter( Future<Void> f, double disabl
 		}
 		when(Void _ = wait(delay(disableTime))) {
 			g_simulator.speedUpSimulation = true;
-			g_simulator.enableConnectionFailures = false;
+			g_simulator.connectionFailuresDisableDuration = 1e6;
 			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
 		}
 	}

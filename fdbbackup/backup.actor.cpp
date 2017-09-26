@@ -23,6 +23,7 @@
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
 #include "flow/genericactors.actor.h"
+#include "flow/SignalSafeUnwind.h"
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BackupAgent.h"
@@ -98,7 +99,7 @@ enum {
 	OPT_CLUSTERFILE, OPT_QUIET, OPT_DRYRUN, OPT_FORCE,
 	OPT_HELP, OPT_DEVHELP, OPT_VERSION, OPT_PARENTPID, OPT_CRASHONERROR,
 	OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACE, OPT_TRACE_DIR,
-	OPT_KNOB, OPT_TRACE_LOG_GROUP,
+	OPT_KNOB, OPT_TRACE_LOG_GROUP, OPT_LOCALITY,
 
 	//DB constants
 	OPT_SOURCE_CLUSTER,
@@ -121,6 +122,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -315,6 +317,7 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -1820,6 +1823,7 @@ extern uint8_t *g_extra_memory;
 
 int main(int argc, char* argv[]) {
 	platformInit();
+	initSignalSafeUnwind();
 
 	int	status = FDB_EXIT_SUCCESS;
 
@@ -1993,6 +1997,7 @@ int main(int argc, char* argv[]) {
 		std::string traceLogGroup;
 		ESOError	lastError;
 		bool partial = true;
+		LocalityData localities;
 
 		std::vector<std::string> blobArgs;
 
@@ -2084,6 +2089,17 @@ int main(int argc, char* argv[]) {
 				case OPT_TRACE_LOG_GROUP:
 					traceLogGroup = args->OptionArg();
 					break;
+				case OPT_LOCALITY: {
+					std::string syn = args->OptionSyntax();
+					if (!StringRef(syn).startsWith(LiteralStringRef("--locality_"))) {
+						fprintf(stderr, "ERROR: unable to parse locality key '%s'\n", syn.c_str());
+						return FDB_EXIT_ERROR;
+					}
+					syn = syn.substr(11);
+					std::transform(syn.begin(), syn.end(), syn.begin(), ::tolower);
+					localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args->OptionArg())));
+					break;
+					}
 				case OPT_CLUSTERFILE:
 					clusterFile = args->OptionArg();
 					break;
@@ -2363,7 +2379,7 @@ int main(int argc, char* argv[]) {
 				.detail("CommandLine", commandLine)
 				.trackLatest("ProgramStart");
 
-			db = cluster->createDatabase(databaseKey).get();
+			db = cluster->createDatabase(databaseKey, localities).get();
 			
 			if(sourceClusterFile.size()) {
 				auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
@@ -2384,7 +2400,7 @@ int main(int argc, char* argv[]) {
 					return 1;
 				}
 
-				source_db = source_cluster->createDatabase(databaseKey).get();
+				source_db = source_cluster->createDatabase(databaseKey, localities).get();
 			}
 		}
 

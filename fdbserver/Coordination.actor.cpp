@@ -247,8 +247,8 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				return Void();
 			} else {
 				Optional<LeaderInfo> nextNominee = 
-					availableLeaders.size() ? *availableLeaders.rbegin() : 
-					availableCandidates.size() ? *availableCandidates.rbegin() : Optional<LeaderInfo>();
+					availableLeaders.size() ? *availableLeaders.begin() : 
+					availableCandidates.size() ? *availableCandidates.begin() : Optional<LeaderInfo>();
 
 				if (nextNominee != currentNominee || !availableLeaders.size()) {
 					TraceEvent("NominatingLeader").detail("Nominee", nextNominee.present() ? nextNominee.get().changeID : UID())

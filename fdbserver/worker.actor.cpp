@@ -24,6 +24,7 @@
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/NativeAPI.h"
+#include "fdbclient/MetricLogger.h"
 #include "WorkerInterface.h"
 #include "IKeyValueStore.h"
 #include "WaitFailure.h"
@@ -184,7 +185,7 @@ std::string filenameFromSample( KeyValueStoreType storeType, std::string folder,
 	if( storeType == KeyValueStoreType::SSD_BTREE_V1 )
 		return joinPath( folder, sample_filename );
 	else if ( storeType == KeyValueStoreType::SSD_BTREE_V2 )
-		return joinPath(folder, sample_filename); 
+		return joinPath(folder, sample_filename);
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, sample_filename.substr(0, sample_filename.size() - 5) );
 
@@ -195,7 +196,7 @@ std::string filenameFromId( KeyValueStoreType storeType, std::string folder, std
 	if( storeType == KeyValueStoreType::SSD_BTREE_V1)
 		return joinPath( folder, prefix + id.toString() + ".fdb" );
 	else if (storeType == KeyValueStoreType::SSD_BTREE_V2)
-		return joinPath(folder, prefix + id.toString() + ".sqlite"); 
+		return joinPath(folder, prefix + id.toString() + ".sqlite");
 	else if( storeType == KeyValueStoreType::MEMORY )
 		return joinPath( folder, prefix + id.toString() + "-" );
 
@@ -318,7 +319,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 		auto* kv = openKVStore( storeType, filename, ssi.uniqueID, memoryLimit );
 		Future<Void> kvClosed = kv->onClosed();
 		filesClosed->add( kvClosed );
-		prevStorageServer = storageServer( kv, ssi, db, folder );
+		prevStorageServer = storageServer( kv, ssi, db, folder, Promise<Void>() );
 		prevStorageServer = handleIOErrors( prevStorageServer, kv, ssi.id(), kvClosed );
 	}
 }
@@ -355,6 +356,7 @@ void startRole(UID roleId, UID workerId, std::string as, std::map<std::string, s
 	g_roles.insert({as, roleId.shortString()});
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	if (g_network->isSimulated()) g_simulator.addRole(g_network->getLocalAddress(), as);
 }
 
 void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
@@ -386,6 +388,7 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 	g_roles.erase({as, id.shortString()});
 	StringMetricHandle(LiteralStringRef("Roles")) = roleString(g_roles, false);
 	StringMetricHandle(LiteralStringRef("RolesWithIDs")) = roleString(g_roles, true);
+	if (g_network->isSimulated()) g_simulator.removeRole(g_network->getLocalAddress(), as);
 }
 
 ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
@@ -509,7 +512,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		if( metricsConnFile.size() > 0) {
 			try {
 				state Reference<Cluster> cluster = Cluster::createCluster( metricsConnFile, Cluster::API_VERSION_LATEST );
-				metricsLogger = runMetrics( cluster->createDatabase(LiteralStringRef("DB")), KeyRef(metricsPrefix) );
+				metricsLogger = runMetrics( cluster->createDatabase(LiteralStringRef("DB"), locality), KeyRef(metricsPrefix) );
 			} catch(Error &e) {
 				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
 			}
@@ -520,10 +523,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	}
 
 	errorForwarders.add( loadedPonger( interf.debugPing.getFuture() ) );
-	errorForwarders.add( registrationClient( ccInterface, interf, processClass ) );
 	errorForwarders.add( waitFailureServer( interf.waitFailure.getFuture() ) );
 	errorForwarders.add( monitorServerDBInfo( ccInterface, connFile, locality, dbInfo ) );
-	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo ) );
+	errorForwarders.add( testerServerCore( interf.testerInterface, connFile, dbInfo, locality ) );
 
 	filesClosed.add(stopping.getFuture());
 
@@ -550,7 +552,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	try {
 		std::vector<DiskStore> stores = getDiskStores( folder );
 		bool validateDataFiles = deleteFile(joinPath(folder, validationFilename));
-
+		std::vector<Future<Void>> recoveries;
 		for( int f = 0; f < stores.size(); f++ ) {
 			DiskStore s = stores[f];
 			// FIXME: Error handling
@@ -581,7 +583,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				DUMPTOKEN(recruited.getKeyValueStoreType);
 				DUMPTOKEN(recruited.watchValue);
 
-				Future<Void> f = storageServer( kv, recruited, dbInfo, folder );
+				Promise<Void> recovery;
+				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery );
+				recoveries.push_back(recovery.getFuture());
 				f =  handleIOErrors( f, kv, s.storeID, kvClosed );
 				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited, dbInfo, folder, &filesClosed, memoryLimit );
 				errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), f ) );
@@ -597,7 +601,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				startRole( s.storeID, interf.id(), "SharedTLog", details, "Restored" );
 
 				Promise<Void> oldLog;
-				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog );
+				Promise<Void> recovery;
+				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery );
+				recoveries.push_back(recovery.getFuture());
 				tl = handleIOErrors( tl, kv, s.storeID );
 				tl = handleIOErrors( tl, queue, s.storeID );
 				if(tlog.isReady()) {
@@ -613,6 +619,11 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		details["StoresPresent"] = format("%d", stores.size());
 		startRole( interf.id(), interf.id(), "Worker", details );
 
+		Void _ = wait(waitForAll(recoveries));
+		errorForwarders.add( registrationClient( ccInterface, interf, processClass ) );
+
+		TraceEvent("RecoveriesComplete", interf.id());
+
 		loop choose {
 
 			when( RebootRequest req = waitNext( interf.clientInterface.reboot.getFuture() ) ) {
@@ -621,7 +632,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					Reference<IAsyncFile> checkFile = wait( IAsyncFileSystem::filesystem()->open( joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600 ) );
 					Void _ = wait( checkFile->sync() );
 				}
-			
+
 				if(g_network->isSimulated()) {
 					TraceEvent("SimulatedReboot").detail("Deletion", rebootReq.deleteData );
 					if( rebootReq.deleteData ) {
@@ -660,7 +671,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					std::map<std::string, std::string> details;
 					details["ForMaster"] = req.recruitmentID.shortString();
 					details["StorageEngine"] = req.storeType.toString();
-					
+
 					//FIXME: start role for every tlog instance, rather that just for the shared actor, also use a different role type for the shared actor
 					startRole( logId, interf.id(), "SharedTLog", details );
 
@@ -669,7 +680,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + logId.toString() + "-" ), logId );
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
-					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>() );
+					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>(), Promise<Void>() );
 					tlog = handleIOErrors( tlog, data, logId );
 					tlog = handleIOErrors( tlog, queue, logId );
 					errorForwarders.add( forwardError( errors, "SharedTLog", logId, tlog ) );
@@ -906,10 +917,11 @@ ACTOR Future<Void> fdbd(
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
 		Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
+		Reference<AsyncVar<ProcessClass>> asyncProcessClass(new AsyncVar<ProcessClass>(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource)));
 		vector<Future<Void>> v;
 		if ( coordFolder.size() )
 			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc ), "clusterController") );
+		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncProcessClass), "clusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
 		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix), "workerServer", UID(), &normalWorkerErrors()) );

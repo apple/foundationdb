@@ -153,6 +153,8 @@ Future<Void> unlockDatabase( Database const& cx, UID const& id );
 Future<Void> checkDatabaseLock( Transaction* const& tr, UID const& id );
 Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
 
+Future<int> setDDMode( Database const& cx, int const& mode );
+
 // Gets the cluster connection string
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );
 #endif

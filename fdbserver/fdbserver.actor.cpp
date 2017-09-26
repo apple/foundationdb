@@ -802,6 +802,45 @@ extern bool g_crashOnError;
 	}
 #endif
 
+Optional<bool> checkBuggifyOverride(const char *testFile) {
+	std::ifstream ifs;
+	ifs.open(testFile, std::ifstream::in);
+	if (!ifs.good())
+		return 0;
+
+	std::string cline;
+
+	while (ifs.good()) {
+		getline(ifs, cline);
+		std::string line = removeWhitespace(std::string(cline));
+		if (!line.size() || line.find(';') == 0)
+			continue;
+
+		size_t found = line.find('=');
+		if (found == std::string::npos)
+			// hmmm, not good
+			continue;
+		std::string attrib = removeWhitespace(line.substr(0, found));
+		std::string value = removeWhitespace(line.substr(found + 1));
+
+		if (attrib == "buggify") {
+			if( !strcmp( value.c_str(), "on" ) ) {
+				ifs.close();
+				return true;
+			} else if( !strcmp( value.c_str(), "off" ) ) {
+				ifs.close();
+				return false;
+			} else {
+				fprintf(stderr, "ERROR: Unknown buggify override state `%s'\n", value.c_str());
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
+	}
+
+	ifs.close();
+	return Optional<bool>();
+}
+
 int main(int argc, char* argv[]) {
 	try {
 		platformInit();
@@ -1359,6 +1398,11 @@ int main(int argc, char* argv[]) {
 		else
 			g_debug_random = new DeterministicRandom(platform::getRandomSeed());
 
+		if(role==Simulation) {
+			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
+			if(buggifyOverride.present())
+				buggifyEnabled = buggifyOverride.get();
+		}
 		enableBuggify( buggifyEnabled );
 
 		delete FLOW_KNOBS;
@@ -1528,6 +1572,17 @@ int main(int argc, char* argv[]) {
 
 		Future<Optional<Void>> f;
 
+		Standalone<StringRef> machineId(getSharedMemoryMachineId().toString());
+
+		if (!localities.isPresent(LocalityData::keyZoneId))
+			localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
+
+		if (!localities.isPresent(LocalityData::keyMachineId))
+			localities.set(LocalityData::keyMachineId, machineId);
+
+		if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
+			localities.set(LocalityData::keyDcId, dcId);
+
 		if (role == Simulation) {
 			TraceEvent("Simulation").detail("TestFile", testFile);
 
@@ -1574,16 +1629,6 @@ int main(int argc, char* argv[]) {
 
 			vector<Future<Void>> actors;
 			actors.push_back( listenError );
-			Standalone<StringRef> machineId(getSharedMemoryMachineId().toString());
-
-			if (!localities.isPresent(LocalityData::keyZoneId))
-				localities.set(LocalityData::keyZoneId, zoneId.present() ? zoneId : machineId);
-
-			if (!localities.isPresent(LocalityData::keyMachineId))
-				localities.set(LocalityData::keyMachineId, machineId);
-
-			if (!localities.isPresent(LocalityData::keyDcId) && dcId.present())
-				localities.set(LocalityData::keyDcId, dcId);
 
 			actors.push_back( fdbd(connectionFile, localities, processClass, dataFolder, dataFolder, storageMemLimit, metricsConnFile, metricsPrefix) );
 			//actors.push_back( recurring( []{}, .001 ) );  // for ASIO latency measurement
@@ -1591,11 +1636,11 @@ int main(int argc, char* argv[]) {
 			f = stopAfter( waitForAll(actors) );
 			g_network->run();
 		} else if (role == MultiTester) {
-			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile ) );
+			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == Test || role == ConsistencyCheck) {
 			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
-			f = stopAfter( runTests( connectionFile, role == ConsistencyCheck ? TEST_TYPE_CONSISTENCY_CHECK : TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile ) );
+			f = stopAfter( runTests( connectionFile, role == ConsistencyCheck ? TEST_TYPE_CONSISTENCY_CHECK : TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == CreateTemplateDatabase) {
 			createTemplateDatabase();

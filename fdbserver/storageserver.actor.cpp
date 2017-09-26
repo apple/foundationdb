@@ -3224,7 +3224,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 	return Void();
 }
 
-ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder )
+ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, Promise<Void> recovered )
 {
 	state StorageServer self(persistentData, db, ssi);
 	self.folder = folder;
@@ -3233,23 +3233,28 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 		state double start = now();
 		TraceEvent("StorageServerRebootStart", self.thisServerID);
 		bool ok = wait( self.storage.restoreDurableState() );
-		if (!ok) return Void();
+		if (!ok) {
+			if(recovered.canBeSet()) recovered.send(Void());
+			return Void();
+		}
 		TraceEvent("SSTimeRestoreDurableState", self.thisServerID).detail("TimeTaken", now() - start);
 
 		ASSERT( self.thisServerID == ssi.id() );
 		TraceEvent("StorageServerReboot", self.thisServerID)
 			.detail("Version", self.version.get());
 
+		if(recovered.canBeSet()) recovered.send(Void());
+
 		Void _ = wait( replaceInterface( &self, ssi ) );
 
 		TraceEvent("StorageServerStartingCore", self.thisServerID).detail("TimeTaken", now() - start);
 
 		//Void _ = wait( delay(0) );  // To make sure self->zkMasterInfo.onChanged is available to wait on
-
 		Void _ = wait( storageServerCore(&self, ssi) );
 
 		throw internal_error();
 	} catch (Error& e) {
+		if(recovered.canBeSet()) recovered.send(Void());
 		if (storageServerTerminated(self, persistentData, e))
 			return Void();
 		throw e;

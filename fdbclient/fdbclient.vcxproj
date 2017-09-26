@@ -38,6 +38,8 @@
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Release|X64'">false</EnableCompile>
     </ActorCompiler>
+    <ClInclude Include="MetricLogger.h" />
+    <ActorCompiler Include="MetricLogger.actor.cpp" />
     <ClInclude Include="FailureMonitorClient.h" />
     <ClInclude Include="FDBOptions.g.h" />
     <ClInclude Include="FDBOptions.h" />
