@@ -1274,6 +1274,11 @@ public:
 			}
 		}
 
+		TEST(kt == RebootAndDelete); // Resulted in a reboot and delete
+		TEST(kt == Reboot); // Resulted in a reboot
+		TEST(kt == KillInstantly); // Resulted in an instant kill
+		TEST(kt == InjectFaults);  // Resulted in a kill by injecting faults
+
 		return true;
 	}
 
