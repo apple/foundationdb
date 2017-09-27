@@ -23,6 +23,44 @@
 
 #include "flow/UnitTest.h"
 
+struct SumType {
+	bool operator==(const SumType &rhs) const { return part1 == rhs.part1 && part2 == rhs.part2; }
+	uint32_t part1;
+	uint32_t part2;
+	std::string toString() { return format("0x%08x%08x", part1, part2); }
+};
+
+void checksum(std::string const &file, Reference<const IPage> page, LogicalPageID logical, PhysicalPageID physical, bool write) {
+	// Calculates and then stores or verifies the checksum at the end of the page.
+	// If write is true then the checksum is written into the page
+	// If write is false then the checksum is compared to the in-page sum and
+	// and error will be thrown if they do not match.
+	uint8_t *pData = (uint8_t *)page->begin();
+	ASSERT(sizeof(SumType) == IndirectShadowPage::PAGE_OVERHEAD_BYTES);
+	SumType sum;
+	SumType *pSumInPage = (SumType *)(pData + page->size());
+
+	// Write sum directly to page or to sum variable based on mode
+	SumType *sumOut = write ? pSumInPage : &sum;
+	sumOut->part1 = physical;
+	sumOut->part2 = logical; 
+	hashlittle2(pData, page->size(), &sumOut->part1, &sumOut->part2);
+
+	// Verify if not in write mode
+	if(!write && sum != *pSumInPage) {
+		auto e = checksum_failed();
+		TraceEvent (SevError, "IndirectShadowPagerPageChecksumFailure")
+			.detail("CodecPageSize", page->size())
+			.detail("Filename", file.c_str())
+			.detail("LogicalPage", logical)
+			.detail("PhysicalPage", physical)
+			.detail("ChecksumInPage", pSumInPage->toString())
+			.detail("ChecksumCalculated", sum.toString())
+			.error(e);
+		throw e;
+	}
+}
+
 IndirectShadowPage::IndirectShadowPage() : allocated(true) {
 	data = (uint8_t*)FastAllocator<4096>::allocate();
 }
@@ -48,7 +86,7 @@ int IndirectShadowPage::size() const {
 }
 
 const int IndirectShadowPage::PAGE_BYTES = 4096;
-const int IndirectShadowPage::PAGE_OVERHEAD_BYTES = 0;
+const int IndirectShadowPage::PAGE_OVERHEAD_BYTES = sizeof(SumType);
 
 Future<Reference<const IPage>> IndirectShadowPagerSnapshot::getPhysicalPage(LogicalPageID pageID) {
 	return pager->getPage(Reference<IndirectShadowPagerSnapshot>::addRef(this), pageID, version);
@@ -155,6 +193,11 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 
 					kr >> version;
 					version = bigEndian(version);
+					if(version > pager->committedVersion) {
+						printf("Omitting future version during recovery! %lld vs %lld\n", pager->committedVersion, version);
+						pager->pageTableLog->clear(singleKeyRange(entry.key));
+						continue;
+					}
 
 					vr >> physicalPageID;
 
@@ -408,6 +451,8 @@ void IndirectShadowPager::writePage(LogicalPageID pageID, Reference<IPage> conte
 	}
 
 	logPageTableUpdate(pageID, updateVersion, physicalPageID);
+
+	checksum(basename, contents, pageID, physicalPageID, true);
 	Future<Void> write = holdWhile(contents, dataFile->write(contents->begin(), IndirectShadowPage::PAGE_BYTES, physicalPageID * IndirectShadowPage::PAGE_BYTES));
 
 	if(write.isError()) {
@@ -551,7 +596,9 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 		--readCountItr->second.first;
 	}
 
-	return Reference<const IPage>(new IndirectShadowPage(buf));
+	Reference<const IPage> p(new IndirectShadowPage(buf));
+	checksum(pager->basename, p, pageID, physicalPageID, false);
+	return p;
 }
 
 Future<Reference<const IPage>> IndirectShadowPager::getPage(Reference<IndirectShadowPagerSnapshot> snapshot, LogicalPageID pageID, Version version) {
