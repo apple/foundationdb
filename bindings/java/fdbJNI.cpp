@@ -353,10 +353,18 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
+	uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(keyValueArray, NULL); 
+	if (!keyvalues_barr) {
+		throwRuntimeEx( jenv, "Error getting handle to native resources" );
+		return JNI_NULL;
+	}
+
 	jintArray lengthArray = jenv->NewIntArray(count * 2);
 	if( !lengthArray ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
+
+		jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 		return JNI_NULL;
 	}
 
@@ -364,20 +372,23 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 	if( !length_barr ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
+
+		jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 		return JNI_NULL;
 	}
 
 	int offset = 0;
 	for(int i = 0; i < count; i++) {
-		jenv->SetByteArrayRegion(keyValueArray, offset, kvs[i].key_length, (jbyte *)kvs[i].key);
+		memcpy(keyvalues_barr + offset, kvs[i].key, kvs[i].key_length);
 		length_barr[ i * 2 ] = kvs[i].key_length;
 		offset += kvs[i].key_length;
 
-		jenv->SetByteArrayRegion(keyValueArray, offset, kvs[i].value_length, (jbyte *)kvs[i].value);
+		memcpy(keyvalues_barr + offset, kvs[i].value, kvs[i].value_length);
 		length_barr[ (i * 2) + 1 ] = kvs[i].value_length;
 		offset += kvs[i].value_length;
 	}
 
+	jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 	jenv->ReleaseIntArrayElements(lengthArray, length_barr, 0);
 
 	jobject result = jenv->NewObject(resultCls, resultCtorId, keyValueArray, lengthArray, (jboolean)more);
