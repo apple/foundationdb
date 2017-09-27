@@ -386,7 +386,17 @@ public:
 			while ((pos = opt.find("$ID", pos)) != opt.npos)
 				opt.replace(pos, 3, id_s, strlen(id_s));
 
-			commands.push_back(std::string("--").append(i.pItem).append("=").append(opt));
+			const char *flagName = i.pItem + 5;
+			if(strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
+				if(opt == "true")
+					commands.push_back(std::string("--") + flagName);
+				else if(opt != "false") {
+					log_msg(LOG_ERR, "Bad flag value, must be true/false.  Flag: '%s'  Value: '%s'\n", flagName, opt.c_str());
+					return;
+				}
+			}
+			else
+				commands.push_back(std::string("--").append(i.pItem).append("=").append(opt));
 		}
 
 		argv = new const char* [commands.size() + 1];
