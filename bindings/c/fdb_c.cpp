@@ -125,8 +125,8 @@ fdb_error_t fdb_stop_network() {
 }
 
 extern "C" DLLEXPORT
-fdb_error_t fdb_add_shutdown_hook(void (*hook)(void)) {
-    CATCH_AND_RETURN( API->addShutdownHook(hook); );
+fdb_error_t fdb_add_thread_completion_hook(void (*hook)(void*), void *hook_parameter) {
+    CATCH_AND_RETURN( API->addThreadCompletionHook(hook, hook_parameter); );
 }
 
 

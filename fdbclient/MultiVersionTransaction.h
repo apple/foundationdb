@@ -320,7 +320,7 @@ struct ClientInfo : ThreadSafeReferenceCounted<ClientInfo> {
 	std::string libPath;
 	bool external;
 	bool failed;
-	vector<void (*)()> shutdownHooks;
+	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
 	ClientInfo() : protocolVersion(0), api(NULL), external(false), failed(true) {}
 	ClientInfo(IClientApi *api) : protocolVersion(0), api(api), libPath("internal"), external(false), failed(false) {}
@@ -403,7 +403,7 @@ public:
 	void setupNetwork();
 	void runNetwork();
 	void stopNetwork();
-	void addShutdownHook(void (*hook)(void));
+	void addThreadCompletionHook(void (*hook)(void*), void *hook_parameter);
 
 	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 	static MultiVersionApi* api;
@@ -443,7 +443,7 @@ private:
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
 	volatile bool envOptionsLoaded;
-	std::vector<void (*)()> shutdownHooks;
+	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 };
 
 

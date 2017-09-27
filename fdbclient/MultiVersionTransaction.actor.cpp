@@ -1140,10 +1140,10 @@ THREAD_FUNC_RETURN runNetworkThread(void *param) {
 		TraceEvent(SevError, "RunNetworkError").error(e);
 	}
 
-	std::vector<void (*)()> &hooks = ((ClientInfo*)param)->shutdownHooks;
-	for(auto hook : hooks) {
+	std::vector<std::pair<void (*)(void*), void*>> &hooks = ((ClientInfo*)param)->threadCompletionHooks;
+	for(auto &hook : hooks) {
 		try {
-			hook();
+			hook.first(hook.second);
 		}
 		catch(Error &e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
@@ -1182,9 +1182,9 @@ void MultiVersionApi::runNetwork() {
 		runErr = &e;
 	}
 
-	for(auto &hook : localClient->shutdownHooks) {
+	for(auto &hook : localClient->threadCompletionHooks) {
 		try {
-			hook();
+			hook.first(hook.second);
 		}
 		catch(Error &e) {
 			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
@@ -1220,7 +1220,7 @@ void MultiVersionApi::stopNetwork() {
 	}
 }
 
-void MultiVersionApi::addShutdownHook(void (*hook)(void)) {
+void MultiVersionApi::addThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
 	lock.enter();
 	if(!networkSetup) {
 		lock.leave();
@@ -1228,11 +1228,12 @@ void MultiVersionApi::addShutdownHook(void (*hook)(void)) {
 	}
 	lock.leave();
 
-	shutdownHooks.push_back(hook);
+	auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
+	threadCompletionHooks.push_back(hookPair);
 
 	if(!bypassMultiClientApi) {
 		for( auto it : externalClients ) {
-			it.second->shutdownHooks.push_back(hook);
+			it.second->threadCompletionHooks.push_back(hookPair);
 		}
 	}
 }

@@ -43,7 +43,7 @@ static thread_local JNIEnv* g_thread_jenv = 0;  // Defined for the network threa
 static thread_local jmethodID g_IFutureCallback_call_methodID = 0;
 static thread_local bool is_external = false;
 
-void detachIfExternalThread() {
+void detachIfExternalThread(void *ignore) {
 	if(is_external && g_thread_jenv != 0) {
 		JNIEnv *local_jenv;
 		g_thread_jenv = 0;
@@ -1050,7 +1050,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1run(JNIEnv *
 			return;
 	}
 
-	fdb_error_t hookErr = fdb_add_shutdown_hook( &detachIfExternalThread );
+	fdb_error_t hookErr = fdb_add_thread_completion_hook( &detachIfExternalThread, NULL );
 	if( hookErr ) {
 		safeThrow( jenv, getThrowable( jenv, hookErr ) );
 	}
