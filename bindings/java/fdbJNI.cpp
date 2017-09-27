@@ -45,7 +45,6 @@ static thread_local bool is_external = false;
 
 void detachIfExternalThread(void *ignore) {
 	if(is_external && g_thread_jenv != 0) {
-		JNIEnv *local_jenv;
 		g_thread_jenv = 0;
 		g_IFutureCallback_call_methodID = 0;
 		g_jvm->DetachCurrentThread();
