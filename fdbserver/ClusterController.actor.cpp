@@ -1355,18 +1355,46 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	TEST(true); // Received an old worker registration request.
 }
 
+#define TIME_KEEPER_VERSION LiteralStringRef("1")
+
+ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
+	try {
+		loop {
+			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(
+					new ReadYourWritesTransaction(self->cx));
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
+				Void _ = wait(tr->commit());
+				break;
+			} catch (Error &e) {
+				Void _ = wait(tr->onError(e));
+			}
+		}
+	} catch (Error & e) {
+		TraceEvent(SevWarnAlways, "TimeKeeperSetupVersionFailed").detail("cause", e.what());
+	}
+
+	return Void();
+}
+
 // This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid running
 // out of space, it limits the max number of entries and clears old entries on each update. This mapping is used from
 // backup and restore to get the version information for a timestamp.
 ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 
-	TraceEvent(SevInfo, "TimeKeeper Started");
+	TraceEvent(SevInfo, "TimeKeeperStarted");
+
+	Void _ = wait(timeKeeperSetVersion(self));
+
 	loop {
 		try {
 			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				Version v = wait(tr->getReadVersion());
 				int64_t currentTime = (int64_t)now();
@@ -1383,7 +1411,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 			}
 		} catch (Error &e) {
 			// Failed to update time-version map even after retries, just ignore this iteration
-			TraceEvent(SevWarn, "TimeKeeper Failed").detail("cause", e.what());
+			TraceEvent(SevWarn, "TimeKeeperFailed").detail("cause", e.what());
 		}
 
 		Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));

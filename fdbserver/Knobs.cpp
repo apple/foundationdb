@@ -361,7 +361,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( CONFIGURATION_ROWS_TO_FETCH,                         20000 );
 
 	// Timekeeper
-	init( TIME_KEEPER_DELAY,                                     1.0 ); if (randomize) { TIME_KEEPER_DELAY = 10; }
+	init( TIME_KEEPER_DELAY,                                      10 );
 	init( TIME_KEEPER_MAX_ENTRIES,                              3600 * 24 * 30 * 6); if( randomize && BUGGIFY ) { TIME_KEEPER_MAX_ENTRIES = 2; }
 
 	if(clientKnobs)

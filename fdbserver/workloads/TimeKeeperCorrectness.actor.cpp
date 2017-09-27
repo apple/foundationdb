@@ -45,7 +45,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload *self) {
 		state Future<Void> testCompleted = delay(self->testDuration);
 
-		TraceEvent(SevInfo, "TKCorrectness start");
+		TraceEvent(SevInfo, "TKCorrectness_start");
 
 		while (!testCompleted.isReady()) {
 			state Transaction tr(cx);
@@ -61,7 +61,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 			Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY / 2));
 		}
 
-		TraceEvent(SevInfo, "TKCorrectness completed");
+		TraceEvent(SevInfo, "TKCorrectness_completed");
 		return Void();
 	}
 
@@ -73,23 +73,24 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 		state KeyBackedMap<int64_t, Version> dbTimeKeeper = KeyBackedMap<int64_t, Version>(timeKeeperPrefixRange.begin);
 		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 
-		TraceEvent(SevInfo, "TKCorrectness check start")
+		TraceEvent(SevInfo, "TKCorrectness_checkStart")
 				.detail("TIME_KEPER_MAX_ENTRIES", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)
 				.detail("TIME_KEEPER_DELAY", SERVER_KNOBS->TIME_KEEPER_DELAY);
 
 		if (SERVER_KNOBS->TIME_KEEPER_DELAY < 2) {
-			TraceEvent(SevError, "TKCorrectness too small delay").detail("found", SERVER_KNOBS->TIME_KEEPER_DELAY);
+			TraceEvent(SevError, "TKCorrectness_tooSmallDelay").detail("found", SERVER_KNOBS->TIME_KEEPER_DELAY);
 			return false;
 		}
 
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				std::vector<std::pair<int64_t, Version>> futureItems = wait(
 						dbTimeKeeper.getRange(tr, ((int64_t) now()) + 1, Optional<int64_t>(), 1));
 				if (!futureItems.empty()) {
-					TraceEvent(SevError, "TKCorrectness FutureMappings").detail("count", futureItems.empty());
+					TraceEvent(SevError, "TKCorrectness_FutureMappings").detail("count", futureItems.empty());
 					return false;
 				}
 
@@ -100,17 +101,16 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 				}
 
 				if (allItems.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES) {
-					TraceEvent(SevError, "TKCorrectness too many entries")
+					TraceEvent(SevError, "TKCorrectness_tooManyEntries")
 							.detail("expected", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)
 							.detail("found", allItems.size());
 					return false;
 				}
 
 				if (allItems.size() < self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY) {
-					TraceEvent(SevError, "TKCorrectness too few entries")
+					TraceEvent(SevWarnAlways, "TKCorrectness_tooFewEntries")
 							.detail("expected", self->testDuration / SERVER_KNOBS->TIME_KEEPER_DELAY)
 							.detail("found", allItems.size());
-					return false;
 				}
 
 				bool first = true;
@@ -119,7 +119,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 					if (first) {
 						first = false;
 					} else if (prevItem.second > item.second) {
-						TraceEvent(SevError, "TKCorrectness time mismatch")
+						TraceEvent(SevError, "TKCorrectness_timeMismatch")
 								.detail("prevVersion", prevItem.second)
 								.detail("currentVersion", item.second);
 						return false;
@@ -128,7 +128,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 					prevItem = item;
 				}
 
-				TraceEvent(SevInfo, "TKCorrectness passed");
+				TraceEvent(SevInfo, "TKCorrectness_passed");
 				return true;
 			} catch (Error & e) {
 				Void _ = wait(tr->onError(e));

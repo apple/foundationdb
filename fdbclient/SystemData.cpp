@@ -307,7 +307,8 @@ const UID dataDistributionModeLock = UID(6345,3425);
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
 
 // Keyspace to maintain wall clock to version map
-const KeyRangeRef timeKeeperPrefixRange(LiteralStringRef("\xff\x02/timeKeeper/"), LiteralStringRef("\xff\x02/timeKeeper0"));
+const KeyRangeRef timeKeeperPrefixRange(LiteralStringRef("\xff\x02/timeKeeper/map/"), LiteralStringRef("\xff\x02/timeKeeper/map0"));
+const KeyRef timeKeeperVersionKey = LiteralStringRef("\xff\x02/timeKeeper/version");
 
 // Backup Log Mutation constant variables
 const KeyRef backupEnabledKey = LiteralStringRef("\xff/backupEnabled");
