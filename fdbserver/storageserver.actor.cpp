@@ -2382,9 +2382,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);
 
+		state bool injectedChanges = false;
 		for(auto& c : fii.changes) {
 			for(auto& m : c.mutations) {
 				updater.applyMutation(data, m, c.version);
+				injectedChanges = true;
 			}
 		}
 
@@ -2428,6 +2430,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) data->lastVersionWithData = ver;
 		ver = cloneCursor2->version().version - 1;
+		if(injectedChanges) data->lastVersionWithData = ver;
+
 		data->updateEagerReads = NULL;
 		data->debug_inApplyUpdate = false;
 
