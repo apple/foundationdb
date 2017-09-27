@@ -1220,7 +1220,7 @@ void MultiVersionApi::stopNetwork() {
 	}
 }
 
-void MultiVersionApi::addThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
+void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
 	lock.enter();
 	if(!networkSetup) {
 		lock.leave();

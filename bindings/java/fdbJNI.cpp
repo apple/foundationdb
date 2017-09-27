@@ -1049,7 +1049,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1run(JNIEnv *
 			return;
 	}
 
-	fdb_error_t hookErr = fdb_add_thread_completion_hook( &detachIfExternalThread, NULL );
+	fdb_error_t hookErr = fdb_add_network_thread_completion_hook( &detachIfExternalThread, NULL );
 	if( hookErr ) {
 		safeThrow( jenv, getThrowable( jenv, hookErr ) );
 	}

@@ -403,7 +403,7 @@ public:
 	void setupNetwork();
 	void runNetwork();
 	void stopNetwork();
-	void addThreadCompletionHook(void (*hook)(void*), void *hook_parameter);
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter);
 
 	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 	static MultiVersionApi* api;
