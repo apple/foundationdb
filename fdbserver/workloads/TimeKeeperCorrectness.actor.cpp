@@ -43,22 +43,25 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(Database cx, TimeKeeperCorrectnessWorkload *self) {
-		state Future<Void> testCompleted = delay(self->testDuration);
-
 		TraceEvent(SevInfo, "TKCorrectness_start");
 
-		while (!testCompleted.isReady()) {
+		state double start = now();
+		while (now() - start > self->testDuration) {
 			state Transaction tr(cx);
 
-			try {
-				Version v = wait(tr.getReadVersion());
-				self->inMemTimeKeeper[(int64_t) now()] = v;
-			} catch (Error & e) {
-				Void _ = wait(tr.onError(e));
+			loop {
+				try {
+					state int64_t curTime = now();
+					Version v = wait(tr.getReadVersion());
+					self->inMemTimeKeeper[curTime] = v;
+					break;
+				} catch (Error &e) {
+					Void _ = wait(tr.onError(e));
+				}
 			}
 
 			// For every sample from Timekeeper collect two samples here.
-			Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY / 2));
+			Void _ = wait(delay(std::min(SERVER_KNOBS->TIME_KEEPER_DELAY / 10, 1L)));
 		}
 
 		TraceEvent(SevInfo, "TKCorrectness_completed");
@@ -77,28 +80,13 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 				.detail("TIME_KEPER_MAX_ENTRIES", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)
 				.detail("TIME_KEEPER_DELAY", SERVER_KNOBS->TIME_KEEPER_DELAY);
 
-		if (SERVER_KNOBS->TIME_KEEPER_DELAY < 2) {
-			TraceEvent(SevError, "TKCorrectness_tooSmallDelay").detail("found", SERVER_KNOBS->TIME_KEEPER_DELAY);
-			return false;
-		}
-
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				std::vector<std::pair<int64_t, Version>> futureItems = wait(
-						dbTimeKeeper.getRange(tr, ((int64_t) now()) + 1, Optional<int64_t>(), 1));
-				if (!futureItems.empty()) {
-					TraceEvent(SevError, "TKCorrectness_FutureMappings").detail("count", futureItems.empty());
-					return false;
-				}
-
 				std::vector<std::pair<int64_t, Version>> allItems = wait(
 						dbTimeKeeper.getRange(tr, 0, Optional<int64_t>(), self->inMemTimeKeeper.size() + 2));
-				for (auto item : allItems) {
-					self->inMemTimeKeeper[item.first] = item.second;
-				}
 
 				if (allItems.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1) {
 					TraceEvent(SevError, "TKCorrectness_tooManyEntries")
@@ -113,19 +101,20 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 							.detail("found", allItems.size());
 				}
 
-				bool first = true;
-				std::pair<int64_t, Version> prevItem;
-				for (auto item : self->inMemTimeKeeper) {
-					if (first) {
-						first = false;
-					} else if (prevItem.second > item.second) {
-						TraceEvent(SevError, "TKCorrectness_timeMismatch")
-								.detail("prevVersion", prevItem.second)
-								.detail("currentVersion", item.second);
-						return false;
+				for (auto item : allItems) {
+					auto it = self->inMemTimeKeeper.lower_bound(item.first);
+					if (it == self->inMemTimeKeeper.end()) {
+						continue;
 					}
 
-					prevItem = item;
+					if (item.second >= it->second) {
+						TraceEvent(SevError, "TKCorrectness_versionIncorrectBounds")
+								.detail("clusterTime", item.first)
+								.detail("clusterVersion", item.second)
+								.detail("localTime", it->first)
+								.detail("localVersion", it->second);
+						return false;
+					}
 				}
 
 				TraceEvent(SevInfo, "TKCorrectness_passed");
