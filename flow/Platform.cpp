@@ -450,7 +450,7 @@ const char* getInterfaceName(uint32_t _ip) {
 	const char* ifa_name = NULL;
 
 	if (getifaddrs(&interfaces)) {
-		TraceEvent(SevError, "GetInterfaceAddrs").GetLastError();
+		TraceEvent(SevWarnAlways, "GetInterfaceAddrs").GetLastError();
 		throw platform_error();
 	}
 
@@ -484,7 +484,16 @@ const char* getInterfaceName(uint32_t _ip) {
 void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
 					   uint64_t& outSegs, uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
-	const char* ifa_name = getInterfaceName(ip);
+	const char* ifa_name = nullptr;
+	try {
+		ifa_name = getInterfaceName(ip);
+	}
+	catch(Error &e) {
+		if(e.code() != error_code_platform_error) {
+			throw;
+		}
+	}
+
 	if (!ifa_name)
 		return;
 
@@ -684,7 +693,16 @@ void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived
 					   uint64_t& outSegs, uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" );
 
-	const char* ifa_name = getInterfaceName(ip);
+	const char* ifa_name = nullptr;
+	try {
+		ifa_name = getInterfaceName(ip);
+	}
+	catch(Error &e) {
+		if(e.code() != error_code_platform_error) {
+			throw;
+		}
+	}
+
 	if (!ifa_name)
 		return;
 
