@@ -1470,7 +1470,7 @@ THREAD_FUNC setAbort(void *arg) {
 		((ThreadSingleAssignmentVar<Void>*)arg)->delref();
 	}
 	catch(Error &e) {
-		printf("Caught error in setAbort: %s\n", e.what());
+		printf("Caught error in setAbort: %s\n", e.name());
 		ASSERT(false);
 	}
 	THREAD_RETURN;
@@ -1489,7 +1489,7 @@ THREAD_FUNC releaseMem(void *arg) {
 		((ThreadSingleAssignmentVar<int>*)arg)->releaseMemory();
 	}
 	catch(Error &e) {
-		printf("Caught error in releaseMem: %s\n", e.what());
+		printf("Caught error in releaseMem: %s\n", e.name());
 		ASSERT(false);
 	}
 	THREAD_RETURN;
@@ -1501,7 +1501,7 @@ THREAD_FUNC destroy(void *arg) {
 		((ThreadSingleAssignmentVar<int>*)arg)->cancel();
 	}
 	catch(Error &e) {
-		printf("Caught error in destroy: %s\n", e.what());
+		printf("Caught error in destroy: %s\n", e.name());
 		ASSERT(false);
 	}
 	THREAD_RETURN;
@@ -1514,7 +1514,7 @@ THREAD_FUNC cancel(void *arg) {
 		destroy(arg);
 	}
 	catch(Error &e) {
-		printf("Caught error in cancel: %s\n", e.what());
+		printf("Caught error in cancel: %s\n", e.name());
 		ASSERT(false);
 	}
 	THREAD_RETURN;
@@ -1608,7 +1608,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 		}, NULL);
 	}
 	catch(Error &e) {
-		printf("Caught error in test: %s\n", e.what());
+		printf("Caught error in test: %s\n", e.name());
 		*done = true;
 		ASSERT(false);
 	}

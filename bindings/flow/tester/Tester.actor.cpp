@@ -1585,7 +1585,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 		}
 		catch (Error& e) {
 			if(LOG_ERRORS) {
-				printf("Error: %s (%d)\n", e.what(), e.code());
+				printf("Error: %s (%d)\n", e.name(), e.code());
 				fflush(stdout);
 			}
 
@@ -1673,7 +1673,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 	catch(Error &e) {
 		TraceEvent("ErrorRunningTest").error(e);
 		if(LOG_ERRORS) {
-			printf("Flow tester encountered error: %s\n", e.what());
+			printf("Flow tester encountered error: %s\n", e.name());
 			fflush(stdout);
 		}
 		flushAndExit(1);
@@ -1715,7 +1715,7 @@ ACTOR void _test_versionstamp() {
 	catch (Error &e) {
 		TraceEvent("ErrorRunningTest").error(e);
 		if (LOG_ERRORS) {
-			printf("Flow tester encountered error: %s\n", e.what());
+			printf("Flow tester encountered error: %s\n", e.name());
 			fflush(stdout);
 		}
 		flushAndExit(1);
@@ -1756,7 +1756,7 @@ int main( int argc, char** argv ) {
 		flushAndExit(FDB_EXIT_SUCCESS);
 	}
 	catch (Error& e) {
-		fprintf(stderr, "Error: %s\n", e.what());
+		fprintf(stderr, "Error: %s\n", e.name());
 		TraceEvent(SevError, "MainError").error(e);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	}
