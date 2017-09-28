@@ -1394,22 +1394,30 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	loop {
 		try {
 			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Version v = wait(tr->getReadVersion());
-				int64_t currentTime = (int64_t)now();
-				versionMap.set(tr, currentTime, v);
+					Optional<Value> disableValue = wait( tr->get(timeKeeperDisableKey) );
+					if(disableValue.present()) {
+						break;
+					}
 
-				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
-				if (ttl > 0) {
-					versionMap.erase(tr, 0, ttl);
+					Version v = tr->getReadVersion().get();
+					int64_t currentTime = (int64_t)now();
+					versionMap.set(tr, currentTime, v);
+
+					int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
+					if (ttl > 0) {
+						versionMap.erase(tr, 0, ttl);
+					}
+
+					Void _ = wait(tr->commit());
+					break;
+				} catch (Error &e) {
+					Void _ = wait(tr->onError(e));
 				}
-
-				Void _ = wait(tr->commit());
-			} catch (Error &e) {
-				Void _ = wait(tr->onError(e));
 			}
 		} catch (Error &e) {
 			// Failed to update time-version map even after retries, just ignore this iteration

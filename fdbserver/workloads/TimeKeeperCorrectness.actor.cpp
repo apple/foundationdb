@@ -100,9 +100,9 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 					self->inMemTimeKeeper[item.first] = item.second;
 				}
 
-				if (allItems.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES) {
+				if (allItems.size() > SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1) {
 					TraceEvent(SevError, "TKCorrectness_tooManyEntries")
-							.detail("expected", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES)
+							.detail("expected", SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES + 1)
 							.detail("found", allItems.size());
 					return false;
 				}

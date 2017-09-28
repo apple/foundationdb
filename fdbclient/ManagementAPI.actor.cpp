@@ -1140,6 +1140,21 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 	}
 }
 
+ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
+	loop {
+		state Transaction tr(cx);
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.set(timeKeeperDisableKey, StringRef());
+			Void _ = wait(tr.commit());
+			return Void();
+		} catch (Error &e) {
+			Void _ = wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> lockDatabase( Transaction* tr, UID id ) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);

@@ -30,6 +30,7 @@
 #include "fdbserver/DataDistribution.h"
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
+#include "fdbclient/ManagementAPI.h"
 
 struct ConsistencyCheckWorkload : TestWorkload
 {
@@ -103,6 +104,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 		//If performing quiescent checks, wait for the database to go quiet
 		if(self->firstClient && self->performQuiescentChecks)
 		{
+			if(g_network->isSimulated()) {
+				Void _ = wait( timeKeeperSetDisable(cx) );
+			}
+
 			try
 			{
 				Void _ = wait(timeoutError(quietDatabase(cx, self->dbInfo, "ConsistencyCheckStart", 0, 1e5, 0, 0), self->quiescentWaitTimeout));  // FIXME: should be zero?

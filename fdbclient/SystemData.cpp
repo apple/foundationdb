@@ -309,6 +309,7 @@ const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientI
 // Keyspace to maintain wall clock to version map
 const KeyRangeRef timeKeeperPrefixRange(LiteralStringRef("\xff\x02/timeKeeper/map/"), LiteralStringRef("\xff\x02/timeKeeper/map0"));
 const KeyRef timeKeeperVersionKey = LiteralStringRef("\xff\x02/timeKeeper/version");
+const KeyRef timeKeeperDisableKey = LiteralStringRef("\xff\x02/timeKeeper/disable");
 
 // Backup Log Mutation constant variables
 const KeyRef backupEnabledKey = LiteralStringRef("\xff/backupEnabled");
