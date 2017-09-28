@@ -173,6 +173,10 @@ extern const KeyRangeRef applyMutationsKeyVersionCountRange;
 // FdbClient Info prefix  
 extern const KeyRangeRef fdbClientInfoPrefixRange;
 
+// Keyspace to maintain wall clock to version map
+extern const KeyRangeRef timeKeeperPrefixRange;
+extern const KeyRef timeKeeperVersionKey;
+
 // Layer status metadata prefix
 extern const KeyRangeRef layerStatusMetaPrefixRange;
 

@@ -237,6 +237,9 @@
     <ActorCompiler Include="workloads\LockDatabase.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\TimeKeeperCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
