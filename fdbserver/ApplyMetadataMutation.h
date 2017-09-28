@@ -220,6 +220,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				if (popVersion != 0 && popVersion < requested) {
 					if (confChange) *confChange = true;
+					TEST(true);  // Recovering at a higher version.
 				}
 			}
 		}

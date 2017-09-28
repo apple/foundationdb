@@ -1460,22 +1460,22 @@ public:
 
 		TraceEvent("DBA_switchover_started");
 
+		state ReadYourWritesTransaction tr3(dest);
 		loop {
 			try {
-				tr2.reset();
-				tr2.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Version destVersion = wait(tr2.getReadVersion());
+				tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Version destVersion = wait(tr3.getReadVersion());
 				if (destVersion <= commitVersion) {
 					TraceEvent("DBA_switchover_version_upgrade").detail("src", commitVersion).detail("dest", destVersion);
 					TEST(true);  // Forcing dest backup cluster to higher version
-					tr2.set(minRequiredCommitVersionKey, BinaryWriter::toValue(commitVersion+1, Unversioned()));
-					Void _ = wait(tr2.commit());
+					tr3.set(minRequiredCommitVersionKey, BinaryWriter::toValue(commitVersion+1, Unversioned()));
+					Void _ = wait(tr3.commit());
 				} else {
 					break;
 				}
 			} catch( Error &e ) {
-				Void _ = wait(tr2.onError(e));
+				Void _ = wait(tr3.onError(e));
 			}
 		}
 
@@ -1513,6 +1513,7 @@ public:
 
 	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent, Database cx, Key tagName, bool partial) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state UID logUid;
 		state Value backupUid;
@@ -1542,9 +1543,9 @@ public:
 				Optional<Value> lastApplied = wait(tr->get(log_uid.withPrefix(applyMutationsBeginRange.begin)));
 				if (lastApplied.present()) {
 					Version applied = BinaryReader::fromStringRef<Version>(lastApplied.get(), Unversioned());
-					if (current < applied) {
+					if (current <= applied) {
 						TraceEvent("DBA_abort_version_upgrade").detail("src", applied).detail("dest", current);
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						TEST(true);  // Upgrading version of local database.
 						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(applied+1, Unversioned()));
 					}
 				}

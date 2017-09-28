@@ -13,4 +13,4 @@ testTitle=VersionStampBackupToDB
     machinesToKill=10
     machinesToLeave=3
     reboot=true
-    testDuration=80.0
+    testDuration=60.0
