@@ -212,7 +212,7 @@ public:
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			TraceEvent(SevWarn, "FileRestoreError").error(e).detail("RestoreUID", u).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
-			std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
+			std::string msg = format("ERROR: %s (%s)", details.c_str(), e.what());
 			RestoreConfig restore(u);
 			restore.lastError().set(tr, {StringRef(msg), (int64_t)now()});
 			return Void();
@@ -788,7 +788,7 @@ namespace fileBackup {
 		}
 		catch (Error &e) {
 			state Error err = e;
-			Void _ = wait(logError(cx, keyErrors, format("ERROR: Failed to open file `%s' because of error %s", fileName.c_str(), err.what())));
+			Void _ = wait(logError(cx, keyErrors, format("ERROR: Failed to open file `%s' because of error: %s", fileName.c_str(), err.what())));
 			throw err;
 		}
 	}
@@ -820,7 +820,7 @@ namespace fileBackup {
 				throw;
 
 			state Error err = e;
-			Void _ = wait(logError(cx, keyErrors, format("ERROR: Failed to write to file `%s' in container '%s' because of error %s", fileName.c_str(), backupContainer.c_str(), err.what())));
+			Void _ = wait(logError(cx, keyErrors, format("ERROR: Failed to write to file `%s' in container '%s' because of error: %s", fileName.c_str(), backupContainer.c_str(), err.what())));
 			throw err;
 		}
 
@@ -922,7 +922,7 @@ namespace fileBackup {
 					throw;
 
 				state Error err = e;
-				Void _ = wait(logError(tr->getDatabase(), keyErrors, format("ERROR: Failed to write to file `%s' because of error %s", filename.c_str(), err.what())));
+				Void _ = wait(logError(tr->getDatabase(), keyErrors, format("ERROR: Failed to write to file `%s' because of error: %s", filename.c_str(), err.what())));
 
 				throw err;
 			}
@@ -1158,7 +1158,7 @@ namespace fileBackup {
 									throw e2;
 								}
 
-								Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error %s", outFileName.c_str(), e2.what())));
+								Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error: %s", outFileName.c_str(), e2.what())));
 								throw e2;
 							}
 						}
@@ -1166,7 +1166,7 @@ namespace fileBackup {
 						return Void();
 					}
 
-					Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error %s", outFileName.c_str(), err.what())));
+					Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error: %s", outFileName.c_str(), err.what())));
 
 					throw err;
 				}
@@ -1311,7 +1311,7 @@ namespace fileBackup {
 					}
 
 					state Error err = e;
-					Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error %s", fileName.c_str(), err.what())));
+					Void _ = wait(logError(cx, task->params[FileBackupAgent::keyErrors], format("ERROR: Failed to write to file `%s' because of error: %s", fileName.c_str(), err.what())));
 
 					throw err;
 				}
@@ -3373,7 +3373,7 @@ public:
 		try {
 			Void _ = wait(timeoutError(bc->create(), 30));
 		} catch(Error &e) {
-			fprintf(stderr, "ERROR:  Could not create backup container: %s\n", e.what());
+			fprintf(stderr, "ERROR: Could not create backup container: %s\n", e.what());
 			throw backup_error();
 		}
 
