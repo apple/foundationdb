@@ -250,7 +250,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
-			if ( (e.code() == error_code_not_committed || e.code() == error_code_past_version ) && creating) {
+			if ( (e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old ) && creating) {
 				// The database now exists.  Determine whether we created it or it was already existing/created by someone else.  The latter is an error.
 				tr.reset();
 				loop {

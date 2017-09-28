@@ -791,7 +791,7 @@ ACTOR Future<Void> commitBatch(
 			trs[t].reply.send(CommitID(commitVersion, t));
 		}
 		else if (committed[t] == ConflictBatch::TransactionTooOld)
-			trs[t].reply.sendError(past_version());
+			trs[t].reply.sendError(transaction_too_old());
 		else
 			trs[t].reply.sendError(not_committed());
 	}

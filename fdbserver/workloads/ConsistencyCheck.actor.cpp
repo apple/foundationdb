@@ -273,7 +273,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 			catch(Error &e)
 			{
-				if(e.code() == error_code_past_version || e.code() == error_code_future_version || e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_server_request_queue_full)
+				if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_server_request_queue_full)
 					TraceEvent("ConsistencyCheck_Retry").error(e); // FIXME: consistency check does not retry in this case
 				else
 					self->testFailure(format("Error %d - %s", e.code(), e.name()));
@@ -464,7 +464,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				catch(Error &e)
 				{
 					//If we failed because of a version problem, then retry
-					if(e.code() == error_code_past_version || e.code() == error_code_future_version || e.code() == error_code_past_version)
+					if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
 						TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(e);
 					else
 						throw;
@@ -910,7 +910,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					catch(Error &e)
 					{
 						//If we failed because of a version problem, then retry
-						if(e.code() == error_code_past_version || e.code() == error_code_future_version || e.code() == error_code_past_version)
+						if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
 							TraceEvent("ConsistencyCheck_RetryDataConsistency").error(e);
 						else
 							throw;

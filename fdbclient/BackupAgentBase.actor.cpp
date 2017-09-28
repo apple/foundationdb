@@ -369,7 +369,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 			}
 		}
 		catch (Error &e) {
-			if (e.code() != error_code_past_version && e.code() != error_code_future_version)
+			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
 				throw;
 			tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 		}
@@ -463,7 +463,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 			nextKey = firstGreaterThan(rangevalue.end()[-1].key);
 		}
 		catch (Error &e) {
-			if (e.code() != error_code_past_version && e.code() != error_code_future_version)
+			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
 				throw;
 			Void _ = wait(tr->onError(e));
 		}
@@ -547,7 +547,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Re
 			nextKey = firstGreaterThan(rangevalue.end()[-1].key);
 		}
 		catch (Error &e) {
-			if (e.code() != error_code_past_version && e.code() != error_code_future_version)
+			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
 				throw;
 			Void _ = wait(tr->onError(e));
 		}
