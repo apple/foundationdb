@@ -171,6 +171,8 @@ class TestRunner(object):
         if self.args.no_threads and self.args.concurrency > 1:
             raise Exception('Not all testers support concurrency')
 
+        # Test types should be intersection of all tester supported types
+        self.args.types = reduce(lambda t1, t2: filter(t1.__contains__, t2), map(lambda tester: tester.types, self.testers))
 
     def print_test(self):
         test_instructions = self._generate_test()

@@ -54,7 +54,7 @@ class ApiTest(Test):
 
         self.generated_keys = []
         self.outstanding_ops = []
-        self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version)
+        self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version, args.types)
 
     def add_stack_items(self, num):
         self.stack_size += num
@@ -148,6 +148,8 @@ class ApiTest(Test):
         versions = ['GET_READ_VERSION', 'SET_READ_VERSION', 'GET_COMMITTED_VERSION']
         snapshot_versions = ['GET_READ_VERSION_SNAPSHOT']
         tuples = ['TUPLE_PACK', 'TUPLE_UNPACK', 'TUPLE_RANGE', 'TUPLE_SORT', 'SUB', 'ENCODE_FLOAT', 'ENCODE_DOUBLE', 'DECODE_DOUBLE', 'DECODE_FLOAT']
+        if 'versionstamp' in args.types:
+            tuples.append('TUPLE_PACK_WITH_VERSIONSTAMP')
         resets = ['ON_ERROR', 'RESET', 'CANCEL']
         read_conflicts = ['READ_CONFLICT_RANGE', 'READ_CONFLICT_KEY']
         write_conflicts = ['WRITE_CONFLICT_RANGE', 'WRITE_CONFLICT_KEY', 'DISABLE_WRITE_CONFLICT']
@@ -348,12 +350,12 @@ class ApiTest(Test):
                 key1 = self.versionstamped_values.pack((rand_str1,))
 
                 split = random.randint(0, 70)
-                rand_str2 = self.random.random_string(20+split) + 'XXXXXXXXXX' + self.random.random_string(70-split)
+                rand_str2 = self.random.random_string(20+split) + fdb.tuple.Versionstamp._UNSET_GLOBAL_VERSION + self.random.random_string(70-split)
                 key2 = self.versionstamped_keys.pack() + rand_str2
-                index = key2.find('XXXXXXXXXX')
+                index = key2.find(fdb.tuple.Versionstamp._UNSET_GLOBAL_VERSION)
                 key2 += chr(index%256)+chr(index/256)
 
-                instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', key1, 'XXXXXXXXXX' + rand_str2)
+                instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', key1, fdb.tuple.Versionstamp._UNSET_GLOBAL_VERSION + rand_str2)
                 instructions.append('ATOMIC_OP')
 
                 instructions.push_args(u'SET_VERSIONSTAMPED_KEY', key2, rand_str1)
@@ -424,6 +426,29 @@ class ApiTest(Test):
                     self.add_strings(1)
                 else:
                     self.add_strings(2)
+
+            elif op == 'TUPLE_PACK_WITH_VERSIONSTAMP':
+                tup = self.random.random_tuple(10, incomplete_versionstamps=True)
+                instructions.push_args(self.versionstamped_keys.pack(), len(tup), *tup)
+                instructions.append(op)
+                self.add_strings(1)
+
+                version_key = fdb.tuple.pack(tup, prefix=self.versionstamped_keys.pack())
+                first_incomplete = version_key.find(fdb.tuple.Versionstamp._UNSET_GLOBAL_VERSION)
+                second_incomplete = -1 if first_incomplete < 0 else version_key.find(fdb.tuple.Versionstamp._UNSET_GLOBAL_VERSION, first_incomplete + 1)
+
+                # If there is exactly one incomplete versionstamp, perform the versionstamped key operation.
+                if first_incomplete >= 0 and second_incomplete < 0:
+                    rand_str = self.random.random_string(100)
+
+                    instructions.push_args(rand_str)
+                    test_util.to_front(instructions, 1)
+                    instructions.push_args(u'SET_VERSIONSTAMPED_KEY')
+                    instructions.append('ATOMIC_OP')
+
+                    version_value_key = self.versionstamped_values.pack((rand_str,))
+                    instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', version_value_key, fdb.tuple.Versionstamp._UNSET_GLOBAL_VERSION + fdb.tuple.pack(tup))
+                    instructions.append('ATOMIC_OP')
 
             elif op == 'TUPLE_UNPACK':
                 tup = self.random.random_tuple(10)
@@ -511,7 +536,7 @@ class ApiTest(Test):
         for k,v in tr.get_range(begin_key, self.versionstamped_values.range().stop, limit=limit):
             next_begin = k + '\x00'
             tup = fdb.tuple.unpack(k)
-            key = self.versionstamped_keys.pack() + v[10:].replace('XXXXXXXXXX', v[:10], 1)
+            key = self.versionstamped_keys.pack() + v[10:].replace(fdb.tuple.Versionstamp._UNSET_GLOBAL_VERSION, v[:10], 1)
             if tr[key] != tup[-1]:
                 incorrect_versionstamps += 1
 

@@ -29,11 +29,13 @@ import fdb.tuple
 
 from bindingtester import util
 from bindingtester import FDB_API_VERSION
+from bindingtester.known_testers import COMMON_TYPES
 
 class RandomGenerator(object):
-    def __init__(self, max_int_bits=64, api_version=FDB_API_VERSION):
+    def __init__(self, max_int_bits=64, api_version=FDB_API_VERSION, types=COMMON_TYPES):
         self.max_int_bits = max_int_bits
         self.api_version = api_version
+        self.types = types
 
     def random_unicode_str(self, length):
         return u''.join(self.random_unicode_char() for i in range(0, length))
@@ -59,38 +61,45 @@ class RandomGenerator(object):
             mantissa = random.random()
             return sign * math.pow(2, exponent) * mantissa
 
-    def random_tuple(self, max_size):
+    def random_tuple(self, max_size, incomplete_versionstamps=False):
         size = random.randint(1, max_size)
         tup = []
 
         for i in range(size):
-            choice = random.randint(0, 8)
-            if choice == 0:
+            choice = random.choice(self.types)
+            if choice == 'int':
                 tup.append(self.random_int())
-            elif choice == 1:
+            elif choice == 'null':
                 tup.append(None)
-            elif choice == 2:
+            elif choice == 'bytes':
                 tup.append(self.random_string(random.randint(0, 100)))
-            elif choice == 3:
+            elif choice == 'string':
                 tup.append(self.random_unicode_str(random.randint(0, 100)))
-            elif choice == 4:
+            elif choice == 'uuid':
                 tup.append(uuid.uuid4())
-            elif choice == 5:
+            elif choice == 'bool':
                 b = random.random() < 0.5
                 if self.api_version < 500:
                     tup.append(int(b))
                 else:
                     tup.append(b)
-            elif choice == 6:
+            elif choice == 'double':
                 tup.append(fdb.tuple.SingleFloat(self.random_float(8)))
-            elif choice == 7:
+            elif choice == 'float':
                 tup.append(self.random_float(11))
-            elif choice == 8:
+            elif choice == 'tuple':
                 length = random.randint(0, max_size - size)
                 if length == 0:
                     tup.append(())
                 else:
                     tup.append(self.random_tuple(length))
+            elif choice == 'versionstamp':
+                if incomplete_versionstamps and random.random() < 0.5:
+                    global_version = fdb.tuple.Versionstamp._UNSET_GLOBAL_VERSION
+                else:
+                    global_version = self.random_string(10)
+                local_version = random.randint(0, 0xffff)
+                tup.append(fdb.tuple.Versionstamp(global_version, local_version))
             else:
                 assert false
 
