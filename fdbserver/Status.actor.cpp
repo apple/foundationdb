@@ -868,7 +868,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 	return processMap;
 }
 
-static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap) {
+static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap, std::map<NetworkAddress, std::string> traceLogGroupMap) {
 	StatusObject clientStatus;
 
 	clientStatus["count"] = (int64_t)clientVersionMap.size();
@@ -890,7 +890,10 @@ static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap) {
 
 		StatusArray clients = StatusArray();
 		for(auto client : cv.second) {
-			clients.push_back(client.toString());
+			StatusObject cli;
+			cli["address"] = client.toString();
+			cli["log_group"] = traceLogGroupMap[client];
+			clients.push_back(cli);
 		}
 
 		ver["clients"] = clients;
@@ -1686,6 +1689,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		ProcessIssuesMap workerIssues,
 		ProcessIssuesMap clientIssues,
 		ClientVersionMap clientVersionMap,
+		std::map<NetworkAddress, std::string> traceLogGroupMap,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections )
 {
@@ -1864,7 +1868,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		StatusObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, cx, configuration, &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
-		statusObj["clients"] = clientStatusFetcher(clientVersionMap);
+		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap);
 
 		StatusArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {

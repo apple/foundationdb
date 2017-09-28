@@ -74,6 +74,7 @@ public:
 		ProcessIssuesMap clientsWithIssues, workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
+		std::map<NetworkAddress, std::string> traceLogGroupMap;
 		Promise<Void> forceMasterFailure;
 		int64_t masterRegistrationCount;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
@@ -928,6 +929,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 	UID knownClientInfoID,
 	std::string issues,
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions,
+	Standalone<StringRef> traceLogGroup,
 	ReplyPromise<ClientDBInfo> reply)
 {
 	// NOTE: The client no longer expects this function to return errors
@@ -938,6 +940,8 @@ ACTOR Future<Void> clusterOpenDatabase(
 		db->clientVersionMap[reply.getEndpoint().address] = supportedVersions;
 	}
 
+	db->traceLogGroupMap[reply.getEndpoint().address] = traceLogGroup.toString();
+
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
 			when (Void _ = wait( db->clientInfo->onChange() )) {}
@@ -947,6 +951,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 
 	removeIssue( db->clientsWithIssues, reply.getEndpoint().address, issues, issueID );
 	db->clientVersionMap.erase(reply.getEndpoint().address);
+	db->traceLogGroupMap.erase(reply.getEndpoint().address);
 
 	reply.send( db->clientInfo->get() );
 	return Void();
@@ -1399,7 +1404,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, coordinators, incompatibleConnections)));
+			ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections)));
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
 
@@ -1568,7 +1573,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			addActor.send( clusterOpenDatabase( &self.db, req.dbName, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.reply ) );
+			addActor.send( clusterOpenDatabase( &self.db, req.dbName, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.traceLogGroup, req.reply ) );
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			addActor.send( clusterRecruitFromConfiguration( &self, req ) );
