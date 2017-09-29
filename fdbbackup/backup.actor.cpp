@@ -512,6 +512,9 @@ static void printAgentUsage(bool devhelp) {
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+		   "                 Memory limit. The default value is 8GiB. When specified\n"
+		   "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -620,6 +623,9 @@ static void printDBAgentUsage(bool devhelp) {
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+		   "                 Memory limit. The default value is 8GiB. When specified\n"
+		   "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
