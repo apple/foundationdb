@@ -92,8 +92,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 		state Future<Void> badCandidateTimeout;
 
 		UID randomID = g_random->randomUniqueID();
-		int64_t mask = 15ll << 60;
-		int64_t modifiedFirstPart = (randomID.first() & ~mask) | ((int64_t)asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController) << 60);
+		uint64_t mask = 15ll << 60;
+		uint64_t modifiedFirstPart = (randomID.first() & ~mask) | ((uint64_t)asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController) << 60);
 		myInfo.changeID = UID(modifiedFirstPart, randomID.second());
 
 		vector<Future<Void>> cand;
@@ -165,6 +165,15 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 	ASSERT( iAmLeader && outSerializedLeader->get() == proposedSerializedInterface );
 
 	loop {
+		uint64_t currentLeaderFitness = asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController);
+		uint64_t mask = 15ll << 60;
+		// change leader changeID only when process class fitness changes
+		if (((myInfo.changeID.first() & mask) >> 60) != currentLeaderFitness) {
+			UID PreviousChangeID = myInfo.changeID;
+			myInfo.changeID = UID((myInfo.changeID.first() & ~mask) | (currentLeaderFitness << 60), myInfo.changeID.second());
+			TraceEvent("ChangeLeaderChangeID").detail("PreviousChangeID", PreviousChangeID).detail("NewChangeID", myInfo.changeID);
+		}
+
 		state vector<Future<Void>> true_heartbeats;
 		state vector<Future<Void>> false_heartbeats;
 		for(int i=0; i<coordinators.leaderElectionServers.size(); i++) {

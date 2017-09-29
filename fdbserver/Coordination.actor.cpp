@@ -246,9 +246,17 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				TraceEvent("EndingLeaderNomination").detail("Key", printable(key));
 				return Void();
 			} else {
-				Optional<LeaderInfo> nextNominee = 
-					availableLeaders.size() ? *availableLeaders.begin() : 
-					availableCandidates.size() ? *availableCandidates.begin() : Optional<LeaderInfo>();
+				Optional<LeaderInfo> nextNominee;
+				if (availableLeaders.size() && availableCandidates.size()) {
+					// Only compare the first 4 bits which represents process class fitness
+					uint64_t mask = 15ll << 60;
+					nextNominee = ((*availableLeaders.begin()).changeID.first() & mask) <= ((*availableCandidates.begin()).changeID.first() & mask) ? *availableLeaders.begin() : *availableCandidates.begin();
+				} else if (availableLeaders.size())
+					nextNominee = *availableLeaders.begin();
+				else if (availableCandidates.size())
+					nextNominee = *availableCandidates.begin();
+				else
+					nextNominee = Optional<LeaderInfo>();
 
 				if (nextNominee != currentNominee || !availableLeaders.size()) {
 					TraceEvent("NominatingLeader").detail("Nominee", nextNominee.present() ? nextNominee.get().changeID : UID())

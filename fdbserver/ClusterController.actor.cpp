@@ -42,7 +42,7 @@ void failAfter( Future<Void> trigger, Endpoint e );
 
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
-	ReplyPromise<Optional<ProcessClass>> reply;
+	ReplyPromise<ProcessClass> reply;
 	Generation gen;
 	int reboots;
 	WorkerInterface interf;
@@ -50,7 +50,7 @@ struct WorkerInfo : NonCopyable {
 	ProcessClass processClass;
 
 	WorkerInfo() : gen(-1), reboots(0) {}
-	WorkerInfo( Future<Void> watcher, ReplyPromise<Optional<ProcessClass>> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
+	WorkerInfo( Future<Void> watcher, ReplyPromise<ProcessClass> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
 		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass) {}
 
 	WorkerInfo( WorkerInfo&& r ) noexcept(true) : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
@@ -1054,7 +1054,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 				}
 			}
 			when( Void _ = wait( failed ) ) {  // remove workers that have failed
-				cluster->id_worker[ worker.locality.processId() ].reply.send( Optional<ProcessClass>() );
+				cluster->id_worker[ worker.locality.processId() ].reply.send( cluster->id_worker[ worker.locality.processId() ].processClass );
 				cluster->id_worker.erase( worker.locality.processId() );
 
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
@@ -1317,7 +1317,6 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
-	ProcessClass processClass = req.processClass;
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
@@ -1326,11 +1325,11 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		auto classIter = self->id_class.find(w.locality.processId());
 
 		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.processClass.classType() == ProcessClass::UnsetClass) ) {
-			processClass = classIter->second;
+			req.reply.send( classIter->second );
+		} else {
+			self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.processClass, req.processClass );
+			checkOutstandingRequests( self );
 		}
-
-		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.processClass, processClass );
-		checkOutstandingRequests( self );
 
 		return;
 	}
@@ -1485,7 +1484,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 						}
 
 						if (newProcessClass != w.second.processClass) {
-							w.second.reply.send( Optional<ProcessClass>(classIter->second) );
+							w.second.reply.send( classIter->second );
 							w.second.processClass = newProcessClass;
 						}
 					}
