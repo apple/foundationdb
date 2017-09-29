@@ -2844,6 +2844,9 @@ int main(int argc, char **argv) {
 	platformInit();
 	initSignalSafeUnwind();
 	Error::init();
+	std::set_new_handler( &platform::outOfMemory );
+	uint64_t memLimit = 8LL << 30;
+	setMemoryQuota( memLimit );
 
 	registerCrashHandler();
 
