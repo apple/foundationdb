@@ -61,7 +61,7 @@ struct TimeKeeperCorrectnessWorkload : TestWorkload {
 			}
 
 			// For every sample from Timekeeper collect two samples here.
-			Void _ = wait(delay(std::min(SERVER_KNOBS->TIME_KEEPER_DELAY / 10, 1L)));
+			Void _ = wait(delay(std::min(SERVER_KNOBS->TIME_KEEPER_DELAY / 10, (int64_t)1L)));
 		}
 
 		TraceEvent(SevInfo, "TKCorrectness_completed");
