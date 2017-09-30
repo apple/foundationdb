@@ -152,7 +152,11 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		// The items are comma separated.
 		std::string host;
 		std::vector<NetworkAddress> addrs;
-		uint16_t portNum = (uint16_t)strtoul(port.toString().c_str(), NULL, 10);
+		char *end;
+		uint16_t portNum = (uint16_t)strtoul(port.toString().c_str(), &end, 10);
+		if(*end) {
+			throw format("%s is not a valid port", port.toString().c_str());
+		}
 
 		tokenizer h(hosts);
 		while(1) {
@@ -175,8 +179,9 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 			if(name.size() == 0)
 				break;
 			StringRef value = t.tok("&");
-			int ivalue = strtol(value.toString().c_str(), NULL, 10);
-			if(ivalue == 0)
+			char *valueEnd;
+			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
+			if(*valueEnd || ivalue == 0)
 				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
 			if(!knobs.set(name, ivalue))
 				throw format("%s is not a valid parameter name", name.toString().c_str());
