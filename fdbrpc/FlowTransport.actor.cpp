@@ -492,7 +492,7 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
-			if(g_network->isSimulated() && g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY_WITH_PROB(0.001)) {
+			if(g_network->isSimulated() && g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY_WITH_PROB(0.0001)) {
 				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip");

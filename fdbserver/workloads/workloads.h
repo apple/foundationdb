@@ -133,6 +133,8 @@ struct WorkloadFactory : IWorkloadFactory {
 	}
 };
 
+#define REGISTER_WORKLOAD(classname) WorkloadFactory<classname> classname##WorkloadFactory( #classname )
+
 struct DistributedTestResults {
 	vector<PerfMetric> metrics;
 	int successes, failures;

@@ -554,7 +554,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Re
 	}
 }
 
-ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Reference<FlowLock> lock, Key uid, Key addPrefix, Key removePrefix, RequestStream<CommitTransactionRequest> commit, 
+ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Reference<FlowLock> lock, Key uid, Key addPrefix, Key removePrefix, RequestStream<CommitTransactionRequest> commit,
 	NotifiedVersion* committedVersion, Optional<Version> endVersion, Key rangeBegin, PromiseStream<Future<Void>> addActor, FlowLock* commitLock, Reference<KeyRangeMap<Version>> keyVersion ) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
@@ -595,9 +595,11 @@ ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Referenc
 		Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
 		Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 		Key rangeEnd = getApplyKey(newBeginVersion, uid);
-		
+
 		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
+		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
 		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
+		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
 
 		req.transaction.read_snapshot = committedVersion->get();
 		req.isLockAware = true;

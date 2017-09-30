@@ -117,6 +117,7 @@ ProcessData decodeWorkerListValue( ValueRef const& );
 
 extern const KeyRef coordinatorsKey;
 extern const KeyRef logsKey;
+extern const KeyRef minRequiredCommitVersionKey;
 
 const Value logsValue( const vector<std::pair<UID, NetworkAddress>>& logs, const vector<std::pair<UID, NetworkAddress>>& oldLogs );
 std::pair<vector<std::pair<UID, NetworkAddress>>,vector<std::pair<UID, NetworkAddress>>> decodeLogsValue( const ValueRef& value );

@@ -526,6 +526,13 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false );
 
+	// Fetch minRequiredCommitVersion from txnStateStore
+	Optional<Standalone<StringRef>> requiredCommitVersion = wait(self->txnStateStore->readValue( minRequiredCommitVersionKey ));
+	Version minRequiredCommitVersion = -1;
+	if (requiredCommitVersion.present()) {
+		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());
+	}
+
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
@@ -535,6 +542,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		if(BUGGIFY) {
 			self->recoveryTransactionVersion += g_random->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 		}
+		if ( self->recoveryTransactionVersion < minRequiredCommitVersion ) self->recoveryTransactionVersion = minRequiredCommitVersion;
 	}
 
 	TraceEvent("MasterRecovering", self->dbgid).detail("lastEpochEnd", self->lastEpochEnd).detail("recoveryTransactionVersion", self->recoveryTransactionVersion);
