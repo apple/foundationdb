@@ -76,6 +76,53 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
+// TODO: Define an acceptable middle place to share it between here and optimisttest.
+Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "") {
+	char *endptr;
+
+	uint64_t ret = strtoull(toparse.c_str(), &endptr, 10);
+
+	if (endptr == toparse.c_str()) {
+		return Optional<uint64_t>();
+	}
+
+	std::string unit;
+
+	if (*endptr == '\0') {
+		if (!default_unit.empty()) {
+			unit = default_unit;
+		} else {
+			return Optional<uint64_t>();
+		}
+	} else {
+		unit = endptr;
+	}
+
+	if (!unit.compare("B")) {
+		// Nothing to do
+	} else if (!unit.compare("KB")) {
+		ret *= int64_t(1e3);
+	} else if (!unit.compare("KiB")) {
+		ret *= 1LL << 10;
+	} else if (!unit.compare("MB")) {
+		ret *= int64_t(1e6);
+	} else if (!unit.compare("MiB")) {
+		ret *= 1LL << 20;
+	} else if (!unit.compare("GB")) {
+		ret *= int64_t(1e9);
+	} else if (!unit.compare("GiB")) {
+		ret *= 1LL << 30;
+	} else if (!unit.compare("TB")) {
+		ret *= int64_t(1e12);
+	} else if (!unit.compare("TiB")) {
+		ret *= 1LL << 40;
+	} else {
+		return Optional<uint64_t>();
+	}
+
+	return ret;
+}
+
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
@@ -503,6 +550,10 @@ void initHelp() {
 		"kill all|list|<ADDRESS>*",
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
+  helpMap["profile"] = CommandHelp(
+		"<type> <on|off|status> <ARGS>",
+		"toggles the profiling state for a form of profiling.",
+		"Supported types are: client.\n`on` and `off` enable and disable the selected type of profiling, and may require additional arguments.  `status` shows if the selected profiling type is currently active.\n\nprofile client on <RATE> <SIZE>\n\tRATE is a double between 0 and 1 inclusive.\n\tSIZE is a unit suffixed value of bytes of samples to maintain in the database.  Defaults to 100MB.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -2532,6 +2583,84 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Attempted to kill %lu processes\n", tokens.size() - 1);
 						}
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "profile")) {
+					if (tokens.size() == 1) {
+						printf("Supported profiling types are: client\n");
+						continue;
+					}
+					if (tokencmp(tokens[1], "client")) {
+						getTransaction(db, tr, options, intrans);
+						if (tokens.size() == 2) {
+							printf("ERROR: on, off, or status missing.\n");
+							is_error = true;
+							continue;
+						}
+						if (tokencmp(tokens[2], "status")) {
+							if (tokens.size() != 3) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+							Optional<Standalone<StringRef>> sampleRate = wait(makeInterruptable(tr->get(fdbClientInfoTxnSampleRate)));
+							const char* status = NULL;
+							if (sampleRate.present() && !std::isinf(BinaryReader::fromStringRef<double>(sampleRate.get(), Unversioned()))) {
+								status = "on";
+							} else {
+								status = "off";
+							}
+							printf("Client profiling is %s.\n", status);
+							continue;
+						}
+						if (tokencmp(tokens[2], "on")) {
+							if (tokens.size() < 4 || tokens.size() > 5) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+							double sampleRate;
+							int64_t sizeLimit = 100 * 1e6;
+							sampleRate = std::atof((const char*)tokens[3].begin());
+							if (tokens.size() == 5) {
+								Optional<uint64_t> parsed = parse_with_suffix(tokens[4].toString());
+								if (parsed.present()) {
+									sizeLimit = parsed.get();
+								} else {
+									printf("ERROR: `%s` failed to parse.\n", printable(tokens[4]).c_str());
+									is_error = true;
+									continue;
+								}
+							}
+							tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
+							tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
+							if (!intrans) {
+								Void _ = wait( commitTransaction( tr ) );
+							}
+							continue;
+						}
+						if (tokencmp(tokens[2], "off")) {
+							if (tokens.size() != 3) {
+								printUsage(tokens[0]);
+								is_error = true;
+								continue;
+							}
+							double sampleRate = std::numeric_limits<double>::infinity();
+							int64_t sizeLimit = -1;
+							tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
+							tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
+							if (!intrans) {
+								Void _ = wait( commitTransaction( tr ) );
+							}
+							continue;
+						}
+						printf("ERROR: Unknown state: %s\n", printable(tokens[2]).c_str());
+						is_error = true;
+						continue;
+					}
+					printf("ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
+					is_error = true;
 					continue;
 				}
 

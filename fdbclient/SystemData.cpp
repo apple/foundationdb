@@ -306,6 +306,8 @@ const UID dataDistributionModeLock = UID(6345,3425);
 
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
+const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("client_txn_sample_rate/").withPrefix(fdbClientInfoPrefixRange.begin);
+const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("client_txn_size_limit/").withPrefix(fdbClientInfoPrefixRange.begin);
 
 // Keyspace to maintain wall clock to version map
 const KeyRangeRef timeKeeperPrefixRange(LiteralStringRef("\xff\x02/timeKeeper/map/"), LiteralStringRef("\xff\x02/timeKeeper/map0"));
