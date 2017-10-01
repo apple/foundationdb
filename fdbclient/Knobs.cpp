@@ -140,7 +140,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
-	init( BLOBSTORE_REQUEST_TIMEOUT,                15 );
+	init( BLOBSTORE_REQUEST_TIMEOUT,                30 );
 
 	init( BLOBSTORE_CONCURRENT_UPLOADS, BACKUP_TASKS_PER_AGENT*2 );
 
