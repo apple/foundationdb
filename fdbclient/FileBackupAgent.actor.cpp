@@ -1114,7 +1114,7 @@ namespace fileBackup {
 							state Key nextKey = keyAfter(lastKey);
 							Void _ = wait(saveAndExtendIncrementally(cx, taskBucket, task,
 																	 endKeyRangeFile(cx, task->params[FileBackupAgent::keyErrors], &rangeFile, task->params[FileBackupAgent::keyBackupContainer].toString(), &outFileName, nextKey, outVersion),
-																	 timeout
+																	 timeout  // time at which to do the first saveAndExtend
 																	)
 										 );
 
@@ -1163,7 +1163,7 @@ namespace fileBackup {
 							try {
 								Void _ = wait(saveAndExtendIncrementally(cx, taskBucket, task, 
 																		 endKeyRangeFile(cx, task->params[FileBackupAgent::keyErrors], &rangeFile, task->params[FileBackupAgent::keyBackupContainer].toString(), &outFileName, endKey, outVersion),
-																		 timeout
+																		 timeout  // time at which to do the first saveAndExtend
 																		)
 											 );
 
@@ -1413,7 +1413,7 @@ namespace fileBackup {
 			std::string logFileName = FileBackupAgent::getLogFilename(beginVersion, endVersion, logFile.offset, logFile.blockSize);
 			Void _ = wait(saveAndExtendIncrementally(cx, taskBucket, task,
 													 endLogFile(cx, task, outFile, tempFileName, logFileName, logFile.offset),
-													 timeout
+													 timeout  // time at which to do the first saveAndExtend
 													)
 						 );
 
