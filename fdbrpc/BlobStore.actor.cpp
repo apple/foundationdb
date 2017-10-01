@@ -688,7 +688,7 @@ ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, s
 	HTTP::Headers headers;
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
-	state Reference<HTTP::Response> r; // = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen));
+	state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen));
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check that too.
 	auto sum = r->headers.find("Content-MD5");
