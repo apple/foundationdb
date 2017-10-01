@@ -589,8 +589,9 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	if(contentLen > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
 
-	try {
 		Void _ = wait(bstore->concurrentUploads.take(1));
+	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
+
 		std::string resource = std::string("/") + bucket + "/" + object;
 		HTTP::Headers headers;
 		// Send MD5 sum for content so blobstore can verify it
@@ -602,12 +603,6 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 		if(sum == r->headers.end() || sum->second != contentMD5)
 			throw http_bad_response();
 
-	} catch(Error &e) {
-		bstore->concurrentUploads.release(1);
-		throw;
-	}
-
-	bstore->concurrentUploads.release(1);
 	if(r->code == 200)
 		return Void();
 	throw http_bad_response();
@@ -686,24 +681,21 @@ Future<std::string> BlobStoreEndpoint::beginMultiPartUpload(std::string const &b
 }
 
 ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, unsigned int partNumber, UnsentPacketQueue *pContent, int contentLen, std::string contentMD5) {
-	try {
+	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 		Void _ = wait(bstore->concurrentUploads.take(1));
+
 		std::string resource = format("/%s/%s?partNumber=%d&uploadId=%s", bucket.c_str(), object.c_str(), partNumber, uploadID.c_str());
 		HTTP::Headers headers;
 		// Send MD5 sum for content so blobstore can verify it
 		headers["Content-MD5"] = contentMD5;
-		state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen));
+	Void _ = wait(Never());
+	state Reference<HTTP::Response> r; // = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen));
 
 		// For uploads, Blobstore returns an MD5 sum of uploaded content so check that too.
 		auto sum = r->headers.find("Content-MD5");
 		if(sum == r->headers.end() || sum->second != contentMD5)
 			throw http_bad_response();
-	} catch(Error &e) {
-		bstore->concurrentUploads.release(1);
-		throw;
-	}
 
-	bstore->concurrentUploads.release(1);
 	if(r->code != 200)
 		throw http_bad_response();
 
