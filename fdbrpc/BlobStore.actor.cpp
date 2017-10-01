@@ -344,15 +344,16 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	Void _ = wait(bstore->concurrentRequests.take(1));
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
-	state NetworkAddress address = bstore->addresses[g_random->randomInt(0, bstore->addresses.size())];
-
-	Void _ = wait(bstore->concurrentRequestsPerAddress[address]->take(1));
-	state FlowLock::Releaser perAddressReleaser(*bstore->concurrentRequestsPerAddress[address], 1);
-
 	state int tries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state double retryDelay = 2.0;
 	loop {
 		try {
+			// Pick an adress
+			state NetworkAddress address = bstore->addresses[g_random->randomInt(0, bstore->addresses.size())];
+			state FlowLock::Releaser perAddressReleaser;
+			Void _ = wait(bstore->concurrentRequestsPerAddress[address]->take(1));
+			perAddressReleaser = FlowLock::Releaser(*bstore->concurrentRequestsPerAddress[address], 1);
+
 			// Start connecting
 			Future<Reference<IConnection>> fconn = bstore->connect(address);
 
