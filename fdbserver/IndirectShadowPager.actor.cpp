@@ -50,7 +50,7 @@ void checksum(std::string const &file, Reference<const IPage> page, LogicalPageI
 	if(!write && sum != *pSumInPage) {
 		auto e = checksum_failed();
 		TraceEvent (SevError, "IndirectShadowPagerPageChecksumFailure")
-			.detail("CodecPageSize", page->size())
+			.detail("UserPageSize", page->size())
 			.detail("Filename", file.c_str())
 			.detail("LogicalPage", logical)
 			.detail("PhysicalPage", physical)
@@ -242,7 +242,7 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 		pager->pagerFile.startVacuuming();
 
 		debug_printf("Finished recovery\n", pager->oldestVersion);
-		TraceEvent("PagerFinishedRecovery");
+		TraceEvent("PagerFinishedRecovery").detail("LatestVersion", pager->latestVersion).detail("OldestVersion", pager->oldestVersion);
 	}
 	catch(Error &e) {
 		TraceEvent(SevError, "PagerRecoveryFailed").error(e, true);

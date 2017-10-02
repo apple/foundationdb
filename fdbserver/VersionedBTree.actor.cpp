@@ -295,6 +295,8 @@ public:
 	Future<Void> init() { return m_init; }
 
 	virtual ~VersionedBTree() {
+		m_init.cancel();
+		m_latestCommit.cancel();
 	}
 
 	// readAtVersion() may only be called on a version which has previously been passed to setWriteVersion() and never previously passed
@@ -1348,12 +1350,24 @@ private:
 KeyVersionValue VersionedBTree::beginKey(StringRef(), 0);
 KeyVersionValue VersionedBTree::endKey(LiteralStringRef("\xff\xff\xff\xff"), 0);
 
+ACTOR template<class T>
+Future<T> catchError(Promise<Void> error, Future<T> f) {
+	try {
+		T result = wait(f);
+		return result;
+	} catch(Error &e) {
+		if(error.canBeSet())
+			error.sendError(e);
+		throw;
+	}
+}
+
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
 		m_pager = new IndirectShadowPager(filePrefix);
 		m_tree = new VersionedBTree(m_pager, m_pager->getUsablePageSize());
-		m_init = init_impl(this);
+		m_init = catchError(m_error, init_impl(this));
 		m_lastCommit = m_init;
 	}
 
@@ -1368,23 +1382,25 @@ public:
 		return Void();
 	}
 
-	ACTOR Future<Void> close_impl(KeyValueStoreRedwoodUnversioned *self) {
+	ACTOR void shutdown(KeyValueStoreRedwoodUnversioned *self, bool dispose) {
 		self->m_init.cancel();
-		// TODO:  Close btree
+		delete self->m_tree;
 		Future<Void> closedFuture = self->m_pager->onClosed();
-		self->m_pager->close();
+		if(dispose)
+			self->m_pager->dispose();
+		else
+			self->m_pager->close();
 		Void _ = wait(closedFuture);
 		self->m_closed.send(Void());
-		return Void();
+		delete self;
 	}
 
 	virtual void close() {
-		if(!m_closing.isValid())
-			m_closing = close_impl(this);
+		shutdown(this, false);
 	}
 
 	virtual void dispose() {
-		close();
+		shutdown(this, true);
 	}
 
 	virtual Future< Void > onClosed() {
@@ -1392,23 +1408,17 @@ public:
 	}
 
 	ACTOR static Future<Void> commit_impl(KeyValueStoreRedwoodUnversioned *self) {
-		// Replace last commit with a new future for this commit and then wait on the previous one.
-		Future<Void> previousCommit = self->m_lastCommit;
-		state Promise<Void> committed;
-		self->m_lastCommit = committed.getFuture();
-		Void _ = wait(previousCommit);
-
+		Void _ = wait(self->m_init);
 		// Start the commit, then set a new write version before waiting on the commit.
 		Future<Void> c = self->m_tree->commit();
 		self->m_tree->setWriteVersion(self->m_tree->getWriteVersion() + 1);
 		Void _ = wait(c);
 
-		committed.send(Void());
 		return Void();
 	}
 
 	Future<Void> commit(bool sequential = false) {
-		return commit_impl(this);
+		return catchError(m_error, commit_impl(this));
 	}
 
 	virtual KeyValueStoreType getType() {
@@ -1419,7 +1429,7 @@ public:
 		return m_pager->getStorageBytes();
 	}
 
-	virtual Future< Void > getError() { return Never(); };
+	virtual Future< Void > getError() { return m_error.getFuture(); };
 
 	void clear(KeyRangeRef range, const Arena* arena = 0) {
 		m_tree->clear(range);
@@ -1437,6 +1447,8 @@ public:
 		ASSERT( byteLimit > 0 );
 
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
+
+		state Version readVersion = self->m_tree->getLastCommittedVersion();
 		if(rowLimit >= 0) {
 			Void _ = wait(cur->findFirstEqualOrGreater(keys.begin, true, 0));
 			while(cur->isValid() && cur->getKey() < keys.end) {
@@ -1465,21 +1477,23 @@ public:
 	}
 
 	virtual Future< Standalone< VectorRef< KeyValueRef > > > readRange(KeyRangeRef keys, int rowLimit = 1<<30, int byteLimit = 1<<30) {
-		return readRange_impl(this, keys, rowLimit, byteLimit);
+		return catchError(m_error, readRange_impl(this, keys, rowLimit, byteLimit));
 	}
 
 	ACTOR static Future< Optional<Value> > readValue_impl(KeyValueStoreRedwoodUnversioned *self, KeyRef key, Optional< UID > debugID) {
 		Void _ = wait(self->m_init);
 		state Reference<IStoreCursor> cur = self->m_tree->readAtVersion(self->m_tree->getLastCommittedVersion());
+		state Version readVersion = self->m_tree->getLastCommittedVersion();
 
 		Void _ = wait(cur->findEqual(key));
-		if(cur->isValid())
+		if(cur->isValid()) {
 			return cur->getValue();
+		}
 		return Optional<Value>();
 	}
 
 	virtual Future< Optional< Value > > readValue(KeyRef key, Optional< UID > debugID = Optional<UID>()) {
-		return readValue_impl(this, key, debugID);
+		return catchError(m_error, readValue_impl(this, key, debugID));
 	}
 
 	ACTOR static Future< Optional<Value> > readValuePrefix_impl(KeyValueStoreRedwoodUnversioned *self, KeyRef key, int maxLength, Optional< UID > debugID) {
@@ -1496,7 +1510,7 @@ public:
 	}
 
 	virtual Future< Optional< Value > > readValuePrefix(KeyRef key, int maxLength, Optional< UID > debugID = Optional<UID>()) {
-		return readValuePrefix_impl(this, key, maxLength, debugID);
+		return catchError(m_error, readValuePrefix_impl(this, key, maxLength, debugID));
 	}
 
 	virtual ~KeyValueStoreRedwoodUnversioned() {
@@ -1507,9 +1521,9 @@ private:
 	IPager *m_pager;
 	VersionedBTree *m_tree;
 	Future<Void> m_init;
-	Future<Void> m_closing;
 	Promise<Void> m_closed;
 	Future<Void> m_lastCommit;
+	Promise<Void> m_error;
 };
 
 IKeyValueStore* keyValueStoreRedwoodV1( std::string const& filename, UID logID) {
