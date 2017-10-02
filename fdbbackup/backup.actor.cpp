@@ -99,7 +99,7 @@ enum {
 	OPT_CLUSTERFILE, OPT_QUIET, OPT_DRYRUN, OPT_FORCE,
 	OPT_HELP, OPT_DEVHELP, OPT_VERSION, OPT_PARENTPID, OPT_CRASHONERROR,
 	OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACE, OPT_TRACE_DIR,
-	OPT_KNOB, OPT_TRACE_LOG_GROUP, OPT_LOCALITY,
+	OPT_KNOB, OPT_TRACE_LOG_GROUP, OPT_MEMLIMIT, OPT_LOCALITY,
 
 	//DB constants
 	OPT_SOURCE_CLUSTER,
@@ -123,6 +123,8 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -158,6 +160,8 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -184,6 +188,8 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -207,6 +213,8 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -232,6 +240,8 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -257,6 +267,8 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -292,6 +304,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_FORCE,           "-f",               SO_NONE },
 	{ OPT_FORCE,           "--force",          SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -318,6 +332,8 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -345,6 +361,8 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -372,6 +390,8 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -397,6 +417,8 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -423,6 +445,8 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -436,6 +460,8 @@ CSimpleOpt::SOption g_rgBlobOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -488,6 +514,9 @@ static void printAgentUsage(bool devhelp) {
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+		   "                 Memory limit. The default value is 8GiB. When specified\n"
+		   "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -596,6 +625,9 @@ static void printDBAgentUsage(bool devhelp) {
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+		   "                 Memory limit. The default value is 8GiB. When specified\n"
+		   "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -1998,6 +2030,8 @@ int main(int argc, char* argv[]) {
 		ESOError	lastError;
 		bool partial = true;
 		LocalityData localities;
+		uint64_t memLimit = 8LL << 30;
+		Optional<uint64_t> ti;
 
 		std::vector<std::string> blobArgs;
 
@@ -2196,6 +2230,15 @@ int main(int argc, char* argv[]) {
 				case OPT_CRASHONERROR:
 					g_crashOnError = true;
 					break;
+				case OPT_MEMLIMIT:
+					ti = parse_with_suffix(args->OptionArg(), "MiB");
+					if (!ti.present()) {
+						fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args->OptionArg());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					memLimit = ti.get();
+					break;
 			}
 		}
 
@@ -2317,6 +2360,7 @@ int main(int argc, char* argv[]) {
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 		Error::init();
 		std::set_new_handler( &platform::outOfMemory );
+		setMemoryQuota( memLimit );
 
 		int total = 0;
 		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
@@ -2377,6 +2421,7 @@ int main(int argc, char* argv[]) {
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
 				.detail("CommandLine", commandLine)
+				.detail("MemoryLimit", memLimit)
 				.trackLatest("ProgramStart");
 
 			db = cluster->createDatabase(databaseKey, localities).get();
