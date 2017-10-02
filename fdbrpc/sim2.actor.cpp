@@ -1356,10 +1356,14 @@ public:
 			.detail("KillType", kt)
 			.detail("OrigKillType", ktOrig);
 
+		TEST(kt == RebootAndDelete); // Resulted in a reboot and delete
+		TEST(kt == Reboot); // Resulted in a reboot
+		TEST(kt == KillInstantly); // Resulted in an instant kill
+		TEST(kt == InjectFaults);  // Resulted in a kill by injecting faults
+		TEST(kt != Reboot); // A true DataCenter kill
+
 		for (auto& datacenterZone : datacenterZones)
-		killMachine( datacenterZone.first, kt, (kt == RebootAndDelete), true);
-// ahm  If above doesn't work, go conservative
-//	killMachine( datacenterZone.first, kt, false, true);
+			killMachine( datacenterZone.first, kt, (kt == RebootAndDelete), true);
 	}
 	virtual void clogInterface( uint32_t ip, double seconds, ClogMode mode = ClogDefault ) {
 		if (mode == ClogDefault) {
