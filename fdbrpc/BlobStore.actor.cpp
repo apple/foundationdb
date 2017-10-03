@@ -328,6 +328,7 @@ Future<Reference<IConnection>> BlobStoreEndpoint::connect( NetworkAddress addres
 		}
 	}
 
+	TraceEvent(SevInfo, "BlobStoreHTTPConnect").detail("RemoteEndpoint", address).suppressFor(5.0, true);
 	return INetworkConnections::net()->connect(address);
 }
 
@@ -346,10 +347,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 	state int tries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state double retryDelay = 2.0;
+	state NetworkAddress address;
+
 	loop {
 		try {
 			// Pick an adress
-			state NetworkAddress address = bstore->addresses[g_random->randomInt(0, bstore->addresses.size())];
+			address = bstore->addresses[g_random->randomInt(0, bstore->addresses.size())];
 			state FlowLock::Releaser perAddressReleaser;
 			Void _ = wait(bstore->concurrentRequestsPerAddress[address]->take(1));
 			perAddressReleaser = FlowLock::Releaser(*bstore->concurrentRequestsPerAddress[address], 1);
@@ -412,8 +415,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// If the error is connection failed and a retry is allowed then ignore the error
 			if((e.code() == error_code_connection_failed || e.code() == error_code_timed_out) && --tries > 0) {
 				bstore->s_stats.requests_failed++;
-				//TraceEvent(SevWarn, "BlobStoreHTTPConnectionFailed").detail("Verb", verb).detail("Resource", resource).detail("Host", bstore->host).detail("Port", bstore->port);
-				//printf("Retrying (%d left) %s %s\n", tries, verb.c_str(), resource.c_str());
+				TraceEvent(SevWarn, "BlobStoreHTTPConnectionFailed").detail("RemoteEndpoint", address).detail("Verb", verb).detail("Resource", resource).suppressFor(5.0, true);
 				Void _ = wait(delay(retryDelay));
 				retryDelay *= 2;
 				retryDelay = std::min(retryDelay, 60.0);
