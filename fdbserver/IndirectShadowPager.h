@@ -157,6 +157,7 @@ public:
 
 //private:
 	std::string basename;
+	std::string pageFileName;
 
 	Version latestVersion;
 	Version committedVersion;
