@@ -168,10 +168,10 @@ description is not currently required but encouraged.
             description="Snapshot read operations will not see the results of writes done in the same transaction." />
     <Option name="lock_aware" code="700"
             description="The transaction can read and write to locked databases, and is resposible for checking that it took the lock."/>
-    <Option name="read_lock_aware" code="701"
-            description="The transaction can read from locked databases."/>
     <Option name="used_during_commit_protection_disable" code="701"
             description="By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail."/>
+    <Option name="read_lock_aware" code="702"
+            description="The transaction can read from locked databases."/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without
