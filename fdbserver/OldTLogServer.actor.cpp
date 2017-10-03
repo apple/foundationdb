@@ -567,7 +567,7 @@ namespace oldTLog {
 
 			nextVersion = std::max<Version>(nextVersion, self->persistentDataVersion);
 
-			TraceEvent("UpdateStorageVer", self->dbgid).detail("nextVersion", nextVersion).detail("persistentDataVersion", self->persistentDataVersion).detail("totalSize", totalSize);
+			//TraceEvent("UpdateStorageVer", self->dbgid).detail("nextVersion", nextVersion).detail("persistentDataVersion", self->persistentDataVersion).detail("totalSize", totalSize);
 
 			Void _ = wait( self->queueCommittedVersion.whenAtLeast( nextVersion ) );
 			Void _ = wait( delay(0, TaskUpdateStorage) );

@@ -135,6 +135,9 @@ public:
 	int MIN_TRACE_SEVERITY;
 	int MAX_TRACE_SUPPRESSIONS;
 	int TRACE_FSYNC_ENABLED;
+	int TRACE_EVENT_METRIC_UNITS_PER_SAMPLE;
+	int TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY;
+	int TRACE_EVENT_THROTTLER_MSG_LIMIT;
 
 	//TDMetrics
 	int64_t MAX_METRIC_SIZE;
@@ -164,5 +167,7 @@ public:
 };
 
 extern FlowKnobs const* FLOW_KNOBS;
+
+FlowKnobs const* getFlowKnobs();
 
 #endif

@@ -21,7 +21,13 @@
 #include "Knobs.h"
 #include "flow/flow.h"
 
-FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
+FlowKnobs const* FLOW_KNOBS = getFlowKnobs();
+
+FlowKnobs const* getFlowKnobs() {
+	if (!FLOW_KNOBS)
+		FLOW_KNOBS = new FlowKnobs();
+	return FLOW_KNOBS;
+}
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
@@ -115,6 +121,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MIN_TRACE_SEVERITY,                 isSimulated ? 0 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_FSYNC_ENABLED,                                   0 );
+	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,				   100 );
+	init( TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY,				   120 );
+	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,					  1000 );
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
