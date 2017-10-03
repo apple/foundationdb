@@ -405,8 +405,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 				// Blob returns this when the account doesn't exist
 				throw http_not_accepted();
 			}
-			else if(r->code == 500) {
-				// For error 500 just treat it like connection_failed
+			else if(r->code == 500 || r->code == 503) {
+				// For these errors just treat it like connection_failed
 				throw connection_failed();
 			}
 			else
