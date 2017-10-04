@@ -77,53 +77,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
-// TODO: Define an acceptable middle place to share it between here and optimisttest.
-Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "") {
-	char *endptr;
-
-	uint64_t ret = strtoull(toparse.c_str(), &endptr, 10);
-
-	if (endptr == toparse.c_str()) {
-		return Optional<uint64_t>();
-	}
-
-	std::string unit;
-
-	if (*endptr == '\0') {
-		if (!default_unit.empty()) {
-			unit = default_unit;
-		} else {
-			return Optional<uint64_t>();
-		}
-	} else {
-		unit = endptr;
-	}
-
-	if (!unit.compare("B")) {
-		// Nothing to do
-	} else if (!unit.compare("KB")) {
-		ret *= int64_t(1e3);
-	} else if (!unit.compare("KiB")) {
-		ret *= 1LL << 10;
-	} else if (!unit.compare("MB")) {
-		ret *= int64_t(1e6);
-	} else if (!unit.compare("MiB")) {
-		ret *= 1LL << 20;
-	} else if (!unit.compare("GB")) {
-		ret *= int64_t(1e9);
-	} else if (!unit.compare("GiB")) {
-		ret *= 1LL << 30;
-	} else if (!unit.compare("TB")) {
-		ret *= int64_t(1e12);
-	} else if (!unit.compare("TiB")) {
-		ret *= 1LL << 40;
-	} else {
-		return Optional<uint64_t>();
-	}
-
-	return ret;
-}
-
 void printAtCol(const char* text, int col) {
 	const char* iter = text;
 	const char* start = text;
@@ -2636,7 +2589,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							if (tokencmp(tokens[3], "default")) {
 								sampleRate = std::numeric_limits<double>::infinity();
 							} else {
-								sampleRate = std::atof((const char*)tokens[3].begin());
+								char* end;
+								sampleRate = std::strtod((const char*)tokens[3].begin(), &end);
+								if (!std::isspace(*end)) {
+									printf("ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
+									is_error = true;
+									continue;
+								}
 							}
 							int64_t sizeLimit;
 							if (tokencmp(tokens[4], "default")) {
