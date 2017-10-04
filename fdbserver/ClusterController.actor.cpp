@@ -1054,9 +1054,9 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 				}
 			}
 			when( Void _ = wait( failed ) ) {  // remove workers that have failed
-				cluster->id_worker[ worker.locality.processId() ].reply.send( cluster->id_worker[ worker.locality.processId() ].processClass );
+				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
+				failedWorkerInfo.reply.send( failedWorkerInfo.processClass );
 				cluster->id_worker.erase( worker.locality.processId() );
-
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
 				return Void();
 			}
@@ -1317,6 +1317,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
+	ProcessClass processClass = req.processClass;
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
@@ -1324,12 +1325,15 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	if( info == self->id_worker.end() ) {
 		auto classIter = self->id_class.find(w.locality.processId());
 
-		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.processClass.classType() == ProcessClass::UnsetClass) ) {
-			req.reply.send( classIter->second );
-		} else {
-			self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.processClass, req.processClass );
-			checkOutstandingRequests( self );
+		if( classIter != self->id_class.end() && classIter->second != req.processClass && (classIter->second.classSource() == ProcessClass::DBSource || req.processClass.classType() == ProcessClass::UnsetClass)) {
+			processClass = classIter->second;
+			if (!req.reply.isSet()) {
+				req.reply.send( processClass );
+			}
 		}
+
+		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.processClass, processClass );
+		checkOutstandingRequests( self );
 
 		return;
 	}
@@ -1484,8 +1488,10 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 						}
 
 						if (newProcessClass != w.second.processClass) {
-							w.second.reply.send( classIter->second );
 							w.second.processClass = newProcessClass;
+							if (!w.second.reply.isSet()) {
+								w.second.reply.send( newProcessClass );
+							}
 						}
 					}
 
