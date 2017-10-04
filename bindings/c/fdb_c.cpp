@@ -125,6 +125,12 @@ fdb_error_t fdb_stop_network() {
 }
 
 extern "C" DLLEXPORT
+fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter) {
+    CATCH_AND_RETURN( API->addNetworkThreadCompletionHook(hook, hook_parameter); );
+}
+
+
+extern "C" DLLEXPORT
 FDBFuture* fdb_cluster_configure_database( FDBCluster* c, int config_type,
 											   int config_mode, uint8_t const* db_name,
 											   int db_name_length )

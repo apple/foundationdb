@@ -1134,10 +1134,23 @@ void MultiVersionApi::setupNetwork() {
 
 THREAD_FUNC_RETURN runNetworkThread(void *param) {
 	try {
-		((IClientApi*)param)->runNetwork();
+		((ClientInfo*)param)->api->runNetwork();
 	}
 	catch(Error &e) {
 		TraceEvent(SevError, "RunNetworkError").error(e);
+	}
+
+	std::vector<std::pair<void (*)(void*), void*>> &hooks = ((ClientInfo*)param)->threadCompletionHooks;
+	for(auto &hook : hooks) {
+		try {
+			hook.first(hook.second);
+		}
+		catch(Error &e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+		}
 	}
 
 	THREAD_RETURN;
@@ -1156,12 +1169,34 @@ void MultiVersionApi::runNetwork() {
 	if(!bypassMultiClientApi) {
 		runOnExternalClients([&handles](Reference<ClientInfo> client) {
 			if(client->external) {
-				handles.push_back(g_network->startThread(&runNetworkThread, client->api));
+				handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr()));
 			}
 		});
 	}
 
-	localClient->api->runNetwork();
+	Error *runErr = NULL;
+	try {
+		localClient->api->runNetwork();
+	}
+	catch(Error &e) {
+		runErr = &e;
+	}
+
+	for(auto &hook : localClient->threadCompletionHooks) {
+		try {
+			hook.first(hook.second);
+		}
+		catch(Error &e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+		}
+	}
+
+	if(runErr != NULL) {
+		throw *runErr;
+	}
 
 	for(auto h : handles) {
 		waitThread(h);
@@ -1182,6 +1217,24 @@ void MultiVersionApi::stopNetwork() {
 		runOnExternalClients([](Reference<ClientInfo> client) {
 			client->api->stopNetwork();
 		}, true);
+	}
+}
+
+void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
+	lock.enter();
+	if(!networkSetup) {
+		lock.leave();
+		throw network_not_setup();
+	}
+	lock.leave();
+
+	auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
+	threadCompletionHooks.push_back(hookPair);
+
+	if(!bypassMultiClientApi) {
+		for( auto it : externalClients ) {
+			it.second->threadCompletionHooks.push_back(hookPair);
+		}
 	}
 }
 

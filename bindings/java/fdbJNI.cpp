@@ -38,8 +38,18 @@
 #error Missing thread local storage
 #endif
 
+static JavaVM* g_jvm = 0; 
 static thread_local JNIEnv* g_thread_jenv = 0;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
 static thread_local jmethodID g_IFutureCallback_call_methodID = 0;
+static thread_local bool is_external = false;
+
+void detachIfExternalThread(void *ignore) {
+	if(is_external && g_thread_jenv != 0) {
+		g_thread_jenv = 0;
+		g_IFutureCallback_call_methodID = 0;
+		g_jvm->DetachCurrentThread();
+	}
+}
 
 void throwOutOfMem(JNIEnv *jenv) {
 	const char *className = "java/lang/OutOfMemoryError";
@@ -103,12 +113,6 @@ void throwParamNotNull(JNIEnv *jenv) {
 extern "C" {
 #endif
 
-static void callCallback( FDBFuture* f, void* data ) {
-	jobject callback = (jobject)data;
-	g_thread_jenv->CallVoidMethod( callback, g_IFutureCallback_call_methodID );
-	g_thread_jenv->DeleteGlobalRef(callback);
-}
-
 // If the methods are not found, exceptions are thrown and this will return false.
 //  Returns TRUE on success, false otherwise.
 static bool findCallbackMethods(JNIEnv *jenv) {
@@ -121,6 +125,27 @@ static bool findCallbackMethods(JNIEnv *jenv) {
 		return false;
 
 	return true;
+}
+
+static void callCallback( FDBFuture* f, void* data ) {
+	if (g_thread_jenv == 0) {
+		// We are on an external thread and must attach to the JVM.
+		// The shutdown hook will later detach this thread.
+		is_external = true;
+		if( g_jvm != 0 && g_jvm->AttachCurrentThreadAsDaemon((void **) &g_thread_jenv, JNI_NULL) == JNI_OK ) {
+			if( !findCallbackMethods( g_thread_jenv ) ) {
+				g_thread_jenv->FatalError("FDB: Could not find callback method.\n");
+			}
+		} else {
+			// Can't call FatalError, because we don't have a pointer to the jenv...
+			// There will be a segmentation fault from the attempt to call the callback method.
+			fprintf(stderr, "FDB: Could not attach external client thread to the JVM as daemon.\n");
+		}
+	}
+
+	jobject callback = (jobject)data;
+	g_thread_jenv->CallVoidMethod( callback, g_IFutureCallback_call_methodID );
+	g_thread_jenv->DeleteGlobalRef(callback);
 }
 
 // Attempts to throw 't', attempts to shut down the JVM if this fails.
@@ -1035,6 +1060,11 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1run(JNIEnv *
 			return;
 	}
 
+	fdb_error_t hookErr = fdb_add_network_thread_completion_hook( &detachIfExternalThread, NULL );
+	if( hookErr ) {
+		safeThrow( jenv, getThrowable( jenv, hookErr ) );
+	}
+
 	fdb_error_t err = fdb_run_network();
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
@@ -1046,6 +1076,11 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1stop(JNIEnv 
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
 	}
+}
+
+jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+	g_jvm = vm;
+	return JNI_VERSION_1_1;
 }
 
 #ifdef __cplusplus
