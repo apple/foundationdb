@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "boost/lexical_cast.hpp"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
@@ -503,6 +504,10 @@ void initHelp() {
 		"kill all|list|<ADDRESS>*",
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
+  helpMap["profile"] = CommandHelp(
+		"<type> <action> <ARGS>",
+		"toggles the profiling state for a form of profiling.",
+		"Supported types are: client.  Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -2532,6 +2537,92 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							printf("Attempted to kill %lu processes\n", tokens.size() - 1);
 						}
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "profile")) {
+					if (tokens.size() == 1) {
+						printf("ERROR: Usage: profile <client>\n");
+						is_error = true;
+						continue;
+					}
+					if (tokencmp(tokens[1], "client")) {
+						getTransaction(db, tr, options, intrans);
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						if (tokens.size() == 2) {
+							printf("ERROR: Usage: profile client <get|set>\n");
+							is_error = true;
+							continue;
+						}
+						if (tokencmp(tokens[2], "get")) {
+							if (tokens.size() != 3) {
+								printf("ERROR: Addtional arguments to `get` are not supported.\n");
+								is_error = true;
+								continue;
+							}
+							state Future<Optional<Standalone<StringRef>>> sampleRateFuture = tr->get(fdbClientInfoTxnSampleRate);
+							state Future<Optional<Standalone<StringRef>>> sizeLimitFuture = tr->get(fdbClientInfoTxnSizeLimit);
+							Void _ = wait(makeInterruptable(success(sampleRateFuture) && success(sizeLimitFuture)));
+							std::string sampleRateStr = "default", sizeLimitStr = "default";
+							if (sampleRateFuture.get().present()) {
+								const double sampleRateDbl = BinaryReader::fromStringRef<double>(sampleRateFuture.get().get(), Unversioned());
+								if (!std::isinf(sampleRateDbl)) {
+									sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
+								}
+							}
+							if (sizeLimitFuture.get().present()) {
+								const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(sizeLimitFuture.get().get(), Unversioned());
+								if (sizeLimit != -1) {
+									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimitStr);
+								}
+							}
+							printf("Client profiling rate is set to %s and size limit is set to %s.\n", sampleRateStr.c_str(), sizeLimitStr.c_str());
+							continue;
+						}
+						if (tokencmp(tokens[2], "set")) {
+							if (tokens.size() != 5) {
+								printf("ERROR: Usage: profile client set <RATE|default> <SIZE|default>\n");
+								is_error = true;
+								continue;
+							}
+							double sampleRate;
+							if (tokencmp(tokens[3], "default")) {
+								sampleRate = std::numeric_limits<double>::infinity();
+							} else {
+								char* end;
+								sampleRate = std::strtod((const char*)tokens[3].begin(), &end);
+								if (!std::isspace(*end)) {
+									printf("ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
+									is_error = true;
+									continue;
+								}
+							}
+							int64_t sizeLimit;
+							if (tokencmp(tokens[4], "default")) {
+								sizeLimit = -1;
+							} else {
+								Optional<uint64_t> parsed = parse_with_suffix(tokens[4].toString());
+								if (parsed.present()) {
+									sizeLimit = parsed.get();
+								} else {
+									printf("ERROR: `%s` failed to parse.\n", printable(tokens[4]).c_str());
+									is_error = true;
+									continue;
+								}
+							}
+							tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
+							tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
+							if (!intrans) {
+								Void _ = wait( commitTransaction( tr ) );
+							}
+							continue;
+						}
+						printf("ERROR: Unknown action: %s\n", printable(tokens[2]).c_str());
+						is_error = true;
+						continue;
+					}
+					printf("ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
+					is_error = true;
 					continue;
 				}
 

@@ -1572,16 +1572,14 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 }
 
 ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db) {
-	state const Key sampleRate= LiteralStringRef("client_txn_sample_rate/").withPrefix(fdbClientInfoPrefixRange.begin);
-	state const Key sizeLimit = LiteralStringRef("client_txn_size_limit/").withPrefix(fdbClientInfoPrefixRange.begin);
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state Optional<Value> rateVal = wait(tr.get(sampleRate));
-				state Optional<Value> limitVal = wait(tr.get(sizeLimit));
+				state Optional<Value> rateVal = wait(tr.get(fdbClientInfoTxnSampleRate));
+				state Optional<Value> limitVal = wait(tr.get(fdbClientInfoTxnSizeLimit));
 				ClientDBInfo clientInfo = db->clientInfo->get();
 				if (rateVal.present()) {
 					double rate = BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned());
@@ -1596,8 +1594,8 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 					db->clientInfo->set(clientInfo);
 				}
 
-				state Future<Void> watchRateFuture = tr.watch(sampleRate);
-				state Future<Void> watchLimitFuture = tr.watch(sizeLimit);
+				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
+				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				Void _ = wait(tr.commit());
 				choose {
 					when(Void _ = wait(watchRateFuture)) { break; }
