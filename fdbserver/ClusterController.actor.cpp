@@ -1319,7 +1319,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
-	ProcessClass processClass = req.processClass;
+	ProcessClass processClass = req.initialClass;
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
