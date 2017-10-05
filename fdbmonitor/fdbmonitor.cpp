@@ -252,8 +252,8 @@ public:
 	double restart_backoff;
 	uint32_t restart_delay_reset_interval;
 	double last_start;
+	double fork_retry_time;
 	bool quiet;
-	//bool delete_wd40_env;
 	const char *delete_envvars;
 	bool deconfigured;
 	bool kill_on_configuration_change;
@@ -262,7 +262,7 @@ public:
 	int pipes[2][2];
 
 	Command() : argv(NULL) { }
-	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
+	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), fork_retry_time(-1), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%llu", section.c_str(), id);
 		ssection = _ssection;
@@ -475,7 +475,10 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 	pid_t pid = fork();
 
 	if (pid < 0) { /* fork error */
-		log_err("fork", errno, "Failed to launch new %s process", cmd->argv[0]);
+		cmd->last_start = timer();
+		int fork_delay = cmd->get_and_update_current_restart_delay();
+		cmd->fork_retry_time = cmd->last_start + fork_delay;
+		log_err("fork", errno, "Failed to fork new %s process, restarting %s in %d seconds", cmd->argv[0], cmd->ssection.c_str(), fork_delay);
 		return;
 	} else if (pid == 0) { /* we are the child */
 		/* remove signal handlers from parent */
@@ -545,6 +548,7 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 	}
 
 	cmd->last_start = timer() + delay;
+	cmd->fork_retry_time = -1;
 	pid_id[pid] = id;
 	id_pid[id] = pid;
 }
@@ -726,10 +730,22 @@ void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb
 			} else {
 				if (!id_pid.count(id)) {
 					/* Found something we haven't yet started */
-					log_msg(LOG_INFO, "Starting %s\n", i.pItem);
-					std::string section(i.pItem, dot - i.pItem);
-					id_command[id] = new Command(ini, section, id, rfds, maxfd);
-					start_process(id_command[id], id, uid, gid, 0, mask);
+					Command *cmd;
+
+					auto itr = id_command.find(id);
+					if(itr != id_command.end()) {
+						cmd = itr->second;
+					}
+					else {
+						std::string section(i.pItem, dot - i.pItem);
+						cmd = new Command(ini, section, id, rfds, maxfd);
+						id_command[id] = cmd;
+					}
+
+					if(cmd->fork_retry_time <= timer()) {
+						log_msg(LOG_INFO, "Starting %s\n", i.pItem);
+						start_process(cmd, id, uid, gid, 0, mask);
+					}
 				}
 			}
 		}
@@ -911,30 +927,18 @@ int main(int argc, char** argv) {
 	std::string conffile = confpath.substr(confdir.size()+1);
 
 #ifdef __linux__
-	// Watch for changes to our configuration file
+	// Setup inotify
 	int ifd = inotify_init();
 	if (ifd < 0) {
 		perror("inotify_init");
 		exit(1);
 	}
 
-	int conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
-	if (conffile_wd < 0) {
-		perror("inotify_add_watch conf file");
-		exit(1);
-	} else {
-		log_msg(LOG_INFO, "Watching config file %s\n", confpath.c_str());
-	}
+	int conffile_wd = -1;
+	int confdir_wd = -1;
+	std::unordered_map<int, std::unordered_set<std::string>> additional_watch_wds;
 
-	int confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
-	if (confdir_wd < 0) {
-		perror("inotify_add_watch conf dir");
-		exit(1);
-	} else {
-		log_msg(LOG_INFO, "Watching config dir %s\n", confdir.c_str());
-	}
-
-	auto additional_watch_wds = set_watches(_confpath, ifd);
+	bool reload_additional_watches = true;
 #endif
 
 	/* fds we're blocking on via pselect or kevent */
@@ -1050,7 +1054,6 @@ int main(int argc, char** argv) {
 	kevent( kq, &ev, 1, NULL, 0, NULL );
 
 	int conff_fd = -1;
-	watch_conf_file( kq, &conff_fd, confpath.c_str() );
 #endif
 
 #ifdef __linux__
@@ -1081,11 +1084,88 @@ int main(int argc, char** argv) {
 	memcpy(&mtimespec, &(st_buf.st_mtimespec), sizeof(struct timespec));
 #endif
 
-	load_conf(confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd);
-
+	bool reload = true;
 	while (1) {
-#ifdef __APPLE__
-		int nev = kevent( kq, NULL, 0, &ev, 1, NULL );
+		if (reload) {
+			reload = false;
+#ifdef __linux__
+			if(confdir_wd >= 0 && inotify_rm_watch(ifd, confdir_wd) < 0) {
+				log_msg(LOG_INFO, "Could not remove inotify conf dir watch, continuing...\n");
+			}
+			if(conffile_wd >= 0 && inotify_rm_watch(ifd, conffile_wd) < 0) {
+				log_msg(LOG_INFO, "Could not remove inotify conf file watch, continuing...\n");
+			}
+			conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
+			if (conffile_wd < 0) {
+				perror("inotify_add_watch conf file");
+				exit(1); // Deleting the conf file causes fdbmonitor to terminate
+			} else {
+				log_msg(LOG_INFO, "Watching config file %s\n", confpath.c_str());
+			}
+
+			confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
+			if (confdir_wd < 0) {
+				perror("inotify_add_watch conf dir");
+				exit(1);
+			} else {
+				log_msg(LOG_INFO, "Watching config dir %s (%d)\n", confdir.c_str(), confdir_wd);
+			}
+
+			if(reload_additional_watches) {
+				additional_watch_wds = set_watches(_confpath, ifd);
+			}
+
+			load_conf(confpath.c_str(), uid, gid, &normal_mask, &rfds, &maxfd);
+			reload_additional_watches = false;
+#elif defined(__APPLE__)
+			load_conf( confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd );
+			watch_conf_file( kq, &conff_fd, confpath.c_str() );
+#endif
+		}
+
+		double end_time = std::numeric_limits<double>::max();
+		for(auto i : id_command) {
+			if(i.second->fork_retry_time >= 0) {
+				end_time = std::min(i.second->fork_retry_time, end_time);
+			}
+		}
+		struct timespec tv;
+		double timeout = -1;
+		if(end_time < std::numeric_limits<double>::max()) {
+			timeout = std::max(0.0, end_time - timer());
+			if(timeout > 0) {
+				tv.tv_sec = timeout;
+				tv.tv_nsec = 1e9*(timeout-tv.tv_sec);
+			}
+		}
+
+#ifdef __linux__
+		/* Block until something interesting happens (while atomically
+		   unblocking signals) */
+		srfds = rfds;
+		nfds = 0;
+		if(timeout < 0) {
+			nfds = pselect(maxfd+1, &srfds, NULL, NULL, NULL, &normal_mask);
+		}
+		else if(timeout > 0) {
+			nfds = pselect(maxfd+1, &srfds, NULL, NULL, &tv, &normal_mask);
+		}
+
+		if(nfds == 0) {
+			reload = true;
+		}
+#elif defined(__APPLE__)
+		int nev = 0;
+		if(timeout < 0) {
+			nev = kevent( kq, NULL, 0, &ev, 1, NULL );
+		}
+		else if(timeout > 0) {
+			nev = kevent( kq, NULL, 0, &ev, 1, &tv );
+		}
+
+		if(nev == 0) {
+			reload = true;
+		}
 
 		if (nev > 0) {
 			switch (ev.filter) {
@@ -1098,13 +1178,11 @@ int main(int argc, char** argv) {
 						kevent( kq, &timeout, 1, NULL, 0, NULL );
 					} else {
 						/* Direct writes to the conf file; reload! */
-						load_conf( confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd );
-						watch_conf_file( kq, &conff_fd, confpath.c_str() );
+						reload = true;
 					}
 					break;
 				case EVFILT_TIMER:
-					watch_conf_file( kq, &conff_fd, confpath.c_str() );
-					load_conf( confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd );
+					reload = true;
 					break;
 				case EVFILT_SIGNAL:
 					switch (ev.ident) {
@@ -1130,12 +1208,21 @@ int main(int argc, char** argv) {
 					break;
 			}
 		}
+		else {
+			reload = true;
+		}
 #endif
+
 		/* select() could have returned because received an exit signal */
 		if (exit_signal > 0) {
 			switch(exit_signal) {
 				case SIGHUP:
-					log_msg(LOG_INFO, "Received signal %d (%s), doing nothing\n", exit_signal, strsignal(exit_signal));
+					for(auto i : id_command) {
+						i.second->current_restart_delay = i.second->initial_restart_delay;
+						i.second->fork_retry_time = -1;
+					}
+					reload = true;
+					log_msg(LOG_INFO, "Received signal %d (%s), resetting timeouts and reloading configuration\n", exit_signal, strsignal(exit_signal));
 					break;
 				case SIGINT:
 				case SIGTERM:
@@ -1181,9 +1268,6 @@ int main(int argc, char** argv) {
 				len = read(ifd, buf, 4096);
 				if (len < 0)
 					log_err("read", errno, "Error reading inotify message");
-
-				bool reload = false;
-				bool reload_additional_watches = false;
 
 				while (i < len) {
 					struct inotify_event* event = (struct inotify_event*) &buf[i];
@@ -1232,36 +1316,6 @@ int main(int argc, char** argv) {
 
 					i += sizeof(struct inotify_event) + event->len;
 				}
-
-				if (reload) {
-					if(inotify_rm_watch(ifd, confdir_wd) < 0) {
-						log_msg(LOG_INFO, "Could not remove inotify conf dir watch, continuing...\n");
-					}
-					if(inotify_rm_watch(ifd, conffile_wd) < 0) {
-						log_msg(LOG_INFO, "Could not remove inotify conf file watch, continuing...\n");
-					}
-					conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
-					if (conffile_wd < 0) {
-						perror("inotify_add_watch conf file");
-						exit(1); // Deleting the conf file causes fdbmonitor to terminate
-					} else {
-						log_msg(LOG_INFO, "Watching config file %s\n", confpath.c_str());
-					}
-
-					confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
-					if (confdir_wd < 0) {
-						perror("inotify_add_watch conf dir");
-						exit(1);
-					} else {
-						log_msg(LOG_INFO, "Watching config dir %s (%d)\n", confdir.c_str(), confdir_wd);
-					}
-
-					if(reload_additional_watches) {
-						additional_watch_wds = set_watches(_confpath, ifd);
-					}
-
-					load_conf(confpath.c_str(), uid, gid, &normal_mask, &rfds, &maxfd);
-				}
 			}
 		}
 #endif
@@ -1305,12 +1359,5 @@ int main(int argc, char** argv) {
 			}
 			child_exited = false;
 		}
-
-#ifdef __linux__
-		/* Block until something interesting happens (while atomically
-		   unblocking signals) */
-		srfds = rfds;
-		nfds = pselect(maxfd+1, &srfds, NULL, NULL, NULL, &normal_mask);
-#endif
 	}
 }
