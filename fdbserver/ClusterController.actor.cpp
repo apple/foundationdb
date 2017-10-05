@@ -1055,7 +1055,9 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 			}
 			when( Void _ = wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
-				failedWorkerInfo.reply.send( failedWorkerInfo.processClass );
+				if (!failedWorkerInfo.reply.isSet()) {
+					failedWorkerInfo.reply.send( failedWorkerInfo.processClass );
+				}
 				cluster->id_worker.erase( worker.locality.processId() );
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
 				return Void();
@@ -1332,7 +1334,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 		}
 
-		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.processClass, processClass );
+		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.initialClass, processClass );
 		checkOutstandingRequests( self );
 
 		return;
@@ -1344,7 +1346,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			info->second.processClass = req.processClass;
 		}
 
-		info->second.initialClass = req.processClass;
+		info->second.initialClass = req.initialClass;
 		if (!info->second.reply.isSet()) {
 			info->second.reply.send( Never() );
 		}

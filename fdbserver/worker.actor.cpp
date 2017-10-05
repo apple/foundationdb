@@ -252,8 +252,10 @@ ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterContro
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	state Generation requestGeneration = 0;
+	state ProcessClass initialClass = asyncProcessClass->get();
+
 	loop {
-		Future<ProcessClass> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, asyncProcessClass->get(), requestGeneration++) ) ) : Never();
+		Future<ProcessClass> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, initialClass, asyncProcessClass->get(), requestGeneration++) ) ) : Never();
 		choose {
 			when ( ProcessClass newProcessClass = wait( registrationReply )) {
 				asyncProcessClass->set(newProcessClass);

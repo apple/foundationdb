@@ -115,16 +115,17 @@ struct RecruitStorageRequest {
 struct RegisterWorkerRequest {
 	WorkerInterface wi;
 	ProcessClass processClass;
+	ProcessClass initialClass;
 	Generation generation;
 	ReplyPromise<ProcessClass> reply;
 
 	RegisterWorkerRequest() {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass processClass,  Generation generation) : 
-	wi(wi), processClass(processClass), generation(generation) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, Generation generation) : 
+	wi(wi), initialClass(initialClass), processClass(processClass), generation(generation) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & wi & processClass & generation & reply;
+		ar & wi & initialClass & processClass & generation & reply;
 	}
 };
 
