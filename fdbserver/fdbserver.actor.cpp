@@ -705,52 +705,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "KiB=2^10, MB=10^6, MiB=2^20, GB=10^9, GiB=2^30, TB=10^12, or TiB=2^40.\n");
 }
 
-Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "") {
-	char *endptr;
-
-	uint64_t ret = strtoull(toparse.c_str(), &endptr, 10);
-
-	if (endptr == toparse.c_str()) {
-		return Optional<uint64_t>();
-	}
-
-	std::string unit;
-
-	if (*endptr == '\0') {
-		if (!default_unit.empty()) {
-			unit = default_unit;
-		} else {
-			return Optional<uint64_t>();
-		}
-	} else {
-		unit = endptr;
-	}
-
-	if (!unit.compare("B")) {
-		// Nothing to do
-	} else if (!unit.compare("KB")) {
-		ret *= int64_t(1e3);
-	} else if (!unit.compare("KiB")) {
-		ret *= 1LL << 10;
-	} else if (!unit.compare("MB")) {
-		ret *= int64_t(1e6);
-	} else if (!unit.compare("MiB")) {
-		ret *= 1LL << 20;
-	} else if (!unit.compare("GB")) {
-		ret *= int64_t(1e9);
-	} else if (!unit.compare("GiB")) {
-		ret *= 1LL << 30;
-	} else if (!unit.compare("TB")) {
-		ret *= int64_t(1e12);
-	} else if (!unit.compare("TiB")) {
-		ret *= 1LL << 40;
-	} else {
-		return Optional<uint64_t>();
-	}
-
-	return ret;
-}
-
 extern bool g_crashOnError;
 
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
@@ -801,6 +755,45 @@ extern bool g_crashOnError;
 		free( ptr );
 	}
 #endif
+
+Optional<bool> checkBuggifyOverride(const char *testFile) {
+	std::ifstream ifs;
+	ifs.open(testFile, std::ifstream::in);
+	if (!ifs.good())
+		return 0;
+
+	std::string cline;
+
+	while (ifs.good()) {
+		getline(ifs, cline);
+		std::string line = removeWhitespace(std::string(cline));
+		if (!line.size() || line.find(';') == 0)
+			continue;
+
+		size_t found = line.find('=');
+		if (found == std::string::npos)
+			// hmmm, not good
+			continue;
+		std::string attrib = removeWhitespace(line.substr(0, found));
+		std::string value = removeWhitespace(line.substr(found + 1));
+
+		if (attrib == "buggify") {
+			if( !strcmp( value.c_str(), "on" ) ) {
+				ifs.close();
+				return true;
+			} else if( !strcmp( value.c_str(), "off" ) ) {
+				ifs.close();
+				return false;
+			} else {
+				fprintf(stderr, "ERROR: Unknown buggify override state `%s'\n", value.c_str());
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+		}
+	}
+
+	ifs.close();
+	return Optional<bool>();
+}
 
 int main(int argc, char* argv[]) {
 	try {
@@ -1359,6 +1352,11 @@ int main(int argc, char* argv[]) {
 		else
 			g_debug_random = new DeterministicRandom(platform::getRandomSeed());
 
+		if(role==Simulation) {
+			Optional<bool> buggifyOverride = checkBuggifyOverride(testFile);
+			if(buggifyOverride.present())
+				buggifyEnabled = buggifyOverride.get();
+		}
 		enableBuggify( buggifyEnabled );
 
 		delete FLOW_KNOBS;

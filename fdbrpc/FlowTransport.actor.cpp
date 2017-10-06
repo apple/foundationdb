@@ -381,7 +381,16 @@ struct Peer : NonCopyable {
 					self->outgoingConnectionIdle = false;
 				}
 
-				Void _ = wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
+				try {
+					self->transport->countConnEstablished++;
+					Void _ = wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
+				} catch (Error& e) {
+					 if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed ))
+						self->transport->countConnClosedWithoutError++;
+					else
+						self->transport->countConnClosedWithError++;
+					throw e;
+				}
 
 				ASSERT( false );
 			} catch (Error& e) {
@@ -396,10 +405,6 @@ struct Peer : NonCopyable {
 
 				if(self->compatible) {
 					TraceEvent(ok ? SevInfo : SevError, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
-					if (ok)
-						self->transport->countConnClosedWithoutError++;
-					else
-						self->transport->countConnClosedWithError++;
 				}
 				else {
 					TraceEvent(ok ? SevInfo : SevError, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
@@ -492,7 +497,8 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 
 		if (checksumEnabled) {
 			bool isBuggifyEnabled = false;
-			if(g_network->isSimulated() && g_simulator.enableConnectionFailures && BUGGIFY_WITH_PROB(0.001)) {
+			if(g_network->isSimulated() && g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY_WITH_PROB(0.0001)) {
+				g_simulator.lastConnectionFailure = g_network->now();
 				isBuggifyEnabled = true;
 				TraceEvent(SevInfo, "BitsFlip");
 				int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
@@ -625,8 +631,6 @@ ACTOR static Future<Void> connectionReader(
 						TraceEvent("ConnectionEstablished", conn->getDebugID())
 							.detail("Peer", conn->getPeerAddress())
 							.detail("ConnectionId", connectionId);
-
-						transport->countConnEstablished++;
 					}
 
 					if(connectionId > 1) {

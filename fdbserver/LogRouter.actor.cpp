@@ -218,10 +218,11 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 			//FIXME: do we add txsTags?
 			self->logSystem->get()->addRemoteTags(self->logSet, originalTags, tags);
 
-			for(auto tag : tags) {
-				auto it = tag_offsets.find(tag);
+			for(auto t : tags) {
+				Tag fullTag(tagLocalityRemoteLog, t);
+				auto it = tag_offsets.find(fullTag);
 				if (it == tag_offsets.end()) {
-					it = tag_offsets.insert(mapPair( Tag(tag), TagMessagesRef() ));
+					it = tag_offsets.insert(mapPair( fullTag, TagMessagesRef() ));
 					it->value.tag = it->key;
 				}
 				it->value.messageOffsets.push_back( arena, wr.getLength() );

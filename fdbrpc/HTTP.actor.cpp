@@ -334,7 +334,7 @@ namespace HTTP {
 		} catch(Error &e) {
 			double elapsed = timer() - send_start;
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
-				printf("[%s] HTTP *ERROR*=%s, time=%fs %s %s [%u out]\n", conn->getDebugID().toString().c_str(), e.what(), elapsed, verb.c_str(), resource.c_str(), (int)total_sent);
+				printf("[%s] HTTP *ERROR*=%s, time=%fs %s %s [%u out]\n", conn->getDebugID().toString().c_str(), e.name(), elapsed, verb.c_str(), resource.c_str(), (int)total_sent);
 			throw;
 		}
 	}

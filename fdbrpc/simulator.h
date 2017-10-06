@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : killedMachines(0), killableMachines(0), machinesNeededForProgress(3), neededDatacenters(1), killableDatacenters(0), killedDatacenters(0), maxCoordinatorsInDatacenter(0), desiredCoordinators(1), processesPerMachine(0), isStopped(false), enableConnectionFailures(true), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), extraDB(NULL) {}
+	ISimulator() : killedMachines(0), killableMachines(0), machinesNeededForProgress(3), neededDatacenters(1), killableDatacenters(0), killedDatacenters(0), maxCoordinatorsInDatacenter(0), desiredCoordinators(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), extraDB(NULL) {}
 
 	// Order matters!
 	enum KillType { None, KillInstantly, InjectFaults, RebootAndDelete, Reboot, RebootProcessAndDelete, RebootProcess };
@@ -56,6 +56,7 @@ public:
 		Reference<IListener> listener;
 		bool failed;
 		bool excluded;
+		bool cleared;
 		int64_t cpuTicks;
 		bool rebooting;
 		std::vector<flowGlobalType> globals;
@@ -70,12 +71,14 @@ public:
 			: name(name), locality(locality), startingClass(startingClass), address(address), dataFolder(dataFolder),
 				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0) {}
+				fault_injection_r(0), machine(0), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
 		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
 		bool isAvailable() const { return !excluded && isReliable(); }
+		bool isExcluded() const { return !excluded; }
+		bool isCleared() const { return !excluded && isReliable(); }
 
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {
@@ -98,8 +101,8 @@ public:
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
-			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s  excluded: %d",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder, excluded); }
+			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s  excluded: %d cleared: %d",
+			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder, excluded, cleared); }
 
 		// Members not for external use
 		Promise<KillType> shutdownSignal;
@@ -200,6 +203,14 @@ public:
 		return roleText;
 	}
 
+	virtual void clearAddress(NetworkAddress const& address) {
+		clearedAddresses[address]++;
+		TraceEvent("ClearAddress").detail("Address", address).detail("Value", clearedAddresses[address]);
+	}
+	virtual bool isCleared(NetworkAddress const& address) const {
+		return clearedAddresses.find(address) != clearedAddresses.end();
+	}
+
 	virtual void excludeAddress(NetworkAddress const& address) {
 		excludedAddresses[address]++;
 		TraceEvent("ExcludeAddress").detail("Address", address).detail("Value", excludedAddresses[address]);
@@ -282,7 +293,8 @@ public:
 	std::string connectionString;
 
 	bool isStopped;
-	bool enableConnectionFailures;
+	double lastConnectionFailure;
+	double connectionFailuresDisableDuration;
 	bool speedUpSimulation;
 	BackupAgentType backupAgents;
 
@@ -296,6 +308,7 @@ protected:
 private:
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
 	std::map<NetworkAddress, int> excludedAddresses;
+	std::map<NetworkAddress, int> clearedAddresses;
 	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
 	bool allSwapsDisabled;
 };

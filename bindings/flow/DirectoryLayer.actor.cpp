@@ -131,7 +131,7 @@ namespace FDB {
 		}
 		else {
 			if(versionBytes.get().size() != 12) {
-				throw invalid_database_value();
+				throw invalid_directory_layer_metadata();
 			}
 			if(((uint32_t*)versionBytes.get().begin())[0] > DirectoryLayer::VERSION[0]) {
 				throw incompatible_directory_version();

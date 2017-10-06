@@ -1410,6 +1410,7 @@ public:
 
 		TraceEvent("DBA_switchover_locked").detail("version", commitVersion);
 
+		// Wait for the destination to apply mutations up to the lock commit before switching over.
 		state ReadYourWritesTransaction tr2(dest);
 		loop {
 			try {
@@ -1459,6 +1460,27 @@ public:
 
 		TraceEvent("DBA_switchover_started");
 
+		state ReadYourWritesTransaction tr3(dest);
+		loop {
+			try {
+				tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Version destVersion = wait(tr3.getReadVersion());
+				if (destVersion <= commitVersion) {
+					TraceEvent("DBA_switchover_version_upgrade").detail("src", commitVersion).detail("dest", destVersion);
+					TEST(true);  // Forcing dest backup cluster to higher version
+					tr3.set(minRequiredCommitVersionKey, BinaryWriter::toValue(commitVersion+1, Unversioned()));
+					Void _ = wait(tr3.commit());
+				} else {
+					break;
+				}
+			} catch( Error &e ) {
+				Void _ = wait(tr3.onError(e));
+			}
+		}
+
+		TraceEvent("DBA_switchover_version_upgraded");
+
 		Void _ = wait( backupAgent->unlockBackup(dest, tagName) );
 
 		TraceEvent("DBA_switchover_unlocked");
@@ -1491,6 +1513,7 @@ public:
 
 	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent, Database cx, Key tagName, bool partial) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state UID logUid;
 		state Value backupUid;
@@ -1505,6 +1528,7 @@ public:
 					throw backup_unneeded();
 				}
 
+				state Version current = wait(tr->getReadVersion());
 				Optional<Value> _backupUid = wait(tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId)));
 				backupUid = _backupUid.get();
 
@@ -1512,7 +1536,19 @@ public:
 				tr->clear(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).range());
 
 				// Clearing the end version of apply mutation cancels ongoing apply work
-				tr->clear(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsEndRange.begin));
+				const auto& log_uid = BinaryWriter::toValue(logUid, Unversioned());
+				tr->clear(log_uid.withPrefix(applyMutationsEndRange.begin));
+
+				// Ensure that we're at a version higher than the data that we've written.
+				Optional<Value> lastApplied = wait(tr->get(log_uid.withPrefix(applyMutationsBeginRange.begin)));
+				if (lastApplied.present()) {
+					Version applied = BinaryReader::fromStringRef<Version>(lastApplied.get(), Unversioned());
+					if (current <= applied) {
+						TraceEvent("DBA_abort_version_upgrade").detail("src", applied).detail("dest", current);
+						TEST(true);  // Upgrading version of local database.
+						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(applied+1, Unversioned()));
+					}
+				}
 
 				Key logsPath = uidPrefixKey(applyLogKeys.begin, logUid);
 				tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));

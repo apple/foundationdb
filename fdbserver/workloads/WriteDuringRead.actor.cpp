@@ -426,7 +426,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				*cancelled = true;
 			if( e.code() == error_code_actor_cancelled || e.code() == error_code_transaction_cancelled )
 				throw commit_unknown_result();
-			if (e.code() == error_code_past_version)
+			if (e.code() == error_code_transaction_too_old)
 				throw not_committed();
 			throw;
 		}

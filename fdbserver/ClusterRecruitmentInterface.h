@@ -66,15 +66,16 @@ struct ClusterControllerFullInterface {
 
 struct RecruitFromConfigurationRequest {
 	DatabaseConfiguration configuration;
+	bool recruitSeedServers;
 	ReplyPromise< struct RecruitFromConfigurationReply > reply;
 
 	RecruitFromConfigurationRequest() {}
-	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration)
-		: configuration(configuration) {}
+	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers)
+		: configuration(configuration), recruitSeedServers(recruitSeedServers) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & configuration & reply;
+		ar & configuration & recruitSeedServers & reply;
 	}
 };
 
@@ -83,11 +84,12 @@ struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> satelliteTLogs;
 	vector<WorkerInterface> proxies;
 	vector<WorkerInterface> resolvers;
+	vector<WorkerInterface> storageServers;
 	Optional<Key> remoteDcId;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & satelliteTLogs & proxies & resolvers & remoteDcId;
+		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & remoteDcId;
 	}
 };
 
@@ -179,7 +181,7 @@ struct RegisterMasterRequest {
 	vector<ResolverInterface> resolvers;
 	DBRecoveryCount recoveryCount;
 	int64_t registrationCount;
-	DatabaseConfiguration configuration;
+	Optional<DatabaseConfiguration> configuration;
 	vector<UID> priorCommittedLogServers;
 	int recoveryState;
 	

@@ -788,10 +788,12 @@ ACTOR Future<Void> commitBatch(
 	// Send replies to clients
 	for (int t = 0; t < trs.size(); t++)
 	{
-		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware))
+		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware)) {
+			ASSERT_WE_THINK(commitVersion != invalidVersion);
 			trs[t].reply.send(CommitID(commitVersion, t));
+		}
 		else if (committed[t] == ConflictBatch::TransactionTooOld)
-			trs[t].reply.sendError(past_version());
+			trs[t].reply.sendError(transaction_too_old());
 		else
 			trs[t].reply.sendError(not_committed());
 	}

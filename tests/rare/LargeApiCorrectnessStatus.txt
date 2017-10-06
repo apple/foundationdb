@@ -20,7 +20,7 @@ testTitle=ApiCorrectnessTest
 	maxTransactionBytes=5000000
 	randomTestDuration=60
 	timeout=2100
-	simEnableConnectionFailures=false
+	connectionFailuresDisableDuration=100000
 
     testName=Status
     testDuration=30.0

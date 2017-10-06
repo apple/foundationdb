@@ -157,6 +157,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
+	bool hasConfiguration;
 
 	ServerCoordinators coordinators;
 
@@ -219,7 +220,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  txnStateStore(0),
 		  memoryLimit(2e9),
 		  cstateUpdated(false),
-		  addActor(addActor)
+		  addActor(addActor),
+		  hasConfiguration(false)
 	{
 	}
 	~MasterData() { if(txnStateStore) txnStateStore->close(); }
@@ -286,60 +288,45 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, Future< RecruitFr
 	return Void();
 }
 
-ACTOR Future<Void> newSeedServers( Reference<MasterData> self, vector<StorageServerInterface>* servers ) {
+ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfigurationReply recruits, vector<StorageServerInterface>* servers ) {
 	// This is only necessary if the database is at version 0
 	// FIXME: the seed servers do not respect the storage policy
 	servers->clear();
 	if (self->lastEpochEnd) return Void();
 
-	state std::map<Optional<Value>,Tag> dcId_tags;
+	state int idx = 0;
+	state std::map<Optional<Value>, Tag> dcId_tags;
 	state int8_t nextLocality = 0;
-	while( servers->size() < self->configuration.storageTeamSize + self->configuration.remoteStorageTeamSize ) {
-		try {
-			RecruitStorageRequest req;
-			req.criticalRecruitment = true;
-			req.includeDCs.push_back( servers->size() < self->configuration.storageTeamSize ? self->configuration.primaryDcId : self->configuration.remoteDcId);
-			for(auto s = servers->begin(); s != servers->end(); ++s)
-				req.excludeMachines.push_back(s->locality.zoneId());
+	while( idx < recruits.storageServers.size() ) {
+		TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
+			.detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
 
-			TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
-				.detail("ExcludingMachines", req.excludeMachines.size())
-				.detail("DataCenters", req.includeDCs.size());
+		InitializeStorageRequest isr;
+		isr.seedTag = dcId_tags.count(recruits.storageServers[idx].locality.dcId()) ? dcId_tags[recruits.storageServers[idx].locality.dcId()] : Tag(nextLocality, 0);
+		isr.storeType = self->configuration.storageServerStoreType;
+		isr.reqId = g_random->randomUniqueID();
+		isr.interfaceId = g_random->randomUniqueID();
 
-			state RecruitStorageReply candidateWorker = wait( brokenPromiseToNever( self->clusterController.recruitStorage.getReply( req ) ) );
+		ErrorOr<StorageServerInterface> newServer = wait( recruits.storageServers[idx].storage.tryGetReply( isr ) );
 
-			TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
-				.detail("CandidateWorker", candidateWorker.worker.locality.toString());
+		if( newServer.isError() ) {
+			if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
+				throw newServer.getError();
 
-			InitializeStorageRequest isr;
-			isr.seedTag = dcId_tags.count(candidateWorker.worker.locality.dcId()) ? dcId_tags[candidateWorker.worker.locality.dcId()] : Tag(nextLocality, 0);
-			isr.storeType = self->configuration.storageServerStoreType;
-			isr.reqId = g_random->randomUniqueID();
-			isr.interfaceId = g_random->randomUniqueID();
-
-			ErrorOr<StorageServerInterface> newServer = wait( candidateWorker.worker.storage.tryGetReply( isr ) );
-
-			if( newServer.isError() ) {
-				if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
-					throw newServer.getError();
-
-				TEST( true ); // masterserver initial storage recuitment loop failed to get new server
-				Void _ = wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY) );
+			TEST( true ); // masterserver initial storage recuitment loop failed to get new server
+			Void _ = wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY) );
+		}
+		else {
+			if(!dcId_tags.count(recruits.storageServers[idx].locality.dcId())) {
+				dcId_tags[recruits.storageServers[idx].locality.dcId()] = Tag(nextLocality, 0);
+				nextLocality++;
 			}
-			else {
-				if(!dcId_tags.count(candidateWorker.worker.locality.dcId())) {
-					dcId_tags[candidateWorker.worker.locality.dcId()] = Tag(nextLocality, 0);
-					nextLocality++;
-				}
 				
-				Tag& tag = dcId_tags[candidateWorker.worker.locality.dcId()];
-				tag.id++;
-				servers->push_back( newServer.get() );
-			}
-		} catch ( Error &e ) {
-			if(e.code() != error_code_timed_out) {
-				throw;
-			}
+			Tag& tag = dcId_tags[recruits.storageServers[idx].locality.dcId()];
+			tag.id++;
+			idx++;
+
+			servers->push_back( newServer.get() );
 		}
 	}
 
@@ -420,7 +407,7 @@ Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& lo
 	masterReq.proxies = proxies;
 	masterReq.resolvers = resolvers;
 	masterReq.recoveryCount = recoveryCount;
-	masterReq.configuration = self->configuration;
+	if(self->hasConfiguration) masterReq.configuration = self->configuration;
 	masterReq.registrationCount = ++self->registrationCount;
 	masterReq.priorCommittedLogServers = priorCommittedLogServers;
 	masterReq.recoveryState = self->recoveryState;
@@ -531,7 +518,7 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 
 	state RecruitFromConfigurationReply recruits = wait(
 		brokenPromiseToNever( self->clusterController.recruitFromConfiguration.getReply(
-			RecruitFromConfigurationRequest( self->configuration ) ) ) );
+			RecruitFromConfigurationRequest( self->configuration, self->lastEpochEnd==0 ) ) ) );
 
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
@@ -543,7 +530,7 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand new database we are sort of lying that we are
 	// past the recruitment phase.  In a perfect world we would split that up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
-	Void _ = wait( newSeedServers( self, seedServers ) );
+	Void _ = wait( newSeedServers( self, recruits, seedServers ) );
 	Void _ = wait( newProxies( self, recruits ) && newResolvers( self, recruits ) && newTLogServers( self, recruits, oldLogSystem ) );
 	return Void();
 }
@@ -561,6 +548,13 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false );
 
+	// Fetch minRequiredCommitVersion from txnStateStore
+	Optional<Standalone<StringRef>> requiredCommitVersion = wait(self->txnStateStore->readValue( minRequiredCommitVersionKey ));
+	Version minRequiredCommitVersion = -1;
+	if (requiredCommitVersion.present()) {
+		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());
+	}
+
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
@@ -570,6 +564,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		if(BUGGIFY) {
 			self->recoveryTransactionVersion += g_random->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 		}
+		if ( self->recoveryTransactionVersion < minRequiredCommitVersion ) self->recoveryTransactionVersion = minRequiredCommitVersion;
 	}
 
 	TraceEvent("MasterRecovering", self->dbgid).detail("lastEpochEnd", self->lastEpochEnd).detail("recoveryTransactionVersion", self->recoveryTransactionVersion);
@@ -577,6 +572,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	Standalone<VectorRef<KeyValueRef>> rawConf = wait( self->txnStateStore->readRange( configKeys ) );
 	self->configuration.fromKeyValues( rawConf );
 	self->originalConfiguration = self->configuration;
+	self->hasConfiguration = true;
 	TraceEvent("MasterRecoveredConfig", self->dbgid).detail("conf", self->configuration.toString()).trackLatest("RecoveredConfig");
 
 	Standalone<VectorRef<KeyValueRef>> rawLocalities = wait( self->txnStateStore->readRange( tagLocalityListKeys ) );
@@ -670,6 +666,7 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 		.detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
 		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+	self->hasConfiguration = false;
 
 	if(BUGGIFY)
 		Void _ = wait( delay(10.0) );

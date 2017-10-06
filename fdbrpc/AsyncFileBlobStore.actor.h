@@ -118,7 +118,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<std::string> doPartUpload(Reference<AsyncFileBlobStoreWrite> f, Reference<Part> p) {
+	ACTOR static Future<std::string> doPartUpload(AsyncFileBlobStoreWrite *f, Part *p) {
 		try {
 			p->finalizeMD5();
 			std::string upload_id = wait(f->getUploadID());
@@ -129,7 +129,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> doFinishUpload(Reference<AsyncFileBlobStoreWrite> f) {
+	ACTOR static Future<Void> doFinishUpload(AsyncFileBlobStoreWrite* f) {
 		// If there is only 1 part then it has not yet been uploaded so just write the whole file at once.
 		if(f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
@@ -164,7 +164,7 @@ public:
 
 		// Only initiate the finish operation once, and also prevent further writing.
 		if(!m_finished.isValid()) {
-			m_finished = doFinishUpload(Reference<AsyncFileBlobStoreWrite>::addRef(this));
+			m_finished = doFinishUpload(this);
 			m_cursor = -1;  // Cause future write attempts to fail
 		}
 
@@ -193,8 +193,7 @@ public:
 	virtual ~AsyncFileBlobStoreWrite() {
 		m_upload_id.cancel();
 		m_finished.cancel();
-		for(auto &p : m_parts)
-			p->etag.cancel();
+		m_parts.clear();  // Contains futures
 	}
 
 	virtual std::string getFilename() { return m_object; }
@@ -215,7 +214,7 @@ private:
 			return Void();
 
 		// Start the upload
-		m_parts.back()->etag = doPartUpload(Reference<AsyncFileBlobStoreWrite>::addRef(this), m_parts.back());
+		m_parts.back()->etag = doPartUpload(this, m_parts.back().getPtr());
 
 		// Make a new part to write to
 		if(startNew)

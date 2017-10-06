@@ -28,7 +28,7 @@ struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
 	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, LogRouterClass, InvalidClass = -1 };
 	enum Fitness { BestFit, GoodFit, BestOtherFit, UnsetFit, WorstFit, NeverAssign };
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter };
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -103,7 +103,7 @@ public:
 		}
 	}
 
-	Fitness machineClassFitness( ClusterRole role );
+	Fitness machineClassFitness( ClusterRole role ) const ;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

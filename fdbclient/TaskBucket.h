@@ -157,6 +157,9 @@ public:
 	Database src;
 	Map<Key, Future<Reference<KeyRangeMap<Version>>>> key_version;
 
+	double getTimeoutSeconds() const {
+		return (double)timeout / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	}
 private:
 	friend class TaskBucketImpl;
 

@@ -145,6 +145,7 @@ struct TransactionOptions {
 	bool causalWriteRisky : 1;
 	bool debugDump : 1;
 	bool lockAware : 1;
+	bool readOnly : 1;
 	
 	TransactionOptions() { reset(); }
 	void reset() { 

@@ -292,7 +292,10 @@ public:
 
 		if ( key.offset <= 0 && it.beginKey() == key.getKey() && key.getKey() != allKeys.begin )
 			--it;
+
 		ExtStringRef keykey = key.getKey();
+		bool keyNeedsCopy = false;
+
 		// Invariant: it.beginKey() <= keykey && keykey <= it.endKey() && (key.isBackward() ? it.beginKey() != keykey : it.endKey() != keykey)
 		// Maintaining this invariant, we transform the key selector toward firstGreaterOrEqual form until we reach an unknown range or the result
 		while (key.offset > 1 && !it.is_unreadable() && !it.is_unknown_range() && it.endKey() < maxKey ) {
@@ -300,17 +303,20 @@ public:
 				--key.offset;
 			++it;
 			keykey = it.beginKey();
+			keyNeedsCopy = true;
 		}
 		while (key.offset < 1 && !it.is_unreadable() && !it.is_unknown_range() && it.beginKey() != allKeys.begin) {
 			if (it.is_kv()) {
 				++key.offset;
 				if (key.offset == 1) {
 					keykey = it.beginKey();
+					keyNeedsCopy = true;
 					break;
 				}
 			}
 			--it;
 			keykey = it.endKey();
+			keyNeedsCopy = true;
 		}
 
 		if(!alreadyExhausted) {
@@ -326,7 +332,7 @@ public:
 		
 		if (!it.is_unreadable() && !it.is_unknown_range() && key.offset > 1) {
 			*readThroughEnd = true;
-			key.setKey(maxKey);
+			key.setKey(maxKey); // maxKey is a KeyRef, but points to a LiteralStringRef. TODO: how can we ASSERT this?
 			key.offset = 1;
 			return;
 		}
@@ -334,9 +340,15 @@ public:
 		while (!it.is_unreadable() && it.is_empty_range() && it.endKey() < maxKey) {
 			++it;
 			keykey = it.beginKey();
+			keyNeedsCopy = true;
 		}
 
-		key.setKey(keykey.toArenaOrRef(key.arena()));
+		if(keyNeedsCopy) {
+			key.setKey(keykey.toArena(key.arena()));
+		}
+		else {
+			key.setKey(keykey.toArenaOrRef(key.arena()));
+		}
 	}
 
 	static KeyRangeRef getKnownKeyRange( RangeResultRef data, KeySelector begin, KeySelector end, Arena& arena ) {
@@ -564,7 +576,10 @@ public:
 					additionalRows += singleClears;
 				}
 
-				read_end.setKey(std::max(read_end.getKey(), read_begin.getKey()));
+				if(read_end.getKey() < read_begin.getKey()) {
+					read_end.setKey(read_begin.getKey());
+					read_end.arena().dependsOn(read_begin.arena());
+				}
 
 				state GetRangeLimits requestLimit = limits;
 				setRequestLimits(requestLimit, additionalRows, 2-read_begin.offset, requestCount);
@@ -829,7 +844,10 @@ public:
 					additionalRows += singleClears;
 				}
 
-				read_begin.setKey(std::min( read_begin.getKey(), read_end.getKey() ));
+				if(read_begin.getKey() > read_end.getKey()) {
+					read_begin.setKey(read_end.getKey());
+					read_begin.arena().dependsOn(read_end.arena());
+				}
 
 				state GetRangeLimits requestLimit = limits;
 				setRequestLimits(requestLimit, additionalRows, read_end.offset, requestCount);

@@ -1345,7 +1345,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			cx->readLatencies.addSample(latency);
 			if (trLogInfo) {
 				int valueSize = reply.value.present() ? reply.value.get().size() : 0;
-				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize));
+				trLogInfo->addLog(FdbClientLogEvents::EventGet(startTimeD, latency, valueSize, key));
 			}
 			cx->getValueCompleted->latency = timer_int() - startTime;
 			cx->getValueCompleted->log();
@@ -1369,13 +1369,13 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 					.detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				(e.code() == error_code_past_version && ver == latestVersion) ) {
+				(e.code() == error_code_transaction_too_old && ver == latestVersion) ) {
 				cx->invalidateCache( key );
 				cx->invalidateCache( ssi.second );
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				if (trLogInfo)
-					trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_GET, startTimeD, static_cast<int>(e.code())));
+					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, static_cast<int>(e.code()), key));
 				throw e;
 			}
 		}
@@ -1863,7 +1863,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Future<Version> 
 				TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				(e.code() == error_code_past_version && readVersion == latestVersion))
+				(e.code() == error_code_transaction_too_old && readVersion == latestVersion))
 			{
 				cx->invalidateCache( reverse ? end.getKey() : begin.getKey(), reverse ? (end-1).isBackward() : begin.isBackward() );
 				cx->invalidateCache( beginServer.second );
@@ -1890,13 +1890,13 @@ ACTOR Future<Standalone<RangeResultRef>> getRangeWrapper(Database cx, Reference<
 			int rangeSize = 0;
 			for (const KeyValueRef &res : ret.contents())
 				rangeSize += res.key.size() + res.value.size();
-			trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, latency, rangeSize));
+			trLogInfo->addLog(FdbClientLogEvents::EventGetRange(startTime, latency, rangeSize, begin.getKey(), end.getKey()));
 		}
 		return ret;
 	}
 	catch (Error &e) {
 		if (trLogInfo)
-			trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_GET_RANGE, startTime, static_cast<int>(e.code())));
+			trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()), begin.getKey(), end.getKey()));
 		throw;
 	}
 }
@@ -2421,7 +2421,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		}
 		TraceEvent("CheckWritesSuccess").detail("Version", version).detail("MutationCount", mCount).detail("CheckedRanges", checkedRanges);
 	} catch( Error& e ) {
-		bool ok = e.code() == error_code_past_version || e.code() == error_code_future_version;
+		bool ok = e.code() == error_code_transaction_too_old || e.code() == error_code_future_version;
 		TraceEvent( ok ? SevWarn : SevError, "CheckWritesFailed" ).error(e);
 		throw;
 	}
@@ -2519,7 +2519,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req->transaction.mutations.size(), req->transaction.mutations.expectedSize()));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req->transaction.mutations.size(), req->transaction.mutations.expectedSize(), req));
 					return Void();
 				} else {
 					if (info.debugID.present())
@@ -2554,10 +2554,10 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else {
-			if (e.code() != error_code_past_version && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
+			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
 				TraceEvent(SevError, "tryCommitError").error(e);
-			if (trLogInfo)
-				trLogInfo->addLog(FdbClientLogEvents::EventError(FdbClientLogEvents::ERROR_COMMIT, startTime, static_cast<int>(e.code())));
+			if (e.code() != error_code_actor_cancelled && trLogInfo)
+				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
 			throw;
 		}
 	}
@@ -2566,13 +2566,16 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 Future<Void> Transaction::commitMutations() {
 	cx->transactionsCommitStarted++;
 
+	if(options.readOnly)
+		return transaction_read_only();
+
 	try {
 		//if this is a read-only transaction return immediately
 		if( !tr.transaction.write_conflict_ranges.size() && !tr.transaction.mutations.size() ) {
 			numErrors = 0;
 
 			committedVersion = invalidVersion;
-			versionstampPromise.sendError(transaction_read_only());
+			versionstampPromise.sendError(no_commit_version());
 			return Void();
 		}
 
@@ -2744,6 +2747,15 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		case FDBTransactionOptions::LOCK_AWARE:
 			validateOptionValue(value, false);
 			options.lockAware = true;
+			options.readOnly = false;
+			break;
+
+		case FDBTransactionOptions::READ_LOCK_AWARE:
+			validateOptionValue(value, false);
+			if(!options.lockAware) {
+				options.lockAware = true;
+				options.readOnly = true;
+			}
 			break;
 
 		default:
@@ -2888,10 +2900,10 @@ Future<Void> Transaction::onError( Error const& e ) {
 		reset();
 		return delay( backoff, info.taskID );
 	}
-	if (e.code() == error_code_past_version ||
+	if (e.code() == error_code_transaction_too_old ||
 		e.code() == error_code_future_version)
 	{
-		if( e.code() == error_code_past_version )
+		if( e.code() == error_code_transaction_too_old )
 			cx->transactionsPastVersions++;
 		else if( e.code() == error_code_future_version )
 			cx->transactionsFutureVersions++;

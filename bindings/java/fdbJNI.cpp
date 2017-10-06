@@ -38,8 +38,18 @@
 #error Missing thread local storage
 #endif
 
+static JavaVM* g_jvm = 0; 
 static thread_local JNIEnv* g_thread_jenv = 0;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
 static thread_local jmethodID g_IFutureCallback_call_methodID = 0;
+static thread_local bool is_external = false;
+
+void detachIfExternalThread(void *ignore) {
+	if(is_external && g_thread_jenv != 0) {
+		g_thread_jenv = 0;
+		g_IFutureCallback_call_methodID = 0;
+		g_jvm->DetachCurrentThread();
+	}
+}
 
 void throwOutOfMem(JNIEnv *jenv) {
 	const char *className = "java/lang/OutOfMemoryError";
@@ -103,12 +113,6 @@ void throwParamNotNull(JNIEnv *jenv) {
 extern "C" {
 #endif
 
-static void callCallback( FDBFuture* f, void* data ) {
-	jobject callback = (jobject)data;
-	g_thread_jenv->CallVoidMethod( callback, g_IFutureCallback_call_methodID );
-	g_thread_jenv->DeleteGlobalRef(callback);
-}
-
 // If the methods are not found, exceptions are thrown and this will return false.
 //  Returns TRUE on success, false otherwise.
 static bool findCallbackMethods(JNIEnv *jenv) {
@@ -121,6 +125,27 @@ static bool findCallbackMethods(JNIEnv *jenv) {
 		return false;
 
 	return true;
+}
+
+static void callCallback( FDBFuture* f, void* data ) {
+	if (g_thread_jenv == 0) {
+		// We are on an external thread and must attach to the JVM.
+		// The shutdown hook will later detach this thread.
+		is_external = true;
+		if( g_jvm != 0 && g_jvm->AttachCurrentThreadAsDaemon((void **) &g_thread_jenv, JNI_NULL) == JNI_OK ) {
+			if( !findCallbackMethods( g_thread_jenv ) ) {
+				g_thread_jenv->FatalError("FDB: Could not find callback method.\n");
+			}
+		} else {
+			// Can't call FatalError, because we don't have a pointer to the jenv...
+			// There will be a segmentation fault from the attempt to call the callback method.
+			fprintf(stderr, "FDB: Could not attach external client thread to the JVM as daemon.\n");
+		}
+	}
+
+	jobject callback = (jobject)data;
+	g_thread_jenv->CallVoidMethod( callback, g_IFutureCallback_call_methodID );
+	g_thread_jenv->DeleteGlobalRef(callback);
 }
 
 // Attempts to throw 't', attempts to shut down the JVM if this fails.
@@ -157,8 +182,10 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1regi
 	// Here we cache a thread-local reference to jenv
 	g_thread_jenv = jenv;
 	fdb_error_t err = fdb_future_set_callback( f, &callCallback, callback );
-	if( err )
+	if( err ) {
+		jenv->DeleteGlobalRef( callback );
 		safeThrow( jenv, getThrowable( jenv, err ) );
+	}
 }
 
 JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1blockUntilReady(JNIEnv *jenv, jobject, jlong future) {
@@ -309,15 +336,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 			return JNI_NULL;
 		}
 
-		uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(lastKey, NULL);
-		if (!keyvalues_barr) {
-			throwRuntimeEx( jenv, "Error getting handle to native resources" );
-			return JNI_NULL;
-		}
-
-		memcpy(keyvalues_barr, kvs[count - 1].key, kvs[count - 1].key_length);
-		// void function that is not documented as not throwing
-		jenv->ReleaseByteArrayElements(lastKey, (jbyte *)keyvalues_barr, 0);
+		jenv->SetByteArrayRegion(lastKey, 0, kvs[count - 1].key_length, (jbyte *)kvs[count - 1].key);
 	}
 
 	jobject result = jenv->NewObject(resultCls, resultCtorId, lastKey, count, (jboolean)more);
@@ -327,6 +346,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 	return result;
 }
 
+// SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
 JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureResults_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
@@ -368,6 +388,8 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 	if( !lengthArray ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
+
+		jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 		return JNI_NULL;
 	}
 
@@ -375,6 +397,8 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 	if( !length_barr ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
+
+		jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 		return JNI_NULL;
 	}
 
@@ -399,7 +423,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 	return result;
 }
 
-// SOMEDAY: this could be done much more efficiently with Direct ByteBuffers
+// SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
 JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureResult_FutureResult_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
@@ -425,15 +449,8 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureResult_Future
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements(result, NULL); 
-	if (!barr) {
-		throwRuntimeEx( jenv, "Error getting handle to native resources" );
-		return JNI_NULL;
-	}
 
-	memcpy(barr, value, length);
-	// passing "0" here commits the data back and releases the native copy
-	jenv->ReleaseByteArrayElements(result, (jbyte *)barr, 0);
+	jenv->SetByteArrayRegion(result, 0, length, (const jbyte *)value);
 	return result;
 }
 
@@ -458,15 +475,8 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureKey_FutureKey
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
-	uint8_t *barr = (uint8_t *)jenv->GetByteArrayElements(result, NULL); 
-	if (!barr) {
-		throwRuntimeEx( jenv, "Error getting handle to native resources" );
-		return JNI_NULL;
-	}
 
-	memcpy(barr, value, length);
-	// passing "0" here commits the data back and releases the native copy
-	jenv->ReleaseByteArrayElements(result, (jbyte *)barr, 0);
+	jenv->SetByteArrayRegion(result, 0, length, (const jbyte *)value);
 	return result;
 }
 
@@ -896,6 +906,8 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	int size = jenv->GetArrayLength( key );
 
 	FDBFuture *f = fdb_transaction_get_addresses_for_key( tr, barr, size );
+
+	jenv->ReleaseByteArrayElements( key, (jbyte *)barr, JNI_ABORT );
 	return (jlong)f;
 }
 
@@ -940,6 +952,8 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	}
 	int size = jenv->GetArrayLength( key );
 	FDBFuture *f = fdb_transaction_watch( tr, barr, size );
+
+	jenv->ReleaseByteArrayElements( key, (jbyte *)barr, JNI_ABORT );
 	return (jlong)f;
 }
 
@@ -1046,6 +1060,11 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1run(JNIEnv *
 			return;
 	}
 
+	fdb_error_t hookErr = fdb_add_network_thread_completion_hook( &detachIfExternalThread, NULL );
+	if( hookErr ) {
+		safeThrow( jenv, getThrowable( jenv, hookErr ) );
+	}
+
 	fdb_error_t err = fdb_run_network();
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
@@ -1057,6 +1076,11 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1stop(JNIEnv 
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
 	}
+}
+
+jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+	g_jvm = vm;
+	return JNI_VERSION_1_1;
 }
 
 #ifdef __cplusplus

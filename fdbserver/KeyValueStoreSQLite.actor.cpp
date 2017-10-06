@@ -1587,7 +1587,11 @@ private:
 			if (checkIntegrityOnOpen || EXPENSIVE_VALIDATION) {
 				if(conn.check(false) != 0) {
 					// A corrupt btree structure must not be used.
-					throw file_corrupt();
+					if (g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->machine->machineProcess->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting)) {
+						throw file_corrupt().asInjectedFault();
+					} else {
+						throw file_corrupt();
+					}
 				}
 			}
 		}
