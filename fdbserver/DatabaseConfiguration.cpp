@@ -106,6 +106,15 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 			result["storage_engine"] = "memory";
 		else
 			result["storage_engine"] = "custom";
+
+		if( desiredTLogCount != -1 )
+			result["logs"] = format("%d", desiredTLogCount);
+
+		if( masterProxyCount != -1 )
+			result["proxies"] = format("%d", masterProxyCount);
+
+		if( resolverCount != -1 )
+			result["resolvers"] = format("%d", resolverCount);
 	}
 
 	return result;
