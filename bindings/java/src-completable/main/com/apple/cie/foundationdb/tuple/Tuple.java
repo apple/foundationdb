@@ -21,6 +21,8 @@
 package com.apple.cie.foundationdb.tuple;
 
 import java.math.BigInteger;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -100,7 +102,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 				!(o instanceof List<?>) &&
 				!(o instanceof Tuple) &&
 				!(o instanceof Boolean) &&
-				!(o instanceof Number)) {
+				!(o instanceof Number) &&
+				!(o instanceof Versionstamp)) {
 			throw new IllegalArgumentException("Parameter type (" + o.getClass().getName() + ") not recognized");
 		}
 		return new Tuple(this.elements, o);
@@ -200,6 +203,18 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
+	 * Creates a copy of this {@code Tuple} with a {@link Versionstamp} object appended as the last
+	 *  element.
+	 *
+	 * @param v the {@link Versionstamp} to append
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public Tuple add(Versionstamp v) {
+		return new Tuple(this.elements, v);
+	}
+
+	/**
 	 * Creates a copy of this {@code Tuple} with an {@link List} appended as the last element.
 	 * This does not add the elements individually (for that, use {@link Tuple#addAll(List) Tuple.addAll}).
 	 * This adds the list as a single elemented nested within the outer {@code Tuple}.
@@ -274,7 +289,30 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return a serialized representation of this {@code Tuple}.
 	 */
 	public byte[] pack() {
-		return TupleUtil.pack(elements);
+		return pack(null);
+	}
+
+	public byte[] pack(byte[] prefix) {
+		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
+		if(encoded.versionPos > 0) {
+			throw new IllegalStateException("Incomplete Versionstamp included in vanilla tuple pack");
+		}
+		return encoded.data;
+	}
+
+	public byte[] packWithVersionstamp() {
+		return packWithVersionstamp(null);
+	}
+
+	public byte[] packWithVersionstamp(byte[] prefix) {
+		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
+		if(encoded.versionPos < 0) {
+			throw new IllegalStateException("No incomplete Versionstamp included in tuple pack with versionstamp");
+		}
+		return ByteBuffer.allocate(encoded.data.length + 2).order(ByteOrder.LITTLE_ENDIAN)
+				.put(encoded.data)
+				.putShort((short)encoded.versionPos)
+				.array();
 	}
 
 	/**
@@ -505,6 +543,22 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		if(o == null)
 			return null;
 		return (UUID)o;
+	}
+
+	/**
+	 * Gets an indexed item as a {@link Versionstamp}. This function will not do type
+	 *  conversion and so will throw a {@code ClassCastException} if the element is not
+	 *  a {@code Versionstamp}. The element at the index may be {@code null}.
+	 *
+	 * @param index the location of the item to return
+	 *
+	 * @return the item at {@code index} as a {@link UUID}
+	 */
+	public Versionstamp getVersionstamp(int index) {
+		Object o = this.elements.get(index);
+		if(o == null)
+			return null;
+		return (Versionstamp)o;
 	}
 
 	/**

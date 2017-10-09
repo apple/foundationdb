@@ -413,13 +413,14 @@ public class AsyncStackTester {
 					boolean filteredError = errorCode == 1102 || errorCode == 2015;
 
 					FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
-					CompletableFuture<Void> f = inst.tr.onError(err)
+					final Transaction oldTr = inst.tr;
+					CompletableFuture<Void> f = oldTr.onError(err)
 						.whenComplete((tr, t) -> {
 							if(t != null) {
-								inst.context.newTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
+								inst.context.newTransaction(oldTr); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 							}
 							else {
-								inst.setTransaction(tr);
+								inst.context.updateCurrentTransaction(oldTr, tr);
 							}
 						})
 						.thenApply(v -> null);
@@ -473,6 +474,33 @@ public class AsyncStackTester {
 							byte[] coded = Tuple.fromItems(elements).pack();
 							//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
 							inst.push(coded);
+							return null;
+						}
+					});
+				}
+			});
+		}
+		else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
+			return inst.popParams(2).thenComposeAsync(new Function<List<Object>, CompletableFuture<Void>>() {
+				@Override
+				public CompletableFuture<Void> apply(List<Object> params) {
+				    byte[] prefix = (byte[])params.get(0);
+					int tupleSize = StackUtils.getInt(params.get(1));
+					//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
+					return inst.popParams(tupleSize).thenApplyAsync(new Function<List<Object>, Void>() {
+						@Override
+						public Void apply(List<Object> elements) {
+							try {
+								byte[] coded = Tuple.fromItems(elements).packWithVersionstamp(prefix);
+								inst.push("OK".getBytes());
+								inst.push(coded);
+							} catch(IllegalStateException e) {
+								if(e.getMessage().startsWith("No incomplete")) {
+									inst.push("ERROR: NONE".getBytes());
+								} else {
+									inst.push("ERROR: MULTIPLE".getBytes());
+								}
+							}
 							return null;
 						}
 					});

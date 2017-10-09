@@ -37,17 +37,18 @@ class TupleUtil {
 	private static final Charset UTF8;
 	private static final IterableComparator iterableComparator;
 
-	private static final byte BYTES_CODE    = 0x01;
-	private static final byte STRING_CODE   = 0x02;
-	private static final byte NESTED_CODE   = 0x05;
-	private static final byte INT_ZERO_CODE = 0x14;
-	private static final byte POS_INT_END   = 0x1d;
-	private static final byte NEG_INT_START = 0x0b;
-	private static final byte FLOAT_CODE    = 0x20;
-	private static final byte DOUBLE_CODE   = 0x21;
-	private static final byte FALSE_CODE    = 0x26;
-	private static final byte TRUE_CODE     = 0x27;
-	private static final byte UUID_CODE     = 0x30;
+	private static final byte BYTES_CODE            = 0x01;
+	private static final byte STRING_CODE           = 0x02;
+	private static final byte NESTED_CODE           = 0x05;
+	private static final byte INT_ZERO_CODE         = 0x14;
+	private static final byte POS_INT_END           = 0x1d;
+	private static final byte NEG_INT_START         = 0x0b;
+	private static final byte FLOAT_CODE            = 0x20;
+	private static final byte DOUBLE_CODE           = 0x21;
+	private static final byte FALSE_CODE            = 0x26;
+	private static final byte TRUE_CODE             = 0x27;
+	private static final byte UUID_CODE             = 0x30;
+	private static final byte VERSIONSTAMP_CODE     = 0x33;
 
 	static {
 		size_limits = new BigInteger[9];
@@ -68,12 +69,27 @@ class TupleUtil {
 		}
 	}
 
+	static class EncodeResult {
+		final int versionPos;
+		final byte[] data;
+
+		EncodeResult(int versionPos, byte[] data) {
+			this.versionPos = versionPos;
+			this.data = data;
+		}
+	}
+
 	static int byteLength(byte[] bytes) {
 		for(int i = 0; i < bytes.length; i++) {
 			if(bytes[i] == 0x00) continue;
 			return bytes.length - i;
 		}
 		return 0;
+	}
+
+	// The Integer.compare method was introduced in Java 1.7. This exists to support Java 1.6.
+	static int compareIntegers(int first, int second) {
+		return (first < second) ? -1 : (first == second ? 0 : 1);
 	}
 
 	/**
@@ -127,6 +143,8 @@ class TupleUtil {
 			return UUID_CODE;
 		if(o instanceof Number)
 			return INT_ZERO_CODE;
+		if(o instanceof Versionstamp)
+			return VERSIONSTAMP_CODE;
 		if(o instanceof List<?>)
 			return NESTED_CODE;
 		if(o instanceof Tuple)
@@ -134,12 +152,12 @@ class TupleUtil {
 		throw new IllegalArgumentException("Unsupported data type: " + o.getClass().getName());
 	}
 
-	static byte[] encode(Object t, boolean nested) {
+	static EncodeResult encode(Object t, boolean nested) {
 		if(t == null)
 			if (nested)
-				return new byte[]{nil, (byte) 0xff};
+				return new EncodeResult(-1, new byte[]{nil, (byte) 0xff});
 			else
-				return new byte[]{nil};
+				return new EncodeResult(-1, new byte[]{nil});
 		if(t instanceof byte[])
 			return encode((byte[])t);
 		if(t instanceof String)
@@ -156,6 +174,8 @@ class TupleUtil {
 			return encode((UUID)t);
 		if(t instanceof Number)
 			return encode(((Number)t).longValue());
+		if(t instanceof Versionstamp)
+			return encode((Versionstamp)t);
 		if(t instanceof List<?>)
 			return encode((List<?>)t);
 		if(t instanceof Tuple)
@@ -163,34 +183,34 @@ class TupleUtil {
 		throw new IllegalArgumentException("Unsupported data type: " + t.getClass().getName());
 	}
 
-	static byte[] encode(Object t) {
+	static EncodeResult encode(Object t) {
 		return encode(t, false);
 	}
 
-	static byte[] encode(byte[] bytes) {
+	static EncodeResult encode(byte[] bytes) {
 		List<byte[]> list = new ArrayList<byte[]>(3);
 		list.add(new byte[] {BYTES_CODE});
 		list.add(ByteArrayUtil.replace(bytes, new byte[] {nil}, nil_rep));
 		list.add(new byte[] {nil});
 
 		//System.out.println("Joining bytes...");
-		return ByteArrayUtil.join(null, list);
+		return new EncodeResult(-1, ByteArrayUtil.join(null, list));
 	}
 
-	static byte[] encode(String s) {
+	static EncodeResult encode(String s) {
 		List<byte[]> list = new ArrayList<byte[]>(3);
 		list.add(new byte[] {STRING_CODE});
 		list.add(ByteArrayUtil.replace(s.getBytes(UTF8), new byte[] {nil}, nil_rep));
 		list.add(new byte[] {nil});
 
 		//System.out.println("Joining string...");
-		return ByteArrayUtil.join(null, list);
+		return new EncodeResult(-1, ByteArrayUtil.join(null, list));
 	}
 
-	static byte[] encode(BigInteger i) {
+	static EncodeResult encode(BigInteger i) {
 		//System.out.println("Encoding integral " + i);
 		if(i.equals(BigInteger.ZERO)) {
-			return new byte[] { INT_ZERO_CODE };
+			return new EncodeResult(-1, new byte[] { INT_ZERO_CODE });
 		}
 		byte[] bytes = i.toByteArray();
 		if(i.compareTo(BigInteger.ZERO) > 0) {
@@ -203,7 +223,7 @@ class TupleUtil {
 				result[0] = POS_INT_END;
 				result[1] = (byte)(length);
 				System.arraycopy(bytes, bytes.length - length, result, 2, length);
-				return result;
+				return new EncodeResult(-1, result);
 			}
 			int n = ByteArrayUtil.bisectLeft(size_limits, i);
 			assert n <= size_limits.length;
@@ -212,7 +232,7 @@ class TupleUtil {
 			byte[] result = new byte[n+1];
 			result[0] = (byte)(INT_ZERO_CODE + n);
 			System.arraycopy(bytes, bytes.length - n, result, 1, n);
-			return result;
+			return new EncodeResult(-1, result);
 		}
 		if(i.negate().compareTo(size_limits[size_limits.length-1]) > 0) {
 			int length = byteLength(i.negate().toByteArray());
@@ -230,7 +250,7 @@ class TupleUtil {
 				Arrays.fill(result, 2, result.length - adjusted.length, (byte)0x00);
 				System.arraycopy(adjusted, 0, result, result.length - adjusted.length, adjusted.length);
 			}
-			return result;
+			return new EncodeResult(-1, result);
 		}
 		int n = ByteArrayUtil.bisectLeft(size_limits, i.negate());
 
@@ -241,51 +261,71 @@ class TupleUtil {
 		byte[] result = new byte[n+1];
 		result[0] = (byte)(20 - n);
 		System.arraycopy(adjustedBytes, adjustedBytes.length - n, result, 1, n);
-		return result;
+		return new EncodeResult(-1, result);
 	}
 
-	static byte[] encode(Integer i) {
+	static EncodeResult encode(Integer i) {
 		return encode(i.longValue());
 	}
 
-	static byte[] encode(long i) {
+	static EncodeResult encode(long i) {
 		return encode(BigInteger.valueOf(i));
 	}
 
-	static byte[] encode(Float f) {
+	static EncodeResult encode(Float f) {
 		byte[] result = ByteBuffer.allocate(5).order(ByteOrder.BIG_ENDIAN).put(FLOAT_CODE).putFloat(f).array();
 		floatingPointCoding(result, 1, true);
-		return result;
+		return new EncodeResult(-1, result);
 	}
 
-	static byte[] encode(Double d) {
+	static EncodeResult encode(Double d) {
 		byte[] result = ByteBuffer.allocate(9).order(ByteOrder.BIG_ENDIAN).put(DOUBLE_CODE).putDouble(d).array();
 		floatingPointCoding(result, 1, true);
-		return result;
+		return new EncodeResult(-1, result);
 	}
 
-	static byte[] encode(Boolean b) {
+	static EncodeResult encode(Boolean b) {
 		if (b) {
-			return new byte[] {TRUE_CODE};
+			return new EncodeResult(-1, new byte[] {TRUE_CODE});
 		} else {
-			return new byte[] {FALSE_CODE};
+			return new EncodeResult(-1, new byte[] {FALSE_CODE});
 		}
 	}
 
-	static byte[] encode(UUID uuid) {
-		return ByteBuffer.allocate(17).put(UUID_CODE).order(ByteOrder.BIG_ENDIAN)
+	static EncodeResult encode(UUID uuid) {
+		byte[] result = ByteBuffer.allocate(17).put(UUID_CODE).order(ByteOrder.BIG_ENDIAN)
 				.putLong(uuid.getMostSignificantBits()).putLong(uuid.getLeastSignificantBits())
 				.array();
+		return new EncodeResult(-1, result);
 	}
 
-	static byte[] encode(List<?> value) {
+	static EncodeResult encode(Versionstamp v) {
+		byte[] result =  ByteBuffer.allocate(Versionstamp.LENGTH + 1)
+				.put(VERSIONSTAMP_CODE)
+				.put(v.getBytes())
+				.array();
+		return new EncodeResult((v.isComplete() ? -1 : 1), result);
+	}
+
+	static EncodeResult encode(List<?> value) {
 		List<byte[]> parts = new LinkedList<byte[]>();
+		int lenSoFar = 0;
+		int versionPos = -1;
 		parts.add(new byte[]{NESTED_CODE});
 		for(Object t : value) {
-			parts.add(encode(t, true));
+			EncodeResult childResult = encode(t, true);
+			if(childResult.versionPos > 0) {
+				if(versionPos > 0) {
+					throw new IllegalStateException("Multiple incomplete Versionstamps included in Tuple");
+				}
+				versionPos = lenSoFar + childResult.versionPos;
+			}
+			lenSoFar += childResult.data.length;
+			parts.add(childResult.data);
 		}
 		parts.add(new byte[]{0x00});
-		return ByteArrayUtil.join(null, parts);
+		return new EncodeResult((versionPos < 0 ? -1 : versionPos + 1),
+								 ByteArrayUtil.join(null, parts));
 	}
 
 	static DecodeResult decode(byte[] rep, int pos, int last) {
@@ -374,6 +414,11 @@ class TupleUtil {
 			}
 			return new DecodeResult(end, val.longValue());
 		}
+		if(code == VERSIONSTAMP_CODE) {
+			return new DecodeResult(
+					start + Versionstamp.LENGTH,
+					Versionstamp.fromBytes(Arrays.copyOfRange(rep, start, start + Versionstamp.LENGTH)));
+		}
 		if(code == NESTED_CODE) {
 			List<Object> items = new LinkedList<Object>();
 			int endPos = start;
@@ -402,7 +447,7 @@ class TupleUtil {
 		int code2 = TupleUtil.getCodeFor(item2);
 
 		if(code1 != code2) {
-			return Integer.compare(code1, code2);
+			return compareIntegers(code1, code2);
 		}
 
 		if(code1 == nil) {
@@ -433,25 +478,30 @@ class TupleUtil {
 		if(code1 == DOUBLE_CODE) {
 			// This is done over vanilla double comparison basically to handle NaN
 			// sorting correctly.
-			byte[] encoded1 = encode((Double)item1);
-			byte[] encoded2 = encode((Double)item2);
+			byte[] encoded1 = encode((Double)item1).data;
+			byte[] encoded2 = encode((Double)item2).data;
 			return ByteArrayUtil.compareUnsigned(encoded1, encoded2);
 		}
 		if(code1 == FLOAT_CODE) {
 			// This is done for the same reason that double comparison is done
 			// that way.
-			byte[] encoded1 = encode((Float)item1);
-			byte[] encoded2 = encode((Float)item2);
+			byte[] encoded1 = encode((Float)item1).data;
+			byte[] encoded2 = encode((Float)item2).data;
 			return ByteArrayUtil.compareUnsigned(encoded1, encoded2);
 		}
 		if(code1 == FALSE_CODE) {
-			return Boolean.compare((Boolean)item1, (Boolean)item2);
+			boolean b1 = (Boolean)item1;
+			boolean b2 = (Boolean)item2;
+			return (b1 && !b2) ? 1 : (!b1 && b2 ? -1 : 0);
 		}
 		if(code1 == UUID_CODE) {
 			// Java UUID.compareTo is signed.
-			byte[] encoded1 = encode((UUID)item1);
-			byte[] encoded2 = encode((UUID)item2);
+			byte[] encoded1 = encode((UUID)item1).data;
+			byte[] encoded2 = encode((UUID)item2).data;
 			return ByteArrayUtil.compareUnsigned(encoded1, encoded2);
+		}
+		if(code1 == VERSIONSTAMP_CODE) {
+			return ((Versionstamp)item1).compareTo((Versionstamp)item2);
 		}
 		if(code1 == NESTED_CODE) {
 			return iterableComparator.compare((Iterable<?>)item1, (Iterable<?>)item2);
@@ -471,24 +521,34 @@ class TupleUtil {
 		return items;
 	}
 
-	static byte[] pack(List<Object> items) {
+	static EncodeResult pack(List<Object> items, byte[] prefix) {
 		if(items.size() == 0)
-			return new byte[0];
+			return new EncodeResult(-1, new byte[0]);
 
-		List<byte[]> parts = new ArrayList<byte[]>(items.size());
+		List<byte[]> parts = new ArrayList<byte[]>(items.size() + (prefix == null ? 0 : 1));
+		if(prefix != null) {
+			parts.add(prefix);
+		}
+		int lenSoFar = (prefix == null) ? 0 : prefix.length;
+		int versionPos = -1;
 		for(Object t : items) {
-			//System.out.println("Starting encode: " + ArrayUtils.printable((byte[])t));
-			byte[] encoded = encode(t);
-			//System.out.println(" encoded -> '" + ArrayUtils.printable(encoded) + "'");
-			parts.add(encoded);
+			EncodeResult result = encode(t);
+			if(result.versionPos > 0) {
+				if(versionPos > 0) {
+					throw new IllegalStateException("Multiple incomplete Versionstamps included in Tuple");
+				}
+				versionPos = result.versionPos + lenSoFar;
+			}
+			lenSoFar += result.data.length;
+			parts.add(result.data);
 		}
 		//System.out.println("Joining whole tuple...");
-		return ByteArrayUtil.join(null, parts);
+		return new EncodeResult(versionPos, ByteArrayUtil.join(null, parts));
 	}
 
 	public static void main(String[] args) {
 		try {
-			byte[] bytes = encode( 4 );
+			byte[] bytes = encode( 4 ).data;
 			assert 4 == (Integer)(decode( bytes, 0, bytes.length ).o);
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -496,7 +556,7 @@ class TupleUtil {
 		}
 
 		try {
-			byte[] bytes = encode( "\u021Aest \u0218tring" );
+			byte[] bytes = encode( "\u021Aest \u0218tring" ).data;
 			String string = (String)(decode( bytes, 0, bytes.length ).o);
 			System.out.println("contents -> " + string);
 			assert "\u021Aest \u0218tring" == string;
@@ -507,7 +567,7 @@ class TupleUtil {
 
 		/*Object[] a = new Object[] { "\u0000a", -2, "b\u0001", 12345, ""};
 		List<Object> o = Arrays.asList(a);
-		byte[] packed = pack( o );
+		byte[] packed = pack( o ).data;
 		System.out.println("packed length: " + packed.length);
 		o = unpack( packed );
 		System.out.println("unpacked elements: " + packed);

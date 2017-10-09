@@ -75,7 +75,7 @@ class SingleFloat(object):
         elif isinstance(value, six.integertypes):
             self.value = ctypes.c_float(value).value
         else:
-	        raise ValueError("Incompatible type for single-precision float: " + repr(value))
+            raise ValueError("Incompatible type for single-precision float: " + repr(value))
 
     # Comparisons
     def __eq__(self, other):
@@ -117,71 +117,70 @@ class SingleFloat(object):
         return bool(self.value)
 
 class Versionstamp(object):
-    _GLOBAL_VERSION_LEN = 10
-    _MAX_LOCAL_VERSION = (1 << 16) - 1
-    _UNSET_GLOBAL_VERSION = 10 * six.int2byte(0xff)
-    _STRUCT_FORMAT_STRING = '>' + str(_GLOBAL_VERSION_LEN) + 'sH'
+    _TR_VERSION_LEN = 10
+    _MAX_USER_VERSION = (1 << 16) - 1
+    _UNSET_TR_VERSION = 10 * six.int2byte(0xff)
+    _STRUCT_FORMAT_STRING = '>' + str(_TR_VERSION_LEN) + 'sH'
 
     @classmethod
-    def validate_global_version(cls, global_version):
-        if global_version is None:
+    def validate_tr_version(cls, tr_version):
+        if tr_version is None:
             return
-        if not isinstance(global_version, bytes):
-            raise TypeError("Global version has illegal type " + str(type(global_version)) + " (requires bytes)")
-        elif len(global_version) != cls._GLOBAL_VERSION_LEN:
-            raise ValueError("Global version has incorrect length " + str(len(global_version)) + " (requires " + str(cls._GLOBAL_VERSION_LEN) + ")")
+        if not isinstance(tr_version, bytes):
+            raise TypeError("Global version has illegal type " + str(type(tr_version)) + " (requires bytes)")
+        elif len(tr_version) != cls._TR_VERSION_LEN:
+            raise ValueError("Global version has incorrect length " + str(len(tr_version)) + " (requires " + str(cls._TR_VERSION_LEN) + ")")
 
     @classmethod
-    def validate_local_version(cls, local_version):
-        if not isinstance(local_version, six.integer_types):
-            raise TypeError("Local version has illegal type " + str(type(local_version)) + " (requires integer type)")
-        elif local_version < 0 or local_version > cls._MAX_LOCAL_VERSION:
-            raise ValueError("Local version has value " + str(local_version) + " which is out of range")
+    def validate_user_version(cls, user_version):
+        if not isinstance(user_version, six.integer_types):
+            raise TypeError("Local version has illegal type " + str(type(user_version)) + " (requires integer type)")
+        elif user_version < 0 or user_version > cls._MAX_USER_VERSION:
+            raise ValueError("Local version has value " + str(user_version) + " which is out of range")
 
-
-    def __init__(self, global_version=None, local_version=0):
-        Versionstamp.validate_global_version(global_version)
-        Versionstamp.validate_local_version(local_version)
-        self.global_version = global_version
-        self.local_version = local_version
+    def __init__(self, tr_version=None, user_version=0):
+        Versionstamp.validate_tr_version(tr_version)
+        Versionstamp.validate_user_version(user_version)
+        self.tr_version = tr_version
+        self.user_version = user_version
 
     @classmethod
     def from_bytes(cls, v, start=0):
         if not isinstance(v, bytes):
             raise TypeError("Cannot parse versionstamp from non-byte string")
-        elif len(v) - start < cls._GLOBAL_VERSION_LEN + 2:
+        elif len(v) - start < cls._TR_VERSION_LEN + 2:
             raise ValueError("Versionstamp byte string is too short (only " + str(len(v) - start) + " bytes to read from")
         else:
-            global_version = v[start:start + cls._GLOBAL_VERSION_LEN]
-            if global_version == cls._UNSET_GLOBAL_VERSION:
-                global_version = None
-            local_version = six.indexbytes(v, start + cls._GLOBAL_VERSION_LEN) * (1 << 8) + six.indexbytes(v, start + cls._GLOBAL_VERSION_LEN + 1)
-            return Versionstamp(global_version, local_version)
+            tr_version = v[start:start + cls._TR_VERSION_LEN]
+            if tr_version == cls._UNSET_TR_VERSION:
+                tr_version = None
+            user_version = six.indexbytes(v, start + cls._TR_VERSION_LEN) * (1 << 8) + six.indexbytes(v, start + cls._TR_VERSION_LEN + 1)
+            return Versionstamp(tr_version, user_version)
 
     def is_complete(self):
-        return self.global_version is not None
+        return self.tr_version is not None
 
     def __repr__(self):
-        return "fdb.tuple.Versionstamp(" + repr(self.global_version) + ", " + repr(self.local_version) + ")"
+        return "fdb.tuple.Versionstamp(" + repr(self.tr_version) + ", " + repr(self.user_version) + ")"
 
     def __str__(self):
-        return "Versionstamp(" + str(self.global_version) + ", " + str(self.local_version) + ")"
+        return "Versionstamp(" + str(self.tr_version) + ", " + str(self.user_version) + ")"
 
     def to_bytes(self):
         return struct.pack(self._STRUCT_FORMAT_STRING,
-                           self.global_version if self.is_complete() else self._UNSET_GLOBAL_VERSION,
-                           self.local_version)
+                           self.tr_version if self.is_complete() else self._UNSET_TR_VERSION,
+                           self.user_version)
 
-    def completed(self, new_global_version):
+    def completed(self, new_tr_version):
         if self.is_complete():
             raise RuntimeError("Cannot complete Versionstamp twice")
         else:
-            return Versionstamp(new_global_version, self.local_version)
+            return Versionstamp(new_tr_version, self.user_version)
 
     # Comparisons
     def __eq__(self, other):
         if isinstance(other, Versionstamp):
-            return self.global_version == other.global_version and self.local_version == other.local_version
+            return self.tr_version == other.tr_version and self.user_version == other.user_version
         else:
             return False
 
@@ -191,10 +190,10 @@ class Versionstamp(object):
     def __cmp__(self, other):
         if self.is_complete():
             if other.is_complete():
-                if self.global_version == other.global_version:
-                    return cmp(self.local_version, other.local_version)
+                if self.tr_version == other.tr_version:
+                    return cmp(self.user_version, other.user_version)
                 else:
-                    return cmp(self.global_version, other.global_version)
+                    return cmp(self.tr_version, other.tr_version)
             else:
                 # All complete are less than all incomplete.
                 return -1
@@ -203,16 +202,16 @@ class Versionstamp(object):
                 # All incomplete are greater than all complete
                 return 1
             else:
-                return cmp(self.local_version, other.local_version)
+                return cmp(self.user_version, other.user_version)
 
     def __hash__(self):
-        if self.global_version is None:
-            return hash(self.local_version)
+        if self.tr_version is None:
+            return hash(self.user_version)
         else:
-            return hash(self.global_version) * 37 ^ hash(self.local_version)
+            return hash(self.tr_version) * 37 ^ hash(self.user_version)
 
     def __nonzero__(self):
-        return bool(self.global_version) or bool(self.local_version)
+        return bool(self.tr_version) or bool(self.user_version)
 
 def _decode(v, pos):
     code = six.indexbytes(v, pos)
@@ -286,7 +285,7 @@ def _reduce_children(child_values):
     for child_bytes, child_pos in child_values:
         if child_pos >= 0:
             if version_pos >= 0:
-                raise ValueError("Multiple unset versionstamps included in tuple")
+                raise ValueError("Multiple incomplete versionstamps included in tuple")
             version_pos = len_so_far + child_pos
         len_so_far += len(child_bytes)
         bytes_list.append(child_bytes)

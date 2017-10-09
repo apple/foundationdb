@@ -337,6 +337,24 @@ public class StackTester {
 				//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
 				inst.push(coded);
 			}
+			else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
+				List<Object> params = inst.popParams(2).join();
+				byte[] prefix = (byte[])params.get(0);
+				int tupleSize = StackUtils.getInt(params.get(1));
+				//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
+				List<Object> elements = inst.popParams(tupleSize).join();
+				try {
+					byte[] coded = Tuple.fromItems(elements).packWithVersionstamp(prefix);
+					inst.push("OK".getBytes());
+					inst.push(coded);
+				} catch(IllegalStateException e) {
+					if(e.getMessage().startsWith("No incomplete")) {
+						inst.push("ERROR: NONE".getBytes());
+					} else {
+						inst.push("ERROR: MULTIPLE".getBytes());
+					}
+				}
+			}
 			else if(op == StackOperation.TUPLE_UNPACK) {
 				List<Object> params = inst.popParams(1).join();
 				/*System.out.println(inst.context.preStr + " - " + "Unpacking tuple code: " +
