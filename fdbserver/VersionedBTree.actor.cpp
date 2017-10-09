@@ -264,17 +264,18 @@ public:
 		return m_lastCommittedVersion;
 	}
 
-	VersionedBTree(IPager *pager, int target_page_size = -1)
+	VersionedBTree(IPager *pager, std::string name, int target_page_size = -1)
 	  : m_pager(pager),
 		m_writeVersion(invalidVersion),
 		m_pageSize(pager->getUsablePageSize()),
 		m_lastCommittedVersion(invalidVersion),
 		m_pBuffer(nullptr),
-		m_latestCommit(Void())
+		m_name(name)
 	{
 		if(target_page_size > 0 && target_page_size < m_pageSize)
 			m_pageSize = target_page_size;
 		m_init = init_impl(this);
+		m_latestCommit = m_init;
 	}
 
 	ACTOR static Future<Void> init_impl(VersionedBTree *self) {
@@ -878,7 +879,7 @@ private:
 						logicalPages.push_back( self->m_pager->allocateLogicalPage() );
 
 					// Write each page using its assigned page ID
-					debug_printf("%s Writing %d internal pages\n", printPrefix.c_str(), pages.size());
+					debug_printf("%s Writing %lu internal pages\n", printPrefix.c_str(), pages.size());
 					for(int i=0; i<pages.size(); i++)
 						self->writePage( logicalPages[i], pages[i].second, version );
 
@@ -930,17 +931,20 @@ private:
 
 		// Wait for the latest commit that started to be finished.
 		Void _ = wait(previousCommit);
+		debug_printf("%s: Beginning commit of version %lld\n", self->m_name.c_str(), writeVersion);
 
 		// Get the latest version from the pager, which is what we will read at
 		Version latestVersion = wait(self->m_pager->getLatestVersion());
+		debug_printf("%s: pager latestVersion %lld\n", self->m_name.c_str(), latestVersion);
 
-		debug_printf("BEGINNING COMMIT.\n");
 		self->printMutationBuffer(mutations);
 
 		VersionedChildrenT _ = wait(commitSubtree(self, mutations, self->m_pager->getReadSnapshot(latestVersion), self->m_root, beginKey.pack().key, endKey.pack().key));
 
 		self->m_pager->setLatestVersion(writeVersion);
+		debug_printf("%s: Committing pager %lld\n", self->m_name.c_str(), writeVersion);
 		Void _ = wait(self->m_pager->commit());
+		debug_printf("%s: Committed version %lld\n", self->m_name.c_str(), writeVersion);
 
 		// Now that everything is committed we must delete the mutation buffer.
 		// Our buffer's start version should be the oldest mutation buffer version in the map.
@@ -962,6 +966,7 @@ private:
 	Future<Void> m_latestCommit;
 	int m_pageSize;
 	Future<Void> m_init;
+	std::string m_name;
 
 	// InternalCursor is for seeking to and iterating over the low level records in the tree
 	// which combine in groups of 1 or more to represent user visible KV pairs.
@@ -1366,9 +1371,8 @@ class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
 		m_pager = new IndirectShadowPager(filePrefix);
-		m_tree = new VersionedBTree(m_pager, m_pager->getUsablePageSize());
+		m_tree = new VersionedBTree(m_pager, filePrefix, m_pager->getUsablePageSize());
 		m_init = catchError(m_error, init_impl(this));
-		m_lastCommit = m_init;
 	}
 
 	virtual Future<Void> init() {
@@ -1408,17 +1412,13 @@ public:
 	}
 
 	ACTOR static Future<Void> commit_impl(KeyValueStoreRedwoodUnversioned *self) {
-		Void _ = wait(self->m_init);
-		// Start the commit, then set a new write version before waiting on the commit.
-		Future<Void> c = self->m_tree->commit();
-		self->m_tree->setWriteVersion(self->m_tree->getWriteVersion() + 1);
-		Void _ = wait(c);
-
 		return Void();
 	}
 
 	Future<Void> commit(bool sequential = false) {
-		return catchError(m_error, commit_impl(this));
+		Future<Void> c = m_tree->commit();
+		m_tree->setWriteVersion(m_tree->getWriteVersion() + 1);
+		return catchError(m_error, c);
 	}
 
 	virtual KeyValueStoreType getType() {
@@ -1522,7 +1522,6 @@ private:
 	VersionedBTree *m_tree;
 	Future<Void> m_init;
 	Promise<Void> m_closed;
-	Future<Void> m_lastCommit;
 	Promise<Void> m_error;
 };
 
@@ -1685,7 +1684,7 @@ TEST_CASE("/redwood/correctness") {
 		pager = createMemoryPager();
 
 	state int pageSize = g_random->coinflip() ? pager->getUsablePageSize() : g_random->randomInt(200, 400);
-	state VersionedBTree *btree = new VersionedBTree(pager, pageSize);
+	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, pageSize);
 	Void _ = wait(btree->init());
 
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
@@ -1758,14 +1757,14 @@ TEST_CASE("/redwood/correctness") {
 		printf("Checking changes committed thus far.\n");
 		if(useDisk && g_random->random01() < .1) {
 			printf("Reopening disk btree\n");
-
+			delete btree;
 			Future<Void> closedFuture = pager->onClosed();
 			pager->close();
 			Void _ = wait(closedFuture);
 
 			pager = new IndirectShadowPager(pagerFile);
 
-			btree = new VersionedBTree(pager, pageSize);
+			btree = new VersionedBTree(pager, pagerFile, pageSize);
 			Void _ = wait(btree->init());
 
 			Version v = wait(btree->getLatestVersion());
@@ -1827,7 +1826,7 @@ TEST_CASE("/redwood/correctness") {
 
 TEST_CASE("/redwood/performance/set") {
 	state IPager *pager = new IndirectShadowPager("pagerfile");
-	state VersionedBTree *btree = new VersionedBTree(pager);
+	state VersionedBTree *btree = new VersionedBTree(pager, "pagerfile");
 	Void _ = wait(btree->init());
 
 	state int nodeCount = 100000;

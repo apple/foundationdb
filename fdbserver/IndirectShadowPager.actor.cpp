@@ -195,6 +195,8 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 					version = bigEndian(version);
 					vr >> physicalPageID;
 
+					ASSERT(version <= pager->latestVersion);
+
 					pager->pageTable[logicalPageID].push_back(std::make_pair(version, physicalPageID));
 					
 					if(physicalPageID != PagerFile::INVALID_PAGE) {
@@ -342,6 +344,7 @@ int IndirectShadowPager::getUsablePageSize() {
 }
 
 Reference<IPagerSnapshot> IndirectShadowPager::getReadSnapshot(Version version) {
+	debug_printf("%s: Getting read snapshot v%lld  latest v%lld  oldest v%lld\n", pageFileName.c_str(), version, latestVersion, oldestVersion);
 	ASSERT(recovery.isReady());
 	ASSERT(version <= latestVersion);
 	ASSERT(version >= oldestVersion);
@@ -674,7 +677,7 @@ const StringRef IndirectShadowPager::OLDEST_VERSION_KEY = LiteralStringRef("\xff
 const StringRef IndirectShadowPager::PAGES_ALLOCATED_KEY = LiteralStringRef("\xff/PagesAllocated");
 const StringRef IndirectShadowPager::TABLE_ENTRY_PREFIX = LiteralStringRef("\x00");
 
-ACTOR Future<Void> copyPage(IndirectShadowPager *pager, Reference<IPage> page, PhysicalPageID from, PhysicalPageID to) {
+ACTOR Future<Void> copyPage(IndirectShadowPager *pager, Reference<IPage> page, LogicalPageID logical, PhysicalPageID from, PhysicalPageID to) {
 	state bool zeroCopied = true;
 	state int bytes = IndirectShadowPage::PAGE_BYTES;
 	state void *data = nullptr;
@@ -691,6 +694,7 @@ ACTOR Future<Void> copyPage(IndirectShadowPager *pager, Reference<IPage> page, P
 		}
 
 		ASSERT(bytes == IndirectShadowPage::PAGE_BYTES);
+		checksum(pager->basename, page, logical, to, true);
 		Void _ = wait(pager->dataFile->write(data, bytes, to * IndirectShadowPage::PAGE_BYTES));
 		if(zeroCopied) {
 			pager->dataFile->releaseZeroCopy(data, bytes, from * IndirectShadowPage::PAGE_BYTES);
@@ -731,7 +735,7 @@ ACTOR Future<Void> vacuumer(IndirectShadowPager *pager, PagerFile *pagerFile) {
 				state PhysicalPageID newPage = pagerFile->allocatePage(logicalPageInfo.first, logicalPageInfo.second);
 
 				debug_printf("%s: Vacuuming: copying page %u to %u\n", pager->pageFileName.c_str(), lastUsedPage, newPage);
-				Void _ = wait(copyPage(pager, page, lastUsedPage, newPage));
+				Void _ = wait(copyPage(pager, page, logicalPageInfo.first, lastUsedPage, newPage));
 
 				auto &pageVersionMap = pager->pageTable[logicalPageInfo.first];
 				auto itr = IndirectShadowPager::pageVersionMapLowerBound(pageVersionMap, logicalPageInfo.second);
