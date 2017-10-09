@@ -188,7 +188,7 @@ struct KeyVersionValue {
 
 	std::string toString() const {
 		//return format("'%s' -> '%s' @%lld [%lld]", key.toString().c_str(), value.present() ? value.get().toString().c_str() : "<cleared>", version, valueIndex);
-		return format("'%s' -> %d bytes @%lld [%lld]", key.toString().c_str(), value.present() ? (int)value.get().size() : -1, version, valueIndex);
+		return format("'%s' -> %d bytes @%lld [%lld]", key.printable().c_str(), value.present() ? (int)value.get().size() : -1, version, valueIndex);
 	}
 };
 
@@ -1411,10 +1411,6 @@ public:
 		return m_closed.getFuture();
 	}
 
-	ACTOR static Future<Void> commit_impl(KeyValueStoreRedwoodUnversioned *self) {
-		return Void();
-	}
-
 	Future<Void> commit(bool sequential = false) {
 		Future<Void> c = m_tree->commit();
 		m_tree->setWriteVersion(m_tree->getWriteVersion() + 1);
@@ -1882,13 +1878,13 @@ std::string SimpleFixedSizeMapRef::toString(bool writing, LogicalPageID id, Vers
 			if(i != 0)
 				result.append(",");
 			if(t.getType(i) == Tuple::ElementType::BYTES)
-				result.append(format("'%s'", t.getString(i).toString().c_str()));
+				result.append(format("'%s'", t.getString(i).printable().c_str()));
 			if(t.getType(i) == Tuple::ElementType::INT)
 				result.append(format("%lld", t.getInt(i)));
 		}
 		result.append("->");
 		if(flags && VersionedBTree::IS_LEAF)
-			result.append(format("'%s'", printable(StringRef(kv.value)).c_str()));
+			result.append(format("'%s'", kv.value.printable().c_str()));
 		else
 			result.append(format("%u", *(const uint32_t *)kv.value.begin()));
 		result.append("]\n");
