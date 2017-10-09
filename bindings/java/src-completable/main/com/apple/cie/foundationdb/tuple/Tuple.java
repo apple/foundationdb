@@ -674,6 +674,19 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
+	 * Determines if there is a {@link Versionstamp} included in this {@code Tuple} that has
+	 *  not had it's transaction version set. It will search through nested {@code Tuple}s
+	 *  contained within this {@code Tuple}. It will not attempt to throw an error if it
+	 *  finds multiple incomplete {@code Versionstamp} instances.
+	 *
+	 * @return whether there is at least one incomplete {@link Versionstamp} included in this
+	 *  {@code Tuple}
+	 */
+	public boolean hasIncompleteVersionstamp() {
+		return TupleUtil.hasIncompleteVersionstamp(stream());
+	}
+
+	/**
 	 * Compare the byte-array representation of this {@code Tuple} against another. This method
 	 *  will sort {@code Tuple}s in the same order that they would be sorted as keys in
 	 *  FoundationDB. Returns a negative integer, zero, or a positive integer when this object's
@@ -824,6 +837,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 			createTuple(i);
 		}
 
+		Versionstamp completeVersionstamp = Versionstamp.complete(new byte[]{0x0f, (byte)0xdb, 0x0f, (byte)0xdb, 0x0f, (byte)0xdb, 0x0f, (byte)0x0db, 0x0f, (byte)0xdb}, 15);
+		Versionstamp incompleteVersionstamp = Versionstamp.incomplete(20);
+
 		Tuple t = new Tuple();
 		t = t.add(Long.MAX_VALUE);
 		t = t.add(Long.MAX_VALUE - 1);
@@ -845,6 +861,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		t = t.add(t);
 		t = t.add(new BigInteger("100000000000000000000000000000000000000000000"));
 		t = t.add(new BigInteger("-100000000000000000000000000000000000000000000"));
+		t = t.add(completeVersionstamp);
 		byte[] bytes = t.pack();
 		System.out.println("Packed: " + ByteArrayUtil.printable(bytes));
 		List<Object> items = Tuple.fromBytes(bytes).getItems();
@@ -882,6 +899,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		System.out.println("t2.getBigInteger(14): " + t2.getBigInteger(14));
 		System.out.println("t2.getNestedList(17): " + t2.getNestedList(17));
 		System.out.println("t2.getNestedTuple(17): " + t2.getNestedTuple(17));
+		System.out.println("t2.getVersionstamp(20): " + t2.getVersionstamp(20));
 
 		System.out.println("(2*(Long.MAX_VALUE+1),) = " + ByteArrayUtil.printable(Tuple.from(
 				BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE).shiftLeft(1)
@@ -891,6 +909,19 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		).pack()));
 		System.out.println("2*Long.MIN_VALUE = " + Tuple.fromBytes(Tuple.from(
 				BigInteger.valueOf(Long.MIN_VALUE).multiply(new BigInteger("2"))).pack()).getBigInteger(0));
+
+		Tuple vt1 = Tuple.from("complete:", completeVersionstamp, 1);
+		System.out.println("vt1: " + vt1 + " ; has incomplete: " + vt1.hasIncompleteVersionstamp());
+		Tuple vt2 = Tuple.from("incomplete:", incompleteVersionstamp, 2);
+		System.out.println("vt2: " + vt2 + " ; has incomplete: " + vt2.hasIncompleteVersionstamp());
+		Tuple vt3 = Tuple.from("complete nested: ", vt1, 3);
+		System.out.println("vt3: " + vt3 + " ; has incomplete: " + vt3.hasIncompleteVersionstamp());
+		Tuple vt4 = Tuple.from("incomplete nested: ", vt2, 4);
+		System.out.println("vt4: " + vt4 + " ; has incomplete: " + vt4.hasIncompleteVersionstamp());
+		Tuple vt5 = Tuple.from("complete with null: ", null, completeVersionstamp, 5);
+		System.out.println("vt5: " + vt5 + " ; has incomplete: " + vt5.hasIncompleteVersionstamp());
+		Tuple vt6 = Tuple.from("complete with null: ", null, incompleteVersionstamp, 6);
+		System.out.println("vt6: " + vt6 + " ; has incomplete: " + vt6.hasIncompleteVersionstamp());
 	}
 
 	private static Tuple createTuple(int items) {

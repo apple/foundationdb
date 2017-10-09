@@ -26,9 +26,11 @@ import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 class TupleUtil {
 	private static final byte nil = 0x00;
@@ -536,6 +538,22 @@ class TupleUtil {
 		}
 		//System.out.println("Joining whole tuple...");
 		return new EncodeResult(versionPos, ByteArrayUtil.join(null, parts));
+	}
+
+	static boolean hasIncompleteVersionstamp(Stream<?> items) {
+		return items.anyMatch(item -> {
+			if(item == null) {
+				return false;
+			} else if(item instanceof Versionstamp) {
+				return !((Versionstamp) item).isComplete();
+			} else if(item instanceof Tuple) {
+				return hasIncompleteVersionstamp(((Tuple) item).stream());
+			} else if(item instanceof Collection<?>) {
+				return hasIncompleteVersionstamp(((Collection) item).stream());
+			} else {
+				return false;
+			}
+		});
 	}
 
 	public static void main(String[] args) {

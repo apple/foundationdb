@@ -546,6 +546,26 @@ class TupleUtil {
 		return new EncodeResult(versionPos, ByteArrayUtil.join(null, parts));
 	}
 
+	static boolean hasIncompleteVersionstamp(Iterable<?> items) {
+		for(Object o : items) {
+			if(o == null) {
+				continue;
+			}
+			if(o instanceof Versionstamp) {
+				if(!((Versionstamp) o).isComplete()) {
+					return true;
+				}
+			}
+			else if(o instanceof Iterable<?>) {
+				if(hasIncompleteVersionstamp((Iterable<?>)o)) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
 	public static void main(String[] args) {
 		try {
 			byte[] bytes = encode( 4 ).data;
