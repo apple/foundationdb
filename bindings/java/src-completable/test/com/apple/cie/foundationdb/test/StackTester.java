@@ -583,7 +583,7 @@ public class StackTester {
 	private static void logStack(Database db, Map<Integer, StackEntry> entries, byte[] prefix) {
 	    db.run(tr -> {
 			for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
-				byte[] pk = ByteArrayUtil.join(prefix, Tuple.from(it.getKey(), it.getValue().idx).pack());
+				byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
 				byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
 				tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
 			}

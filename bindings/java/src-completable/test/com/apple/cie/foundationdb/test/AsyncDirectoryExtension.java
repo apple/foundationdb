@@ -34,7 +34,6 @@ import com.apple.cie.foundationdb.directory.Directory;
 import com.apple.cie.foundationdb.directory.DirectoryLayer;
 import com.apple.cie.foundationdb.directory.DirectorySubspace;
 import com.apple.cie.foundationdb.subspace.Subspace;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
 import com.apple.cie.foundationdb.tuple.Tuple;
 
 class AsyncDirectoryExtension {
@@ -377,7 +376,7 @@ class AsyncDirectoryExtension {
 					return inst.tcx.runAsync(new Function<Transaction, CompletableFuture<Void>>() {
 						@Override
 						public CompletableFuture<Void> apply(Transaction tr) {
-							tr.set(ByteArrayUtil.join((byte[])prefix, new Tuple().add(dirIndex).pack()), subspace().getKey());
+							tr.set(Tuple.from(dirIndex).pack((byte[])prefix), subspace().getKey());
 							return CompletableFuture.completedFuture(null);
 						}
 					});

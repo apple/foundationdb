@@ -36,10 +36,8 @@ import com.apple.cie.foundationdb.KeySelector;
 import com.apple.cie.foundationdb.KeyValue;
 import com.apple.cie.foundationdb.MutationType;
 import com.apple.cie.foundationdb.Range;
-import com.apple.cie.foundationdb.ReadTransaction;
 import com.apple.cie.foundationdb.StreamingMode;
 import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.async.AsyncIterable;
 import com.apple.cie.foundationdb.async.AsyncUtil;
 import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
 import com.apple.cie.foundationdb.tuple.Tuple;
@@ -683,7 +681,7 @@ public class AsyncStackTester {
 	private static CompletableFuture<Void> logStack(final Database db, final Map<Integer, StackEntry> entries, final byte[] prefix) {
 		return db.runAsync(tr -> {
             for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
-                byte[] pk = ByteArrayUtil.join(prefix, Tuple.from(it.getKey(), it.getValue().idx).pack());
+                byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
                 byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
                 tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
             }
@@ -695,7 +693,7 @@ public class AsyncStackTester {
 		//System.out.println("Logging stack at " + i);
 		while(inst.size() > 0) {
 			StackEntry e = inst.pop();
-			byte[] pk = ByteArrayUtil.join(prefix, Tuple.from(i, e.idx).pack());
+			byte[] pk = Tuple.from(i, e.idx).pack(prefix);
 			byte[] pv = Tuple.from(StackUtils.serializeFuture(e.value)).pack();
 			inst.tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
 			i--;
