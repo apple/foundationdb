@@ -23,6 +23,7 @@
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
+#include "fdbclient/ManagementAPI.h"
 
 //For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in (sim2.actor.cpp)
 
@@ -92,6 +93,10 @@ struct ConflictRangeWorkload : TestWorkload {
 		state std::set<int> clearedSet;
 		state int clearedBegin;
 		state int clearedEnd;
+
+		if(g_network->isSimulated()) {
+			Void _ = wait( timeKeeperSetDisable(cx) );
+		}
 
 		loop {
 			randomSets = !randomSets;
@@ -290,7 +295,7 @@ struct ConflictRangeWorkload : TestWorkload {
 
 					if( res.size() == originalResults.size() ) {
 						for( int i = 0; i < res.size(); i++ ) {
-							if( res[i] != originalResults[i] && ( !res[i].key.startsWith(systemKeys.begin) || !originalResults[i].key.startsWith(systemKeys.begin) ) ) {
+							if( res[i] != originalResults[i] ) {
 								TraceEvent(SevError, "ConflictRangeError").detail("Info", "No conflict returned, however results do not match")
 									.detail("Original", printable(originalResults[i].key) + " " + printable(originalResults[i].value))
 									.detail("New", printable(res[i].key) + " " + printable(res[i].value));
