@@ -78,6 +78,7 @@ struct IDataDistributionTeam {
 	virtual bool isOptimal() = 0;
 	virtual bool isWrongConfiguration() = 0;
 	virtual void setWrongConfiguration(bool) = 0;
+	virtual void addServers(const vector<UID> &servers) = 0;
 
 	std::string getDesc() {
 		const auto& servers = getLastKnownServerInterfaces();
@@ -186,7 +187,7 @@ Future<Void> dataDistributionQueue(
 	Database const& cx,
 	PromiseStream<RelocateShard> const& input,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
-	TeamCollectionInterface const& teamCollection,
+	vector<TeamCollectionInterface> const& teamCollection,
 	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	MoveKeysLock const& lock,
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
