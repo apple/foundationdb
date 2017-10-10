@@ -186,6 +186,21 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 			else
 				result["remote_redundancy_mode"] = "custom";
 		}
+
+		if( desiredTLogCount != -1 )
+			result["logs"] = format("%d", desiredTLogCount);
+
+		if( desiredTLogCount != -1 )
+			result["remote_logs"] = format("%d", remoteDesiredTLogCount);
+
+		if( desiredTLogCount != -1 )
+			result["satellite_logs"] = format("%d", satelliteDesiredTLogCount);
+
+		if( masterProxyCount != -1 )
+			result["proxies"] = format("%d", masterProxyCount);
+
+		if( resolverCount != -1 )
+			result["resolvers"] = format("%d", resolverCount);
 	}
 
 	return result;
