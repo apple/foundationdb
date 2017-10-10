@@ -61,11 +61,12 @@ import com.apple.cie.foundationdb.Range;
  *  nested {@link List}s and {@code Tuple}s can be {@code null},
  *  whereas numbers (e.g., {@code long}s and {@code double}s) and booleans cannot.
  *  This means that the typed getters ({@link #getBytes(int) getBytes()}, {@link #getString(int) getString()}),
- *  {@link #getUUID(int) getUUID()}, {@link #getNestedTuple(int) getNestedTuple()}, and {@link #getNestedList(int) getNestedList()})
- *  will return {@code null} if the entry at that location was {@code null} and the typed adds
- *  ({@link #add(byte[])} and {@link #add(String)}) will accept {@code null}. The
- *  {@link #getLong(int) typed get for integers} and other typed getters, however, will throw a {@link NullPointerException} if
- *  the entry in the {@code Tuple} was {@code null} at that position.<br>
+ *  {@link #getUUID(int) getUUID()}, {@link #getNestedTuple(int) getNestedTuple()}, {@link #getVersionstamp(int) getVersionstamp},
+ *  and {@link #getNestedList(int) getNestedList()}) will return {@code null} if the entry at that location was
+ *  {@code null} and the typed adds ({@link #add(byte[])}, {@link #add(String)}, {@link #add(Versionstamp)}
+ *  {@link #add(Tuple)}, and {@link #add(List)}) will accept {@code null}. The
+ *  {@link #getLong(int) typed get for integers} and other typed getters, however, will throw a
+ *  {@link NullPointerException} if the entry in the {@code Tuple} was {@code null} at that position.<br>
  * <br>
  * This class is not thread safe.
  */
@@ -292,6 +293,14 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		return pack(null);
 	}
 
+	/**
+	 * Get an encoded representation of this {@code Tuple} for use with
+	 *  {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-paramter version of this method},
+	 *  but it does not add any prefix to the array.
+	 *
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 */
 	public byte[] pack(byte[] prefix) {
 		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
 		if(encoded.versionPos > 0) {
@@ -300,10 +309,34 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		return encoded.data;
 	}
 
+	/**
+	 * Get an encoded representation of this {@code Tuple} for use with
+	 *  {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-paramter version of this method},
+	 *  but it does not add any prefix to the array.
+	 *
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 */
 	public byte[] packWithVersionstamp() {
 		return packWithVersionstamp(null);
 	}
 
+	/**
+	 * Get an encoded representation of this {@code Tuple} for use with.
+	 *  {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+	 *  There must be exactly one incomplete {@link Versionstamp} instance within this
+	 *  {@code Tuple} or this will throw an {@link IllegalArgumentException}.
+	 *  Each element is encoded to {@code byte}s and concatenated, the prefix
+	 *  is then prepended to the array, and then the index of the serialized incomplete
+	 *  {@link Versionstamp} is appended as a little-endian integer. This can then be passed
+	 *  as the key to
+	 *  {@link com.apple.cie.foundationdb.Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[]) Transaction.mutate}
+	 *  with the {@code SET_VERSIONSTAMPED_KEY} {@link com.apple.cie.foundationdb.MutationType}, and the transaction's
+	 *  version will then be filled in at commit time.
+	 *
+	 * @param prefix additional byte-array prefix to prepend to serialized bytes.
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 */
 	public byte[] packWithVersionstamp(byte[] prefix) {
 		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
 		if(encoded.versionPos < 0) {

@@ -217,9 +217,21 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	}
 
 	/**
-	 * Compares two {@code Versionstamp} instances by the same order that
-	 * @param other
-	 * @return
+	 * Compares two {@code Versionstamp} instances in a manner consistent with their
+	 *  key order when serialized in the database as keys. The rules for comparison are:
+	 *
+	 * <ul>
+	 *     <li>All complete {@code Versionstamp}s sort before incomplete {@code Versionstamp}s</li>
+	 *     <li>
+	 *         Two complete {@code Versionstamp}s will sort based on unsigned lexicographic comparison
+	 *         of their byte representations.
+	 *     </li>
+	 *     <li>Two incomplete {@code Versionstamp}s will sort based on their user versions.</li>
+	 * </ul>
+     *
+	 * @param other {@code Versionstamp} instance to compare against
+	 * @return -1 if this {@code Versionstamp} is smaller than {@code other}, 1 if it is bigger, and
+	 *  0 if it is equal
 	 */
 	@Override
 	public int compareTo(Versionstamp other) {

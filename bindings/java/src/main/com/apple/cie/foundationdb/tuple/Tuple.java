@@ -25,7 +25,6 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -43,7 +42,7 @@ import com.apple.cie.foundationdb.Range;
  * <h3>Types</h3>
  * A {@code Tuple} can
  *  contain byte arrays ({@code byte[]}), {@link String}s, {@link Number}s, {@link UUID}s,
- *  {@code boolean}s, {@link List}s, other {@code Tuple}s, and {@code null}.
+ *  {@code boolean}s, {@link List}s, {@link Versionstamp}s, other {@code Tuple}s, and {@code null}.
  *  {@link Float} and {@link Double} instances will be serialized as single- and double-precision
  *  numbers respectively, and {@link BigInteger}s within the range [{@code -2^2040+1},
  *  {@code 2^2040-1}] are serialized without loss of precision (those outside the range
@@ -59,11 +58,12 @@ import com.apple.cie.foundationdb.Range;
  *  nested {@link List}s and {@code Tuple}s can be {@code null},
  *  whereas numbers (e.g., {@code long}s and {@code double}s) and booleans cannot.
  *  This means that the typed getters ({@link #getBytes(int) getBytes()}, {@link #getString(int) getString()}),
- *  {@link #getUUID(int) getUUID()}, {@link #getNestedTuple(int) getNestedTuple()}, and {@link #getNestedList(int) getNestedList()})
- *  will return {@code null} if the entry at that location was {@code null} and the typed adds
- *  ({@link #add(byte[])} and {@link #add(String)}) will accept {@code null}. The
- *  {@link #getLong(int) typed get for integers} and other typed getters, however, will throw a {@link NullPointerException} if
- *  the entry in the {@code Tuple} was {@code null} at that position.<br>
+ *  {@link #getUUID(int) getUUID()}, {@link #getNestedTuple(int) getNestedTuple()}, {@link #getVersionstamp(int) getVersionstamp},
+ *  and {@link #getNestedList(int) getNestedList()}) will return {@code null} if the entry at that location was
+ *  {@code null} and the typed adds ({@link #add(byte[])}, {@link #add(String)}, {@link #add(Versionstamp)}
+ *  {@link #add(Tuple)}, and {@link #add(List)}) will accept {@code null}. The
+ *  {@link #getLong(int) typed get for integers} and other typed getters, however, will throw a
+ *  {@link NullPointerException} if the entry in the {@code Tuple} was {@code null} at that position.<br>
  * <br>
  * This class is not thread safe.
  */
@@ -290,6 +290,14 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	    return pack(null);
 	}
 
+	/**
+	 * Get an encoded representation of this {@code Tuple}. Each element is encoded to
+	 *  {@code byte}s and concatenated, and then the prefix supplied is prepended to
+	 *  the array.
+	 *
+	 * @param prefix additional byte-array prefix to prepend to serialized bytes.
+	 * @return a serialized representation of this {@code Tuple} prepended by the {@code prefix}.
+	 */
 	public byte[] pack(byte[] prefix) {
 		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
 		if(encoded.versionPos > 0) {
@@ -298,10 +306,36 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		return encoded.data;
 	}
 
+	/**
+	 * Get an encoded representation of this {@code Tuple} for use with
+	 *  {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-paramter version of this method},
+	 *  but it does not add any prefix to the array.
+	 *
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
+	 */
 	public byte[] packWithVersionstamp() {
 		return packWithVersionstamp(null);
 	}
 
+	/**
+	 * Get an encoded representation of this {@code Tuple} for use with
+	 *  {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+	 *  There must be exactly one incomplete {@link Versionstamp} instance within this
+	 *  {@code Tuple} or this will throw an {@link IllegalArgumentException}.
+	 *  Each element is encoded to {@code byte}s and concatenated, the prefix
+	 *  is then prepended to the array, and then the index of the serialized incomplete
+	 *  {@link Versionstamp} is appended as a little-endian integer. This can then be passed
+	 *  as the key to
+	 *  {@link com.apple.cie.foundationdb.Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[]) Transaction.mutate}
+	 *  with the {@code SET_VERSIONSTAMPED_KEY} {@link com.apple.cie.foundationdb.MutationType}, and the transaction's
+	 *  version will then be filled in at commit time.
+	 *
+	 * @param prefix additional byte-array prefix to prepend to serialized bytes.
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
+	 */
 	public byte[] packWithVersionstamp(byte[] prefix) {
 		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
 		if(encoded.versionPos < 0) {

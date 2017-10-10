@@ -237,7 +237,6 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			fetchOutstanding = true;
 			nextChunk = null;
 
-			//System.out.println("starting fetch: " + begin + " -> " + end);
 			FutureResults fetchingChunk = tr.getRange_internal(begin, end,
 					rowsLimited ? rowsRemaining : 0, 0, streamingMode.code(),
 					++iteration, snapshot, reverse);
