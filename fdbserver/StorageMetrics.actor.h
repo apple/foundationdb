@@ -267,16 +267,24 @@ struct StorageServerMetrics {
 
 	//static void waitMetrics( StorageServerMetrics* const& self, WaitMetricsRequest const& req );
 
+	// This function can run on untrusted user data.  We must validate all divisions carefully.
 	KeyRef getSplitKey( int64_t remaining, int64_t estimated, int64_t limits, int64_t used, int64_t infinity,
 		bool isLastShard, StorageMetricSample& sample, double divisor, KeyRef const& lastKey, KeyRef const& key ) {
 		if( limits < infinity / 2 ) {
 			int64_t expectedSize;
-			if( isLastShard || remaining > estimated )
-				expectedSize = remaining / ( ( double( remaining ) / limits ) + 0.5 );
-			else
-				expectedSize = estimated / ( ( double( estimated ) / limits ) + 0.5 );
+			if (limits == 0) throw Error(error_code_client_invalid_operation);
+			if( isLastShard || remaining > estimated ) {
+				double remaining_divisor = ( double( remaining ) / limits ) + 0.5;
+				if (remaining_divisor == 0) throw Error(error_code_client_invalid_operation);
+				expectedSize = remaining / remaining_divisor;
+			} else {
+				double estimated_divisor = ( double( estimated ) / limits ) + 0.5;
+				if (estimated_divisor == 0) throw Error(error_code_client_invalid_operation);
+				expectedSize = remaining / estimated_divisor;
+			}
 
 			if( remaining > expectedSize ) {
+				if (divisor == 0) throw Error(error_code_client_invalid_operation);
 				// This does the conversion from native units to bytes using the divisor.
 				double offset = (expectedSize - used) / divisor;
 				if( offset <= 0 )
