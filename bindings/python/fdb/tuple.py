@@ -353,7 +353,7 @@ def _encode(value, nested=False):
         raise ValueError("Unsupported data type: " + str(type(value)))
 
 # packs the specified tuple into that may be used for versionstamp operations but may be used for regular ops
-def pack_maybe_with_versionstamp(t, prefix=None, prefix_len=0):
+def _pack_maybe_with_versionstamp(t, prefix=None, prefix_len=0):
     if prefix is not None and prefix_len > 0 and len(prefix) != prefix_len:
         raise ValueError("Inconsistent values specified for prefix and prefix_len")
     if prefix_len < 0:
@@ -375,14 +375,14 @@ def pack_maybe_with_versionstamp(t, prefix=None, prefix_len=0):
 
 # packs the specified tuple into a key
 def pack(t, prefix=None):
-    res, version_pos = pack_maybe_with_versionstamp(t, prefix)
+    res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos >= 0:
         raise ValueError("Incomplete versionstamp included in vanilla tuple pack")
     return res
 
 # packs the specified tuple into a key for versionstamp operations
 def pack_with_versionstamp(t, prefix=None, prefix_len=0):
-    res, version_pos = pack_maybe_with_versionstamp(t, prefix, prefix_len)
+    res, version_pos = _pack_maybe_with_versionstamp(t, prefix, prefix_len)
     if version_pos < 0:
         raise ValueError("No incomplete versionstamp included in tuple pack with versionstamp")
     return res
@@ -395,6 +395,19 @@ def unpack(key, prefix_len=0):
         r, pos = _decode(key, pos)
         res.append(r)
     return tuple(res)
+
+# determines if there is at least one incomplete versionstamp in a tuple
+def has_incomplete_versionstamp(t):
+    def _elem_has_incomplete(item):
+        if item is None:
+            return False
+        elif isinstance(item, Versionstamp):
+            return not item.is_complete()
+        elif isinstance(item, tuple) or isinstance(item, list):
+            return has_incomplete_versionstamp(item)
+        else:
+            return False
+    return any(map(_elem_has_incomplete, t))
 
 _range = range
 def range(t):
