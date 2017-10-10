@@ -453,6 +453,46 @@ public:
 					throw operation_failed();
 			}
 		}
+		else if (newEntry.type == MutationRef::ByteMin) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				return RYWMutation(doByteMin(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+			case MutationRef::ByteMin:
+				return RYWMutation(doByteMin(existingEntry.value, newEntry.value, arena), MutationRef::ByteMin);
+			default:
+				throw operation_failed();
+			}
+		}
+		else if (newEntry.type == MutationRef::ByteMax) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				return RYWMutation(doByteMax(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+			case MutationRef::ByteMax:
+				return RYWMutation(doByteMax(existingEntry.value, newEntry.value, arena), MutationRef::ByteMax);
+			default:
+				throw operation_failed();
+			}
+		}
+		else if (newEntry.type == MutationRef::NewMin) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				return RYWMutation(doNewMin(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+			case MutationRef::NewMin:
+				return RYWMutation(doNewMin(existingEntry.value, newEntry.value, arena), MutationRef::NewMin);
+			default:
+				throw operation_failed();
+			}
+		}
+		else if (newEntry.type == MutationRef::NewAnd) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				return RYWMutation(doNewAnd(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+			case MutationRef::NewAnd:
+				return RYWMutation(doNewAnd(existingEntry.value, newEntry.value, arena), MutationRef::NewAnd);
+			default:
+				throw operation_failed();
+			}
+		}
 		else throw operation_failed();
 	}
 		

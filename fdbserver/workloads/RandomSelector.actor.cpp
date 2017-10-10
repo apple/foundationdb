@@ -138,7 +138,7 @@ struct RandomSelectorWorkload : TestWorkload {
 
 			try {
 				for(i = 0; i < g_random->randomInt(self->minOperationsPerTransaction,self->maxOperationsPerTransaction+1); i++) {
-					j = g_random->randomInt(0,13);
+					j = g_random->randomInt(0,15);
 					if( j < 3 ) {
 						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
 						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
@@ -375,6 +375,54 @@ struct RandomSelectorWorkload : TestWorkload {
 									if (thing.present()) break;
 								}
 							}
+						}
+					}
+					else if (j < 13) {
+						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
+						myValue = format("%d", g_random->randomInt(0, 10000000));
+						//TraceEvent("RYOWmin").detail("Key",myKeyA).detail("Value", myValue);
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::ByteMin);
+
+						loop{
+							try {
+								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMin);
+								Void _ = wait(tr.commit());
+								break;
+							}
+							catch (Error& e) {
+								error = e;
+								Void _ = wait(tr.onError(e));
+								if (error.code() == error_code_commit_unknown_result) {
+								Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+								if (thing.present()) break;
+								}
+							}
+						}
+					}
+					else if (j < 14) {
+						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
+						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
+						myValue = format("%d", g_random->randomInt(0, 10000000));
+						//TraceEvent("RYOWmin").detail("Key",myKeyA).detail("Value", myValue);
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::ByteMax);
+
+						loop{
+							try {
+							tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+							tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::ByteMax);
+							Void _ = wait(tr.commit());
+							break;
+						}
+						catch (Error& e) {
+							error = e;
+							Void _ = wait(tr.onError(e));
+							if (error.code() == error_code_commit_unknown_result) {
+								Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+								if (thing.present()) break;
+							}
+						}
 						}
 					}
 					else {

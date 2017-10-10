@@ -1631,6 +1631,8 @@ void populateAtomicOpMap() {
 	optionInfo["MIN"] = FDBMutationType::FDB_MUTATION_TYPE_MIN;
 	optionInfo["SET_VERSIONSTAMPED_KEY"] = FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY;
 	optionInfo["SET_VERSIONSTAMPED_VALUE"] = FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE;
+	optionInfo["BYTE_MIN"] = FDBMutationType::FDB_MUTATION_TYPE_BYTE_MIN;
+	optionInfo["BYTE_MAX"] = FDBMutationType::FDB_MUTATION_TYPE_BYTE_MAX;
 }
 
 void populateOpsThatCreateDirectories() {

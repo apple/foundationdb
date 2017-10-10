@@ -42,7 +42,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		opType = getOption( options, LiteralStringRef("opType"), -1 );
 		nodeCount = getOption( options, LiteralStringRef("nodeCount"), 1000 );
 		if(opType == -1)
-			opType = sharedRandomNumber % 6;
+			opType = sharedRandomNumber % 8;
 
 		switch(opType) {
 		case 0:
@@ -68,6 +68,14 @@ struct AtomicOpsWorkload : TestWorkload {
 		case 5:
 			TEST(true); //Testing atomic Min
 			opType = MutationRef::Min;
+			break;
+		case 6:
+			TEST(true); //Testing atomic ByteMin
+			opType = MutationRef::ByteMin;
+			break;
+		case 7:
+			TEST(true); //Testing atomic ByteMax
+			opType = MutationRef::ByteMax;
 			break;
 		default:
 			ASSERT(false);

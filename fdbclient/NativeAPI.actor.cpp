@@ -2206,6 +2206,12 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 	if(operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
 
+	if (apiVersionAtLeast(510)) {
+		if (operationType == MutationRef::Min)
+			operationType = MutationRef::NewMin;
+		else if (operationType == MutationRef::And)
+			operationType = MutationRef::NewAnd;
+	}
 	auto &req = tr;
 	auto &t = req.transaction;
 	auto r = singleKeyRange( key, req.arena );

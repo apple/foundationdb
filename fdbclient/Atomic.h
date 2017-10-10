@@ -60,6 +60,13 @@ static ValueRef doAnd(const ValueRef& existingValue, const ValueRef& otherOperan
 	return StringRef(buf, i);
 }
 
+static ValueRef doNewAnd(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValue.size())
+		return otherOperand;
+
+	return doAnd(existingValue, otherOperand, ar);
+}
+
 static ValueRef doOr(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
@@ -142,6 +149,16 @@ static ValueRef doMax(const ValueRef& existingValue, const ValueRef& otherOperan
 	return otherOperand;
 }
 
+// Big Endian version of doMin
+static ValueRef doByteMax(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+	if (!otherOperand.size() || !existingValue.size()) return otherOperand;
+
+	if (existingValue > otherOperand)
+		return existingValue;
+
+	return otherOperand;
+}
+
 static ValueRef doMin(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
 	if (!otherOperand.size()) return otherOperand;
 
@@ -179,34 +196,22 @@ static ValueRef doMin(const ValueRef& existingValue, const ValueRef& otherOperan
 	return otherOperand;
 }
 
-static ValueRef doAtomicOp(const ValueRef& existingValue, const ValueRef& otherOperand, MutationRef::Type mutationType, Arena& ar) {
-	switch(mutationType) {
-		case MutationRef::AddValue:
-			return doLittleEndianAdd(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::AppendIfFits:
-			return doAppendIfFits(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::And:
-			return doAnd(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::Or:
-			return doOr(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::Xor:
-			return doXor(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::Max:
-			return doMax(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::Min:
-			return doMin(existingValue, otherOperand, ar);
-			break;
-		default:
-			throw operation_failed();
-	}
+static ValueRef doNewMin(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValue.size())
+		return otherOperand;
+
+	return doMin(existingValue, otherOperand, ar);
 }
 
+// Big Endian version of doMin
+static ValueRef doByteMin(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+	if (!otherOperand.size() || !existingValue.size()) return otherOperand;
+	
+	if (existingValue < otherOperand)
+		return existingValue;
+
+	return otherOperand;
+}
 
 /*
 * Returns the range corresponding to the specified versionstamp key.
