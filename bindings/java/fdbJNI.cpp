@@ -21,7 +21,7 @@
 #include <jni.h>
 #include <string.h>
 
-#define FDB_API_VERSION 500 
+#define FDB_API_VERSION 510 
 
 #include <foundationdb/fdb_c.h>
 

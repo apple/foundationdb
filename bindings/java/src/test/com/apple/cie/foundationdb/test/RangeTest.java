@@ -33,7 +33,7 @@ import com.apple.cie.foundationdb.async.AsyncIterable;
 import com.apple.cie.foundationdb.async.Function;
 
 public class RangeTest {
-	private static final int API_VERSION = 500;
+	private static final int API_VERSION = 510;
 
 	public static void main(String[] args) throws Exception {
 		System.out.println("About to use version " + API_VERSION);

@@ -554,7 +554,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		else if (type == MutationRef::AppendIfFits)
 			return doAppendIfFits(existingValue, value, arena);
 		else if (type == MutationRef::And)
-			return doAnd(existingValue, value, arena);
+			return doNewAnd(existingValue, value, arena);
 		else if (type == MutationRef::Or)
 			return doOr(existingValue, value, arena);
 		else if (type == MutationRef::Xor)
@@ -562,7 +562,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		else if (type == MutationRef::Max)
 			return doMax(existingValue, value, arena);
 		else if (type == MutationRef::Min)
-			return doMin(existingValue, value, arena);
+			return doNewMin(existingValue, value, arena);
 		else if (type == MutationRef::ByteMin)
 			return doByteMin(existingValue, value, arena);
 		else if (type == MutationRef::ByteMax)

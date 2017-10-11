@@ -20,7 +20,7 @@
 
 import os
 
-MAX_API_VERSION = 500
+MAX_API_VERSION = 510
 
 class Tester:
     def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True):

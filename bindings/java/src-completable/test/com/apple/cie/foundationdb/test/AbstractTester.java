@@ -27,7 +27,7 @@ import java.nio.charset.Charset;
 import java.util.Random;
 
 public abstract class AbstractTester {
-    public static final int API_VERSION = 500;
+    public static final int API_VERSION = 510;
     protected static final int NUM_RUNS = 25;
     protected static final Charset ASCII = Charset.forName("ASCII");
 

@@ -1687,7 +1687,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(500);
+		API *fdb = FDB::API::selectAPIVersion(510);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);

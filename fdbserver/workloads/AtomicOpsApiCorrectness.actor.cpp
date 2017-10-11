@@ -159,7 +159,7 @@ public:
 		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2;  }));
 
 		// Current API Version 
-		setApiVersion(&cx, 510); // TODO: Remove 510
+		setApiVersion(&cx, currentApiVersion);
 		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Current Api Version").detail("Version", currentApiVersion);
 		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::Min, key));
 		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::Min, key, [](uint64_t val1, uint64_t val2) { return val1 < val2 ? val1 : val2;  }));
@@ -179,7 +179,7 @@ public:
 		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2;  }));
 
 		// Current API Version 
-		setApiVersion(&cx, 510); // TODO: Remove 510
+		setApiVersion(&cx, currentApiVersion);
 		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Current Api Version").detail("Version", currentApiVersion);
 		Void _ = wait(self->testAtomicOpSetOnNonExistingKey(cx, self, MutationRef::And, key));
 		Void _ = wait(self->testAtomicOpApi(cx, self, MutationRef::And, key, [](uint64_t val1, uint64_t val2) { return val1 & val2;  }));

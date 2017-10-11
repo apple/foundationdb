@@ -39,7 +39,7 @@ public class DirectoryTest {
 
 	public static void main(String[] args) throws Exception {
 		try {
-			Cluster c = FDB.selectAPIVersion(500).createCluster(CLUSTER_FILE);
+			Cluster c = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
 			Database db = c.openDatabase();
 			runTests(db);
 		} catch(Throwable t) {

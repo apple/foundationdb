@@ -34,7 +34,7 @@ import com.apple.cie.foundationdb.Transaction;
 public class WatchTest {
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(500);
+		FDB fdb = FDB.selectAPIVersion(510);
 		Database database = fdb.open(args[0]);
 		database.options().setLocationCacheSize(42);
 		Transaction tr = database.createTransaction();
