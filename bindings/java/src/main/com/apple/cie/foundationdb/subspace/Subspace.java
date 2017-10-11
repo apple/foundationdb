@@ -28,6 +28,7 @@ import java.util.Arrays;
 import com.apple.cie.foundationdb.Range;
 import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
 import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.cie.foundationdb.tuple.Versionstamp;
 
 /**
  * {@code Subspace} provide a convenient way to use {@link Tuple}s to define namespaces for
@@ -60,8 +61,11 @@ public class Subspace
 
     /**
      * Constructor for a subspace formed with the specified prefix {@link Tuple}.
+     * Note that the {@link Tuple} {@code prefix} should not contain any incomplete
+     * {@link Versionstamp}s as any of its entries.
      *
      * @param prefix a {@link Tuple} used to form the subspace
+     * @throws IllegalArgumentException if {@code prefix} contains any incomplete {@link Versionstamp}s
      */
     public Subspace(Tuple prefix) {
         this(prefix, EMPTY_BYTES);
@@ -81,10 +85,12 @@ public class Subspace
      * Constructor for a subspace formed with both a prefix {@link Tuple} and a
 	 * prefix byte string. The prefix {@code Tuple} will be prepended to all
 	 * {@code Tuples} packed by the {@code Subspace}, and the byte string prefix
-	 * will be prepended to the packed result.
+	 * will be prepended to the packed result. Note that the {@link Tuple} {@code prefix}
+     * should not contain any incomplete {@link Versionstamp}s as any of its entries.
      *
      * @param prefix a {@code Tuple} used to form the subspace
      * @param rawPrefix a byte array used as the prefix for all packed keys
+     * @throws IllegalArgumentException if {@code prefix} contains any incomplete {@link Versionstamp}s
      */
     public Subspace(Tuple prefix, byte[] rawPrefix) {
         this.rawPrefix = join(rawPrefix, prefix.pack());
@@ -178,7 +184,25 @@ public class Subspace
      * @return the key encoding the specified tuple in this {@code Subspace}
      */
     public byte[] pack(Tuple tuple) {
-        return join(rawPrefix, tuple.pack());
+        return tuple.pack(rawPrefix);
+    }
+
+    /**
+     * Gets the key encoding the specified tuple in this {@code Subspace} for use with
+     * {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+     * There must be exactly one incomplete {@link Versionstamp} included in the given {@link Tuple}. It will
+     * create a key that is within this {@code Subspace} that can be provided as the {@code key} argument to
+     * {@link com.apple.cie.foundationdb.Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
+     * with the {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
+     * mutation. This will throw an {@link IllegalArgumentException} if the {@link Tuple} does not
+     * contain an incomplete {@link Versionstamp} or if it contains multiple.
+     *
+     * @param tuple the {@code Tuple} to be packed
+     * @return the key encoding the specified tuple in this {@code Subspace}
+     * @throws IllegalArgumentException if {@code tuple} does not contain exactly one incomplete {@link Versionstamp}
+     */
+    public byte[] packWithVersionstamp(Tuple tuple) {
+        return tuple.packWithVersionstamp(rawPrefix);
     }
 
     /**

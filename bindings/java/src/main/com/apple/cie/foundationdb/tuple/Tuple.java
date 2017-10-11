@@ -301,7 +301,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	public byte[] pack(byte[] prefix) {
 		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
 		if(encoded.versionPos > 0) {
-			throw new IllegalStateException("Incomplete Versionstamp included in vanilla tuple pack");
+			throw new IllegalArgumentException("Incomplete Versionstamp included in vanilla tuple pack");
 		}
 		return encoded.data;
 	}
@@ -328,7 +328,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  is then prepended to the array, and then the index of the serialized incomplete
 	 *  {@link Versionstamp} is appended as a little-endian integer. This can then be passed
 	 *  as the key to
-	 *  {@link com.apple.cie.foundationdb.Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[]) Transaction.mutate}
+	 *  {@link com.apple.cie.foundationdb.Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
 	 *  with the {@code SET_VERSIONSTAMPED_KEY} {@link com.apple.cie.foundationdb.MutationType}, and the transaction's
 	 *  version will then be filled in at commit time.
 	 *
@@ -339,7 +339,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	public byte[] packWithVersionstamp(byte[] prefix) {
 		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
 		if(encoded.versionPos < 0) {
-			throw new IllegalStateException("No incomplete Versionstamp included in tuple pack with versionstamp");
+			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple pack with versionstamp");
 		}
 		return ByteBuffer.allocate(encoded.data.length + 2).order(ByteOrder.LITTLE_ENDIAN)
 				.put(encoded.data)

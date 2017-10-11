@@ -488,11 +488,16 @@ public class AsyncStackTester {
 					return inst.popParams(tupleSize).thenApplyAsync(new Function<List<Object>, Void>() {
 						@Override
 						public Void apply(List<Object> elements) {
+							Tuple tuple = Tuple.fromItems(elements);
+							if(!tuple.hasIncompleteVersionstamp() && Math.random() < 0.5) {
+								inst.push("ERROR: NONE".getBytes());
+								return null;
+							}
 							try {
-								byte[] coded = Tuple.fromItems(elements).packWithVersionstamp(prefix);
+								byte[] coded = tuple.packWithVersionstamp(prefix);
 								inst.push("OK".getBytes());
 								inst.push(coded);
-							} catch(IllegalStateException e) {
+							} catch(IllegalArgumentException e) {
 								if(e.getMessage().startsWith("No incomplete")) {
 									inst.push("ERROR: NONE".getBytes());
 								} else {

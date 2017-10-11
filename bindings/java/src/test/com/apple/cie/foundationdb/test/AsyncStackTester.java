@@ -36,6 +36,7 @@ import com.apple.cie.foundationdb.Range;
 import com.apple.cie.foundationdb.ReadTransaction;
 import com.apple.cie.foundationdb.StreamingMode;
 import com.apple.cie.foundationdb.Transaction;
+import com.apple.cie.foundationdb.async.AsyncUtil;
 import com.apple.cie.foundationdb.async.Function;
 import com.apple.cie.foundationdb.async.Future;
 import com.apple.cie.foundationdb.async.ReadyFuture;
@@ -525,12 +526,17 @@ public class AsyncStackTester {
 					return inst.popParams(tupleSize).flatMap(new Function<List<Object>, Future<Void>>() {
 						@Override
 						public Future<Void> apply(List<Object> elements) {
+							Tuple tuple = Tuple.fromItems(elements);
+							if(!tuple.hasIncompleteVersionstamp() && Math.random() < 0.5) {
+								inst.push("ERROR: NONE".getBytes());
+								return ReadyFuture.DONE;
+							}
 							try {
-								byte[] coded = Tuple.fromItems(elements).packWithVersionstamp(prefix);
+								byte[] coded = tuple.packWithVersionstamp(prefix);
 								//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
 								inst.push("OK".getBytes());
 								inst.push(coded);
-							} catch(IllegalStateException e) {
+							} catch(IllegalArgumentException e) {
 							    //System.out.println(inst.context.preStr + " - " + " -> result '" + e.getMessage() + "'");
 								if(e.getMessage().startsWith("No incomplete"))
 								    inst.push("ERROR: NONE".getBytes());
@@ -737,7 +743,6 @@ public class AsyncStackTester {
 					}
 				});
 			}
-
 		}
 
 		return logStack(inst.context.db, entries, prefix);

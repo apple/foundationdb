@@ -535,7 +535,7 @@ class TupleUtil {
 			EncodeResult result = encode(t);
 			if(result.versionPos > 0) {
 				if(versionPos > 0) {
-					throw new IllegalStateException("Multiple incomplete Versionstamps included in Tuple");
+					throw new IllegalArgumentException("Multiple incomplete Versionstamps included in Tuple");
 				}
 				versionPos = result.versionPos + lenSoFar;
 			}
