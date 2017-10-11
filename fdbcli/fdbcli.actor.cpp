@@ -504,10 +504,10 @@ void initHelp() {
 		"kill all|list|<ADDRESS>*",
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
-  helpMap["profile"] = CommandHelp(
+	helpMap["profile"] = CommandHelp(
 		"<type> <action> <ARGS>",
-		"toggles the profiling state for a form of profiling.",
-		"Supported types are: client.  Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
+		"namespace for all the profiling-related commands.",
+		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -2542,7 +2542,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 				if (tokencmp(tokens[0], "profile")) {
 					if (tokens.size() == 1) {
-						printf("ERROR: Usage: profile <client>\n");
+						printf("ERROR: Usage: profile <client|list|flow>\n");
 						is_error = true;
 						continue;
 					}
@@ -2620,6 +2620,91 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("ERROR: Unknown action: %s\n", printable(tokens[2]).c_str());
 						is_error = true;
 						continue;
+					}
+					if (tokencmp(tokens[1], "list")) {
+						if (tokens.size() != 2) {
+							printf("ERROR: Usage: profile list\n");
+							is_error = true;
+							continue;
+						}
+						getTransaction(db, tr, options, intrans);
+						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+						    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
+						                             LiteralStringRef("\xff\xff\xff")),
+						                 1)));
+						for (const auto& pair : kvs) {
+							printf("%s\n", printable(pair.key).c_str());
+						}
+						continue;
+					}
+					if (tokencmp(tokens[1], "flow")) {
+						if (tokens.size() == 2) {
+							printf("ERROR: Usage: profile flow <run>\n");
+							is_error = true;
+							continue;
+						}
+						if (tokencmp(tokens[2], "run")) {
+							if (tokens.size() < 6) {
+								printf("ERROR: Usage: profile flow run <duration in seconds> <filename> <hosts>\n");
+								is_error = true;
+								continue;
+							}
+							getTransaction(db, tr, options, intrans);
+							Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
+							                             LiteralStringRef("\xff\xff\xff")),
+							                 1)));
+							char *duration_end;
+							int duration = std::strtol((const char*)tokens[3].begin(), &duration_end, 10);
+							if (!std::isspace(*duration_end)) {
+								printf("ERROR: Failed to parse %s as an integer.", printable(tokens[3]).c_str());
+								is_error = true;
+								continue;
+							}
+							std::map<Key, ClientWorkerInterface> interfaces;
+							state std::vector<std::pair<Key, Future<ErrorOr<Void>>>> all_profiler_responses;
+							for (const auto& pair : kvs) {
+								interfaces.emplace(pair.key, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
+							}
+							if (tokens.size() == 6 && tokencmp(tokens[5], "all")) {
+								for (const auto& pair : interfaces) {
+									ProfilerRequest profileRequest;
+									profileRequest.type = ProfilerRequest::Type::FLOW;
+									profileRequest.duration = duration;
+									profileRequest.outputFile = tokens[4];
+									all_profiler_responses.push_back(std::make_pair(pair.first, pair.second.profiler.tryGetReply(profileRequest)));
+								}
+							} else {
+								for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
+									auto element = interfaces.find(tokens[tokenidx]);
+									if (element == interfaces.end()) {
+										printf("ERROR: process '%s' not recognized.\n", printable(tokens[tokenidx]).c_str());
+										is_error = true;
+									}
+								}
+								if (!is_error) {
+									for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
+										ProfilerRequest profileRequest;
+										profileRequest.type = ProfilerRequest::Type::FLOW;
+										profileRequest.duration = duration;
+										profileRequest.outputFile = tokens[4];
+										all_profiler_responses.push_back(std::make_pair(tokens[tokenidx], interfaces[tokens[tokenidx]].profiler.tryGetReply(profileRequest)));
+									}
+								}
+							}
+							if (!is_error) {
+								for (const auto& p : all_profiler_responses) {
+									ErrorOr<Void> _ = wait(p.second);
+								}
+								for (const auto& p : all_profiler_responses) {
+									const ErrorOr<Void>& err = p.second.get();
+									if (err.isError()) {
+										printf("ERROR: %s: %s: %s\n", printable(p.first).c_str(), err.getError().name(), err.getError().what());
+									}
+								}
+							}
+							continue;
+						}
 					}
 					printf("ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
 					is_error = true;

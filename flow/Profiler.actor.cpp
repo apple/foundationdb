@@ -123,10 +123,15 @@ struct Profiler {
 	static Profiler* active_profiler;
 	BinaryWriter environmentInfoWriter;
 	INetwork* network;
+	timer_t periodic_timer;
 
 	Profiler(int period, std::string const& outfn, INetwork* network) : environmentInfoWriter(Unversioned()), signalClosure(signal_handler_for_closure, this), network(network) {
-		active_profiler = this;
 		actor = profile(this, period, outfn);
+	}
+
+	~Profiler() {
+		enableSignal(false);
+		timer_delete(periodic_timer);
 	}
 
 	void signal_handler() {  // async signal safe!
@@ -212,13 +217,12 @@ struct Profiler {
 			tv.it_value.tv_nsec = g_nondeterministic_random->randomInt(period_ns/2,period_ns+1);
 
 			sigevent sev;
-			timer_t timer;
 			sev.sigev_notify = SIGEV_THREAD_ID;
 			sev.sigev_signo = SIGPROF;
 			sev.sigev_value.sival_ptr = &(self->signalClosure);
 			sev._sigev_un._tid = gettid();
-			timer_create( CLOCK_THREAD_CPUTIME_ID, &sev, &timer );
-			timer_settime( timer, 0, &tv, NULL );
+			timer_create( CLOCK_THREAD_CPUTIME_ID, &sev, &self->periodic_timer );
+			timer_settime( self->periodic_timer, 0, &tv, NULL );
 		}
 
 		// Open and truncate output file
@@ -241,7 +245,6 @@ struct Profiler {
 			otherBuffer->clear();
 		}
 	}
-
 };
 
 Profiler* Profiler::active_profiler = 0;
@@ -252,19 +255,39 @@ std::string findAndReplace( std::string const& fn, std::string const& symbol, st
 	return fn.substr(0,i) + value + fn.substr(i+symbol.size());
 }
 
-void startProfiling(INetwork* network) {
-	const char* period = getenv("FLOW_PROFILER_PERIOD");
-	const char* outfn = getenv("FLOW_PROFILER_OUTPUT");
+void startProfiling(INetwork* network, Optional<int> maybePeriod /*= {}*/, Optional<StringRef> maybeOutputFile /*= {}*/) {
+	int period;
+	if (maybePeriod.present()) {
+		period = maybePeriod.get();
+	} else {
+		const char* periodEnv = getenv("FLOW_PROFILER_PERIOD");
+		period = (periodEnv ? atoi(periodEnv) : 2000);
+	}
+	std::string outputFile;
+	if (maybeOutputFile.present()) {
+		outputFile = (const char*)maybeOutputFile.get().begin();
+	} else {
+		const char* outfn = getenv("FLOW_PROFILER_OUTPUT");
+		outputFile = (outfn ? outfn : "profile.bin");
+	}
+	outputFile = findAndReplace(findAndReplace(findAndReplace(outputFile, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")), "%PID%", format("%d", getpid())), "%TID%", format("%llx", (long long)gettid()));
 
-	if (!Profiler::active_profiler && (period || outfn))
-		new Profiler(
-			period ? atoi(period) : 2000,
-			outfn ? findAndReplace(findAndReplace(findAndReplace(outfn, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")), "%PID%", format("%d", getpid())), "%TID%", format("%llx", (long long)gettid())) : "profile.bin",
-			network );
+	// HEY REVIEWER:  Singlethreadedness of flow means I don't need to worry about doing explicitly atomic handling of `active_profiler`, right?
+	if (!Profiler::active_profiler)
+		Profiler::active_profiler = new Profiler( period, outputFile, network );
+}
+
+void stopProfiling() {
+	if (Profiler::active_profiler) {
+		Profiler *p = Profiler::active_profiler;
+		Profiler::active_profiler = nullptr;
+		delete p;
+	}
 }
 
 #else
 
-void startProfiling(INetwork* network) {}
+void startProfiling(INetwork* network, Optional<int> period, Optional<StringRef> outputFile) {}
+void stopProfiling() {}
 
 #endif

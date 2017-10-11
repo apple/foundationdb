@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|X64">
@@ -18,6 +18,8 @@
     <ClCompile Include="Error.cpp" />
     <ClCompile Include="FastAlloc.cpp" />
     <ClCompile Include="FaultInjection.cpp" />
+    <ClInclude Include="Profiler.h" />
+    <ActorCompiler Include="Profiler.actor.cpp" />
     <ActorCompiler Include="Net2.actor.cpp" />
     <ClCompile Include="IThreadPool.cpp" />
     <ClCompile Include="network.cpp" />
@@ -28,7 +30,6 @@
     <ClCompile Include="Knobs.cpp" />
     <ClCompile Include="Net2Packet.cpp" />
     <ActorCompiler Include="Stats.actor.cpp" />
-    <ActorCompiler Include="Profiler.actor.cpp" />
     <ClCompile Include="SystemMonitor.cpp" />
     <ClCompile Include="TDMetric.cpp" />
     <ClCompile Include="ThreadHelper.cpp" />

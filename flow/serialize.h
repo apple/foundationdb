@@ -28,6 +28,10 @@
 #include "Arena.h"
 #include <algorithm>
 
+// HEY REVIEWER:  Once upon a time (git sha1 c435dcb4), we supported binary serialization of crazy things (StringRef, VectorRef, etc.).
+// Now, the only things that we additionally define as BINARY_SERIALIZABLE is Endpoint.
+// Do you have any objections to replacing is_binary_serializable<> with std::is_pod<>, which would allow anything that has a
+// copy constructor of memcpy to be binary serializable?
 template <class T>
 struct is_binary_serializable { enum { value = 0 }; };
 
@@ -46,6 +50,7 @@ BINARY_SERIALIZABLE( double );
 // Makes a type typecheck as deserializable but throw not_implemented if you try.
 //#define NOT_SERIALIZABLE( T ) template <class Ar> void load(Ar& ar, T&) { ASSERT(false); } template <class Ar> void save(Ar& ar, T const&) { ASSERT(false); }
 
+// HEY REVIEWER:  Similarly, use std::enable_if here instead?
 template <bool B, class T = void>
 struct enable_if_c {
   typedef T type;

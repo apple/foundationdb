@@ -36,6 +36,8 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/MonitorLeader.h"
+#include "fdbclient/ClientWorkerInterface.h"
+#include "flow/Profiler.h"
 
 #ifdef __linux__
 #ifdef USE_GPERFTOOLS
@@ -282,22 +284,53 @@ void registerThreadForProfiling() {
 
 //Starts or stops the CPU profiler
 void updateCpuProfiler(ProfilerRequest req) {
-#if defined(__linux__) && defined(USE_GPERFTOOLS)
-#ifndef VALGRIND
-	if(req.enabled) {
-		char *workingDir = get_current_dir_name();
-		const char *path = (std::string(workingDir) + "/" + req.outputFile.toString()).c_str();
-		ProfilerOptions *options = new ProfilerOptions();
-		options->filter_in_thread = &filter_in_thread;
-		options->filter_in_thread_arg = NULL;
-		ProfilerStartWithOptions(path, options);
-		free(workingDir);
-	}
-	else {
-		ProfilerStop();
-	}
+	switch (req.type) {
+	case ProfilerRequest::Type::GPROF:
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+		switch (req.action) {
+		case ProfilerRequest::Action::ENABLE: {
+			char *workingDir = get_current_dir_name();
+			// TODO: escape outputFile to prevent it being e.g. "../../../../etc/pam.conf"
+			const char *path = (std::string(workingDir) + "/" + req.outputFile.toString()).c_str();
+			ProfilerOptions *options = new ProfilerOptions();
+			options->filter_in_thread = &filter_in_thread;
+			options->filter_in_thread_arg = NULL;
+			ProfilerStartWithOptions(path, options);
+			free(workingDir);
+			break;
+		}
+		case ProfilerRequest::Action::DISABLE:
+			ProfilerStop();
+			break;
+		case ProfilerRequest::Action::RUN:
+			ASSERT(false);  // User should have called runProfiler.
+			break;
+		}
 #endif
-#endif
+		break;
+	case ProfilerRequest::Type::FLOW:
+		switch (req.action) {
+		case ProfilerRequest::Action::ENABLE:
+			startProfiling(g_network, {}, req.outputFile);
+			break;
+		case ProfilerRequest::Action::DISABLE:
+			stopProfiling();
+			break;
+		case ProfilerRequest::Action::RUN:
+			ASSERT(false);  // User should have called runProfiler.
+			break;
+		}
+		break;
+	}
+}
+
+ACTOR Future<Void> runProfiler(ProfilerRequest req) {
+	req.action = ProfilerRequest::Action::ENABLE;
+	updateCpuProfiler(req);
+	Void _ = wait(delay(req.duration));
+	req.action = ProfilerRequest::Action::DISABLE;
+	updateCpuProfiler(req);
+	return Void();
 }
 
 ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit ) {
@@ -534,7 +567,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	{
 		auto recruited = interf;  //ghetto! don't we all love a good #define
 		DUMPTOKEN(recruited.clientInterface.reboot);
-		DUMPTOKEN(recruited.clientInterface.cpuProfilerRequest);
+		DUMPTOKEN(recruited.clientInterface.profiler);
 		DUMPTOKEN(recruited.tLog);
 		DUMPTOKEN(recruited.master);
 		DUMPTOKEN(recruited.masterProxy);
@@ -646,8 +679,8 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					flushAndExit(0);
 				}
 			}
-			when( ProfilerRequest req = waitNext(interf.clientInterface.cpuProfilerRequest.getFuture()) ) {
-				updateCpuProfiler(req);
+			when( ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture()) ) {
+				uncancellable(runProfiler(req));
 				req.reply.send(Void());
 			}
 			when( RecruitMasterRequest req = waitNext(interf.master.getFuture()) ) {

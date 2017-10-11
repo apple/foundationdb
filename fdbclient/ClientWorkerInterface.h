@@ -31,7 +31,7 @@
 // A ClientWorkerInterface is embedded as the first element of a WorkerInterface.
 struct ClientWorkerInterface {
 	RequestStream< struct RebootRequest > reboot;
-	RequestStream< struct ProfilerRequest > cpuProfilerRequest;
+	RequestStream< struct ProfilerRequest > profiler;
 
 	bool operator == (ClientWorkerInterface const& r) const { return id() == r.id(); }
 	bool operator != (ClientWorkerInterface const& r) const { return id() != r.id(); }
@@ -40,7 +40,7 @@ struct ClientWorkerInterface {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & reboot;
+		ar & reboot & profiler;
 	}
 };
 
@@ -48,7 +48,7 @@ struct RebootRequest {
 	bool deleteData;
 	bool checkData;
 
-	RebootRequest(bool deleteData = false, bool checkData = false) : deleteData(deleteData), checkData(checkData) {}
+	explicit RebootRequest(bool deleteData = false, bool checkData = false) : deleteData(deleteData), checkData(checkData) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -59,13 +59,30 @@ struct RebootRequest {
 struct ProfilerRequest {
 	ReplyPromise<Void> reply;
 
-	bool enabled;
+	enum class Type : std::int8_t {
+		GPROF = 1,
+		FLOW = 2
+	};
+
+	enum class Action : std::int8_t {
+		DISABLE = 0,
+		ENABLE = 1,
+		RUN = 2
+	};
+
+	Type type;
+	Action action;
+	int duration;
 	Standalone<StringRef> outputFile;
 
 	template<class Ar>
 	void serialize( Ar& ar ) {
-		ar & reply & enabled & outputFile;
+		ar & reply & type & action & duration & outputFile;
 	}
 };
+
+// As strongly typed enums are by definition not implicitly convertable to int, we need to inform the serializaiton code that they're still POD types.
+BINARY_SERIALIZABLE( ProfilerRequest::Type );
+BINARY_SERIALIZABLE( ProfilerRequest::Action );
 
 #endif
