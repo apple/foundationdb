@@ -376,7 +376,7 @@ class AsyncDirectoryExtension {
 					return inst.tcx.run(new Function<Transaction, Void>() {
 						@Override
 						public Void apply(Transaction tr) {
-						    tr.set(Tuple.from(dirIndex).pack((byte[])prefix), subspace().getKey());
+							tr.set(Tuple.from(dirIndex).pack((byte[])prefix), subspace().getKey());
 							return null;
 						}
 					});
