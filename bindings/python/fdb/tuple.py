@@ -164,7 +164,7 @@ class Versionstamp(object):
         return "fdb.tuple.Versionstamp(" + repr(self.tr_version) + ", " + repr(self.user_version) + ")"
 
     def __str__(self):
-        return "Versionstamp(" + str(self.tr_version) + ", " + str(self.user_version) + ")"
+        return "Versionstamp(" + repr(self.tr_version) + ", " + str(self.user_version) + ")"
 
     def to_bytes(self):
         return struct.pack(self._STRUCT_FORMAT_STRING,

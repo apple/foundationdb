@@ -39,6 +39,9 @@ class Subspace (object):
     def pack(self, t=tuple()):
         return fdb.tuple.pack(t, prefix=self.rawPrefix)
 
+    def pack_with_versionstamp(self, t=tuple()):
+        return fdb.tuple.pack_with_versionstamp(t, prefix=self.rawPrefix)
+
     def unpack(self, key):
         if not self.contains(key):
             raise ValueError('Cannot unpack key that is not in subspace.')
