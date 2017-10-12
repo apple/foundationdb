@@ -180,6 +180,8 @@ ERROR( restore_destination_not_empty, 2370, "Attempted to restore into a non-emp
 ERROR( restore_duplicate_uid, 2371, "Attempted to restore using a UID that had been used for an aborted restore")
 ERROR( task_invalid_version, 2381, "Invalid task version")
 
+ERROR( key_not_found, 2400, "Expected key is missing")
+
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
 ERROR( internal_error, 4100, "An internal error occurred" )
