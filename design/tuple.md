@@ -9,13 +9,13 @@ Status: Deprecated means that a previous layer used this type, but issues with t
 
 ### **Null Value**
 
-Typecode: 0x00  
+Typecode: `0x00`
 Length: 0 bytes  
 Status: Standard
 
 ### **Byte String**
 
-Typecode: 0x01  
+Typecode: `0x01`
 Length: Variable (terminated by` [\x00]![\xff]`)  
 Encoding: `b'\x01' + value.replace(b'\x00', b'\x00\xFF') + b'\x00'`  
 Test case: `pack(“foo\x00bar”) == b'\x01foo\x00\xffbar\x00'`  
@@ -25,25 +25,25 @@ In other words, byte strings are null terminated with null values occurring in t
 
 ### **Unicode String**
 
-Typecode: 0x02  
-Length: Variable (terminated by [\x00]![\xff])  
+Typecode: `0x02`
+Length: Variable (terminated by` [\x00]![\xff]`)  
 Encoding: `b'\x02' + value.encode('utf-8').replace(b'\x00', b'\x00\xFF') + b'\x00'`  
 Test case: `pack( u"F\u00d4O\u0000bar" ) == b'\x02F\xc3\x94O\x00\xffbar\x00'`  
 Status: Standard
 
 This is the same way that byte strings are encoded, but first, the unicode string is encoded in UTF-8.
 
-### **(DEBRECATED) Nested Tuple**
+### **(DEPRECATED) Nested Tuple**
 
-Typecodes: 0x03-0x04  
-Length: Variable (terminated by 0x04 type code)  
+Typecodes: `0x03` - `0x04`
+Length: Variable (terminated by `0x04` type code)  
 Status: Deprecated  
 
 This encoding was used by a few layers. However, it had ordering problems when one tuple was a prefix of another and the type of the first element in the longer tuple was either null or a byte string. For an example, consider the empty tuple and the tuple containing only null. In the old scheme, the empty tuple would be encoded as `\x03\x04` while the tuple containing only null would be encoded as `\x03\x00\x04`, so the second tuple would sort first based on their bytes, which is incorrect semantically.
 
 ### **Nested Tuple**
 
-Typecodes: 0x05  
+Typecodes: `0x05`
 Length: Variable (terminated by `[\x00]![\xff]` at beginning of nested element)  
 Encoding: `b'\x05' + ''.join(map(lambda x: b'\x00\xff' if x is None else pack(x), value)) + b'\x00'`  
 Test case: `pack( (“foo\x00bar”, None, ()) ) == b'\x05\x01foo\x00\xffbar\x00\x00\xff\x05\x00\x00'`  
@@ -53,23 +53,23 @@ The list is ended with a 0x00 byte. Nulls within the tuple are encoded as `\x00\
 
 ### **Negative arbitrary-precision Integer**
 
-Typecodes: 0x0a, 0x0b  
+Typecodes: `0x0a`, `0x0b`
 Encoding: Not defined yet  
-Status: Reserved; 0x0b used in Python and Java
+Status: Reserved; `0x0b` used in Python and Java
 
-These typecodes are reserved for encoding integers larger than 8 bytes. Presumably the type code would be followed by some encoding of the length, followed by the big endian one’s complement number. Reserving two typecodes for each of positive and negative numbers is probably overkill, but until there’s a design in place we might as well not use them. In the Python and Java implementations, 0x0b stores negative numbers which are expressed with between 9 and 255 bytes. The first byte following the type code (0x0b) is a single byte expressing the number of bytes in the integer (with its bits flipped to preserve order), followed by that number of bytes representing the number in big endian order in one's complement.
+These typecodes are reserved for encoding integers larger than 8 bytes. Presumably the type code would be followed by some encoding of the length, followed by the big endian one’s complement number. Reserving two typecodes for each of positive and negative numbers is probably overkill, but until there’s a design in place we might as well not use them. In the Python and Java implementations, `0x0b` stores negative numbers which are expressed with between 9 and 255 bytes. The first byte following the type code (`0x0b`) is a single byte expressing the number of bytes in the integer (with its bits flipped to preserve order), followed by that number of bytes representing the number in big endian order in one's complement.
 
 ### **Integer**
 
-Typecodes: 0x0c - 0x1c  
-&nbsp;0x0c is an 8 byte negative number  
-&nbsp;0x13 is a 1 byte negative number  
-&nbsp;0x14 is a zero  
-&nbsp;0x15 is a 1 byte positive number  
-&nbsp;0x1c is an 8 byte positive number  
+Typecodes: `0x0c` - `0x1c`
+&nbsp;`0x0c` is an 8 byte negative number  
+&nbsp;`0x13` is a 1 byte negative number  
+&nbsp;`0x14` is a zero  
+&nbsp;`0x15` is a 1 byte positive number  
+&nbsp;`0x1c` is an 8 byte positive number  
 Length: Depends on typecode (0-8 bytes)  
 Encoding: positive numbers are big endian  
- negative numbers are big endian one’s complement (so -1 is 0x13 0xfe)  
+ negative numbers are big endian one’s complement (so -1 is `0x13` `0xfe`)  
 Test case: `pack( -5551212 ) == b'\x11\xabK\x93'`  
 Status: Standard
 
@@ -77,18 +77,18 @@ There is some variation in the ability of language bindings to encode and decode
 
 ### **Positive arbitrary-precision Integer**
 
-Typecodes: 0x1d, 0x1e  
+Typecodes: `0x1d`, `0x1e`
 Encoding: Not defined yet  
 Status: Reserved; 0x1d used in Python and Java
 
-These typecodes are reserved for encoding integers larger than 8 bytes. Presumably the type code would be followed by some encoding of the length, followed by the big endian one’s complement number. Reserving two typecodes for each of positive and negative numbers is probably overkill, but until there’s a design in place we might as well not use them. In the Python and Java implementations, 0x1d stores positive numbers which are expressed with between 9 and 255 bytes. The first byte following the type code (0x1d) is a single byte expressing the number of bytes in the integer, followed by that number of bytes representing the number in big endian order.
+These typecodes are reserved for encoding integers larger than 8 bytes. Presumably the type code would be followed by some encoding of the length, followed by the big endian one’s complement number. Reserving two typecodes for each of positive and negative numbers is probably overkill, but until there’s a design in place we might as well not use them. In the Python and Java implementations, `0x1d` stores positive numbers which are expressed with between 9 and 255 bytes. The first byte following the type code (`0x1d`) is a single byte expressing the number of bytes in the integer, followed by that number of bytes representing the number in big endian order.
 
 ### **IEEE Binary Floating Point**
 
 Typecodes:   
-&nbsp;0x20 - float (32 bits)  
-&nbsp;0x21 - double (64 bits)  
-&nbsp;0x22 - long double (80 bits)  
+&nbsp;`0x20` - float (32 bits)  
+&nbsp;`0x21` - double (64 bits)  
+&nbsp;`0x22` - long double (80 bits)  
 Length: 4 - 10 bytes  
 Test case: `pack( -42f ) == b'=\xd7\xff\xff'`  
 Encoding: Big-endian IEEE binary representation, followed by the following transformation:  
@@ -114,7 +114,7 @@ This should be equivalent to the standard IEEE total ordering.
 
 ### **Arbitrary-precision Decimal**
 
-Typecodes: 0x23, 0x24  
+Typecodes: `0x23`, `0x24`
 Length: Arbitrary  
 Encoding: Scale followed by arbitrary precision integer  
 Status: Reserved
@@ -123,19 +123,19 @@ This encoding format has been used by layers. Note that this encoding makes almo
 
 ### **(DEPRECATED) True Value**
 
-Typecode: 0x25  
+Typecode: `0x25`
 Length: 0 bytes  
 Status: Deprecated
 
 ### **False Value**
 
-Typecode: 0x26  
+Typecode: `0x26`
 Length: 0 bytes  
 Status: Standard
 
 ### **True Value**
 
-Typecode: 0x27  
+Typecode: `0x27`
 Length: 0 bytes  
 Status: Standard
 
@@ -143,7 +143,7 @@ Note that false will sort before true with the given encoding.
 
 ### **RFC 4122 UUID**
 
-Typecode: 0x30  
+Typecode: `0x30`
 Length: 16 bytes  
 Encoding: Network byte order as defined in the rfc: [_http://www.ietf.org/rfc/rfc4122.txt_](http://www.ietf.org/rfc/rfc4122.txt)  
 Status: Standard
@@ -152,7 +152,7 @@ This is equivalent to the unsigned byte ordering of the UUID bytes in big-endian
 
 ### **64 bit identifier**
 
-Typecode: 0x31  
+Typecode: `0x31`
 Length: 8 bytes  
 Encoding: Big endian unsigned 8-byte integer (typically random or perhaps semi-sequential)  
 Status: Reserved
@@ -161,14 +161,14 @@ There’s definitely some question of whether this deserves to be separated from
 
 ### **80 Bit versionstamp**
 
-Typecode: 0x32  
+Typecode: `0x32`
 Length: 10 bytes  
 Encoding: Big endian 10-byte integer. First/high 8 bytes are a database version, next two are batch version.  
 Status: Reserved
 
 ### **96 Bit Versionstamp**
 
-Typecode: 0x33  
+Typecode: `0x33`
 Length: 12 bytes  
 Encoding: Big endian 12-byte integer. First/high 8 bytes are a database version, next two are batch version, next two are ordering within transaction.  
 Status: Reserved
@@ -177,7 +177,7 @@ The two versionstamp typecodes are reserved for future work adding compatibility
 
 ### **User type codes**
 
-Typecode: 0x40 - 0x4f  
+Typecode: `0x40` - `0x4f`
 Length: Variable (user defined)  
 Encoding: User defined  
 Status: Reserved
@@ -188,7 +188,7 @@ The only way in which future official, otherwise backward-compatible versions of
 
 ### **Escape Character**
 
-Typecode: 0xff  
+Typecode: `0xff`
 Length: N/A  
 Encoding: N/A  
 Status: Reserved

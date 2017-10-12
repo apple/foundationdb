@@ -106,7 +106,7 @@ public class TesterArgs {
                     for (j = i + 1; j < args.length && args[j].charAt(0) != '-'; j++) {
                         testsToRun.add(args[j]);
                     }
-                    i = j;
+                    i = j - 1;
                 } else {
                     System.out.println("No tests specified with argument " + arg + "\n");
                     printUsage();

@@ -52,7 +52,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	//FlowTransport
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
-	init( CONNECTION_ID_TIMEOUT,                             600.0 );
+	init( CONNECTION_ID_TIMEOUT,                             600.0 ); if( randomize && BUGGIFY ) CONNECTION_ID_TIMEOUT = 60.0;
 	init( CONNECTION_CLEANUP_DELAY,                          100.0 );
 	init( INITIAL_RECONNECTION_TIME,                          0.05 );
 	init( MAX_RECONNECTION_TIME,                               0.5 );

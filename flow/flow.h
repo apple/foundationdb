@@ -66,6 +66,7 @@ bool validationIsEnabled();
 #define BUGGIFY BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES)
 #define EXPENSIVE_VALIDATION (validationIsEnabled() && g_random->random01() < P_EXPENSIVE_VALIDATION)
 
+extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
 extern std::string format(const char* form, ...);
 extern Standalone<StringRef> strinc(StringRef const& str);
 extern StringRef strinc(StringRef const& str, Arena& arena);

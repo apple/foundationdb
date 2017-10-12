@@ -20,6 +20,7 @@
 
 #include "flow/actorcompiler.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Locality.h"
 #include "ClusterRecruitmentInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
@@ -74,7 +75,7 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected ) {
+ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass ) {
 	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees( new AsyncVar<vector<Optional<LeaderInfo>>>() );
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
@@ -90,7 +91,10 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 	while (!iAmLeader) {
 		state Future<Void> badCandidateTimeout;
 
-		myInfo.changeID = g_random->randomUniqueID();
+		UID randomID = g_random->randomUniqueID();
+		int64_t mask = 15ll << 60;
+		int64_t modifiedFirstPart = (randomID.first() & ~mask) | ((int64_t)asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController) << 60);
+		myInfo.changeID = UID(modifiedFirstPart, randomID.second());
 
 		vector<Future<Void>> cand;
 		for(int i=0; i<coordinators.leaderElectionServers.size(); i++)

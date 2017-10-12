@@ -152,7 +152,11 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		// The items are comma separated.
 		std::string host;
 		std::vector<NetworkAddress> addrs;
-		uint16_t portNum = (uint16_t)strtoul(port.toString().c_str(), NULL, 10);
+		char *end;
+		uint16_t portNum = (uint16_t)strtoul(port.toString().c_str(), &end, 10);
+		if(*end) {
+			throw format("%s is not a valid port", port.toString().c_str());
+		}
 
 		tokenizer h(hosts);
 		while(1) {
@@ -175,8 +179,9 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 			if(name.size() == 0)
 				break;
 			StringRef value = t.tok("&");
-			int ivalue = strtol(value.toString().c_str(), NULL, 10);
-			if(ivalue == 0)
+			char *valueEnd;
+			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
+			if(*valueEnd || ivalue == 0)
 				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
 			if(!knobs.set(name, ivalue))
 				throw format("%s is not a valid parameter name", name.toString().c_str());
@@ -309,10 +314,12 @@ Future<int64_t> BlobStoreEndpoint::objectSize(std::string const &bucket, std::st
 	return objectSize_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-ACTOR Future<Reference<IConnection>> connect_impl(Reference<BlobStoreEndpoint> bstore) {
-	while(!bstore->connectionPool.empty()) {
-		BlobStoreEndpoint::ConnPoolEntry c = bstore->connectionPool.front();
-		bstore->connectionPool.pop_front();
+Future<Reference<IConnection>> BlobStoreEndpoint::connect( NetworkAddress address ) {
+	auto &pool = connectionPool[address];
+
+	while(!pool.empty()) {
+		BlobStoreEndpoint::ConnPoolEntry c = pool.front();
+		pool.pop_front();
 
 		// If the connection was placed in the pool less than 10 seconds ago, reuse it.
 		if(c.second > now() - 10) {
@@ -321,25 +328,8 @@ ACTOR Future<Reference<IConnection>> connect_impl(Reference<BlobStoreEndpoint> b
 		}
 	}
 
-	state Reference<IConnection> conn;
-	state int tries = bstore->knobs.connect_tries;
-	while(!conn && tries-- > 0) {
-		try {
-			if(bstore->addresses.size() == 0)
-				throw connection_string_invalid();
-			Reference<IConnection> c = wait(INetworkConnections::net()->connect(bstore->addresses[g_random->randomInt(0, bstore->addresses.size())]));
-			conn = c;
-		} catch (Error &e) {
-			//TraceEvent(SevWarn, "BlobStoreConnectError").detail("Host", bstore->host).detail("Port", bstore->port).error(e);
-			throw;
-		}
-	}
-
-	return conn;
-}
-
-Future<Reference<IConnection>> BlobStoreEndpoint::connect() {
-	return connect_impl(Reference<BlobStoreEndpoint>::addRef(this));
+	TraceEvent(SevInfo, "BlobStoreHTTPConnect").detail("RemoteEndpoint", address).suppressFor(5.0, true);
+	return INetworkConnections::net()->connect(address);
 }
 
 // Do a request, get a Response.
@@ -353,86 +343,88 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		headers["Content-Length"] = format("%d", contentLen);
 
 	Void _ = wait(bstore->concurrentRequests.take(1));
+	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
-	try {
-		state int tries = bstore->knobs.request_tries;
-		state double retryDelay = 2.0;
-		loop {
-			try {
-				// Start connecting
-				Future<Reference<IConnection>> fconn = bstore->connect();
+	state int tries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
+	state double retryDelay = 2.0;
+	state NetworkAddress address;
 
-				// Finish/update the request headers (which includes Date header)
-				bstore->setAuthHeaders(verb, resource, headers);
+	loop {
+		try {
+			// Pick an adress
+			address = bstore->addresses[g_random->randomInt(0, bstore->addresses.size())];
+			state FlowLock::Releaser perAddressReleaser;
+			Void _ = wait(bstore->concurrentRequestsPerAddress[address]->take(1));
+			perAddressReleaser = FlowLock::Releaser(*bstore->concurrentRequestsPerAddress[address], 1);
 
-				// Make a shallow copy of the queue by calling addref() on each buffer in the chain and then prepending that chain to contentCopy
-				if(pContent != nullptr) {
-					contentCopy.discardAll();
-					PacketBuffer *pFirst = pContent->getUnsent();
-					PacketBuffer *pLast = nullptr;
-					for(PacketBuffer *p = pFirst; p != nullptr; p = p->nextPacketBuffer()) {
-						p->addref();
-						// Also reset the sent count on each buffer
-						p->bytes_sent = 0;
-						pLast = p;
-					}
-					contentCopy.prependWriteBuffer(pFirst, pLast);
+			// Start connecting
+			Future<Reference<IConnection>> fconn = bstore->connect(address);
+
+			// Finish/update the request headers (which includes Date header)
+			bstore->setAuthHeaders(verb, resource, headers);
+
+			// Make a shallow copy of the queue by calling addref() on each buffer in the chain and then prepending that chain to contentCopy
+			if(pContent != nullptr) {
+				contentCopy.discardAll();
+				PacketBuffer *pFirst = pContent->getUnsent();
+				PacketBuffer *pLast = nullptr;
+				for(PacketBuffer *p = pFirst; p != nullptr; p = p->nextPacketBuffer()) {
+					p->addref();
+					// Also reset the sent count on each buffer
+					p->bytes_sent = 0;
+					pLast = p;
 				}
-
-				// Finish connecting, do request
-				state Reference<IConnection> conn = wait(timeoutError(fconn, bstore->knobs.connect_timeout));
-				Void _ = wait(bstore->requestRate->getAllowance(1));
-				state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
-
-				std::string connectionHeader;
-				HTTP::Headers::iterator i = r->headers.find("Connection");
-				if(i != r->headers.end())
-					connectionHeader = i->second;
-
-				// If the response parsed successfully (which is why we reached this point) and the connection can be reused, put the connection in the connection_pool
-				if(connectionHeader != "close")
-					bstore->connectionPool.push_back(BlobStoreEndpoint::ConnPoolEntry(conn, now()));
-
-				// Handle retry-after response code
-				if(r->code == 429) {
-					bstore->s_stats.requests_failed++;
-					conn = Reference<IConnection>();
-					double d = 60;
-					if(r->headers.count("Retry-After"))
-						d = atof(r->headers["Retry-After"].c_str());
-					Void _ = wait(delay(d));
-					// Just continue, don't throw an error, don't decrement tries
-				}
-				else if(r->code == 406) {
-					// Blob returns this when the account doesn't exist
-					throw http_not_accepted();
-				}
-				else if(r->code == 500) {
-					// For error 500 just treat it like connection_failed
-					throw connection_failed();
-				}
-				else
-					break;
-			} catch(Error &e) {
-				// If the error is connection failed and a retry is allowed then ignore the error
-				if((e.code() == error_code_connection_failed || e.code() == error_code_timed_out) && --tries > 0) {
-					bstore->s_stats.requests_failed++;
-					//TraceEvent(SevWarn, "BlobStoreHTTPConnectionFailed").detail("Verb", verb).detail("Resource", resource).detail("Host", bstore->host).detail("Port", bstore->port);
-					//printf("Retrying (%d left) %s %s\n", tries, verb.c_str(), resource.c_str());
-					Void _ = wait(delay(retryDelay));
-					retryDelay *= 2;
-				}
-				else
-					throw;
+				contentCopy.prependWriteBuffer(pFirst, pLast);
 			}
-		}
 
-	} catch(Error &e) {
-		bstore->concurrentRequests.release(1);
-		throw;
+			// Finish connecting, do request
+			state Reference<IConnection> conn = wait(timeoutError(fconn, bstore->knobs.connect_timeout));
+			Void _ = wait(bstore->requestRate->getAllowance(1));
+			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+
+			std::string connectionHeader;
+			HTTP::Headers::iterator i = r->headers.find("Connection");
+			if(i != r->headers.end())
+				connectionHeader = i->second;
+
+			// If the response parsed successfully (which is why we reached this point) and the connection can be reused, put the connection in the connection_pool
+			if(connectionHeader != "close")
+				bstore->connectionPool[address].push_back(BlobStoreEndpoint::ConnPoolEntry(conn, now()));
+
+			// Handle retry-after response code
+			if(r->code == 429) {
+				bstore->s_stats.requests_failed++;
+				conn = Reference<IConnection>();
+				double d = 60;
+				if(r->headers.count("Retry-After"))
+					d = atof(r->headers["Retry-After"].c_str());
+				Void _ = wait(delay(d));
+				// Just continue, don't throw an error, don't decrement tries
+			}
+			else if(r->code == 406) {
+				// Blob returns this when the account doesn't exist
+				throw http_not_accepted();
+			}
+			else if(r->code == 500 || r->code == 503) {
+				// For these errors just treat it like connection_failed
+				throw connection_failed();
+			}
+			else
+				break;
+		} catch(Error &e) {
+			// If the error is connection failed and a retry is allowed then ignore the error
+			if((e.code() == error_code_connection_failed || e.code() == error_code_timed_out) && --tries > 0) {
+				bstore->s_stats.requests_failed++;
+				TraceEvent(SevWarn, "BlobStoreHTTPConnectionFailed").detail("RemoteEndpoint", address).detail("Verb", verb).detail("Resource", resource).suppressFor(5.0, true);
+				Void _ = wait(delay(retryDelay));
+				retryDelay *= 2;
+				retryDelay = std::min(retryDelay, 60.0);
+			}
+			else
+				throw;
+		}
 	}
 
-	bstore->concurrentRequests.release(1);
 	bstore->s_stats.requests_successful++;
 
 	return r;
@@ -600,25 +592,20 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	if(contentLen > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
 
-	try {
-		Void _ = wait(bstore->concurrentUploads.take(1));
-		std::string resource = std::string("/") + bucket + "/" + object;
-		HTTP::Headers headers;
-		// Send MD5 sum for content so blobstore can verify it
-		headers["Content-MD5"] = contentMD5;
-		state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen));
+	Void _ = wait(bstore->concurrentUploads.take(1));
+	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
-		// For uploads, Blobstore returns an MD5 sum of uploaded content so check that too.
-		auto sum = r->headers.find("Content-MD5");
-		if(sum == r->headers.end() || sum->second != contentMD5)
-			throw http_bad_response();
+	std::string resource = std::string("/") + bucket + "/" + object;
+	HTTP::Headers headers;
+	// Send MD5 sum for content so blobstore can verify it
+	headers["Content-MD5"] = contentMD5;
+	state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen));
 
-	} catch(Error &e) {
-		bstore->concurrentUploads.release(1);
-		throw;
-	}
+	// For uploads, Blobstore returns an MD5 sum of uploaded content so check that too.
+	auto sum = r->headers.find("Content-MD5");
+	if(sum == r->headers.end() || sum->second != contentMD5)
+		throw http_bad_response();
 
-	bstore->concurrentUploads.release(1);
 	if(r->code == 200)
 		return Void();
 	throw http_bad_response();
@@ -697,24 +684,20 @@ Future<std::string> BlobStoreEndpoint::beginMultiPartUpload(std::string const &b
 }
 
 ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, unsigned int partNumber, UnsentPacketQueue *pContent, int contentLen, std::string contentMD5) {
-	try {
-		Void _ = wait(bstore->concurrentUploads.take(1));
-		std::string resource = format("/%s/%s?partNumber=%d&uploadId=%s", bucket.c_str(), object.c_str(), partNumber, uploadID.c_str());
-		HTTP::Headers headers;
-		// Send MD5 sum for content so blobstore can verify it
-		headers["Content-MD5"] = contentMD5;
-		state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen));
+	Void _ = wait(bstore->concurrentUploads.take(1));
+	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
-		// For uploads, Blobstore returns an MD5 sum of uploaded content so check that too.
-		auto sum = r->headers.find("Content-MD5");
-		if(sum == r->headers.end() || sum->second != contentMD5)
-			throw http_bad_response();
-	} catch(Error &e) {
-		bstore->concurrentUploads.release(1);
-		throw;
-	}
+	std::string resource = format("/%s/%s?partNumber=%d&uploadId=%s", bucket.c_str(), object.c_str(), partNumber, uploadID.c_str());
+	HTTP::Headers headers;
+	// Send MD5 sum for content so blobstore can verify it
+	headers["Content-MD5"] = contentMD5;
+	state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen));
 
-	bstore->concurrentUploads.release(1);
+	// For uploads, Blobstore returns an MD5 sum of uploaded content so check that too.
+	auto sum = r->headers.find("Content-MD5");
+	if(sum == r->headers.end() || sum->second != contentMD5)
+		throw http_bad_response();
+
 	if(r->code != 200)
 		throw http_bad_response();
 

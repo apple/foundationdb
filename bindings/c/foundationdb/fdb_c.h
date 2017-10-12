@@ -89,6 +89,8 @@ extern "C" {
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_stop_network();
 
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter);
+
 #pragma pack(push, 4)
     typedef struct keyvalue {
         const void* key;

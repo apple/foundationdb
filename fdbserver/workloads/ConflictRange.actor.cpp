@@ -23,6 +23,7 @@
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
+#include "fdbclient/ManagementAPI.h"
 
 //For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in (sim2.actor.cpp)
 
@@ -92,6 +93,10 @@ struct ConflictRangeWorkload : TestWorkload {
 		state std::set<int> clearedSet;
 		state int clearedBegin;
 		state int clearedEnd;
+
+		if(g_network->isSimulated()) {
+			Void _ = wait( timeKeeperSetDisable(cx) );
+		}
 
 		loop {
 			randomSets = !randomSets;

@@ -42,6 +42,8 @@ struct MachineAttritionWorkload : TestWorkload {
 	bool killDc;
 	bool killSelf;
 	bool replacement;
+	bool waitForVersion;
+	bool allowFaultInjection;
 
 	// This is set in setup from the list of workers when the cluster is started
 	std::vector<LocalityData> machines;
@@ -57,6 +59,8 @@ struct MachineAttritionWorkload : TestWorkload {
 		killDc = getOption( options, LiteralStringRef("killDc"), g_random->random01() < 0.25 );
 		killSelf = getOption( options, LiteralStringRef("killSelf"), false );
 		replacement = getOption( options, LiteralStringRef("replacement"), reboot && g_random->random01() < 0.5 );
+		waitForVersion = getOption( options, LiteralStringRef("waitForVersion"), false );
+		allowFaultInjection = getOption( options, LiteralStringRef("allowFaultInjection"), true );
 	}
 
 	static vector<ISimulator::ProcessInfo*> getServers() {
@@ -93,7 +97,7 @@ struct MachineAttritionWorkload : TestWorkload {
 				.detail("MeanDelay", meanDelay);
 
 			return timeout(
-				reportErrorsExcept( machineKillWorker( this, meanDelay ), "machineKillWorkerError", UID(), &normalAttritionErrors()),
+				reportErrorsExcept( machineKillWorker( this, meanDelay, cx ), "machineKillWorkerError", UID(), &normalAttritionErrors()),
 				testDuration, Void() );
 		}
 		if(killSelf)
@@ -111,7 +115,7 @@ struct MachineAttritionWorkload : TestWorkload {
 		StringRef uid;
 	};
 
-	ACTOR static Future<Void> machineKillWorker( MachineAttritionWorkload *self, double meanDelay ) {
+	ACTOR static Future<Void> machineKillWorker( MachineAttritionWorkload *self, double meanDelay, Database cx ) {
 		state int killedMachines = 0;
 		state double delayBeforeKill = g_random->random01() * meanDelay;
 		state std::set<UID> killedUIDs;
@@ -151,6 +155,20 @@ struct MachineAttritionWorkload : TestWorkload {
 				Void _ = wait( delay( delayBeforeKill ) );
 				TraceEvent("WorkerKillAfterDelay");
 
+				if(self->waitForVersion) {
+					state Transaction tr( cx );
+					loop {
+						try {
+							tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+							Version _ = wait(tr.getReadVersion());
+							break;
+						} catch( Error &e ) {
+							Void _ = wait( tr.onError(e) );
+						}
+					}
+				}
+
 				// decide on a machine to kill
 				LocalityData targetMachine = self->machines.back();
 
@@ -173,7 +191,7 @@ struct MachineAttritionWorkload : TestWorkload {
 						TraceEvent("RebootAndDelete").detail("TargetMachine", targetMachine.toString());
 						g_simulator.killMachine( targetMachine.zoneId(), ISimulator::RebootAndDelete );
 					} else {
-						auto kt = g_random->random01() < 0.5 ? ISimulator::KillInstantly : ISimulator::InjectFaults;
+						auto kt = (g_random->random01() < 0.5 || !self->allowFaultInjection) ? ISimulator::KillInstantly : ISimulator::InjectFaults;
 						g_simulator.killMachine( targetMachine.zoneId(), kt );
 					}
 				}
