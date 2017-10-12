@@ -692,7 +692,7 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 		if (traceEventThrottlerCache.getMetric(type) >= FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT) {
 			// Throttle Msg
 			enabled = false;
-			TraceEvent(SevWarn, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
+			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
 		}
 		else {
 			traceEventThrottlerCache.addAndExpire(type, 1, FLOW_KNOBS->TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY);

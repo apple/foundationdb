@@ -22,6 +22,8 @@
 #define METRIC_SAMPLE_H
 #pragma once
 
+#include <tuple>
+
 template <class T>
 struct MetricSample {
 	IndexedSet<T, int64_t> sample;
@@ -40,29 +42,29 @@ struct MetricSample {
 
 template <class T>
 struct TransientMetricSample : MetricSample<T> {
-	Deque< std::pair<double, std::pair<T, int64_t>> > queue;
+	Deque< std::tuple<double, T, int64_t> > queue;
 
 	explicit TransientMetricSample(int64_t metricUnitsPerSample) : MetricSample<T>(metricUnitsPerSample) { }
 
 	bool roll(int64_t metric) {
-		return g_random->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
+		return g_nondeterministic_random->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
 	}
 
 	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
 	int64_t addAndExpire(const T& key, int64_t metric, double expiration) {
 		int64_t x = add(key, metric);
 		if (x)
-			queue.push_back(std::make_pair(expiration, std::make_pair(*this->sample.find(key), -x)));
+			queue.push_back(std::make_tuple(expiration, *this->sample.find(key), -x));
 		return x;
 	}
 
 	void poll() {
 		double now = ::now();
 		while (queue.size() &&
-			queue.front().first <= now)
+			std::get<0>(queue.front()) <= now)
 		{
-			const T& key = queue.front().second.first;
-			int64_t delta = queue.front().second.second;
+			const T& key = std::get<1>(queue.front());
+			int64_t delta = std::get<2>(queue.front());
 			ASSERT(delta != 0);
 
 			if (this->sample.addMetric(T(key), delta) == 0)
@@ -75,7 +77,7 @@ struct TransientMetricSample : MetricSample<T> {
 private:
 	int64_t add(const T& key, int64_t metric) {
 		if (!metric) return 0;
-		int64_t mag = metric<0 ? -metric : metric;
+		int64_t mag = std::abs(metric);
 
 		if (mag < this->metricUnitsPerSample) {
 			if (!roll(mag))
