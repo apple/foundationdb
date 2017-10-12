@@ -613,7 +613,7 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, 
 			if(replaceExisting) {
 				t->data = std::forward<T_>(data);
 				Metric delta = t->total;
-				t->total = metric;
+				t->total = std::forward<Metric_>(metric);
 				if (t->child[0]) t->total = t->total + t->child[0]->total;
 				if (t->child[1]) t->total = t->total + t->child[1]->total;
 				delta = t->total - delta;
