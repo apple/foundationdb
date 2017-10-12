@@ -132,7 +132,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			int64_t delta = queue.front().second.second;
 			ASSERT( delta != 0 );
 
-			if( sample.addMetric( Key(key), delta ) == 0 )
+			if( sample.addMetric( key, delta ) == 0 )
 				sample.erase( key );
 
 			StorageMetrics deltaM = m * delta;
@@ -155,7 +155,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			int64_t delta = queue.front().second.second;
 			ASSERT( delta != 0 );
 
-			if( sample.addMetric( Key(key), delta ) == 0 )
+			if( sample.addMetric( key, delta ) == 0 )
 				sample.erase( key );
 
 			queue.pop_front();
@@ -173,7 +173,7 @@ private:
 			metric = metric<0 ? -metricUnitsPerSample : metricUnitsPerSample;
 		}
 		
-		if( sample.addMetric( Key(key), metric ) == 0 )
+		if( sample.addMetric( key, metric ) == 0 )
 			sample.erase( key );
 
 		return metric;
