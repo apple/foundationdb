@@ -35,6 +35,7 @@
     <ClCompile Include="ThreadHelper.cpp" />
     <ClCompile Include="ThreadPrimitives.cpp" />
     <ClCompile Include="Platform.cpp" />
+    <ClCompile Include="stacktrace.amalgamation.cpp" />
     <ClCompile Include="Trace.cpp" />
     <ClCompile Include="UnitTest.cpp" />
     <ClCompile Include="version.cpp" />

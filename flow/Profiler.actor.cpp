@@ -31,6 +31,8 @@
 #include <sys/syscall.h>
 #include <link.h>
 
+#include "flow/platform.h"
+
 extern volatile int profilingEnabled;
 
 static uint64_t gettid() { return syscall(__NR_gettid); }
@@ -138,7 +140,7 @@ struct Profiler {
 		if(profilingEnabled) {
 			double t = timer();
 			output_buffer->push(*(void**)&t);
-			size_t n = backtrace(addresses, 256);
+			size_t n = platform::raw_backtrace(addresses, 256);
 			for(int i=0; i<n; i++)
 				output_buffer->push(addresses[i]);
 			output_buffer->push((void*)-1LL);
@@ -173,7 +175,7 @@ struct Profiler {
 	ACTOR static Future<Void> profile(Profiler* self, int period, std::string outfn) {
 		// According to folk wisdom, calling this once before setting up the signal handler makes
 		// it async signal safe in practice :-/
-		backtrace(self->addresses, MAX_STACK_DEPTH);
+		platform::raw_backtrace(self->addresses, MAX_STACK_DEPTH);
 
 		// Write environment information header
 		// At the moment this consists of the output of dl_iterate_phdr, the locations of
