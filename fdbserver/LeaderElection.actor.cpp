@@ -89,11 +89,10 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 
 	state Future<Void> buggifyDelay = (SERVER_KNOBS->BUGGIFY_ALL_COORDINATION || BUGGIFY) ? buggifyDelayedAsyncVar( outSerializedLeader ) : Void();
 
-	myInfo.changeID = g_random->randomUniqueID();
-
 	while (!iAmLeader) {
 		state Future<Void> badCandidateTimeout;
 
+		myInfo.changeID = g_random->randomUniqueID();
 		prevChangeID = myInfo.changeID;
 		myInfo.updateChangeID(asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController));
 

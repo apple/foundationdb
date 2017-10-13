@@ -1335,7 +1335,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		}
 
 		// Notify the worker to register again with new process class
-		if (classIter != self->id_class.end() && classIter->second != req.processClass && !req.reply.isSet()) {
+		if (newProcessClass != req.processClass && !req.reply.isSet()) {
 			req.reply.send( newProcessClass );
 		}
 	}
