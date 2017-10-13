@@ -248,13 +248,19 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	return result;
 }
 
-ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, WorkerInterface interf, ProcessClass processClass ) {
+ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, WorkerInterface interf, Reference<AsyncVar<ProcessClass>> asyncProcessClass, ProcessClass initialClass ) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	state Generation requestGeneration = 0;
+
 	loop {
-		Future<Void> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, processClass, requestGeneration++) ) ) : Never();
-		Void _ = wait( registrationReply || ccInterface->onChange() );
+		Future<ProcessClass> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, initialClass, asyncProcessClass->get(), requestGeneration++) ) ) : Never();
+		choose {
+			when ( ProcessClass newProcessClass = wait( registrationReply )) {
+				asyncProcessClass->set(newProcessClass);
+			}
+			when ( Void _ = wait( ccInterface->onChange() )) { }
+		}
 	}
 }
 
@@ -457,7 +463,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 }
 
 ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData localities,
-	ProcessClass processClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix ) {
+	Reference<AsyncVar<ProcessClass>> asyncProcessClass, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix ) {
 	state PromiseStream< ErrorInfo > errors;
 	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
@@ -620,7 +626,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		startRole( interf.id(), interf.id(), "Worker", details );
 
 		Void _ = wait(waitForAll(recoveries));
-		errorForwarders.add( registrationClient( ccInterface, interf, processClass ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncProcessClass, initialClass ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -924,7 +930,7 @@ ACTOR Future<Void> fdbd(
 		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncProcessClass), "clusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix), "workerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncProcessClass, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix), "workerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		Void _ = wait( quorum(v,1) );
