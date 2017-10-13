@@ -684,12 +684,12 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				// beneath the working directory, and we remove the ability to do any symlink or ../..
 				// tricks by resolving all paths through `abspath` first.
 				try {
-					const char* workingDir = get_current_dir_name();
-					std::string realWorkingDir = abspath(workingDir);
-					std::string realOutPath = abspath(realWorkingDir + "/" + req.outputFile.toString());
-					if (realWorkingDir.size() < realOutPath.size() &&
-					    strncmp(realWorkingDir.c_str(), realOutPath.c_str(), realWorkingDir.size()) == 0) {
-						uncancellable(runProfiler(req));
+					std::string realLogDir = abspath(SERVER_KNOBS->LOG_DIRECTORY);
+					std::string realOutPath = abspath(realLogDir + "/" + profilerReq.outputFile.toString());
+					if (realLogDir.size() < realOutPath.size() &&
+					    strncmp(realLogDir.c_str(), realOutPath.c_str(), realLogDir.size()) == 0) {
+						profilerReq.outputFile = realOutPath;
+						uncancellable(runProfiler(profilerReq));
 						profilerReq.reply.send(Void());
 					} else {
 						profilerReq.reply.sendError(client_invalid_operation());

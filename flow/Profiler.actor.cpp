@@ -265,7 +265,7 @@ void startProfiling(INetwork* network, Optional<int> maybePeriod /*= {}*/, Optio
 	}
 	std::string outputFile;
 	if (maybeOutputFile.present()) {
-		outputFile = (const char*)maybeOutputFile.get().begin();
+		outputFile = std::string((const char*)maybeOutputFile.get().begin(), maybeOutputFile.get().size());
 	} else {
 		const char* outfn = getenv("FLOW_PROFILER_OUTPUT");
 		outputFile = (outfn ? outfn : "profile.bin");
