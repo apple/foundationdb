@@ -218,6 +218,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 		}
 		when ( CandidacyRequest req = waitNext( interf.candidacy.getFuture() ) ) {
 			//TraceEvent("CandidacyRequest").detail("Nominee", req.myInfo.changeID );
+			availableCandidates.erase( LeaderInfo(req.prevChangeID) );
 			availableCandidates.insert( req.myInfo );
 			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader)
 				req.reply.send( currentNominee.get() );
@@ -226,8 +227,9 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 		}
 		when (LeaderHeartbeatRequest req = waitNext( interf.leaderHeartbeat.getFuture() ) ) {
 			//TODO: use notify to only send a heartbeat once per interval
+			availableLeaders.erase( LeaderInfo(req.prevChangeID) );
 			availableLeaders.insert( req.myInfo );
-			req.reply.send( currentNominee.present() && req.myInfo == currentNominee.get() );
+			req.reply.send( currentNominee.present() && currentNominee.get().equalInternalId(req.myInfo) );
 		}
 		when (ForwardRequest req = waitNext( interf.forward.getFuture() ) ) {
 			LeaderInfo newInfo;
@@ -248,17 +250,16 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				Optional<LeaderInfo> nextNominee;
 				if (availableLeaders.size() && availableCandidates.size()) {
-					// Only compare the first 4 bits which represents process class fitness
-					uint64_t mask = 15ll << 60;
-					nextNominee = ((*availableLeaders.begin()).changeID.first() & mask) <= ((*availableCandidates.begin()).changeID.first() & mask) ? *availableLeaders.begin() : *availableCandidates.begin();
-				} else if (availableLeaders.size())
+					nextNominee = (*availableLeaders.begin()).leaderChangeRequired(*availableCandidates.begin()) ? *availableCandidates.begin() : *availableLeaders.begin();
+				} else if (availableLeaders.size()) {
 					nextNominee = *availableLeaders.begin();
-				else if (availableCandidates.size())
+				} else if (availableCandidates.size()) {
 					nextNominee = *availableCandidates.begin();
-				else
+				} else {
 					nextNominee = Optional<LeaderInfo>();
+				}
 
-				if (nextNominee != currentNominee || !availableLeaders.size()) {
+				if ( currentNominee.present() != nextNominee.present() || (currentNominee.present() && !currentNominee.get().equalInternalId(nextNominee.get())) || !availableLeaders.size() ) {
 					TraceEvent("NominatingLeader").detail("Nominee", nextNominee.present() ? nextNominee.get().changeID : UID())
 						.detail("Changed", nextNominee != currentNominee).detail("Key", printable(key));
 					for(int i=0; i<notify.size(); i++)

@@ -1319,31 +1319,37 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
-	ProcessClass processClass = req.initialClass;
+	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
 
-	if( info == self->id_worker.end() ) {
+	// Check process class if needed
+	if (self->gotProcessClasses && (info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen)) {
 		auto classIter = self->id_class.find(w.locality.processId());
 
-		if( classIter != self->id_class.end() && classIter->second != req.processClass && (classIter->second.classSource() == ProcessClass::DBSource || req.processClass.classType() == ProcessClass::UnsetClass)) {
-			processClass = classIter->second;
-			if (!req.reply.isSet()) {
-				req.reply.send( processClass );
-			}
+		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
+			newProcessClass = classIter->second;
+		} else {
+			newProcessClass = req.initialClass;
 		}
 
-		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.initialClass, processClass );
+		// Notify the worker to register again with new process class
+		if (classIter != self->id_class.end() && classIter->second != req.processClass && !req.reply.isSet()) {
+			req.reply.send( newProcessClass );
+		}
+	}
+
+	if( info == self->id_worker.end() ) {
+		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass );
 		checkOutstandingRequests( self );
 
 		return;
 	}
 
 	if( info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
-		if( info->second.processClass.classSource() == ProcessClass::CommandLineSource ||
-		   (info->second.processClass.classSource() == ProcessClass::AutoSource && req.processClass.classType() != ProcessClass::UnsetClass) ) {
-			info->second.processClass = req.processClass;
+		if (info->second.processClass != newProcessClass) {
+			info->second.processClass = newProcessClass;
 		}
 
 		info->second.initialClass = req.initialClass;
@@ -1355,7 +1361,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 
 		if(info->second.interf.id() != w.id()) {
 			info->second.interf = w;
-			info->second.watcher = workerAvailabilityWatch( w, req.processClass, self );
+			info->second.watcher = workerAvailabilityWatch( w, newProcessClass, self );
 		}
 		return;
 	}
