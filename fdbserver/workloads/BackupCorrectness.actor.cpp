@@ -73,7 +73,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(start, *i));
 
 				// Track the added range
-				TraceEvent("BackupCorrectness_Range", randomID).detail("rangeBegin", (beginRange < endRange) ? printable(beginRange) : printable(endRange))
+				TraceEvent("BARW_BackupCorrectness_Range", randomID).detail("rangeBegin", (beginRange < endRange) ? printable(beginRange) : printable(endRange))
 					.detail("rangeEnd", (beginRange < endRange) ? printable(endRange) : printable(beginRange));
 			}
 		}
@@ -90,6 +90,19 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	virtual Future<Void> start(Database const& cx) {
 		if (clientId != 0)
 			return Void();
+
+		TraceEvent(SevInfo, "BARW_Param").detail("locked", locked);
+		TraceEvent(SevInfo, "BARW_Param").detail("backupAfter", backupAfter);
+		TraceEvent(SevInfo, "BARW_Param").detail("restoreAfter", restoreAfter);
+		TraceEvent(SevInfo, "BARW_Param").detail("performRestore", performRestore);
+		TraceEvent(SevInfo, "BARW_Param").detail("backupTag", printable(backupTag).c_str());
+		TraceEvent(SevInfo, "BARW_Param").detail("backupRangesCount", backupRangesCount);
+		TraceEvent(SevInfo, "BARW_Param").detail("backupRangeLengthMax", backupRangeLengthMax);
+		TraceEvent(SevInfo, "BARW_Param").detail("abortAndRestartAfter", abortAndRestartAfter);
+		TraceEvent(SevInfo, "BARW_Param").detail("differentialBackup", differentialBackup);
+		TraceEvent(SevInfo, "BARW_Param").detail("stopDifferentialAfter", stopDifferentialAfter);
+		TraceEvent(SevInfo, "BARW_Param").detail("agentRequest", agentRequest);
+
 		return _start(cx, this);
 	}
 

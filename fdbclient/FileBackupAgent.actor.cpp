@@ -3233,6 +3233,11 @@ public:
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
+		TraceEvent(SevInfo, "FBA_submitBackup")
+				.detail("tagName", tagName.c_str())
+				.detail("stopWhenDone", stopWhenDone)
+				.detail("outContainer", outContainer.toString());
+
 		state KeyBackedTag tag = makeBackupTag(tagName);
 		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
 		if (uidAndAbortedFlag.present()) {
@@ -3432,6 +3437,10 @@ public:
 			throw backup_unneeded();
 		}
 
+		TraceEvent(SevInfo, "FBA_discontinueBackup")
+				.detail("tagName", tag.tagName.c_str())
+				.detail("status", BackupAgentBase::getStateText(status));
+
 		state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 
 		if (stopWhenDone) {
@@ -3456,6 +3465,10 @@ public:
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
 		}
+
+		TraceEvent(SevInfo, "FBA_abortBackup")
+				.detail("tagName", tagName.c_str())
+				.detail("status", BackupAgentBase::getStateText(status));
 
 		// Cancel backup task through tag
 		Void _ = wait(tag.cancel(tr));
