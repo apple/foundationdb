@@ -142,7 +142,7 @@ public class FDB {
 	 *   being used to connect to the cluster. In particular, you should not advance
 	 *   the API version of your application after upgrading your client until the 
 	 *   cluster has also been upgraded.
-     *
+	 *
 	 * @param version the API version required
 	 *
 	 * @return the FoundationDB API object
@@ -165,17 +165,17 @@ public class FDB {
 
 	/**
 	 * Connects to the cluster specified by the
-	 *  <a href="https://foundationdb.com/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
+	 *  <a href="https://foundationdb.org/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
 	 *  If the FoundationDB network has not been started, it will be started in the course of this call
 	 *  as if {@link FDB#startNetwork()} had been called.
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@code Cluster}.
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
 	 *
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
 	 */
 	public Cluster createCluster() throws IllegalStateException, FDBException {
-		return createCluster(null, DEFAULT_EXECUTOR);
+		return createCluster(null);
 	}
 
 	/**
@@ -189,7 +189,7 @@ public class FDB {
 	 *  <a href="/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@code Cluster}.
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
 	 *
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
@@ -209,9 +209,9 @@ public class FDB {
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
 	 *  <a href="/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
-	 * @param e used to execute all callbacks from the {@link Cluster}.
+	 * @param e used to run the FDB network thread
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@code Cluster}.
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
 	 *
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
@@ -225,15 +225,15 @@ public class FDB {
 			}
 			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
-		return f.get();
+		return f.join();
 	}
 
 	/**
 	 * Initializes networking, connects with the
-	 *  <a href="https://foundationdb.com/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
+	 *  <a href="https://foundationdb.org/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
 	 *  and opens the database.
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@link Database}
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
 	public Database open() throws FDBException {
 		return open(null);
@@ -249,7 +249,7 @@ public class FDB {
 	 *  <a href="/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@link Database}
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
 	public Database open(String clusterFilePath) throws FDBException {
 		return open(clusterFilePath, DEFAULT_EXECUTOR);
@@ -264,11 +264,11 @@ public class FDB {
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
 	 *  <a href="/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
-	 * @param e the {@link Executor} to use when executing asynchronous callbacks
+	 * @param e the {@link Executor} to use to execute asynchronous callbacks
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@link Database}
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
-	public Database open(String clusterFilePath, Executor e)  throws FDBException {
+	public Database open(String clusterFilePath, Executor e) throws FDBException {
 		FutureCluster f;
 		synchronized (this) {
 			if (!isConnected()) {
@@ -276,7 +276,7 @@ public class FDB {
 			}
 			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
-		Cluster c = f.get();
+		Cluster c = f.join();
 		return c.openDatabase(e);
 	}
 
