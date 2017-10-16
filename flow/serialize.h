@@ -28,40 +28,6 @@
 #include "Arena.h"
 #include <algorithm>
 
-// HEY REVIEWER:  Once upon a time (git sha1 c435dcb4), we supported binary serialization of crazy things (StringRef, VectorRef, etc.).
-// Now, the only things that we additionally define as BINARY_SERIALIZABLE is Endpoint.
-// Do you have any objections to replacing is_binary_serializable<> with std::is_pod<>, which would allow anything that has a
-// copy constructor of memcpy to be binary serializable?
-template <class T>
-struct is_binary_serializable { enum { value = 0 }; };
-
-#define BINARY_SERIALIZABLE( T ) template<> struct is_binary_serializable<T> { enum { value = 1 }; };
-
-BINARY_SERIALIZABLE( uint8_t );
-BINARY_SERIALIZABLE( int16_t );
-BINARY_SERIALIZABLE( uint16_t );
-BINARY_SERIALIZABLE( int32_t );
-BINARY_SERIALIZABLE( uint32_t );
-BINARY_SERIALIZABLE( int64_t );
-BINARY_SERIALIZABLE( uint64_t );
-BINARY_SERIALIZABLE( bool );
-BINARY_SERIALIZABLE( double );
-
-// Makes a type typecheck as deserializable but throw not_implemented if you try.
-//#define NOT_SERIALIZABLE( T ) template <class Ar> void load(Ar& ar, T&) { ASSERT(false); } template <class Ar> void save(Ar& ar, T const&) { ASSERT(false); }
-
-// HEY REVIEWER:  Similarly, use std::enable_if here instead?
-template <bool B, class T = void>
-struct enable_if_c {
-  typedef T type;
-};
-
-template <class T>
-struct enable_if_c<false, T> {};
-
-template <class Cond, class T = void>
-struct enable_if : public enable_if_c<Cond::value, T> {};
-
 template <class Archive, class Item>
 inline typename Archive::WRITER& operator << (Archive& ar, const Item& item ) {
 	save(ar, const_cast<Item&>(item));
@@ -122,7 +88,7 @@ inline void save( Archive& ar, const std::string& value ) {
 }
 
 template <class Archive, class T>
-class Serializer< Archive, T, typename enable_if_c< is_binary_serializable<T>::value >::type> {
+class Serializer< Archive, T, typename std::enable_if< std::is_pod<T>::value >::type> {
 public:
 	static void serialize( Archive& ar, T& t ) {
 		ar.serializeBinaryItem(t);

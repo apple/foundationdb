@@ -81,8 +81,4 @@ struct ProfilerRequest {
 	}
 };
 
-// As strongly typed enums are by definition not implicitly convertable to int, we need to inform the serializaiton code that they're still POD types.
-BINARY_SERIALIZABLE( ProfilerRequest::Type );
-BINARY_SERIALIZABLE( ProfilerRequest::Action );
-
 #endif

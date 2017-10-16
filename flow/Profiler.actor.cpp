@@ -274,7 +274,6 @@ void startProfiling(INetwork* network, Optional<int> maybePeriod /*= {}*/, Optio
 	}
 	outputFile = findAndReplace(findAndReplace(findAndReplace(outputFile, "%ADDRESS%", findAndReplace(network->getLocalAddress().toString(), ":", ".")), "%PID%", format("%d", getpid())), "%TID%", format("%llx", (long long)gettid()));
 
-	// HEY REVIEWER:  Singlethreadedness of flow means I don't need to worry about doing explicitly atomic handling of `active_profiler`, right?
 	if (!Profiler::active_profiler)
 		Profiler::active_profiler = new Profiler( period, outputFile, network );
 }

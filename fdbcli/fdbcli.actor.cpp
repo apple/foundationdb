@@ -2662,7 +2662,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								continue;
 							}
 							std::map<Key, ClientWorkerInterface> interfaces;
-							state std::vector<std::pair<Key, Future<ErrorOr<Void>>>> all_profiler_responses;
+							state std::vector<Key> all_profiler_addresses;
+							state std::vector<Future<ErrorOr<Void>>> all_profiler_responses;
 							for (const auto& pair : kvs) {
 								interfaces.emplace(pair.key, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 							}
@@ -2672,7 +2673,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 									profileRequest.type = ProfilerRequest::Type::FLOW;
 									profileRequest.duration = duration;
 									profileRequest.outputFile = tokens[4];
-									all_profiler_responses.push_back(std::make_pair(pair.first, pair.second.profiler.tryGetReply(profileRequest)));
+									all_profiler_addresses.push_back(pair.first);
+									all_profiler_responses.push_back(pair.second.profiler.tryGetReply(profileRequest));
 								}
 							} else {
 								for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
@@ -2688,21 +2690,22 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 										profileRequest.type = ProfilerRequest::Type::FLOW;
 										profileRequest.duration = duration;
 										profileRequest.outputFile = tokens[4];
-										all_profiler_responses.push_back(std::make_pair(tokens[tokenidx], interfaces[tokens[tokenidx]].profiler.tryGetReply(profileRequest)));
+										all_profiler_addresses.push_back(tokens[tokenidx]);
+										all_profiler_responses.push_back(interfaces[tokens[tokenidx]].profiler.tryGetReply(profileRequest));
 									}
 								}
 							}
 							if (!is_error) {
-								for (const auto& p : all_profiler_responses) {
-									ErrorOr<Void> _ = wait(p.second);
-								}
-								for (const auto& p : all_profiler_responses) {
-									const ErrorOr<Void>& err = p.second.get();
+								Void _ = wait(waitForAll(all_profiler_responses));
+								for (int i = 0; i < all_profiler_responses.size(); i++) {
+									const ErrorOr<Void>& err = all_profiler_responses[i].get();
 									if (err.isError()) {
-										printf("ERROR: %s: %s: %s\n", printable(p.first).c_str(), err.getError().name(), err.getError().what());
+										printf("ERROR: %s: %s: %s\n", printable(all_profiler_addresses[i]).c_str(), err.getError().name(), err.getError().what());
 									}
 								}
 							}
+							all_profiler_addresses.clear();
+							all_profiler_responses.clear();
 							continue;
 						}
 					}
