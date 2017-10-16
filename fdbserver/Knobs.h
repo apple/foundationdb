@@ -230,6 +230,7 @@ public:
 	//FdbServer
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
+	std::string LOG_DIRECTORY;
 
 	//Ratekeeper
 	double SMOOTHING_AMOUNT;

@@ -48,7 +48,6 @@ public:
 	}
 };
 #pragma pack(pop)
-BINARY_SERIALIZABLE( Endpoint );
 
 
 class NetworkMessageReceiver {
