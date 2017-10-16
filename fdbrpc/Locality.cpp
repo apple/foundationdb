@@ -120,8 +120,6 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 			return ProcessClass::BestOtherFit;
 		case ProcessClass::ProxyClass:
 			return ProcessClass::BestOtherFit;
-		case ProcessClass::TransactionClass:
-			return ProcessClass::BestOtherFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::TesterClass:
