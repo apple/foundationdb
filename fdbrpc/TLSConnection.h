@@ -109,6 +109,7 @@ struct TLSNetworkConnections : INetworkConnections {
 	explicit TLSNetworkConnections( Reference<TLSOptions> options );
 
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr );
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 

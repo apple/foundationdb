@@ -173,6 +173,10 @@ Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress to
 	return network->connect( toAddr );
 }
 
+Future<std::vector<NetworkAddress>> TLSNetworkConnections::resolveTCPEndpoint( std::string host, std::string service) {
+	return network->resolveTCPEndpoint( host, service );
+}
+
 Reference<IListener> TLSNetworkConnections::listen( NetworkAddress localAddr ) {
 	if ( localAddr.isTLS() ) {
 		NetworkAddress clearAddr( localAddr.ip, localAddr.port, localAddr.isPublic(), false );

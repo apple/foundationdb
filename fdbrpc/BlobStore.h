@@ -49,6 +49,7 @@ public:
 		BlobKnobs();
 		int connect_tries,
 			connect_timeout,
+			max_connection_life,
 			request_tries,
 			request_timeout,
 			requests_per_second,
@@ -69,6 +70,7 @@ public:
 			return {
 				"connect_tries (or ct)                 Number of times to try to connect for each request.",
 				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
+				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
 				"request_tries (or rt)                 Number of times to try each request until a parseable HTTP response other than 429 is received.",
 				"request_timeout (or rto)              Number of seconds to wait for a request to succeed after a connection is established.",
 				"requests_per_second (or rps)          Max number of requests to start per second.",
@@ -87,45 +89,39 @@ public:
 		}
 	};
 
-	BlobStoreEndpoint(std::string const &host, std::vector<NetworkAddress> const &addrs, uint16_t port, std::string const &key, std::string const &key_secret, BlobKnobs const &knobs = BlobKnobs())
-	  : host(host), port(port), addresses(addrs), key(key), secret(key_secret), knobs(knobs),
+	BlobStoreEndpoint(std::string const &host, std::string service, std::string const &key, std::string const &key_secret, BlobKnobs const &knobs = BlobKnobs())
+	  : host(host), service(service), key(key), secret(key_secret), knobs(knobs),
 		requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 		sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
 		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
 		concurrentRequests(knobs.concurrent_requests),
 		concurrentUploads(knobs.concurrent_uploads) {
 
-		if(addresses.size() == 0)
+		if(host.empty())
 			throw connection_string_invalid();
-
-		int perAddressLimit = std::max<int>( 1, knobs.concurrent_requests/addrs.size() );
-		for(auto &addr : addrs) {
-			concurrentRequestsPerAddress[addr] = Reference<FlowLock>( new FlowLock(perAddressLimit) );
-		}
 	}
 
 	static std::string getURLFormat(bool withResource = false) {
 		const char *resource = "";
 		if(withResource)
 			resource = "<name>";
-		return format("blobstore://<api_key>:<secret>@<[host,]<ip>[,<ip>]...>:<port>/%s[?<param>=<value>[&<param>=<value>]...]", resource);
+		return format("blobstore://<api_key>:<secret>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]", resource);
 	}
 	static Reference<BlobStoreEndpoint> fromString(std::string const &url, std::string *resourceFromURL = nullptr, std::string *error = nullptr);
 
-	// Resolve host, and if successful replace addrs with a list of NetworkAddresses created from the resolve results.
-	Future<Void> resolveHostname(bool only_if_unresolved = true);
-
-	// Get a normalized version of this URL with the given resource, the host and any IP addresses (possibly from DNS
-	// if resolve was done) and any non-default BlobKnob values as URL parameters.
+	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL parameters.
 	std::string getResourceURL(std::string resource);
-	Future<Reference<IConnection>> connect(NetworkAddress address);
 
-	typedef std::pair<Reference<IConnection>, double> ConnPoolEntry;
-	std::map<NetworkAddress,std::list<ConnPoolEntry>> connectionPool;
+	struct ReusableConnection {
+		Reference<IConnection> conn;
+		double expirationTime;
+	};
+	std::vector<ReusableConnection> connectionPool;
+	Future<ReusableConnection> connect();
+	void returnConnection(ReusableConnection &conn);
 
 	std::string host;
-	uint16_t port;
-	std::vector<NetworkAddress> addresses;
+	std::string service;
 	std::string key;
 	std::string secret;
 	BlobKnobs knobs;
@@ -134,7 +130,6 @@ public:
 	Reference<IRateControl> requestRate;
 	Reference<IRateControl> sendRate;
 	Reference<IRateControl> recvRate;
-	std::map<NetworkAddress,Reference<FlowLock>> concurrentRequestsPerAddress;
 	FlowLock concurrentRequests;
 	FlowLock concurrentUploads;
 

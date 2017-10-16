@@ -51,6 +51,7 @@ BlobStoreEndpoint::Stats BlobStoreEndpoint::s_stats;
 BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	connect_tries = CLIENT_KNOBS->BLOBSTORE_CONNECT_TRIES;
 	connect_timeout = CLIENT_KNOBS->BLOBSTORE_CONNECT_TIMEOUT;
+	max_connection_life = CLIENT_KNOBS->BLOBSTORE_MAX_CONNECTION_LIFE;
 	request_tries = CLIENT_KNOBS->BLOBSTORE_REQUEST_TRIES;
 	request_timeout = CLIENT_KNOBS->BLOBSTORE_REQUEST_TIMEOUT;
 	requests_per_second = CLIENT_KNOBS->BLOBSTORE_REQUESTS_PER_SECOND;
@@ -72,6 +73,7 @@ bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(buckets_to_span, bts);
 	TRY_PARAM(connect_tries, ct);
 	TRY_PARAM(connect_timeout, cto);
+	TRY_PARAM(max_connection_life, mcl);
 	TRY_PARAM(request_tries, rt);
 	TRY_PARAM(request_timeout, rto);
 	TRY_PARAM(requests_per_second, rps);
@@ -97,6 +99,7 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(buckets_to_span, bts);
 	_CHECK_PARAM(connect_tries, ct);
 	_CHECK_PARAM(connect_timeout, cto);
+	_CHECK_PARAM(max_connection_life, mcl);
 	_CHECK_PARAM(request_tries, rt);
 	_CHECK_PARAM(request_timeout, rto);
 	_CHECK_PARAM(requests_per_second, rps);
@@ -144,34 +147,16 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 			throw std::string("Invalid blobstore URL.");
 		StringRef key =      t.tok(":");
 		StringRef secret =   t.tok("@");
-		StringRef hosts =    t.tok(":");
-		StringRef port =     t.tok("/");
+		StringRef hostPort = t.tok("/");
 		StringRef resource = t.tok("?");
 
-		// The host/ip list can have up to one text hostname, which should be first, and then 0 or more IP addresses.
-		// The items are comma separated.
-		std::string host;
-		std::vector<NetworkAddress> addrs;
-		char *end;
-		uint16_t portNum = (uint16_t)strtoul(port.toString().c_str(), &end, 10);
-		if(*end) {
-			throw format("%s is not a valid port", port.toString().c_str());
-		}
+		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
+		tokenizer h(hostPort);
+		StringRef host = h.tok(":");
+		if(host.size() == 0)
+			throw std::string("host cannot be empty");
 
-		tokenizer h(hosts);
-		while(1) {
-			StringRef item = h.tok(",");
-			if(item.size() == 0)
-				break;
-			// Try to parse item as an IP with the given port, if it fails it will throw so then store it as host
-			try {
-				// Use an integer port number so the parse doesn't fail due to the port number being garbage
-				NetworkAddress na = NetworkAddress::parse(format("%s:%d", item.toString().c_str(), (int)portNum));
-				addrs.push_back(na);
-			} catch(Error &e) {
-				host = item.toString();
-			}
-		}
+		StringRef service = h.s;
 
 		BlobKnobs knobs;
 		while(1) {
@@ -190,7 +175,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		if(resourceFromURL != nullptr)
 			*resourceFromURL = resource.toString();
 
-		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host, addrs, portNum, key.toString(), secret.toString(), knobs));
+		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host.toString(), service.toString(), key.toString(), secret.toString(), knobs));
 
 	} catch(std::string &err) {
 		if(error != nullptr)
@@ -201,46 +186,16 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 }
 
 std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
-	std::string hosts = host;
-	for(auto &na : addresses) {
-		if(hosts.size() != 0)
-			hosts.append(",");
-		hosts.append(toIPString(na.ip));
+	std::string hostPort = host;
+	if(!service.empty()) {
+		hostPort.append(":");
+		hostPort.append(service);
 	}
-	std::string r = format("blobstore://%s:%s@%s:%d/%s", key.c_str(), secret.c_str(), hosts.c_str(), (int)port, resource.c_str());
+	std::string r = format("blobstore://%s:%s@%s/%s", key.c_str(), secret.c_str(), hostPort.c_str(), resource.c_str());
 	std::string p = knobs.getURLParameters();
 	if(!p.empty())
 		r.append("?").append(p);
 	return r;
-}
-
-ACTOR Future<Void> resolveHostname_impl(Reference<BlobStoreEndpoint> bstore) {
-	state std::vector<uint32_t> ip_addresses;
-
-	// TODO:  Resolve host to get list of IPs into ip_addresses.  Ideally this should be done using
-	// boost asio so that backup agents can re-resolve a blobstore endpoint if none of the IP addresses
-	// are reachable for some long amount of time that exceeds time-to-live for the hostname.
-	// However, if it is done using blocking calls instead then the command line tools that use
-	// blobstore URLs will have to resolve them at a safe time during input parsing / checking.
-	//
-
-	// Don't modify the existing IP address list if resolution did not work
-	if(ip_addresses.empty())
-		return Void();
-
-	// Resolve was successful so replace addresses with the new IPs found.
-	bstore->addresses.clear();
-	for(auto &ip : ip_addresses)
-		bstore->addresses.push_back(NetworkAddress(ip, bstore->port));
-
-	return Void();
-}
-
-Future<Void> BlobStoreEndpoint::resolveHostname(bool only_if_unresolved) {
-	if(only_if_unresolved && !addresses.empty())
-		return Void();
-
-	return resolveHostname_impl(Reference<BlobStoreEndpoint>::addRef(this));
 }
 
 ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
@@ -314,22 +269,36 @@ Future<int64_t> BlobStoreEndpoint::objectSize(std::string const &bucket, std::st
 	return objectSize_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-Future<Reference<IConnection>> BlobStoreEndpoint::connect( NetworkAddress address ) {
-	auto &pool = connectionPool[address];
+Future<BlobStoreEndpoint::ReusableConnection> BlobStoreEndpoint::connect() {
+	// First try to get a connection from the pool
+	while(!connectionPool.empty()) {
+		ReusableConnection rconn = connectionPool.back();
+		connectionPool.pop_back();
 
-	while(!pool.empty()) {
-		BlobStoreEndpoint::ConnPoolEntry c = pool.front();
-		pool.pop_front();
-
-		// If the connection was placed in the pool less than 10 seconds ago, reuse it.
-		if(c.second > now() - 10) {
-			//printf("Reusing blob store connection\n");
-			return c.first;
+		// If the connection expires in the future then return it
+		if(rconn.expirationTime > now()) {
+		TraceEvent("BlobStoreEndpointReusingConnected")
+			.detail("RemoteEndpoint", rconn.conn->getPeerAddress())
+			.detail("ExpiresIn", rconn.expirationTime - now())
+			.suppressFor(5, true);
+			return rconn;
 		}
 	}
 
-	TraceEvent(SevInfo, "BlobStoreHTTPConnect").detail("RemoteEndpoint", address).suppressFor(5.0, true);
-	return INetworkConnections::net()->connect(address);
+	return map(INetworkConnections::net()->connect(host, service.empty() ? "http" : service), [=] (Reference<IConnection> conn) {
+		TraceEvent("BlobStoreEndpointNewConnection")
+			.detail("RemoteEndpoint", conn->getPeerAddress())
+			.detail("ExpiresIn", knobs.max_connection_life)
+			.suppressFor(5, true);;
+		return ReusableConnection({conn, now() + knobs.max_connection_life});
+	});
+}
+
+void BlobStoreEndpoint::returnConnection(ReusableConnection &rconn) {
+	// If it expires in the future then add it to the pool in the front
+	if(rconn.expirationTime > now())
+		connectionPool.push_back(rconn);
+	rconn.conn = Reference<IConnection>();
 }
 
 // Do a request, get a Response.
@@ -347,18 +316,11 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 	state int tries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state double retryDelay = 2.0;
-	state NetworkAddress address;
 
 	loop {
 		try {
-			// Pick an adress
-			address = bstore->addresses[g_random->randomInt(0, bstore->addresses.size())];
-			state FlowLock::Releaser perAddressReleaser;
-			Void _ = wait(bstore->concurrentRequestsPerAddress[address]->take(1));
-			perAddressReleaser = FlowLock::Releaser(*bstore->concurrentRequestsPerAddress[address], 1);
-
 			// Start connecting
-			Future<Reference<IConnection>> fconn = bstore->connect(address);
+			Future<BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect();
 
 			// Finish/update the request headers (which includes Date header)
 			bstore->setAuthHeaders(verb, resource, headers);
@@ -378,9 +340,9 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			}
 
 			// Finish connecting, do request
-			state Reference<IConnection> conn = wait(timeoutError(fconn, bstore->knobs.connect_timeout));
+			state BlobStoreEndpoint::ReusableConnection rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
 			Void _ = wait(bstore->requestRate->getAllowance(1));
-			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
 
 			std::string connectionHeader;
 			HTTP::Headers::iterator i = r->headers.find("Connection");
@@ -389,12 +351,11 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			// If the response parsed successfully (which is why we reached this point) and the connection can be reused, put the connection in the connection_pool
 			if(connectionHeader != "close")
-				bstore->connectionPool[address].push_back(BlobStoreEndpoint::ConnPoolEntry(conn, now()));
+				bstore->returnConnection(rconn);
 
 			// Handle retry-after response code
 			if(r->code == 429) {
 				bstore->s_stats.requests_failed++;
-				conn = Reference<IConnection>();
 				double d = 60;
 				if(r->headers.count("Retry-After"))
 					d = atof(r->headers["Retry-After"].c_str());
@@ -415,7 +376,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// If the error is connection failed and a retry is allowed then ignore the error
 			if((e.code() == error_code_connection_failed || e.code() == error_code_timed_out) && --tries > 0) {
 				bstore->s_stats.requests_failed++;
-				TraceEvent(SevWarn, "BlobStoreHTTPConnectionFailed").detail("RemoteEndpoint", address).detail("Verb", verb).detail("Resource", resource).suppressFor(5.0, true);
+				TraceEvent(SevWarn, "BlobStoreHTTPConnectionFailed").detail("Verb", verb).detail("Resource", resource).suppressFor(5.0, true);
 				Void _ = wait(delay(retryDelay));
 				retryDelay *= 2;
 				retryDelay = std::min(retryDelay, 60.0);
