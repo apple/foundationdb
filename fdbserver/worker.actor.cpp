@@ -289,9 +289,7 @@ void updateCpuProfiler(ProfilerRequest req) {
 #if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 		switch (req.action) {
 		case ProfilerRequest::Action::ENABLE: {
-			char *workingDir = get_current_dir_name();
-			// TODO: escape outputFile to prevent it being e.g. "../../../../etc/pam.conf"
-			const char *path = (std::string(workingDir) + "/" + req.outputFile.toString()).c_str();
+			const char *path = (const char*)req.outputFile.begin();
 			ProfilerOptions *options = new ProfilerOptions();
 			options->filter_in_thread = &filter_in_thread;
 			options->filter_in_thread_arg = NULL;
@@ -680,8 +678,25 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				}
 			}
 			when( ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture()) ) {
-				uncancellable(runProfiler(req));
-				req.reply.send(Void());
+				state ProfilerRequest profilerReq = req;
+				// There really isn't a great "filepath sanitizer" or "filepath escape" function available,
+				// thus we instead enforce a different requirement.  One can only write to a file that's
+				// beneath the working directory, and we remove the ability to do any symlink or ../..
+				// tricks by resolving all paths through `abspath` first.
+				try {
+					const char* workingDir = get_current_dir_name();
+					std::string realWorkingDir = abspath(workingDir);
+					std::string realOutPath = abspath(realWorkingDir + "/" + req.outputFile.toString());
+					if (realWorkingDir.size() < realOutPath.size() &&
+					    strncmp(realWorkingDir.c_str(), realOutPath.c_str(), realWorkingDir.size()) == 0) {
+						uncancellable(runProfiler(req));
+						profilerReq.reply.send(Void());
+					} else {
+						profilerReq.reply.sendError(client_invalid_operation());
+					}
+				} catch (Error& e) {
+					profilerReq.reply.sendError(e);
+				}
 			}
 			when( RecruitMasterRequest req = waitNext(interf.master.getFuture()) ) {
 				MasterInterface recruited;
