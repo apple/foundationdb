@@ -18,17 +18,17 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.math.BigInteger;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
-import com.apple.cie.foundationdb.FDBException;
-import com.apple.cie.foundationdb.KeySelector;
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.FDBException;
+import com.apple.foundationdb.KeySelector;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 public class StackUtils {
 

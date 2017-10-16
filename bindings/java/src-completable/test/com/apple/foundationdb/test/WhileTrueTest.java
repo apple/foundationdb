@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
-import com.apple.cie.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.AsyncUtil;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 

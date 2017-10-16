@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.subspace;
+package com.apple.foundationdb.subspace;
 
-import static com.apple.cie.foundationdb.tuple.ByteArrayUtil.join;
-import static com.apple.cie.foundationdb.tuple.ByteArrayUtil.printable;
+import static com.apple.foundationdb.tuple.ByteArrayUtil.join;
+import static com.apple.foundationdb.tuple.ByteArrayUtil.printable;
 
 import java.util.Arrays;
 
-import com.apple.cie.foundationdb.Range;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.Range;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * {@code Subspace} provide a convenient way to use {@link Tuple}s to define namespaces for

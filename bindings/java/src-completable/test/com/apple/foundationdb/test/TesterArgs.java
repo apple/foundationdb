@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
-import com.apple.cie.foundationdb.subspace.Subspace;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.subspace.Subspace;
+import com.apple.foundationdb.tuple.Tuple;
 
 import java.util.ArrayList;
 import java.util.Arrays;

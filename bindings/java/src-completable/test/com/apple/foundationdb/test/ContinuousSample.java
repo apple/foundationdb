@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.util.ArrayList;
 import java.util.Collections;

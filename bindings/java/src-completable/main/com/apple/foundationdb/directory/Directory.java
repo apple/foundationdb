@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.directory;
+package com.apple.foundationdb.directory;
 
-import static com.apple.cie.foundationdb.directory.DirectoryLayer.EMPTY_BYTES;
-import static com.apple.cie.foundationdb.directory.DirectoryLayer.EMPTY_PATH;
+import static com.apple.foundationdb.directory.DirectoryLayer.EMPTY_BYTES;
+import static com.apple.foundationdb.directory.DirectoryLayer.EMPTY_PATH;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
-import com.apple.cie.foundationdb.ReadTransactionContext;
-import com.apple.cie.foundationdb.TransactionContext;
+import com.apple.foundationdb.ReadTransactionContext;
+import com.apple.foundationdb.TransactionContext;
 
 /**
  * Represents a directory in the {@code DirectoryLayer}. A {@code Directory} stores the path

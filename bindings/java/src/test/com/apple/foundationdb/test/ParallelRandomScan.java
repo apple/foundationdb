@@ -18,23 +18,23 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.nio.ByteBuffer;
 import java.util.Random;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.KeyValue;
-import com.apple.cie.foundationdb.StreamingMode;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.async.AsyncIterable;
-import com.apple.cie.foundationdb.async.AsyncIterator;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.KeyValue;
+import com.apple.foundationdb.StreamingMode;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncIterator;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 public class ParallelRandomScan {
 	private static final int ROWS = 1000000;

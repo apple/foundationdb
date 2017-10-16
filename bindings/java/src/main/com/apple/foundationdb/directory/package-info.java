@@ -35,4 +35,4 @@
  *   directory documentation</a> for information about how directories work and
  *   interact with other parts of the built-in keyspace management features.
  */
-package com.apple.cie.foundationdb.directory;
+package com.apple.foundationdb.directory;

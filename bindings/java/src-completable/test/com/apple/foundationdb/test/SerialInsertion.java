@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.Transaction;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.Transaction;
 
 public class SerialInsertion {
 	private static final int THREAD_COUNT = 10;

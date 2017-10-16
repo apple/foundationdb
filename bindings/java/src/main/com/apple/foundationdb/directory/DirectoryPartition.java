@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.directory;
+package com.apple.foundationdb.directory;
 
-import static com.apple.cie.foundationdb.directory.DirectoryLayer.DEFAULT_NODE_SUBSPACE_PREFIX;
+import static com.apple.foundationdb.directory.DirectoryLayer.DEFAULT_NODE_SUBSPACE_PREFIX;
 
 import java.util.List;
 
-import com.apple.cie.foundationdb.subspace.Subspace;
-import com.apple.cie.foundationdb.Range;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.subspace.Subspace;
+import com.apple.foundationdb.Range;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * A {@code DirectoryPartition} is a {@link DirectorySubspace} whose prefix is prepended to all of its descendant directories' prefixes. 

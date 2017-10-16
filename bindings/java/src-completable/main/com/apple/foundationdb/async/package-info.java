@@ -22,4 +22,4 @@
  * Provides additional constructs for asynchronous programming against Java's {@link java.util.concurrent.CompletableFuture CompletableFuture}s.
  *
  */
-package com.apple.cie.foundationdb.async;
+package com.apple.foundationdb.async;

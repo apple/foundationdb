@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.ReadyFuture;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.tuple.Tuple;
 
 class DirectoryUtil {
 	private static class TuplePopper {

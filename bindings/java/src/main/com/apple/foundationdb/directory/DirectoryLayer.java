@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.directory;
+package com.apple.foundationdb.directory;
 
-import static com.apple.cie.foundationdb.tuple.ByteArrayUtil.join;
+import static com.apple.foundationdb.tuple.ByteArrayUtil.join;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -31,22 +31,22 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-import com.apple.cie.foundationdb.subspace.Subspace;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.tuple.Tuple;
-import com.apple.cie.foundationdb.KeyValue;
-import com.apple.cie.foundationdb.MutationType;
-import com.apple.cie.foundationdb.Range;
-import com.apple.cie.foundationdb.ReadTransaction;
-import com.apple.cie.foundationdb.ReadTransactionContext;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.TransactionContext;
-import com.apple.cie.foundationdb.async.AsyncIterable;
-import com.apple.cie.foundationdb.async.AsyncIterator;
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.subspace.Subspace;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.KeyValue;
+import com.apple.foundationdb.MutationType;
+import com.apple.foundationdb.Range;
+import com.apple.foundationdb.ReadTransaction;
+import com.apple.foundationdb.ReadTransactionContext;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncIterator;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.ReadyFuture;
 
 /**
  * Provides a class for managing directories in FoundationDB.

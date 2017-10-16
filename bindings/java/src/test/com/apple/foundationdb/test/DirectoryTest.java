@@ -18,20 +18,20 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import com.apple.cie.foundationdb.Cluster;
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.TransactionContext;
-import com.apple.cie.foundationdb.async.PartialFunction;
-import com.apple.cie.foundationdb.directory.DirectoryLayer;
-import com.apple.cie.foundationdb.directory.DirectorySubspace;
+import com.apple.foundationdb.Cluster;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.async.PartialFunction;
+import com.apple.foundationdb.directory.DirectoryLayer;
+import com.apple.foundationdb.directory.DirectorySubspace;
 
 public class DirectoryTest {
 	private static final String CLUSTER_FILE = "/home/ajb/fdb.cluster";

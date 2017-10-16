@@ -18,19 +18,19 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.List;
 
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.async.AsyncIterable;
-import com.apple.cie.foundationdb.async.AsyncIterator;
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncIterator;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.ReadyFuture;
 
 /**
  * The FoundationDB API comes with a set of functions for discovering the

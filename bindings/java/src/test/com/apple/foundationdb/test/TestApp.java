@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
-import com.apple.cie.foundationdb.Cluster;
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.FDBException;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.async.Future;
+import com.apple.foundationdb.Cluster;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.FDBException;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.async.Future;
 
 public class TestApp {
 

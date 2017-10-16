@@ -18,20 +18,20 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.util.List;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
 
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.FDBException;
-import com.apple.cie.foundationdb.KeySelector;
-import com.apple.cie.foundationdb.KeyValue;
-import com.apple.cie.foundationdb.Range;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.FDBException;
+import com.apple.foundationdb.KeySelector;
+import com.apple.foundationdb.KeyValue;
+import com.apple.foundationdb.Range;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.async.AsyncIterable;
 
 public class RangeTest {
 	private static final int API_VERSION = 500;

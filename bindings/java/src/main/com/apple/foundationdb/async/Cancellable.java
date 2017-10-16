@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.async;
+package com.apple.foundationdb.async;
 
 /**
  * Describes an operation or signal that can be cancelled. Cancellation will be assumed

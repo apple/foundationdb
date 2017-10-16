@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
-import com.apple.cie.foundationdb.ReadTransaction;
-import com.apple.cie.foundationdb.ReadTransactionContext;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.TransactionContext;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.ReadTransaction;
+import com.apple.foundationdb.ReadTransactionContext;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.tuple.Tuple;
 
 import java.util.List;
 

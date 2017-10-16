@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.nio.charset.Charset;
 import java.security.SecureRandom;
@@ -26,12 +26,12 @@ import java.util.Random;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.ReadyFuture;
 
 public class ConcurrentGetSetGet {
 	public static final Charset UTF8 = Charset.forName("UTF-8");

@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
-import com.apple.cie.foundationdb.async.Cancellable;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.PartialFunction;
-import com.apple.cie.foundationdb.async.PartialFuture;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.async.Cancellable;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.PartialFunction;
+import com.apple.foundationdb.async.PartialFuture;
+import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * A Transaction represents a FoundationDB database transaction. All operations on FoundationDB

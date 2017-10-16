@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.ReadyFuture;
 
 public class WhileTrueTest {
     private static int count;

@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 /**
  * A {@code KeySelector} identifies a particular key in the database. FoundationDB's

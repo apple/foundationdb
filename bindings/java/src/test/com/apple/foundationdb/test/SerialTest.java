@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.apple.cie.foundationdb.Cluster;
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.TransactionContext;
-import com.apple.cie.foundationdb.async.Function;
+import com.apple.foundationdb.Cluster;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.async.Function;
 
 public class SerialTest {
 

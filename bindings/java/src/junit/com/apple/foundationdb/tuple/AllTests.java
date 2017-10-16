@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.tuple;
+package com.apple.foundationdb.tuple;
 
 import org.junit.runner.RunWith;
 import org.junit.runners.Suite;

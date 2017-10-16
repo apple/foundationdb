@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.async;
+package com.apple.foundationdb.async;
 
 /**
  * Applies a process to an input with typed output. The function itself should return

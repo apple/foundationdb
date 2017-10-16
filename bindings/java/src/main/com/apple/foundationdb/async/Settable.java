@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.async;
+package com.apple.foundationdb.async;
 
 /**
  * Used to communicate output to consumers of an asynchronous process. This is the general

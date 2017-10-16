@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.directory;
+package com.apple.foundationdb.directory;
 
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 import java.util.List;
 

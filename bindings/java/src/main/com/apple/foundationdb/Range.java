@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.util.Arrays;
 
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 /**
  * A simple description of an exact range of keyspace, specified by a begin and end key. As with

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.directory;
+package com.apple.foundationdb.directory;
 
 /**
  * An {@link Exception} that is thrown when the version of the directory layer

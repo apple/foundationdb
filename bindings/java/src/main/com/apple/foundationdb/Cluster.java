@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.nio.charset.Charset;
 import java.util.concurrent.Executor;

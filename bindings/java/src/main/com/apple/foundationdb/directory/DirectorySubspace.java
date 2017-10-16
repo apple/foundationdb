@@ -18,20 +18,20 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.directory;
+package com.apple.foundationdb.directory;
 
-import static com.apple.cie.foundationdb.directory.DirectoryLayer.EMPTY_BYTES;
-import static com.apple.cie.foundationdb.directory.DirectoryLayer.EMPTY_PATH;
-import static com.apple.cie.foundationdb.tuple.ByteArrayUtil.printable;
+import static com.apple.foundationdb.directory.DirectoryLayer.EMPTY_BYTES;
+import static com.apple.foundationdb.directory.DirectoryLayer.EMPTY_PATH;
+import static com.apple.foundationdb.tuple.ByteArrayUtil.printable;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
-import com.apple.cie.foundationdb.TransactionContext;
-import com.apple.cie.foundationdb.subspace.Subspace;
-import com.apple.cie.foundationdb.ReadTransactionContext;
-import com.apple.cie.foundationdb.async.Future;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.subspace.Subspace;
+import com.apple.foundationdb.ReadTransactionContext;
+import com.apple.foundationdb.async.Future;
 
 /**
  *  A DirectorySubspace represents the <i>contents</i> of a directory, but it

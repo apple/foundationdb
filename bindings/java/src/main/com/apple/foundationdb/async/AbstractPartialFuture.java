@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.async;
+package com.apple.foundationdb.async;
 
 import java.util.LinkedList;
 import java.util.concurrent.Executor;
 
-import com.apple.cie.foundationdb.Disposable;
-import com.apple.cie.foundationdb.FDBException;
+import com.apple.foundationdb.Disposable;
+import com.apple.foundationdb.FDBException;
 
 /**
  * An abstract implementation of part of the {@link PartialFuture} interface. This class should

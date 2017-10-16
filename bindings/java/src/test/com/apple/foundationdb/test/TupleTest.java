@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
-import com.apple.cie.foundationdb.Cluster;
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.TransactionContext;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.Cluster;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.tuple.Tuple;
 
 public class TupleTest {
 	private static final String CLUSTER_FILE = "C:\\Users\\Ben\\workspace\\fdb\\fdb.cluster";

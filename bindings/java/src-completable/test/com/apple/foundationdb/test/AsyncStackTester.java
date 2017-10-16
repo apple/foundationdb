@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.math.BigInteger;
 import java.util.*;
@@ -28,21 +28,21 @@ import java.nio.ByteOrder;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
-import com.apple.cie.foundationdb.Cluster;
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
-import com.apple.cie.foundationdb.FDBException;
-import com.apple.cie.foundationdb.KeySelector;
-import com.apple.cie.foundationdb.KeyValue;
-import com.apple.cie.foundationdb.MutationType;
-import com.apple.cie.foundationdb.Range;
-import com.apple.cie.foundationdb.ReadTransaction;
-import com.apple.cie.foundationdb.StreamingMode;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.async.AsyncIterable;
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.Cluster;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
+import com.apple.foundationdb.FDBException;
+import com.apple.foundationdb.KeySelector;
+import com.apple.foundationdb.KeyValue;
+import com.apple.foundationdb.MutationType;
+import com.apple.foundationdb.Range;
+import com.apple.foundationdb.ReadTransaction;
+import com.apple.foundationdb.StreamingMode;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 public class AsyncStackTester {
 	static final String DIRECTORY_PREFIX = "DIRECTORY_";

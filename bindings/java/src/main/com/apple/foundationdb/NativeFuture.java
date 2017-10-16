@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.io.IOException;
 import java.nio.channels.AsynchronousCloseException;
 import java.nio.channels.spi.AbstractInterruptibleChannel;
 import java.util.concurrent.Executor;
 
-import com.apple.cie.foundationdb.async.AbstractFuture;
+import com.apple.foundationdb.async.AbstractFuture;
 
 abstract class NativeFuture<T> extends AbstractFuture<T> {
 	protected final long cPtr;

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-import com.apple.cie.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.AsyncUtil;
 
 class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable, OptionConsumer {
 	private DatabaseOptions options;

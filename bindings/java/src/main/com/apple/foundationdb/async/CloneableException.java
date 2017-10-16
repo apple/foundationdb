@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.async;
+package com.apple.foundationdb.async;
 
 /**
  * An {@link Exception} that can be duplicated with a new backtrace.

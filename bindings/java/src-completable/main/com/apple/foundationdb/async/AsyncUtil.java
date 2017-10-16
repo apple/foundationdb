@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.async;
+package com.apple.foundationdb.async;
 
-import static com.apple.cie.foundationdb.FDB.DEFAULT_EXECUTOR;
+import static com.apple.foundationdb.FDB.DEFAULT_EXECUTOR;
 
-import com.apple.cie.foundationdb.FDBException;
+import com.apple.foundationdb.FDBException;
 
 import java.util.ArrayList;
 import java.util.Collection;

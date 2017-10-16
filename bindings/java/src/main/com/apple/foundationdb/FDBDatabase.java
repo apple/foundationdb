@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.PartialFunction;
-import com.apple.cie.foundationdb.async.PartialFuture;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.PartialFunction;
+import com.apple.foundationdb.async.PartialFuture;
 
 class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable, OptionConsumer {
 	private Executor executor;

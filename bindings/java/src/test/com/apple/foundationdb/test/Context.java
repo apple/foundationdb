@@ -18,25 +18,25 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDBException;
-import com.apple.cie.foundationdb.KeySelector;
-import com.apple.cie.foundationdb.Range;
-import com.apple.cie.foundationdb.StreamingMode;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.Settable;
-import com.apple.cie.foundationdb.async.SettableFuture;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDBException;
+import com.apple.foundationdb.KeySelector;
+import com.apple.foundationdb.Range;
+import com.apple.foundationdb.StreamingMode;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.Settable;
+import com.apple.foundationdb.async.SettableFuture;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 abstract class Context implements Runnable {
 	final Stack stack = new Stack();

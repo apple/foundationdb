@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.tuple;
+package com.apple.foundationdb.tuple;
 
 import java.math.BigInteger;
 import java.util.ArrayList;
@@ -32,7 +32,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.apple.cie.foundationdb.Range;
+import com.apple.foundationdb.Range;
 
 /**
  * Represents a set of elements that make up a sortable, typed key. This object

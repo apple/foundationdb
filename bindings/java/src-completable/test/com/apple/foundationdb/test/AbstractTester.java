@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.FDB;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
 
 import java.nio.charset.Charset;
 import java.util.Random;

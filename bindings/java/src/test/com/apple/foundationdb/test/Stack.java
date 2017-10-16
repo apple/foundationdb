@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 class Stack {
 	java.util.Stack<StackEntry> stack = new java.util.Stack<StackEntry>();

@@ -20,16 +20,16 @@
 
 /**
  * Provides an API for the FoundationDB transactional key/value store. Clients operating
- *  on a {@link com.apple.cie.foundationdb.Database} should, in most cases, use the
- *  {@link com.apple.cie.foundationdb.TransactionContext#run(Function) run(Function)}
+ *  on a {@link com.apple.foundationdb.Database} should, in most cases, use the
+ *  {@link com.apple.foundationdb.TransactionContext#run(Function) run(Function)}
  *  or the
- *  {@link com.apple.cie.foundationdb.TransactionContext#runAsync(Function) runAsync(Function)}
+ *  {@link com.apple.foundationdb.TransactionContext#runAsync(Function) runAsync(Function)}
  *  constructs. These two functions (and their two derivations) implement a proper
  *  retry loop around the work that needs to get done and, in the case of {@code Database},
- *  assure that {@link com.apple.cie.foundationdb.Transaction#commit()} has returned successfully
+ *  assure that {@link com.apple.foundationdb.Transaction#commit()} has returned successfully
  *  before itself returning. If you are not able to use these functions for some reason
  *  please closely read and understand the other
  *  <a href="/documentation/data-modeling.html#tuples">developer
  *    documentation on FoundationDB transactions</a>.
  */
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;

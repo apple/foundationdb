@@ -18,18 +18,18 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.util.concurrent.Executor;
 
-import com.apple.cie.foundationdb.async.*;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.async.AsyncIterable;
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.async.Future;
-import com.apple.cie.foundationdb.async.PartialFunction;
-import com.apple.cie.foundationdb.async.PartialFuture;
-import com.apple.cie.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.async.*;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.Future;
+import com.apple.foundationdb.async.PartialFunction;
+import com.apple.foundationdb.async.PartialFuture;
+import com.apple.foundationdb.async.ReadyFuture;
 
 class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transaction, OptionConsumer {
 	private final Executor executor;

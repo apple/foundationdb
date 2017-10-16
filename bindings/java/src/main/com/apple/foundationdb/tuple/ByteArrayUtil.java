@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.tuple;
+package com.apple.foundationdb.tuple;
 
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
@@ -27,7 +27,7 @@ import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 
-import com.apple.cie.foundationdb.Transaction;
+import com.apple.foundationdb.Transaction;
 
 /**
  * Utility functions for operating on byte arrays. Although built for
@@ -368,12 +368,12 @@ public class ByteArrayUtil {
 	/**
 	 * Encode an 64-bit integer (long) into a byte array. Encodes the integer in little
 	 *  endian byte order. The result is valid for use with
-	 *  {@link Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[]) Transaction.mutate(...)}.
+	 *  {@link Transaction#mutate(com.apple.foundationdb.MutationType, byte[], byte[]) Transaction.mutate(...)}.
 	 *
 	 * @param i the number to encode
 	 * @return an 8-byte array containing the
 	 *
-	 * @see Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[])
+	 * @see Transaction#mutate(com.apple.foundationdb.MutationType, byte[], byte[])
 	 */
 	public static byte[] encodeInt(long i) {
 		return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(i).array();

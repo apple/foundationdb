@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
 
-import com.apple.cie.foundationdb.async.*;
-import com.apple.cie.foundationdb.async.AsyncIterable;
-import com.apple.cie.foundationdb.async.Function;
-import com.apple.cie.foundationdb.async.Future;
+import com.apple.foundationdb.async.*;
+import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.Function;
+import com.apple.foundationdb.async.Future;
 
 /**
  * Represents a query against FoundationDB for a range of keys. The

@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
 
-import com.apple.cie.foundationdb.async.AsyncIterable;
-import com.apple.cie.foundationdb.async.AsyncIterator;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncIterator;
+import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * A read-only subset of a FoundationDB {@link Transaction}. This is the interface that

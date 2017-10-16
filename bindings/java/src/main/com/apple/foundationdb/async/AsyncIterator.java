@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.async;
+package com.apple.foundationdb.async;
 
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 
-import com.apple.cie.foundationdb.Disposable;
+import com.apple.foundationdb.Disposable;
 
 /**
  * A version of {@code Iterator} that allows for non-blocking iteration over elements.

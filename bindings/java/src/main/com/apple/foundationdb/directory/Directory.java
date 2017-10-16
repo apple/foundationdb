@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.directory;
+package com.apple.foundationdb.directory;
 
 import java.util.List;
 
-import com.apple.cie.foundationdb.ReadTransactionContext;
-import com.apple.cie.foundationdb.TransactionContext;
-import com.apple.cie.foundationdb.async.Future;
+import com.apple.foundationdb.ReadTransactionContext;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.async.Future;
 
 /**
  * Represents a directory in the {@code DirectoryLayer}. A {@code Directory} stores the path

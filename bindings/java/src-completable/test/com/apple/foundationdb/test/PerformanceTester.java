@@ -18,14 +18,14 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
-import com.apple.cie.foundationdb.Database;
-import com.apple.cie.foundationdb.KeySelector;
-import com.apple.cie.foundationdb.Transaction;
-import com.apple.cie.foundationdb.TransactionContext;
-import com.apple.cie.foundationdb.async.AsyncUtil;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.KeySelector;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 import java.util.ArrayList;
 import java.util.Arrays;

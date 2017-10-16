@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 enum DirectoryOperation {
 	DIRECTORY_CREATE_SUBSPACE(true),

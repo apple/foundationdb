@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 /**
  * A FoundationDB object with native resources that can be freed. It is not mandatory to call

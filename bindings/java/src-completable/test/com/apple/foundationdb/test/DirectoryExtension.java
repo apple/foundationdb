@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb.test;
+package com.apple.foundationdb.test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,13 +26,13 @@ import java.util.List;
 
 import java.util.concurrent.CompletableFuture;
 
-import com.apple.cie.foundationdb.Range;
-import com.apple.cie.foundationdb.directory.Directory;
-import com.apple.cie.foundationdb.directory.DirectoryLayer;
-import com.apple.cie.foundationdb.directory.DirectorySubspace;
-import com.apple.cie.foundationdb.subspace.Subspace;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
-import com.apple.cie.foundationdb.tuple.Tuple;
+import com.apple.foundationdb.Range;
+import com.apple.foundationdb.directory.Directory;
+import com.apple.foundationdb.directory.DirectoryLayer;
+import com.apple.foundationdb.directory.DirectorySubspace;
+import com.apple.foundationdb.subspace.Subspace;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 class DirectoryExtension {
 	List<Object> dirList = new ArrayList<Object>();

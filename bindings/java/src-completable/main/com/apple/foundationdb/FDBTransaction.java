@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-package com.apple.cie.foundationdb;
+package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -26,8 +26,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 
-import com.apple.cie.foundationdb.async.*;
-import com.apple.cie.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.async.*;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transaction, OptionConsumer {
 	private final Database database;
