@@ -56,7 +56,7 @@ struct MutationRef {
 	enum { 
 		ATOMIC_MASK = (1 << AddValue) | (1 << And) | (1 << Or) | (1 << Xor) | (1 << AppendIfFits) | (1 << Max) | (1 << Min) | (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << ByteMin) | (1 << ByteMax) | (1 << NewMin) | (1 << NewAnd),
 		SINGLE_KEY_MASK = ATOMIC_MASK | (1<<SetValue),
-		NON_ASSOCIATIVE_MASK = (1 << AddValue) | (1 << Or) | (1 << Xor) | (1 << Max) | (1 << Min) | (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << ByteMin) | (1 << ByteMax) | (1 << NewMin) | (1 << NewAnd)
+		NON_ASSOCIATIVE_MASK = (1 << AddValue) | (1 << And) | (1 << Or) | (1 << Xor) | (1 << Max) | (1 << Min) | (1 << SetVersionstampedKey) | (1 << SetVersionstampedValue) | (1 << ByteMin) | (1 << ByteMax) | (1 << NewMin) | (1 << NewAnd)
 	};
 };
 

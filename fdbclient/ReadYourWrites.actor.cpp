@@ -1493,7 +1493,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		throw client_invalid_operation();
 		
 	if (tr.apiVersionAtLeast(510)) {
-		if ((MutationRef::Type) operationType == MutationRef::Min)
+		if (operationType == MutationRef::Min)
 			operationType = MutationRef::NewMin;
 		else if (operationType == MutationRef::And)
 			operationType = MutationRef::NewAnd;
