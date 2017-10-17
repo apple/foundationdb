@@ -31,7 +31,7 @@
 #include <sys/syscall.h>
 #include <link.h>
 
-#include "flow/platform.h"
+#include "Platform.h"
 
 extern volatile int profilingEnabled;
 
