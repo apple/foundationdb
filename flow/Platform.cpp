@@ -2326,10 +2326,10 @@ void* getImageOffset() {
 
 size_t raw_backtrace(void** addresses, int maxStackDepth) {
 #if !defined(__APPLE__)
-  // absl::GetStackTrace doesn't have an implementation for MacOS.
-  return absl::GetStackTrace(addresses, maxStackDepth, 0);
+	// absl::GetStackTrace doesn't have an implementation for MacOS.
+	return absl::GetStackTrace(addresses, maxStackDepth, 0);
 #else
-  return backtrace(addresses, maxStackDepth);
+	return backtrace(addresses, maxStackDepth);
 #endif
 }
 
@@ -2351,7 +2351,7 @@ std::string format_backtrace(void **addresses, int numAddresses) {
 
 std::string get_backtrace() {
 	void *addresses[50];
-  size_t size = raw_backtrace(addresses, 50);
+	size_t size = raw_backtrace(addresses, 50);
 	return format_backtrace(addresses, size);
 }
 }; // namespace platform
