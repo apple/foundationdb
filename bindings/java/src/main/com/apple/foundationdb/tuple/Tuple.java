@@ -308,7 +308,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Get an encoded representation of this {@code Tuple} for use with
-	 *  {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
 	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-paramter version of this method},
 	 *  but it does not add any prefix to the array.
 	 *
@@ -321,15 +321,15 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Get an encoded representation of this {@code Tuple} for use with
-	 *  {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
 	 *  There must be exactly one incomplete {@link Versionstamp} instance within this
 	 *  {@code Tuple} or this will throw an {@link IllegalArgumentException}.
 	 *  Each element is encoded to {@code byte}s and concatenated, the prefix
 	 *  is then prepended to the array, and then the index of the serialized incomplete
 	 *  {@link Versionstamp} is appended as a little-endian integer. This can then be passed
 	 *  as the key to
-	 *  {@link com.apple.cie.foundationdb.Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
-	 *  with the {@code SET_VERSIONSTAMPED_KEY} {@link com.apple.cie.foundationdb.MutationType}, and the transaction's
+	 *  {@link com.apple.foundationdb.Transaction#mutate(com.apple.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
+	 *  with the {@code SET_VERSIONSTAMPED_KEY} {@link com.apple.foundationdb.MutationType}, and the transaction's
 	 *  version will then be filled in at commit time.
 	 *
 	 * @param prefix additional byte-array prefix to prepend to serialized bytes.

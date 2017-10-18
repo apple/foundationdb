@@ -189,11 +189,11 @@ public class Subspace
 
     /**
      * Gets the key encoding the specified tuple in this {@code Subspace} for use with
-     * {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
+     * {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
      * There must be exactly one incomplete {@link Versionstamp} included in the given {@link Tuple}. It will
      * create a key that is within this {@code Subspace} that can be provided as the {@code key} argument to
-     * {@link com.apple.cie.foundationdb.Transaction#mutate(com.apple.cie.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
-     * with the {@link com.apple.cie.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
+     * {@link com.apple.foundationdb.Transaction#mutate(com.apple.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
+     * with the {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
      * mutation. This will throw an {@link IllegalArgumentException} if the {@link Tuple} does not
      * contain an incomplete {@link Versionstamp} or if it contains multiple.
      *
