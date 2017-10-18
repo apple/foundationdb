@@ -122,26 +122,26 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		Void _ = wait( delay( startDelay ));
 
 		if (startDelay || BUGGIFY) {
-			TraceEvent("BARW_doBackup abortBackup1", randomID).detail("tag", printable(tag)).detail("startDelay", startDelay);
+			TraceEvent("BARW_doBackupAbortBackup1", randomID).detail("tag", printable(tag)).detail("startDelay", startDelay);
 
 			try {
 				Void _ = wait(backupAgent->abortBackup(cx, tag.toString()));
 			}
 			catch (Error& e) {
-				TraceEvent("BARW_doBackup abortBackup Exception", randomID).detail("tag", printable(tag)).error(e);
+				TraceEvent("BARW_doBackupAbortBackupException", randomID).detail("tag", printable(tag)).error(e);
 				if (e.code() != error_code_backup_unneeded)
 					throw;
 			}
 		}
 
-		TraceEvent("BARW_doBackup submitBackup", randomID).detail("tag", printable(tag)).detail("stopWhenDone", stopDifferentialDelay ? "False" : "True");
+		TraceEvent("BARW_doBackupSubmitBackup", randomID).detail("tag", printable(tag)).detail("stopWhenDone", stopDifferentialDelay ? "False" : "True");
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
 			Void _ = wait(backupAgent->submitBackup(cx, StringRef(backupContainer), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
 		}
 		catch (Error& e) {
-			TraceEvent("BARW_doBackup submitBackup Exception", randomID).detail("tag", printable(tag)).error(e);
+			TraceEvent("BARW_doBackupSubmitBackupException", randomID).detail("tag", printable(tag)).error(e);
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
 		}
@@ -152,12 +152,12 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		if (stopDifferentialDelay) {
 			TEST(!stopDifferentialFuture.isReady()); //Restore starts at specified time
 			Void _ = wait(stopDifferentialFuture);
-			TraceEvent("BARW_doBackup waitToDiscontinue", randomID).detail("tag", printable(tag)).detail("differentialAfter", stopDifferentialDelay);
+			TraceEvent("BARW_doBackupWaitToDiscontinue", randomID).detail("tag", printable(tag)).detail("differentialAfter", stopDifferentialDelay);
 
 			try {
 				if (BUGGIFY) {
 					state KeyBackedTag backupTag = makeBackupTag(tag.toString());
-					TraceEvent("BARW_doBackup waitForRestorable", randomID).detail("tag", backupTag.tagName);
+					TraceEvent("BARW_doBackupWaitForRestorable", randomID).detail("tag", backupTag.tagName);
 					// Wait until the backup is in a restorable state
 					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false));
 					UidAndAbortedFlagT uidFlag = wait(backupTag.getOrThrow(cx));
@@ -190,30 +190,30 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 					// Abort the backup, if not the first backup because the second backup may have aborted the backup by now
 					if (startDelay) {
-						TraceEvent("BARW_doBackup abortBackup2", randomID).detail("tag", printable(tag))
+						TraceEvent("BARW_doBackupAbortBackup2", randomID).detail("tag", printable(tag))
 							.detail("waitStatus", resultWait).detail("lastBackupContainer", lastBackupContainer).detail("restorable", restorableFile);
 						Void _ = wait(backupAgent->abortBackup(cx, tag.toString()));
 					}
 					else {
-						TraceEvent("BARW_doBackup discontinueBackup", randomID).detail("tag", printable(tag)).detail("differentialAfter", stopDifferentialDelay);
+						TraceEvent("BARW_doBackupDiscontinueBackup", randomID).detail("tag", printable(tag)).detail("differentialAfter", stopDifferentialDelay);
 						Void _ = wait(backupAgent->discontinueBackup(cx, tag));
 					}
 				}
 
 				else {
-					TraceEvent("BARW_doBackup discontinueBackup", randomID).detail("tag", printable(tag)).detail("differentialAfter", stopDifferentialDelay);
+					TraceEvent("BARW_doBackupDiscontinueBackup", randomID).detail("tag", printable(tag)).detail("differentialAfter", stopDifferentialDelay);
 					Void _ = wait(backupAgent->discontinueBackup(cx, tag));
 				}
 			}
 			catch (Error& e) {
-				TraceEvent("BARW_doBackup discontinueBackup Exception", randomID).detail("tag", printable(tag)).error(e);
+				TraceEvent("BARW_doBackupDiscontinueBackupException", randomID).detail("tag", printable(tag)).error(e);
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 					throw;
 			}
 		}
 
 		// Wait for the backup to complete
-		TraceEvent("BARW_doBackup waitBackup", randomID).detail("tag", printable(tag));
+		TraceEvent("BARW_doBackupWaitBackup", randomID).detail("tag", printable(tag));
 		state int statusValue = wait(backupAgent->waitBackup(cx, tag.toString(), true));
 
 		state std::string statusText;
@@ -222,7 +222,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		statusText = _statusText;
 		// Can we validate anything about status?
 
-		TraceEvent("BARW_doBackup  complete", randomID).detail("tag", printable(tag))
+		TraceEvent("BARW_doBackupComplete", randomID).detail("tag", printable(tag))
 			.detail("status", statusText).detail("statusValue", statusValue);
 
 		return Void();
@@ -318,7 +318,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"), self->backupTag.toString(), self->backupRanges, true);
 				}
 				catch (Error& e) {
-					TraceEvent("BARW_submitBackup2 Exception", randomID).detail("backupTag", printable(self->backupTag)).error(e);
+					TraceEvent("BARW_submitBackup2Exception", randomID).detail("backupTag", printable(self->backupTag)).error(e);
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
@@ -376,23 +376,23 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			}
 
 			if (extraBackup.isValid()) {
-				TraceEvent("BARW_wait extraBackup", randomID).detail("backupTag", printable(self->backupTag));
+				TraceEvent("BARW_waitExtraBackup", randomID).detail("backupTag", printable(self->backupTag));
 				extraTasks = true;
 				try {
 					Void _ = wait(extraBackup);
 				}
 				catch (Error& e) {
-					TraceEvent("BARW_extraBackup Exception", randomID).detail("backupTag", printable(self->backupTag)).error(e);
+					TraceEvent("BARW_extraBackupException", randomID).detail("backupTag", printable(self->backupTag)).error(e);
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
 
-				TraceEvent("BARW_abortBackup extra", randomID).detail("backupTag", printable(self->backupTag));
+				TraceEvent("BARW_abortBackupExtra", randomID).detail("backupTag", printable(self->backupTag));
 				try {
 					Void _ = wait(backupAgent.abortBackup(cx, self->backupTag.toString()));
 				}
 				catch (Error& e) {
-					TraceEvent("BARW_abortBackup extra Exception", randomID).error(e);
+					TraceEvent("BARW_abortBackupExtraException", randomID).error(e);
 					if (e.code() != error_code_backup_unneeded)
 						throw;
 				}
@@ -484,7 +484,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					break;
 				}
 				catch (Error &e) {
-					TraceEvent("BARW_check Exception", randomID).error(e);
+					TraceEvent("BARW_checkException", randomID).error(e);
 					Void _ = wait(tr->onError(e));
 				}
 			}
