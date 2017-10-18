@@ -59,6 +59,7 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	multipart_min_part_size = CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE;
 	concurrent_uploads = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_UPLOADS;
 	concurrent_reads_per_file = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_READS_PER_FILE;
+	concurrent_writes_per_file = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_WRITES_PER_FILE;
 	read_block_size = CLIENT_KNOBS->BLOBSTORE_READ_BLOCK_SIZE;
 	read_ahead_blocks = CLIENT_KNOBS->BLOBSTORE_READ_AHEAD_BLOCKS;
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
@@ -80,6 +81,7 @@ bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(multipart_min_part_size, minps);
 	TRY_PARAM(concurrent_uploads, cu);
 	TRY_PARAM(concurrent_reads_per_file, crpf);
+	TRY_PARAM(concurrent_writes_per_file, cwpf);
 	TRY_PARAM(read_block_size, rbs);
 	TRY_PARAM(read_ahead_blocks, rab);
 	TRY_PARAM(read_cache_blocks_per_file, rcb);
@@ -105,6 +107,7 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(multipart_min_part_size, minps);
 	_CHECK_PARAM(concurrent_uploads, cu);
 	_CHECK_PARAM(concurrent_reads_per_file, crpf);
+	_CHECK_PARAM(concurrent_writes_per_file, cwpf);
 	_CHECK_PARAM(read_block_size, rbs);
 	_CHECK_PARAM(read_ahead_blocks, rab);
 	_CHECK_PARAM(read_cache_blocks_per_file, rcb);
