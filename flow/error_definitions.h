@@ -92,11 +92,12 @@ ERROR( file_not_writable, 1514, "File could not be written to" )
 ERROR( no_cluster_file_found, 1515, "No cluster file found in current directory or default location" )
 ERROR( file_too_large, 1516, "File too large to be read" )
 ERROR( non_sequential_op, 1517, "Non sequential file operation not allowed." )
-ERROR( http_bad_response, 1518, "HTTP response was not valid." )
+ERROR( http_bad_response, 1518, "HTTP response was badly formed." )
 ERROR( http_not_accepted, 1519, "HTTP request not accepted." )
 ERROR( checksum_failed, 1520, "A data checksum failed." )
 ERROR( io_timeout, 1521, "A disk IO operation failed to complete in a timely manner." )
 ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected." )
+ERROR( http_request_failed, 1523, "HTTP response code indicated failure." )
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx
