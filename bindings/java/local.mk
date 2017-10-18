@@ -40,22 +40,22 @@ endif
 
 define add_java_binding_targets
 
-  JAVA$(1)_GENERATED_SOURCES := bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/NetworkOptions.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/ClusterOptions.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/DatabaseOptions.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/TransactionOptions.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/StreamingMode.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/ConflictRangeType.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/MutationType.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/FDBException.java
+  JAVA$(1)_GENERATED_SOURCES := bindings/java/src$(1)/main/com/apple/foundationdb/NetworkOptions.java bindings/java/src$(1)/main/com/apple/foundationdb/ClusterOptions.java bindings/java/src$(1)/main/com/apple/foundationdb/DatabaseOptions.java bindings/java/src$(1)/main/com/apple/foundationdb/TransactionOptions.java bindings/java/src$(1)/main/com/apple/foundationdb/StreamingMode.java bindings/java/src$(1)/main/com/apple/foundationdb/ConflictRangeType.java bindings/java/src$(1)/main/com/apple/foundationdb/MutationType.java bindings/java/src$(1)/main/com/apple/foundationdb/FDBException.java
 
-  JAVA$(1)_SOURCES := $$(JAVA$(1)_GENERATED_SOURCES) bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/*.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/async/*.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/tuple/*.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/directory/*.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/subspace/*.java bindings/java/src$(1)/test/com/apple/apple/foundationdbdb/test/*.java
+  JAVA$(1)_SOURCES := $$(JAVA$(1)_GENERATED_SOURCES) bindings/java/src$(1)/main/com/apple/foundationdb/*.java bindings/java/src$(1)/main/com/apple/foundationdb/async/*.java bindings/java/src$(1)/main/com/apple/foundationdb/tuple/*.java bindings/java/src$(1)/main/com/apple/foundationdb/directory/*.java bindings/java/src$(1)/main/com/apple/foundationdb/subspace/*.java bindings/java/src$(1)/test/com/apple/foundationdb/test/*.java
 
   fdb_java$(1): bindings/java/foundationdb-client$(1).jar bindings/java/foundationdb-tests$(1).jar
 
   bindings/java/foundationdb-tests$(1).jar: bindings/java/.classstamp$(1)
 	@echo "Building       $$@"
-	@jar cf $$@ -C bindings/java/classes$(1)/test com/apple/apple/foundationdbdb
+	@jar cf $$@ -C bindings/java/classes$(1)/test com/apple/foundationdb
 
   bindings/java/foundationdb-client$(1).jar: bindings/java/.classstamp$(1) lib/libfdb_java.$(DLEXT)
 	@echo "Building       $$@"
 	@rm -rf bindings/java/classes$(1)/main/lib/$$(PLATFORM)/$$(java_ARCH)
 	@mkdir -p bindings/java/classes$(1)/main/lib/$$(PLATFORM)/$$(java_ARCH)
 	@cp lib/libfdb_java.$$(DLEXT) bindings/java/classes$(1)/main/lib/$$(PLATFORM)/$$(java_ARCH)/libfdb_java.$$(java_DLEXT)
-	@jar cf $$@ -C bindings/java/classes$(1)/main com/apple/apple/foundationdbdb -C bindings/java/classes$(1)/main lib
+	@jar cf $$@ -C bindings/java/classes$(1)/main com/apple/foundationdb -C bindings/java/classes$(1)/main lib
 
   fdb_java$(1)_jar_clean:
 	@rm -rf $$(JAVA$(1)_GENERATED_SOURCES)
@@ -65,20 +65,20 @@ define add_java_binding_targets
   # Redefinition of a target already defined in generated.mk, but it's "okay" and the way things were done before.
   fdb_java_clean: fdb_java$(1)_jar_clean
 
-  bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/StreamingMode.java: bin/vexillographer.exe fdbclient/vexillographer/fdb.options
+  bindings/java/src$(1)/main/com/apple/foundationdb/StreamingMode.java: bin/vexillographer.exe fdbclient/vexillographer/fdb.options
 	@echo "Building       Java options"
 	@$$(MONO) bin/vexillographer.exe fdbclient/vexillographer/fdb.options java $$(@D)
 
-  bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/MutationType.java: bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/StreamingMode.java
+  bindings/java/src$(1)/main/com/apple/foundationdb/MutationType.java: bindings/java/src$(1)/main/com/apple/foundationdb/StreamingMode.java
 	@true
 
-  bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/ConflictRangeType.java: bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/StreamingMode.java
+  bindings/java/src$(1)/main/com/apple/foundationdb/ConflictRangeType.java: bindings/java/src$(1)/main/com/apple/foundationdb/StreamingMode.java
 	@true
 
-  bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/FDBException.java: bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/StreamingMode.java
+  bindings/java/src$(1)/main/com/apple/foundationdb/FDBException.java: bindings/java/src$(1)/main/com/apple/foundationdb/StreamingMode.java
 	@true
 
-  bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/%Options.java: bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/StreamingMode.java
+  bindings/java/src$(1)/main/com/apple/foundationdb/%Options.java: bindings/java/src$(1)/main/com/apple/foundationdb/StreamingMode.java
 	@true
 
   bindings/java/src$(1)/main/overview.html: bindings/java/src$(1)/main/overview.html.in $$(ALL_MAKEFILES) versions.target
@@ -89,8 +89,8 @@ define add_java_binding_targets
 	@rm -rf bindings/java/classes$(1)
 	@mkdir -p bindings/java/classes$(1)/main
 	@mkdir -p bindings/java/classes$(1)/test
-	@$$(JAVAC) $$(JAVA$(1)FLAGS) -d bindings/java/classes$(1)/main bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/*.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/async/*.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/tuple/*.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/directory/*.java bindings/java/src$(1)/main/com/apple/apple/foundationdbdb/subspace/*.java
-	@$$(JAVAC) $$(JAVA$(1)FLAGS) -cp bindings/java/classes$(1)/main -d bindings/java/classes$(1)/test bindings/java/src$(1)/test/com/apple/apple/foundationdbdb/test/*.java
+	@$$(JAVAC) $$(JAVA$(1)FLAGS) -d bindings/java/classes$(1)/main bindings/java/src$(1)/main/com/apple/foundationdb/*.java bindings/java/src$(1)/main/com/apple/foundationdb/async/*.java bindings/java/src$(1)/main/com/apple/foundationdb/tuple/*.java bindings/java/src$(1)/main/com/apple/foundationdb/directory/*.java bindings/java/src$(1)/main/com/apple/foundationdb/subspace/*.java
+	@$$(JAVAC) $$(JAVA$(1)FLAGS) -cp bindings/java/classes$(1)/main -d bindings/java/classes$(1)/test bindings/java/src$(1)/test/com/apple/foundationdb/test/*.java
 	@echo timestamp > bindings/java/.classstamp$(1)
 
   javadoc$(1): $$(JAVA$(1)_SOURCES) bindings/java/src$(1)/main/overview.html
@@ -101,7 +101,7 @@ define add_java_binding_targets
 		-windowtitle "FoundationDB Java Client API" \
 		-doctitle "FoundationDB Java Client API" \
 		-link "http://docs.oracle.com/javase/8/docs/api" \
-		com.apple.cie.foundationdb.org.apple.cie.foundationdb.async com.apple.cie.foundationdb.tuple com.apple.cie.foundationdb.directory com.apple.cie.foundationdb.subspace
+		com.apple.foundationdb.org.apple.foundationdb.async com.apple.foundationdb.tuple com.apple.foundationdb.directory com.apple.foundationdb.subspace
 
   javadoc$(1)_clean:
 	@rm -rf $$(JAVADOC_DIR)/javadoc$(1)
@@ -152,7 +152,7 @@ define add_java_binding_targets
     packages/fdb-java$(1)-$$(JARVER)-sources.jar: $$(JAVA$(1)_GENERATED_SOURCES) versions.target
 	  @echo "Building       $$@"
 	  @rm -f $$@
-	  @jar cf $(TOPDIR)/$$@ -C bindings/java/src$(1)/main com/apple/apple/foundationdbdb
+	  @jar cf $(TOPDIR)/$$@ -C bindings/java/src$(1)/main com/apple/foundationdb
 
     packages/fdb-java$(1)-$$(JARVER)-javadoc.jar: javadoc$(1) versions.target
 	  @echo "Building       $$@"

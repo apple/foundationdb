@@ -238,7 +238,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				//SOMEDAY: test lower memory limits, without making them too small and causing the database to stop making progress
 				FlowTransport::createInstance(1);
 				Sim2FileSystem::newFileSystem();
-				simInitTLS();
+				//simInitTLS();
 				NetworkAddress n(ip, port, true, useSSL);
 				Future<Void> listen = FlowTransport::transport().bind( n, n );
 				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "");
@@ -807,9 +807,10 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
 	// Use SSL half the time
-	bool sslEnabled = g_random->random01() < 0.05;
-	TEST( sslEnabled ); // SSL enabled
-	TEST( !sslEnabled ); // SSL disabled
+	//bool sslEnabled = g_random->random01() < 0.05;
+	//TEST( sslEnabled ); // SSL enabled
+	//TEST( !sslEnabled ); // SSL disabled
+	bool sslEnabled = false; // FIXME: Until we have a good solution for the TLS plugin, don't test SSL connections.
 
 	vector<NetworkAddress> coordinatorAddresses;
 	for( int dc = 0; dc < dataCenters; dc++ ) {
@@ -1011,7 +1012,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 			"TestSystem", 0x01010101, 1, LocalityData(Optional<Standalone<StringRef>>(), Standalone<StringRef>(g_random->randomUniqueID().toString()), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()), ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "" ), TaskDefaultYield ) );
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(1);
-	simInitTLS();
+	//simInitTLS();
 
 	TEST(true);  // Simulation start
 

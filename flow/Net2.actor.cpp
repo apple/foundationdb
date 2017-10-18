@@ -31,13 +31,12 @@
 #include "IThreadPool.h"
 #include "boost/range.hpp"
 
-extern void startProfiling(INetwork* network);
-
 #include "ActorCollection.h"
 #include "ThreadSafeQueue.h"
 #include "ThreadHelper.actor.h"
 #include "TDMetric.actor.h"
 #include "AsioReactor.h"
+#include "flow/Profiler.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -549,7 +548,11 @@ void Net2::run() {
 #endif
 
 	timeOffsetLogger = logTimeOffset();
-	startProfiling(this);
+	const char *flow_profiler_enabled = getenv("FLOW_PROFILER_ENABLED");
+	if (flow_profiler_enabled != nullptr && *flow_profiler_enabled != '\0') {
+		// The empty string check is to allow running `FLOW_PROFILER_ENABLED= ./fdbserver` to force disabling flow profiling at startup.
+		startProfiling(this);
+	}
 
 	// Get the address to the launch function
 	typedef void (*runCycleFuncPtr)();

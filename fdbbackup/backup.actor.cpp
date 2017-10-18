@@ -99,7 +99,7 @@ enum {
 	OPT_CLUSTERFILE, OPT_QUIET, OPT_DRYRUN, OPT_FORCE,
 	OPT_HELP, OPT_DEVHELP, OPT_VERSION, OPT_PARENTPID, OPT_CRASHONERROR,
 	OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACE, OPT_TRACE_DIR,
-	OPT_KNOB, OPT_TRACE_LOG_GROUP, OPT_LOCALITY,
+	OPT_KNOB, OPT_TRACE_LOG_GROUP, OPT_MEMLIMIT, OPT_LOCALITY,
 
 	//DB constants
 	OPT_SOURCE_CLUSTER,
@@ -123,6 +123,8 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -158,6 +160,8 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -184,6 +188,8 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -207,6 +213,8 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -232,6 +240,8 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -257,6 +267,8 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -292,6 +304,8 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_FORCE,           "-f",               SO_NONE },
 	{ OPT_FORCE,           "--force",          SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -318,6 +332,8 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_LOCALITY,        "--locality_",      SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -345,6 +361,8 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -372,6 +390,8 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -397,6 +417,8 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -423,6 +445,8 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -436,6 +460,8 @@ CSimpleOpt::SOption g_rgBlobOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
+	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
+	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
 	{ OPT_HELP,            "-?",               SO_NONE },
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
@@ -488,6 +514,9 @@ static void printAgentUsage(bool devhelp) {
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+		   "                 Memory limit. The default value is 8GiB. When specified\n"
+		   "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -596,6 +625,9 @@ static void printDBAgentUsage(bool devhelp) {
 		   "  --logdir PATH  Specifes the output directory for trace files. If\n"
 		   "                 unspecified, defaults to the current directory. Has\n"
 		   "                 no effect unless --log is specified.\n");
+	printf("  -m SIZE, --memory SIZE\n"
+		   "                 Memory limit. The default value is 8GiB. When specified\n"
+		   "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
@@ -865,7 +897,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			totalBlobStats.create(p.first + ".$sum") = p.second;
 
 		state FileBackupAgent fba;
-		state Standalone<RangeResultRef> backupTagNames = wait( tr->getRange(fba.tagNames.range(), 10000));
+		state std::vector<KeyBackedTag> backupTags = wait(getAllBackupTags(tr));
 		state std::vector<Future<Version>> tagLastRestorableVersions;
 		state std::vector<Future<int>> tagStates;
 		state std::vector<Future<std::string>> tagContainers;
@@ -873,14 +905,26 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<int64_t>> tagLogBytes;
 		state int i = 0;
 
-		for(i = 0; i < backupTagNames.size(); i++) {
-			Standalone<KeyRef> tagName = fba.tagNames.unpack(backupTagNames[i].key).getString(0);
-			UID tagUID = BinaryReader::fromStringRef<UID>(backupTagNames[i].value, Unversioned());
-			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, tagName));
-			tagStates.push_back(fba.getStateValue(tr, tagUID));
-			tagContainers.push_back(fba.getLastBackupContainer(tr, tagUID));
-			tagRangeBytes.push_back(fba.getRangeBytesWritten(tr, tagUID));
-			tagLogBytes.push_back(fba.getLogBytesWritten(tr, tagUID));
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		state std::vector<KeyBackedTag>::iterator tag;
+		for (tag = backupTags.begin(); tag != backupTags.end(); tag++) {
+			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag->getOrThrow(tr));
+			state BackupConfig config(uidAndAbortedFlag.first);
+
+			EBackupState status = wait(config.stateEnum().getOrThrow(tr));
+			tagStates.push_back(status);
+
+			int64_t rangeBytesWritten = wait(config.rangeBytesWritten().getD(tr, 0));
+			tagRangeBytes.push_back(rangeBytesWritten);
+
+			int64_t logBytesWritten = wait(config.logBytesWritten().getD(tr, 0));
+			tagLogBytes.push_back(logBytesWritten);
+
+			std::string backupContainer = wait(config.backupContainer().getOrThrow(tr));
+			tagContainers.push_back(backupContainer);
+
+			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
 		}
 
 		Void _ = wait( waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) && waitForAll(tagRangeBytes) && waitForAll(tagLogBytes));
@@ -888,16 +932,15 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		JSONDoc tagsRoot = layerRoot.subDoc("tags.$latest");
 		layerRoot.create("tags.timestamp") = now();
 
-		for (int j = 0; j < backupTagNames.size(); j++) {
-			std::string tagName = fba.tagNames.unpack(backupTagNames[j].key).getString(0).toString();
-
+		int j = 0;
+		for (KeyBackedTag eachTag : backupTags) {
 			Version last_restorable_version = tagLastRestorableVersions[j].get();
 			double last_restorable_seconds_behind = ((double)readVer - last_restorable_version) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 			BackupAgentBase::enumState status = (BackupAgentBase::enumState)tagStates[j].get();
 			const char *statusText = fba.getStateText(status);
 
 			// The object for this backup tag inside this instance's subdocument
-			JSONDoc tagRoot = tagsRoot.subDoc(tagName);
+			JSONDoc tagRoot = tagsRoot.subDoc(eachTag.tagName);
 			tagRoot.create("current_container") = tagContainers[j].get();
 			tagRoot.create("current_status") = statusText;
 			tagRoot.create("last_restorable_version") = tagLastRestorableVersions[j].get();
@@ -906,6 +949,8 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
+
+			j++;
 		}
 	}
 	else if(exe == EXE_DR_AGENT) {
@@ -1210,12 +1255,17 @@ ACTOR Future<Void> submitBackup(Database db, std::string destinationDir, Standal
 		}
 
 		if (dryRun) {
-			state UID logUid = wait(backupAgent.getLogUid(db, StringRef(tagName)));
-			state int backupStatus = wait(backupAgent.getStateValue(db, logUid));
+			state KeyBackedTag tag = makeBackupTag(tagName);
+			Optional<UidAndAbortedFlagT> uidFlag = wait(tag.get(db));
 
-			// Throw error if a backup is currently running until we support parallel backups
-			if (BackupAgentBase::isRunnable((BackupAgentBase::enumState)backupStatus)) {
-				throw backup_duplicate();
+			if (uidFlag.present()) {
+				BackupConfig config(uidFlag.get().first);
+				EBackupState backupStatus = wait(config.stateEnum().getOrThrow(db));
+
+				// Throw error if a backup is currently running until we support parallel backups
+				if (BackupAgentBase::isRunnable((BackupAgentBase::enumState)backupStatus)) {
+					throw backup_duplicate();
+				}
 			}
 
 			if (waitForCompletion) {
@@ -1239,12 +1289,12 @@ ACTOR Future<Void> submitBackup(Database db, std::string destinationDir, Standal
 		}
 
 		else {
-			Void _ = wait(backupAgent.submitBackup(db, KeyRef(destinationDir), KeyRef(tagName), backupRanges, stopWhenDone));
+			Void _ = wait(backupAgent.submitBackup(db, KeyRef(destinationDir), tagName, backupRanges, stopWhenDone));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
 				printf("Submitted and now waiting for the backup on tag `%s' to complete.\n", printable(StringRef(tagName)).c_str());
-				int _ = wait(backupAgent.waitBackup(db, StringRef(tagName)));
+				int _ = wait(backupAgent.waitBackup(db, tagName));
 			}
 			else {
 				// Check if a backup agent is running
@@ -1344,7 +1394,7 @@ ACTOR Future<Void> statusBackup(Database db, std::string tagName, int errorLimit
 	{
 		state FileBackupAgent backupAgent;
 
-		std::string	statusText = wait(backupAgent.getStatus(db, errorLimit, StringRef(tagName)));
+		std::string	statusText = wait(backupAgent.getStatus(db, errorLimit, tagName));
 		printf("%s\n", statusText.c_str());
 	}
 	catch (Error& e) {
@@ -1393,7 +1443,7 @@ ACTOR Future<Void> abortBackup(Database db, std::string tagName) {
 	{
 		state FileBackupAgent backupAgent;
 
-		Void _ = wait(backupAgent.abortBackup(db, Key(tagName)));
+		Void _ = wait(backupAgent.abortBackup(db, tagName));
 
 		printf("The backup on tag `%s' was successfully aborted.\n", printable(StringRef(tagName)).c_str());
 	}
@@ -1423,7 +1473,7 @@ ACTOR Future<Void> waitBackup(Database db, std::string tagName, bool stopWhenDon
 	{
 		state FileBackupAgent backupAgent;
 
-		int status = wait(backupAgent.waitBackup(db, StringRef(tagName), stopWhenDone));
+		int status = wait(backupAgent.waitBackup(db, tagName, stopWhenDone));
 
 		printf("The backup on tag `%s' %s.\n", printable(StringRef(tagName)).c_str(),
 			BackupAgentBase::getStateText((BackupAgentBase::enumState) status));
@@ -1448,7 +1498,7 @@ ACTOR Future<Void> discontinueBackup(Database db, std::string tagName, bool wait
 		// Wait for the backup to complete, if requested
 		if (waitForCompletion) {
 			printf("Discontinued and now waiting for the backup on tag `%s' to complete.\n", printable(StringRef(tagName)).c_str());
-			int _ = wait(backupAgent.waitBackup(db, StringRef(tagName)));
+			int _ = wait(backupAgent.waitBackup(db, tagName));
 		}
 		else {
 			printf("The backup on tag `%s' was successfully discontinued.\n", printable(StringRef(tagName)).c_str());
@@ -1998,6 +2048,8 @@ int main(int argc, char* argv[]) {
 		ESOError	lastError;
 		bool partial = true;
 		LocalityData localities;
+		uint64_t memLimit = 8LL << 30;
+		Optional<uint64_t> ti;
 
 		std::vector<std::string> blobArgs;
 
@@ -2196,6 +2248,15 @@ int main(int argc, char* argv[]) {
 				case OPT_CRASHONERROR:
 					g_crashOnError = true;
 					break;
+				case OPT_MEMLIMIT:
+					ti = parse_with_suffix(args->OptionArg(), "MiB");
+					if (!ti.present()) {
+						fprintf(stderr, "ERROR: Could not parse memory limit from `%s'\n", args->OptionArg());
+						printHelpTeaser(argv[0]);
+						flushAndExit(FDB_EXIT_ERROR);
+					}
+					memLimit = ti.get();
+					break;
 			}
 		}
 
@@ -2317,6 +2378,7 @@ int main(int argc, char* argv[]) {
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 		Error::init();
 		std::set_new_handler( &platform::outOfMemory );
+		setMemoryQuota( memLimit );
 
 		int total = 0;
 		for(auto i = Error::errorCounts().begin(); i != Error::errorCounts().end(); ++i)
@@ -2377,6 +2439,7 @@ int main(int argc, char* argv[]) {
 				.detail("PackageName", FDB_VT_PACKAGE_NAME)
 				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
 				.detail("CommandLine", commandLine)
+				.detail("MemoryLimit", memLimit)
 				.trackLatest("ProgramStart");
 
 			db = cluster->createDatabase(databaseKey, localities).get();

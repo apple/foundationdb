@@ -37,12 +37,13 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbclient/KeyBackedTypes.h"
 
 void failAfter( Future<Void> trigger, Endpoint e );
 
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
-	ReplyPromise<Void> reply;
+	ReplyPromise<ProcessClass> reply;
 	Generation gen;
 	int reboots;
 	WorkerInterface interf;
@@ -50,7 +51,7 @@ struct WorkerInfo : NonCopyable {
 	ProcessClass processClass;
 
 	WorkerInfo() : gen(-1), reboots(0) {}
-	WorkerInfo( Future<Void> watcher, ReplyPromise<Void> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
+	WorkerInfo( Future<Void> watcher, ReplyPromise<ProcessClass> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
 		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass) {}
 
 	WorkerInfo( WorkerInfo&& r ) noexcept(true) : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
@@ -1054,9 +1055,11 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 				}
 			}
 			when( Void _ = wait( failed ) ) {  // remove workers that have failed
-				cluster->id_worker[ worker.locality.processId() ].reply.send( Void() );
+				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
+				if (!failedWorkerInfo.reply.isSet()) {
+					failedWorkerInfo.reply.send( failedWorkerInfo.processClass );
+				}
 				cluster->id_worker.erase( worker.locality.processId() );
-
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
 				return Void();
 			}
@@ -1317,43 +1320,125 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
-	ProcessClass processClass = req.processClass;
+	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
 
-	if( info == self->id_worker.end() ) {
+	// Check process class if needed
+	if (self->gotProcessClasses && (info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen)) {
 		auto classIter = self->id_class.find(w.locality.processId());
 
-		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.processClass.classType() == ProcessClass::UnsetClass) ) {
-			processClass = classIter->second;
+		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
+			newProcessClass = classIter->second;
+		} else {
+			newProcessClass = req.initialClass;
 		}
 
-		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.processClass, processClass );
+		// Notify the worker to register again with new process class
+		if (newProcessClass != req.processClass && !req.reply.isSet()) {
+			req.reply.send( newProcessClass );
+		}
+	}
+
+	if( info == self->id_worker.end() ) {
+		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass );
 		checkOutstandingRequests( self );
 
 		return;
 	}
 
 	if( info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
-		if( info->second.processClass.classSource() == ProcessClass::CommandLineSource ||
-		   (info->second.processClass.classSource() == ProcessClass::AutoSource && req.processClass.classType() != ProcessClass::UnsetClass) ) {
-			info->second.processClass = req.processClass;
+		if (info->second.processClass != newProcessClass) {
+			info->second.processClass = newProcessClass;
 		}
 
-		info->second.initialClass = req.processClass;
-		info->second.reply.send( Never() );
+		info->second.initialClass = req.initialClass;
+		if (!info->second.reply.isSet()) {
+			info->second.reply.send( Never() );
+		}
 		info->second.reply = req.reply;
 		info->second.gen = req.generation;
 
 		if(info->second.interf.id() != w.id()) {
 			info->second.interf = w;
-			info->second.watcher = workerAvailabilityWatch( w, req.processClass, self );
+			info->second.watcher = workerAvailabilityWatch( w, newProcessClass, self );
 		}
 		return;
 	}
 
 	TEST(true); // Received an old worker registration request.
+}
+
+#define TIME_KEEPER_VERSION LiteralStringRef("1")
+
+ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
+	try {
+		loop {
+			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(
+					new ReadYourWritesTransaction(self->cx));
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
+				Void _ = wait(tr->commit());
+				break;
+			} catch (Error &e) {
+				Void _ = wait(tr->onError(e));
+			}
+		}
+	} catch (Error & e) {
+		TraceEvent(SevWarnAlways, "TimeKeeperSetupVersionFailed").detail("cause", e.what());
+	}
+
+	return Void();
+}
+
+// This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid running
+// out of space, it limits the max number of entries and clears old entries on each update. This mapping is used from
+// backup and restore to get the version information for a timestamp.
+ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+	TraceEvent(SevInfo, "TimeKeeperStarted");
+
+	Void _ = wait(timeKeeperSetVersion(self));
+
+	loop {
+		try {
+			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					Optional<Value> disableValue = wait( tr->get(timeKeeperDisableKey) );
+					if(disableValue.present()) {
+						break;
+					}
+
+					Version v = tr->getReadVersion().get();
+					int64_t currentTime = (int64_t)now();
+					versionMap.set(tr, currentTime, v);
+
+					int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
+					if (ttl > 0) {
+						versionMap.erase(tr, 0, ttl);
+					}
+
+					Void _ = wait(tr->commit());
+					break;
+				} catch (Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
+		} catch (Error &e) {
+			// Failed to update time-version map even after retries, just ignore this iteration
+			TraceEvent(SevWarn, "TimeKeeperFailed").detail("cause", e.what());
+		}
+
+		Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));
+	}
 }
 
 ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
@@ -1474,11 +1559,19 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 
 					for( auto& w : self->id_worker ) {
 						auto classIter = self->id_class.find(w.first);
+						ProcessClass newProcessClass;
 
 						if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || w.second.initialClass.classType() == ProcessClass::UnsetClass) ) {
-							w.second.processClass = classIter->second;
+							newProcessClass = classIter->second;
 						} else {
-							w.second.processClass = w.second.initialClass;
+							newProcessClass = w.second.initialClass;
+						}
+
+						if (newProcessClass != w.second.processClass) {
+							w.second.processClass = newProcessClass;
+							if (!w.second.reply.isSet()) {
+								w.second.reply.send( newProcessClass );
+							}
 						}
 					}
 
@@ -1500,16 +1593,14 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 }
 
 ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db) {
-	state const Key sampleRate= LiteralStringRef("client_txn_sample_rate/").withPrefix(fdbClientInfoPrefixRange.begin);
-	state const Key sizeLimit = LiteralStringRef("client_txn_size_limit/").withPrefix(fdbClientInfoPrefixRange.begin);
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state Optional<Value> rateVal = wait(tr.get(sampleRate));
-				state Optional<Value> limitVal = wait(tr.get(sizeLimit));
+				state Optional<Value> rateVal = wait(tr.get(fdbClientInfoTxnSampleRate));
+				state Optional<Value> limitVal = wait(tr.get(fdbClientInfoTxnSizeLimit));
 				ClientDBInfo clientInfo = db->clientInfo->get();
 				if (rateVal.present()) {
 					double rate = BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned());
@@ -1524,8 +1615,8 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 					db->clientInfo->set(clientInfo);
 				}
 
-				state Future<Void> watchRateFuture = tr.watch(sampleRate);
-				state Future<Void> watchLimitFuture = tr.watch(sizeLimit);
+				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
+				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				Void _ = wait(tr.commit());
 				choose {
 					when(Void _ = wait(watchRateFuture)) { break; }
@@ -1551,6 +1642,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
 	addActor.send( self.updateWorkerList.init( self.db.db ) );
 	addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
+	addActor.send( timeKeeper(&self) );
 	addActor.send( monitorProcessClasses(&self) );
 	addActor.send( monitorClientTxnInfoConfigs(&self.db) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());

@@ -36,6 +36,8 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/MonitorLeader.h"
+#include "fdbclient/ClientWorkerInterface.h"
+#include "flow/Profiler.h"
 
 #ifdef __linux__
 #ifdef USE_GPERFTOOLS
@@ -248,13 +250,19 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	return result;
 }
 
-ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, WorkerInterface interf, ProcessClass processClass ) {
+ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, WorkerInterface interf, Reference<AsyncVar<ProcessClass>> asyncProcessClass, ProcessClass initialClass ) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	state Generation requestGeneration = 0;
+
 	loop {
-		Future<Void> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, processClass, requestGeneration++) ) ) : Never();
-		Void _ = wait( registrationReply || ccInterface->onChange() );
+		Future<ProcessClass> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, initialClass, asyncProcessClass->get(), requestGeneration++) ) ) : Never();
+		choose {
+			when ( ProcessClass newProcessClass = wait( registrationReply )) {
+				asyncProcessClass->set(newProcessClass);
+			}
+			when ( Void _ = wait( ccInterface->onChange() )) { }
+		}
 	}
 }
 
@@ -282,22 +290,51 @@ void registerThreadForProfiling() {
 
 //Starts or stops the CPU profiler
 void updateCpuProfiler(ProfilerRequest req) {
-#if defined(__linux__) && defined(USE_GPERFTOOLS)
-#ifndef VALGRIND
-	if(req.enabled) {
-		char *workingDir = get_current_dir_name();
-		const char *path = (std::string(workingDir) + "/" + req.outputFile.toString()).c_str();
-		ProfilerOptions *options = new ProfilerOptions();
-		options->filter_in_thread = &filter_in_thread;
-		options->filter_in_thread_arg = NULL;
-		ProfilerStartWithOptions(path, options);
-		free(workingDir);
-	}
-	else {
-		ProfilerStop();
-	}
+	switch (req.type) {
+	case ProfilerRequest::Type::GPROF:
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+		switch (req.action) {
+		case ProfilerRequest::Action::ENABLE: {
+			const char *path = (const char*)req.outputFile.begin();
+			ProfilerOptions *options = new ProfilerOptions();
+			options->filter_in_thread = &filter_in_thread;
+			options->filter_in_thread_arg = NULL;
+			ProfilerStartWithOptions(path, options);
+			free(workingDir);
+			break;
+		}
+		case ProfilerRequest::Action::DISABLE:
+			ProfilerStop();
+			break;
+		case ProfilerRequest::Action::RUN:
+			ASSERT(false);  // User should have called runProfiler.
+			break;
+		}
 #endif
-#endif
+		break;
+	case ProfilerRequest::Type::FLOW:
+		switch (req.action) {
+		case ProfilerRequest::Action::ENABLE:
+			startProfiling(g_network, {}, req.outputFile);
+			break;
+		case ProfilerRequest::Action::DISABLE:
+			stopProfiling();
+			break;
+		case ProfilerRequest::Action::RUN:
+			ASSERT(false);  // User should have called runProfiler.
+			break;
+		}
+		break;
+	}
+}
+
+ACTOR Future<Void> runProfiler(ProfilerRequest req) {
+	req.action = ProfilerRequest::Action::ENABLE;
+	updateCpuProfiler(req);
+	Void _ = wait(delay(req.duration));
+	req.action = ProfilerRequest::Action::DISABLE;
+	updateCpuProfiler(req);
+	return Void();
 }
 
 ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit ) {
@@ -457,7 +494,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 }
 
 ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData localities,
-	ProcessClass processClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix ) {
+	Reference<AsyncVar<ProcessClass>> asyncProcessClass, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix ) {
 	state PromiseStream< ErrorInfo > errors;
 	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
@@ -534,6 +571,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	{
 		auto recruited = interf;  //ghetto! don't we all love a good #define
 		DUMPTOKEN(recruited.clientInterface.reboot);
+		DUMPTOKEN(recruited.clientInterface.profiler);
 		DUMPTOKEN(recruited.tLog);
 		DUMPTOKEN(recruited.master);
 		DUMPTOKEN(recruited.masterProxy);
@@ -546,7 +584,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		DUMPTOKEN(recruited.setMetricsRate);
 		DUMPTOKEN(recruited.eventLogRequest);
 		DUMPTOKEN(recruited.traceBatchDumpRequest);
-		DUMPTOKEN(recruited.cpuProfilerRequest);
 	}
 
 	try {
@@ -620,7 +657,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		startRole( interf.id(), interf.id(), "Worker", details );
 
 		Void _ = wait(waitForAll(recoveries));
-		errorForwarders.add( registrationClient( ccInterface, interf, processClass ) );
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncProcessClass, initialClass ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -644,6 +681,27 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					TraceEvent("ProcessReboot");
 					ASSERT(!rebootReq.deleteData);
 					flushAndExit(0);
+				}
+			}
+			when( ProfilerRequest req = waitNext(interf.clientInterface.profiler.getFuture()) ) {
+				state ProfilerRequest profilerReq = req;
+				// There really isn't a great "filepath sanitizer" or "filepath escape" function available,
+				// thus we instead enforce a different requirement.  One can only write to a file that's
+				// beneath the working directory, and we remove the ability to do any symlink or ../..
+				// tricks by resolving all paths through `abspath` first.
+				try {
+					std::string realLogDir = abspath(SERVER_KNOBS->LOG_DIRECTORY);
+					std::string realOutPath = abspath(realLogDir + "/" + profilerReq.outputFile.toString());
+					if (realLogDir.size() < realOutPath.size() &&
+					    strncmp(realLogDir.c_str(), realOutPath.c_str(), realLogDir.size()) == 0) {
+						profilerReq.outputFile = realOutPath;
+						uncancellable(runProfiler(profilerReq));
+						profilerReq.reply.send(Void());
+					} else {
+						profilerReq.reply.sendError(client_invalid_operation());
+					}
+				} catch (Error& e) {
+					profilerReq.reply.sendError(e);
 				}
 			}
 			when( RecruitMasterRequest req = waitNext(interf.master.getFuture()) ) {
@@ -788,10 +846,6 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				g_traceBatch.dump();
 				req.reply.send(Void());
 			}
-			when( ProfilerRequest req = waitNext(interf.cpuProfilerRequest.getFuture()) ) {
-				updateCpuProfiler(req);
-				req.reply.send(Void());
-			}
 			when( DiskStoreRequest req = waitNext(interf.diskStoreRequest.getFuture()) ) {
 				Standalone<VectorRef<UID>> ids;
 				for(DiskStore d : getDiskStores(folder)) {
@@ -924,7 +978,7 @@ ACTOR Future<Void> fdbd(
 		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncProcessClass), "clusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix), "workerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncProcessClass, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix), "workerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		Void _ = wait( quorum(v,1) );

@@ -94,6 +94,14 @@ public:
 		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
 		concurrentRequests(knobs.concurrent_requests),
 		concurrentUploads(knobs.concurrent_uploads) {
+
+		if(addresses.size() == 0)
+			throw connection_string_invalid();
+
+		int perAddressLimit = std::max<int>( 1, knobs.concurrent_requests/addrs.size() );
+		for(auto &addr : addrs) {
+			concurrentRequestsPerAddress[addr] = Reference<FlowLock>( new FlowLock(perAddressLimit) );
+		}
 	}
 
 	static std::string getURLFormat(bool withResource = false) {
@@ -110,10 +118,10 @@ public:
 	// Get a normalized version of this URL with the given resource, the host and any IP addresses (possibly from DNS
 	// if resolve was done) and any non-default BlobKnob values as URL parameters.
 	std::string getResourceURL(std::string resource);
-	Future<Reference<IConnection>> connect();
+	Future<Reference<IConnection>> connect(NetworkAddress address);
 
 	typedef std::pair<Reference<IConnection>, double> ConnPoolEntry;
-	std::list<ConnPoolEntry> connectionPool;
+	std::map<NetworkAddress,std::list<ConnPoolEntry>> connectionPool;
 
 	std::string host;
 	uint16_t port;
@@ -126,6 +134,7 @@ public:
 	Reference<IRateControl> requestRate;
 	Reference<IRateControl> sendRate;
 	Reference<IRateControl> recvRate;
+	std::map<NetworkAddress,Reference<FlowLock>> concurrentRequestsPerAddress;
 	FlowLock concurrentRequests;
 	FlowLock concurrentUploads;
 

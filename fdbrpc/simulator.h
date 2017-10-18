@@ -56,6 +56,7 @@ public:
 		Reference<IListener> listener;
 		bool failed;
 		bool excluded;
+		bool cleared;
 		int64_t cpuTicks;
 		bool rebooting;
 		std::vector<flowGlobalType> globals;
@@ -70,12 +71,14 @@ public:
 			: name(name), locality(locality), startingClass(startingClass), address(address), dataFolder(dataFolder),
 				network(net), coordinationFolder(coordinationFolder), failed(false), excluded(false), cpuTicks(0),
 				rebooting(false), fault_injection_p1(0), fault_injection_p2(0),
-				fault_injection_r(0), machine(0) {}
+				fault_injection_r(0), machine(0), cleared(false) {}
 
 		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
 
 		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
-		bool isAvailable() const { return !excluded && isReliable(); }
+		bool isAvailable() const { return !isExcluded() && isReliable(); }
+		bool isExcluded() const { return !excluded; }
+		bool isCleared() const { return !cleared; }
 
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {
@@ -89,6 +92,7 @@ public:
 				case ProcessClass::TesterClass: return false;
 				case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
+				case ProcessClass::ClusterControllerClass: return false;
 				default: return false;
 			}
 		}
@@ -97,8 +101,8 @@ public:
 		inline void setGlobal(size_t id, flowGlobalType v) { globals.resize(std::max(globals.size(),id+1)); globals[id] = v; };
 
 		std::string toString() const {
-			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s  excluded: %d",
-			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder, excluded); }
+			return format("name: %s  address: %d.%d.%d.%d:%d  zone: %s  datahall: %s  class: %s  coord: %s data: %s  excluded: %d cleared: %d",
+			name, (address.ip>>24)&0xff, (address.ip>>16)&0xff, (address.ip>>8)&0xff, address.ip&0xff, address.port, (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"), (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"), startingClass.toString().c_str(), coordinationFolder, dataFolder, excluded, cleared); }
 
 		// Members not for external use
 		Promise<KillType> shutdownSignal;
@@ -144,8 +148,8 @@ public:
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool killIsSafe = false, bool forceKill = false ) = 0;
-	virtual void killDataCenter(Optional<Standalone<StringRef>> dcId, KillType ) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool killIsSafe = false, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, KillType* ktFinal = NULL) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
@@ -197,6 +201,14 @@ public:
 		if (roleText.empty())
 				roleText = "[unset]";
 		return roleText;
+	}
+
+	virtual void clearAddress(NetworkAddress const& address) {
+		clearedAddresses[address]++;
+		TraceEvent("ClearAddress").detail("Address", address).detail("Value", clearedAddresses[address]);
+	}
+	virtual bool isCleared(NetworkAddress const& address) const {
+		return clearedAddresses.find(address) != clearedAddresses.end();
 	}
 
 	virtual void excludeAddress(NetworkAddress const& address) {
@@ -296,6 +308,7 @@ protected:
 private:
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
 	std::map<NetworkAddress, int> excludedAddresses;
+	std::map<NetworkAddress, int> clearedAddresses;
 	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
 	bool allSwapsDisabled;
 };

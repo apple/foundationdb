@@ -37,10 +37,12 @@ protected:
 	void initKnob( double& knob, double value, std::string const& name );
 	void initKnob( int64_t& knob, int64_t value, std::string const& name );
 	void initKnob( int& knob, int value, std::string const& name );
+	void initKnob( std::string& knob, const std::string& value, const std::string& name );
 
 	std::map<std::string, double*> double_knobs;
 	std::map<std::string, int64_t*> int64_knobs;
 	std::map<std::string, int*> int_knobs;
+	std::map<std::string, std::string*> string_knobs;
 };
 
 class FlowKnobs : public Knobs {
@@ -139,7 +141,7 @@ public:
 	//TDMetrics
 	int64_t MAX_METRIC_SIZE;
 	int64_t MAX_METRIC_LEVEL;
-	double METRIC_LEVEL_DIVISOR; 
+	double METRIC_LEVEL_DIVISOR;
 	int METRIC_LIMIT_START_QUEUE_SIZE;
 	int METRIC_LIMIT_RESPONSE_FACTOR;
 	int MAX_METRICS;

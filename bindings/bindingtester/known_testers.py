@@ -47,11 +47,11 @@ class Tester:
 def _absolute_path(path):
     return os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', path)
 
-_java_cmd = 'java -ea -cp %s:%s com.apple.cie.foundationdb.test.' % (
+_java_cmd = 'java -ea -cp %s:%s com.apple.foundationdb.test.' % (
              _absolute_path('java/foundationdb-client.jar'),
              _absolute_path('java/foundationdb-tests.jar'))
 
-_java_completable_cmd = 'java -ea -cp %s:%s com.apple.cie.foundationdb.test.' % (
+_java_completable_cmd = 'java -ea -cp %s:%s com.apple.foundationdb.test.' % (
               _absolute_path('java/foundationdb-client-completable.jar'),
               _absolute_path('java/foundationdb-tests-completable.jar'))
 

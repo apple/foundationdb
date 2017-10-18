@@ -140,7 +140,7 @@ struct CommitBugWorkload : TestWorkload
 				}
 				catch(Error &error) {
 					state Error e = error;
-					if (e.code() != error_code_not_committed && e.code() != error_code_past_version) {
+					if (e.code() != error_code_not_committed && e.code() != error_code_transaction_too_old) {
 						tr.reset();
 						loop {
 							try {

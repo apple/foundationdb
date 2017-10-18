@@ -230,6 +230,7 @@ public:
 	//FdbServer
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
+	std::string LOG_DIRECTORY;
 
 	//Ratekeeper
 	double SMOOTHING_AMOUNT;
@@ -301,6 +302,10 @@ public:
 	// Status
 	double STATUS_MIN_TIME_BETWEEN_REQUESTS;
 	int CONFIGURATION_ROWS_TO_FETCH;
+
+	// Timekeeper
+	int64_t TIME_KEEPER_DELAY;
+	int64_t TIME_KEEPER_MAX_ENTRIES;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
 };

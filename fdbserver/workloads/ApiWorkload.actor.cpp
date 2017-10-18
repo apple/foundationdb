@@ -77,7 +77,7 @@ ACTOR Future<Void> start(Database cx, ApiWorkload *self) {
 	}
 	catch(Error &e) {
 		if(e.code() != error_code_actor_cancelled)
-			self->testFailure(format("Unhandled error %d: %s", e.code(), e.what()));
+			self->testFailure(format("Unhandled error %d: %s", e.code(), e.name()));
 	}
 
 	return Void();

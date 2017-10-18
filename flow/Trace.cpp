@@ -690,7 +690,8 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 		} else {
 			if (error.isInjectedFault())
 				detail("ErrorIsInjectedFault", true);
-			detail("Error", error.what());
+			detail("Error", error.name());
+			detail("ErrorDescription", error.what());
 			detail("ErrorCode", error.code());
 		}
 	}

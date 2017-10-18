@@ -169,6 +169,10 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		}
 		return true;
 	}
+	if (string_knobs.count(knob)) {
+		*string_knobs[knob] = value;
+		return true;
+	}
 	return false;
 }
 
@@ -197,11 +201,18 @@ void Knobs::initKnob( int& knob, int value, std::string const& name ) {
 	int_knobs[toLower(name)] = &knob;
 }
 
+void Knobs::initKnob( std::string& knob, const std::string& value, const std::string& name ) {
+	knob = value;
+	string_knobs[toLower(name)] = &knob;
+}
+
 void Knobs::trace() {
 	for(auto &k : double_knobs)
 		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
 	for(auto &k : int_knobs)
 		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
 	for(auto &k : int64_knobs)
+		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
+	for(auto &k : string_knobs)
 		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
 }

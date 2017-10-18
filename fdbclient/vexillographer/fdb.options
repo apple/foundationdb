@@ -82,7 +82,7 @@ description is not currently required but encouraged.
     <Option name="disable_multi_version_client_api" code="60"
             description="Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network." />
     <Option name="callbacks_on_external_threads" code="61"
-            description="If set, callbacks from external client libraries can be called from threads created by the FoundationDB client library. Otherwise, callbacks will be called from either the thread used to add the callback or the network thread. Setting this option can improve performance when connected using an external client, but may not be safe to use in all environments. Must be set before setting up the network." />
+            description="If set, callbacks from external client libraries can be called from threads created by the FoundationDB client library. Otherwise, callbacks will be called from either the thread used to add the callback or the network thread. Setting this option can improve performance when connected using an external client, but may not be safe to use in all environments. Must be set before setting up the network. WARNING: This feature is considered experimental at this time. " />
     <Option name="external_client_library" code="62"
             paramType="String" paramDescription="path to client library"
             description="Adds an external client library for use by the multi-version client API. Must be set before setting up the network." />
@@ -170,6 +170,8 @@ description is not currently required but encouraged.
             description="The transaction can read and write to locked databases, and is resposible for checking that it took the lock."/>
     <Option name="used_during_commit_protection_disable" code="701"
             description="By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail."/>
+    <Option name="read_lock_aware" code="702"
+            description="The transaction can read from locked databases."/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

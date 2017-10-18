@@ -111,7 +111,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_MAP_KEY_UPPER_LIMIT,              1e5 ); if( buggifyMapLimits ) BACKUP_MAP_KEY_UPPER_LIMIT = 30;
 	init( BACKUP_COPY_TASKS,                        90 );
 	init( BACKUP_BLOCK_SIZE,   LOG_RANGE_BLOCK_SIZE/10 );
-	init( BACKUP_TASKS_PER_AGENT,                   80 );
+	init( BACKUP_TASKS_PER_AGENT,                   20 );
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
@@ -137,12 +137,12 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( HTTP_READ_SIZE,                     128*1024 );
 	init( HTTP_SEND_SIZE,                      32*1024 );
 	init( HTTP_VERBOSE_LEVEL,                        0 );
-	init( BLOBSTORE_CONNECT_TRIES,                   3 );
+	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
-	init( BLOBSTORE_REQUEST_TIMEOUT,                15 );
+	init( BLOBSTORE_REQUEST_TIMEOUT,                30 );
 
-	init( BLOBSTORE_CONCURRENT_UPLOADS,             BACKUP_TASKS_PER_AGENT * 15 );
+	init( BLOBSTORE_CONCURRENT_UPLOADS, BACKUP_TASKS_PER_AGENT*2 );
 
 	init( BLOBSTORE_CONCURRENT_READS_PER_FILE,       3 );
 	init( BLOBSTORE_READ_BLOCK_SIZE,       1024 * 1024 );
@@ -153,8 +153,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_BACKUP_BUCKETS,                100 );
 
 	// These are basically unlimited by default but can be used to reduce blob IO if needed
-	init( BLOBSTORE_REQUESTS_PER_SECOND,           20000);
-	init( BLOBSTORE_CONCURRENT_REQUESTS,            2000);
+	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );
+	init( BLOBSTORE_CONCURRENT_REQUESTS, (BACKUP_TASKS_PER_AGENT*2)+5 );
 	init( BLOBSTORE_MAX_SEND_BYTES_PER_SECOND,      1e9 );
 	init( BLOBSTORE_MAX_RECV_BYTES_PER_SECOND,      1e9 );
 
