@@ -162,7 +162,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false));
 					UidAndAbortedFlagT uidFlag = wait(backupTag.getOrThrow(cx));
 					state UID logUid = uidFlag.first;
-					state std::string lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getOrThrow(cx));
+					state std::string lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getOrThrow(cx, false, backup_unneeded()));
 
 					state std::string restorableFile = joinPath(lastBackupContainer, "restorable");
 					TraceEvent("BARW_lastBackupContainer", randomID).detail("backupTag", printable(tag)).detail("lastBackupContainer", lastBackupContainer)

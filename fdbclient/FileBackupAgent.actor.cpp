@@ -1145,6 +1145,7 @@ namespace fileBackup {
 			// Enable the stop key
 			state Version readVersion = wait(tr->getReadVersion());
 			config.stopVersion().set(tr, readVersion);
+			TraceEvent(SevInfo, "FBA_setStopVersion").detail("stopVersion", readVersion);
 
 			Void _ = wait(taskBucket->finish(tr, task));
 
@@ -1755,6 +1756,8 @@ namespace fileBackup {
 			Void _ = wait(mf->sync());
 
 			std::string fileName = format("kvmanifest,%lld,%lld,%lld,%s", minVer, maxVer, totalBytes, g_random->randomUniqueID().toString().c_str());
+
+			TraceEvent(SevInfo, "FBA_KVManifest").detail("fileName", fileName.c_str());
 			Void _ = wait(bc->renameFile(tempFile, fileName));
 
 			return Void();
@@ -3429,7 +3432,7 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName.toString());
-		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr));
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 		state BackupConfig config(current.first);
 		state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 
@@ -3457,7 +3460,7 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
-		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr));
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 
 		state BackupConfig config(current.first);
 		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));

@@ -123,7 +123,7 @@ public:
 		auto backtrace = platform::get_backtrace();
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
 			if (!val.present()) {
-				TraceEvent(SevError, "KeyBackedProperty_keyNotFound")
+				TraceEvent(SevInfo, "KeyBackedProperty_keyNotFound")
 						.detail("key", printable(keyCopy))
 						.detail("err", err.code())
 						.detail("parentTrace", backtrace.c_str());
