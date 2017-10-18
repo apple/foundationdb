@@ -1157,7 +1157,7 @@ public:
 			killedMachines++;
 		}
 	}
-	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType kt, bool killIsSafe, bool forceKill ) {
+	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType kt, bool killIsSafe, bool forceKill, KillType* ktFinal) {
 		auto ktOrig = kt;
 		if (killIsSafe) ASSERT( kt == ISimulator::RebootAndDelete );  // Only types of "safe" kill supported so far
 
@@ -1167,6 +1167,7 @@ public:
 
 		if(speedUpSimulation && !forceKill) {
 			TraceEvent(SevWarn, "AbortedKill", zoneId).detailext("ZoneId", zoneId).detail("Reason", "Unforced kill within speedy simulation.").backtrace();
+			if (ktFinal) *ktFinal = None;
 			return false;
 		}
 
@@ -1184,6 +1185,7 @@ public:
 		// Do nothing, if no processes to kill
 		if (processesOnMachine == 0) {
 			TraceEvent(SevWarn, "AbortedKill", zoneId).detailext("ZoneId", zoneId).detail("Reason", "The target had no processes running.").detail("processes", processesOnMachine).detail("processesPerMachine", processesPerMachine).backtrace();
+			if (ktFinal) *ktFinal = None;
 			return false;
 		}
 
@@ -1254,6 +1256,7 @@ public:
 		if( processesOnMachine != processesPerMachine && kt >= RebootAndDelete ) {
 			TEST(true); //Attempted reboot, but the target did not have all of its processes running
 			TraceEvent(SevWarn, "AbortedKill", zoneId).detail("KillType", kt).detailext("ZoneId", zoneId).detail("Reason", "Machine processes does not match number of processes per machine").detail("processes", processesOnMachine).detail("processesPerMachine", processesPerMachine).backtrace();
+			if (ktFinal) *ktFinal = None;
 			return false;
 		}
 
@@ -1261,6 +1264,7 @@ public:
 		if ( processesOnMachine != processesPerMachine) {
 			TEST(true); //Attempted reboot, but the target did not have all of its processes running
 			TraceEvent(SevWarn, "AbortedKill", zoneId).detail("KillType", kt).detailext("ZoneId", zoneId).detail("Reason", "Machine processes does not match number of processes per machine").detail("processes", processesOnMachine).detail("processesPerMachine", processesPerMachine).backtrace();
+			if (ktFinal) *ktFinal = None;
 			return false;
 		}
 
@@ -1287,10 +1291,11 @@ public:
 		TEST(kt == KillInstantly); // Resulted in an instant kill
 		TEST(kt == InjectFaults);  // Resulted in a kill by injecting faults
 
+		if (ktFinal) *ktFinal = kt;
 		return true;
 	}
 
-	virtual void killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt ) {
+	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, KillType* ktFinal) {
 		auto ktOrig = kt;
 		auto processes = getAllProcesses();
 		std::map<Optional<Standalone<StringRef>>, int>	datacenterZones;
@@ -1354,6 +1359,20 @@ public:
 			}
 		}
 
+		KillType	ktResult, ktMin = kt;
+		for (auto& datacenterZone : datacenterZones) {
+			killMachine( datacenterZone.first, kt, (kt == RebootAndDelete), true, &ktResult);
+			if (ktResult != kt) {
+				TraceEvent(SevWarn, "killDCFail")
+					.detailext("Zone", datacenterZone.first)
+					.detail("KillType", kt)
+					.detail("KillTypeResult", ktResult)
+					.detail("KillTypeOrig", ktOrig);
+				ASSERT(ktResult == None);
+			}
+			ktMin = std::min<KillType>( ktResult, ktMin );
+		}
+
 		TraceEvent("killDataCenter")
 			.detail("killedMachines", killedMachines)
 			.detail("killableMachines", killableMachines)
@@ -1363,16 +1382,21 @@ public:
 			.detail("DcProcesses", dcProcesses)
 			.detailext("DCID", dcId)
 			.detail("KillType", kt)
-			.detail("OrigKillType", ktOrig);
+			.detail("KillTypeOrig", ktOrig)
+			.detail("KillTypeMin", ktMin)
+			.detail("KilledDC", kt==ktMin);
 
-		TEST(kt == RebootAndDelete); // Resulted in a reboot and delete
-		TEST(kt == Reboot); // Resulted in a reboot
-		TEST(kt == KillInstantly); // Resulted in an instant kill
-		TEST(kt == InjectFaults);  // Resulted in a kill by injecting faults
-		TEST(kt != Reboot); // A true DataCenter kill
+		TEST(kt != ktMin); // DataCenter kill was rejected by killMachine
+		TEST((kt==ktMin) && (kt == RebootAndDelete)); // Resulted in a reboot and delete
+		TEST((kt==ktMin) && (kt == Reboot)); // Resulted in a reboot
+		TEST((kt==ktMin) && (kt == KillInstantly)); // Resulted in an instant kill
+		TEST((kt==ktMin) && (kt == InjectFaults));  // Resulted in a kill by injecting faults
+		TEST((kt==ktMin) && (kt != ktOrig)); // Kill request was downgraded
+		TEST((kt==ktMin) && (kt == ktOrig)); // Requested kill was done
 
-		for (auto& datacenterZone : datacenterZones)
-			killMachine( datacenterZone.first, kt, (kt == RebootAndDelete), true);
+		if (ktFinal) *ktFinal = ktMin;
+
+		return (kt == ktMin);
 	}
 	virtual void clogInterface( uint32_t ip, double seconds, ClogMode mode = ClogDefault ) {
 		if (mode == ClogDefault) {

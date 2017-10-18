@@ -37,7 +37,7 @@ ERROR( wrong_shard_server, 1001, "Shard is not available from this server")
 ERROR( timed_out, 1004, "Operation timed out" )
 ERROR( coordinated_state_conflict, 1005, "Conflict occurred while changing coordination information" )
 ERROR( all_alternatives_failed, 1006, "All alternatives failed" )
-ERROR( transaction_too_old, 1007, "Database no longer remembers this version" )
+ERROR( transaction_too_old, 1007, "Transaction is too old to perform reads or be committed" )
 ERROR( no_more_servers, 1008, "Not enough physical servers available" )
 ERROR( future_version, 1009, "Request for future version" )
 ERROR( movekeys_conflict, 1010, "Conflicting attempts to change data distribution" )
@@ -179,6 +179,8 @@ ERROR( restore_corrupted_data_padding, 2369, "Backup file has unexpected padding
 ERROR( restore_destination_not_empty, 2370, "Attempted to restore into a non-empty destination database")
 ERROR( restore_duplicate_uid, 2371, "Attempted to restore using a UID that had been used for an aborted restore")
 ERROR( task_invalid_version, 2381, "Invalid task version")
+
+ERROR( key_not_found, 2400, "Expected key is missing")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

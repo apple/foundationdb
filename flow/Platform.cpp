@@ -85,6 +85,8 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
+#include "stacktrace.h"
+
 #ifdef __linux__
 /* Needed for memory allocation */
 #include <linux/mman.h>
@@ -2183,15 +2185,15 @@ void outOfMemory() {
 	for( auto i = traceCounts.begin(); i != traceCounts.end(); ++i ) {
 		char buf[1024];
 		std::vector<void *> *frames = i->second.backTrace;
-		std::string backTraceStr = "addr2line -e fdbserver.debug -p -C -f -i ";
-		for (int j = 1; j < frames->size(); j++) {
+		std::string backTraceStr;
 #if defined(_WIN32)
+		for (int j = 1; j < frames->size(); j++) {
 			_snprintf(buf, 1024, "%p ", frames->at(j));
-#else
-			snprintf(buf, 1024, "%p ", frames->at(j));
-#endif
 			backTraceStr += buf;
 		}
+#else
+		backTraceStr = format_backtrace(&(*frames)[0], frames->size());
+#endif
 		TraceEvent("MemSample")
 			.detail("Count", (int64_t)i->second.count)
 			.detail("TotalSize", i->second.totalSize)
@@ -2322,6 +2324,15 @@ void* getImageOffset() {
 	return getCachedImageInfo().offset;
 }
 
+size_t raw_backtrace(void** addresses, int maxStackDepth) {
+#if !defined(__APPLE__)
+	// absl::GetStackTrace doesn't have an implementation for MacOS.
+	return absl::GetStackTrace(addresses, maxStackDepth, 0);
+#else
+	return backtrace(addresses, maxStackDepth);
+#endif
+}
+
 std::string format_backtrace(void **addresses, int numAddresses) {
 	ImageInfo const& imageInfo = getCachedImageInfo();
 #ifdef __APPLE__
@@ -2340,7 +2351,7 @@ std::string format_backtrace(void **addresses, int numAddresses) {
 
 std::string get_backtrace() {
 	void *addresses[50];
-	size_t size = backtrace(addresses, 50);
+	size_t size = raw_backtrace(addresses, 50);
 	return format_backtrace(addresses, size);
 }
 }; // namespace platform

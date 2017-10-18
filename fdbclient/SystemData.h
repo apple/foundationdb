@@ -171,8 +171,10 @@ extern const KeyRangeRef applyMutationsRemovePrefixRange;
 extern const KeyRangeRef applyMutationsKeyVersionMapRange;
 extern const KeyRangeRef applyMutationsKeyVersionCountRange;
 
-// FdbClient Info prefix  
+// FdbClient Info prefix
 extern const KeyRangeRef fdbClientInfoPrefixRange;
+extern const KeyRef fdbClientInfoTxnSampleRate;
+extern const KeyRef fdbClientInfoTxnSizeLimit;
 
 // Keyspace to maintain wall clock to version map
 extern const KeyRangeRef timeKeeperPrefixRange;

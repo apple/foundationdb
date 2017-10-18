@@ -52,9 +52,6 @@ struct WorkerInterface {
 	RequestStream< struct TraceBatchDumpRequest > traceBatchDumpRequest;
 	RequestStream< struct DiskStoreRequest > diskStoreRequest;
 
-	//A stream used to start or stop CPU profiling on a worker
-	RequestStream< struct ProfilerRequest > cpuProfilerRequest;
-
 	TesterInterface testerInterface;
 
 	UID id() const { return tLog.getEndpoint().token; }
@@ -65,7 +62,7 @@ struct WorkerInterface {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & debugQuery & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & cpuProfilerRequest & testerInterface & diskStoreRequest;
+		ar & clientInterface & locality & tLog & master & masterProxy & resolver & storage & debugQuery & debugPing & coordinationPing & waitFailure & setMetricsRate & eventLogRequest & traceBatchDumpRequest & testerInterface & diskStoreRequest;
 	}
 };
 
@@ -144,19 +141,6 @@ struct TraceBatchDumpRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ar & reply;
-	}
-};
-
-//A request to start or stop CPU profiling on a worker
-struct ProfilerRequest {
-	ReplyPromise<Void> reply;
-
-	bool enabled;
-	Standalone<StringRef> outputFile;
-
-	template<class Ar>
-	void serialize( Ar& ar ) {
-		ar & reply & enabled & outputFile;
 	}
 };
 
@@ -272,7 +256,7 @@ class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int 
 Future<Void> extractClusterInterface( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& a, Reference<AsyncVar<Optional<struct ClusterInterface>>> const& b );
 
 Future<Void> fdbd( Reference<ClusterConnectionFile> const&, LocalityData const& localities, ProcessClass const& processClass, std::string const& dataFolder, std::string const& coordFolder, int64_t const& memoryLimit, std::string const& metricsConnFile, std::string const& metricsPrefix );
-Future<Void> workerServer( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& ccInterface, LocalityData const& localities, ProcessClass const& processClass, std::string const& filename, int64_t const& memoryLimit, Future<Void> const& forceFailure, std::string const& metricsConnFile, std::string const& metricsPrefix );
+Future<Void> workerServer( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& ccInterface, LocalityData const& localities, Reference<AsyncVar<ProcessClass>> const& asyncProcessClass, ProcessClass const& initialClass, std::string const& filename, int64_t const& memoryLimit, Future<Void> const& forceFailure, std::string const& metricsConnFile, std::string const& metricsPrefix );
 Future<Void> clusterController( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC, Reference<AsyncVar<ProcessClass>> const& asyncProcessClass );
 
 // These servers are started by workerServer

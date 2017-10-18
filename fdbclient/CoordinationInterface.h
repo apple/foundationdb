@@ -24,6 +24,7 @@
 
 #include "FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 
@@ -96,9 +97,43 @@ struct LeaderInfo {
 	bool forward;  // If true, serializedInfo is a connection string instead!
 
 	LeaderInfo() : forward(false) {}
+	LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}
 
 	bool operator < (LeaderInfo const& r) const { return changeID < r.changeID; }
 	bool operator == (LeaderInfo const& r) const { return changeID == r.changeID; }
+
+	// The first 4 bits of ChangeID represent cluster controller process class fitness, the lower the better
+	bool updateChangeID(uint64_t processClassFitness) {
+		uint64_t mask = 15ll << 60;
+		processClassFitness <<= 60;
+
+		if ((changeID.first() & mask) == processClassFitness) {
+			return false;
+		}
+
+		changeID = UID((changeID.first() & ~mask) | processClassFitness, changeID.second());
+		return true;
+	}
+
+	// Change leader only if the candidate has better process class fitness
+	bool leaderChangeRequired(LeaderInfo const& candidate) const {
+		uint64_t mask = 15ll << 60;
+		if ((changeID.first() & mask) > (candidate.changeID.first() & mask)) {
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	// All but the first 4 bits are used to represent process id
+	bool equalInternalId(LeaderInfo const& leaderInfo) const {
+		uint64_t mask = ~(15ll << 60);
+		if ((changeID.first() & mask) == (leaderInfo.changeID.first() & mask)) {
+			return true;
+		} else {
+			return false;
+		}
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

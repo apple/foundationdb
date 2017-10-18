@@ -1369,6 +1369,8 @@ int main(int argc, char* argv[]) {
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
 
+		if (!serverKnobs->setKnob( "log_directory", logFolder )) ASSERT(false);
+
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
