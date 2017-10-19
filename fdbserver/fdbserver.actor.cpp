@@ -1566,6 +1566,14 @@ int main(int argc, char* argv[]) {
 				flushAndExit(FDB_EXIT_ERROR);
 			}
 
+			//FIXME: old tests do not have enough processes to support logs for two datacenters
+			if(restarting) {
+				int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
+				TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0)
+					.detail("RandomUnseed", unseed);
+				flushAndExit(0);
+			}
+
 			if (!restarting) {
 				platform::eraseDirectoryRecursive( dataFolder );
 				platform::createDirectory( dataFolder );

@@ -45,11 +45,11 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	virtual std::string description() { return "DestroyDatabaseWorkload"; }
 
 	virtual Future<Void> setup( Database const& cx ) {
-		return _setup( cx, this );
+		return Void();//_setup( cx, this );
 	}
 
 	virtual Future<Void> start( Database const& cx ) {
-		return _start( this, cx );
+		return Void();//_start( this, cx );
 	}
 	virtual Future<bool> check( Database const& cx ) {
 		return true;

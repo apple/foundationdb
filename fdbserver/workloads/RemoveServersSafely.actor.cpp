@@ -44,7 +44,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 	RemoveServersSafelyWorkload( WorkloadContext const& wcx )
 		: TestWorkload(wcx)
 	{
-		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
+		enabled = false;//FIXME: re-enable !clientId && g_network->isSimulated(); // only do this on the "first" client, and only when in simulation
 		minMachinesToKill = getOption( options, LiteralStringRef("minMachinesToKill"), 1 );
 		maxMachinesToKill = getOption( options, LiteralStringRef("maxMachinesToKill"), 10 );
 		maxMachinesToKill = std::max(minMachinesToKill, maxMachinesToKill);

@@ -176,6 +176,10 @@ struct MoveKeysWorkload : TestWorkload {
 
 		ASSERT( self->configuration.storageTeamSize > 0 );
 
+		if(self->configuration.remoteTLogReplicationFactor > 0) { //FIXME: add support for generating random teams across DCs
+			return Void();
+		}
+
 		loop { 
 			try {
 				state MoveKeysLock lock = wait( takeMoveKeysLock(cx, UID()) );

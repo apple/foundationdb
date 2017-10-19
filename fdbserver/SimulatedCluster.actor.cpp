@@ -698,7 +698,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	datacenters = g_random->randomInt( 1, 4 );
+	datacenters = 4;//FIXME: g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);
@@ -708,14 +708,14 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("memory");
 	}
 
-	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt( 0, 6 ), 3));
+	int replication_type = 4;//std::min(g_random->randomInt( 1, 6 ), 3);
 	//replication_type = 1;  //ahm
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
 		int storage_servers = g_random->randomInt(1,5);
 		int replication_factor = g_random->randomInt(1,5);
-		int anti_quorum = g_random->randomInt(0, replication_factor);
+		int anti_quorum = g_random->randomInt(0, db.tLogReplicationFactor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d storage_quorum:=%d "
 		                  "log_replicas:=%d log_anti_quorum:=%1 "
@@ -752,13 +752,22 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		}
 		break;
 	}
+	case 4: {
+		set_config("double remote_double one_satellite_double primary_dc=0 remote_dc=1 primary_satellite_dcs=2 remote_satellite_dcs=3");
+		db.desiredTLogCount=1;
+		db.masterProxyCount=1;
+		db.resolverCount=1;
+		db.remoteDesiredTLogCount=1;
+		db.satelliteDesiredTLogCount=1;
+		break;
+	}
 	default:
 		ASSERT(false);  // Programmer forgot to adjust cases.
 	}
 
-	machine_count = g_random->randomInt( std::max( 2+datacenters, db.minMachinesRequired() ), extraDB ? 6 : 10 );
-	processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
-	coordinators = BUGGIFY ? g_random->randomInt(1, machine_count+1) : std::min( machine_count, db.maxMachineFailuresTolerated()*2 + 1 );
+	machine_count = 8;//g_random->randomInt( std::max( 2+datacenters, db.minMachinesRequired() ), extraDB ? 6 : 10 );
+	processes_per_machine = 1;//g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
+	coordinators = 3;//BUGGIFY ? g_random->randomInt(1, machine_count+1) : std::min( machine_count, db.maxMachineFailuresTolerated()*2 + 1 );
 }
 
 std::string SimulationConfig::toString() {
@@ -767,7 +776,7 @@ std::string SimulationConfig::toString() {
 	config << "new";
 
 	if (dbconfig["redundancy_mode"] != "custom") {
-		config << " " << dbconfig["redundancy_mode"];
+		config << " " << "double remote_double one_satellite_double primary_dc=0 remote_dc=1 primary_satellite_dcs=2 remote_satellite_dcs=3";
 	} else {
 		config << " " << "log_replicas:=" << db.tLogReplicationFactor;
 		config << " " << "log_anti_quorum:=" << db.tLogWriteAntiQuorum;
@@ -778,6 +787,8 @@ std::string SimulationConfig::toString() {
 	config << " logs=" << db.getDesiredLogs();
 	config << " proxies=" << db.getDesiredProxies();
 	config << " resolvers=" << db.getDesiredResolvers();
+	config << " remote_logs=" << db.remoteDesiredTLogCount;
+	config << " satellite_logs=" << db.satelliteDesiredTLogCount;
 
 	config << " " << dbconfig["storage_engine"];
 	return config.str();
@@ -794,9 +805,21 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;
 	g_simulator.tLogPolicy = simconfig.db.tLogPolicy;
 	g_simulator.tLogWriteAntiQuorum = simconfig.db.tLogWriteAntiQuorum;
-	ASSERT(g_simulator.storagePolicy);
-	ASSERT(g_simulator.tLogPolicy);
-	TraceEvent("simulatorConfig").detail("tLogPolicy", g_simulator.tLogPolicy->info()).detail("storagePolicy", g_simulator.storagePolicy->info()).detail("tLogWriteAntiQuorum", g_simulator.tLogWriteAntiQuorum).detail("ConfigString", startingConfigString);
+	g_simulator.primaryDcId = simconfig.db.primaryDcId;
+	g_simulator.hasRemoteReplication = simconfig.db.remoteTLogReplicationFactor > 0;
+	g_simulator.remoteTLogPolicy = simconfig.db.remoteTLogPolicy;
+	g_simulator.remoteDcId = simconfig.db.remoteDcId;
+	g_simulator.remoteStoragePolicy = simconfig.db.remoteStoragePolicy;
+	g_simulator.hasSatelliteReplication = simconfig.db.satelliteTLogReplicationFactor > 0;
+	g_simulator.satelliteTLogPolicy = simconfig.db.satelliteTLogPolicy;
+	g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.satelliteTLogWriteAntiQuorum;
+	g_simulator.primarySatelliteDcIds = simconfig.db.primarySatelliteDcIds;
+	g_simulator.remoteSatelliteDcIds = simconfig.db.remoteSatelliteDcIds;
+
+	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
+	ASSERT(!g_simulator.hasRemoteReplication || (g_simulator.remoteTLogPolicy && g_simulator.remoteStoragePolicy));
+	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
+	TraceEvent("simulatorConfig").detail("ConfigString", startingConfigString);
 
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;
@@ -804,7 +827,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	const int processesPerMachine = simconfig.processes_per_machine;
 
 	// half the time, when we have more than 4 machines that are not the first in their dataCenter, assign classes
-	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
+	bool assignClasses = false;//machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
 	// Use SSL half the time
 	bool sslEnabled = g_random->random01() < 0.05;
@@ -823,6 +846,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		}
 	}
 
+	//FIXME: protected addresses will potentially protect too many datacenters from being fully killed
 	g_random->randomShuffle(coordinatorAddresses);
 	for(int i = 0; i < (coordinatorAddresses.size()/2)+1; i++) {
 		TraceEvent("ProtectCoordinator").detail("Address", coordinatorAddresses[i]).detail("Coordinators", describe(coordinatorAddresses)).backtrace();
@@ -840,8 +864,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	int assignedMachines = 0, nonVersatileMachines = 0;
 	for( int dc = 0; dc < dataCenters; dc++ ) {
-		Optional<Standalone<StringRef>> dcUID;
-		if ((dc > 0) || (g_random->random01() > 0.01)) dcUID = StringRef(format("%d", dc));
+		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
 		std::vector<UID> machineIdentities;
 		int machines = machineCount / dataCenters + (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
