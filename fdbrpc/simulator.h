@@ -286,7 +286,17 @@ public:
 	class ClusterConnectionString* extraDB;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
-	int tLogWriteAntiQuorum;
+	int32_t tLogWriteAntiQuorum;
+	Optional<Standalone<StringRef>> primaryDcId;
+	bool hasRemoteReplication;
+	IRepPolicyRef remoteTLogPolicy;
+	Optional<Standalone<StringRef>> remoteDcId;
+	IRepPolicyRef remoteStoragePolicy;
+	bool hasSatelliteReplication;
+	IRepPolicyRef satelliteTLogPolicy;
+	int32_t satelliteTLogWriteAntiQuorum;
+	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
+	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 
 	//Used by workloads that perform reconfigurations
 	int testerCount;

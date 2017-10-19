@@ -80,15 +80,18 @@ public:
 	Promise<Void> fullyRecovered;
 	DBCoreState prevDBState;
 	DBCoreState myDBState;
+	bool finalWriteStarted;
+	Future<Void> previousWrite;
 
-	ReusableCoordinatedState( ServerCoordinators const& coordinators, PromiseStream<Future<Void>> const& addActor, UID const& dbgid ) : coordinators(coordinators), cstate(coordinators), addActor(addActor), dbgid(dbgid) {}
+	ReusableCoordinatedState( ServerCoordinators const& coordinators, PromiseStream<Future<Void>> const& addActor, UID const& dbgid ) : coordinators(coordinators), cstate(coordinators), addActor(addActor), dbgid(dbgid), finalWriteStarted(false), previousWrite(Void()) {}
 
 	Future<Void> read() {
 		return _read(this);
 	}
 
 	Future<Void> write(DBCoreState newState, bool finalWrite = false) {
-		return _write(this, newState, finalWrite);
+		previousWrite = _write(this, newState, finalWrite);
+		return previousWrite;
 	}
 
 	Future<Void> move( ClusterConnectionString const& nc ) {
@@ -104,7 +107,11 @@ private:
 
 	ACTOR Future<Void> _read(ReusableCoordinatedState* self) {
 		Value prevDBStateRaw = wait( self->cstate.read() );
-		self->addActor.send( masterTerminateOnConflict( self->dbgid, self->fullyRecovered, self->cstate.onConflict(), self->switchedState.getFuture() ) );
+		Future<Void> onConflict = masterTerminateOnConflict( self->dbgid, self->fullyRecovered, self->cstate.onConflict(), self->switchedState.getFuture() );
+		if(onConflict.isReady() && onConflict.isError()) {
+			throw onConflict.getError();
+		}
+		self->addActor.send( onConflict );
 
 		if( prevDBStateRaw.size() ) {
 			self->prevDBState = BinaryReader::fromStringRef<DBCoreState>(prevDBStateRaw, IncludeVersion());
@@ -115,6 +122,14 @@ private:
 	}
 
 	ACTOR Future<Void> _write(ReusableCoordinatedState* self, DBCoreState newState, bool finalWrite) {
+		if(self->finalWriteStarted) {
+			Void _ = wait( Future<Void>(Never()) );
+		}
+
+		if(finalWrite) {
+			self->finalWriteStarted = true;
+		}
+		
 		try {
 			Void _ = wait( self->cstate.setExclusive( BinaryWriter::toValue(newState, IncludeVersion()) ) );
 		} catch (Error& e) {
@@ -931,11 +946,19 @@ static std::set<int> const& normalMasterErrors() {
 }
 
 ACTOR Future<Void> changeCoordinators( Reference<MasterData> self ) {
-	Void _ = wait( self->cstate.fullyRecovered.getFuture() );
-
 	loop {
 		ChangeCoordinatorsRequest req = waitNext( self->myInterface.changeCoordinators.getFuture() );
 		state ChangeCoordinatorsRequest changeCoordinatorsRequest = req;
+
+		while( !self->cstate.previousWrite.isReady() ) {
+			Void _ = wait( self->cstate.previousWrite );
+			Void _ = wait( delay(0) ); //if a new core state is ready to be written, have that take priority over our finalizing write;
+		}
+
+		if(!self->cstate.fullyRecovered.isSet()) {
+			Void _ = wait( self->cstate.write(self->cstate.myDBState, true) );
+		}
+
 		try {
 			Void _ = wait( self->cstate.move( ClusterConnectionString( changeCoordinatorsRequest.newConnectionString.toString() ) ) );
 		}

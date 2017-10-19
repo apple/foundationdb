@@ -1071,6 +1071,8 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> getServerInterfaces(
 	return serverInterfaces;
 }
 
+//FIXME: we are now using a version for getting server interfaces instead of latest version, because latest version is wrong if the storage server we are talking to is behind. 
+// A better solution would be for latest version to be a flag, and the storage server gives you data at the latest version if that is greater than the supplied read verison.
 ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInterfaces( Future<Version> ver, Database cx, TransactionInfo info, vector<UID> ids ) {
 	state vector< Future< Optional<StorageServerInterface> > > serverListEntries;
 	for( int s = 0; s < ids.size(); s++ ) {
@@ -1090,7 +1092,7 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInt
 }
 
 //If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key). Otherwise returns the shard containing key
-ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database cx, Key key, TransactionInfo info, bool isBackward = false ) {
+ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database cx, Key key, TransactionInfo info, Version version, bool isBackward = false ) {
 	if (isBackward)
 		ASSERT( key != allKeys.begin && key <= allKeys.end );
 	else
@@ -1138,14 +1140,14 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 			state Standalone<RangeResultRef> results;
 			if( isBackward ) {
 				Standalone<RangeResultRef> _results = wait(
-						getRange( cx, latestVersion,
+						getRange( cx, version,
 							lastLessThan( keyServersK ),
 							firstGreaterOrEqual( keyServersK ) + 1,
 							GetRangeLimits( 2 ), false, info ) );
 				results = _results;
 			} else {
 				Standalone<RangeResultRef> _results = wait(
-						getRange( cx, latestVersion,
+						getRange( cx, version,
 							lastLessOrEqual( keyServersK ),
 							firstGreaterThan( keyServersK ) + 1,
 							GetRangeLimits( 2 ), false, info ) );
@@ -1177,7 +1179,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 				ASSERT(false);
 			}
 
-			Optional<vector<StorageServerInterface>> interfs = wait( getServerInterfaces(cx, info, src) );
+			Optional<vector<StorageServerInterface>> interfs = wait( transactionalGetServerInterfaces(version, cx, info, src) );
 			if( interfs.present() ) {
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Interfs.present");
@@ -1198,7 +1200,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 	return make_pair(range, cx->setCachedLocation( range, serverInterfaces ));
 }
 
-ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
+ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info, Version version = latestVersion ) {
 	//printf("getKeyRangeLocations: getting '%s'-'%s'\n", keyServersKey(keys.begin).toString().c_str(), keyServersKey(keys.end).toString().c_str());
 	loop {
 		state vector< pair<KeyRange,Reference<LocationInfo>> > result;
@@ -1207,7 +1209,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 		state bool ok = true;
 		state Standalone<RangeResultRef> keyServersEntries  =
 			wait(
-				getRange( cx, latestVersion,
+				getRange( cx, version,
 					lastLessOrEqual( keyServersKey(keys.begin) ),
 					firstGreaterOrEqual( keyServersKey(keys.end) ) + 1,
 					GetRangeLimits( limit + 1 ), reverse, info ) );
@@ -1231,7 +1233,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 
 			ASSERT( servers.size() );
 
-			serverListReads.push_back( make_pair( range, getServerInterfaces(cx, info, servers) ) );
+			serverListReads.push_back( make_pair( range, transactionalGetServerInterfaces(version, cx, info, servers) ) );
 			serverListServers.push_back( servers );
 		}
 
@@ -1264,14 +1266,14 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 	}
 }
 
-Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
+Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info, Version version = latestVersion ) {
 	ASSERT (!keys.empty());
 
 	vector< pair<KeyRange,Reference<LocationInfo>> > result;
 	if (cx->getCachedLocations(keys, result, limit, reverse))
 		return result;
 
-	return getKeyRangeLocations_internal( cx, keys, limit, reverse, info );
+	return getKeyRangeLocations_internal( cx, keys, limit, reverse, info, version );
 }
 
 ACTOR Future<Void> warmRange_impl( Transaction *self, Database cx, KeyRange keys ) {
@@ -1301,7 +1303,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	loop {
 		ssi = cx->getCachedLocation( key );
 		if (!ssi.second) {
-			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
+			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info, ver ) );
 			ssi = std::move(ssi2);
 		} else {
 			bool onlyEndpointFailed = false;
@@ -1315,11 +1317,11 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if( onlyEndpointFailed ) {
 				cx->invalidateCache( key );
 				cx->invalidateCache( ssi.second );
-				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
+				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info, ver ) );
 				ssi = std::move(ssi2);
 			}
 		}
-		//Reference<LocationInfo> ssi = wait( getKeyLocation( cx, key ) );
+		
 		state Optional<UID> getValueID = Optional<UID>();
 		state uint64_t startTime;
 		state double startTimeD;
@@ -1383,7 +1385,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 }
 
 ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, TransactionInfo info ) {
-	Version _ = wait(version);
+	state Version ver = wait(version);
 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.AfterVersion");
@@ -1397,7 +1399,27 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			return Key();
 		}
 
-		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, k.getKey(), info, k.isBackward()) );
+		state pair<KeyRange, Reference<LocationInfo>> ssi = cx->getCachedLocation( k.getKey(), k.isBackward() );
+		if (!ssi.second) {
+			pair<KeyRange, Reference<LocationInfo>> _ssi = wait( getKeyLocation(cx, k.getKey(), info, ver, k.isBackward()) );
+			ssi = std::move(_ssi);
+		} else {
+			bool onlyEndpointFailed = false;
+			for(int i = 0; i < ssi.second->size(); i++) {
+				if( IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, &StorageServerInterface::getKey).getEndpoint()) ) {
+					onlyEndpointFailed = true;
+					break;
+				}
+			}
+
+			if( onlyEndpointFailed ) {
+				cx->invalidateCache( k.getKey() );
+				cx->invalidateCache( ssi.second );
+				pair<KeyRange, Reference<LocationInfo>> _ssi = wait( getKeyLocation(cx, k.getKey(), info, ver, k.isBackward()) );
+				ssi = std::move(_ssi);
+			}
+		}
+
 		try {
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("offset",k.offset).detail("orEqual",k.orEqual);
@@ -1457,8 +1479,23 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 	loop {
 		state pair<KeyRange, Reference<LocationInfo>> ssi = cx->getCachedLocation( key );
 		if (!ssi.second) {
-			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
+			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info, ver ) );
 			ssi = std::move(ssi2);
+		} else {
+			bool onlyEndpointFailed = false;
+			for(int i = 0; i < ssi.second->size(); i++) {
+				if( IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, &StorageServerInterface::watchValue).getEndpoint()) ) {
+					onlyEndpointFailed = true;
+					break;
+				}
+			}
+
+			if( onlyEndpointFailed ) {
+				cx->invalidateCache( key );
+				cx->invalidateCache( ssi.second );
+				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info, ver ) );
+				ssi = std::move(ssi2);
+			}
 		}
 
 		try {
@@ -1531,7 +1568,29 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 
 	//printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
-		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, info ) );
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, info, version ) );
+
+		bool foundFailed = false;
+		for(auto& it : locations) {
+			bool onlyEndpointFailed = false;
+			for(int i = 0; i < it.second->size(); i++) {
+				if( IFailureMonitor::failureMonitor().onlyEndpointFailed(it.second->get(i, &StorageServerInterface::getKeyValues).getEndpoint()) ) {
+					onlyEndpointFailed = true;
+					break;
+				}
+			}
+
+			if( onlyEndpointFailed ) {
+				cx->invalidateCache( it.first.begin );
+				cx->invalidateCache( it.second );
+				foundFailed = true;
+			}
+		}
+
+		if(foundFailed) {
+			vector< pair<KeyRange, Reference<LocationInfo>> > _locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, info, version ) );
+			locations = std::move(_locations);
+		}
 
 		ASSERT( locations.size() );
 		state int shard = 0;
@@ -1736,7 +1795,27 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Future<Version> 
 			return output;
 		}
 
-		state pair<KeyRange, Reference<LocationInfo>> beginServer = wait( getKeyLocation( cx, reverse ? end.getKey() : begin.getKey(), info, reverse ? (end-1).isBackward() : begin.isBackward() ) );
+		state pair<KeyRange, Reference<LocationInfo>> beginServer = cx->getCachedLocation( reverse ? end.getKey() : begin.getKey(), reverse ? (end-1).isBackward() : begin.isBackward() );
+		if (!beginServer.second) {
+			pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation( cx, reverse ? end.getKey() : begin.getKey(), info, version, reverse ? (end-1).isBackward() : begin.isBackward() ) );
+			beginServer = std::move(ssi);
+		} else {
+			bool onlyEndpointFailed = false;
+			for(int i = 0; i < beginServer.second->size(); i++) {
+				if( IFailureMonitor::failureMonitor().onlyEndpointFailed(beginServer.second->get(i, &StorageServerInterface::getKeyValues).getEndpoint()) ) {
+					onlyEndpointFailed = true;
+					break;
+				}
+			}
+
+			if( onlyEndpointFailed ) {
+				cx->invalidateCache( reverse ? end.getKey() : begin.getKey() );
+				cx->invalidateCache( beginServer.second );
+				pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation( cx, reverse ? end.getKey() : begin.getKey(), info, version, reverse ? (end-1).isBackward() : begin.isBackward() ) );
+				beginServer = std::move(ssi);
+			}
+		}
+
 		state KeyRange shard = beginServer.first;
 		state bool modifiedSelectors = false;
 		state GetKeyValuesRequest req;

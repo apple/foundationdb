@@ -652,6 +652,7 @@ public:
 			} else {
 				satelliteDCs.insert( req.configuration.remoteSatelliteDcIds.begin(), req.configuration.remoteSatelliteDcIds.end() );
 			}
+			//FIXME: recruitment does not respect usable_dcs, a.k.a if usable_dcs is 1 we should recruit all tlogs in one data center
 			auto satelliteLogs = getWorkersForTlogs( req.configuration, req.configuration.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(), req.configuration.satelliteTLogPolicy, id_used, false, satelliteDCs );
 
 			for(int i = 0; i < satelliteLogs.size(); i++) {
@@ -1512,7 +1513,7 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
 			}
 		}
 	} catch (Error & e) {
-		TraceEvent(SevWarnAlways, "TimeKeeperSetupVersionFailed").detail("cause", e.what());
+		TraceEvent(SevWarnAlways, "TimeKeeperSetupVersionFailed").error(e);
 	}
 
 	return Void();
@@ -1558,7 +1559,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 			}
 		} catch (Error &e) {
 			// Failed to update time-version map even after retries, just ignore this iteration
-			TraceEvent(SevWarn, "TimeKeeperFailed").detail("cause", e.what());
+			TraceEvent(SevWarn, "TimeKeeperFailed").error(e);
 		}
 
 		Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));

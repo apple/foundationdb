@@ -74,6 +74,9 @@ public:
 	int DEFAULT_MAX_OUTSTANDING_WATCHES;
 	int ABSOLUTE_MAX_WATCHES; //The client cannot set the max outstanding watches higher than this
 	double WATCH_POLLING_TIME;
+	double NO_RECENT_UPDATES_DURATION;
+	double FAST_WATCH_TIMEOUT;
+	double WATCH_TIMEOUT;
 
 	double IS_ACCEPTABLE_DELAY;
 

@@ -336,6 +336,8 @@ public:
 
 	AsyncMap<Key,bool> watches;
 	int64_t watchBytes;
+	AsyncVar<bool> noRecentUpdates;
+	double lastUpdate;
 
 	Int64MetricHandle readQueueSizeMetric;
 
@@ -424,7 +426,7 @@ public:
 			debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff"))
+			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now())
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
@@ -784,13 +786,27 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 }
 
 ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req ) {
-	choose {
-		when( Void _ = wait( watchValue_impl( data, req ) ) ) {}
-		when( Void _ = wait( BUGGIFY ? Never() : delay( g_network->isSimulated() ? 20 : 900 ) ) ) {
-			req.reply.sendError( timed_out() );
+	state Future<Void> watch = watchValue_impl( data, req );
+	state double startTime = now();
+	
+	loop {
+		double timeoutDelay = -1;
+		if(data->noRecentUpdates.get()) {
+			timeoutDelay = std::max(CLIENT_KNOBS->FAST_WATCH_TIMEOUT - (now() - startTime), 0.0);
+		} else if(!BUGGIFY) {
+			timeoutDelay = std::max(CLIENT_KNOBS->WATCH_TIMEOUT - (now() - startTime), 0.0);
+		}
+		choose {
+			when( Void _ = wait( watch ) ) {
+				return Void();
+			}
+			when( Void _ = wait( timeoutDelay < 0 ? Never() : delay(timeoutDelay) ) ) {
+				req.reply.sendError( timed_out() );
+				return Void();
+			}
+			when( Void _ = wait( data->noRecentUpdates.onChange()) ) {}
 		}
 	}
-	return Void();
 }
 
 ACTOR Future<Void> getShardState_impl( StorageServer* data, GetShardStateRequest req ) {
@@ -2445,6 +2461,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			data->mutableData().createNewVersion(ver);
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
+			data->noRecentUpdates.set(false);
+			data->lastUpdate = now();
 			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
@@ -3045,6 +3063,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	state ActorCollection actors(false);
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
+	state Future<Void> checkLastUpdate = Void();
 
 	actors.add(updateStorage(self));
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
@@ -3066,6 +3085,14 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 		lastLoopTopTime = loopTopTime;
 
 		choose {
+			when( Void _ = wait( checkLastUpdate ) ) {
+				if(now() - self->lastUpdate >= CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION) {
+					self->noRecentUpdates.set(true);
+					checkLastUpdate = delay(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION);
+				} else {
+					checkLastUpdate = delay( std::max(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION-(now()-self->lastUpdate), 0.1) );
+				}
+			}
 			when( Void _ = wait( dbInfoChange ) ) {
 				TEST( self->logSystem );  // shardServer dbInfo changed
 				dbInfoChange = self->db->onChange();
