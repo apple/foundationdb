@@ -706,6 +706,8 @@ ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, s
 	// Send MD5 sum for content so blobstore can verify it
 	headers["Content-MD5"] = contentMD5;
 	state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, {200}));
+	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then the next retry
+	// will see error 400.  That could be detected and handled gracefully by retrieving the etag for the successful request.
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
 	if(r->headers["Content-MD5"] != contentMD5)
@@ -736,6 +738,9 @@ ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstor
 	PacketWriter pw(part_list.getWriteBuffer(), NULL, Unversioned());
 	pw.serializeBytes(manifest);
 	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, &part_list, manifest.size(), {200}));
+	// TODO:  In the event that the client times out just before the request completes (so the client is unaware) then the next retry
+	// will see error 400.  That could be detected and handled gracefully by HEAD'ing the object before upload to get its (possibly
+	// nonexistent) eTag, then if an error 400 is seen then retrieve the eTag again and if it has changed then consider the finish complete.
 	return Void();
 }
 
