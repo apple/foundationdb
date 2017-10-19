@@ -3264,9 +3264,7 @@ public:
 		// To be consistent with directory handling behavior since FDB backup was first released, if the container string
 		// describes a local directory then "/backup-UID" will be added to it.
 		if(backupContainer.find("file://") == 0) {
-			if(backupContainer[backupContainer.size() - 1] != '/')
-				backupContainer += "/";
-			backupContainer += std::string("backup-") + nowStr.toString();
+			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
 		}
 
 		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer);
