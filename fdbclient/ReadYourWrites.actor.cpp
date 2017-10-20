@@ -146,7 +146,7 @@ public:
 			if(key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
-				read.end = firstGreaterOrEqual(key);
+				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
 
 		Standalone<RangeResultRef> v = wait( ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, Reverse) );
@@ -161,6 +161,7 @@ public:
 		}
 					
 		return v;
+		//return ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, Reverse);
 	}
 
 	// addConflictRange(ryw,read,result) is called after a serializable read and is responsible for adding the relevant conflict range
