@@ -1397,7 +1397,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			return Key();
 		}
 
-		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, k.getKey(), info, k.isBackward()) );
+		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, Key(k.getKey(), k.arena()), info, k.isBackward()) );
 		try {
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("offset",k.offset).detail("orEqual",k.orEqual);
@@ -1736,7 +1736,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Future<Version> 
 			return output;
 		}
 
-		state pair<KeyRange, Reference<LocationInfo>> beginServer = wait( getKeyLocation( cx, reverse ? end.getKey() : begin.getKey(), info, reverse ? (end-1).isBackward() : begin.isBackward() ) );
+		state pair<KeyRange, Reference<LocationInfo>> beginServer = wait( getKeyLocation( cx, reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena()), info, reverse ? (end-1).isBackward() : begin.isBackward() ) );
 		state KeyRange shard = beginServer.first;
 		state bool modifiedSelectors = false;
 		state GetKeyValuesRequest req;
