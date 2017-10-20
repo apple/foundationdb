@@ -1869,8 +1869,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Future<Version> 
 				cx->invalidateCache( beginServer.second );
 
 				if (e.code() == error_code_wrong_shard_server) {
-						Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info ) );
-						return result;
+					Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info ) );
+					return result;
 				}
 
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
