@@ -161,7 +161,6 @@ public:
 		}
 					
 		return v;
-		//return ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, Reverse);
 	}
 
 	// addConflictRange(ryw,read,result) is called after a serializable read and is responsible for adding the relevant conflict range
