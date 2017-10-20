@@ -1111,7 +1111,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 		loop {
 			choose {
 				when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( vector<pair<KeyRangeRef, vector<StorageServerInterface>>> keyServersShards = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>>(), info.taskID ) ) ) {
+				when ( vector<pair<KeyRangeRef, vector<StorageServerInterface>>> keyServersShards = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>>(), TaskDefaultPromiseEndpoint ) ) ) {
 					if( info.debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
 					ASSERT( keyServersShards.size() );  // There should always be storage servers, except on version 0 which should not get to this function
@@ -1401,7 +1401,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 		try {
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("offset",k.offset).detail("orEqual",k.orEqual);
-			GetKeyReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), info.taskID, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+			GetKeyReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",printable(reply.sel.key)).detail("offset", reply.sel.offset).detail("orEqual", k.orEqual);
 			k = reply.sel;
@@ -1469,7 +1469,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 				g_traceBatch.addAttach("WatchValueAttachID", info.debugID.get().first(), watchValueID.get().first());
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			state Version resp = wait( loadBalance( ssi.second, &StorageServerInterface::watchValue, WatchValueRequest(key, value, ver, watchValueID), info.taskID ) );
+			state Version resp = wait( loadBalance( ssi.second, &StorageServerInterface::watchValue, WatchValueRequest(key, value, ver, watchValueID), TaskDefaultPromiseEndpoint ) );
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("WatchValueDebug", watchValueID.get().first(), "NativeAPI.watchValue.After"); //.detail("TaskID", g_network->getCurrentTask());
 			}
@@ -1561,7 +1561,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 					.detail("Reverse", reverse)
 					.detail("Servers", locations[shard].second->description());*/
 				}
-				GetKeyValuesReply rep = wait( loadBalance( locations[shard].second, &StorageServerInterface::getKeyValues, req, info.taskID, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
+				GetKeyValuesReply rep = wait( loadBalance( locations[shard].second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
 				output.arena().dependsOn( rep.arena );
@@ -1779,8 +1779,8 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Future<Version> 
 					.detail("ModifiedSelectors", modifiedSelectors)
 					.detail("Servers", beginServer.second->description());*/
 			}
-			GetKeyValuesReply _rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, info.taskID, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
-			GetKeyValuesReply rep = _rep;
+
+			GetKeyValuesReply rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 
 			if( info.debugID.present() ) {
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.After");//.detail("SizeOf", rep.data.size());
@@ -2491,7 +2491,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		}
 
 		req->debugID = commitID;
-		state Future<CommitID> reply = loadBalance( cx->getMasterProxies(), &MasterProxyInterface::commit, *req, info.taskID, true );
+		state Future<CommitID> reply = loadBalance( cx->getMasterProxies(), &MasterProxyInterface::commit, *req, TaskDefaultPromiseEndpoint, true );
 
 		choose {
 			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {
