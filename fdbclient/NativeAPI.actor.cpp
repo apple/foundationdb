@@ -1724,7 +1724,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Future<Version> 
 
 	if( begin.getKey() == allKeys.begin && begin.offset < 1 ) {
 		output.readToBegin = true;
-		begin = firstGreaterOrEqual( begin.getKey() );
+		begin = KeySelector(firstGreaterOrEqual( begin.getKey() ), begin.arena());
 	}
 
 	validateVersion(version);
@@ -2071,8 +2071,8 @@ ACTOR Future< Standalone<RangeResultRef> > getRangeAndConflictRange(
 	KeySelector begin, KeySelector end, GetRangeLimits limits,
 	Promise<KeyRange> conflictRange, bool reverse, TransactionInfo info)
 {
-	state Key beginKey = ( begin.orEqual ? keyAfter(begin.getKey()) : begin.getKey() );
-	state Key endKey = ( end.orEqual ? keyAfter(end.getKey()) : end.getKey() );
+	state Key beginKey = ( begin.orEqual ? keyAfter(begin.getKey()) : Key(begin.getKey(), begin.arena()) );
+	state Key endKey = ( end.orEqual ? keyAfter(end.getKey()) : Key(end.getKey(), end.arena()) );
 
 	//This optimization prevents NULL operations from being added to the conflict range
 	if( begin.offset >= end.offset && beginKey >= endKey ) {
@@ -2103,11 +2103,13 @@ ACTOR Future< Standalone<RangeResultRef> > getRangeAndConflictRange(
 
 		if ( rep.size() ) {
 			if( reverse ) {
-				rangeBegin = min( rangeBegin, Key(rep.end()[-1].key) );
-				if( end.offset > 0 ) rangeEnd = max( rangeEnd, keyAfter( rep[0].key ) );
+				rangeBegin = min( rangeBegin, Key(rep.end()[-1].key, rep.arena()) );
+				if( end.offset > 0 && rep[0].key >= rangeEnd ) rangeEnd = keyAfter( rep[0].key );
 			} else {
-				if( begin.offset <= 0 ) rangeBegin = min( rangeBegin, Key(rep[0].key) );
-				rangeEnd = max( rangeEnd, keyAfter( rep.end()[-1].key ) );
+				if( begin.offset <= 0 ) rangeBegin = min( rangeBegin, Key(rep[0].key, rep.arena()) );
+				if(rep.end()[-1].key >= rangeEnd) {
+					rangeEnd = keyAfter( rep.end()[-1].key );
+				}
 			}
 		}
 
