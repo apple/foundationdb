@@ -2042,17 +2042,17 @@ Future< Standalone< VectorRef< const char*>>> Transaction::getAddressesForKey( c
 }
 
 ACTOR Future< Key > getKeyAndConflictRange(
-	Database cx, KeySelector k, Future<Version> version, Promise<KeyRange> conflictRange, TransactionInfo info)
+	Database cx, KeySelector k, Future<Version> version, Promise<std::pair<Key, Key>> conflictRange, TransactionInfo info)
 {
 	try {
 		Key rep = wait( getKey(cx, k, version, info) );
 		if( k.offset <= 0 )
-			conflictRange.send( KeyRangeRef( rep, k.orEqual ? keyAfter( k.getKey() ) : k.getKey() ) );
+			conflictRange.send( std::make_pair( rep, k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()) ) );
 		else
-			conflictRange.send( KeyRangeRef( k.orEqual ? keyAfter( k.getKey() ) : k.getKey(), keyAfter( rep ) ) );
+			conflictRange.send( std::make_pair( k.orEqual ? keyAfter( k.getKey() ) : Key(k.getKey(), k.arena()), keyAfter( rep ) ) );
 		return std::move(rep);
 	} catch( Error&e ) {
-		conflictRange.send(KeyRangeRef());
+		conflictRange.send(std::make_pair(Key(), Key()));
 		throw;
 	}
 }
@@ -2061,7 +2061,7 @@ Future< Key > Transaction::getKey( const KeySelector& key, bool snapshot ) {
 	if( snapshot )
 		return ::getKey(cx, key, getReadVersion(), info);
 
-	Promise<KeyRange> conflictRange;
+	Promise<std::pair<Key, Key>> conflictRange;
 	extraConflictRanges.push_back( conflictRange.getFuture() );
 	return getKeyAndConflictRange( cx, key, getReadVersion(), conflictRange, info );
 }
@@ -2069,7 +2069,7 @@ Future< Key > Transaction::getKey( const KeySelector& key, bool snapshot ) {
 ACTOR Future< Standalone<RangeResultRef> > getRangeAndConflictRange(
 	Database cx, Reference<TransactionLogInfo> trLogInfo, Future<Version> version,
 	KeySelector begin, KeySelector end, GetRangeLimits limits,
-	Promise<KeyRange> conflictRange, bool reverse, TransactionInfo info)
+	Promise<std::pair<Key, Key>> conflictRange, bool reverse, TransactionInfo info)
 {
 	state Key beginKey = ( begin.orEqual ? keyAfter(begin.getKey()) : Key(begin.getKey(), begin.arena()) );
 	state Key endKey = ( end.orEqual ? keyAfter(end.getKey()) : Key(end.getKey(), end.arena()) );
@@ -2077,7 +2077,7 @@ ACTOR Future< Standalone<RangeResultRef> > getRangeAndConflictRange(
 	//This optimization prevents NULL operations from being added to the conflict range
 	if( begin.offset >= end.offset && beginKey >= endKey ) {
 		TEST(true); //get range no result possible
-		conflictRange.send(KeyRangeRef());
+		conflictRange.send(std::make_pair(Key(), Key()));
 		return Standalone<RangeResultRef>();
 	}
 
@@ -2113,11 +2113,11 @@ ACTOR Future< Standalone<RangeResultRef> > getRangeAndConflictRange(
 			}
 		}
 
-		conflictRange.send( KeyRangeRef( rangeBegin, rangeEnd ) );
+		conflictRange.send( std::make_pair( rangeBegin, rangeEnd ) );
 
 		return std::move(rep);
 	} catch( Error &e ) {
-		conflictRange.send(KeyRangeRef());
+		conflictRange.send(std::make_pair(Key(), Key()));
 		throw;
 	}
 }
@@ -2138,7 +2138,7 @@ Future< Standalone<RangeResultRef> > Transaction::getRange(
 	if( snapshot )
 		return getRangeWrapper(cx, trLogInfo, getReadVersion(), begin, end, limits, reverse, info );
 
-	Promise<KeyRange> conflictRange;
+	Promise<std::pair<Key, Key>> conflictRange;
 	extraConflictRanges.push_back( conflictRange.getFuture() );
 	return getRangeAndConflictRange( cx, trLogInfo, getReadVersion(), begin, end, limits, conflictRange, reverse, info );
 }
@@ -2606,8 +2606,8 @@ Future<Void> Transaction::commitMutations() {
 
 		bool isCheckingWrites = options.checkWritesEnabled && g_random->random01() < 0.01;
 		for(int i=0; i<extraConflictRanges.size(); i++)
-			if (extraConflictRanges[i].isReady() && !extraConflictRanges[i].get().empty() )
-				tr.transaction.read_conflict_ranges.push_back( tr.arena, extraConflictRanges[i].get() );
+			if (extraConflictRanges[i].isReady() && extraConflictRanges[i].get().first != extraConflictRanges[i].get().second )
+				tr.transaction.read_conflict_ranges.push_back( tr.arena, KeyRangeRef(extraConflictRanges[i].get().first, extraConflictRanges[i].get().second) );
 
 		if( !options.causalWriteRisky && !intersects( tr.transaction.write_conflict_ranges, tr.transaction.read_conflict_ranges ).present() )
 			makeSelfConflicting();
