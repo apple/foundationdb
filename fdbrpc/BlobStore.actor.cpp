@@ -198,7 +198,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 	} catch(std::string &err) {
 		if(error != nullptr)
 			*error = err;
-		TraceEvent(SevWarn, "BlobStoreEndpoint").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url);
+		TraceEvent(SevWarnAlways, "BlobStoreEndpoint").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url);
 		throw file_not_found();
 	}
 }
@@ -400,12 +400,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		bstore->s_stats.requests_failed++;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
-		bool retryAble = err.present() || r->code == 500 || r->code == 503;
+		bool retryable = err.present() || r->code == 500 || r->code == 503;
 
 		// But only if our previous attempt was not the last allowable try.
-		retryAble = retryAble && (thisTry < maxTries);
+		retryable = retryable && (thisTry < maxTries);
 
-		TraceEvent event(SevInfo, retryAble ? "BlobStoreEndpointRequestFailed" : "BlobStoreEndpointRequestFailedRetryable");
+		TraceEvent event(retryable ? SevWarn : SevWarnAlways, retryable ? "BlobStoreEndpointRequestFailedRetryable" : "BlobStoreEndpointRequestFailed");
 
 		event.detail("RemoteEndpoint", address)
 			 .detail("Verb", verb)
@@ -437,7 +437,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		}
 
 		// For retryable errors, log the delay then wait.
-		if(retryAble) {
+		if(retryable) {
 			event.detail("RetryDelay", delay);
 			Void _ = wait(::delay(delay));
 		}
