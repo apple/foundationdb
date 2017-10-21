@@ -314,6 +314,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 	loop {
 		state Optional<Error> err;
+		state Optional<NetworkAddress> remoteAddress;
+
 		try {
 			// Start connecting
 			Future<BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect();
@@ -337,6 +339,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			// Finish connecting, do request
 			state BlobStoreEndpoint::ReusableConnection rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+			remoteAddress = rconn.conn->getPeerAddress();
 			Void _ = wait(bstore->requestRate->getAllowance(1));
 			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
 
@@ -372,8 +375,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 		TraceEvent event(retryable ? SevWarn : SevWarnAlways, retryable ? "BlobStoreEndpointRequestFailedRetryable" : "BlobStoreEndpointRequestFailed");
 
-		event.detail("RemoteEndpoint", "Unknown")
-			 .detail("Verb", verb)
+		if(remoteAddress.present())
+			event.detail("RemoteEndpoint", remoteAddress.get());
+		else
+			event.detail("RemoteHost", bstore->host);
+
+		event.detail("Verb", verb)
 			 .detail("Resource", resource)
 			 .detail("ThisTry", thisTry)
 			 .suppressFor(5, true);
