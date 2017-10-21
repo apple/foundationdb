@@ -907,9 +907,9 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		for (KeyBackedTag eachTag : backupTags) {
-			state KeyBackedTag tag = eachTag;
-			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag.getOrThrow(tr));
+		state std::vector<KeyBackedTag>::iterator tag;
+		for (tag = backupTags.begin(); tag != backupTags.end(); tag++) {
+			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag->getOrThrow(tr));
 			state BackupConfig config(uidAndAbortedFlag.first);
 
 			EBackupState status = wait(config.stateEnum().getOrThrow(tr));
@@ -924,7 +924,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			std::string backupContainer = wait(config.backupContainer().getOrThrow(tr));
 			tagContainers.push_back(backupContainer);
 
-			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag.tagName)));
+			tagLastRestorableVersions.push_back(fba.getLastRestorable(tr, StringRef(tag->tagName)));
 		}
 
 		Void _ = wait( waitForAll(tagLastRestorableVersions) && waitForAll(tagStates) && waitForAll(tagContainers) && waitForAll(tagRangeBytes) && waitForAll(tagLogBytes));

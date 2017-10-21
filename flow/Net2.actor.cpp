@@ -31,13 +31,12 @@
 #include "IThreadPool.h"
 #include "boost/range.hpp"
 
-extern void startProfiling(INetwork* network);
-
 #include "ActorCollection.h"
 #include "ThreadSafeQueue.h"
 #include "ThreadHelper.actor.h"
 #include "TDMetric.actor.h"
 #include "AsioReactor.h"
+#include "flow/Profiler.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -49,10 +48,10 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain zookeeper, database and IKeyValueStore keys
+// These impact both communications and the deserialization of certain database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A551000001LL;
+uint64_t currentProtocolVersion        = 0x0FDB00A551010001LL;
 uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -552,7 +551,11 @@ void Net2::run() {
 #endif
 
 	timeOffsetLogger = logTimeOffset();
-	startProfiling(this);
+	const char *flow_profiler_enabled = getenv("FLOW_PROFILER_ENABLED");
+	if (flow_profiler_enabled != nullptr && *flow_profiler_enabled != '\0') {
+		// The empty string check is to allow running `FLOW_PROFILER_ENABLED= ./fdbserver` to force disabling flow profiling at startup.
+		startProfiling(this);
+	}
 
 	// Get the address to the launch function
 	typedef void (*runCycleFuncPtr)();

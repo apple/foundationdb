@@ -58,6 +58,7 @@ public:
 			multipart_min_part_size,
 			concurrent_uploads,
 			concurrent_reads_per_file,
+			concurrent_writes_per_file,
 			read_block_size,
 			read_ahead_blocks,
 			read_cache_blocks_per_file,
@@ -79,6 +80,7 @@ public:
 				"multipart_min_part_size (or minps)    Min part size for multipart uploads.",
 				"concurrent_uploads (or cu)            Max concurrent uploads (part or whole) that can be in progress at once.",
 				"concurrent_reads_per_file (or crps)   Max concurrent reads in progress for any one file.",
+				"concurrent_writes_per_file (or cwps)  Max concurrent uploads in progress for any one file.",
 				"read_block_size (or rbs)              Block size in bytes to be used for reads.",
 				"read_ahead_blocks (or rab)            Number of blocks to read ahead of requested offset.",
 				"read_cache_blocks_per_file (or rcb)   Size of the read cache for a file in blocks.",
@@ -144,8 +146,8 @@ public:
 
 	// Do an HTTP request to the Blob Store, read the response.  Handles authentication.
 	// Every blob store interaction should ultimately go through this function
-	Future<Reference<HTTP::Response>> doRequest(std::string const &verb, std::string const &resource, const HTTP::Headers &headers, UnsentPacketQueue *pContent, int contentLen);
 
+	Future<Reference<HTTP::Response>> doRequest(std::string const &verb, std::string const &resource, const HTTP::Headers &headers, UnsentPacketQueue *pContent, int contentLen, std::set<unsigned int> successCodes);
 	struct ObjectInfo {
 		std::string bucket;
 		std::string name;

@@ -92,6 +92,7 @@ public:
 				case ProcessClass::TesterClass: return false;
 				case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
+				case ProcessClass::ClusterControllerClass: return false;
 				default: return false;
 			}
 		}

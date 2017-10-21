@@ -67,28 +67,6 @@ public:
 
 	static const int logHeaderSize;
 
-	// The following function will return the textual name of the
-	// start status
-	static const char* getResultText(enumActionResult enResult)
-	{
-		switch (enResult)
-		{
-		case RESULT_SUCCESSFUL:
-			return "action was successful";
-			break;
-		case RESULT_ERRORED:
-			return "error received during action process";
-			break;
-		case RESULT_DUPLICATE:
-			return "requested action has already been performed";
-			break;
-		case RESULT_UNNEEDED:
-			return "requested action is not needed";
-			break;
-		}
-		return "<undefined>";
-	}
-
 	// Convert the status text to an enumerated value
 	static enumState getState(std::string stateText)
 	{
@@ -184,11 +162,7 @@ public:
 		return isRunnable;
 	}
 
-	static bool isRunnable(std::string stateText) {	
-		return isRunnable(getState(stateText));	
-	}
-
-	static const KeyRef getDefaultTag() {	
+	static const KeyRef getDefaultTag() {
 		return StringRef(defaultTagName);
 	}
 

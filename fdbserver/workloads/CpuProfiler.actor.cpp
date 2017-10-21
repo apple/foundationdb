@@ -77,12 +77,12 @@ struct CpuProfilerWorkload : TestWorkload
 			for(i = 0; i < self->profilingWorkers.size(); i++)
 			{
 				ProfilerRequest req;
-				req.enabled = enabled;
+				req.action = enabled ? ProfilerRequest::Action::ENABLE : ProfilerRequest::Action::DISABLE;
 
 				//The profiler output name will be the ip.port.prof
 				req.outputFile = StringRef(toIPString(self->profilingWorkers[i].address().ip) + "." + format("%d", self->profilingWorkers[i].address().port) + ".prof");
 
-				replies.push_back(self->profilingWorkers[i].cpuProfilerRequest.tryGetReply(req));
+				replies.push_back(self->profilingWorkers[i].clientInterface.profiler.tryGetReply(req));
 			}
 
 			Void _ = wait(waitForAll(replies));
@@ -98,7 +98,7 @@ struct CpuProfilerWorkload : TestWorkload
 
 		//Enable (or disable) the profiler on the current tester
 		ProfilerRequest req;
-		req.enabled = enabled;
+		req.action = enabled ? ProfilerRequest::Action::ENABLE : ProfilerRequest::Action::DISABLE;
 		req.outputFile = StringRef(toIPString(g_network->getLocalAddress().ip) + "." + format("%d", g_network->getLocalAddress().port) + ".prof");
 
 		updateCpuProfiler(req);

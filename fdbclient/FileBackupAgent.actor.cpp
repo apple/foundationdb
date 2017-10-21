@@ -1145,6 +1145,7 @@ namespace fileBackup {
 			// Enable the stop key
 			state Version readVersion = wait(tr->getReadVersion());
 			config.stopVersion().set(tr, readVersion);
+			TraceEvent(SevInfo, "FBA_setStopVersion").detail("stopVersion", readVersion);
 
 			Void _ = wait(taskBucket->finish(tr, task));
 
@@ -1755,6 +1756,8 @@ namespace fileBackup {
 			Void _ = wait(mf->sync());
 
 			std::string fileName = format("kvmanifest,%lld,%lld,%lld,%s", minVer, maxVer, totalBytes, g_random->randomUniqueID().toString().c_str());
+
+			TraceEvent(SevInfo, "FBA_KVManifest").detail("fileName", fileName.c_str());
 			Void _ = wait(bc->renameFile(tempFile, fileName));
 
 			return Void();
@@ -3233,6 +3236,11 @@ public:
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
+		TraceEvent(SevInfo, "FBA_submitBackup")
+				.detail("tagName", tagName.c_str())
+				.detail("stopWhenDone", stopWhenDone)
+				.detail("outContainer", outContainer.toString());
+
 		state KeyBackedTag tag = makeBackupTag(tagName);
 		Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
 		if (uidAndAbortedFlag.present()) {
@@ -3256,9 +3264,7 @@ public:
 		// To be consistent with directory handling behavior since FDB backup was first released, if the container string
 		// describes a local directory then "/backup-UID" will be added to it.
 		if(backupContainer.find("file://") == 0) {
-			if(backupContainer[backupContainer.size() - 1] != '/')
-				backupContainer += "/";
-			backupContainer += std::string("backup-") + nowStr.toString();
+			backupContainer = joinPath(backupContainer, std::string("backup-") + nowStr.toString());
 		}
 
 		Reference<IBackupContainer> bc = IBackupContainer::openContainer(backupContainer);
@@ -3424,13 +3430,17 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName.toString());
-		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr));
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 		state BackupConfig config(current.first);
 		state EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 
 		if (!FileBackupAgent::isRunnable(status)) {
 			throw backup_unneeded();
 		}
+
+		TraceEvent(SevInfo, "FBA_discontinueBackup")
+				.detail("tagName", tag.tagName.c_str())
+				.detail("status", BackupAgentBase::getStateText(status));
 
 		state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 
@@ -3448,7 +3458,7 @@ public:
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 		state KeyBackedTag tag = makeBackupTag(tagName);
-		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr));
+		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 
 		state BackupConfig config(current.first);
 		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
@@ -3456,6 +3466,10 @@ public:
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 			throw backup_unneeded();
 		}
+
+		TraceEvent(SevInfo, "FBA_abortBackup")
+				.detail("tagName", tagName.c_str())
+				.detail("status", BackupAgentBase::getStateText(status));
 
 		// Cancel backup task through tag
 		Void _ = wait(tag.cancel(tr));
