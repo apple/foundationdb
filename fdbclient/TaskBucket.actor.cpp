@@ -304,7 +304,10 @@ public:
 	}
 	
 	ACTOR static Future<bool> doTask(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-		if (task && TaskFuncBase::isValidTask(task)) {
+		if (!task || !TaskFuncBase::isValidTask(task))
+			return false;
+
+		try {
 			state Reference<TaskFuncBase> taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
 			if (taskFunc) {
 				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
@@ -358,10 +361,8 @@ public:
 							state Reference<ReadYourWritesTransaction> tr3(new ReadYourWritesTransaction(cx));
 							taskBucket->setOptions(tr3);
 							Version version = wait(tr3->getReadVersion());
-							if(version >= task->timeout) {
-								TraceEvent(SevWarn, "TB_ExecuteTimedOut").detail("TaskType", printable(task->params[Task::reservedTaskParamKeyType]));
-								return true;
-							}
+							if(version >= task->timeout)
+								throw timed_out();
 							// Otherwise reset the timeout
 							timeout = delay((BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeout - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 						}
@@ -370,12 +371,19 @@ public:
 
 				if (BUGGIFY) Void _ = wait(delay(10.0));
 				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-					return finishTaskRun(tr, taskBucket, futureBucket, task, taskFunc, verifyTask);	}));
-				return true;
+					return finishTaskRun(tr, taskBucket, futureBucket, task, taskFunc, verifyTask);
+				}));
 			}
+		} catch(Error &e) {
+			TraceEvent(SevWarn, "TB_ExecuteFailure")
+				.detail("TaskUID", task->key.printable())
+				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
+				.detail("Priority", task->getPriority())
+				.error(e);
 		}
 
-		return false;
+		// Return true to indicate that we did work.
+		return true;
 	}
 
 	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
