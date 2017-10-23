@@ -1461,17 +1461,17 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 	}
 	else if (m.type != MutationRef::SetValue && (m.type)) {
 
-		StringRef oldVal;
+		Optional<StringRef> oldVal;
 		auto it = data.atLatest().lastLessOrEqual(m.param1);
 		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
 			oldVal = it->getValue();
 		else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
 			TEST(true); // Atomic op right after a clear.
-			oldVal = StringRef();
 		}
 		else {
 			Optional<Value>& oldThing = eager->getValue(m.param1);
-			oldVal = oldThing.present() ? oldThing.get() : StringRef();
+			if (oldThing.present())
+				oldVal = oldThing.get();
 		}
 
 		switch(m.type) {

@@ -545,7 +545,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		return KeyRangeRef( getKeyForIndex( startLocation ), getKeyForIndex( endLocation ) );
 	}
 
-	Value applyAtomicOp(Value existingValue, Value value, MutationRef::Type type) {
+	Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type) {
 		Arena arena;
 		if (type == MutationRef::SetValue)
 			return value;
@@ -780,7 +780,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									if( !noConflict && key.size() <= (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) )
 										self->addedConflicts.insert(key, true);
 									Optional<Value> existing = self->memoryGet( &self->memoryDatabase, key );
-									self->memoryDatabase[ key ] = self->applyAtomicOp( existing.present() ? existing.get() : Value(), value, opType );
+									self->memoryDatabase[ key ] = self->applyAtomicOp( existing.present() ? Optional<StringRef>(existing.get()) : Optional<StringRef>(), value, opType );
 								}
 							} else if( operationType > 11 && !disableSet ) {
 								Key key = self->getRandomKey();

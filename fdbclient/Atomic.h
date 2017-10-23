@@ -24,7 +24,8 @@
 
 #include "CommitTransaction.h"
 
-static ValueRef doLittleEndianAdd(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
 	
@@ -46,7 +47,8 @@ static ValueRef doLittleEndianAdd(const ValueRef& existingValue, const ValueRef&
 	return StringRef(buf, i);	
 }
 
-static ValueRef doAnd(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!otherOperand.size()) return otherOperand;
 	
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
@@ -60,14 +62,15 @@ static ValueRef doAnd(const ValueRef& existingValue, const ValueRef& otherOperan
 	return StringRef(buf, i);
 }
 
-static ValueRef doNewAnd(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
-	if (!existingValue.size())
+static ValueRef doNewAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present())
 		return otherOperand;
 
-	return doAnd(existingValue, otherOperand, ar);
+	return doAnd(existingValueOptional, otherOperand, ar);
 }
 
-static ValueRef doOr(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
 
@@ -82,7 +85,8 @@ static ValueRef doOr(const ValueRef& existingValue, const ValueRef& otherOperand
 	return StringRef(buf, i);
 }
 
-static ValueRef doXor(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
 	
@@ -98,7 +102,8 @@ static ValueRef doXor(const ValueRef& existingValue, const ValueRef& otherOperan
 	return StringRef(buf, i);
 }
 
-static ValueRef doAppendIfFits(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return existingValue;
 	if(existingValue.size() + otherOperand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
@@ -118,7 +123,8 @@ static ValueRef doAppendIfFits(const ValueRef& existingValue, const ValueRef& ot
 	return StringRef(buf, i+j);
 }
 
-static ValueRef doMax(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if (!existingValue.size()) return otherOperand;
 	if (!otherOperand.size()) return otherOperand;
 
@@ -149,19 +155,20 @@ static ValueRef doMax(const ValueRef& existingValue, const ValueRef& otherOperan
 	return otherOperand;
 }
 
-// Big Endian version of doMin
-static ValueRef doByteMax(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
-	if (!otherOperand.size() || !existingValue.size()) return otherOperand;
+static ValueRef doByteMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present()) return otherOperand;
 
+	const ValueRef& existingValue = existingValueOptional.get();
 	if (existingValue > otherOperand)
 		return existingValue;
 
 	return otherOperand;
 }
 
-static ValueRef doMin(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	if (!otherOperand.size()) return otherOperand;
 
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	int i,j;
 
 	for (i = otherOperand.size() - 1; i >= existingValue.size(); i--) {
@@ -196,17 +203,17 @@ static ValueRef doMin(const ValueRef& existingValue, const ValueRef& otherOperan
 	return otherOperand;
 }
 
-static ValueRef doNewMin(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
-	if (!existingValue.size())
+static ValueRef doNewMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present())
 		return otherOperand;
 
-	return doMin(existingValue, otherOperand, ar);
+	return doMin(existingValueOptional, otherOperand, ar);
 }
 
-// Big Endian version of doMin
-static ValueRef doByteMin(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
-	if (!otherOperand.size() || !existingValue.size()) return otherOperand;
+static ValueRef doByteMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present()) return otherOperand;
 	
+	const ValueRef& existingValue = existingValueOptional.get();
 	if (existingValue < otherOperand)
 		return existingValue;
 

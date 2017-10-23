@@ -1406,7 +1406,7 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 			for( int i = 0; i < op.size(); ++i) {
 				switch(op[i].type) {
 					case MutationRef::SetValue:
-						tr.set( it.beginKey().assertRef(), op[i].value, false );
+						tr.set( it.beginKey().assertRef(), op[i].value.get(), false );
 						break;
 					case MutationRef::AddValue:
 					case MutationRef::AppendIfFits:
@@ -1421,7 +1421,7 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::ByteMax:
 					case MutationRef::NewMin:
 					case MutationRef::NewAnd:
-						tr.atomicOp( it.beginKey().assertRef(), op[i].value, op[i].type, false );
+						tr.atomicOp( it.beginKey().assertRef(), op[i].value.get(), op[i].type, false );
 						break;
 					default:
 						break;
