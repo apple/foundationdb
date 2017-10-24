@@ -205,7 +205,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  element.
 	 *
 	 * @param v the {@link Versionstamp} to append
-     *
+	 *
 	 * @return a newly created {@code Tuple}
 	 */
 	public Tuple add(Versionstamp v) {
@@ -287,7 +287,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return a serialized representation of this {@code Tuple}.
 	 */
 	public byte[] pack() {
-	    return pack(null);
+		return pack(null);
 	}
 
 	/**
@@ -706,7 +706,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  {@code Tuple}
 	 */
 	public boolean hasIncompleteVersionstamp() {
-	    return TupleUtil.hasIncompleteVersionstamp(this);
+		return TupleUtil.hasIncompleteVersionstamp(this);
 	}
 
 	/**
