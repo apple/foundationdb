@@ -1079,7 +1079,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, 
 		Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector<TestSpec> tests, test_location_t at, 
 		int minTestersExpected, StringRef startingConfiguration, LocalityData locality ) {
-	state int flags = at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY;
+	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
 	state Future<Void> testerTimeout = delay(60.0); // wait 60 sec for testers to show up
 	state vector<std::pair<WorkerInterface, ProcessClass>> workers;
 
