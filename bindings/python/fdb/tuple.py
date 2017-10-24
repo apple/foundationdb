@@ -117,6 +117,7 @@ class SingleFloat(object):
         return bool(self.value)
 
 class Versionstamp(object):
+    LENGTH = 12
     _TR_VERSION_LEN = 10
     _MAX_USER_VERSION = (1 << 16) - 1
     _UNSET_TR_VERSION = 10 * six.int2byte(0xff)
@@ -148,7 +149,7 @@ class Versionstamp(object):
     def from_bytes(cls, v, start=0):
         if not isinstance(v, bytes):
             raise TypeError("Cannot parse versionstamp from non-byte string")
-        elif len(v) - start < cls._TR_VERSION_LEN + 2:
+        elif len(v) - start < cls.LENGTH:
             raise ValueError("Versionstamp byte string is too short (only " + str(len(v) - start) + " bytes to read from")
         else:
             tr_version = v[start:start + cls._TR_VERSION_LEN]
@@ -173,7 +174,7 @@ class Versionstamp(object):
 
     def completed(self, new_tr_version):
         if self.is_complete():
-            raise RuntimeError("Cannot complete Versionstamp twice")
+            raise RuntimeError("Versionstamp already completed")
         else:
             return Versionstamp(new_tr_version, self.user_version)
 
@@ -260,7 +261,7 @@ def _decode(v, pos):
             raise ValueError("Invalid API version " + str(fdb._version) + " for boolean types")
         return True, pos+1
     elif code == VERSIONSTAMP_CODE:
-        return Versionstamp.from_bytes(v, pos+1), pos + 13
+        return Versionstamp.from_bytes(v, pos+1), pos + 1 + Versionstamp.LENGTH
     elif code == NESTED_CODE:
         ret = []
         end_pos = pos+1
@@ -352,12 +353,13 @@ def _encode(value, nested=False):
     else:
         raise ValueError("Unsupported data type: " + str(type(value)))
 
-# packs the specified tuple into that may be used for versionstamp operations but may be used for regular ops
-def _pack_maybe_with_versionstamp(t, prefix=None, prefix_len=0):
-    if prefix is not None and prefix_len > 0 and len(prefix) != prefix_len:
-        raise ValueError("Inconsistent values specified for prefix and prefix_len")
-    if prefix_len < 0:
-        raise ValueError("Illegal prefix_len " + str(prefix_len) + " specified")
+# packs the tuple possibly for versionstamp operations and returns the position of the
+# incomplete versionstamp
+#  * if there are no incomplete versionstamp members, this returns the packed tuple and -1
+#  * if there is exactly one incomplete versionstamp member, it returns the tuple with the
+#    two extra version bytes and the position of the version start
+#  * if there is more than one incomplete versionstamp member, it throws an error
+def _pack_maybe_with_versionstamp(t, prefix=None):
     if not isinstance(t, tuple):
         raise Exception("fdbtuple pack() expects a tuple, got a " + str(type(t)))
 
@@ -365,7 +367,7 @@ def _pack_maybe_with_versionstamp(t, prefix=None, prefix_len=0):
 
     child_bytes, version_pos = _reduce_children(map(_encode, t))
     if version_pos >= 0:
-        version_pos += len(prefix) if prefix is not None else prefix_len
+        version_pos += len(prefix) if prefix is not None else 0
         bytes_list.extend(child_bytes)
         bytes_list.append(struct.pack('<H', version_pos))
     else:
@@ -381,8 +383,8 @@ def pack(t, prefix=None):
     return res
 
 # packs the specified tuple into a key for versionstamp operations
-def pack_with_versionstamp(t, prefix=None, prefix_len=0):
-    res, version_pos = _pack_maybe_with_versionstamp(t, prefix, prefix_len)
+def pack_with_versionstamp(t, prefix=None):
+    res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos < 0:
         raise ValueError("No incomplete versionstamp included in tuple pack with versionstamp")
     return res
