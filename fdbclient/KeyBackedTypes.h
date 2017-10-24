@@ -158,7 +158,7 @@ public:
 
 	Future<Void> set(Database cx, T const &val) {
 		auto _key = key;
-		auto _val = Codec<T>::pack(val).pack();
+		Value _val = Codec<T>::pack(val).pack();
 		return runRYWTransaction(cx, [_key, _val](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
