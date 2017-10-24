@@ -234,10 +234,10 @@ public:
 	template <class X>
 	Future< REPLY_TYPE(X) > getReply(const X& value) const {
 		if (queue->isRemoteEndpoint()) {
-			return sendCanceler(getReplyPromise(value), FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()));
+			return sendCanceler(getReplyPromise(value), FlowTransport::transport().sendReliable(SerializeSource<T>(value), getEndpoint()), getEndpoint());
 		}
 		send(value);
-		return getReplyPromise(value).getFuture();
+		return reportEndpointFailure(getReplyPromise(value).getFuture(), getEndpoint());
 	}
 	template <class X>
 	Future<REPLY_TYPE(X)> getReply(const X& value, int taskID) const {

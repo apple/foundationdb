@@ -171,32 +171,29 @@ struct LogSystemConfig {
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
-		if( logSystemType!=r.logSystemType || tLogs.size() != r.tLogs.size() || oldTLogs.size() != r.oldTLogs.size() || minRouters != r.minRouters || expectedLogSets != r.expectedLogSets ) {
-			return false;
-		}
-		for(int i = 0; i < tLogs.size(); i++ ) {
-			if( !tLogs[i].isEqualIds(r.tLogs[i]) ) {
-				return false;
+		for( auto& i : r.tLogs ) {
+			for( auto& j : tLogs ) {
+				if( i.isEqualIds(j) ) {
+					return true;
+				}
 			}
 		}
-		for(int i = 0; i < oldTLogs.size(); i++ ) {
-			if( !oldTLogs[i].isEqualIds(r.oldTLogs[i]) ) {
-				return false;
-			}
-		}
-		return true;
+		return false;
 	}
 
 	bool isNextGenerationOf(LogSystemConfig const& r) const {
-		if( !oldTLogs.size() || tLogs.size() != oldTLogs[0].tLogs.size() ) {
+		if( !oldTLogs.size() ) {
 			return false;
 		}
-		for( int i = 0; i < tLogs.size(); i++ ) {
-			if( !tLogs[i].isEqualIds(oldTLogs[0].tLogs[i]) ) {
-				return false;
+
+		for( auto& i : r.tLogs ) {
+				for( auto& j : oldTLogs[0].tLogs ) {
+				if( i.isEqualIds(j) ) {
+					return true;
+				}
 			}
 		}
-		return true;
+		return false;
 	}
 
 	template <class Ar>

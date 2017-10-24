@@ -992,9 +992,18 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 
 		state bool finalUpdate = !newState.oldTLogData.size() && newState.tLogs.size() == self->configuration.expectedLogSets();
 		Void _ = wait( self->cstate.write(newState, finalUpdate) );
+
+		if( finalUpdate ) {
+			self->recoveryState = RecoveryState::REMOTE_RECOVERED;
+			TraceEvent("MasterRecoveryState", self->dbgid)
+			.detail("StatusCode", RecoveryStatus::remote_recovered)
+			.detail("Status", RecoveryStatus::names[RecoveryStatus::remote_recovered])
+			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+			self->logSystem->coreStateWritten(newState);
+		}
 		
 		self->cstateUpdated.set(true);
-		self->logSystem->coreStateWritten(newState);
+		
 		self->registrationTrigger.trigger();
 		
 		if( finalUpdate ) {

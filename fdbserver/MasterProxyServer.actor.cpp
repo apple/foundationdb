@@ -911,7 +911,7 @@ ACTOR static Future<Void> transactionStarter(
 			otherProxies.push_back(mp);
 	}
 
-	ASSERT(db->get().recoveryState == RecoveryState::FULLY_RECOVERED);  // else potentially we could return uncommitted read versions (since self->committedVersion is only a committed version if this recovery succeeds)
+	ASSERT(db->get().recoveryState >= RecoveryState::FULLY_RECOVERED);  // else potentially we could return uncommitted read versions (since self->committedVersion is only a committed version if this recovery succeeds)
 
 	TraceEvent("ProxyReadyForTxnStarts", proxy.id());
 
@@ -1129,7 +1129,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		when(Void _ = wait(onError)) {}
 		when(vector<CommitTransactionRequest> trs = waitNext(batchedCommits.getFuture())) {
 			//TraceEvent("MasterProxyCTR", proxy.id()).detail("CommitTransactions", trs.size()).detail("TransactionRate", transactionRate).detail("TransactionQueue", transactionQueue.size()).detail("ReleasedTransactionCount", transactionCount);
-			if (trs.size() || (db->get().recoveryState == RecoveryState::FULLY_RECOVERED && now() - lastCommit >= SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL)) {
+			if (trs.size() || (db->get().recoveryState >= RecoveryState::FULLY_RECOVERED && now() - lastCommit >= SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL)) {
 				lastCommit = now();
 
 				if (trs.size() || lastCommitComplete.isReady()) {

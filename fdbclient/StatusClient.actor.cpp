@@ -362,7 +362,7 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 		// Lots of the JSON reads in this code could throw, and that's OK, isAvailable and isHealthy will be
 		// at the states we want them to be in (currently)
 		isAvailable = client.at("coordinators.quorum_reachable").get_bool()
-			&& cluster.at("recovery_state.name") == "fully_recovered"
+			&& ( cluster.at("recovery_state.name") == "fully_recovered" || "remote_recovered" )
 			&& cluster.at("database_available").get_bool();
 
 		if (isAvailable)

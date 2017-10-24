@@ -26,7 +26,7 @@
 // is slightly more detailed and is used by the status infrastructure.  But I'm scared to make changes to the former so close to 1.0 release, so I'm making the latter.
 
 namespace RecoveryState {
-	enum RecoveryState { READING_CSTATE = 1, LOCKING_CSTATE = 2, RECRUITING = 3, RECOVERY_TRANSACTION = 4, WRITING_CSTATE = 5, FULLY_RECOVERED = 6 };
+	enum RecoveryState { READING_CSTATE = 1, LOCKING_CSTATE = 2, RECRUITING = 3, RECOVERY_TRANSACTION = 4, WRITING_CSTATE = 5, FULLY_RECOVERED = 6, REMOTE_RECOVERED = 7 };
 };
 
 namespace RecoveryStatus {
@@ -43,6 +43,7 @@ namespace RecoveryStatus {
 		recovery_transaction,
 		writing_coordinated_state,
 		fully_recovered,
+		remote_recovered,
 		END
 	};
 

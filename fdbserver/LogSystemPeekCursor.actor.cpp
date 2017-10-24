@@ -634,7 +634,9 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 				for (auto& c : self->serverCursors[self->bestSet]) {
 					if (!c->hasMessage()) {
 						q.push_back(c->getMore());
-						q.push_back(c->onFailed());
+						if(c->isActive()) {
+							q.push_back(c->onFailed());
+						}
 					}
 				}
 				Void _ = wait(quorum(q, 1));

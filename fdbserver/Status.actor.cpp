@@ -37,7 +37,7 @@ const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
 	"configuration_missing", "configuration_never_created", "configuration_invalid",
 	"recruiting_transaction_servers", "initializing_transaction_servers", "recovery_transaction",
-	"writing_coordinated_state", "fully_recovered"
+	"writing_coordinated_state", "fully_recovered", "remote_recovered"
 };
 static_assert( sizeof(RecoveryStatus::names) == sizeof(RecoveryStatus::names[0])*RecoveryStatus::END, "RecoveryStatus::names[] size" );
 const char* RecoveryStatus::descriptions[] = {
@@ -64,7 +64,9 @@ const char* RecoveryStatus::descriptions[] = {
 	// writing_coordinated_state
 	"Writing coordinated state. Verify that a majority of coordination server processes are active.",
 	// fully_recovered
-	"Recovery complete."
+	"Recovery complete.",
+	// remote_recovered
+	"Remote recovery complete."
 };
 static_assert( sizeof(RecoveryStatus::descriptions) == sizeof(RecoveryStatus::descriptions[0])*RecoveryStatus::END, "RecoveryStatus::descriptions[] size" );
 
@@ -1445,7 +1447,7 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 static StatusArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	StatusArray oldTlogsArray;
 
-	if(db->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
+	if(db->get().recoveryState >= RecoveryState::FULLY_RECOVERED) {
 		for(auto it : db->get().logSystemConfig.oldTLogs) {
 			StatusObject statusObj;
 			StatusArray logsObj;
@@ -1813,7 +1815,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<StatusObject> workerStatuses = wait(getAll(futures2));
 
 			int oldLogFaultTolerance = 100;
-			if(db->get().recoveryState == RecoveryState::FULLY_RECOVERED && db->get().logSystemConfig.oldTLogs.size() > 0) {
+			if(db->get().recoveryState >= RecoveryState::FULLY_RECOVERED && db->get().logSystemConfig.oldTLogs.size() > 0) {
 				statusObj["old_logs"] = oldTlogFetcher(&oldLogFaultTolerance, db, address_workers);
 			}
 
