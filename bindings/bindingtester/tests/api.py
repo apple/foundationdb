@@ -434,7 +434,7 @@ class ApiTest(Test):
                 instructions.append(op)
                 self.add_strings(1)
 
-                version_key = fdb.tuple.pack(tup, prefix=self.versionstamped_keys.pack())
+                version_key = self.versionstamped_keys.pack(tup)
                 first_incomplete = version_key.find(fdb.tuple.Versionstamp._UNSET_TR_VERSION)
                 second_incomplete = -1 if first_incomplete < 0 else version_key.find(fdb.tuple.Versionstamp._UNSET_TR_VERSION,
                                                                                      first_incomplete + len(fdb.tuple.Versionstamp._UNSET_TR_VERSION) + 1)

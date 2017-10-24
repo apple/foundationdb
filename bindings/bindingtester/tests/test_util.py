@@ -83,9 +83,9 @@ class RandomGenerator(object):
                     tup.append(int(b))
                 else:
                     tup.append(b)
-            elif choice == 'double':
-                tup.append(fdb.tuple.SingleFloat(self.random_float(8)))
             elif choice == 'float':
+                tup.append(fdb.tuple.SingleFloat(self.random_float(8)))
+            elif choice == 'double':
                 tup.append(self.random_float(11))
             elif choice == 'tuple':
                 length = random.randint(0, max_size - size)

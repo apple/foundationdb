@@ -298,8 +298,8 @@ TUPLE_PACK_WITH_VERSIONSTAMP
     Pops the top item off of the stack as a byte string prefix. Pops the next item
     off of the stack as N. Pops the next N items off of the stack and packs them
     as the tuple [item0,item1,...,itemN], with the provided prefix and tries to
-    append insert the position of the first incomplete versionstamp as if the byte
-    string was to be used as a key in a SET_VERSIONSTAMP_KEY atomic op. If there
+    append the position of the first incomplete versionstamp as if the byte
+    string were to be used as a key in a SET_VERSIONSTAMP_KEY atomic op. If there
     are no incomplete versionstamp instances, then this pushes the literal byte
     string 'ERROR: NONE' to the stack. If there is more than one, then this pushes
     the literal byte string 'ERROR: MULTIPLE'. If there is exactly one, then it pushes
