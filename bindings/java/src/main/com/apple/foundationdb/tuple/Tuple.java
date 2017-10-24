@@ -698,9 +698,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Determines if there is a {@link Versionstamp} included in this {@code Tuple} that has
-	 *  not had it's transaction version set. It will search through nested {@code Tuple}s
-	 *  contained within this {@code Tuple}. It will not attempt to throw an error if it
-	 *  finds multiple incomplete {@code Versionstamp} instances.
+	 *  not had its transaction version set. It will search through nested {@code Tuple}s
+	 *  contained within this {@code Tuple}. It will not throw an error if it finds multiple
+	 *  incomplete {@code Versionstamp} instances.
 	 *
 	 * @return whether there is at least one incomplete {@link Versionstamp} included in this
 	 *  {@code Tuple}

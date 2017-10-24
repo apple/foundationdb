@@ -24,28 +24,81 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
 
+
 /**
- * Used to represent values written by versionstamp operations within a {@link Tuple}.
- *  This wraps a single array which should contain 12 bytes. The first 10 bytes
- *  are used by the transaction resolver to impose a globally ordered version. The first
- *  eight of those bytes are used to specify the transaction version, and the next two
- *  are used to specify the version of the transaction within a commit batch.
- *  The final two bytes are to be set by the user and represent a way for
- *  users to specify an order within a single transaction.
+ * Used to represent values written by versionstamp operations with a {@link Tuple}.
+ *  This wraps a single array which should contain twelve bytes. The first ten bytes
+ *  are the "transaction" version, and they are usually assigned by the database
+ *  in such a way that all transactions receive a different version that is consistent
+ *  with a serialization order of the transactions within the database. (One can
+ *  use the {@link com.apple.foundationdb.Transaction#getVersionstamp() Transaction.getVersionstamp()}
+ *  method to retrieve this version from a {@code Transaction}.) The final two bytes are the
+ *  "user" version and should be set by the client. This allows the user to use this class to
+ *  impose a total order of items across multiple transactions in the database in a consistent
+ *  and conflict-free way. The user can elect to ignore this parameter by instantiating the
+ *  class with the paramaterless {@link #incomplete() incomplete()} and one-parameter
+ *  {@link #complete(byte[]) complete} static initializers.
+ *
+ * <p>
+ * All {@code Versionstamp}s can exist in one of two states: "incomplete" and "complete".
+ *  An "incomplete" {@code Versionstamp} is a {@code Versionstamp} that has not been
+ *  initialized with a meaningful transaction version. For example, this might be used
+ *  with a {@code Versionstamp} that one wants to fill in with the current transaction's
+ *  version information. A "complete" {@code Versionstamp}, in contradistinction, is one
+ *  that <i>has</i> been assigned a meaningful transaction version. This is usually the
+ *  case if one is reading back a {@code Versionstamp} from the database.
+ * </p>
+ *
+ * <p>
+ * Example usage might be to do something like the following:
+ * </p>
+ *
+ * <pre>
+ * <code>
+ *  {@code CompletableFuture<byte[]>} trVersionFuture = db.run((Transaction tr) -> {
+ *       // The incomplete Versionstamp will be overwritten with tr's version information when committed.
+ *       Tuple t = Tuple.from("prefix", Versionstamp.incomplete());
+ *       tr.mutate(MutationType.SET_VERSIONSTAMPED_KEY, t.packWithVersionstamp(), new byte[0]);
+ *       return tr.getVersionstamp();
+ *   });
+ *
+ *   byte[] trVersion = trVersionFuture.get();
+ *
+ *   Versionstamp v = db.run((Transaction tr) -> {
+ *       Subspace subspace = new Subspace(Tuple.from("prefix"));
+ *       byte[] serialized = tr.getRange(subspace.range(), 1).iterator().next().getKey();
+ *       Tuple t = subspace.unpack(serialized);
+ *       return t.getVersionstamp(0);
+ *   });
+ *
+ *   assert v.equals(Versionstamp.complete(trVersion));
+ * </code>
+ * </pre>
+ *
+ * <p>
+ * Here, an incomplete {@code Versionstamp} is packed and written to the database with
+ *  the {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
+ *  {@code MutationType}. After committing, we then attempt to read back the same key that
+ *  we just wrote. Then we verify the invariant that the deserialized {@link Versionstamp} is
+ *  the same as a complete {@code Versionstamp} instance created from the first transaction's
+ *  version information.
+ * </p>
  */
 public class Versionstamp implements Comparable<Versionstamp> {
+	/**
+	 * Length of a serialized {@code Versionstamp} instance when converted into a byte array.
+	 */
 	public static final int LENGTH = 12;
-	protected static final byte[] UNSET_GLOBAL_VERSION = {(byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff,
-														  (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff};
+	private static final byte[] UNSET_TRANSACTION_VERSION = {(byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff,
+	                                                         (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff, (byte)0xff};
 
 	private boolean complete;
-	public byte[] versionBytes;
+	private byte[] versionBytes;
 
 	/**
 	 * From a byte array, unpack the user version starting at the given position.
-	 *  This assumes the bytes are serialized in the array in the same way in
-	 *  the given array as this class would serialize them, i.e., in big-endian
-	 *  order as an unsigned short.
+	 *  This assumes that the bytes are stored in big-endian order as an unsigned
+	 *  short, which is the way the user version is serialized in packed {@code Versionstamp}s.
 	 *
 	 * @param bytes byte array including user version
 	 * @param pos starting position of user version
@@ -59,8 +112,8 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 * Creates a {@code Versionstamp} instance based on the given byte array
 	 *  representation. This follows the same format as that used by
 	 *  the main constructor, but the completeness of the {@code Versionstamp}
-	 *  is instead automatically determined by comparing its global version
-	 *  with the value used to indicate an unset global version.
+	 *  is instead automatically determined by comparing its transaction version
+	 *  with the value used to indicate an unset transaction version.
 	 *
 	 * @param versionBytes byte array representation of {@code Versionstamp}
 	 * @return equivalent instantiated {@code Versionstamp} object
@@ -70,8 +123,8 @@ public class Versionstamp implements Comparable<Versionstamp> {
 			throw new IllegalArgumentException("Versionstamp bytes must have length " + LENGTH);
 		}
 		boolean complete = false;
-		for(int i = 0; i < UNSET_GLOBAL_VERSION.length; i++) {
-			if(versionBytes[i] != UNSET_GLOBAL_VERSION[i]) {
+		for(int i = 0; i < UNSET_TRANSACTION_VERSION.length; i++) {
+			if(versionBytes[i] != UNSET_TRANSACTION_VERSION[i]) {
 				complete = true;
 			}
 		}
@@ -82,7 +135,8 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 * Creates an incomplete {@code Versionstamp} instance with the given
 	 *  user version. The provided user version must fit within an unsigned
 	 *  short. When converted into a byte array, the bytes for the transaction
-	 *  version will be filled in with the
+	 *  version will be filled in with dummy bytes to be later filled
+	 *  in at transaction commit time.
 	 *
 	 * @param userVersion intra-transaction portion of version (set by user code)
 	 * @return an incomplete {@code Versionstamp} with the given user version
@@ -92,9 +146,24 @@ public class Versionstamp implements Comparable<Versionstamp> {
 			throw new IllegalArgumentException("Local version must fit in unsigned short");
 		}
 		ByteBuffer bb = ByteBuffer.allocate(LENGTH).order(ByteOrder.BIG_ENDIAN);
-		bb.put(UNSET_GLOBAL_VERSION);
+		bb.put(UNSET_TRANSACTION_VERSION);
 		bb.putShort((short)userVersion);
 		return new Versionstamp(false, bb.array());
+	}
+
+	/**
+	 * Creates an incomplete {@code Versionstamp} instance with the default user
+	 *  version. When converted into a byte array, the bytes for the transaction
+	 *  version will be filled in with dummy bytes to be later filled in at
+	 *  transaction commit time. If multiple keys are created using the returned
+	 *  {@code Versionstamp} within the same transaction, then all of those
+	 *  keys will have the same version, but it will provide an ordering between
+	 *  different transactions if that is all that is required.
+	 *
+	 * @return an incomplete {@code Versionstamp} with the default user version
+	 */
+	public static Versionstamp incomplete() {
+		return incomplete(0);
 	}
 
 	/**
@@ -108,7 +177,7 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 * @return a complete {@code Versionstamp} assembled from the given parts
 	 */
 	public static Versionstamp complete(byte[] trVersion, int userVersion) {
-		if(trVersion.length != UNSET_GLOBAL_VERSION.length) {
+		if(trVersion.length != UNSET_TRANSACTION_VERSION.length) {
 			throw new IllegalArgumentException("Global version has invalid length " + trVersion.length);
 		}
 		if(userVersion < 0 || userVersion > 0xffff) {
@@ -121,22 +190,19 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	}
 
 	/**
-	 * Create a <code>Versionstamp</code> instance from a byte array.
-	 *  The byte array should have length {@value LENGTH}, the first
-	 *  10 of which represent the transaction version of
-	 *  an operation and the last two of which are set per transaction
-	 *  to impose a global ordering on all versionstamps.
+	 * Creates a complete {@code Versionstamp} instance with the given
+	 *  transaction and default user versions. The provided transaction version
+	 *  must have exactly 10 bytes.
 	 *
-	 *  If the transaction version is not yet known (because the commit has not
-	 *  been performed), set <code>complete</code> to <code>false</code>
-	 *  and the first 10 bytes of <code>versionBytes</code>
-	 *  to any value. Otherwise, <code>complete</code> should be set to
-	 *  <code>true</code>.
-	 *
-	 * @param complete whether the transaction version has been set
-	 * @param versionBytes byte array representing this <code>Versionstamp</code> information
+	 * @param trVersion  inter-transaction portion of version (set by resolver)
+	 * @return a complete {@code Versionstamp} assembled from the given transaction
+	 * 	version and the default user version
 	 */
-	public Versionstamp(boolean complete, byte[] versionBytes) {
+	public static Versionstamp complete(byte[] trVersion) {
+		return complete(trVersion, 0);
+	}
+
+	private Versionstamp(boolean complete, byte[] versionBytes) {
 		if (versionBytes.length != LENGTH) {
 			throw new IllegalArgumentException("Versionstamp bytes must have length " + LENGTH);
 		}
@@ -145,17 +211,14 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	}
 
 	/**
-	 * Whether this <code>Versionstamp</code>'s transaction version is
-	 *  meaningful. The transaction resolver will assign each transaction
-	 *  a different transaction version. This <code>Versionstamp</code> is
-	 *  considered complete if some version has been previously received
-	 *  from the transaction resolver and used to construct this
-	 *  object. If the commit is still yet to occur, the <code>Versionstamp</code>
-	 *  is considered incomplete. If one uses this class with
-	 *  our {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
-	 *  or {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_VALUE SET_VERSIONSTAMPED_VALUE}
-	 *  mutations, then the appropriate bytes should be filled in within
-	 *  the database during the commit.
+	 * Whether this {@code Versionstamp}'s transaction version is
+	 *  meaningful. The database will assign each transaction a different transaction
+	 *  version. A {@code Versionstamp} is considered to be "complete" if its
+	 *  transaction version is one of those database-assigned versions rather than
+	 *  just dummy bytes. If one uses this class with our
+	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
+	 *  mutation, then the appropriate bytes should be filled in within the database at
+	 *  commit time.
 	 *
 	 * @return whether the transaction version has been set
 	 */
@@ -164,18 +227,16 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	}
 
 	/**
-	 * Retrieve a byte-array representation of this <code>Versionstamp</code>.
+	 * Retrieve a byte-array representation of this {@code Versionstamp}.
 	 *  This representation can then be serialized and added to the database.
-	 *  If this <code>Versionstamp</code> is not complete, the first
-	 *  10 bytes (representing the transaction version) will
-	 *  not be meaningful and one should probably use either the
+	 *  If this {@code Versionstamp} is not complete, the first 10 bytes (representing the
+	 *  transaction version) will not be meaningful and one should probably use with the
 	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
-	 *  or {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_VALUE SET_VERSIONSTAMPED_VALUE}
-	 *  mutations.
+	 *  mutation.
 	 *
 	 * <b>Warning:</b> For performance reasons, this method does not create a copy of
 	 *  its underlying data array. As a result, it is dangerous to modify the
-	 *  return value of this function and should not be done in most circumstances.
+	 *  return value of this function.
 	 *
 	 * @return byte representation of this <code>Versionstamp</code>
 	 */
@@ -185,8 +246,7 @@ public class Versionstamp implements Comparable<Versionstamp> {
 
 	/**
 	 * Retrieve the portion of this <code>Versionstamp</code> that is set by
-	 *  the transaction resolver. These 10 bytes are what provide an ordering
-	 *  between different commits.
+	 *  the database. These 10 bytes are what provide an ordering between different commits.
 	 *
 	 * @return transaction version of this <code>Versionstamp</code>
 	 */
@@ -199,7 +259,7 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	/**
 	 * Retrieve the portion of this <code>Versionstamp</code> that is set
 	 *  by the user. This integer is what provides an ordering within
-	 *  one commit.
+	 *  a single commit.
 	 *
 	 * @return user version of this <code>Versionstamp</code>
 	 */
@@ -207,10 +267,18 @@ public class Versionstamp implements Comparable<Versionstamp> {
 		return unpackUserVersion(versionBytes, LENGTH - 2);
 	}
 
+	/**
+	 * Generate a human-readable representation of this {@code Versionstamp}. It contains
+	 *  information as to whether this {@code Versionstamp} is incomplete or not, what
+	 *  its transaction version is (if the {@code Versionstamp} is complete), and what its
+	 *  user version is.
+	 *
+	 * @return a human-readable representation of this {@code Versionstamp}
+	 */
 	@Override
 	public String toString() {
 		if(complete) {
-			return "Versionstamp(" + ByteArrayUtil.printable(versionBytes) + ")";
+			return "Versionstamp(" + ByteArrayUtil.printable(getTransactionVersion()) + " " + getUserVersion() + ")";
 		} else {
 			return "Versionstamp(<incomplete> " + getUserVersion() + ")";
 		}

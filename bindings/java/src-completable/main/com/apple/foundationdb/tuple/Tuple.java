@@ -294,12 +294,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
-	 * Get an encoded representation of this {@code Tuple} for use with
-	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
-	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-paramter version of this method},
-	 *  but it does not add any prefix to the array.
+	 * Get an encoded representation of this {@code Tuple}. Each element is encoded to
+	 *  {@code byte}s and concatenated, and then the prefix supplied is prepended to
+	 *  the array.
 	 *
-	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @param prefix additional byte-array prefix to prepend to serialized bytes.
+	 * @return a serialized representation of this {@code Tuple} prepended by the {@code prefix}.
 	 */
 	public byte[] pack(byte[] prefix) {
 		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
@@ -710,9 +710,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Determines if there is a {@link Versionstamp} included in this {@code Tuple} that has
-	 *  not had it's transaction version set. It will search through nested {@code Tuple}s
-	 *  contained within this {@code Tuple}. It will not attempt to throw an error if it
-	 *  finds multiple incomplete {@code Versionstamp} instances.
+	 *  not had its transaction version set. It will search through nested {@code Tuple}s
+	 *  contained within this {@code Tuple}. It will not throw an error if it finds multiple
+	 *  incomplete {@code Versionstamp} instances.
 	 *
 	 * @return whether there is at least one incomplete {@link Versionstamp} included in this
 	 *  {@code Tuple}
