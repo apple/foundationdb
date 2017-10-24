@@ -320,8 +320,7 @@ class TupleUtil {
 			parts.add(childResult.data);
 		}
 		parts.add(new byte[]{0x00});
-		return new EncodeResult((versionPos < 0 ? -1 : versionPos + 1),
-				ByteArrayUtil.join(null, parts));
+		return new EncodeResult((versionPos < 0 ? -1 : versionPos + 1), ByteArrayUtil.join(null, parts));
 	}
 
 	static DecodeResult decode(byte[] rep, int pos, int last) {

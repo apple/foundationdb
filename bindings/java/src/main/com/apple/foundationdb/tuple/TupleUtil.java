@@ -316,7 +316,7 @@ class TupleUtil {
 			EncodeResult childResult = encode(t, true);
 			if(childResult.versionPos > 0) {
 				if(versionPos > 0) {
-					throw new IllegalStateException("Multiple incomplete Versionstamps included in Tuple");
+					throw new IllegalArgumentException("Multiple incomplete Versionstamps included in Tuple");
 				}
 				versionPos = lenSoFar + childResult.versionPos;
 			}
@@ -324,8 +324,7 @@ class TupleUtil {
 			parts.add(childResult.data);
 		}
 		parts.add(new byte[]{0x00});
-		return new EncodeResult((versionPos < 0 ? -1 : versionPos + 1),
-								 ByteArrayUtil.join(null, parts));
+		return new EncodeResult((versionPos < 0 ? -1 : versionPos + 1), ByteArrayUtil.join(null, parts));
 	}
 
 	static DecodeResult decode(byte[] rep, int pos, int last) {
