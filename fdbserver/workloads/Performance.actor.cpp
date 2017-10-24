@@ -107,7 +107,7 @@ struct PerformanceWorkload : TestWorkload {
 
 		loop {
 			choose {
-				when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::FLAG_TESTER_CLASS ) ) ) ) ) { 
+				when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::TESTER_CLASS_ONLY ) ) ) ) ) { 
 					workers = w;
 					break; 
 				}

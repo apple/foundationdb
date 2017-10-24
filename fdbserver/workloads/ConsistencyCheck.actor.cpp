@@ -236,11 +236,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 					bool hasStorage = wait( self->checkForStorage(cx, configuration, self) );
 					bool hasExtraStores = wait( self->checkForExtraDataStores(cx, self) );
 
-					//SOMEDAY: enable this check when support for background reassigning server type is supported
 					//Check that each machine is operating as its desired class
-					/*bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
+					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
 					if(!usingDesiredClasses)
-						self->testFailure("Cluster has machine(s) not using requested classes");*/
+						self->testFailure("Cluster has machine(s) not using requested classes");
 
 					bool workerListCorrect = wait( self->checkWorkerList(cx, self) );
 					if(!workerListCorrect)
@@ -1171,32 +1170,53 @@ struct ConsistencyCheckWorkload : TestWorkload
 		return true;
 	}
 
+	static ProcessClass::Fitness getBestAvailableFitness(std::set<ProcessClass::ClassType>& availableClassTypes, ProcessClass::ClusterRole role) {
+		ProcessClass::Fitness bestAvailableFitness = ProcessClass::NeverAssign;
+		for (auto classType : availableClassTypes) {
+			bestAvailableFitness = std::min(bestAvailableFitness, ProcessClass(classType, ProcessClass::InvalidSource).machineClassFitness(role));
+		}
+
+		return bestAvailableFitness;
+	}
+
 	//Returns true if all machines in the cluster that specified a desired class are operating in that class
 	ACTOR Future<bool> checkUsingDesiredClasses(Database cx, ConsistencyCheckWorkload *self)
 	{
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
+		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
 		auto& db = self->dbInfo->get();
 
-		//Check master server
-		if(!self->workerHasClass(workers, db.master.address(), ProcessClass::ResolutionClass, "Master"))
+		std::set<ProcessClass::ClassType> availableClassTypes;
+		std::map<NetworkAddress, ProcessClass> workerProcessMap;
+
+		for (auto worker : workers) {
+			availableClassTypes.insert(worker.second.classType());
+			workerProcessMap[worker.first.address()] = worker.second;
+		}
+
+		// Check master
+		ProcessClass::Fitness bestMasterFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Master);
+		if (!workerProcessMap.count(db.master.address()) || workerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
 			return false;
+		}
 
-		//Check master proxies
-		for(int i = 0; i < db.client.proxies.size(); i++)
-			if(!self->workerHasClass(workers, db.client.proxies[i].address(), ProcessClass::TransactionClass, "MasterProxy"))
+		// Check master proxy
+		ProcessClass::Fitness bestMasterProxyFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Proxy);
+		for (auto masterProxy : db.client.proxies) {
+			if (!workerProcessMap.count(masterProxy.address()) || workerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
 				return false;
+			}
+		}
 
-		//Check storage servers
-		for(int i = 0; i < storageServers.size(); i++)
-			if(!self->workerHasClass(workers, storageServers[i].address(), ProcessClass::StorageClass, "StorageServer"))
+		// Check master resolver
+		ProcessClass::Fitness bestResolverFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Resolver);
+		for (auto resolver : db.resolvers) {
+			if (!workerProcessMap.count(resolver.address()) || workerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) != bestResolverFitness) {
 				return false;
+			}
+		}
 
-		//Check tlogs
-		std::vector<TLogInterface> logs = db.logSystemConfig.allPresentLogs();
-		for(int i = 0; i < logs.size(); i++)
-			if(!self->workerHasClass(workers, logs[i].address(), ProcessClass::TransactionClass, "TLog"))
-				return false;
+		// TODO: Check Tlog and cluster controller
 
 		return true;
 	}

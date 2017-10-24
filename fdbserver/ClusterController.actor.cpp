@@ -562,6 +562,18 @@ public:
 			return resolverCount > r.resolverCount;
 		}
 
+		bool betterInDatacenterFitness (InDatacenterFitness const& r) const {
+			int lmax = std::max(resolverFit,proxyFit);
+			int lmin = std::min(resolverFit,proxyFit);
+			int rmax = std::max(r.resolverFit,r.proxyFit);
+			int rmin = std::min(r.resolverFit,r.proxyFit);
+
+			if( lmax != rmax ) return lmax < rmax;
+			if( lmin != rmin ) return lmin < rmin;
+
+			return false;
+		}
+
 		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
 	};
 
@@ -688,6 +700,10 @@ public:
 		id_used[masterProcessId]++;
 
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.processClass.machineClassFitness( ProcessClass::Master );
+		if(db.config.isExcludedServer(dbi.master.address())) {
+			oldMasterFit = std::max(oldMasterFit, ProcessClass::WorstFit);
+		}
+
 		ProcessClass::Fitness newMasterFit = getMasterWorker(db.config, true).second.machineClassFitness( ProcessClass::Master );
 
 		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
@@ -750,7 +766,8 @@ public:
 				newInFit = fitness;
 		}
 
-		if(oldInFit < newInFit) return false;
+		if(oldInFit.betterInDatacenterFitness(newInFit)) return false;
+
 		if(oldMasterFit > newMasterFit || oldAcrossFit > newAcrossFit || oldInFit > newInFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit)
 				.detail("oldAcrossFitC", oldAcrossFit.tlogCount).detail("newAcrossFitC", newAcrossFit.tlogCount)
@@ -1601,18 +1618,22 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			registerWorker( req, &self );
 		}
 		when( GetWorkersRequest req = waitNext( interf.getWorkers.getFuture() ) ) {
-			if ( req.flags & GetWorkersRequest::FLAG_TESTER_CLASS ) {
-				vector<std::pair<WorkerInterface, ProcessClass>> testers;
-				for(auto& it : self.id_worker)
-					if (it.second.processClass.classType() == ProcessClass::TesterClass)
-						testers.push_back(std::make_pair(it.second.interf, it.second.processClass));
-				req.reply.send( testers );
-			} else {
-				vector<std::pair<WorkerInterface, ProcessClass>> workers;
-				for(auto& it : self.id_worker)
-					workers.push_back(std::make_pair(it.second.interf, it.second.processClass));
-				req.reply.send( workers );
+			vector<std::pair<WorkerInterface, ProcessClass>> workers;
+
+			auto masterAddr = self.db.serverInfo->get().master.address();
+			for(auto& it : self.id_worker) {
+				if ( (req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) && self.db.config.isExcludedServer(it.second.interf.address()) ) {
+					continue;
+				}
+
+				if ( (req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) && it.second.processClass.classType() != ProcessClass::TesterClass ) {
+					continue;
+				}
+
+				workers.push_back(std::make_pair(it.second.interf, it.second.processClass));
 			}
+
+			req.reply.send( workers );
 		}
 		when( GetClientWorkersRequest req = waitNext( interf.clientInterface.getClientWorkers.getFuture() ) ) {
 			vector<ClientWorkerInterface> workers;
