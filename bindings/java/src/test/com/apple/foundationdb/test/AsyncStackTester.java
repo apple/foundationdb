@@ -537,9 +537,9 @@ public class AsyncStackTester {
 								inst.push("OK".getBytes());
 								inst.push(coded);
 							} catch(IllegalArgumentException e) {
-							    //System.out.println(inst.context.preStr + " - " + " -> result '" + e.getMessage() + "'");
+								//System.out.println(inst.context.preStr + " - " + " -> result '" + e.getMessage() + "'");
 								if(e.getMessage().startsWith("No incomplete"))
-								    inst.push("ERROR: NONE".getBytes());
+									inst.push("ERROR: NONE".getBytes());
 								else if(e.getMessage().startsWith("Multiple incomplete"))
 									inst.push("ERROR: MULTIPLE".getBytes());
 								else

@@ -73,7 +73,7 @@ public class Subspace
 
     /**
      * Constructor for a subspace formed with the specified byte string, which will
-	 * be prepended to all packed keys.
+     * be prepended to all packed keys.
      *
      * @param rawPrefix a byte array used as the prefix for all packed keys
      */
@@ -83,9 +83,9 @@ public class Subspace
 
     /**
      * Constructor for a subspace formed with both a prefix {@link Tuple} and a
-	 * prefix byte string. The prefix {@code Tuple} will be prepended to all
-	 * {@code Tuples} packed by the {@code Subspace}, and the byte string prefix
-	 * will be prepended to the packed result. Note that the {@link Tuple} {@code prefix}
+     * prefix byte string. The prefix {@code Tuple} will be prepended to all
+     * {@code Tuples} packed by the {@code Subspace}, and the byte string prefix
+     * will be prepended to the packed result. Note that the {@link Tuple} {@code prefix}
      * should not contain any incomplete {@link Versionstamp}s as any of its entries.
      *
      * @param prefix a {@code Tuple} used to form the subspace
@@ -97,14 +97,14 @@ public class Subspace
     }
 
     /**
-	 * Returns true if this {@code Subspace} is equal to {@code rhs}.
-	 * Two {@code Subspace}s are equal if they have the same prefix.
-	 *
+     * Returns true if this {@code Subspace} is equal to {@code rhs}.
+     * Two {@code Subspace}s are equal if they have the same prefix.
+     *
      * @param rhs the object to check for equality
      * @return {@code true} if this {@code Subspace} and {@code rhs} have equal prefixes
      */
-	@Override
-	public boolean equals(Object rhs) {
+    @Override
+    public boolean equals(Object rhs) {
         if(this == rhs) {
             return true;
         }
@@ -113,7 +113,7 @@ public class Subspace
         }
         Subspace other = (Subspace)rhs;
         return Arrays.equals(rawPrefix, other.rawPrefix) ;
-	}
+    }
 
     /**
      * @return a printable representation of the subspace
@@ -124,9 +124,9 @@ public class Subspace
     }
 
     /**
-	 * Gets a new subspace which is equivalent to this subspace with its prefix {@link Tuple} extended by
-	 * the specified {@code Object}. The object will be inserted into a {@link Tuple} and passed to {@link #get(Tuple)}.
-	 *
+     * Gets a new subspace which is equivalent to this subspace with its prefix {@link Tuple} extended by
+     * the specified {@code Object}. The object will be inserted into a {@link Tuple} and passed to {@link #get(Tuple)}.
+     *
      * @param obj an {@code Object} compatible with {@code Tuple}s
      * @return a new subspace formed by joining this {@code Subspace}'s prefix to {@code obj}
      */
@@ -135,9 +135,9 @@ public class Subspace
     }
 
     /**
-	 * Gets a new subspace which is equivalent to this subspace with its prefix {@link Tuple} extended by
-	 * the specified {@link Tuple}.
-	 *
+     * Gets a new subspace which is equivalent to this subspace with its prefix {@link Tuple} extended by
+     * the specified {@link Tuple}.
+     *
      * @param tuple the {@link Tuple} used to form the new {@code Subspace}
      * @return a new subspace formed by joining this {@code Subspace}'s prefix to {@code tuple}
      */
@@ -146,9 +146,9 @@ public class Subspace
     }
 
     /**
-	 * Gets the key encoding the prefix used for this {@code Subspace}. This is equivalent to
-	 * {@link #pack}ing the empty {@link Tuple}.
-	 *
+     * Gets the key encoding the prefix used for this {@code Subspace}. This is equivalent to
+     * {@link #pack}ing the empty {@link Tuple}.
+     *
      * @return the key encoding the prefix used for this {@code Subspace}
      */
     public byte[] getKey() {
@@ -156,8 +156,8 @@ public class Subspace
     }
 
     /**
-	 * Gets the key encoding the prefix used for this {@code Subspace}.
-	 *
+     * Gets the key encoding the prefix used for this {@code Subspace}.
+     *
      * @return the key encoding the prefix used for this {@code Subspace}
      */
     public byte[] pack() {
@@ -165,9 +165,9 @@ public class Subspace
     }
 
     /**
-	 * Gets the key encoding the specified {@code Object} in this {@code Subspace}. {@code obj} is
-	 * inserted into a {@link Tuple} and packed with {@link #pack(Tuple)}.
-	 *
+     * Gets the key encoding the specified {@code Object} in this {@code Subspace}. {@code obj} is
+     * inserted into a {@link Tuple} and packed with {@link #pack(Tuple)}.
+     *
      * @param obj an {@code Object} to be packed that is compatible with {@link Tuple}s
      * @return the key encoding the tuple derived from {@code obj}
      */
@@ -176,10 +176,10 @@ public class Subspace
     }
 
     /**
-	 * Gets the key encoding the specified tuple in this {@code Subspace}. For example, if you have a {@code Subspace}
-	 * with prefix {@link Tuple} {@code ("users")} and you use it to pack the {@link Tuple} {@code ("Smith")},
-	 * the result is the same as if you packed the {@link Tuple} {@code ("users", "Smith")}.
-	 *
+     * Gets the key encoding the specified tuple in this {@code Subspace}. For example, if you have a {@code Subspace}
+     * with prefix {@link Tuple} {@code ("users")} and you use it to pack the {@link Tuple} {@code ("Smith")},
+     * the result is the same as if you packed the {@link Tuple} {@code ("users", "Smith")}.
+     *
      * @param tuple the {@code Tuple} to be packed
      * @return the key encoding the specified tuple in this {@code Subspace}
      */
@@ -206,22 +206,22 @@ public class Subspace
     }
 
     /**
-	 * Gets the {@link Tuple} encoded by the given key, with this {@code Subspace}'s prefix {@link Tuple} and
-	 * {@code raw prefix} removed.
-	 *
+     * Gets the {@link Tuple} encoded by the given key, with this {@code Subspace}'s prefix {@link Tuple} and
+     * {@code raw prefix} removed.
+     *
      * @param key The key being decoded
      * @return the {@link Tuple} encoded by {@code key} with the prefix removed
      */
     public Tuple unpack(byte[] key) {
-		if(!contains(key))
-			throw new IllegalArgumentException("Cannot unpack key that is not contained in subspace.");
+        if(!contains(key))
+            throw new IllegalArgumentException("Cannot unpack key that is not contained in subspace.");
 
         return Tuple.fromBytes(Arrays.copyOfRange(key, rawPrefix.length, key.length));
     }
 
     /**
-	 * Gets a {@link Range} respresenting all keys strictly in the {@code Subspace}.
-	 *
+     * Gets a {@link Range} respresenting all keys strictly in the {@code Subspace}.
+     *
      * @return the {@link Range} of keyspace corresponding to this {@code Subspace}
      */
     public Range range() {
@@ -229,9 +229,9 @@ public class Subspace
     }
 
     /**
-	 * Gets a {@link Range} representing all keys in the {@code Subspace} strictly starting with
-	 * the specified {@link Tuple}.
-	 *
+     * Gets a {@link Range} representing all keys in the {@code Subspace} strictly starting with
+     * the specified {@link Tuple}.
+     *
      * @param tuple the {@code Tuple} whose sub-keys we are searching for
      * @return the {@link Range} of keyspace corresponding to {@code tuple}
      */
@@ -241,9 +241,9 @@ public class Subspace
     }
 
     /**
-	 * Tests whether the specified key starts with this {@code Subspace}'s prefix, indicating that
-	 * the {@code Subspace} logically contains key.
-	 *
+     * Tests whether the specified key starts with this {@code Subspace}'s prefix, indicating that
+     * the {@code Subspace} logically contains key.
+     *
      * @param key the key to be tested
      * @return {@code true} if {@code key} starts with {@code Subspace.key()}
      */
@@ -252,9 +252,9 @@ public class Subspace
     }
 
     /**
-	 * Gets a new subspace which is equivalent to this subspace with its prefix {@link Tuple} extended by
-	 * the specified {@link Tuple}.
-	 *
+     * Gets a new subspace which is equivalent to this subspace with its prefix {@link Tuple} extended by
+     * the specified {@link Tuple}.
+     *
      * @param tuple the {@link Tuple} used to form the new {@code Subspace}
      * @return a new subspace formed by joining this {@code Subspace}'s prefix to {@code tuple}
      */

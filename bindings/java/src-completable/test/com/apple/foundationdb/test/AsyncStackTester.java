@@ -482,7 +482,7 @@ public class AsyncStackTester {
 			return inst.popParams(2).thenComposeAsync(new Function<List<Object>, CompletableFuture<Void>>() {
 				@Override
 				public CompletableFuture<Void> apply(List<Object> params) {
-				    byte[] prefix = (byte[])params.get(0);
+					byte[] prefix = (byte[])params.get(0);
 					int tupleSize = StackUtils.getInt(params.get(1));
 					//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
 					return inst.popParams(tupleSize).thenApplyAsync(new Function<List<Object>, Void>() {
@@ -685,13 +685,13 @@ public class AsyncStackTester {
 
 	private static CompletableFuture<Void> logStack(final Database db, final Map<Integer, StackEntry> entries, final byte[] prefix) {
 		return db.runAsync(tr -> {
-            for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
-                byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
-                byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
-                tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
-            }
+			for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
+				byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
+				byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
+				tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
+			}
 
-            return CompletableFuture.completedFuture(null);
+			return CompletableFuture.completedFuture(null);
 		});
 	}
 	private static CompletableFuture<Void> logStack(final Instruction inst, final byte[] prefix, int i) {
