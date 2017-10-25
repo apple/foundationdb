@@ -130,7 +130,7 @@ struct RegisterWorkerRequest {
 };
 
 struct GetWorkersRequest {
-	enum { FLAG_TESTER_CLASS = 1 };
+	enum { TESTER_CLASS_ONLY = 0x1, NON_EXCLUDED_PROCESSES_ONLY = 0x2 };
 
 	int flags;
 	ReplyPromise<vector<std::pair<WorkerInterface, ProcessClass>>> reply;

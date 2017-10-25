@@ -998,7 +998,7 @@ namespace fileBackup {
 
 							state Key nextKey = keyAfter(lastKey);
 							Void _ = wait(saveAndExtendIncrementally(cx, taskBucket, task,
-																	 endKeyRangeFile(cx, backup, &rangeFile, backupContainer, &outFileName, endKey, outVersion),
+																	 endKeyRangeFile(cx, backup, &rangeFile, backupContainer, &outFileName, nextKey, outVersion),
 																	 timeout  // time at which to do the first saveAndExtend
 																	)
 										 );
