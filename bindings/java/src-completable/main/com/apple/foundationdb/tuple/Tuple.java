@@ -45,7 +45,7 @@ import com.apple.foundationdb.Range;
  * <h3>Types</h3>
  * A {@code Tuple} can
  *  contain byte arrays ({@code byte[]}), {@link String}s, {@link Number}s, {@link UUID}s,
- *  {@code boolean}s, {@link List}s, other {@code Tuple}s, and {@code null}.
+ *  {@code boolean}s, {@link List}s, {@link Versionstamp}s, other {@code Tuple}s, and {@code null}.
  *  {@link Float} and {@link Double} instances will be serialized as single- and double-precision
  *  numbers respectively, and {@link BigInteger}s within the range [{@code -2^2040+1},
  *  {@code 2^2040-1}] are serialized without loss of precision (those outside the range
@@ -167,8 +167,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Creates a copy of this {@code Tuple} with a {@link BigInteger} appended as the last element.
-	 * As {@link Tuple}s cannot contain {@code null} numeric types, a {@link NullPointerException}
-	 * is raised if a {@code null} argument is passed.
+	 *  As {@link Tuple}s cannot contain {@code null} numeric types, a {@link NullPointerException}
+	 *  is raised if a {@code null} argument is passed.
 	 *
 	 * @param bi the {@link BigInteger} to append
 	 *
@@ -217,8 +217,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Creates a copy of this {@code Tuple} with an {@link List} appended as the last element.
-	 * This does not add the elements individually (for that, use {@link Tuple#addAll(List) Tuple.addAll}).
-	 * This adds the list as a single elemented nested within the outer {@code Tuple}.
+	 *  This does not add the elements individually (for that, use {@link Tuple#addAll(List) Tuple.addAll}).
+	 *  This adds the list as a single element nested within the outer {@code Tuple}.
 	 *
 	 * @param l the {@link List} to append
 	 *
@@ -230,8 +230,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Creates a copy of this {@code Tuple} with a {@code Tuple} appended as the last element.
-	 * This does not add the elements individually (for that, use {@link Tuple#addAll(Tuple) Tuple.addAll}).
-	 * This adds the list as a single elemented nested within the outer {@code Tuple}.
+	 *  This does not add the elements individually (for that, use {@link Tuple#addAll(Tuple) Tuple.addAll}).
+	 *  This adds the list as a single element nested within the outer {@code Tuple}.
 	 *
 	 * @param t the {@code Tuple} to append
 	 *
@@ -302,11 +302,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return a serialized representation of this {@code Tuple} prepended by the {@code prefix}.
 	 */
 	public byte[] pack(byte[] prefix) {
-		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
-		if(encoded.versionPos > 0) {
-			throw new IllegalArgumentException("Incomplete Versionstamp included in vanilla tuple pack");
-		}
-		return encoded.data;
+		return TupleUtil.pack(elements, prefix);
 	}
 
 	/**
@@ -323,7 +319,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
-	 * Get an encoded representation of this {@code Tuple} for use with.
+	 * Get an encoded representation of this {@code Tuple} for use with
 	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
 	 *  There must be exactly one incomplete {@link Versionstamp} instance within this
 	 *  {@code Tuple} or this will throw an {@link IllegalArgumentException}.
@@ -340,14 +336,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
 	 */
 	public byte[] packWithVersionstamp(byte[] prefix) {
-		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
-		if(encoded.versionPos < 0) {
-			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple pack with versionstamp");
-		}
-		return ByteBuffer.allocate(encoded.data.length + 2).order(ByteOrder.LITTLE_ENDIAN)
-				.put(encoded.data)
-				.putShort((short)encoded.versionPos)
-				.array();
+		return TupleUtil.packWithVersionstamp(elements, prefix);
 	}
 
 	/**
@@ -567,7 +556,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Gets an indexed item as a {@link UUID}. This function will not do type conversion
 	 *  and so will throw a {@code ClassCastException} if the element is not a {@code UUID}.
-	 *  The element at the index may not be {@code null}.
+	 *  The element at the index may be {@code null}.
 	 *
 	 * @param index the location of the item to return
 	 *

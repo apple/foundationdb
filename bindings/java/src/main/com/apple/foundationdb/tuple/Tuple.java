@@ -299,11 +299,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return a serialized representation of this {@code Tuple} prepended by the {@code prefix}.
 	 */
 	public byte[] pack(byte[] prefix) {
-		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
-		if(encoded.versionPos > 0) {
-			throw new IllegalArgumentException("Incomplete Versionstamp included in vanilla tuple pack");
-		}
-		return encoded.data;
+		return TupleUtil.pack(elements, prefix);
 	}
 
 	/**
@@ -337,14 +333,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
 	 */
 	public byte[] packWithVersionstamp(byte[] prefix) {
-		TupleUtil.EncodeResult encoded = TupleUtil.pack(elements, prefix);
-		if(encoded.versionPos < 0) {
-			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple pack with versionstamp");
-		}
-		return ByteBuffer.allocate(encoded.data.length + 2).order(ByteOrder.LITTLE_ENDIAN)
-				.put(encoded.data)
-				.putShort((short)encoded.versionPos)
-				.array();
+		return TupleUtil.packWithVersionstamp(elements, prefix);
 	}
 
 	/**
