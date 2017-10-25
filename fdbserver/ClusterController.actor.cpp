@@ -188,7 +188,7 @@ public:
 	}
 
 	//FIXME: get master in the same datacenter as the proxies and resolvers for ratekeeper, however this is difficult because the master is recruited before we know the cluster's configuration
-	std::pair<WorkerInterface, ProcessClass> getMasterWorker( DatabaseConfiguration const& conf, NetworkAddress clusterControllerAddress, bool checkStable = false ) {
+	std::pair<WorkerInterface, ProcessClass> getMasterWorker( DatabaseConfiguration const& conf, bool checkStable = false ) {
 		ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;
 		Optional<std::pair<WorkerInterface, ProcessClass>> bestInfo;
 		bool bestIsClusterController = false;
@@ -203,9 +203,9 @@ public:
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 					bestFit = fit;
 					numEquivalent = 1;
-					bestIsClusterController = clusterControllerAddress == it.second.interf.address();
+					bestIsClusterController = clusterControllerProcessId == it.first;
 				}
-				else if( fit != ProcessClass::NeverAssign && fit == bestFit && g_random->random01() < 1.0/++numEquivalent )
+				else if( fit == bestFit && clusterControllerProcessId != it.first && g_random->random01() < 1.0/++numEquivalent )
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 			}
 		}
@@ -634,7 +634,7 @@ public:
 				result.storageServers.push_back(storageServers[i].first);
 		}
 
-		id_used[db.serverInfo->get().myLocality.processId()]++;
+		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
 		auto tlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used );
 		for(int i = 0; i < tlogs.size(); i++)
@@ -700,7 +700,7 @@ public:
 		if(masterWorker == id_worker.end())
 			return false;
 
-		id_used[db.serverInfo->get().myLocality.processId()]++;
+		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
 
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.processClass.machineClassFitness( ProcessClass::Master );
@@ -708,7 +708,7 @@ public:
 			oldMasterFit = std::max(oldMasterFit, ProcessClass::WorstFit);
 		}
 
-		ProcessClass::Fitness newMasterFit = getMasterWorker(db.config, g_network->getLocalAddress(), true).second.machineClassFitness( ProcessClass::Master );
+		ProcessClass::Fitness newMasterFit = getMasterWorker(db.config, true).second.machineClassFitness( ProcessClass::Master );
 
 		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
 			if(oldMasterFit > newMasterFit) {
@@ -790,6 +790,7 @@ public:
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
 	Optional<Standalone<StringRef>> masterProcessId;
+	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	UID id;
 	std::vector<RecruitFromConfigurationRequest> outstandingRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
@@ -838,7 +839,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 		try {
 			state double recoveryStart = now();
 			TraceEvent("CCWDB", cluster->id).detail("Recruiting", "Master");
-			state std::pair<WorkerInterface, ProcessClass> masterWorker = cluster->getMasterWorker(db->config, g_network->getLocalAddress());
+			state std::pair<WorkerInterface, ProcessClass> masterWorker = cluster->getMasterWorker(db->config);
 			if( masterWorker.second.machineClassFitness( ProcessClass::Master ) > SERVER_KNOBS->EXPECTED_MASTER_FITNESS && now() - cluster->startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY ) {
 				TraceEvent("CCWDB", cluster->id).detail("Fitness", masterWorker.second.machineClassFitness( ProcessClass::Master ));
 				Void _ = wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
@@ -1344,6 +1345,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
+
+	if ( w.address() == g_network->getLocalAddress() ) {
+		self->clusterControllerProcessId = w.locality.processId();
+	}
 
 	// Check process class if needed
 	if (self->gotProcessClasses && (info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen)) {
