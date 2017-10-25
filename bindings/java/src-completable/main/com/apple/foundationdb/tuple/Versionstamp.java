@@ -174,7 +174,7 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 *  exactly 10 bytes, and the user version must fit within an unsigned
 	 *  short.
 	 *
-	 * @param trVersion  inter-transaction portion of version (set by resolver)
+	 * @param trVersion  inter-transaction portion of version (set by the database)
 	 * @param userVersion intra-transaction portion of version (set by user code)
 	 * @return a complete {@code Versionstamp} assembled from the given parts
 	 */
@@ -196,7 +196,7 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 *  transaction and default user versions. The provided transaction version
 	 *  must have exactly 10 bytes.
 	 *
-	 * @param trVersion  inter-transaction portion of version (set by resolver)
+	 * @param trVersion  inter-transaction portion of version (set by the database)
 	 * @return a complete {@code Versionstamp} assembled from the given transaction
 	 * 	version and the default user version
 	 */
@@ -219,8 +219,8 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 *  transaction version is one of those database-assigned versions rather than
 	 *  just dummy bytes. If one uses this class with our
 	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
-	 *  mutation, then the appropriate bytes should be filled in within the database at
-	 *  commit time.
+	 *  mutation, then the appropriate bytes will be filled in within the database at
+     *  during a successful commit.
 	 *
 	 * @return whether the transaction version has been set
 	 */
