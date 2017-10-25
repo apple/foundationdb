@@ -62,7 +62,7 @@ static ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const Val
 	return StringRef(buf, i);
 }
 
-static ValueRef doNewAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doAndV2(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	if (!existingValueOptional.present())
 		return otherOperand;
 
@@ -203,7 +203,7 @@ static ValueRef doMin(const Optional<ValueRef>& existingValueOptional, const Val
 	return otherOperand;
 }
 
-static ValueRef doNewMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doMinV2(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	if (!existingValueOptional.present())
 		return otherOperand;
 

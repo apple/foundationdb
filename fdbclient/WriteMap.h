@@ -475,22 +475,22 @@ public:
 				throw operation_failed();
 			}
 		}
-		else if (newEntry.type == MutationRef::NewMin) {
+		else if (newEntry.type == MutationRef::MinV2) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
-				return RYWMutation(doNewMin(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
-			case MutationRef::NewMin:
-				return RYWMutation(doNewMin(existingEntry.value, newEntry.value.get(), arena), MutationRef::NewMin);
+				return RYWMutation(doMinV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
+			case MutationRef::MinV2:
+				return RYWMutation(doMinV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::MinV2);
 			default:
 				throw operation_failed();
 			}
 		}
-		else if (newEntry.type == MutationRef::NewAnd) {
+		else if (newEntry.type == MutationRef::AndV2) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
-				return RYWMutation(doNewAnd(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
-			case MutationRef::NewAnd:
-				return RYWMutation(doNewAnd(existingEntry.value, newEntry.value.get(), arena), MutationRef::NewAnd);
+				return RYWMutation(doAndV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
+			case MutationRef::AndV2:
+				return RYWMutation(doAndV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::AndV2);
 			default:
 				throw operation_failed();
 			}

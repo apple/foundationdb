@@ -1502,11 +1502,11 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 			case MutationRef::ByteMax:
 				m.param2 = doByteMax(oldVal, m.param2, ar);
 				break;
-			case MutationRef::NewMin:
-				m.param2 = doNewMin(oldVal, m.param2, ar);
+			case MutationRef::MinV2:
+				m.param2 = doMinV2(oldVal, m.param2, ar);
 				break;
-			case MutationRef::NewAnd:
-				m.param2 = doNewAnd(oldVal, m.param2, ar);
+			case MutationRef::AndV2:
+				m.param2 = doAndV2(oldVal, m.param2, ar);
 				break;
 		}
 		m.type = MutationRef::SetValue;

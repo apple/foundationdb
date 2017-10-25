@@ -554,7 +554,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		else if (type == MutationRef::AppendIfFits)
 			return doAppendIfFits(existingValue, value, arena);
 		else if (type == MutationRef::And)
-			return doNewAnd(existingValue, value, arena);
+			return doAndV2(existingValue, value, arena);
 		else if (type == MutationRef::Or)
 			return doOr(existingValue, value, arena);
 		else if (type == MutationRef::Xor)
@@ -562,15 +562,15 @@ struct WriteDuringReadWorkload : TestWorkload {
 		else if (type == MutationRef::Max)
 			return doMax(existingValue, value, arena);
 		else if (type == MutationRef::Min)
-			return doNewMin(existingValue, value, arena);
+			return doMinV2(existingValue, value, arena);
 		else if (type == MutationRef::ByteMin)
 			return doByteMin(existingValue, value, arena);
 		else if (type == MutationRef::ByteMax)
 			return doByteMax(existingValue, value, arena);
-		else if (type == MutationRef::NewMin)
-			return doNewMin(existingValue, value, arena);
-		else if (type == MutationRef::NewAnd)
-			return doNewAnd(existingValue, value, arena);
+		else if (type == MutationRef::MinV2)
+			return doMinV2(existingValue, value, arena);
+		else if (type == MutationRef::AndV2)
+			return doAndV2(existingValue, value, arena);
 		ASSERT(false);
 		return Value();
 	}
@@ -764,10 +764,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 											opType = MutationRef::ByteMax;
 											break;
 										case 8:
-											opType = MutationRef::NewMin;
+											opType = MutationRef::MinV2;
 											break;
 										case 9:
-											opType = MutationRef::NewAnd;
+											opType = MutationRef::AndV2;
 											break;
 									}
 									self->changeCount.insert( key, changeNum++ );

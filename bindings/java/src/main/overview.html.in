@@ -25,7 +25,7 @@ and add it to your classpath.<br>
 <h3>Getting started</h3>
 To start using FoundationDB from Java, create an instance of the 
 {@link com.apple.foundationdb.FDB FoundationDB API interface} with the version of the
-API that you want to use (this release of the FoundationDB Java API supports only version {@code 510}).
+API that you want to use (this release of the FoundationDB Java API supports versions between {@code 500} and {@code 510}).
 With this API object you can then open {@link com.apple.foundationdb.Cluster}s and
 {@link com.apple.foundationdb.Database}s and start using
 {@link com.apple.foundationdb.Transaction}s. Here we give an example. The example relies on a

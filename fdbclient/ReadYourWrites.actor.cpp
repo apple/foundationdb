@@ -1419,8 +1419,8 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::SetVersionstampedValue:
 					case MutationRef::ByteMin:
 					case MutationRef::ByteMax:
-					case MutationRef::NewMin:
-					case MutationRef::NewAnd:
+					case MutationRef::MinV2:
+					case MutationRef::AndV2:
 						tr.atomicOp( it.beginKey().assertRef(), op[i].value.get(), op[i].type, false );
 						break;
 					default:
@@ -1494,9 +1494,9 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		
 	if (tr.apiVersionAtLeast(510)) {
 		if (operationType == MutationRef::Min)
-			operationType = MutationRef::NewMin;
+			operationType = MutationRef::MinV2;
 		else if (operationType == MutationRef::And)
-			operationType = MutationRef::NewAnd;
+			operationType = MutationRef::AndV2;
 	}
 
 	if(options.readYourWritesDisabled) {
