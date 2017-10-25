@@ -120,11 +120,13 @@ public:
 	// Get property's value or throw error if it doesn't exist
 	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, Error err = key_not_found()) const {
 		auto keyCopy = key;
+		auto backtrace = platform::get_backtrace();
 		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
 			if (!val.present()) {
-				TraceEvent(SevError, "KeyBackedProperty keyNotFound")
+				TraceEvent(SevInfo, "KeyBackedProperty_keyNotFound")
 						.detail("key", printable(keyCopy))
-						.detail("err", err.code());
+						.detail("err", err.code())
+						.detail("parentTrace", backtrace.c_str());
 				throw err;
 			}
 
@@ -156,7 +158,7 @@ public:
 
 	Future<Void> set(Database cx, T const &val) {
 		auto _key = key;
-		auto _val = Codec<T>::pack(val).pack();
+		Value _val = Codec<T>::pack(val).pack();
 		return runRYWTransaction(cx, [_key, _val](Reference<ReadYourWritesTransaction> tr) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);

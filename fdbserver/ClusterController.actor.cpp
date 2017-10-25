@@ -1373,22 +1373,18 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 #define TIME_KEEPER_VERSION LiteralStringRef("1")
 
 ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
-	try {
-		loop {
-			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(
-					new ReadYourWritesTransaction(self->cx));
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
-				Void _ = wait(tr->commit());
-				break;
-			} catch (Error &e) {
-				Void _ = wait(tr->onError(e));
-			}
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(
+				new ReadYourWritesTransaction(self->cx));
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
+			Void _ = wait(tr->commit());
+			break;
+		} catch (Error &e) {
+			Void _ = wait(tr->onError(e));
 		}
-	} catch (Error & e) {
-		TraceEvent(SevWarnAlways, "TimeKeeperSetupVersionFailed").detail("cause", e.what());
 	}
 
 	return Void();
@@ -1405,36 +1401,31 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	Void _ = wait(timeKeeperSetVersion(self));
 
 	loop {
-		try {
-			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
-			loop {
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					Optional<Value> disableValue = wait( tr->get(timeKeeperDisableKey) );
-					if(disableValue.present()) {
-						break;
-					}
-
-					Version v = tr->getReadVersion().get();
-					int64_t currentTime = (int64_t)now();
-					versionMap.set(tr, currentTime, v);
-
-					int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
-					if (ttl > 0) {
-						versionMap.erase(tr, 0, ttl);
-					}
-
-					Void _ = wait(tr->commit());
+				Optional<Value> disableValue = wait( tr->get(timeKeeperDisableKey) );
+				if(disableValue.present()) {
 					break;
-				} catch (Error &e) {
-					Void _ = wait(tr->onError(e));
 				}
+
+				Version v = tr->getReadVersion().get();
+				int64_t currentTime = (int64_t)now();
+				versionMap.set(tr, currentTime, v);
+
+				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
+				if (ttl > 0) {
+					versionMap.erase(tr, 0, ttl);
+				}
+
+				Void _ = wait(tr->commit());
+				break;
+			} catch (Error &e) {
+				Void _ = wait(tr->onError(e));
 			}
-		} catch (Error &e) {
-			// Failed to update time-version map even after retries, just ignore this iteration
-			TraceEvent(SevWarn, "TimeKeeperFailed").detail("cause", e.what());
 		}
 
 		Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));
