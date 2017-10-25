@@ -32,12 +32,14 @@ import java.util.Arrays;
  *  in such a way that all transactions receive a different version that is consistent
  *  with a serialization order of the transactions within the database. (One can
  *  use the {@link com.apple.foundationdb.Transaction#getVersionstamp() Transaction.getVersionstamp()}
- *  method to retrieve this version from a {@code Transaction}.) The final two bytes are the
- *  "user" version and should be set by the client. This allows the user to use this class to
- *  impose a total order of items across multiple transactions in the database in a consistent
- *  and conflict-free way. The user can elect to ignore this parameter by instantiating the
- *  class with the paramaterless {@link #incomplete() incomplete()} and one-parameter
- *  {@link #complete(byte[]) complete} static initializers.
+ *  method to retrieve this version from a {@code Transaction}.) This also implies that the
+ *  transaction version of newly committed transactions will be monotonically increasing
+ *  over time. The final two bytes are the "user" version and should be set by the client.
+ *  This allows the user to use this class to impose a total order of items across multiple
+ *  transactions in the database in a consistent and conflict-free way. The user can elect to
+ *  ignore this parameter by instantiating the class with the paramaterless {@link #incomplete() incomplete()}
+ *  and one-parameter {@link #complete(byte[]) complete} static initializers. If they do so,
+ *  then versions are written with a default (constant) user version.
  *
  * <p>
  * All {@code Versionstamp}s can exist in one of two states: "incomplete" and "complete".
