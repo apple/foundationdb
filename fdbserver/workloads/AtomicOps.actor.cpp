@@ -47,8 +47,9 @@ struct AtomicOpsWorkload : TestWorkload {
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
 		TraceEvent("AtomicOpsApiVersion500").detail("apiVersion500", apiVersion500);
 
+		int64_t randNum = sharedRandomNumber / 10;
 		if(opType == -1)
-			opType = sharedRandomNumber % 8;
+			opType = randNum % 8;
 
 		switch(opType) {
 		case 0:

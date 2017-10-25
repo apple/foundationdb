@@ -381,7 +381,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
 						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
 						myValue = format("%d", g_random->randomInt(0, 10000000));
-						//TraceEvent("RYOWmin").detail("Key",myKeyA).detail("Value", myValue);
+						//TraceEvent("RYOWbytemin").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::ByteMin);
 
 						loop{
@@ -405,7 +405,7 @@ struct RandomSelectorWorkload : TestWorkload {
 						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
 						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
 						myValue = format("%d", g_random->randomInt(0, 10000000));
-						//TraceEvent("RYOWmin").detail("Key",myKeyA).detail("Value", myValue);
+						//TraceEvent("RYOWbytemax").detail("Key",myKeyA).detail("Value", myValue);
 						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::ByteMax);
 
 						loop{
