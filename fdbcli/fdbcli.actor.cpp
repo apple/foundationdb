@@ -1660,6 +1660,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+											"Please try the exclude again in 30 seconds.\n"
 										    "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n";
 
 			StatusObjectReader statusObj(status);

@@ -32,7 +32,7 @@ import java.util.concurrent.CompletableFuture;
 
 public class VersionstampSmokeTest {
     public static void main(String[] args) {
-        FDB fdb = FDB.selectAPIVersion(500);
+        FDB fdb = FDB.selectAPIVersion(510);
         Database db = fdb.open();
 
         db.run(tr -> {

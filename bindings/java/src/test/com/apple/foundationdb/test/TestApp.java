@@ -31,7 +31,7 @@ public class TestApp {
 
 	public static void main(String[] args) throws Exception {
 		try {
-			Cluster cluster = FDB.selectAPIVersion(500).createCluster("C:\\Users\\Ben\\workspace\\fdb\\fdb.cluster");
+			Cluster cluster = FDB.selectAPIVersion(510).createCluster("C:\\Users\\Ben\\workspace\\fdb\\fdb.cluster");
 			System.out.println("I now have the cluster");
 			Database db = cluster.openDatabase();
 

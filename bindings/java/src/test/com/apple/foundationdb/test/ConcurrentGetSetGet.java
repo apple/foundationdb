@@ -52,7 +52,7 @@ public class ConcurrentGetSetGet {
 	}
 
 	public static void main(String[] args) {
-		Database database = FDB.selectAPIVersion(500).open();
+		Database database = FDB.selectAPIVersion(510).open();
 		new ConcurrentGetSetGet().apply(database);
 	}
 
