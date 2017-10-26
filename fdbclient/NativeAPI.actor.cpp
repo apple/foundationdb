@@ -2103,11 +2103,17 @@ ACTOR Future< Standalone<RangeResultRef> > getRangeAndConflictRange(
 
 		if ( rep.size() ) {
 			if( reverse ) {
-				rangeBegin = min( rangeBegin, Key(rep.end()[-1].key, rep.arena()) );
-				if( end.offset > 0 && rep[0].key >= rangeEnd ) rangeEnd = keyAfter( rep[0].key );
+				if( rep.end()[-1].key < rangeBegin ) {
+					rangeBegin = rep.end()[-1].key;
+				}
+				if( end.offset > 0 && rep[0].key >= rangeEnd ) {
+					rangeEnd = keyAfter( rep[0].key );
+				}
 			} else {
-				if( begin.offset <= 0 ) rangeBegin = min( rangeBegin, Key(rep[0].key, rep.arena()) );
-				if(rep.end()[-1].key >= rangeEnd) {
+				if( begin.offset <= 0 && rep[0].key < rangeBegin ) {
+					rangeBegin = rep[0].key;
+				}
+				if( rep.end()[-1].key >= rangeEnd ) {
 					rangeEnd = keyAfter( rep.end()[-1].key );
 				}
 			}
