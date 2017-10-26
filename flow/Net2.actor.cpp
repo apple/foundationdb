@@ -51,7 +51,7 @@ using namespace boost::asio::ip;
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A551010001LL;
+uint64_t currentProtocolVersion        = 0x0FDB00A551020001LL;
 uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 

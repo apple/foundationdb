@@ -545,16 +545,16 @@ struct WriteDuringReadWorkload : TestWorkload {
 		return KeyRangeRef( getKeyForIndex( startLocation ), getKeyForIndex( endLocation ) );
 	}
 
-	Value applyAtomicOp(Value existingValue, Value value, MutationRef::Type type) {
+	Value applyAtomicOp(Optional<StringRef> existingValue, Value value, MutationRef::Type type) {
 		Arena arena;
 		if (type == MutationRef::SetValue)
 			return value;
 		else if (type == MutationRef::AddValue)
 			return doLittleEndianAdd(existingValue, value, arena);
-		else if (type == MutationRef::AppendIfFits) 
+		else if (type == MutationRef::AppendIfFits)
 			return doAppendIfFits(existingValue, value, arena);
 		else if (type == MutationRef::And)
-			return doAnd(existingValue, value, arena);
+			return doAndV2(existingValue, value, arena);
 		else if (type == MutationRef::Or)
 			return doOr(existingValue, value, arena);
 		else if (type == MutationRef::Xor)
@@ -562,7 +562,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 		else if (type == MutationRef::Max)
 			return doMax(existingValue, value, arena);
 		else if (type == MutationRef::Min)
-			return doMin(existingValue, value, arena);
+			return doMinV2(existingValue, value, arena);
+		else if (type == MutationRef::ByteMin)
+			return doByteMin(existingValue, value, arena);
+		else if (type == MutationRef::ByteMax)
+			return doByteMax(existingValue, value, arena);
 		ASSERT(false);
 		return Value();
 	}
@@ -730,7 +734,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									Key key = self->getRandomKey();
 									Value value = self->getRandomValue();
 									MutationRef::Type opType;
-									switch( g_random->randomInt(0,6) ) {
+									switch( g_random->randomInt(0,8) ) {
 										case 0:
 											opType = MutationRef::AddValue;
 											break;
@@ -749,6 +753,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 										case 5:
 											opType = MutationRef::Min;
 											break;
+										case 6:
+											opType = MutationRef::ByteMin;
+											break;
+										case 7:
+											opType = MutationRef::ByteMax;
+											break;
 									}
 									self->changeCount.insert( key, changeNum++ );
 									bool noConflict = g_random->random01() < 0.5;
@@ -760,7 +770,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 									if( !noConflict && key.size() <= (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT) )
 										self->addedConflicts.insert(key, true);
 									Optional<Value> existing = self->memoryGet( &self->memoryDatabase, key );
-									self->memoryDatabase[ key ] = self->applyAtomicOp( existing.present() ? existing.get() : Value(), value, opType );
+									self->memoryDatabase[ key ] = self->applyAtomicOp( existing.present() ? Optional<StringRef>(existing.get()) : Optional<StringRef>(), value, opType );
 								}
 							} else if( operationType > 11 && !disableSet ) {
 								Key key = self->getRandomKey();

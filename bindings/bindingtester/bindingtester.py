@@ -133,7 +133,7 @@ def choose_api_version(selected_api_version, tester_min_version, tester_max_vers
         elif random.random() < 0.7:
             api_version = min_version
         elif random.random() < 0.9:
-            api_version = random.choice([v for v in [13, 14, 16, 21, 22, 23, 100, 200, 300, 400, 410, 420, 430, 440, 450, 460, 500] if v >= min_version and v <= max_version])
+            api_version = random.choice([v for v in [13, 14, 16, 21, 22, 23, 100, 200, 300, 400, 410, 420, 430, 440, 450, 460, 500, 510] if v >= min_version and v <= max_version])
         else:
             api_version = random.randint(min_version, max_version)
 

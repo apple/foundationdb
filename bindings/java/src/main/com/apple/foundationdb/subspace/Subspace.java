@@ -110,11 +110,24 @@ public class Subspace
 	}
 
     /**
+     * Create a human-readable string representation of this subspace. This is
+     * really only useful for debugging purposes, but it includes information
+     * on what raw prefix the subspace is using.
      * @return a printable representation of the subspace
      */
     @Override
     public String toString() {
         return "Subspace(rawPrefix=" + printable(rawPrefix) + ")";
+    }
+
+    /**
+     * Returns a hash-table compatible hash of this subspace. This is based off
+     * of the hash of the underlying byte-array prefix.
+     * @return a hash of this subspace
+     */
+    @Override
+    public int hashCode() {
+        return Arrays.hashCode(rawPrefix);
     }
 
     /**

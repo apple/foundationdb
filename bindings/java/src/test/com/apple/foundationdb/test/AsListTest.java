@@ -37,7 +37,7 @@ public class AsListTest {
 	 *  a bug made the the addition of the clear into the result returning 0 items.
 	 */
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(500);
+		FDB fdb = FDB.selectAPIVersion(510);
 		Database database = fdb.open("T:\\circus\\tags\\RebarCluster-bbc\\cluster_id.txt");
 		database.options().setLocationCacheSize(42);
 		Transaction tr = database.createTransaction();

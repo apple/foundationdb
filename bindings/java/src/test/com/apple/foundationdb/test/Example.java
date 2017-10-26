@@ -29,7 +29,7 @@ import com.apple.foundationdb.tuple.Tuple;
 
 public class Example {
   public static void main(String[] args) {
-    FDB fdb = FDB.selectAPIVersion(500);
+    FDB fdb = FDB.selectAPIVersion(510);
     Database db = fdb.open();
 
     // Run an operation on the database

@@ -34,7 +34,7 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
 public class LocalityTests {
 
 	public static void main(String[] args) {
-		FDB fdb = FDB.selectAPIVersion(500);
+		FDB fdb = FDB.selectAPIVersion(510);
 		Database database = fdb.open(args[0]);
 		{
 			Transaction tr = database.createTransaction();
