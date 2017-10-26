@@ -32,7 +32,7 @@ fdb.api_version(FDB_API_VERSION)
 
 # SOMEDAY: This should probably be broken up into smaller tests
 class ScriptedTest(Test):
-    TEST_API_VERSION = 500
+    TEST_API_VERSION = 510
 
     def __init__(self, subspace):
         super(ScriptedTest, self).__init__(subspace, ScriptedTest.TEST_API_VERSION, ScriptedTest.TEST_API_VERSION)

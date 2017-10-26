@@ -1406,7 +1406,7 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 			for( int i = 0; i < op.size(); ++i) {
 				switch(op[i].type) {
 					case MutationRef::SetValue:
-						tr.set( it.beginKey().assertRef(), op[i].value, false );
+						tr.set( it.beginKey().assertRef(), op[i].value.get(), false );
 						break;
 					case MutationRef::AddValue:
 					case MutationRef::AppendIfFits:
@@ -1417,7 +1417,11 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::Min:
 					case MutationRef::SetVersionstampedKey:
 					case MutationRef::SetVersionstampedValue:
-						tr.atomicOp( it.beginKey().assertRef(), op[i].value, op[i].type, false );
+					case MutationRef::ByteMin:
+					case MutationRef::ByteMax:
+					case MutationRef::MinV2:
+					case MutationRef::AndV2:
+						tr.atomicOp( it.beginKey().assertRef(), op[i].value.get(), op[i].type, false );
 						break;
 					default:
 						break;
@@ -1488,6 +1492,13 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	if (operationType == MutationRef::SetVersionstampedValue && operand.size() < 10)
 		throw client_invalid_operation();
 		
+	if (tr.apiVersionAtLeast(510)) {
+		if (operationType == MutationRef::Min)
+			operationType = MutationRef::MinV2;
+		else if (operationType == MutationRef::And)
+			operationType = MutationRef::AndV2;
+	}
+
 	if(options.readYourWritesDisabled) {
 		return tr.atomicOp(key, operand, (MutationRef::Type) operationType, addWriteConflict);
 	}

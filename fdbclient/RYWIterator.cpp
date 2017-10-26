@@ -55,9 +55,9 @@ KeyValueRef const& RYWIterator::kv( Arena& arena ) {
 	if (writes.is_unmodified_range())
 		return cache.kv( arena );
 	else if (writes.is_independent() || cache.is_empty_range())
-		return temp = KeyValueRef( writes.beginKey().assertRef(), WriteMap::coalesceUnder( writes.op(), Optional<ValueRef>(), arena ).value );
+		return temp = KeyValueRef( writes.beginKey().assertRef(), WriteMap::coalesceUnder( writes.op(), Optional<ValueRef>(), arena ).value.get() );
 	else
-		return temp = KeyValueRef( writes.beginKey().assertRef(), WriteMap::coalesceUnder( writes.op(), cache.kv(arena).value, arena ).value );
+		return temp = KeyValueRef( writes.beginKey().assertRef(), WriteMap::coalesceUnder( writes.op(), cache.kv(arena).value, arena ).value.get() );
 }
 
 RYWIterator& RYWIterator::operator++() {
@@ -651,11 +651,11 @@ TEST_CASE("fdbclient/WriteMap/random") {
 			TraceEvent("RWMT_checkOperation")
 				.detail("wm_key", printable(it.beginKey().toStandaloneStringRef()))
 				.detail("wm_size", it.op().size())
-				.detail("wm_value", it.op().top().value.size())
+				.detail("wm_value", it.op().top().value.present() ? std::to_string(it.op().top().value.get().size()) : "Not Found")
 				.detail("wm_type", (int)it.op().top().type)
 				.detail("sm_key", printable(setIter->first))
 				.detail("sm_size", setIter->second.size())
-				.detail("sm_value", setIter->second.top().value.size())
+				.detail("sm_value", setIter->second.top().value.present() ? std::to_string(setIter->second.top().value.get().size()) : "Not Found")
 				.detail("sm_type", (int)setIter->second.top().type);
 			ASSERT(it.beginKey() == setIter->first && it.op() == setIter->second);
 			++setIter;

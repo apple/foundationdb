@@ -43,7 +43,7 @@ public class VersionstampExample {
     }
 
     public static void main(String[] args) {
-        FDB fdb = FDB.selectAPIVersion(500);
+        FDB fdb = FDB.selectAPIVersion(510);
         Database db = fdb.open();
         Transaction tr = db.createTransaction();
         tr.mutate(MutationType.SET_VERSIONSTAMPED_VALUE, "foo".getBytes(), "blahblahbl".getBytes());

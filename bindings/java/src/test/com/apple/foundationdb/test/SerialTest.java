@@ -36,7 +36,7 @@ public class SerialTest {
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			Cluster c = FDB.selectAPIVersion(500).createCluster(CLUSTER_FILE);
+			Cluster c = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
 			Database db = c.openDatabase();
 			runTests(reps, db);
 

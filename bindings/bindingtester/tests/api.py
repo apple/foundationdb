@@ -164,7 +164,7 @@ class ApiTest(Test):
         op_choices += write_conflicts
         op_choices += resets
 
-        idempotent_atomic_ops = [u'BIT_AND', u'BIT_OR', u'MAX', u'MIN']
+        idempotent_atomic_ops = [u'BIT_AND', u'BIT_OR', u'MAX', u'MIN', u'BYTE_MIN', u'BYTE_MAX']
         atomic_ops = idempotent_atomic_ops + [u'ADD', u'BIT_XOR']
 
         if args.concurrency > 1:
