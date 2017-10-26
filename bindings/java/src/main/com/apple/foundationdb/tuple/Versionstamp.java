@@ -225,7 +225,7 @@ public class Versionstamp implements Comparable<Versionstamp> {
 	 *  transaction version is one of those database-assigned versions rather than
 	 *  just dummy bytes. If one uses this class with our
 	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY SET_VERSIONSTAMPED_KEY}
-	 *  mutation, then the appropriate bytes will be filled in within the database at
+	 *  mutation, then the appropriate bytes will be filled in within the database
 	 *  during a successful commit.
 	 *
 	 * @return whether the transaction version has been set
