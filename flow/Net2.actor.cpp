@@ -48,7 +48,7 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain zookeeper, database and IKeyValueStore keys
+// These impact both communications and the deserialization of certain database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
 uint64_t currentProtocolVersion        = 0x0FDB00A551020001LL;

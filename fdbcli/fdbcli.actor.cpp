@@ -698,6 +698,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 								description += format("\nNeed at least %d log servers, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes"))
 									description += format("\nHave %d processes on %d machines.", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size());
+							} else if (name == "locking_old_transaction_servers" && recoveryState["missing_logs"].get_str().size()) {
+								description += format("\nNeed one or more of the following log servers: %s", recoveryState["missing_logs"].get_str().c_str());
 							}
 							description = lineWrap(description.c_str(), 80);
 							if (!printedCoordinators && (
@@ -1658,6 +1660,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+											"Please try the exclude again in 30 seconds.\n"
 										    "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n";
 
 			StatusObjectReader statusObj(status);

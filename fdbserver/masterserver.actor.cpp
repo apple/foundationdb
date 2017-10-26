@@ -452,7 +452,7 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 		TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", status)
 			.detail("Status", RecoveryStatus::names[status])
-			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("MasterRecoveryState");
 		return Never();
 	} else
 		TraceEvent("MasterRecoveryState", self->dbgid)
@@ -465,7 +465,7 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 			.detail("RequiredResolvers", 1)
 			.detail("DesiredResolvers", self->configuration.getDesiredResolvers())
 			.detail("storeType", self->configuration.storageServerStoreType)
-			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("MasterRecoveryState");
 
 	RecruitFromConfigurationReply recruits = wait(
 		brokenPromiseToNever( self->clusterController.recruitFromConfiguration.getReply(
@@ -477,7 +477,7 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 		.detail("Proxies", recruits.proxies.size())
 		.detail("TLogs", recruits.tLogs.size())
 		.detail("Resolvers", recruits.resolvers.size())
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand new database we are sort of lying that we are
 	// past the recruitment phase.  In a perfect world we would split that up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
@@ -637,7 +637,7 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 	self->hasConfiguration = false;
 
 	if(BUGGIFY)
@@ -966,7 +966,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::reading_coordinated_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::reading_coordinated_state])
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	Value prevDBStateRaw = wait( self->cstate1.read() );
 	addActor.send( masterTerminateOnConflict( self, self->cstate1.onConflict() ) );
@@ -981,7 +981,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 		.detail("TLogs", self->prevDBState.tLogs.size())
 		.detail("MyRecoveryCount", self->prevDBState.recoveryCount+2)
 		.detail("StateSize", prevDBStateRaw.size())
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems( new AsyncVar<Reference<ILogSystem>> );
 	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems, self->dbgid, self->prevDBState, self->myInterface.tlogRejoin.getFuture(), self->myInterface.locality);
@@ -999,7 +999,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::locking_old_transaction_servers)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_old_transaction_servers])
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.detail("MissingIDs", "")
+		.trackLatest("MasterRecoveryState");
 
 	loop {
 		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
@@ -1025,7 +1026,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::recovery_transaction)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	// Recovery transaction
 	state bool debugResult = debug_checkMinRestoredVersion( UID(), self->lastEpochEnd, "DBRecovery", SevWarn );
@@ -1101,7 +1102,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::writing_coordinated_state])
 		.detail("TLogs", self->logSystem->getLogServerCount())
 		.detail("TLogList", self->logSystem->describe())
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	// Multiple masters prevent conflicts between themselves via CoordinatedState (self->cstate)
 	//  1. If SetMaster succeeds, then by CS's contract, these "new" Tlogs are the immediate
@@ -1137,7 +1138,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 		.detail("StatusCode", RecoveryStatus::fully_recovered)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
 		.detail("storeType", self->configuration.storageServerStoreType)
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	// Now that recovery is complete, we register ourselves with the cluster controller, so that the client and server information
 	// it hands out can be updated

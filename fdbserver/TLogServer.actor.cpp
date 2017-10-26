@@ -663,7 +663,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 
 		nextVersion = std::max<Version>(nextVersion, logData->persistentDataVersion);
 
-		TraceEvent("UpdateStorageVer", logData->logId).detail("nextVersion", nextVersion).detail("persistentDataVersion", logData->persistentDataVersion).detail("totalSize", totalSize);
+		//TraceEvent("UpdateStorageVer", logData->logId).detail("nextVersion", nextVersion).detail("persistentDataVersion", logData->persistentDataVersion).detail("totalSize", totalSize);
 
 		Void _ = wait( logData->queueCommittedVersion.whenAtLeast( nextVersion ) );
 		Void _ = wait( delay(0, TaskUpdateStorage) );

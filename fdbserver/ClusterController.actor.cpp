@@ -192,6 +192,7 @@ public:
 	std::pair<WorkerInterface, ProcessClass> getMasterWorker( DatabaseConfiguration const& conf, bool checkStable = false ) {
 		ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;
 		Optional<std::pair<WorkerInterface, ProcessClass>> bestInfo;
+		bool bestIsClusterController = false;
 		int numEquivalent = 1;
 		for( auto& it : id_worker ) {
 			auto fit = it.second.processClass.machineClassFitness( ProcessClass::Master );
@@ -199,12 +200,13 @@ public:
 				fit = std::max(fit, ProcessClass::WorstFit);
 			}
 			if( workerAvailable(it.second, checkStable) && fit != ProcessClass::NeverAssign ) {
-				if( fit < bestFit ) {
+				if( fit < bestFit || (fit == bestFit && bestIsClusterController) ) {
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 					bestFit = fit;
 					numEquivalent = 1;
+					bestIsClusterController = clusterControllerProcessId == it.first;
 				}
-				else if( fit != ProcessClass::NeverAssign && fit == bestFit && g_random->random01() < 1.0/++numEquivalent )
+				else if( fit == bestFit && clusterControllerProcessId != it.first && g_random->random01() < 1.0/++numEquivalent )
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 			}
 		}
@@ -563,6 +565,18 @@ public:
 			return resolverCount > r.resolverCount;
 		}
 
+		bool betterInDatacenterFitness (InDatacenterFitness const& r) const {
+			int lmax = std::max(resolverFit,proxyFit);
+			int lmin = std::min(resolverFit,proxyFit);
+			int rmax = std::max(r.resolverFit,r.proxyFit);
+			int rmin = std::min(r.resolverFit,r.proxyFit);
+
+			if( lmax != rmax ) return lmax < rmax;
+			if( lmin != rmin ) return lmin < rmin;
+
+			return false;
+		}
+
 		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
 	};
 
@@ -621,6 +635,7 @@ public:
 				result.storageServers.push_back(storageServers[i].first);
 		}
 
+		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
 		auto tlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used );
 		for(int i = 0; i < tlogs.size(); i++)
@@ -686,9 +701,14 @@ public:
 		if(masterWorker == id_worker.end())
 			return false;
 
+		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
 
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.processClass.machineClassFitness( ProcessClass::Master );
+		if(db.config.isExcludedServer(dbi.master.address())) {
+			oldMasterFit = std::max(oldMasterFit, ProcessClass::WorstFit);
+		}
+
 		ProcessClass::Fitness newMasterFit = getMasterWorker(db.config, true).second.machineClassFitness( ProcessClass::Master );
 
 		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
@@ -751,7 +771,8 @@ public:
 				newInFit = fitness;
 		}
 
-		if(oldInFit < newInFit) return false;
+		if(oldInFit.betterInDatacenterFitness(newInFit)) return false;
+
 		if(oldMasterFit > newMasterFit || oldAcrossFit > newAcrossFit || oldInFit > newInFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit)
 				.detail("oldAcrossFitC", oldAcrossFit.tlogCount).detail("newAcrossFitC", newAcrossFit.tlogCount)
@@ -770,6 +791,7 @@ public:
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
 	Optional<Standalone<StringRef>> masterProcessId;
+	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	UID id;
 	std::vector<RecruitFromConfigurationRequest> outstandingRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
@@ -1325,6 +1347,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
 
+	if ( w.address() == g_network->getLocalAddress() ) {
+		self->clusterControllerProcessId = w.locality.processId();
+	}
+
 	// Check process class if needed
 	if (self->gotProcessClasses && (info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen)) {
 		auto classIter = self->id_class.find(w.locality.processId());
@@ -1373,22 +1399,18 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 #define TIME_KEEPER_VERSION LiteralStringRef("1")
 
 ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
-	try {
-		loop {
-			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(
-					new ReadYourWritesTransaction(self->cx));
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
-				Void _ = wait(tr->commit());
-				break;
-			} catch (Error &e) {
-				Void _ = wait(tr->onError(e));
-			}
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(
+				new ReadYourWritesTransaction(self->cx));
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
+			Void _ = wait(tr->commit());
+			break;
+		} catch (Error &e) {
+			Void _ = wait(tr->onError(e));
 		}
-	} catch (Error & e) {
-		TraceEvent(SevWarnAlways, "TimeKeeperSetupVersionFailed").detail("cause", e.what());
 	}
 
 	return Void();
@@ -1405,36 +1427,31 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 	Void _ = wait(timeKeeperSetVersion(self));
 
 	loop {
-		try {
-			state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
-			loop {
-				try {
-					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					Optional<Value> disableValue = wait( tr->get(timeKeeperDisableKey) );
-					if(disableValue.present()) {
-						break;
-					}
-
-					Version v = tr->getReadVersion().get();
-					int64_t currentTime = (int64_t)now();
-					versionMap.set(tr, currentTime, v);
-
-					int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
-					if (ttl > 0) {
-						versionMap.erase(tr, 0, ttl);
-					}
-
-					Void _ = wait(tr->commit());
+				Optional<Value> disableValue = wait( tr->get(timeKeeperDisableKey) );
+				if(disableValue.present()) {
 					break;
-				} catch (Error &e) {
-					Void _ = wait(tr->onError(e));
 				}
+
+				Version v = tr->getReadVersion().get();
+				int64_t currentTime = (int64_t)now();
+				versionMap.set(tr, currentTime, v);
+
+				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
+				if (ttl > 0) {
+					versionMap.erase(tr, 0, ttl);
+				}
+
+				Void _ = wait(tr->commit());
+				break;
+			} catch (Error &e) {
+				Void _ = wait(tr->onError(e));
 			}
-		} catch (Error &e) {
-			// Failed to update time-version map even after retries, just ignore this iteration
-			TraceEvent(SevWarn, "TimeKeeperFailed").detail("cause", e.what());
 		}
 
 		Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));
@@ -1672,18 +1689,22 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			registerWorker( req, &self );
 		}
 		when( GetWorkersRequest req = waitNext( interf.getWorkers.getFuture() ) ) {
-			if ( req.flags & GetWorkersRequest::FLAG_TESTER_CLASS ) {
-				vector<std::pair<WorkerInterface, ProcessClass>> testers;
-				for(auto& it : self.id_worker)
-					if (it.second.processClass.classType() == ProcessClass::TesterClass)
-						testers.push_back(std::make_pair(it.second.interf, it.second.processClass));
-				req.reply.send( testers );
-			} else {
-				vector<std::pair<WorkerInterface, ProcessClass>> workers;
-				for(auto& it : self.id_worker)
-					workers.push_back(std::make_pair(it.second.interf, it.second.processClass));
-				req.reply.send( workers );
+			vector<std::pair<WorkerInterface, ProcessClass>> workers;
+
+			auto masterAddr = self.db.serverInfo->get().master.address();
+			for(auto& it : self.id_worker) {
+				if ( (req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) && self.db.config.isExcludedServer(it.second.interf.address()) ) {
+					continue;
+				}
+
+				if ( (req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) && it.second.processClass.classType() != ProcessClass::TesterClass ) {
+					continue;
+				}
+
+				workers.push_back(std::make_pair(it.second.interf, it.second.processClass));
 			}
+
+			req.reply.send( workers );
 		}
 		when( GetClientWorkersRequest req = waitNext( interf.clientInterface.getClientWorkers.getFuture() ) ) {
 			vector<ClientWorkerInterface> workers;

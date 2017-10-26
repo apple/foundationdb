@@ -36,6 +36,7 @@
 #include "FastRef.h"
 #include "EventTypes.actor.h"
 #include "TDMetric.actor.h"
+#include "MetricSample.h"
 
 #include <fcntl.h>
 #if defined(__unixish__)
@@ -130,6 +131,9 @@ IRandom* trace_random = NULL;
 
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
+
+static TransientMetricSample<const char *> traceEventThrottlerCache(getFlowKnobs()->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE);
+static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 
 struct TraceLog {
 	Standalone< VectorRef<StringRef> > buffer;
@@ -421,6 +425,8 @@ struct TraceLog {
 	}
 
 	ThreadFuture<Void> flush() {
+		traceEventThrottlerCache.poll();
+
 		MutexHolder hold(mutex);
 		bool roll = false;
 		if (!buffer.size()) return Void(); // SOMEDAY: maybe we still roll the tracefile here?
@@ -678,6 +684,20 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 			(local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port );
 	} else
 		enabled = false;
+
+	// TRACE_EVENT_THROTTLER
+	if ( enabled && (severity > SevDebug) &&
+		(strncmp(TRACE_EVENT_THROTTLE_STARTING_TYPE, type, strlen(TRACE_EVENT_THROTTLE_STARTING_TYPE)) != 0) ) {
+		// Not a Trace Event Throttle Type
+		if (traceEventThrottlerCache.getMetric(type) >= FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT) {
+			// Throttle Msg
+			enabled = false;
+			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
+		}
+		else {
+			traceEventThrottlerCache.addAndExpire(type, 1, FLOW_KNOBS->TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY);
+		}
+	}
 
 	return enabled;
 }
