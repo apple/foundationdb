@@ -100,15 +100,23 @@ void restartShardTrackers(
 ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 	ShardSizeBounds bounds;
 
-	bounds.max.bytes = maxShardSize;
+	if(shard.end >= keyServersKeys.begin) {
+		bounds.max.bytes = SERVER_KNOBS->KEY_SERVER_SHARD_BYTES;
+	} else {
+		bounds.max.bytes = maxShardSize;
+	}
+
 	bounds.max.bytesPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
 
 	//The first shard can have arbitrarily small size
-	if(shard.begin != allKeys.begin)
-		bounds.min.bytes = bounds.max.bytes / SERVER_KNOBS->SHARD_BYTES_RATIO;
-	else
+	if(shard.begin == allKeys.begin) {
 		bounds.min.bytes = 0;
+	} else if(shard.begin < keyServersKeys.begin) {
+		bounds.min.bytes = maxShardSize / SERVER_KNOBS->SHARD_BYTES_RATIO;
+	} else {
+		bounds.min.bytes = SERVER_KNOBS->KEY_SERVER_SHARD_BYTES / SERVER_KNOBS->SHARD_BYTES_RATIO;
+	}
 
 	bounds.min.bytesPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
