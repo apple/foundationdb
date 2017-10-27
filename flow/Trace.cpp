@@ -685,20 +685,6 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 	} else
 		enabled = false;
 
-	// TRACE_EVENT_THROTTLER
-	if ( enabled && (severity > SevDebug) &&
-		(strncmp(TRACE_EVENT_THROTTLE_STARTING_TYPE, type, strlen(TRACE_EVENT_THROTTLE_STARTING_TYPE)) != 0) ) {
-		// Not a Trace Event Throttle Type
-		if (traceEventThrottlerCache.getMetric(type) >= FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT) {
-			// Throttle Msg
-			enabled = false;
-			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
-		}
-		else {
-			traceEventThrottlerCache.addAndExpire(type, 1, FLOW_KNOBS->TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY);
-		}
-	}
-
 	return enabled;
 }
 
@@ -877,6 +863,19 @@ TraceEvent& TraceEvent::backtrace(std::string prefix) {
 TraceEvent::~TraceEvent() {
 	try {
 		if (enabled) {
+
+			// TRACE_EVENT_THROTTLER
+			if (severity > SevDebug) {
+				if (traceEventThrottlerCache.getMetric(type) >= FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT) {
+					TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
+					// Throttle Msg
+					return;
+				}
+				else {
+					traceEventThrottlerCache.addAndExpire(type, 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY);
+				}
+			} // End of Throttler
+
 			_detailf("logGroup", "%.*s", g_traceLog.logGroup.size(), g_traceLog.logGroup.data());
 			if (!trackingKey.empty()) {
 				if(!isNetworkThread()) {
