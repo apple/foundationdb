@@ -277,6 +277,8 @@ public:
 	static std::string getDataFilename(Version version, int64_t size, int blockSize);
 	static std::string getLogFilename(Version beginVer, Version endVer, int64_t size, int blockSize);
 
+	static const Key keyLastRestorable;
+
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
 	Future<int64_t> getTaskCount(Database cx) { return taskBucket->getTaskCount(cx); }
 	Future<Void> watchTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->watchTaskCount(tr); }
