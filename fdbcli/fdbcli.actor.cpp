@@ -2671,6 +2671,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								for (const auto& pair : interfaces) {
 									ProfilerRequest profileRequest;
 									profileRequest.type = ProfilerRequest::Type::FLOW;
+									profileRequest.action = ProfilerRequest::Action::RUN;
 									profileRequest.duration = duration;
 									profileRequest.outputFile = tokens[4];
 									all_profiler_addresses.push_back(pair.first);
@@ -2688,6 +2689,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 									for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
 										ProfilerRequest profileRequest;
 										profileRequest.type = ProfilerRequest::Type::FLOW;
+										profileRequest.action = ProfilerRequest::Action::RUN;
 										profileRequest.duration = duration;
 										profileRequest.outputFile = tokens[4];
 										all_profiler_addresses.push_back(tokens[tokenidx]);
