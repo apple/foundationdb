@@ -719,6 +719,8 @@ function processOperation(context, inst, cb) {
 			tr.options.setMaxRetryDelay(100);
 			tr.options.setUsedDuringCommitProtectionDisable();
 			tr.options.setTransactionLoggingEnable('my_transaction');
+			tr.options.setReadLockAware()
+			tr.options.setLockAware()
 
 			tr.get(fdb.buffer.fromByteLiteral('\xff'), innerCb);
 		})

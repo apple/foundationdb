@@ -593,6 +593,8 @@ public class AsyncStackTester {
 				tr.options().setMaxRetryDelay(100);
 				tr.options().setUsedDuringCommitProtectionDisable();
 				tr.options().setTransactionLoggingEnable("my_transaction");
+				tr.options().setReadLockAware();
+				tr.options().setLockAware();
 
 				if(!(new FDBException("Fake", 1020)).isRetryable() ||
 						(new FDBException("Fake", 10)).isRetryable())
