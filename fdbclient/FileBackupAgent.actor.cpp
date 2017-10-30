@@ -3503,8 +3503,8 @@ public:
 
 				statusText = "";
 				tag = makeBackupTag(tagName);
-				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
 				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
+				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
 					EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
