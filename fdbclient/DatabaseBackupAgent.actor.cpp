@@ -1633,11 +1633,12 @@ public:
 
 				statusText = "";
 
-				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
 				state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
 
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
 				int backupStateInt = wait(backupAgent->getStateValue(tr, logUid));
 				state BackupAgentBase::enumState backupState = (BackupAgentBase::enumState)backupStateInt;
 
