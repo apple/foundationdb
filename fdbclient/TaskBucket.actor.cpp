@@ -386,7 +386,7 @@ public:
 		return true;
 	}
 
-	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
+	ACTOR static Future<Void> dispatch(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
 		state std::vector<Future<bool>> tasks(maxConcurrentTasks);
 		for(auto &f : tasks)
 			f = Never();
@@ -446,6 +446,38 @@ public:
 					tasks[i] = Never();
 				}
 			}
+		}
+	}
+
+	ACTOR static Future<Void> watchDisabled(Database cx, Reference<TaskBucket> taskBucket, Reference<AsyncVar<bool>> disabled) {
+		loop {
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			loop {
+				try {
+					taskBucket->setOptions(tr);
+					Optional<Value> disabledVal = wait(tr->get(taskBucket->disableKey));
+					disabled->set(disabledVal.present());
+					state Future<Void> watchDisabledFuture = tr->watch(taskBucket->disableKey);
+					Void _ = wait(tr->commit());
+					Void _ = wait(watchDisabledFuture);
+				}
+				catch (Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
+		}
+	}
+
+	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
+		state Reference<AsyncVar<bool>> disabled = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
+		state Future<Void> watchDisabledFuture = watchDisabled(cx, taskBucket, disabled);
+
+		loop {
+			while(disabled->get()) {
+				Void _ = wait(disabled->onChange() || watchDisabledFuture);
+			}
+
+			Void _ = wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || disabled->onChange() || watchDisabledFuture);
 		}
 	}
 
@@ -693,6 +725,7 @@ TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBa
 	, available(prefix.get(LiteralStringRef("av")))
 	, available_prioritized(prefix.get(LiteralStringRef("avp")))
 	, timeouts(prefix.get(LiteralStringRef("to")))
+	, disableKey(prefix.pack(LiteralStringRef("disable")))
 	, timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS)
 	, system_access(sysAccess)
 	, priority_batch(priorityBatch)
@@ -707,6 +740,18 @@ Future<Void> TaskBucket::clear(Reference<ReadYourWritesTransaction> tr){
 	setOptions(tr);
 
 	tr->clear(prefix.range());
+
+	return Void();
+}
+
+Future<Void> TaskBucket::changeDisable(Reference<ReadYourWritesTransaction> tr, bool disable){
+	setOptions(tr);
+
+	if(disable) {
+		tr->set(disableKey, StringRef());
+	} else {
+		tr->clear(disableKey);
+	}
 
 	return Void();
 }
@@ -773,6 +818,10 @@ Future<bool> TaskBucket::doTask(Database cx, Reference<FutureBucket> futureBucke
 
 Future<Void> TaskBucket::run(Database cx, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
 	return TaskBucketImpl::run(cx, Reference<TaskBucket>::addRef(this), futureBucket, pollDelay, maxConcurrentTasks);
+}
+
+Future<Void> TaskBucket::watchDisabled(Database cx, Reference<AsyncVar<bool>> disabled) {
+	return TaskBucketImpl::watchDisabled(cx, Reference<TaskBucket>::addRef(this), disabled);
 }
 
 Future<bool> TaskBucket::isEmpty(Reference<ReadYourWritesTransaction> tr){

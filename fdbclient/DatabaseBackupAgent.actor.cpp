@@ -1633,6 +1633,7 @@ public:
 
 				statusText = "";
 
+				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
 				state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
 
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1720,6 +1721,11 @@ public:
 						double secondsBehind = ((double)(sourceVersion - destApplyBegin))/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 						statusText += format("\nThe DR is %.6f seconds behind.\n", secondsBehind);
 					}
+				}
+
+				Optional<Value> disabled = wait(fDisabled);
+				if(disabled.present()) {
+					statusText += format("\nAll DR agents have been disabled.\n");
 				}
 
 				break;
