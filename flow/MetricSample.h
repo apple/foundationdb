@@ -92,4 +92,82 @@ private:
 		return metric;
 	}
 };
+
+template <class T>
+struct TransientThresholdMetricSample : MetricSample<T> {
+	Deque< std::tuple<double, T, int64_t> > queue;
+	IndexedSet<T, int64_t> thresholdCrossedSet;
+	int64_t thresholdLimit;
+
+	TransientThresholdMetricSample(int64_t metricUnitsPerSample, int64_t threshold) : MetricSample<T>(metricUnitsPerSample), thresholdLimit(threshold) { }
+
+	bool roll(int64_t metric) {
+		return g_nondeterministic_random->random01() < (double)metric / this->metricUnitsPerSample;	//< SOMEDAY: Better randomInt64?
+	}
+
+	template <class U>
+	bool isAboveThreshold(const U& key) {
+		auto i = thresholdCrossedSet.find(key);
+		if (i == thresholdCrossedSet.end())
+			return false;
+		else
+			return true;
+	}
+
+	// Returns the sampled metric value (possibly 0, possibly increased by the sampling factor)
+	template <class T_>
+	int64_t addAndExpire(T_&& key, int64_t metric, double expiration) {
+		int64_t x = add(std::forward<T_>(key), metric);
+		if (x)
+			queue.push_back(std::make_tuple(expiration, *this->sample.find(key), -x));
+		return x;
+	}
+
+	void poll() {
+		double now = ::now();
+		while (queue.size() &&
+			std::get<0>(queue.front()) <= now)
+		{
+			const T& key = std::get<1>(queue.front());
+			int64_t delta = std::get<2>(queue.front());
+			ASSERT(delta != 0);
+
+			int64_t val = this->sample.addMetric(T(key), delta);
+			if (val < thresholdLimit && (val + std::abs(delta)) >= thresholdLimit) {
+				auto iter = thresholdCrossedSet.find(key);
+				ASSERT(iter != thresholdCrossedSet.end())
+				thresholdCrossedSet.erase(iter);
+			}
+			if (val == 0)
+				this->sample.erase(key);
+
+			queue.pop_front();
+		}
+	}
+
+private:
+	template <class T_>
+	int64_t add(T_&& key, int64_t metric) {
+		if (!metric) return 0;
+		int64_t mag = std::abs(metric);
+
+		if (mag < this->metricUnitsPerSample) {
+			if (!roll(mag))
+				return 0;
+
+			metric = metric<0 ? -this->metricUnitsPerSample : this->metricUnitsPerSample;
+		}
+
+		int64_t val = this->sample.addMetric(T(key), metric);
+		if (val >= thresholdLimit) {
+			ASSERT((val - metric) < thresholdLimit ? thresholdCrossedSet.find(key) == thresholdCrossedSet.end() : thresholdCrossedSet.find(key) != thresholdCrossedSet.end());
+			thresholdCrossedSet.insert(key, val);
+		}
+
+		if (val == 0)
+			this->sample.erase(key);
+
+		return metric;
+	}
+};
 #endif

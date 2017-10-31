@@ -21,13 +21,7 @@
 #include "Knobs.h"
 #include "flow/flow.h"
 
-FlowKnobs const* FLOW_KNOBS = getFlowKnobs();
-
-FlowKnobs const* getFlowKnobs() {
-	if (!FLOW_KNOBS)
-		FLOW_KNOBS = new FlowKnobs();
-	return FLOW_KNOBS;
-}
+FlowKnobs const* FLOW_KNOBS = new FlowKnobs();
 
 #define init( knob, value ) initKnob( knob, value, #knob )
 
