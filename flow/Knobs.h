@@ -170,7 +170,4 @@ public:
 
 extern FlowKnobs const* FLOW_KNOBS;
 
-// This api should be used if FLOW_KNOBS is required during static initialization of global variables.
-FlowKnobs const* getFlowKnobs();
-
 #endif

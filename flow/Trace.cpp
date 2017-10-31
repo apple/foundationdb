@@ -132,8 +132,9 @@ IRandom* trace_random = NULL;
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
 
-static TransientMetricSample<const char *> traceEventThrottlerCache(getFlowKnobs()->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE);
+static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
+
 
 struct TraceLog {
 	Standalone< VectorRef<StringRef> > buffer;
@@ -425,7 +426,7 @@ struct TraceLog {
 	}
 
 	ThreadFuture<Void> flush() {
-		traceEventThrottlerCache.poll();
+		traceEventThrottlerCache->poll();
 
 		MutexHolder hold(mutex);
 		bool roll = false;
@@ -863,16 +864,15 @@ TraceEvent& TraceEvent::backtrace(std::string prefix) {
 TraceEvent::~TraceEvent() {
 	try {
 		if (enabled) {
-
 			// TRACE_EVENT_THROTTLER
-			if (severity > SevDebug) {
-				if (traceEventThrottlerCache.getMetric(type) >= FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT) {
+			if (severity > SevDebug && isNetworkThread()) {
+				if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t *)type, strlen(type)))) {
 					TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
 					// Throttle Msg
 					return;
 				}
 				else {
-					traceEventThrottlerCache.addAndExpire(type, 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY);
+					traceEventThrottlerCache->addAndExpire(StringRef((uint8_t *)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY);
 				}
 			} // End of Throttler
 
@@ -980,6 +980,7 @@ void TraceEvent::writeEscapedfv( const char* format, va_list args ) {
 thread_local bool TraceEvent::networkThread = false;
 
 void TraceEvent::setNetworkThread() {
+	traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
 	networkThread = true;
 }
 
