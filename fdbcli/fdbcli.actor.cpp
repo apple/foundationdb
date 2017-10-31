@@ -2576,7 +2576,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							if (sizeLimitFuture.get().present()) {
 								const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(sizeLimitFuture.get().get(), Unversioned());
 								if (sizeLimit != -1) {
-									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimitStr);
+									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 								}
 							}
 							printf("Client profiling rate is set to %s and size limit is set to %s.\n", sampleRateStr.c_str(), sizeLimitStr.c_str());
