@@ -138,7 +138,6 @@ struct TransientThresholdMetricSample : MetricSample<T> {
 				ASSERT(iter != thresholdCrossedSet.end())
 				thresholdCrossedSet.erase(iter);
 			}
-			ASSERT(val >= thresholdLimit ? thresholdCrossedSet.find(key) != thresholdCrossedSet.end() : thresholdCrossedSet.find(key) == thresholdCrossedSet.end())
 			if (val == 0)
 				this->sample.erase(key);
 
