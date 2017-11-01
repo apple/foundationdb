@@ -400,7 +400,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		bstore->s_stats.requests_failed++;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
-		bool retryable = err.present() || r->code == 500 || r->code == 503;
+		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503;
 
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);
