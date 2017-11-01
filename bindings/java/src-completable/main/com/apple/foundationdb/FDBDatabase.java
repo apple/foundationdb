@@ -22,10 +22,8 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
@@ -72,7 +70,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	public <T> CompletableFuture<T> runAsync(final Function<? super Transaction, CompletableFuture<T>> retryable, Executor e) {
 		final AtomicReference<Transaction> trRef = new AtomicReference<>(createTransaction(e));
 		final AtomicReference<T> returnValue = new AtomicReference<>();
-		return AsyncUtil.whileTrue(v -> {
+		return AsyncUtil.whileTrue(() -> {
 			CompletableFuture<T> process = AsyncUtil.applySafely(retryable, trRef.get());
 
 			return process.thenComposeAsync(returnVal ->

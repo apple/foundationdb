@@ -29,7 +29,7 @@ public class WhileTrueTest {
         // This should cause memory issues using the old implementation but not the new one.
         // Pro tip: Run with options -Xms16m -Xmx16m -XX:+HeadDumpOnOutOfMemoryError
         AtomicInteger count = new AtomicInteger(1000000);
-        AsyncUtil.whileTrue(v -> CompletableFuture.completedFuture(count.decrementAndGet()).thenApplyAsync(c -> c > 0)).join();
+        AsyncUtil.whileTrue(() -> CompletableFuture.completedFuture(count.decrementAndGet()).thenApplyAsync(c -> c > 0)).join();
         System.out.println("Final value: " + count.get());
     }
 }
