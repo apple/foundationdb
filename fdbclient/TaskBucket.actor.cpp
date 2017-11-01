@@ -452,18 +452,16 @@ public:
 	ACTOR static Future<Void> watchDisabled(Database cx, Reference<TaskBucket> taskBucket, Reference<AsyncVar<bool>> disabled) {
 		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-			loop {
-				try {
-					taskBucket->setOptions(tr);
-					Optional<Value> disabledVal = wait(tr->get(taskBucket->disableKey));
-					disabled->set(disabledVal.present());
-					state Future<Void> watchDisabledFuture = tr->watch(taskBucket->disableKey);
-					Void _ = wait(tr->commit());
-					Void _ = wait(watchDisabledFuture);
-				}
-				catch (Error &e) {
-					Void _ = wait(tr->onError(e));
-				}
+			try {
+				taskBucket->setOptions(tr);
+				Optional<Value> disabledVal = wait(tr->get(taskBucket->disableKey));
+				disabled->set(disabledVal.present());
+				state Future<Void> watchDisabledFuture = tr->watch(taskBucket->disableKey);
+				Void _ = wait(tr->commit());
+				Void _ = wait(watchDisabledFuture);
+			}
+			catch (Error &e) {
+				Void _ = wait(tr->onError(e));
 			}
 		}
 	}
