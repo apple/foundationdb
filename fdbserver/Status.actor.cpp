@@ -896,7 +896,7 @@ static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap, std::
 			clients.push_back(cli);
 		}
 
-		ver["clients"] = clients;
+		ver["connected_clients"] = clients;
 		versionsArray.push_back(ver);
 	}
 
