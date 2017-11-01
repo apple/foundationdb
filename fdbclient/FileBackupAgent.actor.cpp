@@ -852,22 +852,10 @@ namespace fileBackup {
 		} catch( Error &e ) {
 			if(e.code() == error_code_actor_cancelled)
 				throw;
-			TraceEvent("FBA_TruncateCloseFileSyncError").error(e);
 
-			state Transaction tr(cx);
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					Tuple t;
-					t.append(std::numeric_limits<Version>::max());
-					t.append(StringRef());
-					tr.set(t.pack().withPrefix(keyErrors), format("WARNING: Cannot sync file `%s' in container '%s'", fileName.c_str(), backupContainer.c_str()));
-					Void _ = wait( tr.commit() );
-					break;
-				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e));
-				}
-			}
+			state Error err = e;
+			Void _ = wait(logError(cx, keyErrors, format("WARNING: Cannot sync file `%s' in container '%s' because of error '%s'", fileName.c_str(), backupContainer.c_str(), err.what())));
+			throw err;
 		}
 		file = Reference<IAsyncFile>();
 		return Void();
