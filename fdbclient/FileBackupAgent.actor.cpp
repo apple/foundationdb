@@ -835,6 +835,7 @@ namespace fileBackup {
 
 		state Future<Void> truncate = file->truncate(truncateSize);
 		state Future<Void> sync = file->sync();
+		state Error err;
 
 		try {
 			Void _ = wait(truncate);
@@ -842,7 +843,7 @@ namespace fileBackup {
 			if(e.code() == error_code_actor_cancelled)
 				throw;
 
-			state Error err = e;
+			err = e;
 			Void _ = wait(logError(cx, keyErrors, format("ERROR: Failed to write to file `%s' in container '%s' because of error %s", fileName.c_str(), backupContainer.c_str(), err.what())));
 			throw err;
 		}
@@ -853,7 +854,7 @@ namespace fileBackup {
 			if(e.code() == error_code_actor_cancelled)
 				throw;
 
-			state Error err = e;
+			err = e;
 			Void _ = wait(logError(cx, keyErrors, format("WARNING: Cannot sync file `%s' in container '%s' because of error '%s'", fileName.c_str(), backupContainer.c_str(), err.what())));
 			throw err;
 		}
