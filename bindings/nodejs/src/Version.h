@@ -22,6 +22,6 @@
 #ifndef FDB_NODE_VERSION_H
 #define FDB_NODE_VERSION_H
 
-#define FDB_API_VERSION 500
+#define FDB_API_VERSION 510
 
 #endif

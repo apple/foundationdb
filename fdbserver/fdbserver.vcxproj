@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(SolutionDir)versions.target" />
   <PropertyGroup Condition="'$(Release)' != 'true' ">
@@ -92,6 +92,8 @@
     <ActorCompiler Include="workloads\DummyWorkload.actor.cpp" />
     <ActorCompiler Include="workloads\BackupCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicOps.actor.cpp" />
+    <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicSwitchover.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp" />
@@ -112,6 +114,7 @@
     <ActorCompiler Include="workloads\Ping.actor.cpp" />
     <ActorCompiler Include="workloads\RandomMoveKeys.actor.cpp" />
     <ActorCompiler Include="workloads\TargetedKill.actor.cpp" />
+    <ActorCompiler Include="workloads\TimeKeeperCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\WriteDuringRead.actor.cpp" />
     <ActorCompiler Include="workloads\Watches.actor.cpp" />
     <ActorCompiler Include="workloads\ThreadSafety.actor.cpp" />

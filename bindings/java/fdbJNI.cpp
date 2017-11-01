@@ -21,7 +21,7 @@
 #include <jni.h>
 #include <string.h>
 
-#define FDB_API_VERSION 500 
+#define FDB_API_VERSION 510 
 
 #include <foundationdb/fdb_c.h>
 
@@ -38,8 +38,18 @@
 #error Missing thread local storage
 #endif
 
+static JavaVM* g_jvm = 0; 
 static thread_local JNIEnv* g_thread_jenv = 0;  // Defined for the network thread once it is running, and for any thread that has called registerCallback
 static thread_local jmethodID g_IFutureCallback_call_methodID = 0;
+static thread_local bool is_external = false;
+
+void detachIfExternalThread(void *ignore) {
+	if(is_external && g_thread_jenv != 0) {
+		g_thread_jenv = 0;
+		g_IFutureCallback_call_methodID = 0;
+		g_jvm->DetachCurrentThread();
+	}
+}
 
 void throwOutOfMem(JNIEnv *jenv) {
 	const char *className = "java/lang/OutOfMemoryError";
@@ -59,7 +69,7 @@ void throwOutOfMem(JNIEnv *jenv) {
 }
 
 static jthrowable getThrowable(JNIEnv *jenv, fdb_error_t e, const char* msg = NULL) {
-	jclass excepClass = jenv->FindClass("com/apple/cie/foundationdb/FDBException");
+	jclass excepClass = jenv->FindClass("com/apple/foundationdb/FDBException");
 	if(jenv->ExceptionOccurred())
 		return JNI_NULL;
 
@@ -103,12 +113,6 @@ void throwParamNotNull(JNIEnv *jenv) {
 extern "C" {
 #endif
 
-static void callCallback( FDBFuture* f, void* data ) {
-	jobject callback = (jobject)data;
-	g_thread_jenv->CallVoidMethod( callback, g_IFutureCallback_call_methodID );
-	g_thread_jenv->DeleteGlobalRef(callback);
-}
-
 // If the methods are not found, exceptions are thrown and this will return false.
 //  Returns TRUE on success, false otherwise.
 static bool findCallbackMethods(JNIEnv *jenv) {
@@ -123,6 +127,27 @@ static bool findCallbackMethods(JNIEnv *jenv) {
 	return true;
 }
 
+static void callCallback( FDBFuture* f, void* data ) {
+	if (g_thread_jenv == 0) {
+		// We are on an external thread and must attach to the JVM.
+		// The shutdown hook will later detach this thread.
+		is_external = true;
+		if( g_jvm != 0 && g_jvm->AttachCurrentThreadAsDaemon((void **) &g_thread_jenv, JNI_NULL) == JNI_OK ) {
+			if( !findCallbackMethods( g_thread_jenv ) ) {
+				g_thread_jenv->FatalError("FDB: Could not find callback method.\n");
+			}
+		} else {
+			// Can't call FatalError, because we don't have a pointer to the jenv...
+			// There will be a segmentation fault from the attempt to call the callback method.
+			fprintf(stderr, "FDB: Could not attach external client thread to the JVM as daemon.\n");
+		}
+	}
+
+	jobject callback = (jobject)data;
+	g_thread_jenv->CallVoidMethod( callback, g_IFutureCallback_call_methodID );
+	g_thread_jenv->DeleteGlobalRef(callback);
+}
+
 // Attempts to throw 't', attempts to shut down the JVM if this fails.
 void safeThrow( JNIEnv *jenv, jthrowable t ) {
 	if( jenv->Throw( t ) != 0 ) {
@@ -130,7 +155,7 @@ void safeThrow( JNIEnv *jenv, jthrowable t ) {
 	}
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1registerCallback(JNIEnv *jenv, jobject cls, jlong future, jobject callback) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1registerCallback(JNIEnv *jenv, jobject cls, jlong future, jobject callback) {
 	// SOMEDAY: Do this on module load instead. Can we cache method ids across threads?
 	if( !g_IFutureCallback_call_methodID ) {
 		if( !findCallbackMethods( jenv ) ) {
@@ -163,7 +188,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1regi
 	}
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1blockUntilReady(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1blockUntilReady(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return;
@@ -175,7 +200,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1bloc
 		safeThrow( jenv, getThrowable( jenv, err ) );
 }
 
-JNIEXPORT jthrowable JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1getError(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jthrowable JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1getError(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -184,7 +209,7 @@ JNIEXPORT jthrowable JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future
 	return getThrowable( jenv, fdb_future_get_error( sav ) );
 }
 
-JNIEXPORT jboolean JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1isReady(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1isReady(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return JNI_FALSE;
@@ -193,7 +218,7 @@ JNIEXPORT jboolean JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1
 	return (jboolean)fdb_future_is_ready(var);
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1dispose(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1dispose(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return;
@@ -202,7 +227,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1disp
 	fdb_future_destroy(var);
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1cancel(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1cancel(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return;
@@ -211,7 +236,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1canc
 	fdb_future_cancel(var);
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1releaseMemory(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_NativeFuture_Future_1releaseMemory(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return;
@@ -220,7 +245,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_NativeFuture_Future_1rele
 	fdb_future_release_memory(var);
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FutureVersion_FutureVersion_1get(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureVersion_FutureVersion_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -237,7 +262,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FutureVersion_FutureVers
 	return (jlong)version;
 }
 
-JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureStrings_FutureStrings_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -278,13 +303,13 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureStrings_FutureSt
 	return arr;
 }
 
-JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureResults_1getSummary(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1getSummary(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
 	}
 
-	jclass resultCls = jenv->FindClass("com/apple/cie/foundationdb/RangeResultSummary");
+	jclass resultCls = jenv->FindClass("com/apple/foundationdb/RangeResultSummary");
 	if( jenv->ExceptionOccurred() )
 		return JNI_NULL;
 	jmethodID resultCtorId = jenv->GetMethodID(resultCls, "<init>", "([BIZ)V");
@@ -322,13 +347,13 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 }
 
 // SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
-JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureResults_1get(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
 	}
 
-	jclass resultCls = jenv->FindClass("com/apple/cie/foundationdb/RangeResult");
+	jclass resultCls = jenv->FindClass("com/apple/foundationdb/RangeResult");
 	jmethodID resultCtorId = jenv->GetMethodID(resultCls, "<init>", "([B[IZ)V");
  
 	FDBFuture *f = (FDBFuture *)future;
@@ -353,10 +378,18 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 			throwOutOfMem(jenv);
 		return JNI_NULL;
 	}
+	uint8_t *keyvalues_barr = (uint8_t *)jenv->GetByteArrayElements(keyValueArray, NULL); 
+	if (!keyvalues_barr) {
+		throwRuntimeEx( jenv, "Error getting handle to native resources" );
+		return JNI_NULL;
+	}
+
 	jintArray lengthArray = jenv->NewIntArray(count * 2);
 	if( !lengthArray ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
+
+		jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 		return JNI_NULL;
 	}
 
@@ -364,20 +397,23 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 	if( !length_barr ) {
 		if( !jenv->ExceptionOccurred() )
 			throwOutOfMem(jenv);
+
+		jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 		return JNI_NULL;
 	}
 
 	int offset = 0;
 	for(int i = 0; i < count; i++) {
-		jenv->SetByteArrayRegion(keyValueArray, offset, kvs[i].key_length, (jbyte *)kvs[i].key);
+		memcpy(keyvalues_barr + offset, kvs[i].key, kvs[i].key_length);
 		length_barr[ i * 2 ] = kvs[i].key_length;
 		offset += kvs[i].key_length;
 
-		jenv->SetByteArrayRegion(keyValueArray, offset, kvs[i].value_length, (jbyte *)kvs[i].value);
+		memcpy(keyvalues_barr + offset, kvs[i].value, kvs[i].value_length);
 		length_barr[ (i * 2) + 1 ] = kvs[i].value_length;
 		offset += kvs[i].value_length;
 	}
 
+	jenv->ReleaseByteArrayElements(keyValueArray, (jbyte *)keyvalues_barr, 0);
 	jenv->ReleaseIntArrayElements(lengthArray, length_barr, 0);
 
 	jobject result = jenv->NewObject(resultCls, resultCtorId, keyValueArray, lengthArray, (jboolean)more);
@@ -388,7 +424,7 @@ JNIEXPORT jobject JNICALL Java_com_apple_cie_foundationdb_FutureResults_FutureRe
 }
 
 // SOMEDAY: explore doing this more efficiently with Direct ByteBuffers
-JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureResult_FutureResult_1get(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureResult_FutureResult_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -418,7 +454,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureResult_Future
 	return result;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureKey_FutureKey_1get(JNIEnv * jenv, jclass, jlong future) {
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv * jenv, jclass, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -444,7 +480,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_cie_foundationdb_FutureKey_FutureKey
 	return result;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FutureCluster_FutureCluster_1get(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureCluster_FutureCluster_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -460,7 +496,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FutureCluster_FutureClus
 	return (jlong)cluster;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FutureDatabase_FutureDatabase_1get(JNIEnv *jenv, jobject, jlong future) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FutureDatabase_FutureDatabase_1get(JNIEnv *jenv, jobject, jlong future) {
 	if( !future ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -476,7 +512,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FutureDatabase_FutureDat
 	return (jlong)database;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBDatabase_Database_1createTransaction(JNIEnv *jenv, jobject, jlong dbPtr) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1createTransaction(JNIEnv *jenv, jobject, jlong dbPtr) {
 	if( !dbPtr ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -491,7 +527,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBDatabase_Database_1cr
 	return (jlong)tr;
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBDatabase_Database_1dispose(JNIEnv *jenv, jobject, jlong dPtr) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1dispose(JNIEnv *jenv, jobject, jlong dPtr) {
 	if( !dPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -499,7 +535,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBDatabase_Database_1dis
 	fdb_database_destroy( (FDBDatabase *)dPtr );
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBDatabase_Database_1setOption(JNIEnv *jenv, jobject, jlong dPtr, jint code, jbyteArray value) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1setOption(JNIEnv *jenv, jobject, jlong dPtr, jint code, jbyteArray value) {
 	if( !dPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -524,11 +560,11 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBDatabase_Database_1set
 	}
 }
 
-JNIEXPORT jboolean JNICALL Java_com_apple_cie_foundationdb_FDB_Error_1predicate(JNIEnv *jenv, jobject, jint predicate, jint code) {
+JNIEXPORT jboolean JNICALL Java_com_apple_foundationdb_FDB_Error_1predicate(JNIEnv *jenv, jobject, jint predicate, jint code) {
 	return (jboolean)fdb_error_predicate(predicate, code);
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDB_Cluster_1create(JNIEnv *jenv, jobject, jstring clusterFileName) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDB_Cluster_1create(JNIEnv *jenv, jobject, jstring clusterFileName) {
 	const char* fileName = 0;
 	if(clusterFileName != 0) {
 		fileName = jenv->GetStringUTFChars(clusterFileName, 0);
@@ -541,7 +577,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDB_Cluster_1create(JNIE
 	return (jlong)cluster;
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_Cluster_Cluster_1setOption(JNIEnv *jenv, jobject, jlong cPtr, jint code, jbyteArray value) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1setOption(JNIEnv *jenv, jobject, jlong cPtr, jint code, jbyteArray value) {
 	if( !cPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -566,7 +602,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_Cluster_Cluster_1setOptio
 	}
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_Cluster_Cluster_1dispose(JNIEnv *jenv, jobject, jlong cPtr) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1dispose(JNIEnv *jenv, jobject, jlong cPtr) {
 	if( !cPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -574,7 +610,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_Cluster_Cluster_1dispose(
 	fdb_cluster_destroy( (FDBCluster *)cPtr );
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_Cluster_Cluster_1createDatabase(JNIEnv *jenv, jobject, jlong cPtr, jbyteArray dbNameBytes) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_Cluster_Cluster_1createDatabase(JNIEnv *jenv, jobject, jlong cPtr, jbyteArray dbNameBytes) {
 	if( !cPtr || !dbNameBytes ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -593,7 +629,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_Cluster_Cluster_1createD
 	return (jlong)f;
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1setVersion(JNIEnv *jenv, jobject, jlong tPtr, jlong version) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1setVersion(JNIEnv *jenv, jobject, jlong tPtr, jlong version) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -602,7 +638,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	fdb_transaction_set_read_version( tr, version );
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1getReadVersion(JNIEnv *jenv, jobject, jlong tPtr) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getReadVersion(JNIEnv *jenv, jobject, jlong tPtr) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -612,7 +648,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1get(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBytes, jboolean snapshot) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1get(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBytes, jboolean snapshot) {
 	if( !tPtr || !keyBytes ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -631,7 +667,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1getKey(JNIEnv *jenv, jobject, jlong tPtr, 
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getKey(JNIEnv *jenv, jobject, jlong tPtr, 
 		jbyteArray keyBytes, jboolean orEqual, jint offset, jboolean snapshot) {
 	if( !tPtr || !keyBytes ) {
 		throwParamNotNull(jenv);
@@ -651,7 +687,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1getRange
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getRange
   (JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBeginBytes, jboolean orEqualBegin, jint offsetBegin,
 		jbyteArray keyEndBytes, jboolean orEqualEnd, jint offsetEnd, jint rowLimit, jint targetBytes, 
 		jint streamingMode, jint iteration, jboolean snapshot, jboolean reverse) {
@@ -685,7 +721,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1set(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBytes, jbyteArray valueBytes) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1set(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBytes, jbyteArray valueBytes) {
 	if( !tPtr || !keyBytes || !valueBytes ) {
 		throwParamNotNull(jenv);
 		return;
@@ -714,7 +750,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	jenv->ReleaseByteArrayElements( valueBytes, (jbyte *)barrValue, JNI_ABORT );
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1clear__J_3B(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBytes) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1clear__J_3B(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBytes) {
 	if( !tPtr || !keyBytes ) {
 		throwParamNotNull(jenv);
 		return;
@@ -732,7 +768,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	jenv->ReleaseByteArrayElements( keyBytes, (jbyte *)barr, JNI_ABORT );
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1clear__J_3B_3B(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBeginBytes, jbyteArray keyEndBytes) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1clear__J_3B_3B(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBeginBytes, jbyteArray keyEndBytes) {
 	if( !tPtr || !keyBeginBytes || !keyEndBytes ) {
 		throwParamNotNull(jenv);
 		return;
@@ -761,7 +797,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	jenv->ReleaseByteArrayElements( keyEndBytes, (jbyte *)barrKeyEnd, JNI_ABORT );
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1mutate(JNIEnv *jenv, jobject, jlong tPtr, jint code,
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1mutate(JNIEnv *jenv, jobject, jlong tPtr, jint code,
 																		jbyteArray key, jbyteArray value ) {
 	if( !tPtr || !key || !value ) {
 		throwParamNotNull(jenv);
@@ -793,7 +829,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	jenv->ReleaseByteArrayElements( value, (jbyte *)barrValue, JNI_ABORT );
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1commit(JNIEnv *jenv, jobject, jlong tPtr) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1commit(JNIEnv *jenv, jobject, jlong tPtr) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -803,7 +839,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1setOption(JNIEnv *jenv, jobject, jlong tPtr, jint code, jbyteArray value) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1setOption(JNIEnv *jenv, jobject, jlong tPtr, jint code, jbyteArray value) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -829,7 +865,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	}
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1getCommittedVersion(JNIEnv *jenv, jobject, jlong tPtr) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getCommittedVersion(JNIEnv *jenv, jobject, jlong tPtr) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -844,7 +880,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)version;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1getVersionstamp(JNIEnv *jenv, jobject, jlong tPtr) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getVersionstamp(JNIEnv *jenv, jobject, jlong tPtr) {
 	if (!tPtr) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -854,7 +890,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1getKeyLocations(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray key) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1getKeyLocations(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray key) {
 	if( !tPtr || !key ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -875,7 +911,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1onError(JNIEnv *jenv, jobject, jlong tPtr, jint errorCode) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1onError(JNIEnv *jenv, jobject, jlong tPtr, jint errorCode) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -885,7 +921,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1dispose(JNIEnv *jenv, jobject, jlong tPtr) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1dispose(JNIEnv *jenv, jobject, jlong tPtr) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -893,7 +929,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	fdb_transaction_destroy( (FDBTransaction *)tPtr );
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1reset(JNIEnv *jenv, jobject, jlong tPtr) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1reset(JNIEnv *jenv, jobject, jlong tPtr) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -901,7 +937,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	fdb_transaction_reset( (FDBTransaction *)tPtr );
 }
 
-JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1watch(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray key) {
+JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1watch(JNIEnv *jenv, jobject, jlong tPtr, jbyteArray key) {
 	if( !tPtr || !key ) {
 		throwParamNotNull(jenv);
 		return 0;
@@ -921,7 +957,7 @@ JNIEXPORT jlong JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transacti
 	return (jlong)f;
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1cancel(JNIEnv *jenv, jobject, jlong tPtr) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1cancel(JNIEnv *jenv, jobject, jlong tPtr) {
 	if( !tPtr ) {
 		throwParamNotNull(jenv);
 		return;
@@ -929,7 +965,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	fdb_transaction_cancel( (FDBTransaction *)tPtr );
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transaction_1addConflictRange(
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDBTransaction_Transaction_1addConflictRange(
 		JNIEnv *jenv, jobject, jlong tPtr, jbyteArray keyBegin, jbyteArray keyEnd, jint conflictType) {
 	if( !tPtr || !keyBegin || !keyEnd ) {
 		throwParamNotNull(jenv);
@@ -964,7 +1000,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDBTransaction_Transactio
 	}
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Select_1API_1version(JNIEnv *jenv, jclass, jint version) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Select_1API_1version(JNIEnv *jenv, jclass, jint version) {
 	fdb_error_t err = fdb_select_api_version( (int)version );
 	if( err ) {
 		if( err == 2203 ) {
@@ -989,7 +1025,7 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Select_1API_1version(
 	}
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1setOption(JNIEnv *jenv, jobject, jint code, jbyteArray value) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Network_1setOption(JNIEnv *jenv, jobject, jint code, jbyteArray value) {
 	uint8_t *barr = NULL;
 	int size = 0;
 	if(value != 0) {
@@ -1009,19 +1045,24 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1setOption(JN
 	}
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1setup(JNIEnv *jenv, jobject) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Network_1setup(JNIEnv *jenv, jobject) {
 	fdb_error_t err = fdb_setup_network();
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
 	}
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1run(JNIEnv *jenv, jobject) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Network_1run(JNIEnv *jenv, jobject) {
 	// initialize things for the callbacks on the network thread
 	g_thread_jenv = jenv;
 	if( !g_IFutureCallback_call_methodID ) {
 		if( !findCallbackMethods( jenv ) )
 			return;
+	}
+
+	fdb_error_t hookErr = fdb_add_network_thread_completion_hook( &detachIfExternalThread, NULL );
+	if( hookErr ) {
+		safeThrow( jenv, getThrowable( jenv, hookErr ) );
 	}
 
 	fdb_error_t err = fdb_run_network();
@@ -1030,11 +1071,16 @@ JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1run(JNIEnv *
 	}
 }
 
-JNIEXPORT void JNICALL Java_com_apple_cie_foundationdb_FDB_Network_1stop(JNIEnv *jenv, jobject) {
+JNIEXPORT void JNICALL Java_com_apple_foundationdb_FDB_Network_1stop(JNIEnv *jenv, jobject) {
 	fdb_error_t err = fdb_stop_network();
 	if( err ) {
 		safeThrow( jenv, getThrowable( jenv, err ) );
 	}
+}
+
+jint JNI_OnLoad(JavaVM *vm, void *reserved) {
+	g_jvm = vm;
+	return JNI_VERSION_1_1;
 }
 
 #ifdef __cplusplus

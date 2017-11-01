@@ -59,6 +59,10 @@ template<> inline Standalone<StringRef> Codec<Standalone<StringRef>>::unpack(Tup
 template<> inline Tuple Codec<UID>::pack(UID const &val) { return Codec<Standalone<StringRef>>::pack(BinaryWriter::toValue<UID>(val, Unversioned())); }
 template<> inline UID Codec<UID>::unpack(Tuple const &val) { return BinaryReader::fromStringRef<UID>(Codec<Standalone<StringRef>>::unpack(val), Unversioned()); }
 
+// This is backward compatible with Codec<Standalone<StringRef>>
+template<> inline Tuple Codec<std::string>::pack(std::string const &val) { return Tuple().append(StringRef(val)); }
+template<> inline std::string Codec<std::string>::unpack(Tuple const &val) { return val.getString(0).toString(); }
+
 // Partial specialization to cover all std::pairs as long as the component types are Codec compatible
 template<typename First, typename Second>
 struct Codec<std::pair<First, Second>> {
@@ -66,6 +70,30 @@ struct Codec<std::pair<First, Second>> {
 	static std::pair<First, Second> unpack(Tuple const &t) {
 		ASSERT(t.size() == 2);
 		return {Codec<First>::unpack(t.subTuple(0, 1)), Codec<Second>::unpack(t.subTuple(1, 2))};
+	}
+};
+
+template<typename T>
+struct Codec<std::vector<T>> {
+	static Tuple pack(typename std::vector<T> const &val) {
+		Tuple t;
+		for (T item : val) {
+			Tuple itemTuple = Codec<T>::pack(item);
+			// fdbclient doesn't support nested tuples yet. For now, flatten the tuple into StringRef
+			t.append(itemTuple.pack());
+		}
+		return t;
+	}
+
+	static std::vector<T> unpack(Tuple const &t) {
+		std::vector<T> v;
+
+		for (int i = 0; i < t.size(); i++) {
+			Tuple itemTuple = Tuple::unpack(t.getString(i));
+			v.push_back(Codec<T>::unpack(itemTuple));
+		}
+
+		return v;
 	}
 };
 
@@ -87,11 +115,61 @@ public:
 	}
 	// Get property's value or defaultValue if it doesn't exist
 	Future<T> getD(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, T defaultValue = T()) const {
-		return map(get(tr, false), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
+		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
+	// Get property's value or throw error if it doesn't exist
+	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, Error err = key_not_found()) const {
+		auto keyCopy = key;
+		auto backtrace = platform::get_backtrace();
+		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
+			if (!val.present()) {
+				TraceEvent(SevInfo, "KeyBackedProperty_keyNotFound")
+						.detail("key", printable(keyCopy))
+						.detail("err", err.code())
+						.detail("parentTrace", backtrace.c_str());
+				throw err;
+			}
+
+			return val.get();
+		});
+	}
+
+	Future<Optional<T>> get(Database cx, bool snapshot = false) const {
+		auto &copy = *this;
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return copy.get(tr, snapshot);
+		});
+	}
+
+	Future<T> getOrThrow(Database cx, bool snapshot = false, Error err = key_not_found()) const {
+		auto &copy = *this;
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return copy.getOrThrow(tr, snapshot, err);
+		});
+	}
+
 	void set(Reference<ReadYourWritesTransaction> tr, T const &val) {
 		return tr->set(key, Codec<T>::pack(val).pack());
 	}
+
+	Future<Void> set(Database cx, T const &val) {
+		auto _key = key;
+		Value _val = Codec<T>::pack(val).pack();
+		return runRYWTransaction(cx, [_key, _val](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->set(_key, _val);
+
+			return Future<Void>(Void());
+		});
+	}
+
 	void clear(Reference<ReadYourWritesTransaction> tr) {
 		return tr->clear(key);
 	}

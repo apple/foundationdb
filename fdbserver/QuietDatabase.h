@@ -33,7 +33,7 @@ Future<int64_t> getMaxTLogQueueSize( Database const& cx, Reference<AsyncVar<stru
 Future<int64_t> getMaxStorageServerQueueSize( Database const& cx, Reference<AsyncVar<struct ServerDBInfo>> const& );
 Future<int64_t> getDataDistributionQueueSize( Database const &cx, Reference<AsyncVar<struct ServerDBInfo>> const&, bool const& reportInFlight );
 Future<vector<StorageServerInterface>> getStorageServers( Database const& cx, bool const &use_system_priority = false);
-Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
+Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> const& dbInfo, int const& flags = 0 );
 Future<WorkerInterface> getMasterWorker( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 
 //Waits for f to complete. If simulated, disables connection failures after waiting a specified amount of time

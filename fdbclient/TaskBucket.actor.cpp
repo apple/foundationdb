@@ -304,7 +304,10 @@ public:
 	}
 	
 	ACTOR static Future<bool> doTask(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-		if (task && TaskFuncBase::isValidTask(task)) {
+		if (!task || !TaskFuncBase::isValidTask(task))
+			return false;
+
+		try {
 			state Reference<TaskFuncBase> taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
 			if (taskFunc) {
 				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
@@ -358,10 +361,8 @@ public:
 							state Reference<ReadYourWritesTransaction> tr3(new ReadYourWritesTransaction(cx));
 							taskBucket->setOptions(tr3);
 							Version version = wait(tr3->getReadVersion());
-							if(version >= task->timeout) {
-								TraceEvent(SevWarn, "TB_ExecuteTimedOut").detail("TaskType", printable(task->params[Task::reservedTaskParamKeyType]));
-								return true;
-							}
+							if(version >= task->timeout)
+								throw timed_out();
 							// Otherwise reset the timeout
 							timeout = delay((BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeout - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
 						}
@@ -370,15 +371,22 @@ public:
 
 				if (BUGGIFY) Void _ = wait(delay(10.0));
 				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-					return finishTaskRun(tr, taskBucket, futureBucket, task, taskFunc, verifyTask);	}));
-				return true;
+					return finishTaskRun(tr, taskBucket, futureBucket, task, taskFunc, verifyTask);
+				}));
 			}
+		} catch(Error &e) {
+			TraceEvent(SevWarn, "TB_ExecuteFailure")
+				.detail("TaskUID", task->key.printable())
+				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
+				.detail("Priority", task->getPriority())
+				.error(e);
 		}
 
-		return false;
+		// Return true to indicate that we did work.
+		return true;
 	}
 
-	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
+	ACTOR static Future<Void> dispatch(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
 		state std::vector<Future<bool>> tasks(maxConcurrentTasks);
 		for(auto &f : tasks)
 			f = Never();
@@ -438,6 +446,38 @@ public:
 					tasks[i] = Never();
 				}
 			}
+		}
+	}
+
+	ACTOR static Future<Void> watchDisabled(Database cx, Reference<TaskBucket> taskBucket, Reference<AsyncVar<bool>> disabled) {
+		loop {
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			loop {
+				try {
+					taskBucket->setOptions(tr);
+					Optional<Value> disabledVal = wait(tr->get(taskBucket->disableKey));
+					disabled->set(disabledVal.present());
+					state Future<Void> watchDisabledFuture = tr->watch(taskBucket->disableKey);
+					Void _ = wait(tr->commit());
+					Void _ = wait(watchDisabledFuture);
+				}
+				catch (Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
+		}
+	}
+
+	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
+		state Reference<AsyncVar<bool>> disabled = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
+		state Future<Void> watchDisabledFuture = watchDisabled(cx, taskBucket, disabled);
+
+		loop {
+			while(disabled->get()) {
+				Void _ = wait(disabled->onChange() || watchDisabledFuture);
+			}
+
+			Void _ = wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || disabled->onChange() || watchDisabledFuture);
 		}
 	}
 
@@ -685,6 +725,7 @@ TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBa
 	, available(prefix.get(LiteralStringRef("av")))
 	, available_prioritized(prefix.get(LiteralStringRef("avp")))
 	, timeouts(prefix.get(LiteralStringRef("to")))
+	, disableKey(prefix.pack(LiteralStringRef("disable")))
 	, timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS)
 	, system_access(sysAccess)
 	, priority_batch(priorityBatch)
@@ -699,6 +740,18 @@ Future<Void> TaskBucket::clear(Reference<ReadYourWritesTransaction> tr){
 	setOptions(tr);
 
 	tr->clear(prefix.range());
+
+	return Void();
+}
+
+Future<Void> TaskBucket::changeDisable(Reference<ReadYourWritesTransaction> tr, bool disable){
+	setOptions(tr);
+
+	if(disable) {
+		tr->set(disableKey, StringRef());
+	} else {
+		tr->clear(disableKey);
+	}
 
 	return Void();
 }
@@ -765,6 +818,10 @@ Future<bool> TaskBucket::doTask(Database cx, Reference<FutureBucket> futureBucke
 
 Future<Void> TaskBucket::run(Database cx, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
 	return TaskBucketImpl::run(cx, Reference<TaskBucket>::addRef(this), futureBucket, pollDelay, maxConcurrentTasks);
+}
+
+Future<Void> TaskBucket::watchDisabled(Database cx, Reference<AsyncVar<bool>> disabled) {
+	return TaskBucketImpl::watchDisabled(cx, Reference<TaskBucket>::addRef(this), disabled);
 }
 
 Future<bool> TaskBucket::isEmpty(Reference<ReadYourWritesTransaction> tr){

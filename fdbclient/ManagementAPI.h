@@ -142,6 +142,8 @@ Future<Void> waitForExcludedServers( Database const& cx, vector<AddressExclusion
 Future<vector<ProcessData>> getWorkers( Database const& cx );
 Future<vector<ProcessData>> getWorkers( Transaction* const& tr );
 
+Future<Void> timeKeeperSetDisable(Database const& cx);
+
 Future<Void> lockDatabase( Transaction* const& tr, UID const& id );
 Future<Void> lockDatabase( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
 Future<Void> lockDatabase( Database const& cx, UID const& id );

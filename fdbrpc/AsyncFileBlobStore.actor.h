@@ -38,6 +38,16 @@
 #include "md5/md5.h"
 #include "libb64/encode.h"
 
+ACTOR template<typename T> static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
+	try {
+		Void _ = wait(success(f) || p.getFuture());
+		return f.get();
+	} catch(Error &e) {
+		if(p.canBeSet())
+			p.sendError(e);
+		throw;
+	}
+}
 // This class represents a write-only file that lives in an S3-style blob store.  It writes using the REST API,
 // using multi-part upload and beginning to transfer each part as soon as it is large enough.
 // All write operations file operations must be sequential and contiguous.
@@ -96,7 +106,7 @@ public:
 			data = (const uint8_t *)data + finishlen;
 
 			// End current part (and start new one)
-			Void _ = wait(f->endCurrentPart(true));
+			Void _ = wait(f->endCurrentPart(f.getPtr(), true));
 			p = f->m_parts.back().getPtr();
 		}
 
@@ -109,7 +119,7 @@ public:
 			throw non_sequential_op();
 		m_cursor += length;
 
-		return write_impl(Reference<AsyncFileBlobStoreWrite>::addRef(this), (const uint8_t *)data, length);
+		return m_error.getFuture() || write_impl(Reference<AsyncFileBlobStoreWrite>::addRef(this), (const uint8_t *)data, length);
 	}
 
 	virtual Future<Void> truncate( int64_t size ) {
@@ -118,18 +128,14 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<std::string> doPartUpload(Reference<AsyncFileBlobStoreWrite> f, Reference<Part> p) {
-		try {
-			p->finalizeMD5();
-			std::string upload_id = wait(f->getUploadID());
-			std::string etag = wait(f->m_bstore->uploadPart(f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->md5string));
-			return etag;
-		} catch(Error &e) {
-			throw;
-		}
+	ACTOR static Future<std::string> doPartUpload(AsyncFileBlobStoreWrite *f, Part *p) {
+		p->finalizeMD5();
+		std::string upload_id = wait(f->getUploadID());
+		std::string etag = wait(f->m_bstore->uploadPart(f->m_bucket, f->m_object, upload_id, p->number, &p->content, p->length, p->md5string));
+		return etag;
 	}
 
-	ACTOR static Future<Void> doFinishUpload(Reference<AsyncFileBlobStoreWrite> f) {
+	ACTOR static Future<Void> doFinishUpload(AsyncFileBlobStoreWrite* f) {
 		// If there is only 1 part then it has not yet been uploaded so just write the whole file at once.
 		if(f->m_parts.size() == 1) {
 			Reference<Part> part = f->m_parts.back();
@@ -139,7 +145,7 @@ public:
 		}
 
 		// There are at least 2 parts.  End the last part (which could be empty)
-		Void _ = wait(f->endCurrentPart());
+		Void _ = wait(f->endCurrentPart(f));
 
 		state BlobStoreEndpoint::MultiPartSetT partSet;
 		state std::vector<Reference<Part>>::iterator p;
@@ -164,7 +170,7 @@ public:
 
 		// Only initiate the finish operation once, and also prevent further writing.
 		if(!m_finished.isValid()) {
-			m_finished = doFinishUpload(Reference<AsyncFileBlobStoreWrite>::addRef(this));
+			m_finished = doFinishUpload(this);
 			m_cursor = -1;  // Cause future write attempts to fail
 		}
 
@@ -193,8 +199,7 @@ public:
 	virtual ~AsyncFileBlobStoreWrite() {
 		m_upload_id.cancel();
 		m_finished.cancel();
-		for(auto &p : m_parts)
-			p->etag.cancel();
+		m_parts.clear();  // Contains futures
 	}
 
 	virtual std::string getFilename() { return m_object; }
@@ -209,17 +214,26 @@ private:
 	Future<std::string> m_upload_id;
 	Future<Void> m_finished;
 	std::vector<Reference<Part>> m_parts;
+	Promise<Void> m_error;
+	FlowLock m_concurrentUploads;
 
-	Future<Void> endCurrentPart(bool startNew = false) {
-		if(m_parts.back()->length == 0)
+	// End the current part and start uploading it, but also wait for a part to finish if too many are in transit.
+	ACTOR static Future<Void> endCurrentPart(AsyncFileBlobStoreWrite *f, bool startNew = false) {
+		if(f->m_parts.back()->length == 0)
 			return Void();
 
-		// Start the upload
-		m_parts.back()->etag = doPartUpload(Reference<AsyncFileBlobStoreWrite>::addRef(this), m_parts.back());
+		// Wait for an upload slot to be available
+		Void _ = wait(f->m_concurrentUploads.take(1));
+
+		// Do the upload, and if it fails forward errors to m_error and also stop if anything else sends an error to m_error
+		// Also, hold a releaser for the concurrent upload slot while all that is going on.
+		f->m_parts.back()->etag = holdWhile(std::shared_ptr<FlowLock::Releaser>(new FlowLock::Releaser(f->m_concurrentUploads, 1)),
+									joinErrorGroup(doPartUpload(f, f->m_parts.back().getPtr()), f->m_error)
+								  );
 
 		// Make a new part to write to
 		if(startNew)
-			m_parts.push_back(Reference<Part>(new Part(m_parts.size() + 1)));
+			f->m_parts.push_back(Reference<Part>(new Part(f->m_parts.size() + 1)));
 
 		return Void();
 	}
@@ -232,7 +246,7 @@ private:
 
 public:
 	AsyncFileBlobStoreWrite(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object)
-		: m_bstore(bstore), m_bucket(bucket), m_object(object), m_cursor(0) {
+		: m_bstore(bstore), m_bucket(bucket), m_object(object), m_cursor(0), m_concurrentUploads(bstore->knobs.concurrent_writes_per_file) {
 
 		// Add first part
 		m_parts.push_back(Reference<Part>(new Part(1)));

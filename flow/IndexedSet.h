@@ -62,7 +62,11 @@ struct IndexedSet{
 
 private: // Forward-declare IndexedSet::Node because Clang is much stricter about this ordering.
 	struct Node : FastAllocated<Node> {
-		Node(T &&data, const Metric& m, Node* parent=0) : data(std::move(data)), total(m), parent(parent), balance(0) {
+		// Here, and throughout all code that indirectly instantiates a Node, we rely on forwarding
+		// references so that we don't need to maintain the set of 2^arity lvalue and rvalue reference
+		// combinations, but still take advantage of move constructors when available (or required).
+		template <class T_, class Metric_>
+		Node(T_&& data, Metric_&& m, Node* parent=0) : data(std::forward<T_>(data)), total(std::forward<Metric_>(m)), parent(parent), balance(0) {
 			child[0] = child[1] = NULL;
 		}
 		~Node(){
@@ -106,8 +110,8 @@ public:
 
 	// Place data in the set with the given metric.  If an item equal to data is already in the set and,
 	//   replaceExisting == true, it will be overwritten (and its metric will be replaced)
-	iterator insert(T &&data, const Metric &metric, bool replaceExisting = true);
-	iterator insert(const T& data, const Metric& metric, bool replaceExisting = true) { T t(data); return insert(std::move(t), metric, replaceExisting); }
+	template <class T_, class Metric_>
+	iterator insert(T_ &&data, Metric_ &&metric, bool replaceExisting = true);
 
 	// Insert all items from data into set. All items will use metric. If an item equal to data is already in the set and,
 	//   replaceExisting == true, it will be overwritten (and its metric will be replaced). returns the number of items inserted.
@@ -115,7 +119,8 @@ public:
 
 	// Increase the metric for the given item by the given amount.  Inserts data into the set if it
 	//   doesn't exist. Returns the new sum.
-	Metric addMetric( T && data, const Metric& metric );
+	template <class T_, class Metric_>
+	Metric addMetric( T_ && data, Metric_ && metric );
 
 	// Remove the data item, if any, which is equal to key
 	template <class Key>
@@ -233,10 +238,8 @@ public:
 	Key key;
 	Value value;
 
-	MapPair( const Key& key, const Value& value ) : key(key), value(value) {}
-	MapPair(Key && key, Value && value) noexcept(true) : key(std::move(key)), value(std::move(value)) {}
-	MapPair(const Key & key, Value && value) noexcept(true) : key(key), value(std::move(value)) {}
-	MapPair(Key && key, const Value & value) noexcept(true) : key(std::move(key)), value(value) {}
+	template <class Key_, class Value_>
+	MapPair( Key_&& key, Value_&& value ) : key(std::forward<Key_>(key)), value(std::forward<Value_>(value)) {}
 	void operator= ( MapPair const& rhs ) { key = rhs.key; value = rhs.value; }
 	MapPair( MapPair const& rhs ) : key(rhs.key), value(rhs.value) {}
 
@@ -581,23 +584,23 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::lastItem() const {
 	return x;
 }
 
-template <class T, class Metric>
-Metric IndexedSet<T,Metric>::addMetric(T &&data, const Metric &metric){
+template <class T, class Metric> template<class T_, class Metric_>
+Metric IndexedSet<T,Metric>::addMetric(T_&& data, Metric_&& metric){
 	auto i = find( data );
 	if (i == end()) {
-		insert( data, metric );
+		insert( std::forward<T_>(data), std::forward<Metric_>(metric) );
 		return metric;
 	} else {
 		Metric m = metric + getMetric(i);
-		insert( data, m );
+		insert( std::forward<T_>(data), m );
 		return m;
 	}
 }
 
-template <class T, class Metric>
-typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T &&data, const Metric &metric, bool replaceExisting){
+template <class T, class Metric> template<class T_, class Metric_>
+typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T_&& data, Metric_&& metric, bool replaceExisting){
 	if (root == NULL){
-		root = new Node(std::move(data), metric);
+		root = new Node(std::forward<T_>(data), std::forward<Metric_>(metric));
 		return root;
 	}
 	Node *t = root;
@@ -608,9 +611,9 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T &&data, c
 		if (!d && !(data < t->data)) {	// t->data == data
 			Node *returnNode = t;
 			if(replaceExisting) {
-				t->data = std::move(data);
+				t->data = std::forward<T_>(data);
 				Metric delta = t->total;
-				t->total = metric;
+				t->total = std::forward<Metric_>(metric);
 				if (t->child[0]) t->total = t->total + t->child[0]->total;
 				if (t->child[1]) t->total = t->total + t->child[1]->total;
 				delta = t->total - delta;
@@ -628,7 +631,7 @@ typename IndexedSet<T,Metric>::iterator IndexedSet<T,Metric>::insert(T &&data, c
 		t = nextT;
 	}
 
-	Node *newNode = new Node(std::move(data), metric, t);
+	Node *newNode = new Node(std::forward<T_>(data), std::forward<Metric_>(metric), t);
 	t->child[d] = newNode;
 
 	while (true){

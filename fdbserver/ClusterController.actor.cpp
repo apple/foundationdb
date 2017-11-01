@@ -37,12 +37,13 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "fdbclient/KeyBackedTypes.h"
 
 void failAfter( Future<Void> trigger, Endpoint e );
 
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
-	ReplyPromise<Void> reply;
+	ReplyPromise<ProcessClass> reply;
 	Generation gen;
 	int reboots;
 	WorkerInterface interf;
@@ -50,7 +51,7 @@ struct WorkerInfo : NonCopyable {
 	ProcessClass processClass;
 
 	WorkerInfo() : gen(-1), reboots(0) {}
-	WorkerInfo( Future<Void> watcher, ReplyPromise<Void> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
+	WorkerInfo( Future<Void> watcher, ReplyPromise<ProcessClass> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
 		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass) {}
 
 	WorkerInfo( WorkerInfo&& r ) noexcept(true) : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
@@ -192,6 +193,7 @@ public:
 	std::pair<WorkerInterface, ProcessClass> getMasterWorker( DatabaseConfiguration const& conf, bool checkStable = false ) {
 		ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;
 		Optional<std::pair<WorkerInterface, ProcessClass>> bestInfo;
+		bool bestIsClusterController = false;
 		int numEquivalent = 1;
 		for( auto& it : id_worker ) {
 			auto fit = it.second.processClass.machineClassFitness( ProcessClass::Master );
@@ -199,12 +201,13 @@ public:
 				fit = std::max(fit, ProcessClass::WorstFit);
 			}
 			if( workerAvailable(it.second, checkStable) && fit != ProcessClass::NeverAssign ) {
-				if( fit < bestFit ) {
+				if( fit < bestFit || (fit == bestFit && bestIsClusterController) ) {
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 					bestFit = fit;
 					numEquivalent = 1;
+					bestIsClusterController = clusterControllerProcessId == it.first;
 				}
-				else if( fit != ProcessClass::NeverAssign && fit == bestFit && g_random->random01() < 1.0/++numEquivalent )
+				else if( fit == bestFit && clusterControllerProcessId != it.first && g_random->random01() < 1.0/++numEquivalent )
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 			}
 		}
@@ -563,6 +566,18 @@ public:
 			return resolverCount > r.resolverCount;
 		}
 
+		bool betterInDatacenterFitness (InDatacenterFitness const& r) const {
+			int lmax = std::max(resolverFit,proxyFit);
+			int lmin = std::min(resolverFit,proxyFit);
+			int rmax = std::max(r.resolverFit,r.proxyFit);
+			int rmin = std::min(r.resolverFit,r.proxyFit);
+
+			if( lmax != rmax ) return lmax < rmax;
+			if( lmin != rmin ) return lmin < rmin;
+
+			return false;
+		}
+
 		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
 	};
 
@@ -621,6 +636,7 @@ public:
 				result.storageServers.push_back(storageServers[i].first);
 		}
 
+		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
 		auto tlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used );
 		for(int i = 0; i < tlogs.size(); i++)
@@ -686,9 +702,14 @@ public:
 		if(masterWorker == id_worker.end())
 			return false;
 
+		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
 
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.processClass.machineClassFitness( ProcessClass::Master );
+		if(db.config.isExcludedServer(dbi.master.address())) {
+			oldMasterFit = std::max(oldMasterFit, ProcessClass::WorstFit);
+		}
+
 		ProcessClass::Fitness newMasterFit = getMasterWorker(db.config, true).second.machineClassFitness( ProcessClass::Master );
 
 		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
@@ -751,7 +772,8 @@ public:
 				newInFit = fitness;
 		}
 
-		if(oldInFit < newInFit) return false;
+		if(oldInFit.betterInDatacenterFitness(newInFit)) return false;
+
 		if(oldMasterFit > newMasterFit || oldAcrossFit > newAcrossFit || oldInFit > newInFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit)
 				.detail("oldAcrossFitC", oldAcrossFit.tlogCount).detail("newAcrossFitC", newAcrossFit.tlogCount)
@@ -770,6 +792,7 @@ public:
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
 	Optional<Standalone<StringRef>> masterProcessId;
+	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	UID id;
 	std::vector<RecruitFromConfigurationRequest> outstandingRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
@@ -1059,9 +1082,11 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 				}
 			}
 			when( Void _ = wait( failed ) ) {  // remove workers that have failed
-				cluster->id_worker[ worker.locality.processId() ].reply.send( Void() );
+				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
+				if (!failedWorkerInfo.reply.isSet()) {
+					failedWorkerInfo.reply.send( failedWorkerInfo.processClass );
+				}
 				cluster->id_worker.erase( worker.locality.processId() );
-
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
 				return Void();
 			}
@@ -1322,43 +1347,120 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
-	ProcessClass processClass = req.processClass;
+	ProcessClass newProcessClass = req.processClass;
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
 
-	if( info == self->id_worker.end() ) {
+	if ( w.address() == g_network->getLocalAddress() ) {
+		self->clusterControllerProcessId = w.locality.processId();
+	}
+
+	// Check process class if needed
+	if (self->gotProcessClasses && (info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen)) {
 		auto classIter = self->id_class.find(w.locality.processId());
 
-		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.processClass.classType() == ProcessClass::UnsetClass) ) {
-			processClass = classIter->second;
+		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
+			newProcessClass = classIter->second;
+		} else {
+			newProcessClass = req.initialClass;
 		}
 
-		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, req.processClass, self ), req.reply, req.generation, w, req.processClass, processClass );
+		// Notify the worker to register again with new process class
+		if (newProcessClass != req.processClass && !req.reply.isSet()) {
+			req.reply.send( newProcessClass );
+		}
+	}
+
+	if( info == self->id_worker.end() ) {
+		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass );
 		checkOutstandingRequests( self );
 
 		return;
 	}
 
 	if( info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
-		if( info->second.processClass.classSource() == ProcessClass::CommandLineSource ||
-		   (info->second.processClass.classSource() == ProcessClass::AutoSource && req.processClass.classType() != ProcessClass::UnsetClass) ) {
-			info->second.processClass = req.processClass;
+		if (info->second.processClass != newProcessClass) {
+			info->second.processClass = newProcessClass;
 		}
 
-		info->second.initialClass = req.processClass;
-		info->second.reply.send( Never() );
+		info->second.initialClass = req.initialClass;
+		if (!info->second.reply.isSet()) {
+			info->second.reply.send( Never() );
+		}
 		info->second.reply = req.reply;
 		info->second.gen = req.generation;
 
 		if(info->second.interf.id() != w.id()) {
 			info->second.interf = w;
-			info->second.watcher = workerAvailabilityWatch( w, req.processClass, self );
+			info->second.watcher = workerAvailabilityWatch( w, newProcessClass, self );
 		}
 		return;
 	}
 
 	TEST(true); // Received an old worker registration request.
+}
+
+#define TIME_KEEPER_VERSION LiteralStringRef("1")
+
+ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(
+				new ReadYourWritesTransaction(self->cx));
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
+			Void _ = wait(tr->commit());
+			break;
+		} catch (Error &e) {
+			Void _ = wait(tr->onError(e));
+		}
+	}
+
+	return Void();
+}
+
+// This actor periodically gets read version and writes it to cluster with current timestamp as key. To avoid running
+// out of space, it limits the max number of entries and clears old entries on each update. This mapping is used from
+// backup and restore to get the version information for a timestamp.
+ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+	TraceEvent(SevInfo, "TimeKeeperStarted");
+
+	Void _ = wait(timeKeeperSetVersion(self));
+
+	loop {
+		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(self->cx));
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				Optional<Value> disableValue = wait( tr->get(timeKeeperDisableKey) );
+				if(disableValue.present()) {
+					break;
+				}
+
+				Version v = tr->getReadVersion().get();
+				int64_t currentTime = (int64_t)now();
+				versionMap.set(tr, currentTime, v);
+
+				int64_t ttl = currentTime - SERVER_KNOBS->TIME_KEEPER_DELAY * SERVER_KNOBS->TIME_KEEPER_MAX_ENTRIES;
+				if (ttl > 0) {
+					versionMap.erase(tr, 0, ttl);
+				}
+
+				Void _ = wait(tr->commit());
+				break;
+			} catch (Error &e) {
+				Void _ = wait(tr->onError(e));
+			}
+		}
+
+		Void _ = wait(delay(SERVER_KNOBS->TIME_KEEPER_DELAY));
+	}
 }
 
 ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
@@ -1479,11 +1581,19 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 
 					for( auto& w : self->id_worker ) {
 						auto classIter = self->id_class.find(w.first);
+						ProcessClass newProcessClass;
 
 						if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || w.second.initialClass.classType() == ProcessClass::UnsetClass) ) {
-							w.second.processClass = classIter->second;
+							newProcessClass = classIter->second;
 						} else {
-							w.second.processClass = w.second.initialClass;
+							newProcessClass = w.second.initialClass;
+						}
+
+						if (newProcessClass != w.second.processClass) {
+							w.second.processClass = newProcessClass;
+							if (!w.second.reply.isSet()) {
+								w.second.reply.send( newProcessClass );
+							}
 						}
 					}
 
@@ -1505,32 +1615,22 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 }
 
 ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db) {
-	state const Key sampleRate= LiteralStringRef("client_txn_sample_rate/").withPrefix(fdbClientInfoPrefixRange.begin);
-	state const Key sizeLimit = LiteralStringRef("client_txn_size_limit/").withPrefix(fdbClientInfoPrefixRange.begin);
 	loop {
 		state ReadYourWritesTransaction tr(db->db);
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state Optional<Value> rateVal = wait(tr.get(sampleRate));
-				state Optional<Value> limitVal = wait(tr.get(sizeLimit));
+				state Optional<Value> rateVal = wait(tr.get(fdbClientInfoTxnSampleRate));
+				state Optional<Value> limitVal = wait(tr.get(fdbClientInfoTxnSizeLimit));
 				ClientDBInfo clientInfo = db->clientInfo->get();
-				if (rateVal.present()) {
-					double rate = BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned());
-					clientInfo.clientTxnInfoSampleRate = rate;
-				}
-				if (limitVal.present()) {
-					int64_t limit = BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned());
-					clientInfo.clientTxnInfoSizeLimit = limit;
-				}
-				if (rateVal.present() || limitVal.present()) {
-					clientInfo.id = g_random->randomUniqueID();
-					db->clientInfo->set(clientInfo);
-				}
+				clientInfo.clientTxnInfoSampleRate = rateVal.present() ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned()) : std::numeric_limits<double>::infinity();
+				clientInfo.clientTxnInfoSizeLimit = limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
+				clientInfo.id = g_random->randomUniqueID();
+				db->clientInfo->set(clientInfo);
 
-				state Future<Void> watchRateFuture = tr.watch(sampleRate);
-				state Future<Void> watchLimitFuture = tr.watch(sizeLimit);
+				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
+				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				Void _ = wait(tr.commit());
 				choose {
 					when(Void _ = wait(watchRateFuture)) { break; }
@@ -1556,6 +1656,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	addActor.send( clusterWatchDatabase( &self, &self.db ) );  // Start the master database
 	addActor.send( self.updateWorkerList.init( self.db.db ) );
 	addActor.send( statusServer( interf.clientInterface.databaseStatus.getFuture(), &self, coordinators));
+	addActor.send( timeKeeper(&self) );
 	addActor.send( monitorProcessClasses(&self) );
 	addActor.send( monitorClientTxnInfoConfigs(&self.db) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
@@ -1585,18 +1686,22 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			registerWorker( req, &self );
 		}
 		when( GetWorkersRequest req = waitNext( interf.getWorkers.getFuture() ) ) {
-			if ( req.flags & GetWorkersRequest::FLAG_TESTER_CLASS ) {
-				vector<std::pair<WorkerInterface, ProcessClass>> testers;
-				for(auto& it : self.id_worker)
-					if (it.second.processClass.classType() == ProcessClass::TesterClass)
-						testers.push_back(std::make_pair(it.second.interf, it.second.processClass));
-				req.reply.send( testers );
-			} else {
-				vector<std::pair<WorkerInterface, ProcessClass>> workers;
-				for(auto& it : self.id_worker)
-					workers.push_back(std::make_pair(it.second.interf, it.second.processClass));
-				req.reply.send( workers );
+			vector<std::pair<WorkerInterface, ProcessClass>> workers;
+
+			auto masterAddr = self.db.serverInfo->get().master.address();
+			for(auto& it : self.id_worker) {
+				if ( (req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) && self.db.config.isExcludedServer(it.second.interf.address()) ) {
+					continue;
+				}
+
+				if ( (req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) && it.second.processClass.classType() != ProcessClass::TesterClass ) {
+					continue;
+				}
+
+				workers.push_back(std::make_pair(it.second.interf, it.second.processClass));
 			}
+
+			req.reply.send( workers );
 		}
 		when( GetClientWorkersRequest req = waitNext( interf.clientInterface.getClientWorkers.getFuture() ) ) {
 			vector<ClientWorkerInterface> workers;

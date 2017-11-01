@@ -69,6 +69,11 @@ public:
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	}
 
+	Future<Void> changeDisable(Reference<ReadYourWritesTransaction> tr, bool disable);
+	Future<Void> changeDisable(Database cx, bool disable) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return changeDisable(tr, disable); });
+	}
+
 	Future<Void> clear(Reference<ReadYourWritesTransaction> tr);
 	Future<Void> clear(Database cx) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return clear(tr); });
@@ -99,6 +104,7 @@ public:
 	Future<bool> doOne(Database cx, Reference<FutureBucket> futureBucket);
 
 	Future<Void> run(Database cx, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks);
+	Future<Void> watchDisabled(Database cx, Reference<AsyncVar<bool>> disabled);
 
 	Future<bool> isEmpty(Reference<ReadYourWritesTransaction> tr);
 	Future<bool> isEmpty(Database cx){
@@ -148,6 +154,10 @@ public:
 		return lock_aware;	
 	}
 
+	Key getDisableKey() const {
+		return disableKey;	
+	}
+
 	Subspace getAvailableSpace(int priority = 0) {
 		if(priority == 0)
 			return available;
@@ -157,11 +167,15 @@ public:
 	Database src;
 	Map<Key, Future<Reference<KeyRangeMap<Version>>>> key_version;
 
+	double getTimeoutSeconds() const {
+		return (double)timeout / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+	}
 private:
 	friend class TaskBucketImpl;
 
 	Subspace prefix;
 	Subspace active;
+	Key disableKey;
 	
 	// Available task subspaces.  Priority 0, the default, will be under available which is backward
 	// compatible with pre-priority TaskBucket processes.  Priority 1 and higher will be in

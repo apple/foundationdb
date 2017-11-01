@@ -57,6 +57,7 @@ public:
 			multipart_min_part_size,
 			concurrent_uploads,
 			concurrent_reads_per_file,
+			concurrent_writes_per_file,
 			read_block_size,
 			read_ahead_blocks,
 			read_cache_blocks_per_file,
@@ -77,6 +78,7 @@ public:
 				"multipart_min_part_size (or minps)    Min part size for multipart uploads.",
 				"concurrent_uploads (or cu)            Max concurrent uploads (part or whole) that can be in progress at once.",
 				"concurrent_reads_per_file (or crps)   Max concurrent reads in progress for any one file.",
+				"concurrent_writes_per_file (or cwps)  Max concurrent uploads in progress for any one file.",
 				"read_block_size (or rbs)              Block size in bytes to be used for reads.",
 				"read_ahead_blocks (or rab)            Number of blocks to read ahead of requested offset.",
 				"read_cache_blocks_per_file (or rcb)   Size of the read cache for a file in blocks.",
@@ -94,6 +96,14 @@ public:
 		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
 		concurrentRequests(knobs.concurrent_requests),
 		concurrentUploads(knobs.concurrent_uploads) {
+
+		if(addresses.size() == 0)
+			throw connection_string_invalid();
+
+		int perAddressLimit = std::max<int>( 1, knobs.concurrent_requests/addrs.size() );
+		for(auto &addr : addrs) {
+			concurrentRequestsPerAddress[addr] = Reference<FlowLock>( new FlowLock(perAddressLimit) );
+		}
 	}
 
 	static std::string getURLFormat(bool withResource = false) {
@@ -110,10 +120,10 @@ public:
 	// Get a normalized version of this URL with the given resource, the host and any IP addresses (possibly from DNS
 	// if resolve was done) and any non-default BlobKnob values as URL parameters.
 	std::string getResourceURL(std::string resource);
-	Future<Reference<IConnection>> connect();
+	Future<Reference<IConnection>> connect(NetworkAddress address);
 
 	typedef std::pair<Reference<IConnection>, double> ConnPoolEntry;
-	std::list<ConnPoolEntry> connectionPool;
+	std::map<NetworkAddress,std::list<ConnPoolEntry>> connectionPool;
 
 	std::string host;
 	uint16_t port;
@@ -126,6 +136,7 @@ public:
 	Reference<IRateControl> requestRate;
 	Reference<IRateControl> sendRate;
 	Reference<IRateControl> recvRate;
+	std::map<NetworkAddress,Reference<FlowLock>> concurrentRequestsPerAddress;
 	FlowLock concurrentRequests;
 	FlowLock concurrentUploads;
 
@@ -140,8 +151,8 @@ public:
 
 	// Do an HTTP request to the Blob Store, read the response.  Handles authentication.
 	// Every blob store interaction should ultimately go through this function
-	Future<Reference<HTTP::Response>> doRequest(std::string const &verb, std::string const &resource, const HTTP::Headers &headers, UnsentPacketQueue *pContent, int contentLen);
 
+	Future<Reference<HTTP::Response>> doRequest(std::string const &verb, std::string const &resource, const HTTP::Headers &headers, UnsentPacketQueue *pContent, int contentLen, std::set<unsigned int> successCodes);
 	struct ObjectInfo {
 		std::string bucket;
 		std::string name;

@@ -29,6 +29,7 @@
 struct AtomicOpsWorkload : TestWorkload {
 	int opNum, actorCount, nodeCount;
 	uint32_t opType;
+	bool apiVersion500 = false;
 
 	double testDuration, transactionsPerSecond;
 	vector<Future<Void>> clients;
@@ -41,8 +42,14 @@ struct AtomicOpsWorkload : TestWorkload {
 		actorCount = getOption( options, LiteralStringRef("actorsPerClient"), transactionsPerSecond / 5 );
 		opType = getOption( options, LiteralStringRef("opType"), -1 );
 		nodeCount = getOption( options, LiteralStringRef("nodeCount"), 1000 );
+		// Atomic OPs Min and And have modified behavior from api version 510. Hence allowing testing for older version (500) with a 10% probability
+		// Actual change of api Version happens in setup
+		apiVersion500 = ((sharedRandomNumber % 10) == 0);
+		TraceEvent("AtomicOpsApiVersion500").detail("apiVersion500", apiVersion500);
+
+		int64_t randNum = sharedRandomNumber / 10;
 		if(opType == -1)
-			opType = sharedRandomNumber % 6;
+			opType = randNum % 8;
 
 		switch(opType) {
 		case 0:
@@ -69,6 +76,14 @@ struct AtomicOpsWorkload : TestWorkload {
 			TEST(true); //Testing atomic Min
 			opType = MutationRef::Min;
 			break;
+		case 6:
+			TEST(true); //Testing atomic ByteMin
+			opType = MutationRef::ByteMin;
+			break;
+		case 7:
+			TEST(true); //Testing atomic ByteMax
+			opType = MutationRef::ByteMax;
+			break;
 		default:
 			ASSERT(false);
 		}
@@ -77,7 +92,10 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	virtual std::string description() { return "AtomicOps"; }
 
-	virtual Future<Void> setup( Database const& cx ) { 
+	virtual Future<Void> setup( Database const& cx ) {
+		if (apiVersion500)
+			cx->cluster->apiVersion = 500;
+
 		if(clientId != 0)
 			return Void();
 		return _setup( cx, this );

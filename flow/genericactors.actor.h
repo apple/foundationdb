@@ -70,7 +70,7 @@ Future<Optional<T>> stopAfter( Future<T> what ) {
 		T _ = wait(what);
 		ret = Optional<T>(_);
 	} catch (Error& e) {
-		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete;
+		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete || e.code() == error_code_actor_cancelled;
 		TraceEvent(ok ? SevInfo : SevError, "StopAfterError").error(e);
 		if(!ok) {
 			fprintf(stderr, "Fatal Error: %s\n", e.what());

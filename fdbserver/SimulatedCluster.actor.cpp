@@ -806,7 +806,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	// half the time, when we have more than 4 machines that are not the first in their dataCenter, assign classes
 	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
-	// Use SSL half the time
+	// Use SSL 5% of the time
 	bool sslEnabled = g_random->random01() < 0.05;
 	TEST( sslEnabled ); // SSL enabled
 	TEST( !sslEnabled ); // SSL disabled

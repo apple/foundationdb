@@ -59,7 +59,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		if (beforePrefix) {
 			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
 			backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xff"));
-			
+
 		}
 		else {
 			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\x00\x00\x01"));
@@ -138,7 +138,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 						auto src = srcFuture.get().begin();
 						auto bkp = bkpFuture.get().begin();
-						
+
 						while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
 							KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
 							if (src->key != bkpKey && src->value != bkp->value) {
@@ -380,7 +380,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 				Standalone<RangeResultRef> logValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
-				// Error if the log/mutation keyspace for the backup tag  is not empty
+				// Error if the log/mutation keyspace for the backup tag is not empty
 				if (logValues.size() > 0) {
 					displaySystemKeys++;
 					printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n", logValues.size(), printable(backupLogValuesKey).c_str());
@@ -447,7 +447,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			TraceEvent("BARW_doBackupDone", randomID).detail("backupTag", printable(self->backupTag)).detail("abortAndRestartAfter", self->abortAndRestartAfter);
 
 			state UID logUid = wait(backupAgent.getLogUid(self->extraDB, self->backupTag));
-			
+
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_submitBackup2", randomID).detail("tag", printable(self->backupTag));
@@ -460,7 +460,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 						throw;
 				}
 			}
-			
+
 			TEST(!startRestore.isReady()); //Restore starts at specified time
 			Void _ = wait(startRestore);
 
@@ -550,7 +550,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			TraceEvent(SevError, "BackupAndRestoreCorrectness").error(e);
 			throw;
 		}
-		
+
 		return Void();
 	}
 };

@@ -110,10 +110,12 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		}
 	case ProcessClass::ClusterController:
 		switch( _class ) {
+		case ProcessClass::ClusterControllerClass:
+			return ProcessClass::BestFit;	
 		case ProcessClass::StatelessClass:
-			return ProcessClass::BestFit;
-		case ProcessClass::MasterClass:
 			return ProcessClass::GoodFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::BestOtherFit;
 		case ProcessClass::ResolutionClass:
 			return ProcessClass::BestOtherFit;
 		case ProcessClass::ProxyClass:

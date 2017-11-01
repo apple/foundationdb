@@ -51,7 +51,7 @@ namespace FDB {
 				int64_t count = 0;
 				if(countValue.present()) {
 					if(countValue.get().size() != 8) {
-						throw invalid_database_value();
+						throw invalid_directory_layer_metadata();
 					}
 					count = *(int64_t*)countValue.get().begin();
 				}

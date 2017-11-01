@@ -120,7 +120,7 @@ struct CycleWorkload : TestWorkload {
 						//TraceEvent("CycleCommit");
 						break;
 					} catch (Error& e) {
-						if (e.code() == error_code_past_version) ++self->pastVersionRetries;
+						if (e.code() == error_code_transaction_too_old) ++self->pastVersionRetries;
 						else if (e.code() == error_code_not_committed) ++self->commitFailedRetries;
 						Void _ = wait( tr.onError(e) );
 					}

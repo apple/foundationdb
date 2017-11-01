@@ -90,7 +90,7 @@ public:
 	//The amount of time to run the random tests
 	double randomTestDuration;
 
-	//The maximum number of keys operated on in a transaction; used to prevent past_version errors
+	//The maximum number of keys operated on in a transaction; used to prevent transaction_too_old errors
 	int maxKeysPerTransaction;
 
 	//The number of API calls made by the random test

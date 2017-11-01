@@ -24,24 +24,24 @@ and add it to your classpath.<br>
 <br>
 <h3>Getting started</h3>
 To start using FoundationDB from Java, create an instance of the 
-{@link com.apple.cie.foundationdb.FDB FoundationDB API interface} with the version of the
-API that you want to use (this release of the FoundationDB Java API supports only version {@code 500}).
-With this API object you can then open {@link com.apple.cie.foundationdb.Cluster Cluster}s and
-{@link com.apple.cie.foundationdb.Database Database}s and start using
-{@link com.apple.cie.foundationdb.Transaction Transactions}s.
+{@link com.apple.foundationdb.FDB FoundationDB API interface} with the version of the
+API that you want to use (this release of the FoundationDB Java API supports versions between {@code 500} and {@code 510}).
+With this API object you can then open {@link com.apple.foundationdb.Cluster Cluster}s and
+{@link com.apple.foundationdb.Database Database}s and start using
+{@link com.apple.foundationdb.Transaction Transactions}s.
 Here we give an example. The example relies on a cluster file at the
 <a href="/documentation/api-general.html#default-cluster-file">default location</a> 
 for your platform and a running server.<br>
 <br>
 <pre>
 {@code
-import com.apple.cie.foundationdb.*;
+import com.apple.foundationdb.*;
 import Function;
 import Tuple;
 
 public class Example {
   public static void main(String[] args) {
-    FDB fdb = FDB.selectAPIVersion(500);
+    FDB fdb = FDB.selectAPIVersion(510);
     Database db = fdb.open();
 
     // Run an operation on the database
@@ -64,21 +64,21 @@ public class Example {
 }
 }
 </pre>
-<h3>FoundationDB {@link com.apple.cie.foundationdb.tuple Tuple API}</h3>
-The {@link com.apple.cie.foundationdb.tuple Tuple API} is provided with the core Java API for FoundationDB.
+<h3>FoundationDB {@link com.apple.foundationdb.tuple Tuple API}</h3>
+The {@link com.apple.foundationdb.tuple Tuple API} is provided with the core Java API for FoundationDB.
 This layer is provided in some form in all official language bindings. It enables
 cross-language support for storing and retrieving typed data from the 
 binary data that FoundationDB supports. And, just as importantly, data packed into 
 {@code Tuple}s and used as keys sort in predictable and useful ways. See the 
-{@link com.apple.cie.foundationdb.tuple Tuple class documentation} for information about use in Java
+{@link com.apple.foundationdb.tuple Tuple class documentation} for information about use in Java
 and <a href="/documentation/data-modeling.html#tuples">general Tuple documentation</a>
 for information about how Tuples sort and can be used to efficiently model data.
 <br>
-<h3>FoundationDB {@link com.apple.cie.foundationdb.directory Directory API}</h3>
-The {@link com.apple.cie.foundationdb.directory Directory API} is provided with the core
+<h3>FoundationDB {@link com.apple.foundationdb.directory Directory API}</h3>
+The {@link com.apple.foundationdb.directory Directory API} is provided with the core
 Java API for FoundationDB. This layer is provided in some form in all official
 language bindings. The FoundationDB API provides directories as a tool for
-managing related {@link com.apple.cie.foundationdb.subspace.Subspace Subspace}s. Directories are a
+managing related {@link com.apple.foundationdb.subspace.Subspace Subspace}s. Directories are a
 recommended approach for administering applications. Each application should 
 create or open at least one directory to manage its subspaces. Directories are 
 identified by hierarchical paths analogous to the paths in a Unix-like file system. 

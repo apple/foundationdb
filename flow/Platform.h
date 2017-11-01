@@ -348,7 +348,8 @@ std::string getDefaultPluginPath( const char* plugin_name );
 
 void *getImageOffset();
 
-// Implemented only on *NIX. Places the frame pointers in a string formatted as parameters for addr2line.
+// Places the frame pointers in a string formatted as parameters for addr2line.
+size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
 

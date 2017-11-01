@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "boost/lexical_cast.hpp"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
@@ -503,6 +504,10 @@ void initHelp() {
 		"kill all|list|<ADDRESS>*",
 		"attempts to kill one or more processes in the cluster",
 		"If no addresses are specified, populates the list of processes which can be killed. Processes cannot be killed before this list has been populated.\n\nIf `all' is specified, attempts to kill all known processes.\n\nIf `list' is specified, displays all known processes. This is only useful when the database is unresponsive.\n\nFor each IP:port pair in <ADDRESS>*, attempt to kill the specified process.");
+	helpMap["profile"] = CommandHelp(
+		"<type> <action> <ARGS>",
+		"namespace for all the profiling-related commands.",
+		"Different types support different actions.  Run `profile` to get a list of types, and iteratively explore the help.\n");
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
@@ -693,6 +698,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 								description += format("\nNeed at least %d log servers, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes"))
 									description += format("\nHave %d processes on %d machines.", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size());
+							} else if (name == "locking_old_transaction_servers" && recoveryState["missing_logs"].get_str().size()) {
+								description += format("\nNeed one or more of the following log servers: %s", recoveryState["missing_logs"].get_str().c_str());
 							}
 							description = lineWrap(description.c_str(), 80);
 							if (!printedCoordinators && (
@@ -1653,6 +1660,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+											"Please try the exclude again in 30 seconds.\n"
 										    "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n";
 
 			StatusObjectReader statusObj(status);
@@ -2535,6 +2543,182 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "profile")) {
+					if (tokens.size() == 1) {
+						printf("ERROR: Usage: profile <client|list|flow>\n");
+						is_error = true;
+						continue;
+					}
+					if (tokencmp(tokens[1], "client")) {
+						getTransaction(db, tr, options, intrans);
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						if (tokens.size() == 2) {
+							printf("ERROR: Usage: profile client <get|set>\n");
+							is_error = true;
+							continue;
+						}
+						if (tokencmp(tokens[2], "get")) {
+							if (tokens.size() != 3) {
+								printf("ERROR: Addtional arguments to `get` are not supported.\n");
+								is_error = true;
+								continue;
+							}
+							state Future<Optional<Standalone<StringRef>>> sampleRateFuture = tr->get(fdbClientInfoTxnSampleRate);
+							state Future<Optional<Standalone<StringRef>>> sizeLimitFuture = tr->get(fdbClientInfoTxnSizeLimit);
+							Void _ = wait(makeInterruptable(success(sampleRateFuture) && success(sizeLimitFuture)));
+							std::string sampleRateStr = "default", sizeLimitStr = "default";
+							if (sampleRateFuture.get().present()) {
+								const double sampleRateDbl = BinaryReader::fromStringRef<double>(sampleRateFuture.get().get(), Unversioned());
+								if (!std::isinf(sampleRateDbl)) {
+									sampleRateStr = boost::lexical_cast<std::string>(sampleRateDbl);
+								}
+							}
+							if (sizeLimitFuture.get().present()) {
+								const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(sizeLimitFuture.get().get(), Unversioned());
+								if (sizeLimit != -1) {
+									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
+								}
+							}
+							printf("Client profiling rate is set to %s and size limit is set to %s.\n", sampleRateStr.c_str(), sizeLimitStr.c_str());
+							continue;
+						}
+						if (tokencmp(tokens[2], "set")) {
+							if (tokens.size() != 5) {
+								printf("ERROR: Usage: profile client set <RATE|default> <SIZE|default>\n");
+								is_error = true;
+								continue;
+							}
+							double sampleRate;
+							if (tokencmp(tokens[3], "default")) {
+								sampleRate = std::numeric_limits<double>::infinity();
+							} else {
+								char* end;
+								sampleRate = std::strtod((const char*)tokens[3].begin(), &end);
+								if (!std::isspace(*end)) {
+									printf("ERROR: %s failed to parse.\n", printable(tokens[3]).c_str());
+									is_error = true;
+									continue;
+								}
+							}
+							int64_t sizeLimit;
+							if (tokencmp(tokens[4], "default")) {
+								sizeLimit = -1;
+							} else {
+								Optional<uint64_t> parsed = parse_with_suffix(tokens[4].toString());
+								if (parsed.present()) {
+									sizeLimit = parsed.get();
+								} else {
+									printf("ERROR: `%s` failed to parse.\n", printable(tokens[4]).c_str());
+									is_error = true;
+									continue;
+								}
+							}
+							tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleRate, Unversioned()));
+							tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
+							if (!intrans) {
+								Void _ = wait( commitTransaction( tr ) );
+							}
+							continue;
+						}
+						printf("ERROR: Unknown action: %s\n", printable(tokens[2]).c_str());
+						is_error = true;
+						continue;
+					}
+					if (tokencmp(tokens[1], "list")) {
+						if (tokens.size() != 2) {
+							printf("ERROR: Usage: profile list\n");
+							is_error = true;
+							continue;
+						}
+						getTransaction(db, tr, options, intrans);
+						Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+						    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
+						                             LiteralStringRef("\xff\xff\xff")),
+						                 1)));
+						for (const auto& pair : kvs) {
+							printf("%s\n", printable(pair.key).c_str());
+						}
+						continue;
+					}
+					if (tokencmp(tokens[1], "flow")) {
+						if (tokens.size() == 2) {
+							printf("ERROR: Usage: profile flow <run>\n");
+							is_error = true;
+							continue;
+						}
+						if (tokencmp(tokens[2], "run")) {
+							if (tokens.size() < 6) {
+								printf("ERROR: Usage: profile flow run <duration in seconds> <filename> <hosts>\n");
+								is_error = true;
+								continue;
+							}
+							getTransaction(db, tr, options, intrans);
+							Standalone<RangeResultRef> kvs = wait(makeInterruptable(
+							    tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"),
+							                             LiteralStringRef("\xff\xff\xff")),
+							                 1)));
+							char *duration_end;
+							int duration = std::strtol((const char*)tokens[3].begin(), &duration_end, 10);
+							if (!std::isspace(*duration_end)) {
+								printf("ERROR: Failed to parse %s as an integer.", printable(tokens[3]).c_str());
+								is_error = true;
+								continue;
+							}
+							std::map<Key, ClientWorkerInterface> interfaces;
+							state std::vector<Key> all_profiler_addresses;
+							state std::vector<Future<ErrorOr<Void>>> all_profiler_responses;
+							for (const auto& pair : kvs) {
+								interfaces.emplace(pair.key, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
+							}
+							if (tokens.size() == 6 && tokencmp(tokens[5], "all")) {
+								for (const auto& pair : interfaces) {
+									ProfilerRequest profileRequest;
+									profileRequest.type = ProfilerRequest::Type::FLOW;
+									profileRequest.action = ProfilerRequest::Action::RUN;
+									profileRequest.duration = duration;
+									profileRequest.outputFile = tokens[4];
+									all_profiler_addresses.push_back(pair.first);
+									all_profiler_responses.push_back(pair.second.profiler.tryGetReply(profileRequest));
+								}
+							} else {
+								for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
+									auto element = interfaces.find(tokens[tokenidx]);
+									if (element == interfaces.end()) {
+										printf("ERROR: process '%s' not recognized.\n", printable(tokens[tokenidx]).c_str());
+										is_error = true;
+									}
+								}
+								if (!is_error) {
+									for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
+										ProfilerRequest profileRequest;
+										profileRequest.type = ProfilerRequest::Type::FLOW;
+										profileRequest.action = ProfilerRequest::Action::RUN;
+										profileRequest.duration = duration;
+										profileRequest.outputFile = tokens[4];
+										all_profiler_addresses.push_back(tokens[tokenidx]);
+										all_profiler_responses.push_back(interfaces[tokens[tokenidx]].profiler.tryGetReply(profileRequest));
+									}
+								}
+							}
+							if (!is_error) {
+								Void _ = wait(waitForAll(all_profiler_responses));
+								for (int i = 0; i < all_profiler_responses.size(); i++) {
+									const ErrorOr<Void>& err = all_profiler_responses[i].get();
+									if (err.isError()) {
+										printf("ERROR: %s: %s: %s\n", printable(all_profiler_addresses[i]).c_str(), err.getError().name(), err.getError().what());
+									}
+								}
+							}
+							all_profiler_addresses.clear();
+							all_profiler_responses.clear();
+							continue;
+						}
+					}
+					printf("ERROR: Unknown type: %s\n", printable(tokens[1]).c_str());
+					is_error = true;
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "expensive_data_check")) {
 					getTransaction(db, tr, options, intrans);
 					if (tokens.size() == 1) {
@@ -2879,6 +3063,9 @@ int main(int argc, char **argv) {
 	platformInit();
 	initSignalSafeUnwind();
 	Error::init();
+	std::set_new_handler( &platform::outOfMemory );
+	uint64_t memLimit = 8LL << 30;
+	setMemoryQuota( memLimit );
 
 	registerCrashHandler();
 

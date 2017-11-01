@@ -907,11 +907,11 @@ static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap, std::
 	return clientStatus;
 }
 
-ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, int workerCount, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, int workerCount, std::set<std::string> *incomplete_reasons) {
 	state StatusObject message;
 
 	try {
-		Standalone<StringRef> md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(StringRef(dbName+"/MasterRecoveryState") ) ), 1.0) );
+		Standalone<StringRef> md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
 		state int mStatusCode = parseInt( extractAttribute(md, LiteralStringRef("StatusCode")) );
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
@@ -929,6 +929,8 @@ ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInt
 			message["required_logs"] = requiredLogs;
 			message["required_proxies"] = requiredProxies;
 			message["required_resolvers"] = requiredResolvers;
+		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
+			message["missing_logs"] = extractAttribute(md, LiteralStringRef("MissingIDs")).c_str();
 		}
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
@@ -1748,7 +1750,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// construct status information for cluster subsections
-		state StatusObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, dbName, workers.size(), &status_incomplete_reasons));
+		state StatusObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, workers.size(), &status_incomplete_reasons));
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();

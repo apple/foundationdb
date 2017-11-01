@@ -28,6 +28,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "RecoveryState.h"
 
 template <class Collection>
 void uniquify( Collection& c ) {
@@ -648,6 +649,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			std::vector<TLogLockResult> results;
 			std::string	sServerState;
 			LocalityGroup	unResponsiveSet;
+			std::string missingServerIds;
+
 			double	t = timer();
 			cycles ++;
 
@@ -660,6 +663,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				else {
 					unResponsiveSet.add(prevState.tLogLocalities[t]);
 					sServerState += 'f';
+					if(missingServerIds.size()) {
+						missingServerIds += ", ";
+					}
+					missingServerIds += logServers[t]->get().toString();
 				}
 			}
 
@@ -773,22 +780,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						.detail("LogZones", ::describeZones(prevState.tLogLocalities))
 						.detail("LogDataHalls", ::describeDataHalls(prevState.tLogLocalities));
 				}
-			}
-			// Too many failures
-			else {
-				TraceEvent("LogSystemWaitingForRecovery", dbgid).detail("Cycles", cycles)
-					.detail("AvailableServers", results.size())
-					.detail("TotalServers", logServers.size())
-					.detail("Present", results.size())
-					.detail("Available", availableItems.size())
-					.detail("Absent", logServers.size() - results.size())
-					.detail("ServerState", sServerState)
-					.detail("ReplicationFactor", prevState.tLogReplicationFactor)
-					.detail("AntiQuorum", prevState.tLogWriteAntiQuorum)
-					.detail("Policy", prevState.tLogPolicy->info())
-					.detail("TooManyFailures", bTooManyFailures)
-					.detail("LogZones", ::describeZones(prevState.tLogLocalities))
-					.detail("LogDataHalls", ::describeDataHalls(prevState.tLogLocalities));
+			} else {
+				TraceEvent("MasterRecoveryState", dbgid)
+					.detail("StatusCode", RecoveryStatus::locking_old_transaction_servers)
+					.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_old_transaction_servers])
+					.detail("MissingIDs", missingServerIds)
+					.trackLatest("MasterRecoveryState");
 			}
 
 			// Wait for anything relevant to change

@@ -705,52 +705,6 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "KiB=2^10, MB=10^6, MiB=2^20, GB=10^9, GiB=2^30, TB=10^12, or TiB=2^40.\n");
 }
 
-Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "") {
-	char *endptr;
-
-	uint64_t ret = strtoull(toparse.c_str(), &endptr, 10);
-
-	if (endptr == toparse.c_str()) {
-		return Optional<uint64_t>();
-	}
-
-	std::string unit;
-
-	if (*endptr == '\0') {
-		if (!default_unit.empty()) {
-			unit = default_unit;
-		} else {
-			return Optional<uint64_t>();
-		}
-	} else {
-		unit = endptr;
-	}
-
-	if (!unit.compare("B")) {
-		// Nothing to do
-	} else if (!unit.compare("KB")) {
-		ret *= int64_t(1e3);
-	} else if (!unit.compare("KiB")) {
-		ret *= 1LL << 10;
-	} else if (!unit.compare("MB")) {
-		ret *= int64_t(1e6);
-	} else if (!unit.compare("MiB")) {
-		ret *= 1LL << 20;
-	} else if (!unit.compare("GB")) {
-		ret *= int64_t(1e9);
-	} else if (!unit.compare("GiB")) {
-		ret *= 1LL << 30;
-	} else if (!unit.compare("TB")) {
-		ret *= int64_t(1e12);
-	} else if (!unit.compare("TiB")) {
-		ret *= 1LL << 40;
-	} else {
-		return Optional<uint64_t>();
-	}
-
-	return ret;
-}
-
 extern bool g_crashOnError;
 
 #if defined(ALLOC_INSTRUMENTATION) || defined(ALLOC_INSTRUMENTATION_STDOUT)
@@ -1414,6 +1368,8 @@ int main(int argc, char* argv[]) {
 		FLOW_KNOBS = flowKnobs;
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
+
+		if (!serverKnobs->setKnob( "log_directory", logFolder )) ASSERT(false);
 
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {

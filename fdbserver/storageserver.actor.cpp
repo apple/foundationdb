@@ -196,7 +196,7 @@ struct UpdateEagerReadInfo {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
 		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end))
 			keyBegin.push_back( m.param2 );
-		else if (m.type == MutationRef::AppendIfFits)
+		else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) || (m.type == MutationRef::ByteMax))
 			keys.push_back(pair<KeyRef, int>(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT));
 		else if (isAtomicOp((MutationRef::Type) m.type))
 			keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size()));
@@ -602,7 +602,7 @@ ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
 	// This could become an Actor transparently, but for now it just does the lookup
 	if (version == latestVersion)
 		version = std::max(Version(1), data->version.get());
-	if (version < data->oldestVersion.get() || version <= 0) throw past_version();
+	if (version < data->oldestVersion.get() || version <= 0) throw transaction_too_old();
 	else if (version <= data->version.get())
 		return version;
 
@@ -616,7 +616,7 @@ ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
 		when ( Void _ = wait( data->version.whenAtLeast(version) ) ) {
 			//FIXME: A bunch of these can block with or without the following delay 0.
 			//Void _ = wait( delay(0) );  // don't do a whole bunch of these at once
-			if (version < data->oldestVersion.get()) throw past_version();  // just in case
+			if (version < data->oldestVersion.get()) throw transaction_too_old();  // just in case
 			return version;
 		}
 		when ( Void _ = wait( delay( SERVER_KNOBS->FUTURE_VERSION_DELAY ) ) ) {
@@ -688,8 +688,8 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 			Optional<Value> vv = wait( data->storage.readValue( req.key, req.debugID ) );
 			// Validate that while we were reading the data we didn't lose the version or shard
 			if (version < data->storageVersion()) {
-				TEST(true); // past_version after readValue
-				throw past_version();
+				TEST(true); // transaction_too_old after readValue
+				throw transaction_too_old();
 			}
 			data->checkChangeCounter(changeCounter, req.key);
 			v = vv;
@@ -772,7 +772,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 					throw;
 				}
 			} catch( Error &e ) {
-				if( e.code() != error_code_past_version )
+				if( e.code() != error_code_transaction_too_old )
 					throw;
 			}
 		}
@@ -941,7 +941,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			}*/
 
 			ASSERT( atStorageVersion.size() <= limit );
-			if (data->storageVersion() > version) throw past_version();
+			if (data->storageVersion() > version) throw transaction_too_old();
 
 			bool more = atStorageVersion.size()!=0;
 
@@ -1032,7 +1032,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 				readBegin = std::max( readBegin, vEnd->isClearTo() ? vEnd->getEndKey() : vEnd.key() );
 
 			Standalone<VectorRef<KeyValueRef>> atStorageVersion = wait( data->storage.readRange( KeyRangeRef(readBegin, readEnd), limit ) );
-			if (data->storageVersion() > version) throw past_version();
+			if (data->storageVersion() > version) throw transaction_too_old();
 
 			int prevSize = result.data.size();
 			merge( result.arena, result.data, atStorageVersion, vStart, vEnd, vCount, limit, false, *pLimitBytes );
@@ -1461,17 +1461,17 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 	}
 	else if (m.type != MutationRef::SetValue && (m.type)) {
 
-		StringRef oldVal;
+		Optional<StringRef> oldVal;
 		auto it = data.atLatest().lastLessOrEqual(m.param1);
 		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
 			oldVal = it->getValue();
 		else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
 			TEST(true); // Atomic op right after a clear.
-			oldVal = StringRef();
 		}
 		else {
 			Optional<Value>& oldThing = eager->getValue(m.param1);
-			oldVal = oldThing.present() ? oldThing.get() : StringRef();
+			if (oldThing.present())
+				oldVal = oldThing.get();
 		}
 
 		switch(m.type) {
@@ -1495,6 +1495,18 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 				break;
 			case MutationRef::Min:
 				m.param2 = doMin(oldVal, m.param2, ar);
+				break;
+			case MutationRef::ByteMin:
+				m.param2 = doByteMin(oldVal, m.param2, ar);
+				break;
+			case MutationRef::ByteMax:
+				m.param2 = doByteMax(oldVal, m.param2, ar);
+				break;
+			case MutationRef::MinV2:
+				m.param2 = doMinV2(oldVal, m.param2, ar);
+				break;
+			case MutationRef::AndV2:
+				m.param2 = doAndV2(oldVal, m.param2, ar);
 				break;
 		}
 		m.type = MutationRef::SetValue;
@@ -1618,7 +1630,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 	state KeySelectorRef end = firstGreaterOrEqual( keys.end );
 
 	if( *isPastVersion )
-		throw past_version();
+		throw transaction_too_old();
 
 	tr.setVersion( version );
 	limits.minRows = 0;
@@ -1657,8 +1669,8 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 			}
 		}
 	} catch( Error &e ) {
-		if( begin.getKey() != keys.begin && ( e.code() == error_code_past_version || e.code() == error_code_future_version ) ) {
-			if( e.code() == error_code_past_version )
+		if( begin.getKey() != keys.begin && ( e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ) ) {
+			if( e.code() == error_code_transaction_too_old )
 				*isPastVersion = true;
 			output.more = true;
 			if( begin.isFirstGreaterOrEqual() )
@@ -1828,7 +1840,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 				break;
 			} catch (Error& e) {
 				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true);
-				if (e.code() == error_code_past_version){
+				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
 					Void _ = wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
 					Version lastFV = fetchVersion;
@@ -2382,9 +2394,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);
 
+		state bool injectedChanges = false;
 		for(auto& c : fii.changes) {
 			for(auto& m : c.mutations) {
 				updater.applyMutation(data, m, c.version);
+				injectedChanges = true;
 			}
 		}
 
@@ -2428,6 +2442,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) data->lastVersionWithData = ver;
 		ver = cloneCursor2->version().version - 1;
+		if(injectedChanges) data->lastVersionWithData = ver;
+
 		data->updateEagerReads = NULL;
 		data->debug_inApplyUpdate = false;
 

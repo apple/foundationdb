@@ -1370,7 +1370,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 					.detail("ReplySize", reply.value.present() ? reply.value.get().size() : -1);*/
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				(e.code() == error_code_past_version && ver == latestVersion) ) {
+				(e.code() == error_code_transaction_too_old && ver == latestVersion) ) {
 				cx->invalidateCache( key );
 				cx->invalidateCache( ssi.second );
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
@@ -1864,7 +1864,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Future<Version> 
 				TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-				(e.code() == error_code_past_version && readVersion == latestVersion))
+				(e.code() == error_code_transaction_too_old && readVersion == latestVersion))
 			{
 				cx->invalidateCache( reverse ? end.getKey() : begin.getKey(), reverse ? (end-1).isBackward() : begin.isBackward() );
 				cx->invalidateCache( beginServer.second );
@@ -2207,6 +2207,12 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 	if(operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
 
+	if (apiVersionAtLeast(510)) {
+		if (operationType == MutationRef::Min)
+			operationType = MutationRef::MinV2;
+		else if (operationType == MutationRef::And)
+			operationType = MutationRef::AndV2;
+	}
 	auto &req = tr;
 	auto &t = req.transaction;
 	auto r = singleKeyRange( key, req.arena );
@@ -2422,7 +2428,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		}
 		TraceEvent("CheckWritesSuccess").detail("Version", version).detail("MutationCount", mCount).detail("CheckedRanges", checkedRanges);
 	} catch( Error& e ) {
-		bool ok = e.code() == error_code_past_version || e.code() == error_code_future_version;
+		bool ok = e.code() == error_code_transaction_too_old || e.code() == error_code_future_version;
 		TraceEvent( ok ? SevWarn : SevError, "CheckWritesFailed" ).error(e);
 		throw;
 	}
@@ -2555,7 +2561,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else {
-			if (e.code() != error_code_past_version && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
+			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
 				TraceEvent(SevError, "tryCommitError").error(e);
 			if (e.code() != error_code_actor_cancelled && trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -2567,13 +2573,16 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 Future<Void> Transaction::commitMutations() {
 	cx->transactionsCommitStarted++;
 
+	if(options.readOnly)
+		return transaction_read_only();
+
 	try {
 		//if this is a read-only transaction return immediately
 		if( !tr.transaction.write_conflict_ranges.size() && !tr.transaction.mutations.size() ) {
 			numErrors = 0;
 
 			committedVersion = invalidVersion;
-			versionstampPromise.sendError(transaction_read_only());
+			versionstampPromise.sendError(no_commit_version());
 			return Void();
 		}
 
@@ -2745,6 +2754,15 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 		case FDBTransactionOptions::LOCK_AWARE:
 			validateOptionValue(value, false);
 			options.lockAware = true;
+			options.readOnly = false;
+			break;
+
+		case FDBTransactionOptions::READ_LOCK_AWARE:
+			validateOptionValue(value, false);
+			if(!options.lockAware) {
+				options.lockAware = true;
+				options.readOnly = true;
+			}
 			break;
 
 		default:
@@ -2889,10 +2907,10 @@ Future<Void> Transaction::onError( Error const& e ) {
 		reset();
 		return delay( backoff, info.taskID );
 	}
-	if (e.code() == error_code_past_version ||
+	if (e.code() == error_code_transaction_too_old ||
 		e.code() == error_code_future_version)
 	{
-		if( e.code() == error_code_past_version )
+		if( e.code() == error_code_transaction_too_old )
 			cx->transactionsPastVersions++;
 		else if( e.code() == error_code_future_version )
 			cx->transactionsFutureVersions++;
