@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.MutationType;
@@ -730,9 +731,9 @@ public class DirectoryLayer implements Directory
 		tr.clear(Range.startsWith(nodeSubspace.unpack(node.getKey()).getBytes(0)));
 		tr.clear(node.range());
 
-		return AsyncUtil.whileTrue(new Function<Void, CompletableFuture<Boolean>>() {
+		return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
 			@Override
-			public CompletableFuture<Boolean> apply(Void ignore) {
+			public CompletableFuture<Boolean> get() {
 				CompletableFuture<Void> subdirRemoveFuture;
 				if(rangeItr.onHasNext().isDone() && rangeItr.hasNext())
 					subdirRemoveFuture = removeRecursive(tr, nodeWithPrefix(rangeItr.next().getValue()));
@@ -1039,9 +1040,9 @@ public class DirectoryLayer implements Directory
 			node = new Node(rootNode, currentPath, path);
 			currentPath = new ArrayList<String>();
 
-			return AsyncUtil.whileTrue(new Function<Void, CompletableFuture<Boolean>>() {
+			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
 				@Override
-				public CompletableFuture<Boolean> apply(Void ignore) {
+				public CompletableFuture<Boolean> get() {
 					if(index == path.size())
 						return CompletableFuture.completedFuture(false);
 
@@ -1163,9 +1164,9 @@ public class DirectoryLayer implements Directory
 		}
 
 		public CompletableFuture<byte[]> find(final Transaction tr, final HighContentionAllocator allocator) {
-			return AsyncUtil.whileTrue(new Function<Void, CompletableFuture<Boolean>>() {
+			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
 				@Override
-				public CompletableFuture<Boolean> apply(Void ignore) {
+				public CompletableFuture<Boolean> get() {
 					final AsyncIterator<KeyValue> rangeItr = tr.snapshot().getRange(allocator.counters.range(), 1, true).iterator();
 					return rangeItr.onHasNext()
 					.thenApply(new Function<Boolean, Void>() {
@@ -1203,9 +1204,9 @@ public class DirectoryLayer implements Directory
 
 		public CompletableFuture<Void> chooseWindow(final Transaction tr, final HighContentionAllocator allocator) {
 			final long initialWindowStart = windowStart;
-			return AsyncUtil.whileTrue(new Function<Void, CompletableFuture<Boolean>>() {
+			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
 				@Override
-				public CompletableFuture<Boolean> apply(Void ignore) {
+				public CompletableFuture<Boolean> get() {
 					final byte[] counterKey = allocator.counters.get(windowStart).getKey();
 
 					Range oldCounters = new Range(allocator.counters.getKey(), counterKey);
@@ -1244,9 +1245,9 @@ public class DirectoryLayer implements Directory
 
 		public CompletableFuture<Boolean> choosePrefix(final Transaction tr, final HighContentionAllocator allocator) {
 			restart = false;
-			return AsyncUtil.whileTrue(new Function<Void, CompletableFuture<Boolean>>() {
+			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
 				@Override
-				public CompletableFuture<Boolean> apply(Void ignore) {
+				public CompletableFuture<Boolean> get() {
 					// As of the snapshot being read from, the window is less than half
 					// full, so this should be expected to take 2 tries.  Under high
 					// contention (and when the window advances), there is an additional

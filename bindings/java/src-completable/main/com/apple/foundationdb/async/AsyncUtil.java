@@ -22,18 +22,15 @@ package com.apple.foundationdb.async;
 
 import static com.apple.foundationdb.FDB.DEFAULT_EXECUTOR;
 
-import com.apple.foundationdb.FDBException;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Provided utilities for using and manipulating {@link CompletableFuture}s.
@@ -85,9 +82,9 @@ public class AsyncUtil {
 		final List<V> accumulator = new LinkedList<V>();
 
 		// The condition of the while loop is simply "onHasNext()" returning true
-		Function<Void, CompletableFuture<Boolean>> condition = new Function<Void, CompletableFuture<Boolean>>() {
+		Supplier<CompletableFuture<Boolean>> condition = new Supplier<CompletableFuture<Boolean>>() {
 			@Override
-			public CompletableFuture<Boolean> apply(Void v) {
+			public CompletableFuture<Boolean> get() {
 				return it.onHasNext().thenApply(new Function<Boolean, Boolean>() {
 					@Override
 					public Boolean apply(Boolean o) {
@@ -170,11 +167,11 @@ public class AsyncUtil {
 	}
 
 	private static class LoopPartial implements BiFunction<Boolean, Throwable, Void> {
-		final Function<Void, ? extends CompletableFuture<Boolean>> body;
+		final Supplier<? extends CompletableFuture<Boolean>> body;
 		final CompletableFuture<Void> done;
 		final Executor executor;
 
-		public LoopPartial(Function<Void, ? extends CompletableFuture<Boolean>> body, Executor executor) {
+		public LoopPartial(Supplier<? extends CompletableFuture<Boolean>> body, Executor executor) {
 			this.body = body;
 			this.done = new CompletableFuture<>();
 			this.executor = executor;
@@ -192,7 +189,7 @@ public class AsyncUtil {
 					}
 					CompletableFuture<Boolean> result;
 					try {
-						result = body.apply(null);
+						result = body.get();
 					} catch (Exception e) {
 						done.completeExceptionally(e);
 						break;
@@ -226,7 +223,10 @@ public class AsyncUtil {
 	 * @param body the asynchronous operation over which to loop
 	 *
 	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 * @deprecated Since version 5.1.0. Use the version of {@link #whileTrue(Supplier) whileTrue} that takes a
+	 * {@link Supplier} instead.
 	 */
+	@Deprecated
 	public static CompletableFuture<Void> whileTrue(Function<Void,? extends CompletableFuture<Boolean>> body) {
 		return whileTrue(body, DEFAULT_EXECUTOR);
 	}
@@ -238,8 +238,34 @@ public class AsyncUtil {
 	 * @param executor the {@link Executor} to use for asynchronous operations
 	 *
 	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 * @deprecated Since version 5.1.0. Use the version of {@link #whileTrue(Supplier, Executor) whileTrue} that takes a
+	 * {@link Supplier} instead.
 	 */
+	@Deprecated
 	public static CompletableFuture<Void> whileTrue(Function<Void,? extends CompletableFuture<Boolean>> body, Executor executor) {
+		return whileTrue(() -> body.apply(null), executor);
+	}
+
+	/**
+	 * Executes an asynchronous operation repeatedly until it returns {@code False}.
+	 *
+	 * @param body the asynchronous operation over which to loop
+	 *
+	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 */
+	public static CompletableFuture<Void> whileTrue(Supplier<CompletableFuture<Boolean>> body) {
+		return whileTrue(body, DEFAULT_EXECUTOR);
+	}
+
+	/**
+	 * Executes an asynchronous operation repeatedly until it returns {@code False}.
+	 *
+	 * @param body the asynchronous operation over which to loop
+	 * @param executor the {@link Executor} to use for asynchronous operations
+	 *
+	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 */
+	public static CompletableFuture<Void> whileTrue(Supplier<CompletableFuture<Boolean>> body, Executor executor) {
 		return new LoopPartial(body, executor).run();
 	}
 
