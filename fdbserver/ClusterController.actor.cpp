@@ -1624,11 +1624,15 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 				state Optional<Value> rateVal = wait(tr.get(fdbClientInfoTxnSampleRate));
 				state Optional<Value> limitVal = wait(tr.get(fdbClientInfoTxnSizeLimit));
 				ClientDBInfo clientInfo = db->clientInfo->get();
-				clientInfo.clientTxnInfoSampleRate = rateVal.present() ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned()) : std::numeric_limits<double>::infinity();
-				clientInfo.clientTxnInfoSizeLimit = limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
-				clientInfo.id = g_random->randomUniqueID();
-				db->clientInfo->set(clientInfo);
-
+				double sampleRate = rateVal.present() ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned()) : std::numeric_limits<double>::infinity();
+				int64_t sizeLimit = limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
+				if (sampleRate != clientInfo.clientTxnInfoSampleRate || sizeLimit != clientInfo.clientTxnInfoSampleRate) {
+					clientInfo.id = g_random->randomUniqueID();
+					clientInfo.clientTxnInfoSampleRate = sampleRate;
+					clientInfo.clientTxnInfoSizeLimit = sizeLimit;
+					db->clientInfo->set(clientInfo);
+				}
+				
 				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
 				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				Void _ = wait(tr.commit());

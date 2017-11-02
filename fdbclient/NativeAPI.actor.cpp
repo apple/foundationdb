@@ -442,12 +442,25 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 	}
 }
 
+ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
+	state vector< MasterProxyInterface > curProxies;
+	curProxies = clientDBInfo->get().proxies;
+	
+	loop{
+		Void _ = wait(clientDBInfo->onChange());
+		if (clientDBInfo->get().proxies != curProxies) {
+			curProxies = clientDBInfo->get().proxies;
+			triggerVar->trigger();
+		}
+	}
+}
+
 DatabaseContext::DatabaseContext(
 	Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	Reference<Cluster> cluster, Future<Void> clientInfoMonitor,
 	Standalone<StringRef> dbName, Standalone<StringRef> dbId,
 	int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware )
-  : clientInfo(clientInfo), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
+  : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
 	transactionsReadVersions(0), transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsPastVersions(0),
 	transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), taskID(taskID),
 	outstandingWatches(0), maxOutstandingWatches(CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
@@ -460,6 +473,7 @@ DatabaseContext::DatabaseContext(
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
+	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
 
@@ -542,6 +556,7 @@ Database DatabaseContext::create( Reference<AsyncVar<ClientDBInfo>> info, Future
 }
 
 DatabaseContext::~DatabaseContext() {
+	monitorMasterProxiesInfoChange.cancel();
 	locationCacheLock.assertNotEntered();
 	SSInterfaceCacheLock.assertNotEntered();
 	SSInterfaceCache.clear();
@@ -643,7 +658,7 @@ void DatabaseContext::invalidateCache( std::vector<UID> const& ids ) {
 }
 
 Future<Void> DatabaseContext::onMasterProxiesChanged() {
-	return this->clientInfo->onChange();
+	return this->masterProxiesChangeTrigger.onTrigger();
 }
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue, int64_t maxValue ) {
