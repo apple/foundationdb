@@ -35,6 +35,8 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
+const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable");
+
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
 
@@ -304,6 +306,7 @@ FileBackupAgent::FileBackupAgent()
 	: subspace(Subspace(fileBackupPrefixRange.begin))
 	// The other subspaces have logUID -> value
 	, config(subspace.get(BackupAgentBase::keyConfig))
+	, lastRestorable(subspace.get(FileBackupAgent::keyLastRestorable))
 	, taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, true))
 	, futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, true))
 {
@@ -3501,6 +3504,7 @@ public:
 				statusText = "";
 				tag = makeBackupTag(tagName);
 				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
+				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
 					EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
@@ -3541,6 +3545,12 @@ public:
 						statusText += format("[%lld]: %s\n", errMsg.get().second, errMsg.get().first.c_str());
 					}
 				}
+
+				Optional<Value> disabled = wait(fDisabled);
+				if(disabled.present()) {
+					statusText += format("\nAll backup agents have been disabled.\n");
+				}
+
 				break;
 			}
 			catch (Error &e) {

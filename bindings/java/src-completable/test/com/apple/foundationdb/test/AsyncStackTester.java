@@ -36,10 +36,8 @@ import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
-import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
@@ -520,7 +518,7 @@ public class AsyncStackTester {
 					return inst.popParams(listSize).thenApply(new Function<List<Object>, Void>() {
 						@Override
 						public Void apply(List<Object> rawElements) {
-							List<Tuple> tuples = new ArrayList(listSize);
+							List<Tuple> tuples = new ArrayList<Tuple>(listSize);
 							for(Object o : rawElements) {
 								tuples.add(Tuple.fromBytes((byte[])o));
 							}
@@ -593,6 +591,8 @@ public class AsyncStackTester {
 				tr.options().setMaxRetryDelay(100);
 				tr.options().setUsedDuringCommitProtectionDisable();
 				tr.options().setTransactionLoggingEnable("my_transaction");
+				tr.options().setReadLockAware();
+				tr.options().setLockAware();
 
 				if(!(new FDBException("Fake", 1020)).isRetryable() ||
 						(new FDBException("Fake", 10)).isRetryable())

@@ -442,12 +442,25 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 	}
 }
 
+ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDBInfo>> clientDBInfo, AsyncTrigger *triggerVar) {
+	state vector< MasterProxyInterface > curProxies;
+	curProxies = clientDBInfo->get().proxies;
+	
+	loop{
+		Void _ = wait(clientDBInfo->onChange());
+		if (clientDBInfo->get().proxies != curProxies) {
+			curProxies = clientDBInfo->get().proxies;
+			triggerVar->trigger();
+		}
+	}
+}
+
 DatabaseContext::DatabaseContext(
 	Reference<AsyncVar<ClientDBInfo>> clientInfo,
 	Reference<Cluster> cluster, Future<Void> clientInfoMonitor,
 	Standalone<StringRef> dbName, Standalone<StringRef> dbId,
 	int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware )
-  : clientInfo(clientInfo), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
+  : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
 	transactionsReadVersions(0), transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsPastVersions(0),
 	transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), taskID(taskID),
 	outstandingWatches(0), maxOutstandingWatches(CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
@@ -460,6 +473,7 @@ DatabaseContext::DatabaseContext(
 	getValueSubmitted.init(LiteralStringRef("NativeAPI.GetValueSubmitted"));
 	getValueCompleted.init(LiteralStringRef("NativeAPI.GetValueCompleted"));
 
+	monitorMasterProxiesInfoChange = monitorMasterProxiesChange(clientInfo, &masterProxiesChangeTrigger);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 }
 
@@ -474,6 +488,7 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 			req.knownClientInfoID = outInfo->get().id;
 			req.dbName = dbName;
 			req.supportedVersions = VectorRef<ClientVersionRef>(req.arena, networkOptions.supportedVersions);
+			req.traceLogGroup = StringRef(req.arena, networkOptions.traceLogGroup);
 
 			ClusterConnectionString fileConnectionString;
 			if (ccf && !ccf->fileContentsUpToDate(fileConnectionString)) {
@@ -541,6 +556,7 @@ Database DatabaseContext::create( Reference<AsyncVar<ClientDBInfo>> info, Future
 }
 
 DatabaseContext::~DatabaseContext() {
+	monitorMasterProxiesInfoChange.cancel();
 	locationCacheLock.assertNotEntered();
 	SSInterfaceCacheLock.assertNotEntered();
 	SSInterfaceCache.clear();
@@ -642,7 +658,7 @@ void DatabaseContext::invalidateCache( std::vector<UID> const& ids ) {
 }
 
 Future<Void> DatabaseContext::onMasterProxiesChanged() {
-	return this->clientInfo->onChange();
+	return this->masterProxiesChangeTrigger.onTrigger();
 }
 
 int64_t extractIntOption( Optional<StringRef> value, int64_t minValue, int64_t maxValue ) {
@@ -2492,6 +2508,9 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	state double startTime;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
+
+	state CommitTransactionRequest ctReq(*req);
+
 	try {
 		Version v = wait( readVersion );
 		req->transaction.read_snapshot = v;
@@ -2570,8 +2589,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		} else {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
 				TraceEvent(SevError, "tryCommitError").error(e);
-			if (e.code() != error_code_actor_cancelled && trLogInfo)
-				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
+			if (trLogInfo)
+				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), &ctReq));
 			throw;
 		}
 	}

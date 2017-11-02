@@ -2576,7 +2576,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							if (sizeLimitFuture.get().present()) {
 								const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(sizeLimitFuture.get().get(), Unversioned());
 								if (sizeLimit != -1) {
-									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimitStr);
+									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 								}
 							}
 							printf("Client profiling rate is set to %s and size limit is set to %s.\n", sampleRateStr.c_str(), sizeLimitStr.c_str());
@@ -2674,6 +2674,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								for (const auto& pair : interfaces) {
 									ProfilerRequest profileRequest;
 									profileRequest.type = ProfilerRequest::Type::FLOW;
+									profileRequest.action = ProfilerRequest::Action::RUN;
 									profileRequest.duration = duration;
 									profileRequest.outputFile = tokens[4];
 									all_profiler_addresses.push_back(pair.first);
@@ -2691,6 +2692,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 									for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
 										ProfilerRequest profileRequest;
 										profileRequest.type = ProfilerRequest::Type::FLOW;
+										profileRequest.action = ProfilerRequest::Action::RUN;
 										profileRequest.duration = duration;
 										profileRequest.outputFile = tokens[4];
 										all_profiler_addresses.push_back(tokens[tokenidx]);

@@ -28,6 +28,10 @@
 #include "crc32c.h"
 #include "simulator.h"
 
+#if VALGRIND
+#include <memcheck.h>
+#endif
+
 static NetworkAddress g_currentDeliveryPeerAddress;
 
 const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
@@ -532,6 +536,9 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 			}
 		}
 
+#if VALGRIND
+		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
+#endif
 		ArenaReader reader( arena, StringRef(p, packetLen), AssumeVersion(peerProtocolVersion) );
 		UID token; reader >> token;
 
@@ -807,6 +814,9 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
 		what.serializeBinaryWriter(wr);
 		Standalone<StringRef> copy = wr.toStringRef();
+#if VALGRIND
+		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
+#endif
 
 		deliver( self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false );
 
@@ -890,6 +900,16 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 			if(g_network->isSimulated())
 				self->warnAlwaysForLargePacket = false;
 		}
+
+#if VALGRIND
+		SendBuffer *checkbuf = pb;
+		while (checkbuf) {
+			int size = checkbuf->bytes_written;
+			const uint8_t* data = checkbuf->data;
+			VALGRIND_CHECK_MEM_IS_DEFINED(data, size);
+			checkbuf = checkbuf -> next;
+		}
+#endif
 
 		peer->send(pb, rp, firstUnsent);
 
