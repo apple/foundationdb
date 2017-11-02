@@ -101,6 +101,8 @@ public:
 
 	// Key DB-specific information
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
+	AsyncTrigger masterProxiesChangeTrigger;
+	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
 	UID masterProxiesLastChange;
 	LocalityData clientLocality;
