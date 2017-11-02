@@ -996,12 +996,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	state vector<Standalone<CommitTransactionRef>> initialConfChanges;
 	state Future<Void> logChanges;
 
-	TraceEvent("MasterRecoveryState", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::locking_old_transaction_servers)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_old_transaction_servers])
-		.detail("MissingIDs", "")
-		.trackLatest("MasterRecoveryState");
-
 	loop {
 		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
 		if(oldLogSystem) logChanges = triggerUpdates(self, oldLogSystem);
