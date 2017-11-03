@@ -960,9 +960,11 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state std::vector<KeyBackedTag>::iterator tag;
+		state std::vector<UID> backupTagUids;
 		for (tag = backupTags.begin(); tag != backupTags.end(); tag++) {
 			UidAndAbortedFlagT uidAndAbortedFlag = wait(tag->getOrThrow(tr));
 			BackupConfig config(uidAndAbortedFlag.first);
+			backupTagUids.push_back(config.getUid());
 
 			tagStates.push_back(config.stateEnum().getOrThrow(tr));
 			tagRangeBytes.push_back(config.rangeBytesWritten().getD(tr, 0));
@@ -995,6 +997,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytes[j].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytes[j].get();
+			tagRoot.create("mutation_stream_id") = backupTagUids[j].toString();
 
 			j++;
 		}
@@ -1011,9 +1014,11 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<int64_t>> tagLogBytesDR;
 		state Future<Optional<Value>> fDRDisabled = tr->get(dba.taskBucket->getDisableKey());
 
+		state std::vector<UID> drTagUids;
 		for(int i = 0; i < tagNames.size(); i++) {
 			backupVersion.push_back(tr2->get(tagNames[i].value.withPrefix(applyMutationsBeginRange.begin)));
 			UID tagUID = BinaryReader::fromStringRef<UID>(tagNames[i].value, Unversioned());
+			drTagUids.push_back(tagUID);
 			backupStatus.push_back(dba.getStateValue(tr2, tagUID));
 			tagRangeBytesDR.push_back(dba.getRangeBytesWritten(tr2, tagUID));
 			tagLogBytesDR.push_back(dba.getLogBytesWritten(tr2, tagUID));
@@ -1036,6 +1041,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			tagRoot.create("running_backup_is_restorable") = (status == BackupAgentBase::STATE_DIFFERENTIAL);
 			tagRoot.create("range_bytes_written") = tagRangeBytesDR[i].get();
 			tagRoot.create("mutation_log_bytes_written") = tagLogBytesDR[i].get();
+			tagRoot.create("mutation_stream_id") = drTagUids[i].toString();
 
 			if (backupVersion[i].get().present()) {
 				double seconds_behind = ((double)readVer - BinaryReader::fromStringRef<Version>(backupVersion[i].get().get(), Unversioned())) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
