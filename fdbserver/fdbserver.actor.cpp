@@ -624,7 +624,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Data center identifier key (up to 16 hex characters).\n");
 	printf("  -c CLASS, --class CLASS\n"
 		   "                 Machine class (valid options are storage, transaction,\n");
-	printf("                 resolution, proxy, master, test, unset, stateless, log).\n");
+	printf("                 resolution, proxy, master, test, unset, stateless, log, cluster_controller).\n");
 	printf(TLS_HELP);
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, -?, --help Display this help and exit.\n");
