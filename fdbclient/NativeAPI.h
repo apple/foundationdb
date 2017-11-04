@@ -308,7 +308,7 @@ private:
 	Version committedVersion;
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
-	vector<Future<KeyRange>> extraConflictRanges;
+	vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
 };

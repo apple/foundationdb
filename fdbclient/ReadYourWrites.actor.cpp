@@ -146,7 +146,7 @@ public:
 			if(key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
-				read.end = firstGreaterOrEqual(key);
+				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
 
 		Standalone<RangeResultRef> v = wait( ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, Reverse) );
@@ -346,9 +346,6 @@ public:
 		if(keyNeedsCopy) {
 			key.setKey(keykey.toArena(key.arena()));
 		}
-		else {
-			key.setKey(keykey.toArenaOrRef(key.arena()));
-		}
 	}
 
 	static KeyRangeRef getKnownKeyRange( RangeResultRef data, KeySelector begin, KeySelector end, Arena& arena ) {
@@ -360,10 +357,12 @@ public:
 
 		if( data.size() ) {
 			beginKey = std::min( beginKey, data[0].key );
-
-			if( data.readThrough.present() ) 
+			if( data.readThrough.present() ) {
 				endKey = std::max<ExtStringRef>( endKey, data.readThrough.get() );
-			endKey = !data.more && data.end()[-1].key < endKey ? endKey : ExtStringRef( data.end()[-1].key, 1 );
+			}
+			else {
+				endKey = !data.more && data.end()[-1].key < endKey ? endKey : ExtStringRef( data.end()[-1].key, 1 );
+			}
 		}
 		if (beginKey >= endKey) return KeyRangeRef();
 
@@ -461,7 +460,7 @@ public:
 		resolveKeySelectorFromCache( begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
 		resolveKeySelectorFromCache( end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset );
 
-		if( begin.getKey() >= end.getKey() && actualBeginOffset >= actualEndOffset ) {
+		if( actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey() ) {
 			return RangeResultRef(false, false);
 		}
 		else if( ( begin.isFirstGreaterOrEqual() && begin.getKey() == ryw->getMaxReadKey() ) 
@@ -501,16 +500,16 @@ public:
 				.detail("unknown", it.is_unknown_range())
 				.detail("requests", requestCount);*/
 
-			if( !result.size() && begin.getKey() >= end.getKey() && actualBeginOffset >= actualEndOffset ) {
+			if( !result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey() ) {
 				return RangeResultRef(false, false);
 			}
 
-			if( end.getKey() == allKeys.begin && end.offset <= 1 ) {
+			if( end.offset <= 1 && end.getKey() == allKeys.begin ) {
 				return RangeResultRef(readToBegin, readThroughEnd);
 			}
 			
-			if( ( begin.getKey() >= end.getKey() && begin.offset >= end.offset ) ||
-				( begin.getKey() >= ryw->getMaxReadKey() && begin.offset >= 1) ) {
+			if( ( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) ||
+				( begin.offset >= 1 && begin.getKey() >= ryw->getMaxReadKey() ) ) {
 				if( end.isFirstGreaterOrEqual() ) break;
 				if( !result.size() ) break;
 				Key resolvedEnd = wait( read( ryw, GetKeyReq(end), pit ) ); //do not worry about iterator invalidation, because we are breaking for the loop
@@ -522,7 +521,7 @@ public:
 				break;
 			}
 
-			if( it.beginKey() > itEnd.beginKey() && !it.is_unreadable() && !it.is_unknown_range() ) {
+			if( !it.is_unreadable() && !it.is_unknown_range() && it.beginKey() > itEnd.beginKey() ) {
 				if( end.isFirstGreaterOrEqual() ) break;
 				return RangeResultRef(readToBegin, readThroughEnd);
 			}
@@ -545,10 +544,11 @@ public:
 				
 				state KeySelector read_end;
 				if ( ucEnd!=itEnd ) {
-					read_end = firstGreaterOrEqual(ucEnd.endKey().toStandaloneStringRef());
+					Key k = ucEnd.endKey().toStandaloneStringRef();
+					read_end = KeySelector(firstGreaterOrEqual(k), k.arena());
 					if( end.offset < 1 ) additionalRows += 1 - end.offset; // extra for items past end
 				} else if( end.offset < 1 ) {
-					read_end = firstGreaterOrEqual( end.getKey() );
+					read_end = KeySelector(firstGreaterOrEqual(end.getKey()), end.arena());
 					additionalRows += 1 - end.offset;
 				} else {
 					read_end = end;
@@ -562,10 +562,11 @@ public:
 
 				state KeySelector read_begin;
 				if (begin.isFirstGreaterOrEqual()) {
-					begin = firstGreaterOrEqual( it.beginKey() > begin.getKey() ? it.beginKey().toStandaloneStringRef() : begin.getKey() );
+					Key k = it.beginKey() > begin.getKey() ? it.beginKey().toStandaloneStringRef() : Key(begin.getKey(), begin.arena());
+					begin = KeySelector(firstGreaterOrEqual(k), k.arena());
 					read_begin = begin;
 				} else if( begin.offset > 1 ) {
-					read_begin = firstGreaterOrEqual(begin.getKey());
+					read_begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
 					additionalRows += begin.offset - 1;
 				} else {
 					read_begin = begin;
@@ -645,10 +646,13 @@ public:
 		if (data.readThroughEnd) endKey = allKeys.end;
 
 		if( data.size() ) {
-			beginKey = !data.more && data.end()[-1].key > beginKey ? beginKey : data.end()[-1].key;
-			
-			if( data.readThrough.present() )
+			if( data.readThrough.present() ) {
 				beginKey = std::min( data.readThrough.get(), beginKey );
+			}
+			else {
+				beginKey = !data.more && data.end()[-1].key > beginKey ? beginKey : data.end()[-1].key;
+			}
+			
 			endKey = data[0].key < endKey ? endKey : ExtStringRef( data[0].key, 1 );
 		}
 		if (beginKey >= endKey) return KeyRangeRef();
@@ -725,7 +729,7 @@ public:
 		resolveKeySelectorFromCache( end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset );
 		resolveKeySelectorFromCache( begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
 
-		if( ( begin.getKey() >= end.getKey() && actualBeginOffset >= actualEndOffset ) ) {
+		if( actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey() ) {
 			return RangeResultRef(false, false);
 		}
 		else if( ( begin.isFirstGreaterOrEqual() && begin.getKey() == ryw->getMaxReadKey() ) 
@@ -766,16 +770,16 @@ public:
 				.detail("kv", it.is_kv())
 				.detail("requests", requestCount);*/
 
-			if(!result.size() && begin.getKey() >= end.getKey() && actualBeginOffset >= actualEndOffset) {
+			if(!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 				return RangeResultRef(false, false);
 			}
 			
-			if( begin.getKey() >= ryw->getMaxReadKey() && !begin.isBackward() ) {
+			if( !begin.isBackward() && begin.getKey() >= ryw->getMaxReadKey() ) {
 				return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
-			if( ( begin.getKey() >= end.getKey() && begin.offset >= end.offset ) ||
-				( end.getKey() == allKeys.begin && end.offset <= 1 ) ) {
+			if( ( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) ||
+				( end.offset <= 1 && end.getKey() == allKeys.begin ) ) {
 				if( begin.isFirstGreaterOrEqual() ) break;
 				if( !result.size() ) break;
 				Key resolvedBegin = wait( read( ryw, GetKeyReq(begin), pit ) ); //do not worry about iterator invalidation, because we are breaking for the loop
@@ -787,7 +791,7 @@ public:
 				break;
 			}
 			
-			if (it.beginKey() < itEnd.beginKey() && !it.is_unreadable() && !it.is_unknown_range() && itemsPastBegin >= begin.offset - 1) {
+			if (itemsPastBegin >= begin.offset - 1 && !it.is_unreadable() && !it.is_unknown_range() && it.beginKey() < itEnd.beginKey()) {
 				if( begin.isFirstGreaterOrEqual() ) break;
 				return RangeResultRef(readToBegin, readThroughEnd);
 			}
@@ -813,10 +817,11 @@ public:
 				
 				state KeySelector read_begin;
 				if ( ucEnd!=itEnd ) {
-					read_begin = firstGreaterOrEqual(ucEnd.beginKey().toStandaloneStringRef());
+					Key k = ucEnd.beginKey().toStandaloneStringRef();
+					read_begin = KeySelector(firstGreaterOrEqual(k), k.arena());
 					if( begin.offset > 1 ) additionalRows += begin.offset - 1; // extra for items past end
 				} else if( begin.offset > 1 ) {
-					read_begin = firstGreaterOrEqual( begin.getKey() );
+					read_begin = KeySelector(firstGreaterOrEqual( begin.getKey() ), begin.arena());
 					additionalRows += begin.offset - 1;
 				} else {
 					read_begin = begin;
@@ -830,10 +835,11 @@ public:
 
 				state KeySelector read_end;
 				if (end.isFirstGreaterOrEqual()) {
-					end = firstGreaterOrEqual( it.endKey() < end.getKey() ? it.endKey().toStandaloneStringRef() : end.getKey() );
+					Key k = it.endKey() < end.getKey() ? it.endKey().toStandaloneStringRef() : end.getKey();
+					end = KeySelector(firstGreaterOrEqual(k), k.arena());
 					read_end = end;
 				} else if (end.offset < 1) {
-					read_end = firstGreaterOrEqual(end.getKey());
+					read_end = KeySelector(firstGreaterOrEqual(end.getKey()), end.arena());
 					additionalRows += 1 - end.offset;
 				} else {
 					read_end = end;
