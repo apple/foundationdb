@@ -198,7 +198,7 @@ public:
 		for( auto& it : id_worker ) {
 			auto fit = it.second.processClass.machineClassFitness( ProcessClass::Master );
 			if(conf.isExcludedServer(it.second.interf.address())) {
-				fit = std::max(fit, ProcessClass::WorstFit);
+				fit = std::max(fit, ProcessClass::ExcludeFit);
 			}
 			if( workerAvailable(it.second, checkStable) && fit != ProcessClass::NeverAssign ) {
 				if( fit < bestFit || (fit == bestFit && bestIsClusterController) ) {
@@ -696,6 +696,11 @@ public:
 
 	bool betterMasterExists() {
 		ServerDBInfo dbi = db.serverInfo->get();
+
+		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
+			return false;
+		}
+
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 
 		auto masterWorker = id_worker.find(dbi.master.locality.processId());
@@ -707,18 +712,13 @@ public:
 
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.processClass.machineClassFitness( ProcessClass::Master );
 		if(db.config.isExcludedServer(dbi.master.address())) {
-			oldMasterFit = std::max(oldMasterFit, ProcessClass::WorstFit);
+			oldMasterFit = std::max(oldMasterFit, ProcessClass::ExcludeFit);
 		}
 
-		ProcessClass::Fitness newMasterFit = getMasterWorker(db.config, true).second.machineClassFitness( ProcessClass::Master );
-
-		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
-			if(oldMasterFit > newMasterFit) {
-				TEST(true); //Better master exists triggered before full recovery
-				TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit);
-				return true;
-			}
-			return false;
+		auto mworker = getMasterWorker(db.config, true);
+		ProcessClass::Fitness newMasterFit = mworker.second.machineClassFitness( ProcessClass::Master );
+		if(db.config.isExcludedServer(mworker.first.address())) {
+			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
 		}
 
 		if(oldMasterFit < newMasterFit) return false;

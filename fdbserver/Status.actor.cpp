@@ -46,7 +46,7 @@ const char* RecoveryStatus::descriptions[] = {
 	// locking_coordinated_state
 	"Locking coordination state. Verify that a majority of coordination server processes are active.",
 	// locking_old_transaction_servers
-	"Locking old transaction servers. Verify that a least one transaction server from the previous generation is running.",
+	"Locking old transaction servers. Verify that at least one transaction server from the previous generation is running.",
 	// reading_transaction_system_state
 	"Recovering transaction server state. Verify that the transaction server processes are active.",
 	// configuration_missing

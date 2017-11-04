@@ -2520,17 +2520,15 @@ void Transaction::setupWatches() {
 	}
 }
 
-ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest* req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, bool causalWriteRisky ) {
+ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, bool causalWriteRisky ) {
 	state TraceInterval interval( "TransactionCommit" );
 	state double startTime;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 
-	state CommitTransactionRequest ctReq(*req);
-
 	try {
 		Version v = wait( readVersion );
-		req->transaction.read_snapshot = v;
+		req.transaction.read_snapshot = v;
 
 		startTime = now();
 		state Optional<UID> commitID = Optional<UID>();
@@ -2540,8 +2538,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.Before");
 		}
 
-		req->debugID = commitID;
-		state Future<CommitID> reply = loadBalance( cx->getMasterProxies(), &MasterProxyInterface::commit, *req, TaskDefaultPromiseEndpoint, true );
+		req.debugID = commitID;
+		state Future<CommitID> reply = loadBalance( cx->getMasterProxies(), &MasterProxyInterface::commit, req, TaskDefaultPromiseEndpoint, true );
 
 		choose {
 			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {
@@ -2569,7 +2567,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 					cx->commitLatencies.addSample(latency);
 					cx->latencies.addSample(now() - tr->startTime);
 					if (trLogInfo)
-						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req->transaction.mutations.size(), req->transaction.mutations.expectedSize(), req));
+						trLogInfo->addLog(FdbClientLogEvents::EventCommit(startTime, latency, req.transaction.mutations.size(), req.transaction.mutations.expectedSize(), req));
 					return Void();
 				} else {
 					if (info.debugID.present())
@@ -2594,7 +2592,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 				// We pick a key range which also intersects its write conflict ranges, since that avoids potentially creating conflicts where there otherwise would be none
 				// We make the range as small as possible (a single key range) to minimize conflicts
 				// The intersection will never be empty, because if it were (since !causalWriteRisky) makeSelfConflicting would have been applied automatically to req
-				KeyRangeRef selfConflictingRange = intersects( req->transaction.write_conflict_ranges, req->transaction.read_conflict_ranges ).get();
+				KeyRangeRef selfConflictingRange = intersects( req.transaction.write_conflict_ranges, req.transaction.read_conflict_ranges ).get();
 
 				TEST(true);  // Waiting for dummy transaction to report commit_unknown_result
 
@@ -2607,7 +2605,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
 				TraceEvent(SevError, "tryCommitError").error(e);
 			if (trLogInfo)
-				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), &ctReq));
+				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
 			throw;
 		}
 	}
@@ -2674,7 +2672,7 @@ Future<Void> Transaction::commitMutations() {
 
 		tr.isLockAware = options.lockAware;
 
-		Future<Void> commitResult = tryCommit( cx, trLogInfo, &tr, readVersion, info, &this->committedVersion, this, options.causalWriteRisky );
+		Future<Void> commitResult = tryCommit( cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options.causalWriteRisky );
 
 		if (isCheckingWrites) {
 			Promise<Void> committed;
