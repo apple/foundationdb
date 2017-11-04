@@ -696,6 +696,11 @@ public:
 
 	bool betterMasterExists() {
 		ServerDBInfo dbi = db.serverInfo->get();
+
+		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
+			return false;
+		}
+
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 
 		auto masterWorker = id_worker.find(dbi.master.locality.processId());
@@ -714,15 +719,6 @@ public:
 		ProcessClass::Fitness newMasterFit = mworker.second.machineClassFitness( ProcessClass::Master );
 		if(db.config.isExcludedServer(mworker.first.address())) {
 			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
-		}
-
-		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
-			if(oldMasterFit > newMasterFit) {
-				TEST(true); //Better master exists triggered before full recovery
-				TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit);
-				return true;
-			}
-			return false;
 		}
 
 		if(oldMasterFit < newMasterFit) return false;
