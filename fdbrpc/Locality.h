@@ -27,7 +27,7 @@
 struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
 	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, InvalidClass = -1 };
-	enum Fitness { BestFit, GoodFit, BestOtherFit, UnsetFit, WorstFit, NeverAssign };
+	enum Fitness { BestFit, GoodFit, BestOtherFit, UnsetFit, WorstFit, ExcludeFit, NeverAssign };
 	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, ClusterController };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;

@@ -198,7 +198,7 @@ public:
 		for( auto& it : id_worker ) {
 			auto fit = it.second.processClass.machineClassFitness( ProcessClass::Master );
 			if(conf.isExcludedServer(it.second.interf.address())) {
-				fit = std::max(fit, ProcessClass::WorstFit);
+				fit = std::max(fit, ProcessClass::ExcludeFit);
 			}
 			if( workerAvailable(it.second, checkStable) && fit != ProcessClass::NeverAssign ) {
 				if( fit < bestFit || (fit == bestFit && bestIsClusterController) ) {
@@ -707,10 +707,14 @@ public:
 
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.processClass.machineClassFitness( ProcessClass::Master );
 		if(db.config.isExcludedServer(dbi.master.address())) {
-			oldMasterFit = std::max(oldMasterFit, ProcessClass::WorstFit);
+			oldMasterFit = std::max(oldMasterFit, ProcessClass::ExcludeFit);
 		}
 
-		ProcessClass::Fitness newMasterFit = getMasterWorker(db.config, true).second.machineClassFitness( ProcessClass::Master );
+		auto mworker = getMasterWorker(db.config, true);
+		ProcessClass::Fitness newMasterFit = mworker.second.machineClassFitness( ProcessClass::Master );
+		if(db.config.isExcludedServer(mworker.first.address())) {
+			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
+		}
 
 		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
 			if(oldMasterFit > newMasterFit) {

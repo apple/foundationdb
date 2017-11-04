@@ -1202,6 +1202,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		// Check master
 		ProcessClass::Fitness bestMasterFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Master);
 		if (!workerProcessMap.count(db.master.address()) || workerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
+			TraceEvent("ConsistencyCheck_MasterNotBest").detail("bestMasterFitness", bestMasterFitness).detail("existingMasterFit", workerProcessMap.count(db.master.address()) ? workerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) : -1);
 			return false;
 		}
 
@@ -1209,6 +1210,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		ProcessClass::Fitness bestMasterProxyFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Proxy);
 		for (auto masterProxy : db.client.proxies) {
 			if (!workerProcessMap.count(masterProxy.address()) || workerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
+				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("bestMasterProxyFitness", bestMasterProxyFitness).detail("existingMasterProxyFitness", workerProcessMap.count(masterProxy.address()) ? workerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) : -1);
 				return false;
 			}
 		}
@@ -1217,6 +1219,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		ProcessClass::Fitness bestResolverFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Resolver);
 		for (auto resolver : db.resolvers) {
 			if (!workerProcessMap.count(resolver.address()) || workerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) != bestResolverFitness) {
+				TraceEvent("ConsistencyCheck_ResolverNotBest").detail("bestResolverFitness", bestResolverFitness).detail("existingResolverFitness", workerProcessMap.count(resolver.address()) ? workerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) : -1);
 				return false;
 			}
 		}
