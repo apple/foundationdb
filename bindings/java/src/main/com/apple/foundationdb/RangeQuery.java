@@ -53,9 +53,10 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 	private final StreamingMode streamingMode;
 	private final FutureResults firstChunk;
 
-	RangeQuery(FDBTransaction transaction, boolean isSnapshot,
+	private RangeQuery(FDBTransaction transaction, boolean isSnapshot,
 			KeySelector begin, KeySelector end, int rowLimit,
-			boolean reverse, StreamingMode streamingMode) {
+			boolean reverse, StreamingMode streamingMode,
+			FutureResults firstChunk) {
 		this.tr = transaction;
 		this.begin = begin;
 		this.end = end;
@@ -63,10 +64,17 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 		this.rowLimit = rowLimit;
 		this.reverse = reverse;
 		this.streamingMode = streamingMode;
+		this.firstChunk = firstChunk;
+	}
 
+	static RangeQuery start(FDBTransaction transaction, boolean isSnapshot,
+							KeySelector begin, KeySelector end, int rowLimit,
+							boolean reverse, StreamingMode streamingMode) {
 		// start the first fetch...
-		firstChunk = tr.getRange_internal(begin, end,
-				rowLimit, 0, streamingMode.code(), 1, snapshot, reverse);
+		FutureResults firstChunk = transaction.getRange_internal(begin, end,
+				rowLimit, 0, streamingMode.code(), 1, isSnapshot, reverse);
+
+		return new RangeQuery(transaction, isSnapshot, begin, end, rowLimit, reverse, streamingMode, firstChunk);
 	}
 
 	/**
@@ -98,7 +106,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 
 		// If the streaming mode is not EXACT, simply collect the results of an iteration into a list
 		return AsyncUtil.collect(
-				new RangeQuery(tr, snapshot, begin, end, rowLimit, reverse, mode));
+				new RangeQuery(tr, snapshot, begin, end, rowLimit, reverse, mode, firstChunk));
 	}
 
 	/**
