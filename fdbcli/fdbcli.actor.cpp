@@ -617,7 +617,7 @@ std::string getWorkloadRates(StatusObjectReader statusObj, bool unknown, std::st
 	return "unknown";
 }
 
-void getBackupDRTags(StatusObjectReader &statusObjCluster, const char *context, int &tagCount, std::map<std::string, std::string> &tagMap) {
+void getBackupDRTags(StatusObjectReader &statusObjCluster, const char *context, std::map<std::string, std::string> &tagMap) {
 	std::string path = format("layers.%s.tags", context);
 	StatusObjectReader tags;
 	if(statusObjCluster.tryGet(path, tags)) {
@@ -625,7 +625,6 @@ void getBackupDRTags(StatusObjectReader &statusObjCluster, const char *context, 
 			JSONDoc tag(itr.second);
 			bool running = false;
 			if(tag.tryGet("running_backup", running)) {
-				++tagCount;
 				std::string uid;
 				if(tag.tryGet("mutation_stream_id", uid)) {
 					tagMap[itr.first] = uid;
@@ -638,9 +637,9 @@ void getBackupDRTags(StatusObjectReader &statusObjCluster, const char *context, 
 	}
 }
 
-std::string logBackupDR(const char *context, int tagCount, std::map<std::string, std::string> const& tagMap) {
+std::string logBackupDR(const char *context, std::map<std::string, std::string> const& tagMap) {
 	std::string outputString = "";
-	if(tagCount > 0) {
+	if(tagMap.size() > 0) {
 		outputString += format("\n\n%s:", context);
 		for(auto itr : tagMap) {
 			outputString += format("\n  %-22s", itr.first.c_str());
@@ -1190,41 +1189,38 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 			// Backup and DR section
 			outputString += "\n\nBackup and DR:";
 
-			int backupCount = 0;
 			std::map<std::string, std::string> backupTags;
-			getBackupDRTags(statusObjCluster, "backup", backupCount, backupTags);
+			getBackupDRTags(statusObjCluster, "backup", backupTags);
 
-			int drPrimaryCount = 0;
 			std::map<std::string, std::string> drPrimaryTags;
-			getBackupDRTags(statusObjCluster, "dr_backup", drPrimaryCount, drPrimaryTags);
+			getBackupDRTags(statusObjCluster, "dr_backup", drPrimaryTags);
 
-			int drSecondaryCount = 0;
 			std::map<std::string, std::string> drSecondaryTags;
-			getBackupDRTags(statusObjCluster, "dr_backup_dest", drSecondaryCount, drSecondaryTags);
+			getBackupDRTags(statusObjCluster, "dr_backup_dest", drSecondaryTags);
 
-			outputString += format("\n  Running backups        - %d", backupCount);
+			outputString += format("\n  Running backups        - %d", backupTags.size());
 			outputString += format("\n  Running DRs            - ");
 
-			if(drPrimaryCount == 0 && drSecondaryCount == 0) {
+			if(drPrimaryTags.size() == 0 && drSecondaryTags.size() == 0) {
 				outputString += format("%d", 0);
 			}
 			else {
-				if(drPrimaryCount > 0) {
-					outputString += format("%d as primary", drPrimaryCount);
-					if(drSecondaryCount > 0) {
+				if(drPrimaryTags.size() > 0) {
+					outputString += format("%d as primary", drPrimaryTags.size());
+					if(drSecondaryTags.size() > 0) {
 						outputString += ", ";
 					}
 				}
-				if(drSecondaryCount > 0) {
-					outputString += format("%d as secondary", drSecondaryCount);
+				if(drSecondaryTags.size() > 0) {
+					outputString += format("%d as secondary", drSecondaryTags.size());
 				}		
 			}
 
 			// status details
 			if (level == StatusClient::DETAILED) {
-				outputString += logBackupDR("Running backup tags", backupCount, backupTags);
-				outputString += logBackupDR("Running DR tags (as primary)", drPrimaryCount, drPrimaryTags);
-				outputString += logBackupDR("Running DR tags (as secondary)", drSecondaryCount, drSecondaryTags);
+				outputString += logBackupDR("Running backup tags", backupTags);
+				outputString += logBackupDR("Running DR tags (as primary)", drPrimaryTags);
+				outputString += logBackupDR("Running DR tags (as secondary)", drSecondaryTags);
 
 				outputString += "\n\nProcess performance details:";
 				outputStringCache = outputString;
