@@ -145,6 +145,10 @@ class Versionstamp(object):
         self.tr_version = tr_version
         self.user_version = user_version
 
+    @staticmethod
+    def incomplete(user_version=0):
+        return Versionstamp(user_version=user_version)
+
     @classmethod
     def from_bytes(cls, v, start=0):
         if not isinstance(v, bytes):
@@ -212,7 +216,7 @@ class Versionstamp(object):
             return hash(self.tr_version) * 37 ^ hash(self.user_version)
 
     def __nonzero__(self):
-        return bool(self.tr_version) or bool(self.user_version)
+        return self.is_complete()
 
 def _decode(v, pos):
     code = six.indexbytes(v, pos)

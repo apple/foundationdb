@@ -95,11 +95,11 @@ class RandomGenerator(object):
                     tup.append(self.random_tuple(length))
             elif choice == 'versionstamp':
                 if incomplete_versionstamps and random.random() < 0.5:
-                    commit_version = fdb.tuple.Versionstamp._UNSET_TR_VERSION
+                    tr_version = fdb.tuple.Versionstamp._UNSET_TR_VERSION
                 else:
-                    commit_version = self.random_string(10)
+                    tr_version = self.random_string(10)
                 user_version = random.randint(0, 0xffff)
-                tup.append(fdb.tuple.Versionstamp(commit_version, user_version))
+                tup.append(fdb.tuple.Versionstamp(tr_version, user_version))
             else:
                 assert false
 
