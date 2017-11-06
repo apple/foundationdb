@@ -2933,9 +2933,9 @@ namespace fileBackup {
 
 			// Use high priority for dispatch tasks that have to queue more blocks for the current batch
 			unsigned int priority = (remainingInBatch > 0) ? 1 : 0;
- 			state Reference<Task> task(new Task(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority));
+			state Reference<Task> task(new Task(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority));
 
- 			// Create a config from the parent task and bind it to the new task
+			// Create a config from the parent task and bind it to the new task
 			Void _ = wait(RestoreConfig(parentTask).toTask(tr, task));
 			Params.beginVersion().set(task, beginVersion);
 			Params.batchSize().set(task, batchSize);
@@ -3013,7 +3013,7 @@ namespace fileBackup {
 		return ERestoreState::ABORTED;
 	}
 
- 	struct StartFullRestoreTaskFunc : TaskFuncBase {
+	struct StartFullRestoreTaskFunc : TaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
 
