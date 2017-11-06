@@ -617,6 +617,41 @@ std::string getWorkloadRates(StatusObjectReader statusObj, bool unknown, std::st
 	return "unknown";
 }
 
+void getBackupDRTags(StatusObjectReader &statusObjCluster, const char *context, std::map<std::string, std::string> &tagMap) {
+	std::string path = format("layers.%s.tags", context);
+	StatusObjectReader tags;
+	if(statusObjCluster.tryGet(path, tags)) {
+		for(auto itr : tags.obj()) {
+			JSONDoc tag(itr.second);
+			bool running = false;
+			if(tag.tryGet("running_backup", running)) {
+				std::string uid;
+				if(tag.tryGet("mutation_stream_id", uid)) {
+					tagMap[itr.first] = uid;
+				}
+				else {
+					tagMap[itr.first] = "";
+				}
+			}
+		}
+	}
+}
+
+std::string logBackupDR(const char *context, std::map<std::string, std::string> const& tagMap) {
+	std::string outputString = "";
+	if(tagMap.size() > 0) {
+		outputString += format("\n\n%s:", context);
+		for(auto itr : tagMap) {
+			outputString += format("\n  %-22s", itr.first.c_str());
+			if(itr.second.size() > 0) {
+				outputString += format(" - %s", itr.second.c_str());
+			}
+		}
+	}
+
+	return outputString;
+}
+
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
 	try {
 		bool printedCoordinators = false;
@@ -1151,8 +1186,42 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += "\n  Unable to retrieve workload status";
 			}
 
+			// Backup and DR section
+			outputString += "\n\nBackup and DR:";
+
+			std::map<std::string, std::string> backupTags;
+			getBackupDRTags(statusObjCluster, "backup", backupTags);
+
+			std::map<std::string, std::string> drPrimaryTags;
+			getBackupDRTags(statusObjCluster, "dr_backup", drPrimaryTags);
+
+			std::map<std::string, std::string> drSecondaryTags;
+			getBackupDRTags(statusObjCluster, "dr_backup_dest", drSecondaryTags);
+
+			outputString += format("\n  Running backups        - %d", backupTags.size());
+			outputString += format("\n  Running DRs            - ");
+
+			if(drPrimaryTags.size() == 0 && drSecondaryTags.size() == 0) {
+				outputString += format("%d", 0);
+			}
+			else {
+				if(drPrimaryTags.size() > 0) {
+					outputString += format("%d as primary", drPrimaryTags.size());
+					if(drSecondaryTags.size() > 0) {
+						outputString += ", ";
+					}
+				}
+				if(drSecondaryTags.size() > 0) {
+					outputString += format("%d as secondary", drSecondaryTags.size());
+				}		
+			}
+
 			// status details
 			if (level == StatusClient::DETAILED) {
+				outputString += logBackupDR("Running backup tags", backupTags);
+				outputString += logBackupDR("Running DR tags (as primary)", drPrimaryTags);
+				outputString += logBackupDR("Running DR tags (as secondary)", drSecondaryTags);
+
 				outputString += "\n\nProcess performance details:";
 				outputStringCache = outputString;
 				try {
