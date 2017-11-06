@@ -643,9 +643,9 @@ std::string logBackupDR(const char *context, int tagCount, std::map<std::string,
 	if(tagCount > 0) {
 		outputString += format("\n\n%s:", context);
 		for(auto itr : tagMap) {
-			outputString += format("\n  %21s", itr.first.c_str());
+			outputString += format("\n  %-22s", itr.first.c_str());
 			if(itr.second.size() > 0) {
-				outputString += format("\n - %s", itr.second.c_str());
+				outputString += format(" - %s", itr.second.c_str());
 			}
 		}
 	}
