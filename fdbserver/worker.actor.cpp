@@ -329,12 +329,17 @@ void updateCpuProfiler(ProfilerRequest req) {
 }
 
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
-	req.action = ProfilerRequest::Action::ENABLE;
-	updateCpuProfiler(req);
-	Void _ = wait(delay(req.duration));
-	req.action = ProfilerRequest::Action::DISABLE;
-	updateCpuProfiler(req);
-	return Void();
+	if (req.action == ProfilerRequest::Action::RUN) {
+		req.action = ProfilerRequest::Action::ENABLE;
+		updateCpuProfiler(req);
+		Void _ = wait(delay(req.duration));
+		req.action = ProfilerRequest::Action::DISABLE;
+		updateCpuProfiler(req);
+		return Void();
+	} else {
+		updateCpuProfiler(req);
+		return Void();
+	}
 }
 
 ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit ) {
