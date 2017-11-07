@@ -38,7 +38,7 @@ class DirectoryHcaTest(Test):
         self.next_path = 1
 
     def setup(self, args):
-        self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version)
+        self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version, args.types)
         self.transactions = ['tr%d' % i for i in range(3)] # SOMEDAY: parameterize this number?
         self.barrier_num = 0
 

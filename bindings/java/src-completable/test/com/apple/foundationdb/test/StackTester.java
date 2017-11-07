@@ -337,6 +337,28 @@ public class StackTester {
 				//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
 				inst.push(coded);
 			}
+			else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
+				List<Object> params = inst.popParams(2).join();
+				byte[] prefix = (byte[])params.get(0);
+				int tupleSize = StackUtils.getInt(params.get(1));
+				//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
+				Tuple tuple = Tuple.fromItems(inst.popParams(tupleSize).join());
+				if(!tuple.hasIncompleteVersionstamp() && Math.random() < 0.5) {
+					inst.push("ERROR: NONE".getBytes());
+				} else {
+					try {
+						byte[] coded = tuple.packWithVersionstamp(prefix);
+						inst.push("OK".getBytes());
+						inst.push(coded);
+					} catch (IllegalArgumentException e) {
+						if (e.getMessage().startsWith("No incomplete")) {
+							inst.push("ERROR: NONE".getBytes());
+						} else {
+							inst.push("ERROR: MULTIPLE".getBytes());
+						}
+					}
+				}
+			}
 			else if(op == StackOperation.TUPLE_UNPACK) {
 				List<Object> params = inst.popParams(1).join();
 				/*System.out.println(inst.context.preStr + " - " + "Unpacking tuple code: " +
@@ -567,7 +589,7 @@ public class StackTester {
 	private static void logStack(Database db, Map<Integer, StackEntry> entries, byte[] prefix) {
 	    db.run(tr -> {
 			for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
-				byte[] pk = ByteArrayUtil.join(prefix, Tuple.from(it.getKey(), it.getValue().idx).pack());
+				byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
 				byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
 				tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
 			}

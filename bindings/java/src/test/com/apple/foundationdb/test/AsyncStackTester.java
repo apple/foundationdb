@@ -36,7 +36,7 @@ import com.apple.foundationdb.Range;
 import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.async.Function;
 import com.apple.foundationdb.async.Future;
 import com.apple.foundationdb.async.ReadyFuture;
@@ -306,7 +306,6 @@ public class AsyncStackTester {
 							return inst.readTr.get((byte[])param);
 						}
 					});
-
 					inst.push(f);
 					return ReadyFuture.DONE;
 				}
@@ -443,19 +442,21 @@ public class AsyncStackTester {
 					boolean filteredError = errorCode == 1102;
 
 					FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
-
-					Future<Void> f = inst.tr.onError(err)
+					final Transaction oldTr = inst.tr;
+					Future<Void> f = oldTr.onError(err)
 						.map(new Function<Transaction, Void>() {
 							@Override
 							public Void apply(final Transaction tr) {
-								inst.setTransaction(tr);
+								// Replace the context's transaction if it is still using the old one
+								inst.context.updateCurrentTransaction(oldTr, tr);
 								return null;
 							}
 						})
 						.rescueRuntime(new Function<RuntimeException, Future<Void>>() {
 							@Override
 							public Future<Void> apply(RuntimeException ex) {
-								inst.context.newTransaction();
+								// Create a new transaction for the context if it is still using the old one
+								inst.context.newTransaction(oldTr);
 								throw ex;
 							}
 						});
@@ -509,6 +510,41 @@ public class AsyncStackTester {
 							byte[] coded = Tuple.fromItems(elements).pack();
 							//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
 							inst.push(coded);
+							return ReadyFuture.DONE;
+						}
+					});
+				}
+			});
+		}
+		else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
+			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
+				@Override
+				public Future<Void> apply(List<Object> params) {
+					final byte[] prefix = (byte[])params.get(0);
+					int tupleSize = StackUtils.getInt(params.get(1));
+					//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
+					return inst.popParams(tupleSize).flatMap(new Function<List<Object>, Future<Void>>() {
+						@Override
+						public Future<Void> apply(List<Object> elements) {
+							Tuple tuple = Tuple.fromItems(elements);
+							if(!tuple.hasIncompleteVersionstamp() && Math.random() < 0.5) {
+								inst.push("ERROR: NONE".getBytes());
+								return ReadyFuture.DONE;
+							}
+							try {
+								byte[] coded = tuple.packWithVersionstamp(prefix);
+								//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
+								inst.push("OK".getBytes());
+								inst.push(coded);
+							} catch(IllegalArgumentException e) {
+								//System.out.println(inst.context.preStr + " - " + " -> result '" + e.getMessage() + "'");
+								if(e.getMessage().startsWith("No incomplete"))
+									inst.push("ERROR: NONE".getBytes());
+								else if(e.getMessage().startsWith("Multiple incomplete"))
+									inst.push("ERROR: MULTIPLE".getBytes());
+								else
+									throw e;
+							}
 							return ReadyFuture.DONE;
 						}
 					});
@@ -709,7 +745,6 @@ public class AsyncStackTester {
 					}
 				});
 			}
-
 		}
 
 		return logStack(inst.context.db, entries, prefix);
@@ -720,7 +755,7 @@ public class AsyncStackTester {
 			@Override
 			public Future<Void> apply(Transaction tr) {
 				for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
-					byte[] pk = ByteArrayUtil.join(prefix, Tuple.from(it.getKey(), it.getValue().idx).pack());
+					byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
 					byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
 					tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
 				}

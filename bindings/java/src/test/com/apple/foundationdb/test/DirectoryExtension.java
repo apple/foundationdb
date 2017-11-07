@@ -30,7 +30,6 @@ import com.apple.foundationdb.directory.Directory;
 import com.apple.foundationdb.directory.DirectoryLayer;
 import com.apple.foundationdb.directory.DirectorySubspace;
 import com.apple.foundationdb.subspace.Subspace;
-import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
 class DirectoryExtension {
@@ -193,7 +192,7 @@ class DirectoryExtension {
 			}
 			else if(op == DirectoryOperation.DIRECTORY_LOG_SUBSPACE) {
 				final byte[] prefix = (byte[])inst.popParam().get();
-				inst.tr.set(ByteArrayUtil.join(prefix, new Tuple().add(dirIndex).pack()), subspace().getKey());
+				inst.tr.set(Tuple.from(dirIndex).pack(prefix), subspace().getKey());
 			}
 			else if(op == DirectoryOperation.DIRECTORY_LOG_DIRECTORY) {
 				final byte[] prefix = (byte[])inst.popParam().get();

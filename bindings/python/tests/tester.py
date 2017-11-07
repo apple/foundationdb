@@ -455,6 +455,22 @@ class Tester:
                     count = inst.pop()
                     items = inst.pop(count)
                     inst.push(fdb.tuple.pack(tuple(items)))
+                elif inst.op == six.u("TUPLE_PACK_WITH_VERSIONSTAMP"):
+                    prefix = inst.pop()
+                    count = inst.pop()
+                    items = inst.pop(count)
+                    if not fdb.tuple.has_incomplete_versionstamp(items) and random.random() < 0.5:
+                        inst.push(b"ERROR: NONE")
+                    else:
+                        try:
+                            packed = fdb.tuple.pack_with_versionstamp(tuple(items), prefix=prefix)
+                            inst.push(b"OK")
+                            inst.push(packed)
+                        except ValueError as e:
+                            if str(e).startswith("No incomplete"):
+                                inst.push(b"ERROR: NONE")
+                            else:
+                                inst.push(b"ERROR: MULTIPLE")
                 elif inst.op == six.u("TUPLE_UNPACK"):
                     for i in fdb.tuple.unpack( inst.pop() ):
                         inst.push(fdb.tuple.pack((i,)))
