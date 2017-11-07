@@ -158,15 +158,16 @@ class TupleUtil {
 	}
 
 	static EncodeResult encode(Object t, boolean nested, List<byte[]> encoded) {
-		if(t == null)
-			if (nested) {
+		if(t == null) {
+			if(nested) {
 				encoded.add(NULL_ESCAPED_ARR);
-				return new EncodeResult(NULL_ESCAPED_ARR.length,-1);
+				return new EncodeResult(NULL_ESCAPED_ARR.length, -1);
 			}
 			else {
 				encoded.add(NULL_ARR);
 				return new EncodeResult(NULL_ARR.length, -1);
 			}
+		}
 		if(t instanceof byte[])
 			return encode((byte[]) t, encoded);
 		if(t instanceof String)
