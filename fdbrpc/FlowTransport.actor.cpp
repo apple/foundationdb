@@ -177,6 +177,7 @@ public:
 	Int64MetricHandle countConnClosedWithoutError;
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
+	uint32_t num_outgoing_incompatible_connections;
 	std::map<uint64_t, double> multiVersionConnections;
 	double lastIncompatibleMessage;
 	uint64_t transportId;
@@ -411,6 +412,8 @@ struct Peer : NonCopyable {
 					TraceEvent(ok ? SevInfo : SevError, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 				}
 				else {
+					ASSERT(self->transport->num_outgoing_incompatible_connections > 0);
+					self->transport->num_outgoing_incompatible_connections--;
 					TraceEvent(ok ? SevInfo : SevError, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 				}
 
@@ -651,6 +654,8 @@ ACTOR static Future<Void> connectionReader(
 						// Outgoing connection; port information should be what we expect
 						TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
 						peer->compatible = compatible;
+						if (!compatible)
+							peer->transport->num_outgoing_incompatible_connections++;
 						ASSERT( p->canonicalRemotePort == peerAddress.port );
 					} else {
 						if (p->canonicalRemotePort) {
@@ -933,6 +938,10 @@ void FlowTransport::sendUnreliable( ISerializeSource const& what, const Endpoint
 
 int FlowTransport::getEndpointCount() { 
 	return -1; 
+}
+
+bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
+	return self->num_outgoing_incompatible_connections;
 }
 
 void FlowTransport::createInstance( uint64_t transportId )

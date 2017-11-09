@@ -653,6 +653,10 @@ std::string logBackupDR(const char *context, std::map<std::string, std::string> 
 }
 
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
+	if (FlowTransport::transport().incompatibleOutgoingConnectionsPresent()) {
+		printf("WARNING: Incompatible peers exist.\n\n");
+	}
+
 	try {
 		bool printedCoordinators = false;
 
