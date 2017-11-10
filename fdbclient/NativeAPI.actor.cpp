@@ -480,8 +480,6 @@ DatabaseContext::DatabaseContext(
 ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface, Standalone<StringRef> dbName,
 	Reference<ClusterConnectionFile> ccf, Reference<AsyncVar<ClientDBInfo>> outInfo ) 
 {
-	state double badClusterFileStartTime = 0;
-	state bool unableToWriteClusterFile = false;
 	try {
 		loop {
 			OpenDatabaseRequest req;
@@ -492,29 +490,12 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 
 			ClusterConnectionString fileConnectionString;
 			if (ccf && !ccf->fileContentsUpToDate(fileConnectionString)) {
-				if(!ccf->canGetFilename()) {
-					unableToWriteClusterFile = true;
-				}
-				else if(badClusterFileStartTime == 0) {
-					badClusterFileStartTime = now();
-				}
-				else if(now()-badClusterFileStartTime > CLIENT_KNOBS->CLUSTER_FILE_REWRITE_DELAY) {
+				req.issues = LiteralStringRef("unable_to_write_cluster_file");
+				if(ccf->canGetFilename()) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContents").detail("Filename", ccf->getFilename())
 						.detail("ConnectionStringFromFile", fileConnectionString.toString())
 						.detail("CurrentConnectionString", ccf->getConnectionString().toString());
-
-					if(!unableToWriteClusterFile) {
-						unableToWriteClusterFile = !ccf->writeFile();
-					}
 				}
-			}
-			else {
-				badClusterFileStartTime = 0;
-				unableToWriteClusterFile = false;
-			}
-
-			if(unableToWriteClusterFile) {
-				req.issues = LiteralStringRef("unable_to_write_cluster_file");
 			}
 
 			choose {
