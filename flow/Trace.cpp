@@ -869,6 +869,7 @@ TraceEvent::~TraceEvent() {
 				if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t *)type, strlen(type)))) {
 					TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
 					// Throttle Msg
+					delete tmpEventMetric;
 					return;
 				}
 				else {
