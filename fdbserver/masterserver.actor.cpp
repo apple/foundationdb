@@ -954,6 +954,37 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 	}
 }
 
+ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
+	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state Future<Standalone<RangeResultRef>> fresults = tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY );
+				Void _ = wait( success(fresults) ); 
+				Standalone<RangeResultRef> results = fresults.get();
+				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
+
+				DatabaseConfiguration conf;
+				conf.fromKeyValues((VectorRef<KeyValueRef>) results);
+				if(conf != self->configuration) {
+					self->configuration = conf;
+					self->registrationTrigger.trigger();
+				}
+
+				state Future<Void> watchFuture = tr.watch(excludedServersVersionKey);
+				Void _ = wait(tr.commit());
+				Void _ = wait(watchFuture);
+				break;
+			} catch (Error& e) {
+				Void _ = wait( tr.onError(e) );
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<Void>> addActor )
 {
 	state TraceInterval recoveryInterval("MasterRecovery");
@@ -1073,6 +1104,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	state Future<Void> resolverFailure = waitResolverFailure( self->resolvers );
 	state Future<Void> proxyFailure = waitProxyFailure( self->proxies );
 	state Future<Void> providingVersions = provideVersions(self);
+	state Future<Void> configMonitor = configurationMonitor( self );
 
 	addActor.send( reportErrors(updateRegistration(self, self->logSystem), "updateRegistration", self->dbgid) );
 	self->registrationTrigger.trigger();
@@ -1156,7 +1188,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 		when( Void _ = wait( tlogFailure ) ) { throw internal_error(); }
 		when( Void _ = wait( proxyFailure ) ) { throw internal_error(); }
 		when( Void _ = wait( resolverFailure ) ) { throw internal_error(); }
-		when (Void _ = wait(providingVersions)) { throw internal_error(); }
+		when( Void _ = wait( providingVersions ) ) { throw internal_error(); }
+		when( Void _ = wait( configMonitor ) ) { throw internal_error(); }
 	}
 }
 

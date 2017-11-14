@@ -112,20 +112,34 @@ struct RecruitStorageRequest {
 	}
 };
 
+struct RegisterWorkerReply {
+	ProcessClass processClass;
+	bool isExcluded;
+
+	RegisterWorkerReply() {}
+	RegisterWorkerReply(ProcessClass processClass, bool isExcluded) : processClass(processClass), isExcluded(isExcluded) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		ar & processClass & isExcluded;
+	}
+};
+
 struct RegisterWorkerRequest {
 	WorkerInterface wi;
 	ProcessClass processClass;
 	ProcessClass initialClass;
+	bool isExcluded;
 	Generation generation;
-	ReplyPromise<ProcessClass> reply;
+	ReplyPromise<RegisterWorkerReply> reply;
 
 	RegisterWorkerRequest() {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, Generation generation) : 
-	wi(wi), initialClass(initialClass), processClass(processClass), generation(generation) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, bool isExcluded, Generation generation) : 
+	wi(wi), initialClass(initialClass), processClass(processClass), isExcluded(isExcluded), generation(generation) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & wi & initialClass & processClass & generation & reply;
+		ar & wi & initialClass & processClass & isExcluded & generation & reply;
 	}
 };
 
