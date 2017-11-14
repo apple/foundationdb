@@ -278,22 +278,6 @@ public:
 				fitness_workers[ fitness ].push_back(std::make_pair(it.second.interf, it.second.processClass));
 			}
 			else {
-				if (it.second.interf.locality.dataHallId().present())
-					TraceEvent(SevWarn,"GWFTADNotAvailable", functionId)
-						.detail("Fitness", fitness)
-						.detailext("Zone", it.second.interf.locality.zoneId())
-						.detailext("DataHall", it.second.interf.locality.dataHallId())
-						.detail("Address", it.second.interf.address())
-						.detail("workerAvailable", workerAvailable(it.second, checkStable))
-						.detail("isExcludedServer", conf.isExcludedServer(it.second.interf.address()))
-						.detail("checkStable", checkStable)
-						.detail("reboots", it.second.reboots)
-						.detail("isAvailable", IFailureMonitor::failureMonitor().getState(it.second.interf.storage.getEndpoint()).isAvailable())
-						.detail("Locality", it.second.interf.locality.toString())
-						.detail("tLogReplicationFactor", conf.tLogReplicationFactor)
-						.detail("tLogPolicy", conf.tLogPolicy ? conf.tLogPolicy->info() : "[unset]")
-						.detail("DesiredLogs", conf.getDesiredLogs())
-						.detail("InterfaceId", id);
 				unavailableLocals.push_back(it.second.interf.locality);
 			}
 		}
@@ -941,7 +925,6 @@ ACTOR Future<Void> clusterGetServerInfo(
 
 	removeIssue( db->workersWithIssues, reply.getEndpoint().address, issues, issueID );
 
-	TraceEvent("SendingServerInfo").detail("Dest", reply.getEndpoint().address );
 	reply.send( db->serverInfo->get() );
 	return Void();
 }
