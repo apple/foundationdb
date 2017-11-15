@@ -107,6 +107,8 @@ public:
 	int getEndpointCount();
 	// for tracing only
 
+	bool incompatibleOutgoingConnectionsPresent();
+
 	static FlowTransport& transport() { return *static_cast<FlowTransport*>((void*) g_network->global(INetwork::enFlowTransport)); }
 	static NetworkAddress getGlobalLocalAddress() { return transport().getLocalAddress(); }
 
