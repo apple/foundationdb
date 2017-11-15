@@ -177,7 +177,7 @@ public:
 	Int64MetricHandle countConnClosedWithoutError;
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
-	uint32_t num_incompatible_connections;
+	uint32_t numIncompatibleConnections;
 	std::map<uint64_t, double> multiVersionConnections;
 	double lastIncompatibleMessage;
 	uint64_t transportId;
@@ -653,7 +653,7 @@ ACTOR static Future<Void> connectionReader(
 							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
 							peer->compatible = compatible;
 							if (!compatible)
-								peer->transport->num_incompatible_connections++;
+								peer->transport->numIncompatibleConnections++;
 							ASSERT( p->canonicalRemotePort == peerAddress.port );
 						} else {
 							if (p->canonicalRemotePort) {
@@ -662,7 +662,7 @@ ACTOR static Future<Void> connectionReader(
 							peer = transport->getPeer(peerAddress);
 							peer->compatible = compatible;
 							if (!compatible)
-								peer->transport->num_incompatible_connections++;
+								peer->transport->numIncompatibleConnections++;
 							onConnected.send( peer );
 							Void _ = wait( delay(0) );  // Check for cancellation
 						}
@@ -688,8 +688,8 @@ ACTOR static Future<Void> connectionReader(
 	}
 	catch (Error& e) {
 		if (peer && !peer->compatible) {
-			ASSERT(peer->transport->num_incompatible_connections > 0);
-			peer->transport->num_incompatible_connections--;
+			ASSERT(peer->transport->numIncompatibleConnections > 0);
+			peer->transport->numIncompatibleConnections--;
 		}
 		throw;
 	}
@@ -949,7 +949,7 @@ int FlowTransport::getEndpointCount() {
 }
 
 bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
-	return self->num_incompatible_connections;
+	return self->numIncompatibleConnections;
 }
 
 void FlowTransport::createInstance( uint64_t transportId )
