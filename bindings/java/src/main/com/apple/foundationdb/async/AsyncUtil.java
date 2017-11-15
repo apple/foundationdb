@@ -99,6 +99,13 @@ public class AsyncUtil {
 		Future<Void> complete = whileTrue(condition);
 		Future<List<V>> result = tag(complete, accumulator);
 
+		result.onReady(new Runnable() {
+			@Override
+			public void run() {
+				it.dispose();
+			}
+		});
+
 		return result;
 	}
 

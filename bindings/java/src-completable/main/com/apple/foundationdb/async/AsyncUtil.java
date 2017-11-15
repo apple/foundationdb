@@ -100,7 +100,7 @@ public class AsyncUtil {
 		CompletableFuture<Void> complete = whileTrue(condition, executor);
 		CompletableFuture<List<V>> result = tag(complete, accumulator);
 
-		return result;
+		return result.whenComplete((v, t) -> it.dispose());
 	}
 
 	/**

@@ -842,7 +842,7 @@ public class DirectoryLayer implements Directory
 		tr.clear(Range.startsWith(nodeSubspace.unpack(node.getKey()).getBytes(0)));
 		tr.clear(node.range());
 
-		return AsyncUtil.whileTrue(new Function<Void, Future<Boolean>>() {
+		Future<Void> result = AsyncUtil.whileTrue(new Function<Void, Future<Boolean>>() {
 			@Override
 			public Future<Boolean> apply(Void ignore) {
 				Future<Void> subdirRemoveFuture;
@@ -860,6 +860,15 @@ public class DirectoryLayer implements Directory
 				});
 			}
 		});
+
+		result.onReady(new Runnable() {
+			@Override
+			public void run() {
+				rangeItr.dispose();
+			}
+		});
+
+		return result;
 	}
 
 	private Future<Boolean> isPrefixFree(final ReadTransaction tr, final byte[] prefix) {
@@ -876,14 +885,23 @@ public class DirectoryLayer implements Directory
 				if(node != null)
 					return new ReadyFuture<Boolean>(false);
 
-				AsyncIterator<KeyValue> it = tr.getRange(nodeSubspace.pack(prefix), nodeSubspace.pack(ByteArrayUtil.strinc(prefix)), 1).iterator();
-				return it.onHasNext()
+				final AsyncIterator<KeyValue> it = tr.getRange(nodeSubspace.pack(prefix), nodeSubspace.pack(ByteArrayUtil.strinc(prefix)), 1).iterator();
+				Future<Boolean> result = it.onHasNext()
 				.map(new Function<Boolean, Boolean>() {
 					@Override
 					public Boolean apply(Boolean hasNext) {
 						return !hasNext;
 					}
 				});
+
+				result.onReady(new Runnable() {
+					@Override
+					public void run() {
+						it.dispose();
+					}
+				});
+
+				return result;
 			}
 		});
 	}
@@ -1274,7 +1292,7 @@ public class DirectoryLayer implements Directory
 				@Override
 				public Future<Boolean> apply(Void ignore) {
 					final AsyncIterator<KeyValue> rangeItr = tr.snapshot().getRange(allocator.counters.range(), 1, true).iterator();
-					return rangeItr.onHasNext()
+					Future<Boolean> result = rangeItr.onHasNext()
 					.map(new Function<Boolean, Void>() {
 						@Override
 						public Void apply(Boolean hasNext) {
@@ -1298,6 +1316,15 @@ public class DirectoryLayer implements Directory
 							return choosePrefix(tr, allocator); // false exits the loop (i.e. we have a valid prefix)
 						}
 					});
+
+					result.onReady(new Runnable() {
+						@Override
+						public void run() {
+							rangeItr.dispose();
+						}
+					});
+
+					return result;
 				}
 			})
 			.map(new Function<Void, byte[]>() {

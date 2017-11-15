@@ -168,6 +168,7 @@ public class LocalityUtil {
 				}
 				lastBegin = begin;
 				tr.options().setReadSystemKeys();
+				block.dispose();
 				block = tr.getRange(
 						keyServersForKey(begin),
 						keyServersForKey(end)).iterator();
@@ -185,8 +186,7 @@ public class LocalityUtil {
 						FDBException err = (FDBException) o;
 						if(err.getCode() == 1007 && !Arrays.equals(begin, lastBegin)) {
 							BoundaryIterator.this.tr.dispose();
-							BoundaryIterator.this.tr =
-									BoundaryIterator.this.tr.getDatabase().createTransaction();
+							BoundaryIterator.this.tr = BoundaryIterator.this.tr.getDatabase().createTransaction();
 							return restartGet();
 						}
 					}
@@ -228,6 +228,7 @@ public class LocalityUtil {
 			@Override
 			public void dispose() {
 				BoundaryIterator.this.tr.dispose();
+				block.dispose();
 			}
 		}
 	}

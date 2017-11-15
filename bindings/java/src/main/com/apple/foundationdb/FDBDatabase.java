@@ -121,7 +121,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	public <T> Future<T> runAsync(final Function<? super Transaction, Future<T>> retryable, Executor e) {
 		final AtomicReference<Transaction> trRef = new AtomicReference<Transaction>(createTransaction(e));
 		final AtomicReference<T> returnValue = new AtomicReference<T>();
-		return AsyncUtil.whileTrue(new Function<Void, Future<Boolean>>() {
+		Future<T> result = AsyncUtil.whileTrue(new Function<Void, Future<Boolean>>() {
 			@Override
 			public Future<Boolean> apply(Void v) {
 				Future<T> process = AsyncUtil.applySafely(retryable, trRef.get());
@@ -153,10 +153,18 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 		}).map(new Function<Void, T>(){
 			@Override
 			public T apply(Void o) {
-				trRef.get().dispose();
 				return returnValue.get();
 			}
 		});
+
+		result.onReady(new Runnable() {
+			@Override
+			public void run() {
+				trRef.get().dispose();
+			}
+		});
+
+		return result;
 	}
 
 	@Override
@@ -180,7 +188,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	public <T> PartialFuture<T> runAsync(final PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable, Executor e) {
 		final AtomicReference<Transaction> trRef = new AtomicReference<Transaction>(createTransaction());
 		final AtomicReference<T> returnValue = new AtomicReference<T>();
-		return AsyncUtil.whileTrue(new Function<Void, PartialFuture<Boolean>>() {
+		PartialFuture<T> result = AsyncUtil.whileTrue(new Function<Void, PartialFuture<Boolean>>() {
 			@Override
 			public PartialFuture<Boolean> apply(Void v) {
 				PartialFuture<T> process = AsyncUtil.applySafely(retryable, trRef.get());
@@ -209,13 +217,21 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 					}
 				});
 			}
-		}).map(new Function<Void, T>(){
+		}).map(new Function<Void, T>() {
 			@Override
 			public T apply(Void o) {
-				trRef.get().dispose();
 				return returnValue.get();
 			}
 		});
+
+		result.onReady(new Runnable() {
+			@Override
+			public void run() {
+				trRef.get().dispose();
+			}
+		});
+
+		return result;
 	}
 
 	@Override
@@ -244,11 +260,16 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	@Override
 	public Transaction createTransaction(Executor e) {
 		pointerReadLock.lock();
+		Transaction tr = null;
 		try {
-			Transaction tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e);
+			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e);
 			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;
 		} finally {
+			if(tr != null) {
+				tr.dispose();
+			}
+
 			pointerReadLock.unlock();
 		}
 	}

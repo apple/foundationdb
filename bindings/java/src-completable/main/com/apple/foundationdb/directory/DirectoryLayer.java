@@ -748,7 +748,8 @@ public class DirectoryLayer implements Directory
 					}
 				}, tr.getExecutor());
 			}
-		}, tr.getExecutor());
+		}, tr.getExecutor())
+		.whenComplete((v, t) -> rangeItr.dispose());
 	}
 
 	private CompletableFuture<Boolean> isPrefixFree(final ReadTransaction tr, final byte[] prefix) {
@@ -767,14 +768,15 @@ public class DirectoryLayer implements Directory
 					//return new ReadyFuture<Boolean>(false);
 					return CompletableFuture.completedFuture(false);
 
-				AsyncIterator<KeyValue> it = tr.getRange(nodeSubspace.pack(prefix), nodeSubspace.pack(ByteArrayUtil.strinc(prefix)), 1).iterator();
+				final AsyncIterator<KeyValue> it = tr.getRange(nodeSubspace.pack(prefix), nodeSubspace.pack(ByteArrayUtil.strinc(prefix)), 1).iterator();
 				return it.onHasNext()
 				.thenApply(new Function<Boolean, Boolean>() {
 					@Override
 					public Boolean apply(Boolean hasNext) {
 						return !hasNext;
 					}
-				});
+				})
+				.whenComplete((v, t) -> it.dispose());
 			}
 		}, tr.getExecutor());
 	}
@@ -1180,6 +1182,7 @@ public class DirectoryLayer implements Directory
 							return null;
 						}
 					})
+					.whenComplete((v, t) -> rangeItr.dispose())
 					.thenComposeAsync(new Function<Void, CompletableFuture<Void>>() {
 						@Override
 						public CompletableFuture<Void> apply(Void ignore) {
