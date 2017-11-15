@@ -235,7 +235,6 @@ public:
 	//Ratekeeper
 	double SMOOTHING_AMOUNT;
 	double SLOW_SMOOTHING_AMOUNT;
-	double RATEKEEPER_LOGGING_INTERVAL;
 	double METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
 
