@@ -957,6 +957,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<Void>> addActor )
 {
 	state TraceInterval recoveryInterval("MasterRecovery");
+	state double recoverStartTime = now();
 
 	addActor.send( waitFailureServer(self->myInterface.waitFailure.getFuture()) );
 
@@ -1128,10 +1129,17 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	TraceEvent(recoveryInterval.end(), self->dbgid).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
 	self->recoveryState = RecoveryState::FULLY_RECOVERED;
+	double recoveryDuration = now() - recoverStartTime;
+
+	TraceEvent(recoveryDuration > 4 ? SevWarnAlways : SevInfo, "MasterRecoveryDuration", self->dbgid)
+		.detail("recoveryDuration", recoveryDuration)
+		.trackLatest("MasterRecoveryDuration");
+
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::fully_recovered)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
 		.detail("storeType", self->configuration.storageServerStoreType)
+		.detail("recoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");
 
 	// Now that recovery is complete, we register ourselves with the cluster controller, so that the client and server information
