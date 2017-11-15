@@ -77,10 +77,12 @@ struct CpuProfilerWorkload : TestWorkload
 			for(i = 0; i < self->profilingWorkers.size(); i++)
 			{
 				ProfilerRequest req;
+				req.type = ProfilerRequest::Type::FLOW;
 				req.action = enabled ? ProfilerRequest::Action::ENABLE : ProfilerRequest::Action::DISABLE;
+				req.duration = 0; //unused
 
 				//The profiler output name will be the ip.port.prof
-				req.outputFile = StringRef(toIPString(self->profilingWorkers[i].address().ip) + "." + format("%d", self->profilingWorkers[i].address().port) + ".prof");
+				req.outputFile = StringRef(toIPString(self->profilingWorkers[i].address().ip) + "." + format("%d", self->profilingWorkers[i].address().port) + ".profile.bin");
 
 				replies.push_back(self->profilingWorkers[i].clientInterface.profiler.tryGetReply(req));
 			}
@@ -96,12 +98,15 @@ struct CpuProfilerWorkload : TestWorkload
 			TraceEvent("DoneSignalingProfiler");
 		}
 
-		//Enable (or disable) the profiler on the current tester
-		ProfilerRequest req;
-		req.action = enabled ? ProfilerRequest::Action::ENABLE : ProfilerRequest::Action::DISABLE;
-		req.outputFile = StringRef(toIPString(g_network->getLocalAddress().ip) + "." + format("%d", g_network->getLocalAddress().port) + ".prof");
-
-		updateCpuProfiler(req);
+		// Profiling the testers is already covered above, as the workers listed include all testers.
+		// TODO(alexmiller): Create role-restricted profiling, and consider restoring the below.
+		// Enable (or disable) the profiler on the current tester
+		// ProfilerRequest req;
+		// req.type = ProfilerRequest::Type::FLOW;
+		// req.action = enabled ? ProfilerRequest::Action::ENABLE : ProfilerRequest::Action::DISABLE;
+		// req.duration = 0; //unused
+		// req.outputFile = StringRef(SERVER_KNOBS->LOG_DIRECTORY + "/" + toIPString(g_network->getLocalAddress().ip) + "." + format("%d", g_network->getLocalAddress().port) + ".profile.local.bin");
+		// updateCpuProfiler(req);
 
 		return Void();
 	}

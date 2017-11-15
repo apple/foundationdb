@@ -28,6 +28,27 @@
 #include "Arena.h"
 #include <algorithm>
 
+// Though similar, is_binary_serializable cannot be replaced by std::is_pod, as doing so would prefer
+// memcpy over a defined serialize() method on a POD struct.  As not all of our structs are packed,
+// this would both inflate message sizes by transmitting padding, and mean that we're transmitting
+// undefined bytes over the wire.
+// A more intelligent SFINAE that does "binarySerialize if POD and no serialize() is defined" could
+// replace the usage of is_binary_serializable.
+template <class T>
+struct is_binary_serializable { enum { value = 0 }; };
+
+#define BINARY_SERIALIZABLE( T ) template<> struct is_binary_serializable<T> { enum { value = 1 }; };
+
+BINARY_SERIALIZABLE( uint8_t );
+BINARY_SERIALIZABLE( int16_t );
+BINARY_SERIALIZABLE( uint16_t );
+BINARY_SERIALIZABLE( int32_t );
+BINARY_SERIALIZABLE( uint32_t );
+BINARY_SERIALIZABLE( int64_t );
+BINARY_SERIALIZABLE( uint64_t );
+BINARY_SERIALIZABLE( bool );
+BINARY_SERIALIZABLE( double );
+
 template <class Archive, class Item>
 inline typename Archive::WRITER& operator << (Archive& ar, const Item& item ) {
 	save(ar, const_cast<Item&>(item));
@@ -88,7 +109,7 @@ inline void save( Archive& ar, const std::string& value ) {
 }
 
 template <class Archive, class T>
-class Serializer< Archive, T, typename std::enable_if< std::is_pod<T>::value >::type> {
+class Serializer< Archive, T, typename std::enable_if< is_binary_serializable<T>::value >::type> {
 public:
 	static void serialize( Archive& ar, T& t ) {
 		ar.serializeBinaryItem(t);

@@ -29,18 +29,19 @@ import fdb
 _size_limits = tuple( (1 << (i*8))-1 for i in range(9) )
 
 # Define type codes:
-NULL_CODE       = 0x00
-BYTES_CODE      = 0x01
-STRING_CODE     = 0x02
-NESTED_CODE     = 0x05
-INT_ZERO_CODE   = 0x14
-POS_INT_END     = 0x1d
-NEG_INT_START   = 0x0b
-FLOAT_CODE      = 0x20
-DOUBLE_CODE     = 0x21
-FALSE_CODE      = 0x26
-TRUE_CODE       = 0x27
-UUID_CODE       = 0x30
+NULL_CODE         = 0x00
+BYTES_CODE        = 0x01
+STRING_CODE       = 0x02
+NESTED_CODE       = 0x05
+INT_ZERO_CODE     = 0x14
+POS_INT_END       = 0x1d
+NEG_INT_START     = 0x0b
+FLOAT_CODE        = 0x20
+DOUBLE_CODE       = 0x21
+FALSE_CODE        = 0x26
+TRUE_CODE         = 0x27
+UUID_CODE         = 0x30
+VERSIONSTAMP_CODE = 0x33
 
 # Reserved: Codes 0x03, 0x04, 0x23, and 0x24 are reserved for historical reasons.
 
@@ -74,7 +75,7 @@ class SingleFloat(object):
         elif isinstance(value, six.integertypes):
             self.value = ctypes.c_float(value).value
         else:
-	        raise ValueError("Incompatible type for single-precision float: " + repr(value))
+            raise ValueError("Incompatible type for single-precision float: " + repr(value))
 
     # Comparisons
     def __eq__(self, other):
@@ -114,6 +115,108 @@ class SingleFloat(object):
 
     def __nonzero__(self):
         return bool(self.value)
+
+class Versionstamp(object):
+    LENGTH = 12
+    _TR_VERSION_LEN = 10
+    _MAX_USER_VERSION = (1 << 16) - 1
+    _UNSET_TR_VERSION = 10 * six.int2byte(0xff)
+    _STRUCT_FORMAT_STRING = '>' + str(_TR_VERSION_LEN) + 'sH'
+
+    @classmethod
+    def validate_tr_version(cls, tr_version):
+        if tr_version is None:
+            return
+        if not isinstance(tr_version, bytes):
+            raise TypeError("Global version has illegal type " + str(type(tr_version)) + " (requires bytes)")
+        elif len(tr_version) != cls._TR_VERSION_LEN:
+            raise ValueError("Global version has incorrect length " + str(len(tr_version)) + " (requires " + str(cls._TR_VERSION_LEN) + ")")
+
+    @classmethod
+    def validate_user_version(cls, user_version):
+        if not isinstance(user_version, six.integer_types):
+            raise TypeError("Local version has illegal type " + str(type(user_version)) + " (requires integer type)")
+        elif user_version < 0 or user_version > cls._MAX_USER_VERSION:
+            raise ValueError("Local version has value " + str(user_version) + " which is out of range")
+
+    def __init__(self, tr_version=None, user_version=0):
+        Versionstamp.validate_tr_version(tr_version)
+        Versionstamp.validate_user_version(user_version)
+        self.tr_version = tr_version
+        self.user_version = user_version
+
+    @staticmethod
+    def incomplete(user_version=0):
+        return Versionstamp(user_version=user_version)
+
+    @classmethod
+    def from_bytes(cls, v, start=0):
+        if not isinstance(v, bytes):
+            raise TypeError("Cannot parse versionstamp from non-byte string")
+        elif len(v) - start < cls.LENGTH:
+            raise ValueError("Versionstamp byte string is too short (only " + str(len(v) - start) + " bytes to read from")
+        else:
+            tr_version = v[start:start + cls._TR_VERSION_LEN]
+            if tr_version == cls._UNSET_TR_VERSION:
+                tr_version = None
+            user_version = six.indexbytes(v, start + cls._TR_VERSION_LEN) * (1 << 8) + six.indexbytes(v, start + cls._TR_VERSION_LEN + 1)
+            return Versionstamp(tr_version, user_version)
+
+    def is_complete(self):
+        return self.tr_version is not None
+
+    def __repr__(self):
+        return "fdb.tuple.Versionstamp(" + repr(self.tr_version) + ", " + repr(self.user_version) + ")"
+
+    def __str__(self):
+        return "Versionstamp(" + repr(self.tr_version) + ", " + str(self.user_version) + ")"
+
+    def to_bytes(self):
+        return struct.pack(self._STRUCT_FORMAT_STRING,
+                           self.tr_version if self.is_complete() else self._UNSET_TR_VERSION,
+                           self.user_version)
+
+    def completed(self, new_tr_version):
+        if self.is_complete():
+            raise RuntimeError("Versionstamp already completed")
+        else:
+            return Versionstamp(new_tr_version, self.user_version)
+
+    # Comparisons
+    def __eq__(self, other):
+        if isinstance(other, Versionstamp):
+            return self.tr_version == other.tr_version and self.user_version == other.user_version
+        else:
+            return False
+
+    def __ne__(self, other):
+        return not (self == other)
+
+    def __cmp__(self, other):
+        if self.is_complete():
+            if other.is_complete():
+                if self.tr_version == other.tr_version:
+                    return cmp(self.user_version, other.user_version)
+                else:
+                    return cmp(self.tr_version, other.tr_version)
+            else:
+                # All complete are less than all incomplete.
+                return -1
+        else:
+            if other.is_complete():
+                # All incomplete are greater than all complete
+                return 1
+            else:
+                return cmp(self.user_version, other.user_version)
+
+    def __hash__(self):
+        if self.tr_version is None:
+            return hash(self.user_version)
+        else:
+            return hash(self.tr_version) * 37 ^ hash(self.user_version)
+
+    def __nonzero__(self):
+        return self.is_complete()
 
 def _decode(v, pos):
     code = six.indexbytes(v, pos)
@@ -161,6 +264,8 @@ def _decode(v, pos):
         if hasattr(fdb, "_version") and fdb._version < 500:
             raise ValueError("Invalid API version " + str(fdb._version) + " for boolean types")
         return True, pos+1
+    elif code == VERSIONSTAMP_CODE:
+        return Versionstamp.from_bytes(v, pos+1), pos + 1 + Versionstamp.LENGTH
     elif code == NESTED_CODE:
         ret = []
         end_pos = pos+1
@@ -178,32 +283,45 @@ def _decode(v, pos):
     else:
         raise ValueError("Unknown data type in DB: " + repr(v))
 
+def _reduce_children(child_values):
+    version_pos = -1
+    len_so_far = 0
+    bytes_list = []
+    for child_bytes, child_pos in child_values:
+        if child_pos >= 0:
+            if version_pos >= 0:
+                raise ValueError("Multiple incomplete versionstamps included in tuple")
+            version_pos = len_so_far + child_pos
+        len_so_far += len(child_bytes)
+        bytes_list.append(child_bytes)
+    return bytes_list, version_pos
+
 def _encode(value, nested=False):
     # returns [code][data] (code != 0xFF)
     # encoded values are self-terminating
     # sorting need to work too!
     if value == None:  # ==, not is, because some fdb.impl.Value are equal to None
         if nested:
-            return b''.join([six.int2byte(NULL_CODE), six.int2byte(0xff)])
+            return b''.join([six.int2byte(NULL_CODE), six.int2byte(0xff)]), -1
         else:
-            return b''.join([six.int2byte(NULL_CODE)])
+            return b''.join([six.int2byte(NULL_CODE)]), -1
     elif isinstance(value, bytes): # also gets non-None fdb.impl.Value
-        return six.int2byte(BYTES_CODE) + value.replace(b'\x00', b'\x00\xFF') + b'\x00'
+        return six.int2byte(BYTES_CODE) + value.replace(b'\x00', b'\x00\xFF') + b'\x00', -1
     elif isinstance(value, six.text_type):
-        return six.int2byte(STRING_CODE) + value.encode('utf-8').replace(b'\x00', b'\x00\xFF') + b'\x00'
+        return six.int2byte(STRING_CODE) + value.encode('utf-8').replace(b'\x00', b'\x00\xFF') + b'\x00', -1
     elif isinstance(value, six.integer_types) and (not isinstance(value, bool) or (hasattr(fdb, '_version') and fdb._version < 500)):
         if value == 0:
-            return b''.join([six.int2byte(INT_ZERO_CODE)])
+            return b''.join([six.int2byte(INT_ZERO_CODE)]), -1
         elif value > 0:
             if value >= _size_limits[-1]:
                 length = (value.bit_length()+7)//8
                 data = [six.int2byte(POS_INT_END), six.int2byte(length)]
                 for i in _range(length-1,-1,-1):
                     data.append(six.int2byte( (value>>(8*i))&0xff ))
-                return b''.join(data)
+                return b''.join(data), -1
 
             n = bisect_left( _size_limits, value )
-            return six.int2byte(INT_ZERO_CODE + n) + struct.pack( ">Q", value )[-n:]
+            return six.int2byte(INT_ZERO_CODE + n) + struct.pack( ">Q", value )[-n:], -1
         else:
             if -value >= _size_limits[-1]:
                 length = (value.bit_length()+7)//8
@@ -211,43 +329,91 @@ def _encode(value, nested=False):
                 data = [six.int2byte(NEG_INT_START), six.int2byte(length^0xff)]
                 for i in _range(length-1,-1,-1):
                     data.append(six.int2byte( (value>>(8*i))&0xff ))
-                return b''.join(data)
+                return b''.join(data), -1
 
             n = bisect_left( _size_limits, -value )
             maxv = _size_limits[n]
-            return six.int2byte(INT_ZERO_CODE - n) + struct.pack( ">Q", maxv+value)[-n:]
+            return six.int2byte(INT_ZERO_CODE - n) + struct.pack( ">Q", maxv+value)[-n:], -1
     elif isinstance(value, ctypes.c_float) or isinstance(value, SingleFloat):
-        return six.int2byte(FLOAT_CODE) + _float_adjust(struct.pack(">f", value.value), True)
+        return six.int2byte(FLOAT_CODE) + _float_adjust(struct.pack(">f", value.value), True), -1
     elif isinstance(value, ctypes.c_double):
-        return six.int2byte(DOUBLE_CODE) + _float_adjust(struct.pack(">d", value.value), True)
+        return six.int2byte(DOUBLE_CODE) + _float_adjust(struct.pack(">d", value.value), True), -1
     elif isinstance(value, float):
-        return six.int2byte(DOUBLE_CODE) + _float_adjust(struct.pack(">d", value), True)
+        return six.int2byte(DOUBLE_CODE) + _float_adjust(struct.pack(">d", value), True), -1
     elif isinstance(value, uuid.UUID):
-        return six.int2byte(UUID_CODE) + value.bytes
+        return six.int2byte(UUID_CODE) + value.bytes, -1
     elif isinstance(value, bool):
         if value:
-            return b''.join([six.int2byte(TRUE_CODE)])
+            return b''.join([six.int2byte(TRUE_CODE)]), -1
         else:
-            return b''.join([six.int2byte(FALSE_CODE)])
+            return b''.join([six.int2byte(FALSE_CODE)]), -1
+    elif isinstance(value, Versionstamp):
+        version_pos = -1 if value.is_complete() else 1
+        return six.int2byte(VERSIONSTAMP_CODE) + value.to_bytes(), version_pos
     elif isinstance(value, tuple) or isinstance(value, list):
-       return b''.join([six.int2byte(NESTED_CODE)] + list(map(lambda x: _encode(x, True), value)) + [six.int2byte(0x00)])
+        child_bytes, version_pos = _reduce_children(map(lambda x: _encode(x, True), value))
+        new_version_pos = -1 if version_pos < 0 else version_pos + 1
+        return b''.join([six.int2byte(NESTED_CODE)] + child_bytes + [six.int2byte(0x00)]), version_pos
     else:
         raise ValueError("Unsupported data type: " + str(type(value)))
 
-# packs the specified tuple into a key
-def pack(t):
+# packs the tuple possibly for versionstamp operations and returns the position of the
+# incomplete versionstamp
+#  * if there are no incomplete versionstamp members, this returns the packed tuple and -1
+#  * if there is exactly one incomplete versionstamp member, it returns the tuple with the
+#    two extra version bytes and the position of the version start
+#  * if there is more than one incomplete versionstamp member, it throws an error
+def _pack_maybe_with_versionstamp(t, prefix=None):
     if not isinstance(t, tuple):
         raise Exception("fdbtuple pack() expects a tuple, got a " + str(type(t)))
-    return b''.join([_encode(x) for x in t])
+
+    bytes_list = [prefix] if prefix is not None else []
+
+    child_bytes, version_pos = _reduce_children(map(_encode, t))
+    if version_pos >= 0:
+        version_pos += len(prefix) if prefix is not None else 0
+        bytes_list.extend(child_bytes)
+        bytes_list.append(struct.pack('<H', version_pos))
+    else:
+        bytes_list.extend(child_bytes)
+
+    return b''.join(bytes_list), version_pos
+
+# packs the specified tuple into a key
+def pack(t, prefix=None):
+    res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
+    if version_pos >= 0:
+        raise ValueError("Incomplete versionstamp included in vanilla tuple pack")
+    return res
+
+# packs the specified tuple into a key for versionstamp operations
+def pack_with_versionstamp(t, prefix=None):
+    res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
+    if version_pos < 0:
+        raise ValueError("No incomplete versionstamp included in tuple pack with versionstamp")
+    return res
 
 # unpacks the specified key into a tuple
-def unpack(key):
-    pos = 0
+def unpack(key, prefix_len=0):
+    pos = prefix_len
     res = []
     while pos < len(key):
         r, pos = _decode(key, pos)
         res.append(r)
     return tuple(res)
+
+# determines if there is at least one incomplete versionstamp in a tuple
+def has_incomplete_versionstamp(t):
+    def _elem_has_incomplete(item):
+        if item is None:
+            return False
+        elif isinstance(item, Versionstamp):
+            return not item.is_complete()
+        elif isinstance(item, tuple) or isinstance(item, list):
+            return has_incomplete_versionstamp(item)
+        else:
+            return False
+    return any(map(_elem_has_incomplete, t))
 
 _range = range
 def range(t):
@@ -282,6 +448,8 @@ def _code_for(value):
         return DOUBLE_CODE
     elif isinstance(value, uuid.UUID):
         return UUID_CODE
+    elif isinstance(value, Versionstamp):
+        return VERSIONSTAMP_CODE
     elif isinstance(value, tuple) or isinstance(value, list):
         return NESTED_CODE
     else:
@@ -334,7 +502,7 @@ def _compare_values(value1, value2):
     elif code1 == NESTED_CODE:
         return compare(value1, value2)
     else:
-        # Booleans, UUIDs, and integers can just use standard comparison.
+        # Booleans, UUIDs, integers, and Versionstamps can just use standard comparison.
         return -1 if value1 < value2 else 0 if value1 == value2 else 1
 
 # compare element by element and return -1 if t1 < t2 or 1 if t1 > t2 or 0 if t1 == t2

@@ -62,7 +62,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 				int limit, boolean reverse, StreamingMode mode) {
-			return new RangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode);
+			return RangeQuery.start(FDBTransaction.this, true, begin, end, limit, reverse, mode);
 		}
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -244,7 +244,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse, StreamingMode mode) {
-		return new RangeQuery(this, false, begin, end, limit, reverse, mode);
+		return RangeQuery.start(this, false, begin, end, limit, reverse, mode);
 	}
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,

@@ -36,10 +36,8 @@ import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
-import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
@@ -413,13 +411,14 @@ public class AsyncStackTester {
 					boolean filteredError = errorCode == 1102 || errorCode == 2015;
 
 					FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
-					CompletableFuture<Void> f = inst.tr.onError(err)
+					final Transaction oldTr = inst.tr;
+					CompletableFuture<Void> f = oldTr.onError(err)
 						.whenComplete((tr, t) -> {
 							if(t != null) {
-								inst.context.newTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
+								inst.context.newTransaction(oldTr); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 							}
 							else {
-								inst.setTransaction(tr);
+								inst.context.updateCurrentTransaction(oldTr, tr);
 							}
 						})
 						.thenApply(v -> null);
@@ -479,6 +478,38 @@ public class AsyncStackTester {
 				}
 			});
 		}
+		else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
+			return inst.popParams(2).thenComposeAsync(new Function<List<Object>, CompletableFuture<Void>>() {
+				@Override
+				public CompletableFuture<Void> apply(List<Object> params) {
+					byte[] prefix = (byte[])params.get(0);
+					int tupleSize = StackUtils.getInt(params.get(1));
+					//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
+					return inst.popParams(tupleSize).thenApplyAsync(new Function<List<Object>, Void>() {
+						@Override
+						public Void apply(List<Object> elements) {
+							Tuple tuple = Tuple.fromItems(elements);
+							if(!tuple.hasIncompleteVersionstamp() && Math.random() < 0.5) {
+								inst.push("ERROR: NONE".getBytes());
+								return null;
+							}
+							try {
+								byte[] coded = tuple.packWithVersionstamp(prefix);
+								inst.push("OK".getBytes());
+								inst.push(coded);
+							} catch(IllegalArgumentException e) {
+								if(e.getMessage().startsWith("No incomplete")) {
+									inst.push("ERROR: NONE".getBytes());
+								} else {
+									inst.push("ERROR: MULTIPLE".getBytes());
+								}
+							}
+							return null;
+						}
+					});
+				}
+			});
+		}
 		else if(op == StackOperation.TUPLE_UNPACK) {
 			return inst.popParam().thenApplyAsync(new Function<Object, Void>() {
 				@Override
@@ -520,7 +551,7 @@ public class AsyncStackTester {
 					return inst.popParams(listSize).thenApply(new Function<List<Object>, Void>() {
 						@Override
 						public Void apply(List<Object> rawElements) {
-							List<Tuple> tuples = new ArrayList(listSize);
+							List<Tuple> tuples = new ArrayList<Tuple>(listSize);
 							for(Object o : rawElements) {
 								tuples.add(Tuple.fromBytes((byte[])o));
 							}
@@ -593,6 +624,8 @@ public class AsyncStackTester {
 				tr.options().setMaxRetryDelay(100);
 				tr.options().setUsedDuringCommitProtectionDisable();
 				tr.options().setTransactionLoggingEnable("my_transaction");
+				tr.options().setReadLockAware();
+				tr.options().setLockAware();
 
 				if(!(new FDBException("Fake", 1020)).isRetryable() ||
 						(new FDBException("Fake", 10)).isRetryable())
@@ -654,20 +687,20 @@ public class AsyncStackTester {
 
 	private static CompletableFuture<Void> logStack(final Database db, final Map<Integer, StackEntry> entries, final byte[] prefix) {
 		return db.runAsync(tr -> {
-            for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
-                byte[] pk = ByteArrayUtil.join(prefix, Tuple.from(it.getKey(), it.getValue().idx).pack());
-                byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
-                tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
-            }
+			for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
+				byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
+				byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
+				tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
+			}
 
-            return CompletableFuture.completedFuture(null);
+			return CompletableFuture.completedFuture(null);
 		});
 	}
 	private static CompletableFuture<Void> logStack(final Instruction inst, final byte[] prefix, int i) {
 		//System.out.println("Logging stack at " + i);
 		while(inst.size() > 0) {
 			StackEntry e = inst.pop();
-			byte[] pk = ByteArrayUtil.join(prefix, Tuple.from(i, e.idx).pack());
+			byte[] pk = Tuple.from(i, e.idx).pack(prefix);
 			byte[] pv = Tuple.from(StackUtils.serializeFuture(e.value)).pack();
 			inst.tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
 			i--;

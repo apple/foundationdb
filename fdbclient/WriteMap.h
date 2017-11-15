@@ -28,11 +28,11 @@
 #include "Atomic.h"
 
 struct RYWMutation {
-	ValueRef value;
+	Optional<ValueRef> value;
 	enum MutationRef::Type type;
 
-	RYWMutation( ValueRef const& entry, MutationRef::Type type ) : value(entry), type(type) {}
-	RYWMutation() : value(ValueRef()), type(MutationRef::NoOp) {}
+	RYWMutation(Optional<ValueRef> const& entry, MutationRef::Type type ) : value(entry), type(type) {}
+	RYWMutation() : value(), type(MutationRef::NoOp) {}
 
 	bool operator == (const RYWMutation& r) const {
 		return value == r.value && type == r.type;
@@ -148,7 +148,7 @@ public:
 		if (it.entry().key != key) {
 			if( it.is_cleared_range() && is_dependent ) {
 				it.tree.clear();
-				OperationStack op( RYWMutation( StringRef(), MutationRef::SetValue ) );
+				OperationStack op( RYWMutation( Optional<StringRef>(), MutationRef::SetValue ) );
 				coalesceOver(op, RYWMutation(param, operation), *arena);
 				PTreeImpl::insert( writes, ver, WriteMapEntry( key, std::move(op), true, following_conflict, is_conflict, following_unreadable, is_unreadable ) );
 			} else {
@@ -165,7 +165,7 @@ public:
 				e.is_conflict = is_conflict;
 				e.is_unreadable = is_unreadable;
 				if (e.stack.size() == 0 && it.is_cleared_range() && is_dependent)  {
-					e.stack.push(RYWMutation(StringRef(), MutationRef::SetValue));
+					e.stack.push(RYWMutation(Optional<StringRef>(), MutationRef::SetValue));
 					coalesceOver(e.stack, RYWMutation(param, operation), *arena);
 				} else if( !is_unreadable && e.stack.size() > 0 )
 					coalesceOver( e.stack, RYWMutation( param, operation ), *arena );
@@ -381,14 +381,16 @@ public:
 	bool empty() const { return writeMapEmpty; }
 
 	static RYWMutation coalesce(RYWMutation existingEntry, RYWMutation newEntry, Arena& arena) {
+		ASSERT(newEntry.value.present());
+
 		if (newEntry.type == MutationRef::SetValue)
 			return newEntry;
 		else if (newEntry.type == MutationRef::AddValue) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
-					return RYWMutation(doLittleEndianAdd(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+					return RYWMutation(doLittleEndianAdd(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
 				case MutationRef::AddValue:
-					return RYWMutation(doLittleEndianAdd(existingEntry.value, newEntry.value, arena), MutationRef::AddValue);
+					return RYWMutation(doLittleEndianAdd(existingEntry.value, newEntry.value.get(), arena), MutationRef::AddValue);
 				default:
 					throw operation_failed();
 			}
@@ -396,9 +398,9 @@ public:
 		else if (newEntry.type == MutationRef::AppendIfFits) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
-					return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+					return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
 				case MutationRef::AppendIfFits:
-					return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value, arena), MutationRef::AppendIfFits);
+					return RYWMutation(doAppendIfFits(existingEntry.value, newEntry.value.get(), arena), MutationRef::AppendIfFits);
 				default:
 					throw operation_failed();
 			}
@@ -406,9 +408,9 @@ public:
 		else if (newEntry.type == MutationRef::And) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
-					return RYWMutation(doAnd(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+					return RYWMutation(doAnd(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
 				case MutationRef::And:
-					return RYWMutation(doAnd(existingEntry.value, newEntry.value, arena), MutationRef::And);
+					return RYWMutation(doAnd(existingEntry.value, newEntry.value.get(), arena), MutationRef::And);
 				default:
 					throw operation_failed();
 			}
@@ -416,9 +418,9 @@ public:
 		else if (newEntry.type == MutationRef::Or) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
-					return RYWMutation(doOr(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+					return RYWMutation(doOr(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
 				case MutationRef::Or:
-					return RYWMutation(doOr(existingEntry.value, newEntry.value, arena), MutationRef::Or);
+					return RYWMutation(doOr(existingEntry.value, newEntry.value.get(), arena), MutationRef::Or);
 				default:
 					throw operation_failed();
 			}
@@ -426,9 +428,9 @@ public:
 		else if (newEntry.type == MutationRef::Xor) {
 			switch(existingEntry.type) {
 				case MutationRef::SetValue:
-					return RYWMutation(doXor(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+					return RYWMutation(doXor(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
 				case MutationRef::Xor:
-					return RYWMutation(doXor(existingEntry.value, newEntry.value, arena), MutationRef::Xor);
+					return RYWMutation(doXor(existingEntry.value, newEntry.value.get(), arena), MutationRef::Xor);
 				default:
 					throw operation_failed();
 			}
@@ -436,9 +438,9 @@ public:
 		else if (newEntry.type == MutationRef::Max) {
 			switch (existingEntry.type) {
 			case MutationRef::SetValue:
-				return RYWMutation(doMax(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+				return RYWMutation(doMax(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
 			case MutationRef::Max:
-				return RYWMutation(doMax(existingEntry.value, newEntry.value, arena), MutationRef::Max);
+				return RYWMutation(doMax(existingEntry.value, newEntry.value.get(), arena), MutationRef::Max);
 			default:
 				throw operation_failed();
 			}
@@ -446,11 +448,51 @@ public:
 		else if (newEntry.type == MutationRef::Min) {
 			switch (existingEntry.type) {
 				case MutationRef::SetValue:
-					return RYWMutation(doMin(existingEntry.value, newEntry.value, arena), MutationRef::SetValue);
+					return RYWMutation(doMin(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
 				case MutationRef::Min:
-					return RYWMutation(doMin(existingEntry.value, newEntry.value, arena), MutationRef::Min);
+					return RYWMutation(doMin(existingEntry.value, newEntry.value.get(), arena), MutationRef::Min);
 				default:
 					throw operation_failed();
+			}
+		}
+		else if (newEntry.type == MutationRef::ByteMin) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				return RYWMutation(doByteMin(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
+			case MutationRef::ByteMin:
+				return RYWMutation(doByteMin(existingEntry.value, newEntry.value.get(), arena), MutationRef::ByteMin);
+			default:
+				throw operation_failed();
+			}
+		}
+		else if (newEntry.type == MutationRef::ByteMax) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				return RYWMutation(doByteMax(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
+			case MutationRef::ByteMax:
+				return RYWMutation(doByteMax(existingEntry.value, newEntry.value.get(), arena), MutationRef::ByteMax);
+			default:
+				throw operation_failed();
+			}
+		}
+		else if (newEntry.type == MutationRef::MinV2) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				return RYWMutation(doMinV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
+			case MutationRef::MinV2:
+				return RYWMutation(doMinV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::MinV2);
+			default:
+				throw operation_failed();
+			}
+		}
+		else if (newEntry.type == MutationRef::AndV2) {
+			switch (existingEntry.type) {
+			case MutationRef::SetValue:
+				return RYWMutation(doAndV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::SetValue);
+			case MutationRef::AndV2:
+				return RYWMutation(doAndV2(existingEntry.value, newEntry.value.get(), arena), MutationRef::AndV2);
+			default:
+				throw operation_failed();
 			}
 		}
 		else throw operation_failed();
@@ -459,7 +501,7 @@ public:
 	static void coalesceOver(OperationStack& stack, RYWMutation newEntry, Arena& arena) {
 		RYWMutation existingEntry = stack.top();
 		if (existingEntry.type == newEntry.type) {
-			if (isNonAssociativeOp(existingEntry.type) && existingEntry.value.size() != newEntry.value.size()) {
+			if (isNonAssociativeOp(existingEntry.type) && existingEntry.value.present() && existingEntry.value.get().size() != newEntry.value.get().size()) {
 				stack.push(newEntry);
 			}
 			else {
@@ -480,7 +522,7 @@ public:
 		if( !stack.isDependent() && stack.size() == 1 )
 			return stack.at(0);
 
-		RYWMutation currentEntry = RYWMutation( value.present() ? value.get() : StringRef(), MutationRef::SetValue);
+		RYWMutation currentEntry = RYWMutation( value, MutationRef::SetValue);
 		for(int i = 0; i < stack.size(); ++i) {
 			currentEntry = coalesce(currentEntry, stack.at(i), arena);
 		}

@@ -617,6 +617,41 @@ std::string getWorkloadRates(StatusObjectReader statusObj, bool unknown, std::st
 	return "unknown";
 }
 
+void getBackupDRTags(StatusObjectReader &statusObjCluster, const char *context, std::map<std::string, std::string> &tagMap) {
+	std::string path = format("layers.%s.tags", context);
+	StatusObjectReader tags;
+	if(statusObjCluster.tryGet(path, tags)) {
+		for(auto itr : tags.obj()) {
+			JSONDoc tag(itr.second);
+			bool running = false;
+			if(tag.tryGet("running_backup", running)) {
+				std::string uid;
+				if(tag.tryGet("mutation_stream_id", uid)) {
+					tagMap[itr.first] = uid;
+				}
+				else {
+					tagMap[itr.first] = "";
+				}
+			}
+		}
+	}
+}
+
+std::string logBackupDR(const char *context, std::map<std::string, std::string> const& tagMap) {
+	std::string outputString = "";
+	if(tagMap.size() > 0) {
+		outputString += format("\n\n%s:", context);
+		for(auto itr : tagMap) {
+			outputString += format("\n  %-22s", itr.first.c_str());
+			if(itr.second.size() > 0) {
+				outputString += format(" - %s", itr.second.c_str());
+			}
+		}
+	}
+
+	return outputString;
+}
+
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
 	try {
 		bool printedCoordinators = false;
@@ -698,6 +733,8 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 								description += format("\nNeed at least %d log servers, %d proxies and %d resolvers.", recoveryState["required_logs"].get_int(), recoveryState["required_proxies"].get_int(), recoveryState["required_resolvers"].get_int());
 								if (statusObjCluster.has("machines") && statusObjCluster.has("processes"))
 									description += format("\nHave %d processes on %d machines.", statusObjCluster["processes"].get_obj().size(), statusObjCluster["machines"].get_obj().size());
+							} else if (name == "locking_old_transaction_servers" && recoveryState["missing_logs"].get_str().size()) {
+								description += format("\nNeed one or more of the following log servers: %s", recoveryState["missing_logs"].get_str().c_str());
 							}
 							description = lineWrap(description.c_str(), 80);
 							if (!printedCoordinators && (
@@ -1149,8 +1186,42 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += "\n  Unable to retrieve workload status";
 			}
 
+			// Backup and DR section
+			outputString += "\n\nBackup and DR:";
+
+			std::map<std::string, std::string> backupTags;
+			getBackupDRTags(statusObjCluster, "backup", backupTags);
+
+			std::map<std::string, std::string> drPrimaryTags;
+			getBackupDRTags(statusObjCluster, "dr_backup", drPrimaryTags);
+
+			std::map<std::string, std::string> drSecondaryTags;
+			getBackupDRTags(statusObjCluster, "dr_backup_dest", drSecondaryTags);
+
+			outputString += format("\n  Running backups        - %d", backupTags.size());
+			outputString += format("\n  Running DRs            - ");
+
+			if(drPrimaryTags.size() == 0 && drSecondaryTags.size() == 0) {
+				outputString += format("%d", 0);
+			}
+			else {
+				if(drPrimaryTags.size() > 0) {
+					outputString += format("%d as primary", drPrimaryTags.size());
+					if(drSecondaryTags.size() > 0) {
+						outputString += ", ";
+					}
+				}
+				if(drSecondaryTags.size() > 0) {
+					outputString += format("%d as secondary", drSecondaryTags.size());
+				}		
+			}
+
 			// status details
 			if (level == StatusClient::DETAILED) {
+				outputString += logBackupDR("Running backup tags", backupTags);
+				outputString += logBackupDR("Running DR tags (as primary)", drPrimaryTags);
+				outputString += logBackupDR("Running DR tags (as secondary)", drSecondaryTags);
+
 				outputString += "\n\nProcess performance details:";
 				outputStringCache = outputString;
 				try {
@@ -1658,6 +1729,7 @@ ACTOR Future<bool> exclude( Database db, std::vector<StringRef> tokens, Referenc
 			StatusObject status = wait( makeInterruptable( StatusClient::statusFetcher( ccf ) ) );
 
 			state std::string errorString = "ERROR: Could not calculate the impact of this exclude on the total free space in the cluster.\n"
+											"Please try the exclude again in 30 seconds.\n"
 										    "Type `exclude FORCE <ADDRESS>*' to exclude without checking free space.\n";
 
 			StatusObjectReader statusObj(status);
@@ -2573,7 +2645,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							if (sizeLimitFuture.get().present()) {
 								const int64_t sizeLimit = BinaryReader::fromStringRef<int64_t>(sizeLimitFuture.get().get(), Unversioned());
 								if (sizeLimit != -1) {
-									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimitStr);
+									sizeLimitStr = boost::lexical_cast<std::string>(sizeLimit);
 								}
 							}
 							printf("Client profiling rate is set to %s and size limit is set to %s.\n", sampleRateStr.c_str(), sizeLimitStr.c_str());
@@ -2671,6 +2743,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 								for (const auto& pair : interfaces) {
 									ProfilerRequest profileRequest;
 									profileRequest.type = ProfilerRequest::Type::FLOW;
+									profileRequest.action = ProfilerRequest::Action::RUN;
 									profileRequest.duration = duration;
 									profileRequest.outputFile = tokens[4];
 									all_profiler_addresses.push_back(pair.first);
@@ -2688,6 +2761,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 									for (int tokenidx = 5; tokenidx < tokens.size(); tokenidx++) {
 										ProfilerRequest profileRequest;
 										profileRequest.type = ProfilerRequest::Type::FLOW;
+										profileRequest.action = ProfilerRequest::Action::RUN;
 										profileRequest.duration = duration;
 										profileRequest.outputFile = tokens[4];
 										all_profiler_addresses.push_back(tokens[tokenidx]);

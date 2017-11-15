@@ -34,7 +34,7 @@ public class SerialInsertion {
 	private static final int NODES = 1000000;
 
 	public static void main(String[] args) {
-		FDB api = FDB.selectAPIVersion(500);
+		FDB api = FDB.selectAPIVersion(510);
 		Database database = api.open("T:\\circus\\tags\\RebarCluster-bbc\\cluster_id.txt");
 		long start = System.currentTimeMillis();
 

@@ -32,8 +32,6 @@ public:
 
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
-	double CLUSTER_FILE_REWRITE_DELAY;
-
 	double SYSTEM_MONITOR_INTERVAL;
 
 	double FAILURE_MAX_DELAY;

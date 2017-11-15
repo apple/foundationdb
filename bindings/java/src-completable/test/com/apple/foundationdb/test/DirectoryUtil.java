@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.Tuple;
@@ -40,9 +41,9 @@ class DirectoryUtil {
 		}
 
 		CompletableFuture<List<Tuple>> pop() {
-			return AsyncUtil.whileTrue(new Function<Void, CompletableFuture<Boolean>>() {
+			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
 				@Override
-				public CompletableFuture<Boolean> apply(Void ignore) {
+				public CompletableFuture<Boolean> get() {
 					if(num-- == 0) {
 						return CompletableFuture.completedFuture(false);
 					}

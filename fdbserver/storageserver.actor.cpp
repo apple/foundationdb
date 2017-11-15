@@ -196,7 +196,7 @@ struct UpdateEagerReadInfo {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
 		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end))
 			keyBegin.push_back( m.param2 );
-		else if (m.type == MutationRef::AppendIfFits)
+		else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) || (m.type == MutationRef::ByteMax))
 			keys.push_back(pair<KeyRef, int>(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT));
 		else if (isAtomicOp((MutationRef::Type) m.type))
 			keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size()));
@@ -1461,17 +1461,17 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 	}
 	else if (m.type != MutationRef::SetValue && (m.type)) {
 
-		StringRef oldVal;
+		Optional<StringRef> oldVal;
 		auto it = data.atLatest().lastLessOrEqual(m.param1);
 		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
 			oldVal = it->getValue();
 		else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
 			TEST(true); // Atomic op right after a clear.
-			oldVal = StringRef();
 		}
 		else {
 			Optional<Value>& oldThing = eager->getValue(m.param1);
-			oldVal = oldThing.present() ? oldThing.get() : StringRef();
+			if (oldThing.present())
+				oldVal = oldThing.get();
 		}
 
 		switch(m.type) {
@@ -1495,6 +1495,18 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 				break;
 			case MutationRef::Min:
 				m.param2 = doMin(oldVal, m.param2, ar);
+				break;
+			case MutationRef::ByteMin:
+				m.param2 = doByteMin(oldVal, m.param2, ar);
+				break;
+			case MutationRef::ByteMax:
+				m.param2 = doByteMax(oldVal, m.param2, ar);
+				break;
+			case MutationRef::MinV2:
+				m.param2 = doMinV2(oldVal, m.param2, ar);
+				break;
+			case MutationRef::AndV2:
+				m.param2 = doAndV2(oldVal, m.param2, ar);
 				break;
 		}
 		m.type = MutationRef::SetValue;

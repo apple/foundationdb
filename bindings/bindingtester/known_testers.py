@@ -20,16 +20,19 @@
 
 import os
 
-MAX_API_VERSION = 500
+MAX_API_VERSION = 510
+COMMON_TYPES = [ 'null', 'bytes', 'string', 'int', 'uuid', 'bool', 'float', 'double', 'tuple' ]
+ALL_TYPES = COMMON_TYPES + [ 'versionstamp' ]
 
 class Tester:
-    def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True):
+    def __init__(self, name, cmd, max_int_bits=64, min_api_version=0, max_api_version=MAX_API_VERSION, threads_enabled=True, types=COMMON_TYPES):
         self.name = name
         self.cmd = cmd
         self.max_int_bits = max_int_bits
         self.min_api_version = min_api_version
         self.max_api_version = max_api_version
         self.threads_enabled = threads_enabled
+        self.types = types
 
     def supports_api_version(self, api_version):
         return api_version >= self.min_api_version and api_version <= self.max_api_version
@@ -54,15 +57,15 @@ _java_completable_cmd = 'java -ea -cp %s:%s com.apple.foundationdb.test.' % (
 
 # We could set min_api_version lower on some of these if the testers were updated to support them
 testers = {
-    'python' :                 Tester('python', 'python ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION),
-    'python3' :                Tester('python3', 'python3 ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION),
+    'python' :                 Tester('python', 'python ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION, types=ALL_TYPES),
+    'python3' :                Tester('python3', 'python3 ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION, types=ALL_TYPES),
     'node' :                   Tester('node', _absolute_path('nodejs/tests/tester.js'), 53, 500, MAX_API_VERSION),
     'streamline' :             Tester('streamline', _absolute_path('nodejs/tests/streamline_tester._js'), 53, 500, MAX_API_VERSION),
     'ruby' :                   Tester('ruby', _absolute_path('ruby/tests/tester.rb'), 64, 23, MAX_API_VERSION),
-    'java' :                   Tester('java', _java_cmd + 'StackTester', 2040, 500, MAX_API_VERSION),
-    'java_async' :             Tester('java', _java_cmd + 'AsyncStackTester', 2040, 500, MAX_API_VERSION),
-    'java_completable' :       Tester('java', _java_completable_cmd + 'StackTester', 2040, 500, MAX_API_VERSION),
-    'java_completable_async' : Tester('java', _java_completable_cmd + 'AsyncStackTester', 2040, 500, MAX_API_VERSION),
+    'java' :                   Tester('java', _java_cmd + 'StackTester', 2040, 500, MAX_API_VERSION, types=ALL_TYPES),
+    'java_async' :             Tester('java', _java_cmd + 'AsyncStackTester', 2040, 500, MAX_API_VERSION, types=ALL_TYPES),
+    'java_completable' :       Tester('java', _java_completable_cmd + 'StackTester', 2040, 500, MAX_API_VERSION, types=ALL_TYPES),
+    'java_completable_async' : Tester('java', _java_completable_cmd + 'AsyncStackTester', 2040, 500, MAX_API_VERSION, types=ALL_TYPES),
     'go' :                     Tester('go', _absolute_path('go/build/bin/_stacktester'), 63, 200, MAX_API_VERSION),
     'flow' :                   Tester('flow', _absolute_path('flow/bin/fdb_flow_tester'), 63, 500, MAX_API_VERSION),
 }

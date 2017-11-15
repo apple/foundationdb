@@ -103,7 +103,7 @@ namespace FdbClientLogEvents {
 	};
 
 	struct EventCommit : public Event {
-		EventCommit(double ts, double lat, int mut, int bytes, CommitTransactionRequest *commit_req) : Event(COMMIT_LATENCY, ts), latency(lat), numMutations(mut), commitBytes(bytes), req(*commit_req) { }
+		EventCommit(double ts, double lat, int mut, int bytes, const CommitTransactionRequest &commit_req) : Event(COMMIT_LATENCY, ts), latency(lat), numMutations(mut), commitBytes(bytes), req(commit_req) { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -172,7 +172,7 @@ namespace FdbClientLogEvents {
 	};
 
 	struct EventCommitError : public Event {
-		EventCommitError(double ts, int err_code, CommitTransactionRequest *commit_req) : Event(ERROR_COMMIT, ts), errCode(err_code), req(*commit_req) { }
+		EventCommitError(double ts, int err_code, const CommitTransactionRequest &commit_req) : Event(ERROR_COMMIT, ts), errCode(err_code), req(commit_req) { }
 	
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)

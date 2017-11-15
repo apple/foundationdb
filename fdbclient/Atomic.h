@@ -24,7 +24,8 @@
 
 #include "CommitTransaction.h"
 
-static ValueRef doLittleEndianAdd(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doLittleEndianAdd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
 	
@@ -46,7 +47,8 @@ static ValueRef doLittleEndianAdd(const ValueRef& existingValue, const ValueRef&
 	return StringRef(buf, i);	
 }
 
-static ValueRef doAnd(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doAnd(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!otherOperand.size()) return otherOperand;
 	
 	uint8_t* buf = new (ar) uint8_t [otherOperand.size()];
@@ -60,7 +62,15 @@ static ValueRef doAnd(const ValueRef& existingValue, const ValueRef& otherOperan
 	return StringRef(buf, i);
 }
 
-static ValueRef doOr(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doAndV2(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present())
+		return otherOperand;
+
+	return doAnd(existingValueOptional, otherOperand, ar);
+}
+
+static ValueRef doOr(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
 
@@ -75,7 +85,8 @@ static ValueRef doOr(const ValueRef& existingValue, const ValueRef& otherOperand
 	return StringRef(buf, i);
 }
 
-static ValueRef doXor(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doXor(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return otherOperand;
 	
@@ -91,7 +102,8 @@ static ValueRef doXor(const ValueRef& existingValue, const ValueRef& otherOperan
 	return StringRef(buf, i);
 }
 
-static ValueRef doAppendIfFits(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doAppendIfFits(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if(!existingValue.size()) return otherOperand;
 	if(!otherOperand.size()) return existingValue;
 	if(existingValue.size() + otherOperand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) {
@@ -111,7 +123,8 @@ static ValueRef doAppendIfFits(const ValueRef& existingValue, const ValueRef& ot
 	return StringRef(buf, i+j);
 }
 
-static ValueRef doMax(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	if (!existingValue.size()) return otherOperand;
 	if (!otherOperand.size()) return otherOperand;
 
@@ -142,9 +155,20 @@ static ValueRef doMax(const ValueRef& existingValue, const ValueRef& otherOperan
 	return otherOperand;
 }
 
-static ValueRef doMin(const ValueRef& existingValue, const ValueRef& otherOperand, Arena& ar) {
+static ValueRef doByteMax(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present()) return otherOperand;
+
+	const ValueRef& existingValue = existingValueOptional.get();
+	if (existingValue > otherOperand)
+		return existingValue;
+
+	return otherOperand;
+}
+
+static ValueRef doMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
 	if (!otherOperand.size()) return otherOperand;
 
+	const ValueRef& existingValue = existingValueOptional.present() ? existingValueOptional.get() : StringRef();
 	int i,j;
 
 	for (i = otherOperand.size() - 1; i >= existingValue.size(); i--) {
@@ -179,34 +203,22 @@ static ValueRef doMin(const ValueRef& existingValue, const ValueRef& otherOperan
 	return otherOperand;
 }
 
-static ValueRef doAtomicOp(const ValueRef& existingValue, const ValueRef& otherOperand, MutationRef::Type mutationType, Arena& ar) {
-	switch(mutationType) {
-		case MutationRef::AddValue:
-			return doLittleEndianAdd(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::AppendIfFits:
-			return doAppendIfFits(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::And:
-			return doAnd(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::Or:
-			return doOr(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::Xor:
-			return doXor(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::Max:
-			return doMax(existingValue, otherOperand, ar);
-			break;
-		case MutationRef::Min:
-			return doMin(existingValue, otherOperand, ar);
-			break;
-		default:
-			throw operation_failed();
-	}
+static ValueRef doMinV2(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present())
+		return otherOperand;
+
+	return doMin(existingValueOptional, otherOperand, ar);
 }
 
+static ValueRef doByteMin(const Optional<ValueRef>& existingValueOptional, const ValueRef& otherOperand, Arena& ar) {
+	if (!existingValueOptional.present()) return otherOperand;
+	
+	const ValueRef& existingValue = existingValueOptional.get();
+	if (existingValue < otherOperand)
+		return existingValue;
+
+	return otherOperand;
+}
 
 /*
 * Returns the range corresponding to the specified versionstamp key.

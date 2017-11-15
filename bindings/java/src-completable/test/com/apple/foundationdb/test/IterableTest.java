@@ -36,7 +36,7 @@ public class IterableTest {
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			Cluster cluster = FDB.selectAPIVersion(500).createCluster(CLUSTER_FILE);
+			Cluster cluster = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
 			Database db = cluster.openDatabase();
 			runTests(reps, db);
 		} catch(Throwable t) {

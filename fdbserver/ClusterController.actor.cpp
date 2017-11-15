@@ -75,6 +75,7 @@ public:
 		ProcessIssuesMap clientsWithIssues, workersWithIssues;
 		std::map<NetworkAddress, double> incompatibleConnections;
 		ClientVersionMap clientVersionMap;
+		std::map<NetworkAddress, std::string> traceLogGroupMap;
 		Promise<Void> forceMasterFailure;
 		int64_t masterRegistrationCount;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
@@ -192,19 +193,21 @@ public:
 	std::pair<WorkerInterface, ProcessClass> getMasterWorker( DatabaseConfiguration const& conf, bool checkStable = false ) {
 		ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;
 		Optional<std::pair<WorkerInterface, ProcessClass>> bestInfo;
+		bool bestIsClusterController = false;
 		int numEquivalent = 1;
 		for( auto& it : id_worker ) {
 			auto fit = it.second.processClass.machineClassFitness( ProcessClass::Master );
 			if(conf.isExcludedServer(it.second.interf.address())) {
-				fit = std::max(fit, ProcessClass::WorstFit);
+				fit = std::max(fit, ProcessClass::ExcludeFit);
 			}
 			if( workerAvailable(it.second, checkStable) && fit != ProcessClass::NeverAssign ) {
-				if( fit < bestFit ) {
+				if( fit < bestFit || (fit == bestFit && bestIsClusterController) ) {
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 					bestFit = fit;
 					numEquivalent = 1;
+					bestIsClusterController = clusterControllerProcessId == it.first;
 				}
-				else if( fit != ProcessClass::NeverAssign && fit == bestFit && g_random->random01() < 1.0/++numEquivalent )
+				else if( fit == bestFit && clusterControllerProcessId != it.first && g_random->random01() < 1.0/++numEquivalent )
 					bestInfo = std::make_pair(it.second.interf, it.second.processClass);
 			}
 		}
@@ -563,6 +566,18 @@ public:
 			return resolverCount > r.resolverCount;
 		}
 
+		bool betterInDatacenterFitness (InDatacenterFitness const& r) const {
+			int lmax = std::max(resolverFit,proxyFit);
+			int lmin = std::min(resolverFit,proxyFit);
+			int rmax = std::max(r.resolverFit,r.proxyFit);
+			int rmin = std::min(r.resolverFit,r.proxyFit);
+
+			if( lmax != rmax ) return lmax < rmax;
+			if( lmin != rmin ) return lmin < rmin;
+
+			return false;
+		}
+
 		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
 	};
 
@@ -621,6 +636,7 @@ public:
 				result.storageServers.push_back(storageServers[i].first);
 		}
 
+		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
 		auto tlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used );
 		for(int i = 0; i < tlogs.size(); i++)
@@ -680,24 +696,29 @@ public:
 
 	bool betterMasterExists() {
 		ServerDBInfo dbi = db.serverInfo->get();
+
+		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
+			return false;
+		}
+
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 
 		auto masterWorker = id_worker.find(dbi.master.locality.processId());
 		if(masterWorker == id_worker.end())
 			return false;
 
+		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
 
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.processClass.machineClassFitness( ProcessClass::Master );
-		ProcessClass::Fitness newMasterFit = getMasterWorker(db.config, true).second.machineClassFitness( ProcessClass::Master );
+		if(db.config.isExcludedServer(dbi.master.address())) {
+			oldMasterFit = std::max(oldMasterFit, ProcessClass::ExcludeFit);
+		}
 
-		if(dbi.recoveryState < RecoveryState::FULLY_RECOVERED) {
-			if(oldMasterFit > newMasterFit) {
-				TEST(true); //Better master exists triggered before full recovery
-				TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit);
-				return true;
-			}
-			return false;
+		auto mworker = getMasterWorker(db.config, true);
+		ProcessClass::Fitness newMasterFit = mworker.second.machineClassFitness( ProcessClass::Master );
+		if(db.config.isExcludedServer(mworker.first.address())) {
+			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
 		}
 
 		if(oldMasterFit < newMasterFit) return false;
@@ -751,7 +772,8 @@ public:
 				newInFit = fitness;
 		}
 
-		if(oldInFit < newInFit) return false;
+		if(oldInFit.betterInDatacenterFitness(newInFit)) return false;
+
 		if(oldMasterFit > newMasterFit || oldAcrossFit > newAcrossFit || oldInFit > newInFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit)
 				.detail("oldAcrossFitC", oldAcrossFit.tlogCount).detail("newAcrossFitC", newAcrossFit.tlogCount)
@@ -770,6 +792,7 @@ public:
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
 	Optional<Standalone<StringRef>> masterProcessId;
+	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	UID id;
 	std::vector<RecruitFromConfigurationRequest> outstandingRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
@@ -929,6 +952,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 	UID knownClientInfoID,
 	std::string issues,
 	Standalone<VectorRef<ClientVersionRef>> supportedVersions,
+	Standalone<StringRef> traceLogGroup,
 	ReplyPromise<ClientDBInfo> reply)
 {
 	// NOTE: The client no longer expects this function to return errors
@@ -939,6 +963,8 @@ ACTOR Future<Void> clusterOpenDatabase(
 		db->clientVersionMap[reply.getEndpoint().address] = supportedVersions;
 	}
 
+	db->traceLogGroupMap[reply.getEndpoint().address] = traceLogGroup.toString();
+
 	while (db->clientInfo->get().id == knownClientInfoID) {
 		choose {
 			when (Void _ = wait( db->clientInfo->onChange() )) {}
@@ -948,6 +974,7 @@ ACTOR Future<Void> clusterOpenDatabase(
 
 	removeIssue( db->clientsWithIssues, reply.getEndpoint().address, issues, issueID );
 	db->clientVersionMap.erase(reply.getEndpoint().address);
+	db->traceLogGroupMap.erase(reply.getEndpoint().address);
 
 	reply.send( db->clientInfo->get() );
 	return Void();
@@ -1325,6 +1352,10 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
 
+	if ( w.address() == g_network->getLocalAddress() ) {
+		self->clusterControllerProcessId = w.locality.processId();
+	}
+
 	// Check process class if needed
 	if (self->gotProcessClasses && (info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen)) {
 		auto classIter = self->id_class.find(w.locality.processId());
@@ -1475,7 +1506,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, coordinators, incompatibleConnections)));
+			ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections)));
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
 
@@ -1593,19 +1624,15 @@ ACTOR Future<Void> monitorClientTxnInfoConfigs(ClusterControllerData::DBInfo* db
 				state Optional<Value> rateVal = wait(tr.get(fdbClientInfoTxnSampleRate));
 				state Optional<Value> limitVal = wait(tr.get(fdbClientInfoTxnSizeLimit));
 				ClientDBInfo clientInfo = db->clientInfo->get();
-				if (rateVal.present()) {
-					double rate = BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned());
-					clientInfo.clientTxnInfoSampleRate = rate;
-				}
-				if (limitVal.present()) {
-					int64_t limit = BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned());
-					clientInfo.clientTxnInfoSizeLimit = limit;
-				}
-				if (rateVal.present() || limitVal.present()) {
+				double sampleRate = rateVal.present() ? BinaryReader::fromStringRef<double>(rateVal.get(), Unversioned()) : std::numeric_limits<double>::infinity();
+				int64_t sizeLimit = limitVal.present() ? BinaryReader::fromStringRef<int64_t>(limitVal.get(), Unversioned()) : -1;
+				if (sampleRate != clientInfo.clientTxnInfoSampleRate || sizeLimit != clientInfo.clientTxnInfoSampleRate) {
 					clientInfo.id = g_random->randomUniqueID();
+					clientInfo.clientTxnInfoSampleRate = sampleRate;
+					clientInfo.clientTxnInfoSizeLimit = sizeLimit;
 					db->clientInfo->set(clientInfo);
 				}
-
+				
 				state Future<Void> watchRateFuture = tr.watch(fdbClientInfoTxnSampleRate);
 				state Future<Void> watchLimitFuture = tr.watch(fdbClientInfoTxnSizeLimit);
 				Void _ = wait(tr.commit());
@@ -1651,7 +1678,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			return Void();
 		}
 		when( OpenDatabaseRequest req = waitNext( interf.clientInterface.openDatabase.getFuture() ) ) {
-			addActor.send( clusterOpenDatabase( &self.db, req.dbName, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.reply ) );
+			addActor.send( clusterOpenDatabase( &self.db, req.dbName, req.knownClientInfoID, req.issues.toString(), req.supportedVersions, req.traceLogGroup, req.reply ) );
 		}
 		when( RecruitFromConfigurationRequest req = waitNext( interf.recruitFromConfiguration.getFuture() ) ) {
 			addActor.send( clusterRecruitFromConfiguration( &self, req ) );
@@ -1663,18 +1690,22 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 			registerWorker( req, &self );
 		}
 		when( GetWorkersRequest req = waitNext( interf.getWorkers.getFuture() ) ) {
-			if ( req.flags & GetWorkersRequest::FLAG_TESTER_CLASS ) {
-				vector<std::pair<WorkerInterface, ProcessClass>> testers;
-				for(auto& it : self.id_worker)
-					if (it.second.processClass.classType() == ProcessClass::TesterClass)
-						testers.push_back(std::make_pair(it.second.interf, it.second.processClass));
-				req.reply.send( testers );
-			} else {
-				vector<std::pair<WorkerInterface, ProcessClass>> workers;
-				for(auto& it : self.id_worker)
-					workers.push_back(std::make_pair(it.second.interf, it.second.processClass));
-				req.reply.send( workers );
+			vector<std::pair<WorkerInterface, ProcessClass>> workers;
+
+			auto masterAddr = self.db.serverInfo->get().master.address();
+			for(auto& it : self.id_worker) {
+				if ( (req.flags & GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY) && self.db.config.isExcludedServer(it.second.interf.address()) ) {
+					continue;
+				}
+
+				if ( (req.flags & GetWorkersRequest::TESTER_CLASS_ONLY) && it.second.processClass.classType() != ProcessClass::TesterClass ) {
+					continue;
+				}
+
+				workers.push_back(std::make_pair(it.second.interf, it.second.processClass));
 			}
+
+			req.reply.send( workers );
 		}
 		when( GetClientWorkersRequest req = waitNext( interf.clientInterface.getClientWorkers.getFuture() ) ) {
 			vector<ClientWorkerInterface> workers;

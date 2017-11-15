@@ -127,6 +127,9 @@ public:
 	void checkDeferredError() { if (deferred_error.code() != invalid_error_code) throw deferred_error; }
 
 private: friend class ThreadSafeCluster;
+		 friend class AtomicOpsApiCorrectnessWorkload; // This is just for testing purposes. It needs to change apiVersion
+		 friend class AtomicOpsWorkload; // This is just for testing purposes. It needs to change apiVersion
+
 	Cluster( Reference<ClusterConnectionFile> connFile, int apiVersion = API_VERSION_LATEST );
 
 	Reference<AsyncVar<Optional<struct ClusterInterface>>> clusterInterface;
@@ -305,7 +308,7 @@ private:
 	Version committedVersion;
 	CommitTransactionRequest tr;
 	Future<Version> readVersion;
-	vector<Future<KeyRange>> extraConflictRanges;
+	vector<Future<std::pair<Key, Key>>> extraConflictRanges;
 	Promise<Void> commitResult;
 	Future<Void> committing;
 };

@@ -171,9 +171,9 @@ Status: Reserved
 Typecode: `0x33`
 Length: 12 bytes  
 Encoding: Big endian 12-byte integer. First/high 8 bytes are a database version, next two are batch version, next two are ordering within transaction.  
-Status: Reserved
+Status: Python, Java
 
-The two versionstamp typecodes are reserved for future work adding compatibility between the tuple layer and versionstamp operations. Note that the first 80 bits of the 96 bit versionstamp are the same as the contents of the 80 bit versionstamp, and they correspond to what the `SET_VERSIONSTAMP_KEY` mutation will write into a database key , i.e., the first 8 bytes are a big-endian, unsigned version corresponding to the commit version of a transaction, and the next to bytes are a big-endian, unsigned batch number ordering transactions are committed at the same version. The final two bytes of the 96 bit versionstamp are written by the client and should order writes within a single transaction, thereby providing a global order for all versions.
+The two versionstamp typecodes are reserved for ongoing work adding compatibility between the tuple layer and versionstamp operations. Note that the first 80 bits of the 96 bit versionstamp are the same as the contents of the 80 bit versionstamp, and they correspond to what the `SET_VERSIONSTAMP_KEY` mutation will write into a database key , i.e., the first 8 bytes are a big-endian, unsigned version corresponding to the commit version of a transaction, and the next two bytes are a big-endian, unsigned batch number ordering transactions are committed at the same version. The final two bytes of the 96 bit versionstamp are written by the client and should order writes within a single transaction, thereby providing a global order for all versions.
 
 ### **User type codes**
 

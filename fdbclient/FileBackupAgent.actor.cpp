@@ -35,6 +35,8 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
+const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable");
+
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
 
@@ -54,10 +56,11 @@ template<> Tuple Codec<ERestoreState>::pack(ERestoreState const &val) { return T
 template<> ERestoreState Codec<ERestoreState>::unpack(Tuple const &val) { return (ERestoreState)val.getInt(0); }
 
 ACTOR Future<std::vector<KeyBackedTag>> TagUidMap::getAll_impl(TagUidMap *tagsMap, Reference<ReadYourWritesTransaction> tr) {
+	state Key prefix = tagsMap->prefix; // Copying it here as tagsMap lifetime is not tied to this actor
 	TagMap::PairsType tagPairs = wait(tagsMap->getRange(tr, std::string(), {}, 1e6));
 	std::vector<KeyBackedTag> results;
 	for(auto &p : tagPairs)
-		results.push_back(KeyBackedTag(p.first, tagsMap->prefix));
+		results.push_back(KeyBackedTag(p.first, prefix));
 	return results;
 }
 
@@ -342,6 +345,7 @@ FileBackupAgent::FileBackupAgent()
 	: subspace(Subspace(fileBackupPrefixRange.begin))
 	// The other subspaces have logUID -> value
 	, config(subspace.get(BackupAgentBase::keyConfig))
+	, lastRestorable(subspace.get(FileBackupAgent::keyLastRestorable))
 	, taskBucket(new TaskBucket(subspace.get(BackupAgentBase::keyTasks), true, false, true))
 	, futureBucket(new FutureBucket(subspace.get(BackupAgentBase::keyFutures), true, true))
 {
@@ -889,6 +893,7 @@ namespace fileBackup {
 							Void _ = wait(rangeFile.writeKey(nextKey));
 
 							bool keepGoing = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
+
 							if(!keepGoing)
 								return Void();
 						}
@@ -2391,9 +2396,9 @@ namespace fileBackup {
 
 			// Use high priority for dispatch tasks that have to queue more blocks for the current batch
 			unsigned int priority = (remainingInBatch > 0) ? 1 : 0;
- 			state Reference<Task> task(new Task(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority));
+			state Reference<Task> task(new Task(RestoreDispatchTaskFunc::name, RestoreDispatchTaskFunc::version, doneKey, priority));
 
- 			// Create a config from the parent task and bind it to the new task
+			// Create a config from the parent task and bind it to the new task
 			Void _ = wait(RestoreConfig(parentTask).toTask(tr, task));
 			Params.beginVersion().set(task, beginVersion);
 			Params.batchSize().set(task, batchSize);
@@ -2471,7 +2476,7 @@ namespace fileBackup {
 		return ERestoreState::ABORTED;
 	}
 
- 	struct StartFullRestoreTaskFunc : TaskFuncBase {
+	struct StartFullRestoreTaskFunc : TaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
 
@@ -2963,6 +2968,7 @@ public:
 				statusText = "";
 				tag = makeBackupTag(tagName);
 				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
+				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
 					EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
@@ -3003,6 +3009,12 @@ public:
 						statusText += format("[%lld]: %s\n", errMsg.get().second, errMsg.get().first.c_str());
 					}
 				}
+
+				Optional<Value> disabled = wait(fDisabled);
+				if(disabled.present()) {
+					statusText += format("\nAll backup agents have been disabled.\n");
+				}
+
 				break;
 			}
 			catch (Error &e) {

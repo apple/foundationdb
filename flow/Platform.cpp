@@ -329,10 +329,39 @@ void getMemoryInfo(std::map<StringRef, int64_t>& request, std::stringstream& mem
 		memInfoStream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 	}
 }
+
+int64_t getLowWatermark(std::stringstream& zoneInfoStream) {
+	int64_t lowWatermark = 0;
+	while(!zoneInfoStream.eof()) {
+		std::string key;
+		zoneInfoStream >> key;
+
+		if(key == "low") {
+			int64_t value;
+			zoneInfoStream >> value;
+			lowWatermark += value;
+		}
+
+		zoneInfoStream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+	}
+
+	return lowWatermark;
+}
 #endif
 
 void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 #if defined(__linux__)
+	std::ifstream zoneInfoFileStream("/proc/zoneinfo", std::ifstream::in);
+	int64_t lowWatermark = 0;
+	if(!zoneInfoFileStream.good()) {
+		TraceEvent(SevWarnAlways, "GetMachineZoneInfo").GetLastError();
+	}
+	else {
+		std::stringstream zoneInfoStream;
+		zoneInfoStream << zoneInfoFileStream.rdbuf();
+		lowWatermark = getLowWatermark(zoneInfoStream) * 4; // Convert from 4K pages to KB
+	}
+
 	std::ifstream fileStream("/proc/meminfo", std::ifstream::in);
 	if (!fileStream.good()) {
 		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
@@ -342,27 +371,32 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	std::map<StringRef, int64_t> request = {
 		{ LiteralStringRef("MemTotal:"), 0 },
 		{ LiteralStringRef("MemFree:"), 0 },
-		{ LiteralStringRef("MemAvailable:"), 0 },
-		{ LiteralStringRef("Buffers:"), 0 },
-		{ LiteralStringRef("Cached:"), 0 },
+		{ LiteralStringRef("MemAvailable:"), -1 },
+		{ LiteralStringRef("Active(file):"), 0 },
+		{ LiteralStringRef("Inactive(file):"), 0 },
 		{ LiteralStringRef("SwapTotal:"), 0 },
 		{ LiteralStringRef("SwapFree:"), 0 },
+		{ LiteralStringRef("SReclaimable:"), 0 },
 	};
 
 	std::stringstream memInfoStream;
 	memInfoStream << fileStream.rdbuf();
 	getMemoryInfo( request, memInfoStream );
 
+	int64_t memFree = request[LiteralStringRef("MemFree:")];
+	int64_t pageCache = request[LiteralStringRef("Active(file):")] + request[LiteralStringRef("Inactive(file):")];
+	int64_t slabReclaimable = request[LiteralStringRef("SReclaimable:")];
+	int64_t usedSwap = request[LiteralStringRef("SwapTotal:")] - request[LiteralStringRef("SwapFree:")];
+
 	memInfo.total = 1024 * request[LiteralStringRef("MemTotal:")];
-	int64_t available = 1024 * (request[LiteralStringRef("MemFree:")] + request[LiteralStringRef("Buffers:")] + request[LiteralStringRef("Cached:")] - request[LiteralStringRef("SwapTotal:")] + request[LiteralStringRef("SwapFree:")]);
-	memInfo.committed = memInfo.total - available;
-	if(request[LiteralStringRef("MemAvailable:")] != 0) {
-		memInfo.available = 1024 * (request[LiteralStringRef("MemAvailable:")] - request[LiteralStringRef("SwapTotal:")] + request[LiteralStringRef("SwapFree:")]);
+	if(request[LiteralStringRef("MemAvailable:")] != -1) {
+		memInfo.available = 1024 * (request[LiteralStringRef("MemAvailable:")] - usedSwap);
 	}
-	else
-	{
-		memInfo.available = available;
+	else {
+		memInfo.available = 1024 * (std::max<int64_t>(0, (memFree-lowWatermark) + std::max(pageCache-lowWatermark, pageCache/2) + std::max(slabReclaimable-lowWatermark, slabReclaimable/2)) - usedSwap);
 	}
+
+	memInfo.committed = memInfo.total - memInfo.available;
 #elif defined(_WIN32)
 	MEMORYSTATUSEX mem_status;
 	mem_status.dwLength = sizeof(mem_status);

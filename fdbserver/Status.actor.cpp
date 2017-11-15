@@ -46,7 +46,7 @@ const char* RecoveryStatus::descriptions[] = {
 	// locking_coordinated_state
 	"Locking coordination state. Verify that a majority of coordination server processes are active.",
 	// locking_old_transaction_servers
-	"Locking old transaction servers. Verify that a least one transaction server from the previous generation is running.",
+	"Locking old transaction servers. Verify that at least one transaction server from the previous generation is running.",
 	// reading_transaction_system_state
 	"Recovering transaction server state. Verify that the transaction server processes are active.",
 	// configuration_missing
@@ -868,7 +868,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 	return processMap;
 }
 
-static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap) {
+static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap, std::map<NetworkAddress, std::string> traceLogGroupMap) {
 	StatusObject clientStatus;
 
 	clientStatus["count"] = (int64_t)clientVersionMap.size();
@@ -890,10 +890,13 @@ static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap) {
 
 		StatusArray clients = StatusArray();
 		for(auto client : cv.second) {
-			clients.push_back(client.toString());
+			StatusObject cli;
+			cli["address"] = client.toString();
+			cli["log_group"] = traceLogGroupMap[client];
+			clients.push_back(cli);
 		}
 
-		ver["clients"] = clients;
+		ver["connected_clients"] = clients;
 		versionsArray.push_back(ver);
 	}
 
@@ -904,11 +907,11 @@ static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap) {
 	return clientStatus;
 }
 
-ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, int workerCount, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, int workerCount, std::set<std::string> *incomplete_reasons) {
 	state StatusObject message;
 
 	try {
-		Standalone<StringRef> md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(StringRef(dbName+"/MasterRecoveryState") ) ), 1.0) );
+		Standalone<StringRef> md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
 		state int mStatusCode = parseInt( extractAttribute(md, LiteralStringRef("StatusCode")) );
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
@@ -926,6 +929,8 @@ ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInt
 			message["required_logs"] = requiredLogs;
 			message["required_proxies"] = requiredProxies;
 			message["required_resolvers"] = requiredResolvers;
+		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
+			message["missing_logs"] = extractAttribute(md, LiteralStringRef("MissingIDs")).c_str();
 		}
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
@@ -1686,6 +1691,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		ProcessIssuesMap workerIssues,
 		ProcessIssuesMap clientIssues,
 		ClientVersionMap clientVersionMap,
+		std::map<NetworkAddress, std::string> traceLogGroupMap,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections )
 {
@@ -1744,7 +1750,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// construct status information for cluster subsections
-		state StatusObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, dbName, workers.size(), &status_incomplete_reasons));
+		state StatusObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, workers.size(), &status_incomplete_reasons));
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -1864,7 +1870,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		StatusObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, cx, configuration, &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
-		statusObj["clients"] = clientStatusFetcher(clientVersionMap);
+		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap);
 
 		StatusArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {

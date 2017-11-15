@@ -36,6 +36,7 @@
 #include "FastRef.h"
 #include "EventTypes.actor.h"
 #include "TDMetric.actor.h"
+#include "MetricSample.h"
 
 #include <fcntl.h>
 #if defined(__unixish__)
@@ -130,6 +131,10 @@ IRandom* trace_random = NULL;
 
 LatestEventCache latestEventCache;
 SuppressionMap suppressedEvents;
+
+static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
+static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
+
 
 struct TraceLog {
 	Standalone< VectorRef<StringRef> > buffer;
@@ -421,6 +426,8 @@ struct TraceLog {
 	}
 
 	ThreadFuture<Void> flush() {
+		traceEventThrottlerCache->poll();
+
 		MutexHolder hold(mutex);
 		bool roll = false;
 		if (!buffer.size()) return Void(); // SOMEDAY: maybe we still roll the tracefile here?
@@ -857,6 +864,19 @@ TraceEvent& TraceEvent::backtrace(std::string prefix) {
 TraceEvent::~TraceEvent() {
 	try {
 		if (enabled) {
+			// TRACE_EVENT_THROTTLER
+			if (severity > SevDebug && isNetworkThread()) {
+				if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t *)type, strlen(type)))) {
+					TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
+					// Throttle Msg
+					delete tmpEventMetric;
+					return;
+				}
+				else {
+					traceEventThrottlerCache->addAndExpire(StringRef((uint8_t *)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY);
+				}
+			} // End of Throttler
+
 			_detailf("logGroup", "%.*s", g_traceLog.logGroup.size(), g_traceLog.logGroup.data());
 			if (!trackingKey.empty()) {
 				if(!isNetworkThread()) {
@@ -961,6 +981,7 @@ void TraceEvent::writeEscapedfv( const char* format, va_list args ) {
 thread_local bool TraceEvent::networkThread = false;
 
 void TraceEvent::setNetworkThread() {
+	traceEventThrottlerCache = new TransientThresholdMetricSample<Standalone<StringRef>>(FLOW_KNOBS->TRACE_EVENT_METRIC_UNITS_PER_SAMPLE, FLOW_KNOBS->TRACE_EVENT_THROTTLER_MSG_LIMIT);
 	networkThread = true;
 }
 

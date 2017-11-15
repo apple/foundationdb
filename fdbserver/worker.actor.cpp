@@ -329,12 +329,17 @@ void updateCpuProfiler(ProfilerRequest req) {
 }
 
 ACTOR Future<Void> runProfiler(ProfilerRequest req) {
-	req.action = ProfilerRequest::Action::ENABLE;
-	updateCpuProfiler(req);
-	Void _ = wait(delay(req.duration));
-	req.action = ProfilerRequest::Action::DISABLE;
-	updateCpuProfiler(req);
-	return Void();
+	if (req.action == ProfilerRequest::Action::RUN) {
+		req.action = ProfilerRequest::Action::ENABLE;
+		updateCpuProfiler(req);
+		Void _ = wait(delay(req.duration));
+		req.action = ProfilerRequest::Action::DISABLE;
+		updateCpuProfiler(req);
+		return Void();
+	} else {
+		updateCpuProfiler(req);
+		return Void();
+	}
 }
 
 ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit ) {
@@ -429,9 +434,6 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 }
 
 ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, Reference<ClusterConnectionFile> connFile, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
-	state double badClusterFileStartTime = 0;
-	state bool unableToWriteClusterFile = false;
-
 	// Initially most of the serverDBInfo is not known, but we know our locality right away
 	ServerDBInfo localInfo;
 	localInfo.myLocality = locality;
@@ -443,29 +445,12 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
-			if(!connFile->canGetFilename()) {
-				unableToWriteClusterFile = true;
-			}
-			else if(badClusterFileStartTime == 0) {
-				badClusterFileStartTime = now();
-			}
-			else if(now()-badClusterFileStartTime > CLIENT_KNOBS->CLUSTER_FILE_REWRITE_DELAY) {
+			req.issues = LiteralStringRef("unable_to_write_cluster_file");
+			if(connFile->canGetFilename()) {
 				TraceEvent(SevWarnAlways, "IncorrectClusterFileContents").detail("Filename", connFile->getFilename())
 					.detail("ConnectionStringFromFile", fileConnectionString.toString())
 					.detail("CurrentConnectionString", connFile->getConnectionString().toString());
-
-				if(!unableToWriteClusterFile) {
-					unableToWriteClusterFile = !connFile->writeFile();
-				}
 			}
-		}
-		else {
-			badClusterFileStartTime = 0;
-			unableToWriteClusterFile = false;
-		}
-
-		if(unableToWriteClusterFile) {
-			req.issues = LiteralStringRef("unable_to_write_cluster_file");
 		}
 
 		auto peers = FlowTransport::transport().getIncompatiblePeers();

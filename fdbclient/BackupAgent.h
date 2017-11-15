@@ -271,6 +271,8 @@ public:
 
 	static Future<std::string> getBackupInfo(std::string backupContainer, Version* defaultVersion = NULL);
 
+	static const Key keyLastRestorable;
+
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
 	Future<int64_t> getTaskCount(Database cx) { return taskBucket->getTaskCount(cx); }
 	Future<Void> watchTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->watchTaskCount(tr); }

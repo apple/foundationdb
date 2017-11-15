@@ -20,10 +20,9 @@
 
 package com.apple.foundationdb.test;
 
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDBException;
@@ -48,7 +47,7 @@ abstract class Context implements Runnable {
 	Long lastVersion = null;
 	List<Thread> children = new LinkedList<Thread>();
 
-	static Map<String, Transaction> transactionMap = new HashMap<String, Transaction>();
+	static ConcurrentHashMap<String, Transaction> transactionMap = new ConcurrentHashMap<String, Transaction>();
 
 	Context(Database db, byte[] prefix) {
 		this.db = db;
@@ -85,33 +84,41 @@ abstract class Context implements Runnable {
 	}
 
 	public Transaction getCurrentTransaction() {
-		synchronized(Context.transactionMap) {
-			return Context.transactionMap.get(this.trName);
-		}
+		return Context.transactionMap.get(this.trName);
 	}
 
 	public void updateCurrentTransaction(Transaction tr) {
-		synchronized(Context.transactionMap) {
-			Context.transactionMap.put(this.trName, tr);
-		}
+		Context.transactionMap.put(this.trName, tr);
+	}
+
+	public boolean updateCurrentTransaction(Transaction oldTr, Transaction newTr) {
+		return Context.transactionMap.replace(this.trName, oldTr, newTr);
 	}
 
 	public Transaction newTransaction() {
 		Transaction tr = db.createTransaction();
-
-		synchronized(Context.transactionMap) {
-			Context.transactionMap.put(this.trName, tr);
-		}
-
+		Context.transactionMap.put(this.trName, tr);
 		return tr;
 	}
 
+	public Transaction newTransaction(Transaction oldTr) {
+		Transaction newTr = db.createTransaction();
+		boolean replaced = Context.transactionMap.replace(this.trName, oldTr, newTr);
+		if(replaced) {
+			return newTr;
+		}
+		else {
+			newTr.cancel();
+			return Context.transactionMap.get(this.trName);
+		}
+	}
+
 	public void switchTransaction(byte[] trName) {
-		synchronized(Context.transactionMap) {
-			this.trName = ByteArrayUtil.printable(trName);
-			if(!Context.transactionMap.containsKey(this.trName)) {
-				newTransaction();
-			}
+		this.trName = ByteArrayUtil.printable(trName);
+		Transaction tr = db.createTransaction();
+		Transaction previousTr = Context.transactionMap.putIfAbsent(this.trName, tr);
+		if(previousTr != null) {
+			tr.cancel();
 		}
 	}
 
