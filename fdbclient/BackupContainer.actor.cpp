@@ -30,6 +30,20 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
+namespace IBackupFile_impl {
+
+	ACTOR Future<Void> appendString(Reference<IBackupFile> file, Standalone<StringRef> s) {
+		state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
+		Void _ = wait(file->append(&lenBuf, sizeof(lenBuf)));
+		Void _ = wait(file->append(s.begin(), s.size()));
+		return Void();
+	}
+}
+
+Future<Void> IBackupFile::appendString(Standalone<StringRef> s) {
+	return IBackupFile_impl::appendString(Reference<IBackupFile>::addRef(this), s);
+}
+
 std::string BackupDescription::toString() const {
 	std::string info;
 
@@ -215,7 +229,7 @@ public:
 		state std::string docString = json_spirit::write_string(json);
 
 		state Reference<IBackupFile> f = wait(bc->writeFile(format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes)));
-		Void _ = wait(f->append(docString));
+		Void _ = wait(f->append(docString.data(), docString.size()));
 		Void _ = wait(f->finish());
 
 		return Void();
@@ -507,9 +521,9 @@ public:
 	public:
 		BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath) : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath) {}
 
-		Future<Void> append(StringRef data) {
-			Future<Void> r = m_file->write(data.begin(), data.size(), m_offset);
-			m_offset += data.size();
+		Future<Void> append(const void *data, int len) {
+			Future<Void> r = m_file->write(data, len, m_offset);
+			m_offset += len;
 			return r;
 		}
 
@@ -623,9 +637,9 @@ public:
 	public:
 		BackupFile(std::string fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file) {}
 
-		Future<Void> append(StringRef data) {
-			Future<Void> r = m_file->write(data.begin(), data.size(), m_offset);
-			m_offset += data.size();
+		Future<Void> append(const void *data, int len) {
+			Future<Void> r = m_file->write(data, len, m_offset);
+			m_offset += len;
 			return r;
 		}
 
@@ -772,15 +786,15 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
 
 	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100, 150, 10));
-	Void _ = wait(log1->append(LiteralStringRef("asdf")));
+	Void _ = wait(log1->append("asdf", 4));
 	Void _ = wait(log1->finish());
 
 	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150, 300, 10));
-	Void _ = wait(log2->append(LiteralStringRef("asdf2")));
+	Void _ = wait(log2->append("asdf", 4));
 	Void _ = wait(log2->finish());
 
 	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(110, 10));
-	Void _ = wait(range1->append(LiteralStringRef("asdf3")));
+	Void _ = wait(range1->append("asdf", 4));
 	Void _ = wait(range1->finish());
 
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName()}, range1->size()));
@@ -799,6 +813,9 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	Void _ = wait(c->deleteContainer());
 
 	// TODO:  Read the files back, verify contents.
+
+	// TODO:  Expire data, very change to description
+
 	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
 
 	return Void();

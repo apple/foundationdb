@@ -318,6 +318,10 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 	// *Database* operations here are exactly once; side effects are at least once; excessive time here may prevent task from finishing!
 	virtual Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) = 0;
 
+	virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
+		return Void();
+	}
+
 	template <class TaskFuncBaseType>
 	struct Factory {
 		static TaskFuncBase* create() {

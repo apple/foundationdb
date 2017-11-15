@@ -308,8 +308,11 @@ public:
 		if (!task || !TaskFuncBase::isValidTask(task))
 			return false;
 
+		state Reference<TaskFuncBase> taskFunc;
+
 		try {
-			state Reference<TaskFuncBase> taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
+			Reference<TaskFuncBase> _taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
+			taskFunc = _taskFunc;
 			if (taskFunc) {
 				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
 
@@ -381,6 +384,16 @@ public:
 				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
 				.detail("Priority", task->getPriority())
 				.error(e);
+			try {
+				state Error e2 = e;
+				Void _ = wait(taskFunc->handleError(cx, task, e2));
+			} catch(Error &e) {
+				TraceEvent(SevWarn, "TB_ExecuteFailureLogErrorFailed")
+					.detail("TaskUID", task->key.printable())
+					.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
+					.detail("Priority", task->getPriority())
+					.error(e2);
+			}
 		}
 
 		// Return true to indicate that we did work.

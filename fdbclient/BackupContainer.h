@@ -27,13 +27,13 @@
 #include <vector>
 
 // Append-only file interface for writing backup data
-// TODO: Move the log file and range file format encoder/decoder classes to this file, probably as part of IBackupFile.
+// TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
 class IBackupFile {
 public:
 	IBackupFile(std::string fileName) : m_fileName(fileName), m_offset(0) {}
 	virtual ~IBackupFile() {}
 	// Backup files are append-only and cannot have more than 1 append outstanding at once.
-	virtual Future<Void> append(StringRef data) = 0;
+	virtual Future<Void> append(const void *data, int len) = 0;
 	virtual Future<Void> finish() = 0;
 	inline std::string getFileName() const {
 		return m_fileName;
@@ -43,6 +43,8 @@ public:
 	}
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+
+	Future<Void> appendString(Standalone<StringRef> s);
 protected:
 	std::string m_fileName;
 	int64_t m_offset;
