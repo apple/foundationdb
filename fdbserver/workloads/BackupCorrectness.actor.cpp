@@ -162,36 +162,42 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					state int resultWait = wait(backupAgent->waitBackup(cx, backupTag.tagName, false));
 					UidAndAbortedFlagT uidFlag = wait(backupTag.getOrThrow(cx));
 					state UID logUid = uidFlag.first;
-					state std::string lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getOrThrow(cx, false, backup_unneeded()));
+					state Reference<IBackupContainer> lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getD(cx));
 
-					state std::string restorableFile = joinPath(lastBackupContainer, "restorable");
-					TraceEvent("BARW_lastBackupContainer", randomID).detail("backupTag", printable(tag)).detail("lastBackupContainer", lastBackupContainer)
-						.detail("logUid", logUid).detail("waitStatus", resultWait).detail("restorable", restorableFile);
+					state bool restorable = false;
+					if(lastBackupContainer) {
+						BackupDescription desc = wait(lastBackupContainer->describeBackup());
+						restorable = desc.maxRestorableVersion.present();
+					}
+
+					TraceEvent("BARW_lastBackupContainer", randomID)
+						.detail("backupTag", printable(tag))
+						.detail("lastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
+						.detail("logUid", logUid).detail("waitStatus", resultWait).detail("restorable", restorable);
 
 					// Do not check the backup, if aborted
 					if (resultWait == BackupAgentBase::STATE_ABORTED) {
 					}
-
 					// Ensure that a backup container was found
-					else if (lastBackupContainer.empty()) {
+					else if (!lastBackupContainer) {
 						TraceEvent("BARW_missingBackupContainer", randomID).detail("logUid", logUid).detail("backupTag", printable(tag)).detail("waitStatus", resultWait);
 						printf("BackupCorrectnessMissingBackupContainer   tag: %s  status: %d\n", printable(tag).c_str(), resultWait);
 					}
-
-					// Ensure that the restorable file is present
+					// Check that backup is restorable
 					else {
-						bool rfExists = wait(IBackupContainer::openContainer(lastBackupContainer)->fileExists(restorableFile));
-						if(!rfExists) {
-							TraceEvent("BARW_missingBackupRestoreFile", randomID).detail("logUid", logUid).detail("backupTag", printable(tag))
-								.detail("backupFolder", lastBackupContainer).detail("restorable", restorableFile).detail("waitStatus", resultWait);
-							printf("BackupCorrectnessMissingRestorable: %s   tag: %s\n", restorableFile.c_str(), printable(tag).c_str());
+						if(!restorable) {
+							TraceEvent("BARW_notRestorable", randomID).detail("logUid", logUid).detail("backupTag", printable(tag))
+								.detail("backupFolder", lastBackupContainer->getURL()).detail("waitStatus", resultWait);
+							printf("BackupCorrectnessNotRestorable:  tag: %s\n", printable(tag).c_str());
 						}
 					}
 
 					// Abort the backup, if not the first backup because the second backup may have aborted the backup by now
 					if (startDelay) {
 						TraceEvent("BARW_doBackupAbortBackup2", randomID).detail("tag", printable(tag))
-							.detail("waitStatus", resultWait).detail("lastBackupContainer", lastBackupContainer).detail("restorable", restorableFile);
+							.detail("waitStatus", resultWait)
+							.detail("lastBackupContainer", lastBackupContainer ? lastBackupContainer->getURL() : "")
+							.detail("restorable", restorable);
 						Void _ = wait(backupAgent->abortBackup(cx, tag.toString()));
 					}
 					else {
@@ -309,7 +315,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
 			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx));
 			state UID logUid = uidFlag.first;
-			state std::string lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getOrThrow(cx));
+			state Reference<IBackupContainer> lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getD(cx));
 
 			// Occasionally start yet another backup that might still be running when we restore
 			if (!self->locked && BUGGIFY) {
@@ -327,9 +333,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			TEST(!startRestore.isReady()); //Restore starts at specified time
 			Void _ = wait(startRestore);
 			
-			if ((lastBackupContainer.size()) && (self->performRestore)) {
+			if (lastBackupContainer && self->performRestore) {
 				if (g_random->random01() < 0.5) {
-					Void _ = wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer), randomID));
+					Void _ = wait(attemptDirtyRestore(self, cx, &backupAgent, StringRef(lastBackupContainer->getURL()), randomID));
 				}
 				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
 					for (auto &kvrange : self->backupRanges)
@@ -338,7 +344,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				}));
 
 				// restore database
-				TraceEvent("BARW_restore", randomID).detail("lastBackupContainer", lastBackupContainer).detail("restoreAfter", self->restoreAfter).detail("backupTag", printable(self->backupTag));
+				TraceEvent("BARW_restore", randomID).detail("lastBackupContainer", lastBackupContainer->getURL()).detail("restoreAfter", self->restoreAfter).detail("backupTag", printable(self->backupTag));
 				
 				state std::vector<Future<Version>> restores;
 				state std::vector<Standalone<StringRef>> restoreTags;
@@ -348,7 +354,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 					auto range = self->backupRanges[restoreIndex];
 					Standalone<StringRef> restoreTag(self->backupTag.toString() + "_" + std::to_string(restoreIndex));
 					restoreTags.push_back(restoreTag);
-					restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer), true, -1, true, range, Key(), Key(), self->locked));
+					restores.push_back(backupAgent.restore(cx, restoreTag, KeyRef(lastBackupContainer->getURL()), true, -1, true, range, Key(), Key(), self->locked));
 				}
 				
 				// Sometimes kill and restart the restore
@@ -363,7 +369,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 								tr->clear(self->backupRanges[restoreIndex]);
 								return Void();
 							}));
-							restores[restoreIndex] = backupAgent.restore(cx, restoreTags[restoreIndex], KeyRef(lastBackupContainer), true, -1, true, self->backupRanges[restoreIndex], Key(), Key(), self->locked);
+							restores[restoreIndex] = backupAgent.restore(cx, restoreTags[restoreIndex], KeyRef(lastBackupContainer->getURL()), true, -1, true, self->backupRanges[restoreIndex], Key(), Key(), self->locked);
 						}
 					}
 				}

@@ -24,7 +24,6 @@
 #include "libb64/encode.h"
 #include "sha1/SHA1.h"
 #include "time.h"
-#include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 
@@ -66,12 +65,10 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
-	buckets_to_span = CLIENT_KNOBS->BLOBSTORE_BACKUP_BUCKETS;
 }
 
 bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	#define TRY_PARAM(n, sn) if(name == LiteralStringRef(#n) || name == LiteralStringRef(#sn)) { n = value; return true; }
-	TRY_PARAM(buckets_to_span, bts);
 	TRY_PARAM(connect_tries, ct);
 	TRY_PARAM(connect_timeout, cto);
 	TRY_PARAM(max_connection_life, mcl);
@@ -98,7 +95,6 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	static BlobKnobs defaults;
 	std::string r;
 	#define _CHECK_PARAM(n, sn) if(n != defaults. n) { r += format("%s%s=%d", r.empty() ? "" : "&", #sn, n); }
-	_CHECK_PARAM(buckets_to_span, bts);
 	_CHECK_PARAM(connect_tries, ct);
 	_CHECK_PARAM(connect_timeout, cto);
 	_CHECK_PARAM(max_connection_life, mcl);
@@ -184,7 +180,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		if(error != nullptr)
 			*error = err;
 		TraceEvent(SevWarnAlways, "BlobStoreEndpoint").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url);
-		throw file_not_found();
+		throw backup_invalid_url();
 	}
 }
 
@@ -226,19 +222,23 @@ Future<Void> BlobStoreEndpoint::deleteObject(std::string const &bucket, std::str
 }
 
 ACTOR Future<Void> deleteBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket, int *pNumDeleted) {
-	state PromiseStream<BlobStoreEndpoint::ObjectInfo> resultStream;
-	state Future<Void> done = b->getBucketContentsStream(bucket, resultStream);
+	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
+	state Future<Void> done = b->listBucketStream(bucket, resultStream);
 	state std::vector<Future<Void>> deleteFutures;
 	loop {
 		choose {
 			when(Void _ = wait(done)) {
 				break;
 			}
-			when(BlobStoreEndpoint::ObjectInfo info = waitNext(resultStream.getFuture())) {
-				if(pNumDeleted == nullptr)
-					deleteFutures.push_back(b->deleteObject(bucket, info.name));
-				else
-					deleteFutures.push_back(map(b->deleteObject(bucket, info.name), [this](Void) -> Void { ++*pNumDeleted; return Void(); }));
+			when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
+				for(auto &object : list.objects) {
+					int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
+					deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [pNumDeletedCopy](Void) -> Void {
+						if(pNumDeletedCopy != nullptr)
+							++*pNumDeletedCopy;
+						return Void();
+					}));
+				}
 			}
 		}
 	}
@@ -249,6 +249,18 @@ ACTOR Future<Void> deleteBucket_impl(Reference<BlobStoreEndpoint> b, std::string
 
 Future<Void> BlobStoreEndpoint::deleteBucket(std::string const &bucket, int *pNumDeleted) {
 	return deleteBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, pNumDeleted);
+}
+
+ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
+	std::string resource = std::string("/") + bucket;
+	HTTP::Headers headers;
+
+	Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, NULL, 0, {200, 409}));
+	return Void();
+}
+
+Future<Void> BlobStoreEndpoint::createBucket(std::string const &bucket) {
+	return createBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket);
 }
 
 ACTOR Future<int64_t> objectSize_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
@@ -429,9 +441,16 @@ Future<Reference<HTTP::Response>> BlobStoreEndpoint::doRequest(std::string const
 	return doRequest_impl(Reference<BlobStoreEndpoint>::addRef(this), verb, resource, headers, pContent, contentLen, successCodes);
 }
 
-ACTOR Future<Void> getBucketContentsStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ObjectInfo> results) {
+ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ListResult> results, Optional<std::string> prefix, Optional<char> delimiter) {
 	// Request 1000 keys at a time, the maximum allowed
-	state std::string resource = std::string("/") + bucket + "/?max-keys=1000&marker=";
+	state std::string resource = "/";
+	resource.append(bucket);
+	resource.append("/?max-keys=1000");
+	if(prefix.present())
+		resource.append("&prefix=").append(HTTP::urlEncode(prefix.get()));
+	if(delimiter.present())
+		resource.append("&delimiter=").append(HTTP::urlEncode(std::string(delimiter.get(), 1)));
+	resource.append("&marker=");
 	state std::string lastFile;
 	state bool more = true;
 
@@ -440,32 +459,31 @@ ACTOR Future<Void> getBucketContentsStream_impl(Reference<BlobStoreEndpoint> bst
 		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource + HTTP::urlEncode(lastFile), headers, NULL, 0, {200}));
 
 		try {
+			BlobStoreEndpoint::ListResult result;
 			// Parse the json assuming it is valid and contains the right stuff.  If any exceptions are thrown, throw http_bad_response
-			json_spirit::Value json;
+			json_spirit::mValue json;
 			json_spirit::read_string(r->content, json);
-			for(auto &i : json.get_obj()) {
-				if(i.name_ == "truncated") {
-					more = i.value_.get_bool();
-				}
-				else if(i.name_ == "results") {
-					BlobStoreEndpoint::ObjectInfo info;
-					info.bucket = bucket;
-					for(auto &o : i.value_.get_array()) {
-						info.size = -1;
-						info.name.clear();
-						for(auto &f : o.get_obj()) {
-							if(f.name_ == "size")
-								info.size = f.value_.get_int();
-							else if(f.name_ == "key")
-								info.name = f.value_.get_str();
-						}
-						if(info.size >= 0 && !info.name.empty()) {
-							lastFile = info.name;
-							results.send(std::move(info));
-						}
-					}
+			JSONDoc doc(json);
+			doc.tryGet("truncated", more);
+			if(doc.has("results")) {
+				for(auto &jsonObject : doc.at("results").get_array()) {
+					JSONDoc objectDoc(jsonObject);
+					BlobStoreEndpoint::ObjectInfo object;
+					objectDoc.get("size", object.size);
+					objectDoc.get("key", object.name);
+					result.objects.push_back(std::move(object));
 				}
 			}
+			if(doc.has("CommonPrefixes")) {
+				for(auto &jsonObject : doc.at("CommonPrefixes").get_array()) {
+					JSONDoc objectDoc(jsonObject);
+					std::string prefix;
+					objectDoc.get("Prefix", prefix);
+					result.commonPrefixes.push_back(std::move(prefix));
+				}
+			}
+
+			results.send(result);
 		} catch(Error &e) {
 			throw http_bad_response();
 		}
@@ -474,29 +492,30 @@ ACTOR Future<Void> getBucketContentsStream_impl(Reference<BlobStoreEndpoint> bst
 	return Void();
 }
 
-Future<Void> BlobStoreEndpoint::getBucketContentsStream(std::string const &bucket, PromiseStream<BlobStoreEndpoint::ObjectInfo> results) {
-	return getBucketContentsStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results);
+Future<Void> BlobStoreEndpoint::listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix, Optional<char> delimiter) {
+	return listBucketStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter);
 }
 
-ACTOR Future<BlobStoreEndpoint::BucketContentsT> getBucketContents_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket) {
-	state BlobStoreEndpoint::BucketContentsT results;
-	state PromiseStream<BlobStoreEndpoint::ObjectInfo> resultStream;
-	state Future<Void> done = bstore->getBucketContentsStream(bucket, resultStream);
+ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, Optional<std::string> prefix, Optional<char> delimiter) {
+	state BlobStoreEndpoint::ListResult results;
+	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
+	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter);
 	loop {
 		choose {
 			when(Void _ = wait(done)) {
 				break;
 			}
-			when(BlobStoreEndpoint::ObjectInfo info = waitNext(resultStream.getFuture())) {
-				results.push_back(info);
+			when(BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
+				results.commonPrefixes.insert(results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
+				results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
 			}
 		}
 	}
 	return results;
 }
 
-Future<BlobStoreEndpoint::BucketContentsT> BlobStoreEndpoint::getBucketContents(std::string const &bucket) {
-	return getBucketContents_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket);
+Future<BlobStoreEndpoint::ListResult> BlobStoreEndpoint::listBucket(std::string const &bucket, Optional<std::string> prefix, Optional<char> delimiter) {
+	return listBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter);
 }
 
 std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {
@@ -639,7 +658,9 @@ ACTOR Future<int> readObject_impl(Reference<BlobStoreEndpoint> bstore, std::stri
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
-	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, NULL, 0, {200, 206}));
+	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, NULL, 0, {200, 206, 404}));
+	if(r->code == 404)
+		throw file_not_found();
 	if(r->contentLen != r->content.size())  // Double check that this wasn't a header-only response, probably unnecessary
 		throw io_error();
 	// Copy the output bytes, server could have sent more or less bytes than requested so copy at most length bytes

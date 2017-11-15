@@ -220,6 +220,7 @@ public:
 		return task;
 	}
 
+	// Verify that the user configured task verification key still has the user specificied value
 	ACTOR static Future<bool> taskVerify(Reference<TaskBucket> tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 
 		if (task->params.find(Task::reservedTaskParamValidKey) == task->params.end()) {
@@ -503,6 +504,7 @@ public:
 		return false;
 	}
 
+	// Verify that the task's keys are still in the timeout space at the expected timeout prefix
 	ACTOR static Future<bool> isFinished(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task) {
 		taskBucket->setOptions(tr);
 

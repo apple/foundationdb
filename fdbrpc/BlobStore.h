@@ -26,7 +26,7 @@
 #include "fdbclient/Knobs.h"
 #include "IRateControl.h"
 #include "HTTP.h"
-#include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "JSONDoc.h"
 
 // Representation of all the things you need to connect to a blob store instance with some credentials.
 // Reference counted because a very large number of them could be needed.
@@ -63,8 +63,7 @@ public:
 			read_ahead_blocks,
 			read_cache_blocks_per_file,
 			max_send_bytes_per_second,
-			max_recv_bytes_per_second,
-			buckets_to_span;
+			max_recv_bytes_per_second;
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
 		static std::vector<std::string> getKnobDescriptions() {
@@ -85,8 +84,7 @@ public:
 				"read_ahead_blocks (or rab)            Number of blocks to read ahead of requested offset.",
 				"read_cache_blocks_per_file (or rcb)   Size of the read cache for a file in blocks.",
 				"max_send_bytes_per_second (or sbps)   Max send bytes per second for all requests combined.",
-				"max_recv_bytes_per_second (or rbps)   Max receive bytes per second for all requests combined (NOT YET USED).",
-				"buckets_to_span (or bts)              Number of buckets that a new backup should distribute over."
+				"max_recv_bytes_per_second (or rbps)   Max receive bytes per second for all requests combined (NOT YET USED)."
 			};
 		}
 	};
@@ -148,18 +146,22 @@ public:
 	// Every blob store interaction should ultimately go through this function
 
 	Future<Reference<HTTP::Response>> doRequest(std::string const &verb, std::string const &resource, const HTTP::Headers &headers, UnsentPacketQueue *pContent, int contentLen, std::set<unsigned int> successCodes);
+
 	struct ObjectInfo {
-		std::string bucket;
 		std::string name;
 		int64_t size;
 	};
 
+	struct ListResult {
+		std::vector<std::string> commonPrefixes;
+		std::vector<ObjectInfo> objects;
+	};
+
 	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests
-	Future<Void> getBucketContentsStream(std::string const &bucket, PromiseStream<ObjectInfo> results);
+	Future<Void> listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix = {}, Optional<char> delimiter = {});
 
 	// Get a list of the files in a bucket
-	typedef std::vector<ObjectInfo> BucketContentsT;
-	Future<BucketContentsT> getBucketContents(std::string const &bucket);
+	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {});
 
 	// Check if an object exists in a bucket
 	Future<bool> objectExists(std::string const &bucket, std::string const &object);
@@ -178,6 +180,9 @@ public:
 	// Since it can take a while, if a pNumDeleted is provided then it will be incremented every time
 	// a deletion of an object completes.
 	Future<Void> deleteBucket(std::string const &bucket, int *pNumDeleted = NULL);
+
+	// Create a bucket if it does not already exists.
+	Future<Void> createBucket(std::string const &bucket);
 
 	// Useful methods for working with tiny files
 	Future<std::string> readEntireFile(std::string const &bucket, std::string const &object);

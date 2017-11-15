@@ -364,7 +364,8 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 				begin = firstGreaterThan(values.end()[-1].key);
 
 			if (!values.more && !limits.isReached()) {
-				results.sendError(end_of_stream());
+				if(terminator)
+					results.sendError(end_of_stream());
 				return Void();
 			}
 		}
@@ -456,7 +457,8 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 					results.send(rcGroup);
 				}
 
-				results.sendError(end_of_stream());
+				if(terminator)
+					results.sendError(end_of_stream());
 				return Void();
 			}
 

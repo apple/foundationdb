@@ -1887,6 +1887,21 @@ std::vector<std::string> listFiles( std::string const& directory, std::string co
 std::vector<std::string> listDirectories( std::string const& directory ) {
 	return findFiles( directory, "", &acceptDirectory );
 }
+
+void findFilesRecursively(std::string path, std::vector<std::string> &out) {
+	// Add files to output, prefixing path
+	std::vector<std::string> files = platform::listFiles(path);
+	for(auto const &f : files)
+		out.push_back(joinPath(path, f));
+
+	// Recurse for directories
+	std::vector<std::string> directories = platform::listDirectories(path);
+	for(auto const &dir : directories) {
+		if(dir != "." && dir != "..")
+			findFilesRecursively(joinPath(path, dir), out);
+	}
+};
+
 }; // namespace platform
 
 

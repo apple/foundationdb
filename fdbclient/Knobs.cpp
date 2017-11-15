@@ -152,7 +152,6 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
 	init( BLOBSTORE_MULTIPART_MAX_PART_SIZE,  20000000 );
 	init( BLOBSTORE_MULTIPART_MIN_PART_SIZE,   5242880 );
-	init( BLOBSTORE_BACKUP_BUCKETS,                100 );
 
 	// These are basically unlimited by default but can be used to reduce blob IO if needed
 	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );

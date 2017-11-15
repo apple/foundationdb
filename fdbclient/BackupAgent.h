@@ -30,6 +30,7 @@
 #include "KeyBackedTypes.h"
 #include <ctime>
 #include <climits>
+#include "BackupContainer.h"
 
 class BackupAgentBase : NonCopyable {
 public:
@@ -262,20 +263,13 @@ public:
 	Future<std::string> getStatus(Database cx, int errorLimit, std::string tagName);
 
 	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
+	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
 	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
 
 	static Future<std::string> getBackupInfo(std::string backupContainer, Version* defaultVersion = NULL);
-
-	static std::string getTempFilename();
-	// Data(key ranges) and Log files will have their file size in the name because it is not at all convenient
-	// to fetch filesizes from either of the current BackupContainer implementations. LocalDirectory requires
-	// querying each file separately, and Blob Store doesn't support renames so the apparent log and data files
-	// are actually a kind of symbolic link so to get the size of the final file it would have to be read.
-	static std::string getDataFilename(Version version, int64_t size, int blockSize);
-	static std::string getLogFilename(Version beginVer, Version endVer, int64_t size, int blockSize);
 
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
 	Future<int64_t> getTaskCount(Database cx) { return taskBucket->getTaskCount(cx); }
@@ -562,14 +556,39 @@ protected:
 	Subspace configSpace;
 };
 
+template<> inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const &bc) { 
+	return Tuple().append(StringRef(bc->getURL()));
+}
+template<> inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const &val) {
+	return IBackupContainer::openContainer(val.getString(0).toString());
+}
+
 class BackupConfig : public KeyBackedConfig {
 public:
 	BackupConfig(UID uid = UID()) : KeyBackedConfig(fileBackupPrefixRange.begin, uid) {}
 	BackupConfig(Reference<Task> task) : KeyBackedConfig(fileBackupPrefixRange.begin, task) {}
 
 	// rangeFileMap maps a keyrange file's End to its Begin and Filename
-	typedef std::pair<Key, Key> KeyAndFilenameT;
-	typedef KeyBackedMap<Key, KeyAndFilenameT> RangeFileMapT;
+	struct RangeSlice {
+		Key begin;
+		Version version;
+		std::string fileName;
+		int64_t fileSize;
+		Tuple pack() const {
+			return Tuple().append(begin).append(version).append(StringRef(fileName)).append(fileSize);
+		}
+		static RangeSlice unpack(Tuple const &t) {
+			RangeSlice r;
+			int i = 0;
+			r.begin = t.getString(i++);
+			r.version = t.getInt(i++);
+			r.fileName = t.getString(i++).toString();
+			r.fileSize = t.getInt(i++);
+			return r;
+		}
+	};
+
+	typedef KeyBackedMap<Key, RangeSlice> RangeFileMapT;
 	RangeFileMapT rangeFileMap() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
@@ -586,8 +605,13 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	KeyBackedProperty<std::string> backupContainer() {
+	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Get the backup container URL only without creating a backup container instance.
+	KeyBackedProperty<Reference<IBackupContainer>> backupContainerURL() {
+		return configSpace.pack(LiteralStringRef("backupContainer"));
 	}
 
 	// Stop differntial logging if already started or don't start after completing KV ranges
