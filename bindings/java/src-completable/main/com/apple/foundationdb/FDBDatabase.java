@@ -113,11 +113,13 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e);
 			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;
-		} finally {
+		} catch(RuntimeException err) {
 			if(tr != null) {
 				tr.dispose();
 			}
 
+			throw err;
+		} finally {
 			pointerReadLock.unlock();
 		}
 	}
