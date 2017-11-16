@@ -114,7 +114,7 @@ public:
 
 
 	static std::string versionFolderString(Version v) {
-		return format("%lld/%lld/%lld", v - (v % (int64_t)1e15), v - (v % (int64_t)1e11), v - (v % (int64_t)1e7));
+		return format("%lld/%lld/%lld", v - (v % (int64_t)1e16), v - (v % (int64_t)1e12), v - (v % (int64_t)1e8));
 	}
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) {
