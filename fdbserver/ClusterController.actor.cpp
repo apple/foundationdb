@@ -81,6 +81,7 @@ public:
 		Promise<Void> forceMasterFailure;
 		int64_t masterRegistrationCount;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
+		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
 
 		DBInfo() : masterRegistrationCount(0),
@@ -793,7 +794,7 @@ public:
 	std::map<  Optional<Standalone<StringRef>>, ProcessClass > id_class; //contains the mapping from process id to process class from the database
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
-	bool gotConfiguration;
+	bool gotFullyRecoveredConfig;
 	Optional<Standalone<StringRef>> masterProcessId;
 	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	UID id;
@@ -808,7 +809,7 @@ public:
 	double startTime;
 
 	explicit ClusterControllerData( ClusterControllerFullInterface ccInterface )
-		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), gotConfiguration(false), startTime(now())
+		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now())
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -1300,12 +1301,15 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	db->masterRegistrationCount = req.registrationCount;
 	if ( req.configuration.present() ) {
 		db->config = req.configuration.get();
-		self->gotConfiguration = true;
 
-		for ( auto& it : self->id_worker ) {
-			bool isExcludedFromConfig = db->config.isExcludedServer(it.second.interf.address());
-			if ( it.second.isExcluded != isExcludedFromConfig && !it.second.reply.isSet() ) {
-				it.second.reply.send( RegisterWorkerReply( it.second.processClass, isExcludedFromConfig) );
+		if ( req.recoveryState >= RecoveryState::FULLY_RECOVERED ) {
+			self->gotFullyRecoveredConfig = true;
+			db->fullyRecoveredConfig = req.configuration.get();
+			for ( auto& it : self->id_worker ) {
+				bool isExcludedFromConfig = db->fullyRecoveredConfig.isExcludedServer(it.second.interf.address());
+				if ( it.second.isExcluded != isExcludedFromConfig && !it.second.reply.isSet() ) {
+					it.second.reply.send( RegisterWorkerReply( it.second.processClass, isExcludedFromConfig) );
+				}
 			}
 		}
 	}
@@ -1382,8 +1386,8 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 			}
 		}
 
-		if ( self->gotConfiguration ) {
-			newIsExcluded = self->db.config.isExcludedServer(w.address());
+		if ( self->gotFullyRecoveredConfig ) {
+			newIsExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.address());
 		}
 
 		// Notify the worker to register again with new process class/exclusive property

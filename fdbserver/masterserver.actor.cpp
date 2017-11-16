@@ -1104,7 +1104,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	state Future<Void> resolverFailure = waitResolverFailure( self->resolvers );
 	state Future<Void> proxyFailure = waitProxyFailure( self->proxies );
 	state Future<Void> providingVersions = provideVersions(self);
-	state Future<Void> configMonitor = configurationMonitor( self );
 
 	addActor.send( reportErrors(updateRegistration(self, self->logSystem), "updateRegistration", self->dbgid) );
 	self->registrationTrigger.trigger();
@@ -1181,6 +1180,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	if( self->resolvers.size() > 1 )
 		addActor.send( resolutionBalancing(self) );
 
+	state Future<Void> configMonitor = configurationMonitor( self );
 	addActor.send( changeCoordinators(self, skipTransition) );
 	addActor.send( trackTlogRecovery(self, oldLogSystems, skipTransition) );
 
