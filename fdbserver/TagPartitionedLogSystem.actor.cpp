@@ -141,6 +141,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogLocalities = lsConf.tLogLocalities;
 		logSystem->logSystemType = lsConf.logSystemType;
 		logSystem->UpdateLocalitySet(lsConf.tLogs);
+		filterLocalityDataForPolicy(logSystem->tLogPolicy, &logSystem->tLogLocalities);
 
 		return logSystem;
 	}
@@ -159,6 +160,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogReplicationFactor = lsConf.oldTLogs[0].tLogReplicationFactor;
 			logSystem->tLogPolicy = lsConf.oldTLogs[0].tLogPolicy;
 			logSystem->tLogLocalities = lsConf.oldTLogs[0].tLogLocalities;
+			filterLocalityDataForPolicy(logSystem->tLogPolicy, &logSystem->tLogLocalities);
 
 			logSystem->oldLogData.resize(lsConf.oldTLogs.size()-1);
 			for( int i = 1; i < lsConf.oldTLogs.size(); i++ ) {
@@ -346,21 +348,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		Void _ = wait( quorum( alive, std::min(self->tLogReplicationFactor, numPresent - self->tLogWriteAntiQuorum) ) );
 
+		state Reference<LocalityGroup> locked(new LocalityGroup());
+		state std::vector<bool> responded(alive.size());
+		for (int i = 0; i < alive.size(); i++) {
+			responded[i] = false;
+		}
 		loop {
-			LocalityGroup locked;
-			std::vector<LocalityData> unlocked, unused;
 			for (int i = 0; i < alive.size(); i++) {
-				if (alive[i].isReady() && !alive[i].isError()) {
-					locked.add(self->tLogLocalities[i]);
-				} else {
-					unlocked.push_back(self->tLogLocalities[i]);
+				if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
+					locked->add(self->tLogLocalities[i]);
+					responded[i] = true;
 				}
 			}
-			bool quorum_obtained = locked.validate(self->tLogPolicy);
-			if (!quorum_obtained && self->tLogWriteAntiQuorum != 0) {
-				quorum_obtained = !validateAllCombinations(unused, locked, self->tLogPolicy, unlocked, self->tLogWriteAntiQuorum, false);
-			}
-			if (self->tLogReplicationFactor - self->tLogWriteAntiQuorum == 1 && locked.size() > 0) {
+			bool quorum_obtained = locked->validate(self->tLogPolicy);
+			// We intentionally skip considering antiquorums, as the CPU cost of doing so is prohibitive.
+			if (self->tLogReplicationFactor == 1 && locked->size() > 0) {
 				ASSERT(quorum_obtained);
 			}
 			if (quorum_obtained) {
@@ -581,6 +583,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogPolicy = prevState.tLogPolicy;
 			logSystem->tLogLocalities = prevState.tLogLocalities;
 			logSystem->logSystemType = prevState.logSystemType;
+			filterLocalityDataForPolicy(logSystem->tLogPolicy, &logSystem->tLogLocalities);
 
 			logSystem->epochEndVersion = 0;
 			logSystem->knownCommittedVersion = 0;
@@ -869,6 +872,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(initializationReplies[i].get()) ) );
 			logSystem->tLogLocalities[i] = workers[i].locality;
 		}
+		filterLocalityDataForPolicy(logSystem->tLogPolicy, &logSystem->tLogLocalities);
 
 		//Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running recoveries causing tests to timeout
 		if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator.speedUpSimulation) throw master_recovery_failed();
