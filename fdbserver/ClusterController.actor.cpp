@@ -43,19 +43,20 @@ void failAfter( Future<Void> trigger, Endpoint e );
 
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
-	ReplyPromise<ProcessClass> reply;
+	ReplyPromise<RegisterWorkerReply> reply;
 	Generation gen;
 	int reboots;
 	WorkerInterface interf;
 	ProcessClass initialClass;
 	ProcessClass processClass;
+	bool isExcluded;
 
 	WorkerInfo() : gen(-1), reboots(0) {}
-	WorkerInfo( Future<Void> watcher, ReplyPromise<ProcessClass> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
-		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass) {}
+	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, bool isExcluded ) :
+		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass), isExcluded(isExcluded) {}
 
 	WorkerInfo( WorkerInfo&& r ) noexcept(true) : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
-		reboots(r.reboots), interf(std::move(r.interf)), initialClass(r.initialClass), processClass(r.processClass) {}
+		reboots(r.reboots), interf(std::move(r.interf)), initialClass(r.initialClass), processClass(r.processClass), isExcluded(r.isExcluded) {}
 	void operator=( WorkerInfo&& r ) noexcept(true) {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -64,6 +65,7 @@ struct WorkerInfo : NonCopyable {
 		interf = std::move(r.interf);
 		initialClass = r.initialClass;
 		processClass = r.processClass;
+		isExcluded = r.isExcluded;
 	}
 };
 
@@ -79,6 +81,7 @@ public:
 		Promise<Void> forceMasterFailure;
 		int64_t masterRegistrationCount;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
+		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
 
 		DBInfo() : masterRegistrationCount(0),
@@ -775,6 +778,7 @@ public:
 	std::map<  Optional<Standalone<StringRef>>, ProcessClass > id_class; //contains the mapping from process id to process class from the database
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
+	bool gotFullyRecoveredConfig;
 	Optional<Standalone<StringRef>> masterProcessId;
 	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	UID id;
@@ -789,7 +793,7 @@ public:
 	double startTime;
 
 	explicit ClusterControllerData( ClusterControllerFullInterface ccInterface )
-		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), startTime(now())
+		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now())
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -1067,7 +1071,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 			when( Void _ = wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
 				if (!failedWorkerInfo.reply.isSet()) {
-					failedWorkerInfo.reply.send( failedWorkerInfo.processClass );
+					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.processClass, failedWorkerInfo.isExcluded) );
 				}
 				cluster->id_worker.erase( worker.locality.processId() );
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
@@ -1278,7 +1282,20 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
-	if(req.configuration.present()) db->config = req.configuration.get();
+	if ( req.configuration.present() ) {
+		db->config = req.configuration.get();
+
+		if ( req.recoveryState >= RecoveryState::FULLY_RECOVERED ) {
+			self->gotFullyRecoveredConfig = true;
+			db->fullyRecoveredConfig = req.configuration.get();
+			for ( auto& it : self->id_worker ) {
+				bool isExcludedFromConfig = db->fullyRecoveredConfig.isExcludedServer(it.second.interf.address());
+				if ( it.second.isExcluded != isExcludedFromConfig && !it.second.reply.isSet() ) {
+					it.second.reply.send( RegisterWorkerReply( it.second.processClass, isExcludedFromConfig) );
+				}
+			}
+		}
+	}
 
 	bool isChanged = false;
 	auto dbInfo = self->db.serverInfo->get();
@@ -1331,6 +1348,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
+	bool newIsExcluded = req.isExcluded;
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
@@ -1339,39 +1357,43 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		self->clusterControllerProcessId = w.locality.processId();
 	}
 
-	// Check process class if needed
-	if (self->gotProcessClasses && (info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen)) {
-		auto classIter = self->id_class.find(w.locality.processId());
-
-		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
-			newProcessClass = classIter->second;
-		} else {
-			newProcessClass = req.initialClass;
+	// Check process class and exclusive property
+	if ( info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
+		if ( self->gotProcessClasses ) {
+			auto classIter = self->id_class.find(w.locality.processId());
+			
+			if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
+				newProcessClass = classIter->second;
+			} else {
+				newProcessClass = req.initialClass;
+			}
 		}
 
-		// Notify the worker to register again with new process class
-		if (newProcessClass != req.processClass && !req.reply.isSet()) {
-			req.reply.send( newProcessClass );
+		if ( self->gotFullyRecoveredConfig ) {
+			newIsExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.address());
+		}
+
+		// Notify the worker to register again with new process class/exclusive property
+		if ( !req.reply.isSet() && ( newProcessClass != req.processClass || newIsExcluded != req.isExcluded ) ) {
+			req.reply.send( RegisterWorkerReply(newProcessClass, newIsExcluded) );
 		}
 	}
 
 	if( info == self->id_worker.end() ) {
-		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass );
+		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, req.isExcluded );
 		checkOutstandingRequests( self );
 
 		return;
 	}
 
 	if( info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
-		if (info->second.processClass != newProcessClass) {
-			info->second.processClass = newProcessClass;
-		}
-
-		info->second.initialClass = req.initialClass;
 		if (!info->second.reply.isSet()) {
 			info->second.reply.send( Never() );
 		}
 		info->second.reply = req.reply;
+		info->second.processClass = newProcessClass;
+		info->second.isExcluded = req.isExcluded;
+		info->second.initialClass = req.initialClass;
 		info->second.gen = req.generation;
 
 		if(info->second.interf.id() != w.id()) {
@@ -1575,7 +1597,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 						if (newProcessClass != w.second.processClass) {
 							w.second.processClass = newProcessClass;
 							if (!w.second.reply.isSet()) {
-								w.second.reply.send( newProcessClass );
+								w.second.reply.send( RegisterWorkerReply(newProcessClass, w.second.isExcluded) );
 							}
 						}
 					}
@@ -1724,14 +1746,14 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	}
 }
 
-ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass ) {
+ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass, Reference<AsyncVar<bool>> asyncIsExcluded ) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
 		cci.initEndpoints();
 		try {
 			//Register as a possible leader; wait to be elected
-			state Future<Void> leaderFail = tryBecomeLeader( coordinators, cci, currentCC, hasConnected, asyncProcessClass );
+			state Future<Void> leaderFail = tryBecomeLeader( coordinators, cci, currentCC, hasConnected, asyncProcessClass, asyncIsExcluded );
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
 				choose {
@@ -1755,12 +1777,12 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 	}
 }
 
-ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ProcessClass>> asyncProcessClass) {
+ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ProcessClass>> asyncProcessClass, Reference<AsyncVar<bool>> asyncIsExcluded) {
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators( connFile );
-			Void _ = wait( clusterController( coordinators, currentCC, hasConnected, asyncProcessClass ) );
+			Void _ = wait( clusterController( coordinators, currentCC, hasConnected, asyncProcessClass, asyncIsExcluded ) );
 		} catch( Error &e ) {
 			if( e.code() != error_code_coordinators_changed )
 				throw; // Expected to terminate fdbserver
