@@ -150,7 +150,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 					}
 				});
 			}
-		}).map(new Function<Void, T>(){
+		}).map(new Function<Void, T>() {
 			@Override
 			public T apply(Void o) {
 				return returnValue.get();
