@@ -527,10 +527,20 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 	// Must hold pointerReadLock when calling
 	private FDBTransaction transfer() {
-		FDBTransaction tr = new FDBTransaction(getPtr(), database, executor);
-		tr.options().setUsedDuringCommitProtectionDisable();
-		transactionOwner = false;
-		return tr;
+		FDBTransaction tr = null;
+		try {
+			tr = new FDBTransaction(getPtr(), database, executor);
+			tr.options().setUsedDuringCommitProtectionDisable();
+			transactionOwner = false;
+			return tr;
+		}
+		catch(RuntimeException err) {
+			if(tr != null) {
+				tr.dispose();
+			}
+
+			throw err;
+		}
 	}
 
 	@Override
