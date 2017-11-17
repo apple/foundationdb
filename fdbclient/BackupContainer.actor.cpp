@@ -302,17 +302,26 @@ public:
 				if(i->beginVersion == end)
 					end = i->endVersion;
 			}
+		}
 
-			for(auto &s : snapshots) {
-				// If the snapshot is covered by the contiguous log chain then update min/max restorable.
-				if(s.beginVersion >= desc.minLogBegin.get() && s.endVersion <= desc.contiguousLogEnd.get()) {
-					// Update min restorable
-					if(!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
-						desc.minRestorableVersion = s.endVersion;
-					// Update max restorable, which is just the contigous log end as long as there is at least one
-					// keyspace snapshot that is within the log chain range.
+		for(auto &s : snapshots) {
+			// If the snapshot is at a single version then it requires no logs.  Update min and max restorable.
+			// TODO:  Somehow check / report if the restorable range is not or may not be contiguous.
+			if(s.beginVersion == s.endVersion) {
+				if(!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
+					desc.minRestorableVersion = s.endVersion;
+
+				if(!desc.maxRestorableVersion.present() || s.endVersion > desc.maxRestorableVersion.get())
+					desc.maxRestorableVersion = s.endVersion;
+			}
+
+			// If the snapshot is covered by the contiguous log chain then update min/max restorable.
+			if(desc.minLogBegin.present() && s.beginVersion >= desc.minLogBegin.get() && s.endVersion <= desc.contiguousLogEnd.get()) {
+				if(!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
+					desc.minRestorableVersion = s.endVersion;
+
+				if(!desc.maxRestorableVersion.present() || desc.contiguousLogEnd.get() > desc.maxRestorableVersion.get())
 					desc.maxRestorableVersion = desc.contiguousLogEnd;
-				}
 			}
 		}
 
@@ -359,9 +368,14 @@ public:
 
 		if(snapshot.present()) {
 			state RestorableFileSet restorable;
+			restorable.targetVersion = targetVersion;
 
 			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));
 			restorable.ranges = ranges;
+
+			// No logs needed if there is a complete key space snapshot at a single version.
+			if(snapshot.get().beginVersion == snapshot.get().endVersion)
+				return restorable;
 
 			std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion));
 
@@ -383,7 +397,6 @@ public:
 				}
 
 				if(end >= targetVersion) {
-					restorable.targetVersion = targetVersion;
 					return restorable;
 				}
 			}
@@ -585,17 +598,11 @@ public:
 	}
 
 	Future<Void> deleteContainer(int *pNumDeleted) {
-		// TODO:  Providing a way to delete a backup folder doesn't seem very necessary since users generally
-		// know how to manage files on disk.  However, if we want this to work then eraseDirectoryRecursive()
-		// or something like it needs to work outside the pre-simulation phase of execution.
-		/*
-		// List files directly from the filesystem so we see .temp and .part files too.
-		int count = platform::listFiles(m_path, "").size();
-		platform::eraseDirectoryRecursive(m_path);
-		if(pNumDeleted != nullptr)
-			*pNumDeleted = count;
-		*/
-		return Void();
+		// Destroying a directory seems pretty unsafe, as a badly formed file:// URL could point to a thing
+		// that should't be deleted.  Also, platform::eraseDirectoryRecursive() intentionally doesn't work outside
+		// of the pre-simulation phase.
+		// By just expiring ALL data, only parsable backup files in the correct locations will be deleted.
+		return expireData(std::numeric_limits<Version>::max());
 	}
 
 private:
@@ -780,41 +787,92 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 	}
 }
 
+ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f) {
+	state Standalone<StringRef> content = makeString(g_random->randomInt(0, 10000000));
+	for(int i = 0; i < content.size(); ++i)
+		mutateString(content)[i] = (uint8_t)g_random->randomInt(0, 256);
+
+	Void _ = wait(f->append(content.begin(), content.size()));
+	Void _ = wait(f->finish());
+	state Reference<IAsyncFile> in = wait(c->readFile(f->getFileName()));
+	int64_t size = wait(in->size());
+	state Standalone<StringRef> buf = makeString(size);
+	int b = wait(in->read(mutateString(buf), buf.size(), 0));
+	ASSERT(b == buf.size());
+	ASSERT(buf == content);
+	return Void();
+}
+
 ACTOR Future<Void> testBackupContainer(std::string url) {
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
 
 	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100, 150, 10));
-	Void _ = wait(log1->append("asdf", 4));
-	Void _ = wait(log1->finish());
+	Void _ = wait(writeAndVerifyFile(c, log1));
 
 	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150, 300, 10));
-	Void _ = wait(log2->append("asdf", 4));
-	Void _ = wait(log2->finish());
+	Void _ = wait(writeAndVerifyFile(c, log2));
 
-	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(110, 10));
-	Void _ = wait(range1->append("asdf", 4));
-	Void _ = wait(range1->finish());
+	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160, 10));
+	Void _ = wait(writeAndVerifyFile(c, range1));
 
-	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName()}, range1->size()));
+	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300, 10));
+	Void _ = wait(writeAndVerifyFile(c, range2));
+
+	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310, 10));
+	Void _ = wait(writeAndVerifyFile(c, range3));
+
+	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size()));
+
+	Void _ = wait(c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size()));
 
 	state BackupDescription desc = wait(c->describeBackup());
 	printf("Backup Description\n%s", desc.toString().c_str());
 
 	ASSERT(desc.maxRestorableVersion.present());
 	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
-
 	ASSERT(rest.present());
-	ASSERT(rest.get().targetVersion == desc.maxRestorableVersion.get());
-	ASSERT(rest.get().logs.size() == 2);
+	ASSERT(rest.get().logs.size() == 0);
 	ASSERT(rest.get().ranges.size() == 1);
+
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(150));
+	ASSERT(!rest.present());
+
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(300));
+	ASSERT(rest.present());
+	ASSERT(rest.get().logs.size() == 1);
+	ASSERT(rest.get().ranges.size() == 2);
+
+	Void _ = wait(c->expireData(100));
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(d.minLogBegin == 100);
+	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+
+	Void _ = wait(c->expireData(101));
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(d.minLogBegin == 150);
+	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+
+	Void _ = wait(c->expireData(155));
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(!d.minLogBegin.present());
+	ASSERT(d.snapshots.size() == desc.snapshots.size());
+	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+
+	Void _ = wait(c->expireData(161));
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(d.snapshots.size() == 1);
 
 	Void _ = wait(c->deleteContainer());
 
-	// TODO:  Read the files back, verify contents.
-
-	// TODO:  Expire data, very change to description
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(d.snapshots.size() == 0);
 
 	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
 
@@ -830,6 +888,7 @@ TEST_CASE("backup/containers/localdir") {
 };
 
 TEST_CASE("backup/containers/blobstore") {
-	Void _ = wait(testBackupContainer(format("blobstore://FDB_TEST:FDB_TEST_KEY@store-test.blobstore.apple.com/test_%llx", timer_int())));
+	if(!g_network->isSimulated())
+		Void _ = wait(testBackupContainer(format("blobstore://FDB_TEST:FDB_TEST_KEY@store-test.blobstore.apple.com/test_%llx", timer_int())));
 	return Void();
 };
