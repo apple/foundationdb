@@ -850,6 +850,9 @@ namespace fileBackup {
 			static TaskParam<int64_t> fileSize() {
 				return LiteralStringRef(__FUNCTION__);
 			}
+			static TaskParam<int64_t> nrKeys() {
+				return LiteralStringRef(__FUNCTION__);
+			}
 		} Params;
 
 		StringRef getName() const { return name; };
@@ -910,6 +913,7 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Key begin, Key end, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), int priority = 0) {
+			TraceEvent(SevInfo, "FBA_schedBackupRangeTask").detail("begin", printable(begin)).detail("end", printable(end));
 			Key key = wait(addBackupTask(BackupRangeTaskFunc::name,
 										 BackupRangeTaskFunc::version,
 										 tr, taskBucket, completionKey,
@@ -944,6 +948,7 @@ namespace fileBackup {
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+			state int64_t nrKeys = 0;
 
 			Void _ = wait(checkTaskVersion(cx, task, BackupRangeTaskFunc::name, BackupRangeTaskFunc::version));
 
@@ -1022,6 +1027,7 @@ namespace fileBackup {
 							TEST(true); // Backup range task did not finish before timeout
 							Params.backupRangeBeginKey().set(task, beginKey);
 							Params.fileSize().set(task, fileSize);
+							Params.nrKeys().set(task, nrKeys);
 							return Void();
 						}
 
@@ -1041,6 +1047,7 @@ namespace fileBackup {
 					for (; i < values.first.size(); ++i) {
 						lastKey = values.first[i].key;
 						Void _ = wait(rangeFile.writeKV(lastKey, values.first[i].value));
+						nrKeys++;
 					}
 				}
 				catch (Error &e) {
@@ -1075,6 +1082,7 @@ namespace fileBackup {
 							}
 						}
 						Params.fileSize().set(task, fileSize);
+						Params.nrKeys().set(task, nrKeys);
 						return Void();
 					}
 
@@ -1126,6 +1134,9 @@ namespace fileBackup {
 			else {
 				Void _ = wait(taskFuture->set(tr, taskBucket));
 			}
+
+			TraceEvent(SevInfo, "FBA_endBackupRangeTask").detail("begin", printable(Params.beginKey().get(task))).detail("end", printable(Params.endKey().get(task)))
+					.detail("size", Params.fileSize().get(task)).detail("nrKeys", Params.nrKeys().get(task));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
