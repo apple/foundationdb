@@ -68,6 +68,11 @@ struct IReplicationPolicy : public ReferenceCounted<IReplicationPolicy> {
 			std::vector<LocalityEntry>	const&	solutionSet,
 			std::vector<LocalityEntry> const&		alsoServers,
 			LocalitySetRef const&								fromServers );
+
+		// Returns a set of the attributes that this policy uses in selection and validation.
+		std::set<std::string> attributeKeys() const
+		{ std::set<std::string> keys; this->attributeKeys(&keys); return keys; }
+		virtual void attributeKeys(std::set<std::string>*) const = 0;
 };
 
 template <class Archive>
@@ -108,6 +113,7 @@ struct PolicyOne : IReplicationPolicy, public ReferenceCounted<PolicyOne> {
 	template <class Ar>
 	void serialize(Ar& ar) {
 	}
+	virtual void attributeKeys(std::set<std::string>* set) const override { return; }
 };
 
 struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> {
@@ -134,6 +140,9 @@ struct PolicyAcross : IReplicationPolicy, public ReferenceCounted<PolicyAcross> 
 
 	static bool compareAddedResults(const std::pair<int, int>& rhs, const std::pair<int, int>& lhs)
 	{ return (rhs.first < lhs.first) || (!(lhs.first < rhs.first) && (rhs.second < lhs.second)); }
+
+	virtual void attributeKeys(std::set<std::string> *set) const override
+	{ set->insert(_attribKey); _policy->attributeKeys(set); }
 
 protected:
 	int																_count;
@@ -206,6 +215,9 @@ struct PolicyAnd : IReplicationPolicy, public ReferenceCounted<PolicyAnd> {
 			std::sort(_sortedPolicies.begin(), _sortedPolicies.end(), PolicyAnd::comparePolicy);
 		}
 	}
+
+	virtual void attributeKeys(std::set<std::string> *set) const override
+	{ for (const IRepPolicyRef& r : _policies) { r->attributeKeys(set); } }
 
 protected:
 	std::vector<IRepPolicyRef>			_policies;
