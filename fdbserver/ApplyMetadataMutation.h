@@ -126,17 +126,8 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			}
 			else if (m.param1.startsWith(configKeysPrefix) || m.param1 == coordinatorsKey) {
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().cast_to<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
-					auto t = txnStateStore->readValue(m.param1).get();
-					if (logSystem && m.param1.startsWith( excludedServersPrefix )) {
-						// If one of our existing tLogs is now excluded, we have to die and recover
-						auto addr = decodeExcludedServersKey(m.param1);
-						for( auto tl : logSystem->getLogSystemConfig().tLogs ) {
-							if(!tl.present() || addr.excludes(tl.interf().commit.getEndpoint().address)) {
-								TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL).detail("addr", addr.toString());
-								if(confChange) *confChange = true;
-							}
-						}
-					} else if(m.param1 != excludedServersVersionKey) {
+					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
+						auto t = txnStateStore->readValue(m.param1).get();
 						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL);
 						if(confChange) *confChange = true;
 					}
