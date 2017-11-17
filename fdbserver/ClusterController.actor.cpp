@@ -577,26 +577,13 @@ public:
 		TLogFitness() : tlogFit( ProcessClass::NeverAssign ), tlogCount(0) {}
 
 		TLogFitness( vector<std::pair<WorkerInterface, ProcessClass>> tlogs ) {
-			// std::set<Optional<Standalone<StringRef>>> dcs;
 			tlogFit = ProcessClass::BestFit;
-			
 			for(auto it : tlogs) {
-				// dcs.insert(it.first.locality.dcId());
 				tlogFit = std::max(tlogFit, it.second.machineClassFitness( ProcessClass::TLog ));
 			}
+			
 			tlogCount = tlogs.size();
 		}
-
-		// TLogFitness( vector<OptionalInterface<TLogInterface>> tlogs, std::vector<ProcessClass> processClasses ) {
-		// 	std::set<Optional<Standalone<StringRef>>> dcs;
-		// 	tlogFit = ProcessClass::BestFit;
-		// 	for(int i = 0; i < tlogs.size(); i++) {
-		// 		ASSERT(tlogs[i].present());
-		// 		dcs.insert(tlogs[i].interf().locality.dcId());
-		// 		tlogFit = std::max(tlogFit, processClasses[i].machineClassFitness( ProcessClass::TLog ));
-		// 	}
-		// 	tlogCount = tlogs.size();
-		// }
 
 		bool operator < (TLogFitness const& r) const {
 			if (tlogFit != r.tlogFit) return tlogFit < r.tlogFit;
