@@ -277,7 +277,10 @@ public class FDB {
 			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
 		Cluster c = f.join();
-		return c.openDatabase(e);
+		Database db = c.openDatabase(e);
+		c.dispose();
+
+		return db;
 	}
 
 	/**
