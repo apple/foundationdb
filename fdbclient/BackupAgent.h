@@ -639,7 +639,11 @@ public:
 			TraceEvent(SevError, "FileBackupErrorNoUID").error(e).detail("Description", details);
 			return Void();
 		}
-		TraceEvent(SevWarn, "FileBackupError").error(e).detail("BackupUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		TraceEvent t(SevWarn, "FileBackupError");
+		t.error(e).detail("BackupUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		// These should not happen
+		if(e.code() == error_code_key_not_found)
+			t.backtrace();
 		std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
 		return lastError().set(cx, {msg, (int64_t)now()});
 	}

@@ -172,7 +172,11 @@ public:
 			TraceEvent(SevError, "FileRestoreErrorNoUID").error(e).detail("Description", details);
 			return Void();
 		}
-		TraceEvent(SevWarn, "FileRestoreError").error(e).detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		TraceEvent t(SevWarn, "FileRestoreError");
+		t.error(e).detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		// These should not happen
+		if(e.code() == error_code_key_not_found)
+			t.backtrace();
 		std::string msg = format("ERROR: %s (%s)", details.c_str(), e.what());
 		return lastError().set(cx, {msg, (int64_t)now()});
 	}
@@ -569,7 +573,7 @@ namespace fileBackup {
 			return results;
 
 		} catch(Error &e) {
-			TraceEvent(SevError, "FileRestoreCorruptRangeFileBlock")
+			TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock")
 				.detail("Filename", file->getFilename())
 				.detail("BlockOffset", offset)
 				.detail("BlockLen", len)
@@ -663,7 +667,7 @@ namespace fileBackup {
 			return results;
 
 		} catch(Error &e) {
-			TraceEvent(SevError, "FileRestoreCorruptLogFileBlock")
+			TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
 				.detail("Filename", file->getFilename())
 				.detail("BlockOffset", offset)
 				.detail("BlockLen", len)
@@ -679,7 +683,7 @@ namespace fileBackup {
 		if (taskVersion > version) {
 			state Error err = task_invalid_version();
 
-			TraceEvent(SevError, "BA_BackupRangeTaskFunc_execute").detail("taskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
+			TraceEvent(SevWarn, "BA_BackupRangeTaskFunc_execute").detail("taskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
 			if (KeyBackedConfig::TaskParams.uid().exists(task)) {
 				std::string msg = format("%s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version);
 				Void _ = wait(BackupConfig(task).logError(cx, err, msg));
@@ -3045,7 +3049,7 @@ public:
 		Optional<RestorableFileSet> restoreSet = wait(bc->getRestoreSet(targetVersion));
 
 		if(!restoreSet.present()) {
-			TraceEvent(SevError, "FileBackupAgentRestoreNotPossible")
+			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 				.detail("BackupContainer", bc->getURL())
 				.detail("TargetVersion", targetVersion);
 			fprintf(stderr, "ERROR: Restore version %lld is not possible from %s\n", targetVersion, bc->getURL().c_str());
