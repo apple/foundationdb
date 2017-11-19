@@ -909,14 +909,15 @@ namespace fileBackup {
 					// If we've seen a new read version OR hit the end of the stream, then if we were writing a file finish it.
 					if (values.second != outVersion || done) {
 						if (outFile){
-							TEST(true); // Backup range task wrote multiple versions
-							state Key nextKey = keyAfter(lastKey);
+						TEST(outVersion != invalidVersion); // Backup range task wrote multiple versions
+						state Key nextKey = done ? endKey : keyAfter(lastKey);
 							Void _ = wait(rangeFile.writeKey(nextKey));
 
 							bool keepGoing = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
-
 							if(!keepGoing)
 								return Void();
+
+						beginKey = nextKey;
 						}
 
 						if(done)
