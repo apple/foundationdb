@@ -729,13 +729,21 @@ namespace fileBackup {
 	// servers to catch and log to the appropriate config any error that execute/finish didn't catch and log.
 	struct RestoreTaskFuncBase : TaskFuncBase {
 		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return RestoreConfig(task).logError(cx, error, format("Task '%s' UID '%s' failed", task->params[Task::reservedTaskParamKeyType].printable().c_str(), task->key.printable().c_str()));
+			return RestoreConfig(task).logError(cx, error, format("Task '%s' UID '%s' %s failed", task->params[Task::reservedTaskParamKeyType].printable().c_str(), task->key.printable().c_str(), toString(task).c_str()));
+		}
+		virtual std::string toString(Reference<Task> task)
+		{
+			return "";
 		}
 	};
 
 	struct BackupTaskFuncBase : TaskFuncBase {
 		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return RestoreConfig(task).logError(cx, error, format("Task '%s' UID '%s' failed", task->params[Task::reservedTaskParamKeyType].printable().c_str(), task->key.printable().c_str()));
+			return BackupConfig(task).logError(cx, error, format("Task '%s' UID '%s' %s failed", task->params[Task::reservedTaskParamKeyType].printable().c_str(), task->key.printable().c_str(), toString(task).c_str()));
+		}
+		virtual std::string toString(Reference<Task> task)
+		{
+			return "";
 		}
 	};
 
@@ -754,6 +762,14 @@ namespace fileBackup {
 				return LiteralStringRef(__FUNCTION__);
 			}
 		} Params;
+
+		std::string toString(Reference<Task> task) {
+			return format("beginKey '%s' endKey '%s' addTasks %d", 
+				Params.beginKey().get(task).printable().c_str(),
+				Params.endKey().get(task).printable().c_str(),
+				Params.addBackupRangeTasks().get(task)
+			);
+		}
 
 		StringRef getName() const { return name; };
 
@@ -1694,13 +1710,11 @@ namespace fileBackup {
 			static TaskParam<int64_t> readLen() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
 
-		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			std::string msg = format("%s error on fileName:%s readLen: %lld readOffset: %lld",
-				getName().toString().c_str(),
+		std::string toString(Reference<Task> task) {
+			return format("fileName '%s' readLen %lld readOffset %lld",
 				Params.inputFile().get(task).fileName.c_str(), 
 				Params.readLen().get(task),
 				Params.readOffset().get(task));
-			return RestoreConfig(task).logError(cx, error, msg, this);
 		}
 	};
 	
@@ -1709,6 +1723,13 @@ namespace fileBackup {
 			// The range of data that the (possibly empty) data represented, which is set if it intersects the target restore range
 			static TaskParam<KeyRange> originalFileRange() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
+
+		std::string toString(Reference<Task> task) {
+			return RestoreFileTaskFuncBase::toString(task) + format(" fileName '%s' readLen %lld readOffset %lld",
+				Params.inputFile().get(task).fileName.c_str(), 
+				Params.readLen().get(task),
+				Params.readOffset().get(task));
+		}
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state double startTime = now();
