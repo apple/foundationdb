@@ -89,6 +89,12 @@ struct KeyspaceSnapshotFile {
 	}
 };
 
+struct FullBackupListing {
+	std::vector<RangeFile> ranges;
+	std::vector<LogFile> logs;
+	std::vector<KeyspaceSnapshotFile> snapshots;
+};
+
 struct BackupDescription {
 	std::string url;
 	std::vector<KeyspaceSnapshotFile> snapshots;
@@ -151,6 +157,8 @@ public:
 
 	// Uses the virtual methods to describe the backup contents
 	virtual Future<BackupDescription> describeBackup() = 0;
+
+	virtual Future<FullBackupListing> listBackup() = 0;
 
 	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
 	// restore to given version is not possible.

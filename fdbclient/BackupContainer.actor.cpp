@@ -277,7 +277,19 @@ public:
 		});
 	}
 
-	ACTOR Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc) {
+	ACTOR static Future<FullBackupListing> listBackup_impl(Reference<BackupContainerFileSystem> bc) {
+		state Future<std::vector<RangeFile>> fRanges = bc->listRangeFiles(0, std::numeric_limits<Version>::max());
+		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots(0, std::numeric_limits<Version>::max());
+		state Future<std::vector<LogFile>> fLogs = bc->listLogFiles(0, std::numeric_limits<Version>::max());
+		Void _ = wait(success(fRanges) && success(fSnapshots) && success(fLogs));
+		return FullBackupListing({fRanges.get(), fLogs.get(), fSnapshots.get()});
+	}
+
+	Future<FullBackupListing> listBackup() {
+		return listBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
+	}
+
+	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc) {
 		state BackupDescription desc;
 		desc.url = bc->getURL();
 
@@ -333,7 +345,7 @@ public:
 		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
 	}
 
-	ACTOR Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version endVersion) {
+	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version endVersion) {
 		state std::vector<Future<Void>> deletes;
 
 		std::vector<LogFile> logs = wait(bc->listLogFiles(0, endVersion));
@@ -357,7 +369,7 @@ public:
 		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), endVersion);
 	}
 
-	ACTOR Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
 		// Find the most recent keyrange snapshot to end at or before targetVersion
 		state Optional<KeyspaceSnapshotFile> snapshot;
 		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
@@ -669,7 +681,7 @@ public:
 		return m_bstore->deleteObject(BACKUP_BUCKET, m_name + "/" + path);
 	}
 
-	ACTOR Future<FilesAndSizesT> listFiles_impl(Reference<BackupContainerBlobStore> bc, std::string path) {
+	ACTOR static Future<FilesAndSizesT> listFiles_impl(Reference<BackupContainerBlobStore> bc, std::string path) {
 		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BACKUP_BUCKET, bc->m_name + "/" + path));
 		FilesAndSizesT files;
 		for(auto &o : result.objects)
@@ -681,7 +693,7 @@ public:
 		return listFiles_impl(Reference<BackupContainerBlobStore>::addRef(this), path);
 	}
 
-	ACTOR Future<Void> create_impl(Reference<BackupContainerBlobStore> bc) {
+	ACTOR static Future<Void> create_impl(Reference<BackupContainerBlobStore> bc) {
 		Void _ = wait(bc->m_bstore->createBucket(BACKUP_BUCKET));
 
 		/*
@@ -826,6 +838,11 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size()));
 
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size()));
+
+	FullBackupListing listing = wait(c->listBackup());
+	ASSERT(listing.logs.size() == 2);
+	ASSERT(listing.ranges.size() == 3);
+	ASSERT(listing.snapshots.size() == 2);
 
 	state BackupDescription desc = wait(c->describeBackup());
 	printf("Backup Description\n%s", desc.toString().c_str());
