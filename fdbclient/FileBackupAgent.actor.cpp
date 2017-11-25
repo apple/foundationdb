@@ -889,66 +889,63 @@ namespace fileBackup {
 			// This will require some kind of coordination with the saveAndExtendIncrementally going on in parallel with
 			// this execute() function().
 			state BackupConfig backup(task);
-			state Reference<IBackupContainer> bc = wait(backup.backupContainer().getOrThrow(cx));
+
+			// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if bc
+			// is false then clearly the backup is no longer in progress
+			state Reference<IBackupContainer> bc = wait(backup.backupContainer().getD(cx));
+			if(!bc) {
+				return Void();
+			}
+
 			state bool done = false;
 
 			loop{
-				try{
-					state RangeResultWithVersion values;
-					try {
-						RangeResultWithVersion _values = waitNext(results.getFuture());
-						values = _values;
-						lock->release(values.first.expectedSize());
-					} catch(Error &e) {
-						if(e.code() == error_code_end_of_stream)
-							done = true;
-						else
-							throw;
-					}
+				state RangeResultWithVersion values;
+				try {
+					RangeResultWithVersion _values = waitNext(results.getFuture());
+					values = _values;
+					lock->release(values.first.expectedSize());
+				} catch(Error &e) {
+					if(e.code() == error_code_end_of_stream)
+						done = true;
+					else
+						throw;
+				}
 
-					// If we've seen a new read version OR hit the end of the stream, then if we were writing a file finish it.
-					if (values.second != outVersion || done) {
-						if (outFile){
+				// If we've seen a new read version OR hit the end of the stream, then if we were writing a file finish it.
+				if (values.second != outVersion || done) {
+					if (outFile){
 						TEST(outVersion != invalidVersion); // Backup range task wrote multiple versions
 						state Key nextKey = done ? endKey : keyAfter(lastKey);
-							Void _ = wait(rangeFile.writeKey(nextKey));
+						Void _ = wait(rangeFile.writeKey(nextKey));
 
-							bool keepGoing = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
-							if(!keepGoing)
-								return Void();
-
-						beginKey = nextKey;
-						}
-
-						if(done)
+						bool keepGoing = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
+						if(!keepGoing)
 							return Void();
 
-						// Start writing a new file 
-						outVersion = values.second;
-						// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so 250k conservatively.
-						state int blockSize = BUGGIFY ? g_random->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
-						Reference<IBackupFile> f = wait(bc->writeRangeFile(outVersion, blockSize));
-						outFile = f;
-
-						// Initialize range file writer and write begin key
-						rangeFile = RangeFileWriter(outFile, blockSize);
-						Void _ = wait(rangeFile.writeKey(beginKey));
+						beginKey = nextKey;
 					}
 
-					// write kvData to file
-					state size_t i = 0;
-					for (; i < values.first.size(); ++i) {
-						lastKey = values.first[i].key;
-						Void _ = wait(rangeFile.writeKV(lastKey, values.first[i].value));
-					}
+					if(done)
+						return Void();
+
+					// Start writing a new file 
+					outVersion = values.second;
+					// block size must be at least large enough for 3 max size keys and 2 max size values + overhead so 250k conservatively.
+					state int blockSize = BUGGIFY ? g_random->randomInt(250e3, 4e6) : CLIENT_KNOBS->BACKUP_RANGEFILE_BLOCK_SIZE;
+					Reference<IBackupFile> f = wait(bc->writeRangeFile(outVersion, blockSize));
+					outFile = f;
+
+					// Initialize range file writer and write begin key
+					rangeFile = RangeFileWriter(outFile, blockSize);
+					Void _ = wait(rangeFile.writeKey(beginKey));
 				}
-				catch (Error &e) {
-					if (e.code() == error_code_actor_cancelled)
-						throw;
 
-					state Error err = e;
-					Void _ = wait(backup.logError(cx, err, format("Failed to write to file `%s'", outFile->getFileName().c_str())));
-					throw err;
+				// write kvData to file
+				state size_t i = 0;
+				for (; i < values.first.size(); ++i) {
+					lastKey = values.first[i].key;
+					Void _ = wait(rangeFile.writeKV(lastKey, values.first[i].value));
 				}
 			}
 		}
@@ -1080,9 +1077,17 @@ namespace fileBackup {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				// Wait for the read version to pass endVersion
 				try {
-					Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
-					bc = _bc;
-					Version currentVersion = wait(tr->getReadVersion());
+					bool keepGoing = wait(taskBucket->keepRunning(tr, task));
+					if(!keepGoing)
+						return Void();
+
+					if(!bc) {
+						// Backup container must be present if keepGoing was true.
+						Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
+						bc = _bc;
+					}
+
+					Version currentVersion = tr->getReadVersion().get();
 					if(endVersion < currentVersion)
 						break;
 
@@ -1141,6 +1146,11 @@ namespace fileBackup {
 					throw err;
 				}
 			}
+
+			// Make sure this task is still alive, if it's not then the data read above could be incomplete.
+			bool keepGoing = wait(taskBucket->keepRunning(cx, task));
+			if(!keepGoing)
+				return Void();
 
 			Void _ = wait(outFile->finish());
 			Params.fileSize().set(task, outFile->size());
@@ -1418,12 +1428,16 @@ namespace fileBackup {
 						tr->reset();
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-						Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
-						bc = _bc;
 
 						bool keepGoing = wait(taskBucket->keepRunning(tr, task));
 						if(!keepGoing)
 							return Void();
+
+						if(!bc) {
+							// Backup container must be present if keepGoing was true.
+							Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
+							bc = _bc;
+						}
 
 						BackupConfig::RangeFileMapT::PairsType rangeresults = wait(config.rangeFileMap().getRange(tr, startKey, {}, batchSize));
 
@@ -1726,10 +1740,7 @@ namespace fileBackup {
 		} Params;
 
 		std::string toString(Reference<Task> task) {
-			return RestoreFileTaskFuncBase::toString(task) + format(" fileName '%s' readLen %lld readOffset %lld",
-				Params.inputFile().get(task).fileName.c_str(), 
-				Params.readLen().get(task),
-				Params.readOffset().get(task));
+			return RestoreFileTaskFuncBase::toString(task) + format(" originalFileRange '%s'", printable(Params.originalFileRange().get(task)).c_str());
 		}
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
@@ -1766,10 +1777,11 @@ namespace fileBackup {
 					addPrefix = restore.addPrefix().getD(tr);
 					removePrefix = restore.removePrefix().getD(tr);
 
-					Void _ = wait(success(bc) && success(restoreRange) && success(addPrefix) && success(removePrefix) && checkTaskVersion(tr->getDatabase(), task, name, version));
-					bool go = wait(taskBucket->keepRunning(tr, task));
-					if(!go)
+					bool keepRunning = wait(taskBucket->keepRunning(tr, task));
+					if(!keepRunning)
 						return Void();
+
+					Void _ = wait(success(bc) && success(restoreRange) && success(addPrefix) && success(removePrefix) && checkTaskVersion(tr->getDatabase(), task, name, version));
 					break;
 
 				} catch(Error &e) {
@@ -2548,6 +2560,9 @@ namespace fileBackup {
 			if(!restorable.present())
 				throw restore_missing_data();
 
+			// First version for which log data should be applied
+			Params.firstVersion().set(task, restorable.get().snapshot.beginVersion);
+
 			// Convert the two lists in restorable (logs and ranges) to a single list of RestoreFiles.
 			// Order does not matter, they will be put in order when written to the restoreFileMap below.
 			state std::vector<RestoreConfig::RestoreFile> files;
@@ -2579,12 +2594,6 @@ namespace fileBackup {
 					state int nFiles = 0;
 					auto fileSet = restore.fileSet();
 					for(; i != end && txBytes < 1e6; ++i) {
-						if(i == files.begin())
-							Params.firstVersion().set(task, i->version);
-						if(i->version > restoreVersion) {
-							end = i;
-							break;
-						}
 						txBytes += fileSet.insert(tr, *i);
 						nFileBlocks += (i->fileSize + i->blockSize - 1) / i->blockSize;
 						++nFiles;
@@ -2613,9 +2622,10 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			state Version firstVersion = Params.firstVersion().get(task);
 			state RestoreConfig restore(task);
-			if(firstVersion == Version()) {
+
+			state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
+			if(firstVersion == invalidVersion) {
 				Void _ = wait(restore.logError(tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", this));
 				std::string tag = wait(restore.tag().getD(tr));
 				ERestoreState _ = wait(abortRestore(tr, StringRef(tag)));
@@ -2629,7 +2639,7 @@ namespace fileBackup {
 			restore.setApplyEndVersion(tr, firstVersion);
 
 			// Apply range data and log data in order
-			Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, firstVersion, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE));
+			Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, 0, "", 0, CLIENT_KNOBS->RESTORE_DISPATCH_BATCH_SIZE));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();

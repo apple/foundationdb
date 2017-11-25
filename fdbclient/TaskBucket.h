@@ -85,6 +85,9 @@ public:
 		Future<bool> valid = isVerified(tr, task);
 		return map(success(finished) && success(valid), [=](Void) -> bool { return !finished.get() && valid.get(); } );
 	}
+	Future<bool> keepRunning(Database cx, Reference<Task> task) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return keepRunning(tr, task); });
+	}
 
 	static void setValidationCondition(Reference<Task> task, KeyRef vKey, KeyRef vValue);
 

@@ -111,6 +111,7 @@ struct RestorableFileSet {
 	Version targetVersion;
 	std::vector<LogFile> logs;
 	std::vector<RangeFile> ranges;
+	KeyspaceSnapshotFile snapshot;
 };
 
 /* IBackupContainer is an interface to a set of backup data, which contains

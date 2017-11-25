@@ -380,6 +380,7 @@ public:
 
 		if(snapshot.present()) {
 			state RestorableFileSet restorable;
+			restorable.snapshot = snapshot.get();
 			restorable.targetVersion = targetVersion;
 
 			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));

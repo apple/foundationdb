@@ -137,7 +137,7 @@ struct CycleWorkload : TestWorkload {
 	}
 	bool cycleCheckData( const VectorRef<KeyValueRef>& data, Version v ) {
 		if (data.size() != nodeCount) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v);
+			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v).detail("KeyPrefix", keyPrefix.printable());
 			return false;
 		}
 		int i=0;
