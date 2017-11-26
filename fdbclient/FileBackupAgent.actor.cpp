@@ -925,8 +925,8 @@ namespace fileBackup {
 						TraceEvent("FileBackupWroteRangeFile")
 							.detail("Size", outFile->size())
 							.detail("Keys", nrKeys)
-							.detail("BeginKey", beginKey)
-							.detail("EndKey", nextKey)
+							.detail("BeginKey", beginKey.printable())
+							.detail("EndKey", nextKey.printable())
 							.detail("FileDiscarded", keepGoing ? "No" : "Yes");
 
 						if(!keepGoing)
