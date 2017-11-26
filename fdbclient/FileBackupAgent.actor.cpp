@@ -841,6 +841,7 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Key begin, Key end, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), int priority = 0) {
+			TraceEvent(SevInfo, "FBA_schedBackupRangeTask").detail("begin", printable(begin)).detail("end", printable(end));
 			Key key = wait(addBackupTask(BackupRangeTaskFunc::name,
 										 BackupRangeTaskFunc::version,
 										 tr, taskBucket, completionKey,
@@ -898,6 +899,7 @@ namespace fileBackup {
 			}
 
 			state bool done = false;
+			state int64_t nrKeys = 0;
 
 			loop{
 				state RangeResultWithVersion values;
@@ -920,9 +922,17 @@ namespace fileBackup {
 						Void _ = wait(rangeFile.writeKey(nextKey));
 
 						bool keepGoing = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
+						TraceEvent("FileBackupWroteRangeFile")
+							.detail("Size", outFile->size())
+							.detail("Keys", nrKeys)
+							.detail("BeginKey", beginKey)
+							.detail("EndKey", nextKey)
+							.detail("FileDiscarded", keepGoing ? "No" : "Yes");
+
 						if(!keepGoing)
 							return Void();
-
+						
+						nrKeys = 0;
 						beginKey = nextKey;
 					}
 
@@ -947,6 +957,7 @@ namespace fileBackup {
 					lastKey = values.first[i].key;
 					Void _ = wait(rangeFile.writeKV(lastKey, values.first[i].value));
 				}
+				nrKeys += values.first.size();
 			}
 		}
 
@@ -983,6 +994,8 @@ namespace fileBackup {
 			else {
 				Void _ = wait(taskFuture->set(tr, taskBucket));
 			}
+
+			TraceEvent(SevInfo, "FBA_endBackupRangeTask").detail("begin", printable(Params.beginKey().get(task))).detail("end", printable(Params.endKey().get(task)));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();

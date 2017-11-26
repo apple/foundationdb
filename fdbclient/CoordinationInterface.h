@@ -93,6 +93,7 @@ private:
 
 struct LeaderInfo {
 	UID changeID;
+	uint64_t mask = ~(15ll << 60);
 	Value serializedInfo;
 	bool forward;  // If true, serializedInfo is a connection string instead!
 
@@ -103,32 +104,24 @@ struct LeaderInfo {
 	bool operator == (LeaderInfo const& r) const { return changeID == r.changeID; }
 
 	// The first 4 bits of ChangeID represent cluster controller process class fitness, the lower the better
-	bool updateChangeID(uint64_t processClassFitness) {
-		uint64_t mask = 15ll << 60;
-		processClassFitness <<= 60;
-
-		if ((changeID.first() & mask) == processClassFitness) {
-			return false;
-		}
-
-		changeID = UID((changeID.first() & ~mask) | processClassFitness, changeID.second());
-		return true;
+	void updateChangeID(uint64_t processClassFitness, bool isExcluded) {
+		changeID = UID( ( (uint64_t)isExcluded << 63) | (processClassFitness << 60) | (changeID.first() & mask ), changeID.second() );
 	}
 
-	// Change leader only if the candidate has better process class fitness
-	bool leaderChangeRequired(LeaderInfo const& candidate) const {
-		uint64_t mask = 15ll << 60;
-		if ((changeID.first() & mask) > (candidate.changeID.first() & mask)) {
+	// All but the first 4 bits are used to represent process id
+	bool equalInternalId(LeaderInfo const& leaderInfo) const {
+		if ( (changeID.first() & mask) == (leaderInfo.changeID.first() & mask) && changeID.second() == leaderInfo.changeID.second() ) {
 			return true;
 		} else {
 			return false;
 		}
 	}
 
-	// All but the first 4 bits are used to represent process id
-	bool equalInternalId(LeaderInfo const& leaderInfo) const {
-		uint64_t mask = ~(15ll << 60);
-		if ((changeID.first() & mask) == (leaderInfo.changeID.first() & mask)) {
+	// Change leader only if 
+	// 1. the candidate has better process class fitness and the candidate is not the leader
+	// 2. the leader process class fitness become worse
+	bool leaderChangeRequired(LeaderInfo const& candidate) const {
+		if ( ((changeID.first() & ~mask) > (candidate.changeID.first() & ~mask) && !equalInternalId(candidate)) || ((changeID.first() & ~mask) < (candidate.changeID.first() & ~mask) && equalInternalId(candidate)) ) {
 			return true;
 		} else {
 			return false;

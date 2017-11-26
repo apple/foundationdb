@@ -653,6 +653,10 @@ std::string logBackupDR(const char *context, std::map<std::string, std::string> 
 }
 
 void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, bool displayDatabaseAvailable = true, bool hideErrorMessages = false) {
+	if (FlowTransport::transport().incompatibleOutgoingConnectionsPresent()) {
+		printf("WARNING: One or more of the processes in the cluster is incompatible with this version of fdbcli.\n\n");
+	}
+
 	try {
 		bool printedCoordinators = false;
 

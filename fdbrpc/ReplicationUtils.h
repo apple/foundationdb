@@ -71,4 +71,9 @@ extern bool validateAllCombinations(
 	std::vector<LocalityData> const&	newItems,
 	unsigned int											nCombinationSize,
 	bool															bCheckIfValid = true);
+
+/// Remove all pieces of locality information from the LocalityData that will not be used when validating the policy.
+void filterLocalityDataForPolicy(IRepPolicyRef policy, LocalityData* ld);
+void filterLocalityDataForPolicy(IRepPolicyRef policy, std::vector<LocalityData>* vld);
+
 #endif

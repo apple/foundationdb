@@ -32,7 +32,8 @@ Future<Void> tryBecomeLeader( ServerCoordinators const& coordinators,
 							  LeaderInterface const& proposedInterface,
 							  Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
 							  bool hasConnected,
-							  Reference<AsyncVar<ProcessClass>> const& asyncProcessClass);
+							  Reference<AsyncVar<ProcessClass>> const& asyncProcessClass,
+							  Reference<AsyncVar<bool>> const& asyncIsExcluded);
 
 // Participates in the given coordination group's leader election process, nominating the given
 // LeaderInterface (presumed to be a local interface) as leader.  The leader election process is
@@ -48,17 +49,18 @@ Future<Void> changeLeaderCoordinators( ServerCoordinators const& coordinators, V
 
 #pragma region Implementation
 
-Future<Void> tryBecomeLeaderInternal( ServerCoordinators const& coordinators, Value const& proposedSerializedInterface, Reference<AsyncVar<Value>> const& outSerializedLeader, bool const& hasConnected, Reference<AsyncVar<ProcessClass>> const& asyncProcessClass );
+Future<Void> tryBecomeLeaderInternal( ServerCoordinators const& coordinators, Value const& proposedSerializedInterface, Reference<AsyncVar<Value>> const& outSerializedLeader, bool const& hasConnected, Reference<AsyncVar<ProcessClass>> const& asyncProcessClass, Reference<AsyncVar<bool>> const& asyncIsExcluded );
 
 template <class LeaderInterface>
 Future<Void> tryBecomeLeader( ServerCoordinators const& coordinators,
 							  LeaderInterface const& proposedInterface,
 							  Reference<AsyncVar<Optional<LeaderInterface>>> const& outKnownLeader,
 							  bool hasConnected,
-							  Reference<AsyncVar<ProcessClass>> const& asyncProcessClass)
+							  Reference<AsyncVar<ProcessClass>> const& asyncProcessClass,
+							  Reference<AsyncVar<bool>> const& asyncIsExcluded)
 {
 	Reference<AsyncVar<Value>> serializedInfo( new AsyncVar<Value> );
-	Future<Void> m = tryBecomeLeaderInternal( coordinators, BinaryWriter::toValue(proposedInterface, IncludeVersion()), serializedInfo, hasConnected, asyncProcessClass );
+	Future<Void> m = tryBecomeLeaderInternal( coordinators, BinaryWriter::toValue(proposedInterface, IncludeVersion()), serializedInfo, hasConnected, asyncProcessClass, asyncIsExcluded );
 	return m || asyncDeserialize( serializedInfo, outKnownLeader );
 }
 

@@ -137,7 +137,6 @@ struct Ratekeeper {
 
 //SOMEDAY: template trackStorageServerQueueInfo and trackTLogQueueInfo into one function
 ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerInterface ssi ) {
-	state double debug_lastTraceTime = 0;
 	self->storageQueueInfo.insert( mapPair(ssi.id(), StorageQueueInfo(ssi.id(), ssi.locality) ) );
 	state Map<UID, StorageQueueInfo>::iterator myQueueInfo = self->storageQueueInfo.find(ssi.id());
 	TraceEvent("RkTracking", ssi.id());
@@ -163,25 +162,7 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 					myQueueInfo->value.smoothFreeSpace.setTotal( reply.get().storageBytes.available );
 					myQueueInfo->value.smoothTotalSpace.setTotal( reply.get().storageBytes.total );
 				}
-				if (now() > debug_lastTraceTime + SERVER_KNOBS->RATEKEEPER_LOGGING_INTERVAL){
-					TraceEvent("RkServerQueueInfo", ssi.id())
-						.detail("LocalTime", reply.get().localTime)
-						.detail("BytesDurable", reply.get().bytesDurable)
-						.detail("BytesInput", reply.get().bytesInput)
-						.detail("BytesDurableSmooth", myQueueInfo->value.smoothDurableBytes.smoothTotal())
-						.detail("BytesInputSmooth", myQueueInfo->value.smoothInputBytes.smoothTotal())
-						.detail("BytesDurableRate", myQueueInfo->value.verySmoothDurableBytes.smoothRate())
-						.detail("BytesInputRate", myQueueInfo->value.smoothInputBytes.smoothRate())
-						.detail("FreeSpaceSmooth", myQueueInfo->value.smoothFreeSpace.smoothTotal()).detail("TotalSpaceSmooth", myQueueInfo->value.smoothTotalSpace.smoothTotal())
-						.detail("Version", reply.get().v)
-						.trackLatest(("StorageServerQueueSize/" + ssi.id().toString()).c_str());
-					debug_lastTraceTime = now();
-				}
 			} else {
-				//If the SS didn't respond, clear the queue info so that we know it might have failed
-				if(myQueueInfo->value.valid)
-					TraceEvent("RkServerQueueInfo", ssi.id()).trackLatest(("StorageServerQueueSize/" + ssi.id().toString()).c_str());
-
 				myQueueInfo->value.valid = false;
 			}
 
@@ -195,7 +176,6 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 }
 
 ACTOR Future<Void> trackTLogQueueInfo( Ratekeeper* self, TLogInterface tli ) {
-	state double debug_lastTraceTime = 0;
 	self->tlogQueueInfo.insert( mapPair(tli.id(), TLogQueueInfo(tli.id()) ) );
 	state Map<UID, TLogQueueInfo>::iterator myQueueInfo = self->tlogQueueInfo.find(tli.id());
 	TraceEvent("RkTracking", tli.id());
@@ -220,20 +200,7 @@ ACTOR Future<Void> trackTLogQueueInfo( Ratekeeper* self, TLogInterface tli ) {
 					myQueueInfo->value.smoothFreeSpace.setTotal(reply.get().storageBytes.available);
 					myQueueInfo->value.smoothTotalSpace.setTotal(reply.get().storageBytes.total);
 				}
-				if (now() > debug_lastTraceTime + SERVER_KNOBS->RATEKEEPER_LOGGING_INTERVAL){
-					TraceEvent("RkTLogQueueInfo", tli.id()).detail("LocalTime", reply.get().localTime).detail("BytesDurable", reply.get().bytesDurable).detail("BytesInput", reply.get().bytesInput)
-						.detail("BytesDurableSmooth", myQueueInfo->value.smoothDurableBytes.smoothTotal()).detail("BytesInputSmooth", myQueueInfo->value.smoothInputBytes.smoothTotal())
-						.detail("BytesDurableRate", myQueueInfo->value.verySmoothDurableBytes.smoothRate()).detail("BytesInputRate", myQueueInfo->value.smoothInputBytes.smoothRate())
-						.detail("FreeSpaceSmooth", myQueueInfo->value.smoothFreeSpace.smoothTotal()).detail("TotalSpaceSmooth", myQueueInfo->value.smoothTotalSpace.smoothTotal())
-						.detail("Version", reply.get().v)
-						.trackLatest(("TLogQueueSize/" + tli.id().toString()).c_str());
-					debug_lastTraceTime = now();
-				}
 			} else {
-				//If the TLog didn't respond, clear the queue info so that we know it might have failed
-				if(myQueueInfo->value.valid)
-					TraceEvent("RkTLogQueueInfo", tli.id()).trackLatest(("TLogQueueSize/" + tli.id().toString()).c_str());
-
 				myQueueInfo->value.valid = false;
 			}
 
