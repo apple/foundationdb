@@ -27,6 +27,8 @@
 #include <vector>
 
 // Append-only file interface for writing backup data
+// Once finish() is called the file cannot be further written to.
+// Backup containers should not attempt to use files for which finish was not called or did not complete.
 // TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
 class IBackupFile {
 public:
