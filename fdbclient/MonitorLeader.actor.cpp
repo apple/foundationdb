@@ -331,16 +331,39 @@ Optional<LeaderInfo> getLeader( vector<Optional<LeaderInfo>> nominees ) {
 		if (nominees[i].present() && nominees[i].get().forward)
 			return nominees[i].get();
 
+	if(!nominees.size())
+		return Optional<LeaderInfo>();
 	// There is a leader if a majority of the nominees are the same.
 	// If there is a majority, the median item is in it.
-	int quorum = nominees.size()/2 + 1;
-	int q = nominees.size() - quorum;
-	std::nth_element( nominees.begin(), nominees.begin() + q, nominees.end() );
-	auto median = nominees[q];
-	if (std::count( nominees.begin(), nominees.end(), median ) >= quorum)
-		return median;
-	else
+	int bestCount = 0;
+	Optional<LeaderInfo> currentNominee;
+	for(int i=0; i<nominees.size(); i++) {
+		if( (nominees[i].present() != currentNominee.present()) || (currentNominee.present() && !currentNominee.get().equalInternalId(nominees[i].get()) ) ) {
+			if(bestCount > 0) {
+				bestCount--;
+			} else {
+				bestCount = 1;
+				currentNominee = nominees[i];
+			}
+		} else {
+			bestCount++;
+		}
+	}
+
+	if(!currentNominee.present())
 		return Optional<LeaderInfo>();
+
+	int amountBest = 0;
+	for(int i=0; i<nominees.size(); i++) {
+		if( nominees[i].present() && currentNominee.get().equalInternalId(nominees[i].get()) ) {
+			amountBest++;
+		}
+	}
+
+	if(amountBest >= nominees.size()/2 + 1) {
+		return currentNominee;
+	}
+	return Optional<LeaderInfo>();
 }
 
 struct MonitorLeaderInfo {
