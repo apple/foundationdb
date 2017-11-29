@@ -37,7 +37,6 @@
 #include "ServerDBInfo.h"
 #include "LogSystem.h"
 #include "WaitFailure.h"
-#include "fdbrpc/simulator.h"
 
 using std::pair;
 using std::make_pair;
@@ -1412,9 +1411,6 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state UID lastId = UID(1,1); //initialized so it will not compare equal to a default UID
 	state double recoverMemoryLimit = SERVER_KNOBS->TARGET_BYTES_PER_TLOG + SERVER_KNOBS->SPRING_BYTES_TLOG;
 	if (BUGGIFY) recoverMemoryLimit = std::max<double>(SERVER_KNOBS->BUGGIFY_RECOVER_MEMORY_LIMIT, SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
-
-	//LowLatencyWithFailures needs to avoid flushing large queues
-	if (g_network->isSimulated() && g_simulator.connectionFailuresDisableDuration > 0) recoverMemoryLimit = 2000e6;
 
 	try {
 		loop {
