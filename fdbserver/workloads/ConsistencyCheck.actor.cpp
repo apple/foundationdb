@@ -1187,44 +1187,65 @@ struct ConsistencyCheckWorkload : TestWorkload
 	//Returns true if all machines in the cluster that specified a desired class are operating in that class
 	ACTOR Future<bool> checkUsingDesiredClasses(Database cx, ConsistencyCheckWorkload *self)
 	{
-		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) );
+		state vector<std::pair<WorkerInterface, ProcessClass>> allWorkers = wait( getWorkers( self->dbInfo ) );
+		state vector<std::pair<WorkerInterface, ProcessClass>> nonExcludedWorkers = wait( getWorkers( self->dbInfo, GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
 		auto& db = self->dbInfo->get();
 
-		std::set<ProcessClass::ClassType> availableClassTypes;
-		std::map<NetworkAddress, ProcessClass> workerProcessMap;
+		std::set<ProcessClass::ClassType> allClassTypes;
+		std::map<NetworkAddress, ProcessClass> allWorkerProcessMap;
+		for (auto worker : allWorkers) {
+			allClassTypes.insert(worker.second.classType());
+			allWorkerProcessMap[worker.first.address()] = worker.second;
+		}
 
-		for (auto worker : workers) {
-			availableClassTypes.insert(worker.second.classType());
-			workerProcessMap[worker.first.address()] = worker.second;
+		std::set<ProcessClass::ClassType> nonExcludedClassTypes;
+		std::map<NetworkAddress, ProcessClass> nonExcludedWorkerProcessMap;
+		for (auto worker : nonExcludedWorkers) {
+			nonExcludedClassTypes.insert(worker.second.classType());
+			nonExcludedWorkerProcessMap[worker.first.address()] = worker.second;
+		}
+
+		// Check cluster controller
+		ProcessClass::Fitness bestClusterControllerFitness = getBestAvailableFitness(nonExcludedClassTypes, ProcessClass::ClusterController);
+		if (!nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) || nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].machineClassFitness(ProcessClass::ClusterController) != bestClusterControllerFitness) {
+			TraceEvent("ConsistencyCheck_ClusterControllerNotBest").detail("bestClusterControllerFitness", bestClusterControllerFitness).detail("existingClusterControllerFit", nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) ? nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].machineClassFitness(ProcessClass::ClusterController) : -1);
+			return false;
 		}
 
 		// Check master
-		ProcessClass::Fitness bestMasterFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Master);
-		if (!workerProcessMap.count(db.master.address()) || workerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
-			TraceEvent("ConsistencyCheck_MasterNotBest").detail("bestMasterFitness", bestMasterFitness).detail("existingMasterFit", workerProcessMap.count(db.master.address()) ? workerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) : -1);
+		ProcessClass::Fitness bestMasterFitness = getBestAvailableFitness(nonExcludedClassTypes, ProcessClass::Master);
+		if (bestMasterFitness == ProcessClass::NeverAssign) {
+			bestMasterFitness = getBestAvailableFitness(allClassTypes, ProcessClass::Master);
+			if (bestMasterFitness != ProcessClass::NeverAssign) {
+				bestMasterFitness = ProcessClass::ExcludeFit;
+			}
+		}
+
+		if (!allWorkerProcessMap.count(db.master.address()) || (!nonExcludedWorkerProcessMap.count(db.master.address()) && bestMasterFitness != ProcessClass::ExcludeFit) || nonExcludedWorkerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
+			TraceEvent("ConsistencyCheck_MasterNotBest").detail("bestMasterFitness", bestMasterFitness).detail("existingMasterFit", nonExcludedWorkerProcessMap.count(db.master.address()) ? nonExcludedWorkerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) : -1);
 			return false;
 		}
 
 		// Check master proxy
-		ProcessClass::Fitness bestMasterProxyFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Proxy);
+		ProcessClass::Fitness bestMasterProxyFitness = getBestAvailableFitness(nonExcludedClassTypes, ProcessClass::Proxy);
 		for (auto masterProxy : db.client.proxies) {
-			if (!workerProcessMap.count(masterProxy.address()) || workerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
-				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("bestMasterProxyFitness", bestMasterProxyFitness).detail("existingMasterProxyFitness", workerProcessMap.count(masterProxy.address()) ? workerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) : -1);
+			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
+				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("bestMasterProxyFitness", bestMasterProxyFitness).detail("existingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) : -1);
 				return false;
 			}
 		}
 
-		// Check master resolver
-		ProcessClass::Fitness bestResolverFitness = getBestAvailableFitness(availableClassTypes, ProcessClass::Resolver);
+		// Check resolver
+		ProcessClass::Fitness bestResolverFitness = getBestAvailableFitness(nonExcludedClassTypes, ProcessClass::Resolver);
 		for (auto resolver : db.resolvers) {
-			if (!workerProcessMap.count(resolver.address()) || workerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) != bestResolverFitness) {
-				TraceEvent("ConsistencyCheck_ResolverNotBest").detail("bestResolverFitness", bestResolverFitness).detail("existingResolverFitness", workerProcessMap.count(resolver.address()) ? workerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) : -1);
+			if (!nonExcludedWorkerProcessMap.count(resolver.address()) || nonExcludedWorkerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) != bestResolverFitness) {
+				TraceEvent("ConsistencyCheck_ResolverNotBest").detail("bestResolverFitness", bestResolverFitness).detail("existingResolverFitness", nonExcludedWorkerProcessMap.count(resolver.address()) ? nonExcludedWorkerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) : -1);
 				return false;
 			}
 		}
 
-		// TODO: Check Tlog and cluster controller
+		// TODO: Check Tlog
 
 		return true;
 	}
