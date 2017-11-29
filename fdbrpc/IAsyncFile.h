@@ -27,7 +27,7 @@
 //All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
 class IAsyncFile {
 public:
-	IAsyncFile();
+	virtual ~IAsyncFile();
 	// Pass these to g_network->open to get an IAsyncFile
 	enum {
 		// Implementation relies on the low bits being the same as the SQLite flags (this is validated by a static_assert there)
@@ -58,10 +58,6 @@ public:
 	virtual Future<int64_t> size() = 0;
 	virtual std::string getFilename() = 0;
 
-	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
-	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-	static Future<Void> incrementalDelete( std::string filename, bool mustBeDurable );
-
 	// Attempt to read the *length bytes at offset without copying.  If successful, a pointer to the
 	//   requested bytes is written to *data, and the number of bytes successfully read is
 	//   written to *length.  If unsuccessful, *data and *length are undefined.
@@ -83,11 +79,15 @@ typedef void (*runCycleFuncPtr)();
 
 class IAsyncFileSystem {
 public:
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode ) = 0;
 	// Opens a file for asynchronous I/O
+	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode ) = 0;
 
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable ) = 0;
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable ) = 0;
+
+	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
+	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	virtual Future<Void> incrementalDeleteFile( std::string filename, bool mustBeDurable );
 
 	static IAsyncFileSystem* filesystem() { return filesystem(g_network); }
 	static runCycleFuncPtr runCycleFunc() { return reinterpret_cast<runCycleFuncPtr>(reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc))); }

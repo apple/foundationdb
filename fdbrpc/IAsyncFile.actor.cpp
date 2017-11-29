@@ -25,7 +25,7 @@
 #include "flow/UnitTest.h"
 #include <iostream>
 
-IAsyncFile::IAsyncFile(){};
+IAsyncFile::~IAsyncFile() = default;
 
 ACTOR static Future<Void> incrementalDeleteHelper( std::string filename, bool mustBeDurable, int64_t truncateAmt, double interval ) {
 	state Reference<IAsyncFile> file;
@@ -53,7 +53,7 @@ ACTOR static Future<Void> incrementalDeleteHelper( std::string filename, bool mu
 	return Void();
 }
 
-Future<Void> IAsyncFile::incrementalDelete( std::string filename, bool mustBeDurable ) {
+Future<Void> IAsyncFileSystem::incrementalDeleteFile( std::string filename, bool mustBeDurable ) {
 	return uncancellable(incrementalDeleteHelper(
 		filename,
 		mustBeDurable,
@@ -74,6 +74,6 @@ TEST_CASE( "fileio/incrementalDelete" ) {
 	Void _ = wait(f->truncate(fileSize));
 	//close the file by deleting the reference
 	f.clear();
-	Void _ = wait(IAsyncFile::incrementalDelete(filename, true));
+	Void _ = wait(IAsyncFileSystem::filesystem()->incrementalDeleteFile(filename, true));
 	return Void();
 }
