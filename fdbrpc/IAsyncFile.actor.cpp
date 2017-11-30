@@ -27,6 +27,60 @@
 
 IAsyncFile::~IAsyncFile() = default;
 
+const static unsigned int ONE_MEGABYTE = 1<<20;
+const static unsigned int FOUR_KILOBYTES = 4<<10;
+
+ACTOR static Future<Void> zeroRangeHelper( IAsyncFile* f, int64_t offset, int64_t length, int fixedbyte) {
+	state int64_t pos = offset;
+	state void* zeros = aligned_alloc( ONE_MEGABYTE, ONE_MEGABYTE );
+	memset( zeros, fixedbyte, ONE_MEGABYTE );
+
+	while(pos < offset+length) {
+		state int len = std::min<int64_t>( ONE_MEGABYTE, offset+length-pos );
+		Void _ = wait( f->write( zeros, len, pos ) );
+		pos += len;
+		Void _ = wait( yield() );
+	}
+
+	free(zeros);
+	return Void();
+}
+
+Future<Void> IAsyncFile::zeroRange(int64_t offset, int64_t length) {
+	return uncancellable(zeroRangeHelper(this, offset, length, 0));
+}
+
+TEST_CASE( "fileio/zero" ) {
+	state std::string filename = "/tmp/__ZEROJUNK__";
+	state Reference<IAsyncFile> f =
+		wait(IAsyncFileSystem::filesystem()->open(
+		    filename,
+		    IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE,
+		    0));
+
+	// Verify that we can grow a file with zero().
+	Void _ = wait(f->sync());
+	Void _ = wait(f->zeroRange(0, ONE_MEGABYTE));
+	int64_t size = wait(f->size());
+	ASSERT( ONE_MEGABYTE == size );
+
+	// Verify that zero() does, in fact, zero.
+	Void _ = wait(zeroRangeHelper(f.getPtr(), 0, ONE_MEGABYTE, 0xff));
+	Void _ = wait(f->zeroRange(0, ONE_MEGABYTE));
+	state uint8_t* page = (uint8_t*)malloc(FOUR_KILOBYTES);
+	int n = wait( f->read(page, FOUR_KILOBYTES, 0) );
+	ASSERT( n == FOUR_KILOBYTES );
+	for (int i = 0; i < FOUR_KILOBYTES; i++) {
+		ASSERT(page[i] == 0);
+	}
+	free(page);
+
+	// Destruct our file and remove it.
+	f.clear();
+	Void _ = wait( IAsyncFileSystem::filesystem()->deleteFile(filename, true) );
+	return Void();
+}
+
 ACTOR static Future<Void> incrementalDeleteHelper( std::string filename, bool mustBeDurable, int64_t truncateAmt, double interval ) {
 	state Reference<IAsyncFile> file;
 	state int64_t remainingFileSize;

@@ -52,6 +52,8 @@ public:
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	virtual Future<int> read( void* data, int length, int64_t offset ) = 0;  // Returns number of bytes actually read (from [0,length])
 	virtual Future<Void> write( void const* data, int length, int64_t offset ) = 0;
+	// The zeroed data is not guaranteed to be durable after `zeroRange` returns.  A call to sync() would be required.
+	virtual Future<Void> zeroRange( int64_t offset, int64_t length );
 	virtual Future<Void> truncate( int64_t size ) = 0;
 	virtual Future<Void> sync() = 0;
 	virtual Future<Void> flush() { return Void();  }      // Sends previous writes to the OS if they have been buffered in memory, but does not make them power safe

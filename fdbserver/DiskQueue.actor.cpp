@@ -581,20 +581,11 @@ public:
 
 	ACTOR static UNCANCELLABLE Future<Void> truncateFile(RawDiskQueue_TwoFiles* self, int file, int64_t pos) {
 		state TrackMe trackMe(self);
-		state StringBuffer zeros( self->dbgid );
-
 		TraceEvent("DQTruncateFile", self->dbgid).detail("File", file).detail("Pos", pos).detail("File0Name", self->files[0].dbgFilename);
-
-		zeros.alignReserve( sizeof(Page), 1<<20 );
-		memset( zeros.append(1<<20), 0, 1<<20 );
-
-		while(pos < self->files[file].size) {
-			state int len = std::min<int64_t>(zeros.size(), self->files[file].size-pos);
-			Void _ = wait( self->files[file].f->write( zeros.str.begin(), len, pos ) );
-			pos += len;
-		}
-
+		state Reference<IAsyncFile> f = self->files[file].f;  // Hold onto a reference in the off-chance that the DQ is removed from underneath us.
+		Void _ = wait( f->zeroRange( pos, self->files[file].size-pos ) );
 		Void _ = wait(self->files[file].syncQueue->onSync());
+		// We intentionally don't return the f->zero future, so that TrackMe is destructed after f->zero finishes.
 		return Void();
 	}
 
