@@ -278,8 +278,8 @@ Future<int64_t> BlobStoreEndpoint::objectSize(std::string const &bucket, std::st
 Future<BlobStoreEndpoint::ReusableConnection> BlobStoreEndpoint::connect() {
 	// First try to get a connection from the pool
 	while(!connectionPool.empty()) {
-		ReusableConnection rconn = connectionPool.back();
-		connectionPool.pop_back();
+		ReusableConnection rconn = connectionPool.front();
+		connectionPool.pop();
 
 		// If the connection expires in the future then return it
 		if(rconn.expirationTime > now()) {
@@ -303,7 +303,7 @@ Future<BlobStoreEndpoint::ReusableConnection> BlobStoreEndpoint::connect() {
 void BlobStoreEndpoint::returnConnection(ReusableConnection &rconn) {
 	// If it expires in the future then add it to the pool in the front
 	if(rconn.expirationTime > now())
-		connectionPool.push_back(rconn);
+		connectionPool.push(rconn);
 	rconn.conn = Reference<IConnection>();
 }
 

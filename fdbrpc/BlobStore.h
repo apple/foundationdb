@@ -116,7 +116,7 @@ public:
 		Reference<IConnection> conn;
 		double expirationTime;
 	};
-	std::vector<ReusableConnection> connectionPool;
+	std::queue<ReusableConnection> connectionPool;
 	Future<ReusableConnection> connect();
 	void returnConnection(ReusableConnection &conn);
 

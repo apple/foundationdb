@@ -22,7 +22,6 @@
 
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "fdbrpc/BlobStore.h"
 #include "FDBTypes.h"
 #include <vector>
 
