@@ -615,7 +615,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 			} else if( s.storedComponent == DiskStore::TLogData ) {
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
 				IDiskQueue* queue = openDiskQueue(
-					joinPath( folder, fileLogQueuePrefix.toString() + s.storeID.toString() + "-" ), s.storeID );
+					joinPath( folder, fileLogQueuePrefix.toString() + s.storeID.toString() + "-" ), s.storeID, 10*SERVER_KNOBS->TARGET_BYTES_PER_TLOG);
 				filesClosed.add( kv->onClosed() );
 				filesClosed.add( queue->onClosed() );
 
