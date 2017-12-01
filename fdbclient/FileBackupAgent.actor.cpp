@@ -1504,7 +1504,9 @@ namespace fileBackup {
 				if(e.code() == error_code_actor_cancelled)
 					throw;
 				state Error err = e;
-				Void _ = wait(config.logError(cx, err, format("Failed to write restorable metadata to `%s'", bc->getURL().c_str())));
+				if(bc) {
+					Void _ = wait(config.logError(cx, err, format("Failed to write restorable metadata to `%s'", bc->getURL().c_str())));
+				}
 				throw err;
 			}
 
@@ -2710,6 +2712,8 @@ public:
 		try {
 			Void _ = wait(timeoutError(bc->create(), 30));
 		} catch(Error &e) {
+			if(e.code() == error_code_actor_cancelled)
+				throw;
 			fprintf(stderr, "ERROR: Could not create backup container: %s\n", e.what());
 			throw backup_error();
 		}

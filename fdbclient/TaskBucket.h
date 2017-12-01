@@ -86,6 +86,7 @@ public:
 		Future<bool> valid = isVerified(tr, task);
 		return map(success(finished) && success(valid), [=](Void) {
 			if(finished.get() || !valid.get()) {
+				throw task_interrupted();
 			}
 			return Void();
 		});

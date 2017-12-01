@@ -306,13 +306,33 @@ public:
 	}
 	
 	ACTOR static Future<Void> extendTimeoutRepeatedly(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state Version versionNow = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			taskBucket->setOptions(tr);
+			return map(tr->getReadVersion(), [=](Version v) {
+				return v;
+			});
+		}));
+
 		loop {
 			// Wait until we are half way to the timeout version of this task
-			Version versionNow = wait((new ReadYourWritesTransaction(cx))->getReadVersion());
 			Void _ = wait(delay(0.5 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 
-			// Attempt to extend the task's timeout
-			Void _ = wait(taskBucket->extendTimeout(cx, task, false));
+			loop {
+				try {
+					tr->reset();
+					taskBucket->setOptions(tr);
+
+					// Attempt to extend the task's timeout
+					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, false));
+					Void _ = wait(tr->commit());
+					task->timeoutVersion = newTimeout;
+					versionNow = tr->getCommittedVersion();
+					break;
+				} catch(Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
 		}
 	}
 
