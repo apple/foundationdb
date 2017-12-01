@@ -183,6 +183,7 @@ ERROR( restore_corrupted_data_padding, 2369, "Backup file has unexpected padding
 ERROR( restore_destination_not_empty, 2370, "Attempted to restore into a non-empty destination database")
 ERROR( restore_duplicate_uid, 2371, "Attempted to restore using a UID that had been used for an aborted restore")
 ERROR( task_invalid_version, 2381, "Invalid task version")
+ERROR( task_interrupted, 2382, "Task execution stopped due to timeout, abort, or completion by another worker")
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 

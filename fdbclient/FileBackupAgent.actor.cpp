@@ -357,29 +357,6 @@ FileBackupAgent::FileBackupAgent()
 
 namespace fileBackup {
 
-	// Try to save and extend task repeatedly until it fails or f is ready (or throws)
-	// In case the task was started or saveAndExtend'd recently, firstSaveAndExtendTimestamp can be used to indicate
-	// when the first saveAndExtend should be done.
-	ACTOR static Future<Void> saveAndExtendIncrementally(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task, Future<Void> f, double firstSaveAndExtendTimestamp = 0) {
-		// delaySeconds is half of the taskBucket task timeout.
-		state double delaySeconds = 0.5 * taskBucket->getTimeoutSeconds();
-		state Future<Void> timeout = delayUntil(firstSaveAndExtendTimestamp);
-		loop {
-			choose {
-				when(Void _ = wait(f)) {
-					break;
-				}
-				when(Void _ = wait(timeout)) {
-					bool keepGoing = wait(taskBucket->saveAndExtend(cx, task));
-					if(!keepGoing)
-						throw timed_out();
-					timeout = delay(delaySeconds);
-				}
-			}
-		}
-		return Void();
-	}
-
 	// Padding bytes for backup files.  The largest padded area that could ever have to be written is
 	// the size of two 32 bit ints and the largest key size and largest value size.  Since CLIENT_KNOBS
 	// may not be initialized yet a conservative constant is being used.
@@ -788,10 +765,11 @@ namespace fileBackup {
 
 			// Ignore empty ranges.
 			if(range.empty())
-				return true;
+				return false;
 
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			state BackupConfig backup(task);
+			state bool usedFile = false;
 
 			loop {
 				try {
@@ -799,30 +777,32 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					// Update the start key of the task
+					// Update the start key of the task so if this transaction completes but the task then fails
+					// when it is restarted it will continue where this execution left off.
 					Params.beginKey().set(task, range.end);
 
 					// Save and extend the task with the new begin parameter
-					bool keepGoing = wait(taskBucket->saveAndExtend(tr, task));
-					if(!keepGoing)
-						return false;
+					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, true));
 
 					// Update the range bytes written in the backup config
 					backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
 
 					// See if there is already a file for this key which has an earlier begin, update the map if not.
 					Optional<BackupConfig::RangeSlice> s = wait(backup.rangeFileMap().get(tr, range.end));
-					if(!s.present() || s.get().begin >= range.begin)
+					if(!s.present() || s.get().begin >= range.begin) {
 						backup.rangeFileMap().set(tr, range.end, {range.begin, version, file->getFileName(), file->size()});
+						usedFile = true;
+					}
 
 					Void _ = wait(tr->commit());
+					task->timeoutVersion = newTimeout;
 					break;
 				} catch(Error &e) {
 					Void _ = wait(tr->onError(e));
 				}
 			}
 
-			return true;
+			return usedFile;
 		}
 
 		ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr, Key beginKey, Key endKey, int limit) {
@@ -888,11 +868,6 @@ namespace fileBackup {
 
 			state Future<Void> rc = readCommitted(cx, results, lock, KeyRangeRef(beginKey, endKey), true, true, true);
 			state RangeFileWriter rangeFile;
-
-			// TODO:  Try to run forever until the shard is done, but also update the task after each output file is sync'd
-			// so in case this process dies the next worker to run this task will continue from where it left off.
-			// This will require some kind of coordination with the saveAndExtendIncrementally going on in parallel with
-			// this execute() function().
 			state BackupConfig backup(task);
 
 			// Don't need to check keepRunning(task) here because we will do that while finishing each output file, but if bc
@@ -925,16 +900,14 @@ namespace fileBackup {
 						state Key nextKey = done ? endKey : keyAfter(lastKey);
 						Void _ = wait(rangeFile.writeKey(nextKey));
 
-						bool keepGoing = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
+						bool usedFile = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
 						TraceEvent("FileBackupWroteRangeFile")
 							.detail("Size", outFile->size())
 							.detail("Keys", nrKeys)
 							.detail("BeginKey", beginKey.printable())
 							.detail("EndKey", nextKey.printable())
-							.detail("FileDiscarded", keepGoing ? "No" : "Yes");
+							.detail("AddedFileToMap", usedFile);
 
-						if(!keepGoing)
-							return Void();
 						
 						nrKeys = 0;
 						beginKey = nextKey;
@@ -1059,9 +1032,6 @@ namespace fileBackup {
 		static const uint32_t version;
 
 		static struct {
-			static TaskParam<Version> nextBeginVersion() {
-				return LiteralStringRef(__FUNCTION__);
-			}
 			static TaskParam<bool> addBackupLogRangeTasks() {
 				return LiteralStringRef(__FUNCTION__);
 			}
@@ -1098,12 +1068,10 @@ namespace fileBackup {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				// Wait for the read version to pass endVersion
 				try {
-					bool keepGoing = wait(taskBucket->keepRunning(tr, task));
-					if(!keepGoing)
-						return Void();
+					Void _ = wait(taskBucket->keepRunning(tr, task));
 
 					if(!bc) {
-						// Backup container must be present if keepGoing was true.
+						// Backup container must be present if we're still here
 						Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
 						bc = _bc;
 					}
@@ -1169,9 +1137,7 @@ namespace fileBackup {
 			}
 
 			// Make sure this task is still alive, if it's not then the data read above could be incomplete.
-			bool keepGoing = wait(taskBucket->keepRunning(cx, task));
-			if(!keepGoing)
-				return Void();
+			Void _ = wait(taskBucket->keepRunning(cx, task));
 
 			Void _ = wait(outFile->finish());
 			Params.fileSize().set(task, outFile->size());
@@ -1229,11 +1195,6 @@ namespace fileBackup {
 			if (Params.addBackupLogRangeTasks().get(task)) {
 				Void _ = wait(startBackupLogRangeInternal(tr, taskBucket, futureBucket, task, taskFuture, beginVersion, endVersion));
 				endVersion = beginVersion;
-			}
-			else if (Params.nextBeginVersion().exists(task)) {
-				state Version nextVersion = Params.nextBeginVersion().get(task);
-				Key _ = wait(addTask(tr, taskBucket, task, nextVersion, endVersion, TaskCompletionKey::joinWith(taskFuture)));
-				endVersion = nextVersion;
 			} else {
 				Void _ = wait(taskFuture->set(tr, taskBucket));
 			}
@@ -1450,12 +1411,10 @@ namespace fileBackup {
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-						bool keepGoing = wait(taskBucket->keepRunning(tr, task));
-						if(!keepGoing)
-							return Void();
+						Void _ = wait(taskBucket->keepRunning(tr, task));
 
 						if(!bc) {
-							// Backup container must be present if keepGoing was true.
+							// Backup container must be present if we're still here
 							Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
 							bc = _bc;
 						}
@@ -1522,9 +1481,7 @@ namespace fileBackup {
 				loop {
 					try {
 						tr->reset();
-						bool keepGoing = wait(taskBucket->keepRunning(tr, task));
-						if(!keepGoing)
-							return Void();
+						Void _ = wait(taskBucket->keepRunning(tr, task));
 
 						state std::string tag = wait(config.tag().getOrThrow(tr));
 						// stopVersion must be set or the current task would not be running
@@ -1765,7 +1722,6 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			state double startTime = now();
 			state RestoreConfig restore(task);
 
 			state RestoreFile rangeFile = Params.inputFile().get(task);
@@ -1798,9 +1754,7 @@ namespace fileBackup {
 					addPrefix = restore.addPrefix().getD(tr);
 					removePrefix = restore.removePrefix().getD(tr);
 
-					bool keepRunning = wait(taskBucket->keepRunning(tr, task));
-					if(!keepRunning)
-						return Void();
+					Void _ = wait(taskBucket->keepRunning(tr, task));
 
 					Void _ = wait(success(bc) && success(restoreRange) && success(addPrefix) && success(removePrefix) && checkTaskVersion(tr->getDatabase(), task, name, version));
 					break;
@@ -1885,19 +1839,7 @@ namespace fileBackup {
 
 					state Future<Void> checkLock = checkDatabaseLock(tr, restore.getUid());
 
-					// Save and extend this task periodically in case database is slow, which checks keepRunning, or check it directly.
-					Future<bool> goFuture;
-					if(now() - startTime > 30) {
-						// TODO: Optionally, task params could be modified here to save progress so far.
-						startTime = now();
-						goFuture = taskBucket->saveAndExtend(tr, task);
-					}
-					else
-						goFuture = taskBucket->keepRunning(tr, task);
-
-					bool go = wait(goFuture);
-					if(!go)
-						return Void();
+					Void _ = wait(taskBucket->keepRunning(tr, task));
 
 					Void _ = wait( checkLock );
 
@@ -2007,7 +1949,6 @@ namespace fileBackup {
 		} Params;
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			state double startTime = now();
 			state RestoreConfig restore(task);
 
 			state RestoreFile logFile = Params.inputFile().get(task);
@@ -2037,9 +1978,7 @@ namespace fileBackup {
 					bc = _bc;
 
 					Void _ = wait(checkTaskVersion(tr->getDatabase(), task, name, version));
-					bool go = wait(taskBucket->keepRunning(tr, task));
-					if(!go)
-						return Void();
+					Void _ = wait(taskBucket->keepRunning(tr, task));
 
 					break;
 				} catch(Error &e) {
@@ -2076,20 +2015,7 @@ namespace fileBackup {
 
 					state Future<Void> checkLock = checkDatabaseLock(tr, restore.getUid());
 
-					// Save and extend this task periodically in case database is slow, which checks keepRunning, or check it directly.
-					Future<bool> goFuture;
-					if(now() - startTime > 30) {
-						// TODO: Optionally, task params could be modified here to save progress so far.
-						startTime = now();
-						goFuture = taskBucket->saveAndExtend(tr, task);
-					}
-					else
-						goFuture = taskBucket->keepRunning(tr, task);
-
-					bool go = wait(goFuture);
-					if(!go)
-						return Void();
-
+					Void _ = wait(taskBucket->keepRunning(tr, task));
 					Void _ = wait( checkLock );
 
 					// Add to bytes written count
@@ -2553,9 +2479,7 @@ namespace fileBackup {
 					Void _ = wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 					Version _restoreVersion = wait(restore.restoreVersion().getOrThrow(tr));
 					restoreVersion = _restoreVersion;
-					bool go = wait(taskBucket->keepRunning(tr, task));
-					if(!go)
-						return Void();
+					Void _ = wait(taskBucket->keepRunning(tr, task));
 
 					ERestoreState oldState = wait(restore.stateEnum().getD(tr));
 					if(oldState != ERestoreState::QUEUED && oldState != ERestoreState::STARTING) {
@@ -2604,9 +2528,7 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					bool go = wait(taskBucket->keepRunning(tr, task));
-					if(!go)
-						return Void();
+					Void _ = wait(taskBucket->keepRunning(tr, task));
 
 					state std::vector<RestoreConfig::RestoreFile>::iterator i = start;
 

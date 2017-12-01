@@ -24,6 +24,7 @@
 
 #include "flow/flow.h"
 #include "flow/IDispatched.h"
+#include "flow/genericactors.actor.h"
 
 #include "FDBTypes.h"
 #include "NativeAPI.h"
@@ -40,7 +41,7 @@ public:
 	unsigned int getPriority() const;
 
 	Key key;
-	uint64_t timeout;
+	Version timeoutVersion;
 
 	Map<Key, Value> params; // SOMEDAY: use one arena?
 
@@ -80,12 +81,16 @@ public:
 	}
 
 	// Transactions inside an execute() function should call this and stop without committing if it returns false.
-	Future<bool> keepRunning(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
+	Future<Void> keepRunning(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 		Future<bool> finished = isFinished(tr, task);
 		Future<bool> valid = isVerified(tr, task);
-		return map(success(finished) && success(valid), [=](Void) -> bool { return !finished.get() && valid.get(); } );
+		return map(success(finished) && success(valid), [=](Void) {
+			if(finished.get() || !valid.get()) {
+			}
+			return Void();
+		});
 	}
-	Future<bool> keepRunning(Database cx, Reference<Task> task) {
+	Future<Void> keepRunning(Database cx, Reference<Task> task) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return keepRunning(tr, task); });
 	}
 
@@ -120,9 +125,16 @@ public:
 	}
 
 	// Extend the task's timeout as if it just started and also save any parameter changes made to the task
-	Future<bool> saveAndExtend(Reference<ReadYourWritesTransaction> tr, Reference<Task> task);
-	Future<bool> saveAndExtend(Database cx, Reference<Task> task){
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return saveAndExtend(tr, task); });
+	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams);
+	Future<Void> extendTimeout(Database cx, Reference<Task> task, bool updateParams){
+		return map(
+			runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+				return extendTimeout(tr, task, updateParams);
+			}),
+			[=](Version v) {
+				task->timeoutVersion = v; 
+				return Void();
+		});
 	}
 
 	Future<bool> isFinished(Reference<ReadYourWritesTransaction> tr, Reference<Task> task);

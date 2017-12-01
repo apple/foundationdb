@@ -204,8 +204,9 @@ public:
 
 		state Standalone<RangeResultRef> values = wait(tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY));
 		Version version = wait(tr->getReadVersion());
-		task->timeout = (uint64_t)version + (uint64_t)(taskBucket->timeout * (CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_OFFSET + CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_RANGE * g_random->random01()));
-		Subspace timeoutSpace = taskBucket->timeouts.get(task->timeout).get(taskUID);
+		task->timeoutVersion = version + (uint64_t)(taskBucket->timeout * (CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_OFFSET + CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_RANGE * g_random->random01()));
+
+		Subspace timeoutSpace = taskBucket->timeouts.get(task->timeoutVersion).get(taskUID);
 
 		for (auto & s : values) {
 			Key param = taskAvailableSpace.unpack(s.key).getString(0);
@@ -304,6 +305,17 @@ public:
 		return result;
 	}
 	
+	ACTOR static Future<Void> extendTimeoutRepeatedly(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+		loop {
+			// Wait until we are half way to the timeout version of this task
+			Version versionNow = wait((new ReadYourWritesTransaction(cx))->getReadVersion());
+			Void _ = wait(delay(0.5 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+
+			// Attempt to extend the task's timeout
+			Void _ = wait(taskBucket->extendTimeout(cx, task, false));
+		}
+	}
+
 	ACTOR static Future<bool> doTask(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 		if (!task || !TaskFuncBase::isValidTask(task))
 			return false;
@@ -315,8 +327,6 @@ public:
 			taskFunc = _taskFunc;
 			if (taskFunc) {
 				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
-
-				state Version versionNow;
 
 				if (verifyTask) {
 					loop {
@@ -334,8 +344,6 @@ public:
 								Void _ = wait(tr->commit());
 								return true;
 							}
-							Version ver = wait(tr->getReadVersion());
-							versionNow = ver;
 							break;
 						}
 						catch (Error &e) {
@@ -343,35 +351,8 @@ public:
 						}
 					}
 				}
-				else {
-					state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
-					taskBucket->setOptions(tr2);
-					Version ver = wait(tr2->getReadVersion());
-					versionNow = ver;
-				}
 
-				state Future<Void> run = taskFunc->execute(cx, taskBucket, futureBucket, task);
-				// Convert timeout version of task to seconds using recent read version and versions_per_second
-				state Future<Void> timeout = delay((BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeout - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-
-				loop {
-					choose {
-						when(Void _ = wait(run)) {
-							break;
-						}
-
-						when(Void _ = wait(timeout)) {
-							// Get read version, if it is greater than task timeout then return true because a task was run but it timed out.
-							state Reference<ReadYourWritesTransaction> tr3(new ReadYourWritesTransaction(cx));
-							taskBucket->setOptions(tr3);
-							Version version = wait(tr3->getReadVersion());
-							if(version >= task->timeout)
-								throw timed_out();
-							// Otherwise reset the timeout
-							timeout = delay((BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeout - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-						}
-					}
-				}
+				Void _ = wait(taskFunc->execute(cx, taskBucket, futureBucket, task) || extendTimeoutRepeatedly(cx, taskBucket, task));
 
 				if (BUGGIFY) Void _ = wait(delay(10.0));
 				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
@@ -552,7 +533,7 @@ public:
 		taskBucket->setOptions(tr);
 
 		Tuple t;
-		t.append(task->timeout);
+		t.append(task->timeoutVersion);
 		t.append(task->key);
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
@@ -673,7 +654,7 @@ public:
 			task.params[param] = iter.value;
 		}
 
-		// Move the final task to its new available keyspace. Safe if task == Task()
+		// Move the final task, if complete, to its new available keyspace. Safe if task == Task()
 		if(!values.more) {
 			Subspace space = taskBucket->getAvailableSpace(task.getPriority()).get(task.key);
 			for(auto &p : task.params)
@@ -708,27 +689,45 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<bool> saveAndExtend(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+	ACTOR static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task, bool updateParams) {
 		taskBucket->setOptions(tr);
 
 		// First make sure it's safe to keep running
-		bool keepRunning = wait(taskBucket->keepRunning(tr, task));
-		if(!keepRunning)
-			return false;
+		Void _ = wait(taskBucket->keepRunning(tr, task));
 
-		// Clear old timeout keys
-		KeyRange range = taskBucket->timeouts.range(Tuple().append(task->timeout).append(task->key));
-		tr->clear(range);
 
-		// Update timeout and write new timeout keys
+		// This is where the task definition currently exists
+		state Subspace oldTimeoutSpace = taskBucket->timeouts.get(task->timeoutVersion).get(task->key);
+		// Update the task's timeout
 		Version version = wait(tr->getReadVersion());
-		task->timeout = (uint64_t)version + taskBucket->timeout;
-		Subspace timeoutSpace = taskBucket->timeouts.get(task->timeout).get(task->key);
+		// Ensure that the time extension is to the future
+		state Version newTimeout = std::max<Version>(version + taskBucket->timeout, task->timeoutVersion + 1);
 
-		for(auto &p : task->params)
-			tr->set(timeoutSpace.pack(p.key), p.value);
+		// This is where the task definition is being moved to
+		state Subspace newTimeoutSpace = taskBucket->timeouts.get(newTimeout).get(task->key);
 
-		return true;
+		tr->addReadConflictRange(oldTimeoutSpace.range());
+		tr->addWriteConflictRange(newTimeoutSpace.range());
+
+		// If we're updating the task params the clear the old space and write params to the new space
+		if(updateParams) {
+			TEST(true);  // Extended a task while updating parameters
+			for(auto &p : task->params) {
+				tr->set(newTimeoutSpace.pack(p.key), p.value);
+			}
+		} else {
+			TEST(true);  // Extended a task without updating parameters
+			// Otherwise, read and transplant the params from the old to new timeout spaces
+			Standalone<RangeResultRef> params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
+			for(auto &kv : params) {
+				Tuple paramKey = oldTimeoutSpace.unpack(kv.key);
+				tr->set(newTimeoutSpace.pack(paramKey), kv.value);
+			}
+		}
+
+		tr->clear(oldTimeoutSpace.range());
+
+		return newTimeout;
 	}
 };
 
@@ -845,7 +844,7 @@ Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Referen
 	setOptions(tr);
 
 	Tuple t;
-	t.append(task->timeout);
+	t.append(task->timeoutVersion);
 	t.append(task->key);
 
 	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")), LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"), MutationRef::AddValue);
@@ -854,8 +853,8 @@ Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Referen
 	return Void();
 }
 
-Future<bool> TaskBucket::saveAndExtend(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
-	return TaskBucketImpl::saveAndExtend(tr, Reference<TaskBucket>::addRef(this), task);
+Future<Version> TaskBucket::extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams) {
+	return TaskBucketImpl::extendTimeout(tr, Reference<TaskBucket>::addRef(this), task, updateParams);
 }
 
 Future<bool> TaskBucket::isFinished(Reference<ReadYourWritesTransaction> tr, Reference<Task> task){

@@ -265,14 +265,10 @@ namespace dbBackup {
 						state Future<Optional<Value>> rangeCountValue = tr->get(rangeCountKey, true);
 						state Future<Standalone<RangeResultRef>> prevRange = tr->getRange(firstGreaterOrEqual(prefix), lastLessOrEqual(rangeBegin.withPrefix(prefix)), 1, true, true);
 						state Future<Standalone<RangeResultRef>> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)), firstGreaterOrEqual(strinc(prefix)), 1, true, false);
-						state Future<bool> verified = taskBucket->keepRunning(tr, task);
+						state Future<Void> verified = taskBucket->keepRunning(tr, task);
 
 						Void _ = wait( checkDatabaseLock(tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())) );
 						Void _ = wait( success(backupVersions) && success(logVersionValue) && success(rangeCountValue) && success(prevRange) && success(nextRange) && success(verified) );
-
-						if(!verified.get()) {
-							return Void();
-						}
 
 						int64_t rangeCount = 0;
 						if(rangeCountValue.get().present()) {
@@ -658,26 +654,7 @@ namespace dbBackup {
 				dump.push_back(dumpData(cx, task, results[i], lock.getPtr(), taskBucket));
 			}
 
-			state Future<Void> dumpComplete = waitForAll(dump);
-
-			try {
-				loop {
-					choose {
-						when( Void _ = wait(dumpComplete) ) { break; }
-						when( Void _ = wait(delay((CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS/2)/CLIENT_KNOBS->CORE_VERSIONSPERSECOND)) ) {
-							bool saveResult = wait( taskBucket->saveAndExtend(cx, task) );
-							if(!saveResult) {
-								return Void();
-							}
-						}
-					}
-				}
-			}
-			catch (Error &e) {
-				if (e.code() == error_code_backup_error)
-					return Void();
-				throw;
-			}
+			Void _ = wait(waitForAll(dump));
 
 			if (newEndVersion < endVersion) {
 				task->params[CopyLogRangeTaskFunc::keyNextBeginVersion] = BinaryWriter::toValue(newEndVersion, Unversioned());
