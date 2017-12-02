@@ -15,7 +15,7 @@ case $1 in
 		OPTIONS="$OPTIONS -Wl,-dylib_install_name -Wl,$( basename $3 )"
 	    fi
 	else
-	    OPTIONS=
+	    OPTIONS="$OPTIONS -pie -fPIE"
 	fi
 
 	OPTIONS=$( eval echo "$OPTIONS $LDFLAGS \$$2_LDFLAGS \$$2_OBJECTS \$$2_LIBS \$$2_STATIC_LIBS_REAL -o $3" )
