@@ -343,8 +343,6 @@ public:
 		state Reference<TaskFuncBase> taskFunc;
 
 		try {
-			Reference<TaskFuncBase> _taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
-			taskFunc = _taskFunc;
 			if (taskFunc) {
 				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
 
