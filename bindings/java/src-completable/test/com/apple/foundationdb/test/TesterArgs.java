@@ -90,7 +90,7 @@ public class TesterArgs {
                 if (i + 1 < args.length) {
                     subspace = new Subspace(Tuple.from(args[++i]));
                 } else {
-                    System.out.println("No subspace specified for argument " + args + "\n");
+                    System.out.println("No subspace specified for argument " + arg + "\n");
                     printUsage();
                     throw new IllegalArgumentException("Not subspace specified for argument " + arg);
                 }
