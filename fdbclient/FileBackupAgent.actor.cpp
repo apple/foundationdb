@@ -773,7 +773,7 @@ namespace fileBackup {
 
 			// Avoid unnecessary conflict by prevent taskbucket's automatic timeout extension
 			// because the following transaction loop extends and updates the task.
-			Void _ = wait(task->extendMutex.take(1));
+			Void _ = wait(task->extendMutex.take());
 			state FlowLock::Releaser releaser(task->extendMutex, 1);
 
 			loop {

@@ -321,7 +321,7 @@ public:
 			Void _ = wait(delay(0.8 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
 
 			// Take the extendMutex lock until we either succeed or stop trying to extend due to failure
-			Void _ = wait(task->extendMutex.take(1));
+			Void _ = wait(task->extendMutex.take());
 			releaser = FlowLock::Releaser(task->extendMutex, 1);
 
 			loop {

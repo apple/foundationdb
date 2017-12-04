@@ -317,7 +317,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	if(contentLen > 0)
 		headers["Content-Length"] = format("%d", contentLen);
 
-	Void _ = wait(bstore->concurrentRequests.take(1));
+	Void _ = wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
@@ -604,7 +604,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	if(contentLen > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
 
-	Void _ = wait(bstore->concurrentUploads.take(1));
+	Void _ = wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
 	std::string resource = std::string("/") + bucket + "/" + object;
@@ -691,7 +691,7 @@ Future<std::string> BlobStoreEndpoint::beginMultiPartUpload(std::string const &b
 }
 
 ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, unsigned int partNumber, UnsentPacketQueue *pContent, int contentLen, std::string contentMD5) {
-	Void _ = wait(bstore->concurrentUploads.take(1));
+	Void _ = wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
 	std::string resource = format("/%s/%s?partNumber=%d&uploadId=%s", bucket.c_str(), object.c_str(), partNumber, uploadID.c_str());
