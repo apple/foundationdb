@@ -1189,7 +1189,7 @@ private:
 	}
 
 	ACTOR static Future<Void> takeMoreActor(FlowLock* lock, int* amount) {
-		Void _ = wait(lock->take(1));
+		Void _ = wait(lock->take());
 		int extra = std::min( lock->available(), *amount-1 );
 		lock->active += extra;
 		*amount = 1 + extra;

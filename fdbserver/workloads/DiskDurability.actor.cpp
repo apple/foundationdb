@@ -36,7 +36,7 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload
 		Reference<FlowLock> lock;
 
 		ACTOR static Future<Void> test_impl(FileBlock *self, Reference<AsyncFileHandle> file, int pages, Reference<AsyncFileBuffer> buffer) {
-			Void _ = wait(self->lock->take(1));
+			Void _ = wait(self->lock->take());
 
 			state int64_t offset = (int64_t)self->blockNum * pages * _PAGE_SIZE;
 			state int size = pages * _PAGE_SIZE;
