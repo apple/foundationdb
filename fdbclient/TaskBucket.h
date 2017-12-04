@@ -30,6 +30,7 @@
 #include "NativeAPI.h"
 #include "RunTransaction.actor.h"
 #include "Subspace.h"
+#include "KeyBackedTypes.h"
 
 class Task : public ReferenceCounted<Task> {
 public:
@@ -43,6 +44,9 @@ public:
 	Key key;
 	Version timeoutVersion;
 
+	// Take this lock while you don't want Taskbucket to try to extend your task's timeout
+	FlowLock extendMutex;
+
 	Map<Key, Value> params; // SOMEDAY: use one arena?
 
 	static Key reservedTaskParamKeyPriority;
@@ -54,6 +58,27 @@ public:
 	static Key reservedTaskParamKeyVersion;
 	static Key reservedTaskParamValidKey;
 	static Key reservedTaskParamValidValue;
+};
+
+template <typename T>
+class TaskParam {
+public:
+	TaskParam(StringRef key) : key(key) {}
+	T get(Reference<Task> task) const {
+		return Codec<T>::unpack(Tuple::unpack(task->params[key]));
+	}
+	void set(Reference<Task> task, T const &val) const {
+		task->params[key] = Codec<T>::pack(val).pack();
+	}
+	bool exists(Reference<Task> task) const {
+		return task->params.find(key) != task->params.end();
+	}
+	T getOrDefault(Reference<Task> task, const T defaultValue = T()) const {
+		if(!exists(task))
+			return defaultValue;
+		return get(task);
+	}
+	StringRef key;
 };
 
 class FutureBucket;

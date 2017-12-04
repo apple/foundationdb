@@ -421,27 +421,6 @@ Future<Void> readCommitted(Database const& cx, PromiseStream<RangeResultWithVers
 Future<Void> readCommitted(Database const& cx, PromiseStream<RCGroup> const& results, Future<Void> const& active, Reference<FlowLock> const& lock, KeyRangeRef const& range, std::function< std::pair<uint64_t, uint32_t>(Key key) > const& groupBy, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false, std::function< Future<Void>(Reference<ReadYourWritesTransaction> tr) > const& withEachFunction = nullptr);
 Future<Void> applyMutations(Database const& cx, Key const& uid, Key const& addPrefix, Key const& removePrefix, Version const& beginVersion, Version* const& endVersion, RequestStream<CommitTransactionRequest> const& commit, NotifiedVersion* const& committedVersion, Reference<KeyRangeMap<Version>> const& keyVersion);
 
-template <typename T>
-class TaskParam {
-public:
-	TaskParam(StringRef key) : key(key) {}
-	T get(Reference<Task> task) const {
-		return Codec<T>::unpack(Tuple::unpack(task->params[key]));
-	}
-	void set(Reference<Task> task, T const &val) const {
-		task->params[key] = Codec<T>::pack(val).pack();
-	}
-	bool exists(Reference<Task> task) const {
-		return task->params.find(key) != task->params.end();
-	}
-	T getOrDefault(Reference<Task> task, const T defaultValue = T()) const {
-		if(!exists(task))
-			return defaultValue;
-		return get(task);
-	}
-	StringRef key;
-};
-
 typedef BackupAgentBase::enumState EBackupState;
 template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
 template<> inline EBackupState Codec<EBackupState>::unpack(Tuple const &val) { return (EBackupState)val.getInt(0); }

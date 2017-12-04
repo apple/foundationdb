@@ -87,7 +87,7 @@ Key Task::reservedTaskParamValidValue = LiteralStringRef("_validvalue");
 // IMPORTANT:  Task() must result in an EMPTY parameter set, so params should only
 // be set for non-default constructor arguments.  To change this behavior look at all
 // Task() default constructions to see if they require params to be empty and call clear.
-Task::Task(Value type, uint32_t version, Value done, unsigned int priority) {
+Task::Task(Value type, uint32_t version, Value done, unsigned int priority) : extendMutex(1) {
 	if (type.size())
 		params[Task::reservedTaskParamKeyType] = type;
 
@@ -315,8 +315,14 @@ public:
 		}));
 
 		loop {
+			state FlowLock::Releaser releaser;
+
 			// Wait until we are half way to the timeout version of this task
-			Void _ = wait(delay(0.5 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+			Void _ = wait(delay(0.8 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+
+			// Take the extendMutex lock until we either succeed or stop trying to extend due to failure
+			Void _ = wait(task->extendMutex.take(1));
+			releaser = FlowLock::Releaser(task->extendMutex, 1);
 
 			loop {
 				try {
@@ -343,6 +349,7 @@ public:
 		state Reference<TaskFuncBase> taskFunc;
 
 		try {
+			taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
 			if (taskFunc) {
 				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
 
