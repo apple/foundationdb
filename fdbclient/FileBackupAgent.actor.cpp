@@ -3021,8 +3021,40 @@ namespace fileBackup {
 		// Cancel the backup tasks on this tag
 		Void _ = wait(tag.cancel(tr));
 		Void _ = wait(unlockDatabase(tr, current.get().first));
-
 		return ERestoreState::ABORTED;
+	}
+
+	ACTOR Future<ERestoreState> abortRestore(Database cx, Key tagName) {
+		state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>( new ReadYourWritesTransaction(cx) );
+
+		loop {
+			try {
+				ERestoreState estate = wait( abortRestore(tr, tagName) );
+				if(estate != ERestoreState::ABORTED) {
+					return estate;
+				}
+				Void _ = wait(tr->commit());
+				break;
+			} catch( Error &e ) {
+				Void _ = wait( tr->onError(e) );
+			}
+		}
+		
+		tr = Reference<ReadYourWritesTransaction>( new ReadYourWritesTransaction(cx) );
+
+		//Commit a dummy transaction before returning success, to ensure the mutation applier has stopped submitting mutations
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->addReadConflictRange(singleKeyRange(KeyRef()));
+				tr->addWriteConflictRange(singleKeyRange(KeyRef()));
+				Void _ = wait(tr->commit());
+				return ERestoreState::ABORTED;
+			} catch( Error &e ) {
+				Void _ = wait( tr->onError(e) );
+			}
+		}
 	}
 
 	struct StartFullRestoreTaskFunc : TaskFuncBase {
@@ -3769,6 +3801,10 @@ Future<Version> FileBackupAgent::atomicRestore(Database cx, Key tagName, KeyRang
 
 Future<ERestoreState> FileBackupAgent::abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {
 	return fileBackup::abortRestore(tr, tagName);
+}
+
+Future<ERestoreState> FileBackupAgent::abortRestore(Database cx, Key tagName) {
+	return fileBackup::abortRestore(cx, tagName);
 }
 
 Future<std::string> FileBackupAgent::restoreStatus(Reference<ReadYourWritesTransaction> tr, Key tagName) {
