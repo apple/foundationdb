@@ -71,6 +71,13 @@ ACTORCOMPILER := bin/actorcompiler.exe
 
 # UNSTRIPPED := 1
 
+HARDENING_FLAGS := -fstack-protector-all -Wstack-protector --param ssp-buffer-size=4 -fPIC -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now
+# TODO(alexmiller): boost 1.52.0 prevents us from using most of these with -Werror.
+# Reassess after boost has been upgraded to >1.52.0.
+#WARNING_FLAGS ?= -Wall -Wextra -Wformat-security -Wconversion -Wsign-conversion -Werror
+
+CFLAGS += ${HARDENING_FLAGS} ${WARNING_FLAGS}
+
 # Normal optimization level
 CFLAGS += -O2
 
@@ -84,7 +91,7 @@ CFLAGS += -g
 # valgrind-compatibile builds are enabled by uncommenting lines in valgind.mk
 
 CXXFLAGS += -Wno-deprecated
-LDFLAGS :=
+LDFLAGS := ${HARDENING_FLAGS}
 LIBS :=
 STATIC_LIBS :=
 
