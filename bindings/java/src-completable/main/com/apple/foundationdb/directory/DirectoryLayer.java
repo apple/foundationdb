@@ -236,6 +236,18 @@ public class DirectoryLayer implements Directory
 	}
 
 	/**
+	 * Produces a hash of this {@code DirectoryLayer} based on its path and subspaces.
+	 * This satisfies the necessary requirements to allow this class to be used as keys
+	 * in hash tables or as values in hash-based sets.
+	 *
+	 * @return a hash based on the path and subspaces of this {@code DirectoryLayer}
+	 */
+	@Override
+	public int hashCode() {
+	    return path.hashCode() ^ (nodeSubspace.hashCode() * 179) ^ (contentSubspace.hashCode() * 937);
+	}
+
+	/**
 	 * Sets path of directory to {@code path}
 	 *
 	 * @param path a {@code List<String>} specifying a path
