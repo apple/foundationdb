@@ -24,8 +24,6 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CompletableFuture;
 
-import com.apple.foundationdb.Disposable;
-
 /**
  * A version of {@code Iterator} that allows for non-blocking iteration over elements.
  *  Calls to {@link #next()} will not block if {@link #onHasNext()} has been called
@@ -34,10 +32,10 @@ import com.apple.foundationdb.Disposable;
  *
  * @param <T> the type of object yielded by {@code next()}
  */
-public interface AsyncIterator<T> extends Iterator<T>, Disposable {
+public interface AsyncIterator<T> extends Iterator<T> {
 	/**
 	 * Returns a asynchronous signal for the presence of more elements in the sequence.
-	 * Once the future returned by {@link #onHasNext()} is ready, the next call to
+	 * Once the future returned by {@code onHasNext()} is ready, the next call to
 	 * {@link #next} will not block.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to {@code true} if {@code next()}
@@ -78,11 +76,4 @@ public interface AsyncIterator<T> extends Iterator<T>, Disposable {
 	 * Cancels any outstanding asynchronous work associated with this {@code AsyncIterator}.
 	 */
 	public void cancel();
-
-	/**
-	 * Cancel this {@code AsyncIterable} and dispose of associated resources. Equivalent
-	 *  to calling {@link AsyncIterator#cancel()}.
-	 */
-	@Override
-	public void dispose();
 }

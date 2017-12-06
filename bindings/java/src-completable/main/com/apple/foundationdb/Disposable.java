@@ -21,13 +21,15 @@
 package com.apple.foundationdb;
 
 /**
- * A FoundationDB object with native resources that can be freed. It is not mandatory to call
- *  {@link Disposable#dispose()} most of the time, as disposal will happen at finalization.
+ * An object with native FoundationDB resources that must be freed. Failure to dispose of
+ *  {@code Disposable} objects will result in memory leaks.
  */
 public interface Disposable {
 	/**
-	 * Dispose of the object.  This can be called multiple times, but care should be
-	 *  taken that an object is not in use in another thread at the time of the call.
+	 * Dispose of the object. This must be called once the object is no longer in use to
+	 *  free any native resources associated with the object. This can be called multiple times,
+	 *  but care should be taken that an object is not in use in another thread at the time of
+	 *  the call.
 	 */
 	void dispose();
 }

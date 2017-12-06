@@ -748,8 +748,7 @@ public class DirectoryLayer implements Directory
 					}
 				}, tr.getExecutor());
 			}
-		}, tr.getExecutor())
-		.whenComplete((v, t) -> rangeItr.dispose());
+		}, tr.getExecutor());
 	}
 
 	private CompletableFuture<Boolean> isPrefixFree(final ReadTransaction tr, final byte[] prefix) {
@@ -775,8 +774,7 @@ public class DirectoryLayer implements Directory
 					public Boolean apply(Boolean hasNext) {
 						return !hasNext;
 					}
-				})
-				.whenComplete((v, t) -> it.dispose());
+				});
 			}
 		}, tr.getExecutor());
 	}
@@ -1182,7 +1180,6 @@ public class DirectoryLayer implements Directory
 							return null;
 						}
 					})
-					.whenComplete((v, t) -> rangeItr.dispose())
 					.thenComposeAsync(new Function<Void, CompletableFuture<Void>>() {
 						@Override
 						public CompletableFuture<Void> apply(Void ignore) {

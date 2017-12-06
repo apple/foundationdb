@@ -22,9 +22,14 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-abstract class NativeFuture<T> extends CompletableFuture<T> {
-	protected final long cPtr;
+abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposable {
+	private final ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
+	protected final Lock pointerReadLock = rwl.readLock();
+
+	private long cPtr;
 
 	protected NativeFuture(long cPtr) {
 		this.cPtr = cPtr;
@@ -36,15 +41,33 @@ abstract class NativeFuture<T> extends CompletableFuture<T> {
 	// constructor of this class because a quickly completing future can  
 	// lead to a race where the marshalWhenDone tries to run on an
 	// unconstructed subclass.
+	//
+	// Since this must be called from a constructor, we assume that dispose
+	// cannot be called concurrently.
 	protected void registerMarshalCallback(Executor executor) {
-		Future_registerCallback(cPtr, () -> executor.execute(this::marshalWhenDone));
+		if(cPtr != 0) {
+			Future_registerCallback(cPtr, () -> executor.execute(this::marshalWhenDone));
+		}
 	}
 
 	private void marshalWhenDone() {
 		try {
-			T val = getIfDone_internal();
-			postMarshal();
-			complete(val);
+			T val = null;
+			boolean shouldComplete = false;
+			try {
+				pointerReadLock.lock();
+				if(cPtr != 0) {
+					val = getIfDone_internal(cPtr);
+					shouldComplete = true;
+				}
+			}
+			finally {
+				pointerReadLock.unlock();
+			}
+
+			if(shouldComplete) {
+				complete(val);
+			}
 		} catch(FDBException t) {
 			assert(t.getCode() != 2015); // future_not_set not possible
 			if(t.getCode() != 1102) { // future_released
@@ -52,6 +75,8 @@ abstract class NativeFuture<T> extends CompletableFuture<T> {
 			}
 		} catch(Throwable t) {
 			completeExceptionally(t);
+		} finally {
+			postMarshal();
 		}
 	}
 
@@ -59,22 +84,52 @@ abstract class NativeFuture<T> extends CompletableFuture<T> {
 		dispose();
 	}
 
-	abstract T getIfDone_internal() throws FDBException;
+	abstract protected T getIfDone_internal(long cPtr) throws FDBException;
 
-	public void dispose()  {
-		Future_releaseMemory(cPtr);
+	@Override
+	public void dispose() {
+		long ptr = 0;
+
+		rwl.writeLock().lock();
+		if(cPtr != 0) {
+			ptr = cPtr;
+			cPtr = 0;
+		}
+		rwl.writeLock().unlock();
+
+		if(ptr != 0) {
+			Future_dispose(ptr);
+			completeExceptionally(new IllegalStateException("Future has been disposed"));
+		}
 	}
 
 	@Override
-	protected void finalize() throws Throwable {
-		Future_dispose(cPtr);
+	public boolean cancel(boolean mayInterruptIfRunning) {
+		boolean result = super.cancel(mayInterruptIfRunning);
+		try {
+			rwl.readLock().lock();
+			if(cPtr != 0) {
+				Future_cancel(cPtr);
+			}
+			return result;
+		}
+		finally {
+			rwl.readLock().unlock();
+		}
 	}
 
-	@Override
-	public T join() {
-		Future_blockUntilReady(cPtr);
-		return super.join();
+	protected long getPtr() {
+		// we must have a read lock for this function to make sense, however it
+		//  does not make sense to take the lock here, since the code that uses
+		//  the result must inherently have the read lock itself.
+		assert( rwl.getReadHoldCount() > 0 );
+
+		if(cPtr == 0)
+			throw new IllegalStateException("Cannot access disposed object");
+
+		return cPtr;
 	}
+
 
 	private native void Future_registerCallback(long cPtr, Runnable callback);
 	private native void Future_blockUntilReady(long cPtr);

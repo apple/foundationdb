@@ -25,7 +25,6 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
@@ -53,12 +52,10 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 	private final int rowLimit;
 	private final boolean reverse;
 	private final StreamingMode streamingMode;
-	private final FutureResults firstChunk;
 
-	private RangeQuery(FDBTransaction transaction, boolean isSnapshot,
+	RangeQuery(FDBTransaction transaction, boolean isSnapshot,
 			KeySelector begin, KeySelector end, int rowLimit,
-			boolean reverse, StreamingMode streamingMode,
-			FutureResults firstChunk) {
+			boolean reverse, StreamingMode streamingMode) {
 		this.tr = transaction;
 		this.begin = begin;
 		this.end = end;
@@ -66,17 +63,6 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 		this.rowLimit = rowLimit;
 		this.reverse = reverse;
 		this.streamingMode = streamingMode;
-		this.firstChunk = firstChunk;
-	}
-
-	static RangeQuery start(FDBTransaction transaction, boolean isSnapshot,
-							KeySelector begin, KeySelector end, int rowLimit,
-							boolean reverse, StreamingMode streamingMode) {
-		// start the first fetch...
-		FutureResults firstChunk = transaction.getRange_internal(begin, end,
-				rowLimit, 0, streamingMode.code(), 1, isSnapshot, reverse);
-
-		return new RangeQuery(transaction, isSnapshot, begin, end, rowLimit, reverse, streamingMode, firstChunk);
 	}
 
 	/**
@@ -95,20 +81,16 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 
 		// if the streaming mode is EXACT, try and grab things as one chunk
 		if(mode == StreamingMode.EXACT) {
-			CompletableFuture<RangeResultInfo> range = tr.getRange_internal(
+			FutureResults range = tr.getRange_internal(
 					this.begin, this.end, this.rowLimit, 0, StreamingMode.EXACT.code(),
 					1, this.snapshot, this.reverse);
-			return range.thenApply(new Function<RangeResultInfo, List<KeyValue>>() {
-				@Override
-				public List<KeyValue> apply(RangeResultInfo o) {
-					return o.get().values;
-				}
-			});
+			return range.thenApply(result -> result.get().values)
+					.whenComplete((result, e) -> range.dispose());
 		}
 
 		// If the streaming mode is not EXACT, simply collect the results of an iteration into a list
 		return AsyncUtil.collect(
-				new RangeQuery(tr, snapshot, begin, end, rowLimit, reverse, mode, firstChunk), tr.getExecutor());
+				new RangeQuery(tr, snapshot, begin, end, rowLimit, reverse, mode), tr.getExecutor());
 	}
 
 	/**
@@ -130,16 +112,16 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 		// There is the chance for parallelism in the two "chunks" for fetched data
 		private RangeResult chunk = null;
 		private RangeResult nextChunk = null;
-		private boolean fetchOutstanding = true;
+		private boolean fetchOutstanding = false;
 		private byte[] prevKey = null;
 		private int index = 0;
-		// The first request is made in the constructor for the parent Iterable, so start at 1
-		private int iteration = 1;
+		private int iteration = 0;
 		private KeySelector begin;
 		private KeySelector end;
 
 		private int rowsRemaining;
 
+		private FutureResults fetchingChunk;
 		private CompletableFuture<Boolean> nextFuture;
 		private boolean isCancelled = false;
 
@@ -151,19 +133,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			this.reverse = reverse;
 			this.streamingMode = streamingMode;
 
-			// Register for completion, etc. on the first chunk. Some of the fields in
-			//  this class were initialized with the knowledge that this fetch is active
-			//  at creation time. This set normally happens in startNextFetch, but
-			//  the first fetch has already been configured and started.
-			CompletableFuture<Boolean> promise = new CompletableFuture<Boolean>();
-			nextFuture = promise;
-
-			// FIXME: should we propagate cancellation into the first chuck fetch?
-			//  This would invalidate the whole iterable, not just the iterator
-			//promise.onCancelledCancel(firstChunk);
-
-			// FIXME: I have no idea if this will just get garbage collected away, etc.
-			firstChunk.whenComplete(new FetchComplete(firstChunk, promise));
+			startNextFetch();
 		}
 
 		private synchronized boolean mainChunkIsTheLast() {
@@ -174,54 +144,61 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			final FutureResults fetchingChunk;
 			final CompletableFuture<Boolean> promise;
 
-			public FetchComplete(FutureResults fetch, CompletableFuture<Boolean> promise) {
+			FetchComplete(FutureResults fetch, CompletableFuture<Boolean> promise) {
 				this.fetchingChunk = fetch;
 				this.promise = promise;
 			}
 
 			@Override
 			public void accept(RangeResultInfo data, Throwable error) {
-				final RangeResultSummary summary;
+				try {
+					final RangeResultSummary summary;
 
-				if(error != null) {
-					promise.completeExceptionally(error);
-					if(error instanceof Error) {
-						throw (Error)error;
+					if(error != null) {
+						promise.completeExceptionally(error);
+						if(error instanceof Error) {
+							throw (Error) error;
+						}
+
+						return;
 					}
 
-					return;
-				}
-
-				summary = data.getSummary();
-				if(summary.lastKey == null) {
-					promise.complete(Boolean.FALSE);
-					return;
-				}
-
-				synchronized(AsyncRangeIterator.this) {
-					fetchOutstanding = false;
-
-					// adjust the total number of rows we should ever fetch
-					rowsRemaining -= summary.keyCount;
-
-					// set up the next fetch
-					if (reverse) {
-						end = KeySelector.firstGreaterOrEqual(summary.lastKey);
-					} else {
-						begin = KeySelector.firstGreaterThan(summary.lastKey);
+					summary = data.getSummary();
+					if(summary.lastKey == null) {
+						promise.complete(Boolean.FALSE);
+						return;
 					}
 
-					// If this is the first fetch or the main chunk is exhausted
-					if(chunk == null || index == chunk.values.size()) {
-						nextChunk = null;
-						chunk = data.get();
-						index = 0;
-					} else {
-						nextChunk = data.get();
-					}
-				}
+					synchronized(AsyncRangeIterator.this) {
+						fetchOutstanding = false;
 
-				promise.complete(Boolean.TRUE);
+						// adjust the total number of rows we should ever fetch
+						rowsRemaining -= summary.keyCount;
+
+						// set up the next fetch
+						if(reverse) {
+							end = KeySelector.firstGreaterOrEqual(summary.lastKey);
+						}
+						else {
+							begin = KeySelector.firstGreaterThan(summary.lastKey);
+						}
+
+						// If this is the first fetch or the main chunk is exhausted
+						if(chunk == null || index == chunk.values.size()) {
+							nextChunk = null;
+							chunk = data.get();
+							index = 0;
+						}
+						else {
+							nextChunk = data.get();
+						}
+					}
+
+					promise.complete(Boolean.TRUE);
+				}
+				finally {
+					fetchingChunk.dispose();
+				}
 			}
 		}
 
@@ -231,24 +208,18 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			if(isCancelled)
 				return;
 
-			if(mainChunkIsTheLast())
+			if(chunk != null && mainChunkIsTheLast())
 				return;
 
 			fetchOutstanding = true;
 			nextChunk = null;
 
-			FutureResults fetchingChunk = tr.getRange_internal(begin, end,
+			fetchingChunk = tr.getRange_internal(begin, end,
 					rowsLimited ? rowsRemaining : 0, 0, streamingMode.code(),
 					++iteration, snapshot, reverse);
 
-			CompletableFuture<Boolean> promise = new CompletableFuture<Boolean>();
-			nextFuture = promise;
-
-			// FIXME: BOOOOOOOOOO! Maybe we don't need this?
-			// promise.onCancelledCancel(fetchingChunk);
-
-			// TODO: again, I have no idea if this will get out-of-scope collected right away
-			fetchingChunk.whenComplete(new FetchComplete(fetchingChunk, promise));
+			nextFuture = new CompletableFuture<>();
+			fetchingChunk.whenComplete(new FetchComplete(fetchingChunk, nextFuture));
 		}
 
 		@Override
@@ -341,11 +312,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 		public synchronized void cancel() {
 			isCancelled = true;
 			nextFuture.cancel(true);
-		}
-
-		@Override
-		public void dispose() {
-			cancel();
+			fetchingChunk.cancel(true);
 		}
 
 		private final Function<Boolean, KeyValue> NEXT_MAPPER = new Function<Boolean, KeyValue>() {
