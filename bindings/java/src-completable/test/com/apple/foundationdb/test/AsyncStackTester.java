@@ -418,7 +418,7 @@ public class AsyncStackTester {
 								inst.context.newTransaction(oldTr); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 							}
 							else {
-								inst.context.updateCurrentTransaction(oldTr, tr);
+								inst.setTransaction(oldTr, tr);
 							}
 						})
 						.thenApply(v -> null);

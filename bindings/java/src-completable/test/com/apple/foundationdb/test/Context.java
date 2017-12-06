@@ -101,20 +101,19 @@ abstract class Context implements Runnable {
 	}
 
 	public synchronized void updateCurrentTransaction(Transaction tr) {
-		Context.transactionRefCounts.putIfAbsent(tr, new AtomicInteger(1));
-	    releaseTransaction(Context.transactionMap.put(this.trName, tr));
+		Context.transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(1));
+		releaseTransaction(Context.transactionMap.put(this.trName, tr));
 	}
 
 	public synchronized boolean updateCurrentTransaction(Transaction oldTr, Transaction newTr) {
-		Context.transactionRefCounts.putIfAbsent(newTr, new AtomicInteger(1));
 		if(Context.transactionMap.replace(this.trName, oldTr, newTr)) {
+			AtomicInteger count = Context.transactionRefCounts.computeIfAbsent(newTr, x -> new AtomicInteger(0));
+			count.incrementAndGet();
 			releaseTransaction(oldTr);
 			return true;
 		}
-		else {
-			Context.transactionRefCounts.remove(newTr);
-			return false;
-		}
+
+		return false;
 	}
 
 	public void newTransaction() {
@@ -131,12 +130,8 @@ abstract class Context implements Runnable {
 
 	public synchronized void switchTransaction(byte[] trName) {
 		this.trName = ByteArrayUtil.printable(trName);
-		Transaction tr = db.createTransaction();
-		Context.transactionRefCounts.put(tr, new AtomicInteger(1));
-		Transaction previousTr = Context.transactionMap.putIfAbsent(this.trName, tr);
-		if(previousTr != null) {
-			releaseTransaction(tr);
-		}
+		Transaction tr = Context.transactionMap.computeIfAbsent(this.trName, x -> db.createTransaction());
+		Context.transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(1));
 	}
 
 	abstract void executeOperations() throws Throwable;

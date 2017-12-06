@@ -555,9 +555,13 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 	@Override
 	protected void finalize() throws Throwable {
-		checkUndisposed("Transaction");
-		dispose();
-		super.finalize();
+		try {
+			checkUndisposed("Transaction");
+			dispose();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	@Override

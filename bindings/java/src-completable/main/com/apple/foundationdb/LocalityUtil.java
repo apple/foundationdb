@@ -227,9 +227,9 @@ public class LocalityUtil {
 					System.err.println("DisposableAsyncIterator not disposed (getBoundaryKeys)");
 				}
 			}
-			catch(Exception e) {}
-
-			super.finalize();
+			finally {
+				super.finalize();
+			}
 		}
 	}
 

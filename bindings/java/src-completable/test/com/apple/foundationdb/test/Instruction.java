@@ -86,6 +86,20 @@ class Instruction extends Stack {
 		}
 	}
 
+	void setTransaction(Transaction oldTr, Transaction newTr) {
+		if(!isDatabase) {
+			context.updateCurrentTransaction(oldTr, newTr);
+
+			this.tr = context.getCurrentTransaction();
+			if(isSnapshot) {
+				readTr = this.tr.snapshot();
+			}
+			else {
+				readTr = tr;
+			}
+		}
+	}
+
 	void releaseTransaction() {
 		context.releaseTransaction(this.tr);
 	}

@@ -99,7 +99,9 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposabl
 
 		if(ptr != 0) {
 			Future_dispose(ptr);
-			completeExceptionally(new IllegalStateException("Future has been disposed"));
+			if(!isDone()) {
+				completeExceptionally(new IllegalStateException("Future has been disposed"));
+			}
 		}
 	}
 
@@ -129,7 +131,6 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposabl
 
 		return cPtr;
 	}
-
 
 	private native void Future_registerCallback(long cPtr, Runnable callback);
 	private native void Future_blockUntilReady(long cPtr);

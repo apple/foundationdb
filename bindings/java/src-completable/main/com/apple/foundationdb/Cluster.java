@@ -59,9 +59,13 @@ public class Cluster extends DefaultDisposableImpl implements Disposable {
 
 	@Override
 	protected void finalize() throws Throwable {
-		checkUndisposed("Cluster");
-		dispose();
-		super.finalize();
+		try {
+			checkUndisposed("Cluster");
+			dispose();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	/**

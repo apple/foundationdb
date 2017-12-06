@@ -101,9 +101,13 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 
 	@Override
 	protected void finalize() throws Throwable {
-		checkUndisposed("Database");
-		dispose();
-		super.finalize();
+		try {
+			checkUndisposed("Database");
+			dispose();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	@Override
