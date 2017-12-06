@@ -489,7 +489,12 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif
 #elif defined(__APPLE__)
-inline static void* aligned_alloc(size_t alignment, size_t size) { return malloc(size); }  // FIXME: OSX doesn't have memalign(). All allocations are 16-byte aligned
+#include <cstdlib>
+inline static void* aligned_alloc(size_t alignment, size_t size) {
+	void* ptr = nullptr;
+	posix_memalign(&ptr, alignment, size);
+	return ptr;
+}
 inline static void aligned_free(void* ptr) { free(ptr); }
 #endif
 
