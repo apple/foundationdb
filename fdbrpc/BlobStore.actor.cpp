@@ -212,7 +212,7 @@ Future<bool> BlobStoreEndpoint::objectExists(std::string const &bucket, std::str
 ACTOR Future<Void> deleteObject_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
-	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 404}));
+	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 204, 404}));
 	// 200 means object deleted, 404 means it doesn't exist already, so either success code passed above is fine.
 	return Void();
 }
@@ -317,6 +317,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	if(contentLen > 0)
 		headers["Content-Length"] = format("%d", contentLen);
 
+	headers["Host"] = bstore->host;
 	Void _ = wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
@@ -354,6 +355,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			remoteAddress = rconn.conn->getPeerAddress();
 			Void _ = wait(bstore->requestRate->getAllowance(1));
 			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			r->convertToJSONifXML();
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we received the "Connection: close" header.
 			if(r->headers["Connection"] != "close")
@@ -464,14 +466,42 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 			json_spirit::mValue json;
 			json_spirit::read_string(r->content, json);
 			JSONDoc doc(json);
-			doc.tryGet("truncated", more);
-			if(doc.has("results")) {
-				for(auto &jsonObject : doc.at("results").get_array()) {
+			std::string isTruncated;
+			if (!doc.tryGet("truncated", more)) {
+				doc.get("ListBucketResult.IsTruncated", isTruncated);
+				more = isTruncated == "false" ? false : true;
+			}
+			if (doc.has("results")) {
+				for (auto &jsonObject : doc.at("results").get_array()) {
 					JSONDoc objectDoc(jsonObject);
 					BlobStoreEndpoint::ObjectInfo object;
 					objectDoc.get("size", object.size);
 					objectDoc.get("key", object.name);
 					result.objects.push_back(std::move(object));
+				}
+			}
+			if(doc.has("ListBucketResult.Contents")) {
+				if (doc.at("ListBucketResult.Contents").type() == json_spirit::array_type) {
+					for (auto &jsonObject : doc.at("ListBucketResult.Contents").get_array()) {
+						JSONDoc objectDoc(jsonObject);
+						BlobStoreEndpoint::ObjectInfo object;
+						std::string sizeVal;
+						objectDoc.get("Size", sizeVal);
+						object.size = strtoll(sizeVal.c_str(), NULL, 10);
+						objectDoc.get("Key", object.name);
+						result.objects.push_back(std::move(object));
+					}
+				}
+				else {
+					auto jsonObject = doc.at("ListBucketResult.Contents");
+					JSONDoc objectDoc(jsonObject);
+					BlobStoreEndpoint::ObjectInfo object;
+					std::string sizeVal;
+					objectDoc.get("Size", sizeVal);
+					object.size = strtoll(sizeVal.c_str(), NULL, 10);
+					objectDoc.get("Key", object.name);
+					result.objects.push_back(std::move(object));
+
 				}
 			}
 			if(doc.has("CommonPrefixes")) {
@@ -482,7 +512,6 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					result.commonPrefixes.push_back(std::move(prefix));
 				}
 			}
-
 			results.send(result);
 		} catch(Error &e) {
 			throw http_bad_response();
@@ -578,7 +607,8 @@ void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string cons
 	std::string sig = base64::encoder::from_string(hmac_sha1(msg));
 	// base64 encoded blocks end in \n so remove it.
 	sig.resize(sig.size() - 1);
-	std::string auth = key;
+	std::string auth = "AWS ";
+	auth.append(key);
 	auth.append(":");
 	auth.append(sig);
 	headers["Authorization"] = auth;
@@ -614,7 +644,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, {200}));
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
-	if(r->headers["Content-MD5"] != contentMD5)
+	if (!r->verifyMD5(false, contentMD5))
 		throw checksum_failed();
 
 	return Void();
@@ -703,7 +733,7 @@ ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, s
 	// will see error 400.  That could be detected and handled gracefully by retrieving the etag for the successful request.
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
-	if(r->headers["Content-MD5"] != contentMD5)
+	if (!r->verifyMD5(false, contentMD5))
 		throw checksum_failed();
 
 	// No etag -> bad response.
