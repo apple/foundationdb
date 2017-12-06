@@ -138,11 +138,8 @@ public class TestResult {
 
         outputBuilder.append('}');
 
-        BufferedWriter writer = null;
-        try  {
-            writer = new BufferedWriter(new FileWriter(file));
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
             writer.write(outputBuilder.toString());
-            writer.close();
         } catch (IOException e) {
             System.out.println("Could not write results to file " + file);
             throw new RuntimeException("Could not save results: " + e.getMessage(), e);

@@ -75,7 +75,7 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass ) {
+ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass, Reference<AsyncVar<bool>> asyncIsExcluded ) {
 	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees( new AsyncVar<vector<Optional<LeaderInfo>>>() );
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
@@ -94,7 +94,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 
 		myInfo.changeID = g_random->randomUniqueID();
 		prevChangeID = myInfo.changeID;
-		myInfo.updateChangeID(asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController));
+		myInfo.updateChangeID( asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController), asyncIsExcluded->get() );
 
 		vector<Future<Void>> cand;
 		for(int i=0; i<coordinators.leaderElectionServers.size(); i++)
@@ -153,7 +153,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 					break;
 				}
 				when (Void _ = wait(candidacies)) { ASSERT(false); }
-				when (Void _ = wait( asyncProcessClass->onChange() )) {
+				when (Void _ = wait( asyncProcessClass->onChange() || asyncIsExcluded->onChange() )) {
 					break;
 				}
 			}
@@ -166,7 +166,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 
 	loop {
 		prevChangeID = myInfo.changeID;
-		if (myInfo.updateChangeID(asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController))) {
+		myInfo.updateChangeID( asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController), asyncIsExcluded->get() );
+		if (myInfo.changeID != prevChangeID) {
 			TraceEvent("ChangeLeaderChangeID").detail("PrevChangeID", prevChangeID).detail("NewChangeID", myInfo.changeID);
 		}
 

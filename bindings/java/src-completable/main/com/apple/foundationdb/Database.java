@@ -21,7 +21,6 @@
 package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 
@@ -43,7 +42,7 @@ public interface Database extends Disposable, TransactionContext {
 	/**
 	 * Creates a {@link Transaction} that operates on this {@code Database}.<br>
 	 * <br>
-	 * Note: Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
+	 * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
 	 *  option. This is because the Java bindings disallow use of {@code Transaction} objects after
 	 *  {@link Transaction#onError} is called.<br>
 	 * <br>

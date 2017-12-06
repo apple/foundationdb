@@ -103,7 +103,7 @@ public class LocalityUtil {
 	 */
 	public static CompletableFuture<String[]> getAddressesForKey(Transaction tr, byte[] key) {
 		if (!(tr instanceof FDBTransaction)) {
-			CompletableFuture<String[]> future = new CompletableFuture<String[]>();
+			CompletableFuture<String[]> future = new CompletableFuture<>();
 			future.completeExceptionally(new FDBException("locality_information_unavailable", 1033));
 			return future;
 		}
@@ -233,7 +233,7 @@ public class LocalityUtil {
 		}
 	}
 
-	static Charset ASCII = Charset.forName("US-ASCII");
+	private static Charset ASCII = Charset.forName("US-ASCII");
 	static byte[] keyServersForKey(byte[] key) {
 		return ByteArrayUtil.join(new byte[] { (byte)255 },
 							  "/keyServers/".getBytes(ASCII),

@@ -45,13 +45,13 @@ public interface Database extends Disposable, TransactionContext {
 	/**
 	 * Creates a {@link Transaction} that operates on this {@code Database}.<br>
 	 * <br>
-	 * Note: Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
+	 * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
 	 *  option. This is because the Java bindings disallow use of {@code Transaction} objects after
 	 *  {@link Transaction#onError} is called.
 	 *
 	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
 	 */
-	public Transaction createTransaction();
+	Transaction createTransaction();
 
 	/**
 	 * Creates a {@link Transaction} that operates on this {@code Database} with the given {@link Executor}
@@ -60,14 +60,14 @@ public interface Database extends Disposable, TransactionContext {
 	 * @param e the {@link Executor} to use when executing asynchronous callbacks for the database
 	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
 	 */
-	public Transaction createTransaction(Executor e);
+	Transaction createTransaction(Executor e);
 
 	/**
 	 * Returns a set of options that can be set on a {@code Database}
 	 *
 	 * @return a set of database-specific options affecting this {@code Database}
 	 */
-	public DatabaseOptions options();
+	DatabaseOptions options();
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
@@ -81,7 +81,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *  this database
 	 */
 	@Override
-	public <T> T read(Function<? super ReadTransaction, T> retryable);
+	<T> T read(Function<? super ReadTransaction, T> retryable);
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
@@ -94,7 +94,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * 
 	 * @see #read(Function)
 	 */
-	public <T> T read(Function<? super ReadTransaction, T> retryable, Executor e);
+	<T> T read(Function<? super ReadTransaction, T> retryable, Executor e);
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
@@ -109,7 +109,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * @see #read(Function)
 	 */
 	@Override
-	public abstract <T> T read(PartialFunction<? super ReadTransaction, T> retryable) throws Exception;
+	<T> T read(PartialFunction<? super ReadTransaction, T> retryable) throws Exception;
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
@@ -125,7 +125,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *
 	 * @see #read(Function)
 	 */
-	public abstract <T> T read(PartialFunction<? super ReadTransaction, T> retryable, Executor e) throws Exception;
+	<T> T read(PartialFunction<? super ReadTransaction, T> retryable, Executor e) throws Exception;
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
@@ -143,7 +143,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *  this database
 	 */
 	@Override
-	public abstract <T> Future<T> readAsync(
+	<T> Future<T> readAsync(
 			Function<? super ReadTransaction, Future<T>> retryable);
 
 	/**
@@ -157,7 +157,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * 
 	 * @see #readAsync(Function)
 	 */
-	public abstract <T> Future<T> readAsync(
+	<T> Future<T> readAsync(
 			Function<? super ReadTransaction, Future<T>> retryable, Executor e);
 
 	/**
@@ -171,7 +171,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * @see #read(Function)
 	 */
 	@Override
-	public abstract <T> PartialFuture<T> readAsync(
+	<T> PartialFuture<T> readAsync(
 			PartialFunction<? super ReadTransaction, ? extends PartialFuture<T>> retryable);
 
 	/**
@@ -186,7 +186,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *
 	 * @see #read(Function)
 	 */
-	public abstract <T> PartialFuture<T> readAsync(
+	<T> PartialFuture<T> readAsync(
 			PartialFunction<? super ReadTransaction, ? extends PartialFuture<T>> retryable, Executor e);
 
 
@@ -210,7 +210,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *  this database
 	 */
 	@Override
-	public <T> T run(Function<? super Transaction, T> retryable);
+	<T> T run(Function<? super Transaction, T> retryable);
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic.
@@ -222,7 +222,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
 	 */
-	public <T> T run(Function<? super Transaction, T> retryable, Executor e);
+	<T> T run(Function<? super Transaction, T> retryable, Executor e);
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic. Use
@@ -237,7 +237,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * @see #run(Function)
 	 */
 	@Override
-	public abstract <T> T run(PartialFunction<? super Transaction, T> retryable) throws Exception;
+	<T> T run(PartialFunction<? super Transaction, T> retryable) throws Exception;
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic. Use
@@ -253,7 +253,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *
 	 * @see #run(Function)
 	 */
-	public abstract <T> T run(PartialFunction<? super Transaction, T> retryable, Executor e) throws Exception;
+	<T> T run(PartialFunction<? super Transaction, T> retryable, Executor e) throws Exception;
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic.
@@ -279,7 +279,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *  this database
 	 */
 	@Override
-	public abstract <T> Future<T> runAsync(
+	<T> Future<T> runAsync(
 			Function<? super Transaction, Future<T>> retryable);
 
 	/**
@@ -293,7 +293,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *
 	 * @see #run(Function)
 	 */
-	public abstract <T> Future<T> runAsync(
+	<T> Future<T> runAsync(
 			Function<? super Transaction, Future<T>> retryable, Executor e);
 
 	/**
@@ -307,7 +307,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * @see #run(Function)
 	 */
 	@Override
-	public abstract <T> PartialFuture<T> runAsync(
+	<T> PartialFuture<T> runAsync(
 			PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable);
 
 	/**
@@ -322,7 +322,7 @@ public interface Database extends Disposable, TransactionContext {
 	 *
 	 * @see #run(Function)
 	 */
-	public abstract <T> PartialFuture<T> runAsync(
+	<T> PartialFuture<T> runAsync(
 			PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable, Executor e);
 
 }

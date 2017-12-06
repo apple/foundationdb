@@ -807,6 +807,31 @@ int testReplication()
 	return totalErrors;
 }
 
+namespace {
+void filterLocalityDataForPolicy(const std::set<std::string>& keys, LocalityData* ld) {
+	for (auto iter = ld->_data.begin(); iter != ld->_data.end();) {
+		auto prev = iter;
+		iter++;
+		if (keys.find(prev->first.toString()) == keys.end()) {
+			ld->_data.erase(prev);
+		}
+	}
+}
+}
+
+void filterLocalityDataForPolicy(IRepPolicyRef policy, LocalityData* ld) {
+	if (!policy) return;
+	filterLocalityDataForPolicy(policy->attributeKeys(), ld);
+}
+
+void filterLocalityDataForPolicy(IRepPolicyRef policy, std::vector<LocalityData>* vld) {
+	if (!policy) return;
+	std::set<std::string> keys = policy->attributeKeys();
+	for (LocalityData& ld : *vld) {
+		filterLocalityDataForPolicy(policy, &ld);
+	}
+}
+
 TEST_CASE("fdbrpc/Replication/test") {
 	printf("Running replication test\n");
 

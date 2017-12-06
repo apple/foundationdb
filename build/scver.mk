@@ -82,19 +82,8 @@ ifdef JAVAC
 	ifneq ($(JAVAVERMAJOR),1)
 $(warning Unable to compile source using Java version: $(JAVAVER) with compiler: $(JAVAC) on $(PLATFORM) $(ARCH))
 	else
-		# Set specific flags for Java 1.8
-		ifeq ($(JAVAVERMAJOR).$(JAVAVERMINOR),1.8)
-				JAVAFLAGS := -source 1.6 -target 1.6
-				JAVA-completableFLAGS :=
-		else
-			ifeq ($(JAVAVERMAJOR).$(JAVAVERMINOR),1.7)
-				JAVAFLAGS := -source 1.6 -target 1.6
-				JAVA-completableFLAGS :=
-			else
-				JAVAFLAGS :=
-				JAVA-completableFLAGS :=
-				endif
-			endif
+		JAVAFLAGS := -Xlint -source 1.6 -target 1.6
+		JAVA-completableFLAGS := -Xlint -source 1.8 -target 1.8
 	endif
 endif
 

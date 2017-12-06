@@ -42,7 +42,7 @@ public interface AsyncIterator<T> extends Iterator<T> {
 	 *  would return another element without blocking or to {@code false} if there are
 	 *  no more elements in the sequence.
 	 */
-	public CompletableFuture<Boolean> onHasNext();
+	CompletableFuture<Boolean> onHasNext();
 
 	/**
 	 * Blocking call to determine if the sequence contains more elements. This call
@@ -54,7 +54,7 @@ public interface AsyncIterator<T> extends Iterator<T> {
 	 *  otherwise.
 	 */
 	@Override
-	public boolean hasNext();
+	boolean hasNext();
 
 	/**
 	 * Returns the next element in the sequence. This will not block if, since the
@@ -70,10 +70,10 @@ public interface AsyncIterator<T> extends Iterator<T> {
 	 * @throws NoSuchElementException if the sequence has been exhausted.
 	 */
 	@Override
-	public T next();
+	T next();
 
 	/**
 	 * Cancels any outstanding asynchronous work associated with this {@code AsyncIterator}.
 	 */
-	public void cancel();
+	void cancel();
 }

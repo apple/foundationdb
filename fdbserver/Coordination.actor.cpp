@@ -250,7 +250,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				Optional<LeaderInfo> nextNominee;
 				if (availableLeaders.size() && availableCandidates.size()) {
-					nextNominee = (*availableLeaders.begin()).leaderChangeRequired(*availableCandidates.begin()) ? *availableCandidates.begin() : *availableLeaders.begin();
+					nextNominee = ( *availableLeaders.begin() < *availableCandidates.begin() ) ? *availableLeaders.begin() : *availableCandidates.begin();
 				} else if (availableLeaders.size()) {
 					nextNominee = *availableLeaders.begin();
 				} else if (availableCandidates.size()) {
@@ -259,12 +259,15 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					nextNominee = Optional<LeaderInfo>();
 				}
 
-				if ( currentNominee.present() != nextNominee.present() || (currentNominee.present() && !currentNominee.get().equalInternalId(nextNominee.get())) || !availableLeaders.size() ) {
+				if ( currentNominee.present() != nextNominee.present() || (currentNominee.present() && currentNominee.get().leaderChangeRequired(nextNominee.get())) || !availableLeaders.size() ) {
 					TraceEvent("NominatingLeader").detail("Nominee", nextNominee.present() ? nextNominee.get().changeID : UID())
 						.detail("Changed", nextNominee != currentNominee).detail("Key", printable(key));
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( nextNominee );
 					notify.clear();
+					currentNominee = nextNominee;
+				} else if (currentNominee.present() && nextNominee.present() && currentNominee.get().equalInternalId(nextNominee.get())) {
+					// leader becomes better
 					currentNominee = nextNominee;
 				}
 

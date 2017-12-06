@@ -189,7 +189,7 @@ public class AsyncUtil {
 		PartialFuture<Boolean> process;
 		boolean m_cancelled = false;
 
-		public LoopPartial(PartialFunction<Void, ? extends PartialFuture<Boolean>> body) {
+		LoopPartial(PartialFunction<Void, ? extends PartialFuture<Boolean>> body) {
 			this.body = body;
 			this.done = new SettablePartialFuture<Void>();
 			this.done.onCancelled(new Runnable() {

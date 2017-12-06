@@ -33,5 +33,5 @@ public interface OptionConsumer {
 	 * @param code the encoded parameter to set
 	 * @param parameter the value, the range of which is dependent on the parameter {@code code}
 	 */
-	public void setOption(int code, byte[] parameter);
+	void setOption(int code, byte[] parameter);
 }

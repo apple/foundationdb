@@ -81,7 +81,7 @@ public class Cluster extends DefaultDisposableImpl implements Disposable {
 	 *         successful connection.
 	 */
 	public Database openDatabase(Executor e) throws FDBException {
-		FutureDatabase futureDatabase = null;
+		FutureDatabase futureDatabase;
 		pointerReadLock.lock();
 		try {
 			futureDatabase = new FutureDatabase(Cluster_createDatabase(getPtr(), "DB".getBytes(UTF8)), e);

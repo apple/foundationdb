@@ -574,7 +574,7 @@ public class AsyncStackTester {
 					return inst.popParams(listSize).flatMap(new Function<List<Object>, Future<Void>>() {
 						@Override
 						public Future<Void> apply(List<Object> rawElements) {
-							List<Tuple> tuples = new ArrayList(listSize);
+							List<Tuple> tuples = new ArrayList<Tuple>(listSize);
 							for(Object o : rawElements) {
 								tuples.add(Tuple.fromBytes((byte[])o));
 							}

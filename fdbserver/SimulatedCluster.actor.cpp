@@ -757,6 +757,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	}
 
 	machine_count = g_random->randomInt( std::max( 2+datacenters, db.minMachinesRequired() ), extraDB ? 6 : 10 );
+	if(minimumReplication > 1 && datacenters == 3) {
+		//low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for logs to recover.
+		machine_count = std::max( machine_count, 6);
+	}
 	processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
 	coordinators = BUGGIFY ? g_random->randomInt(1, machine_count+1) : std::min( machine_count, db.maxMachineFailuresTolerated()*2 + 1 );
 }

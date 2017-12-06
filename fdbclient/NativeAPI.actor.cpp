@@ -2507,6 +2507,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 
+	req.transaction.read_snapshot = 0;
 	try {
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;

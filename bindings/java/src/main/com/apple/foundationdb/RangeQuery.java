@@ -283,11 +283,6 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			return onHasNext().get();
 		}
 
-		// moves to the last position in the current chunk
-		/*public synchronized void consumeAll() {
-			index = chunk.values.size() - 1;
-		}*/
-
 		@Override
 		public KeyValue next() {
 			Future<Boolean> nextFuture;

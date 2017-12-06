@@ -39,15 +39,12 @@ public class Cluster extends DefaultDisposableImpl implements Disposable {
 	protected Cluster(long cPtr, Executor executor) {
 		super(cPtr);
 		this.executor = executor;
-		this.options = new ClusterOptions(new OptionConsumer() {
-			@Override
-			public void setOption(int code, byte[] parameter) {
+		this.options = new ClusterOptions((code, parameter) -> {
 			pointerReadLock.lock();
 			try {
 				Cluster_setOption(getPtr(), code, parameter);
 			} finally {
 				pointerReadLock.unlock();
-			}
 			}
 		});
 	}
@@ -84,7 +81,7 @@ public class Cluster extends DefaultDisposableImpl implements Disposable {
 	 *         successful connection.
 	 */
 	public Database openDatabase(Executor e) throws FDBException {
-		FutureDatabase futureDatabase = null;
+		FutureDatabase futureDatabase;
 		pointerReadLock.lock();
 		try {
 			futureDatabase = new FutureDatabase(Cluster_createDatabase(getPtr(), "DB".getBytes(UTF8)), e);

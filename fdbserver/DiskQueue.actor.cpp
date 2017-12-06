@@ -111,11 +111,11 @@ private:
 
 class RawDiskQueue_TwoFiles {
 public:
-	RawDiskQueue_TwoFiles( std::string basename, UID dbgid )
+	RawDiskQueue_TwoFiles( std::string basename, UID dbgid, int64_t fileSizeWarningLimit )
 		: basename(basename), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
 		readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
 		dbg_file0BeginSeq(0), fileExtensionBytes(10<<20), readingBuffer( dbgid ),
-		readyToPush(Void())
+		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit)
 	{
 		if(BUGGIFY)
 			fileExtensionBytes = 8<<10;
@@ -184,6 +184,7 @@ public:
 
 	UID dbgid;
 	int64_t dbg_file0BeginSeq;
+	int64_t fileSizeWarningLimit;
 
 	Promise<Void> error, stopped;
 	Future<Void> onError, onStopped;
@@ -249,6 +250,10 @@ public:
 				int64_t minExtension = pageData.size() + writingPos - files[1].size;
 				files[1].size += std::min(std::max(fileExtensionBytes, minExtension), files[0].size+files[1].size+minExtension);
 				waitfor.push_back( files[1].f->truncate( files[1].size ) );
+
+				if(fileSizeWarningLimit > 0 && files[1].size > fileSizeWarningLimit) {
+					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", dbgid).detail("filename", filename(1)).detail("size", files[1].size).suppressFor(1.0);
+				}
 			}
 		}
 
@@ -636,8 +641,8 @@ public:
 
 class DiskQueue : public IDiskQueue {
 public:
-	DiskQueue( std::string basename, UID dbgid )
-		: rawQueue( new RawDiskQueue_TwoFiles(basename, dbgid) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
+	DiskQueue( std::string basename, UID dbgid, int64_t fileSizeWarningLimit )
+		: rawQueue( new RawDiskQueue_TwoFiles(basename, dbgid,fileSizeWarningLimit) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
 		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), lastCommittedSeq(0), warnAlwaysForMemory(true)
 	{
 	}
@@ -1029,7 +1034,7 @@ private:
 class DiskQueue_PopUncommitted : public IDiskQueue {
 
 public:
-	DiskQueue_PopUncommitted( std::string basename, UID dbgid ) : queue(new DiskQueue(basename, dbgid)), pushed(0), popped(0), committed(0) { };
+	DiskQueue_PopUncommitted( std::string basename, UID dbgid, int64_t fileSizeWarningLimit ) : queue(new DiskQueue(basename, dbgid, fileSizeWarningLimit)), pushed(0), popped(0), committed(0) { };
 
 	//IClosable
 	Future<Void> getError() { return queue->getError(); }
@@ -1097,6 +1102,6 @@ private:
 	}
 };
 
-IDiskQueue* openDiskQueue( std::string basename, UID dbgid ) {
-	return new DiskQueue_PopUncommitted( basename, dbgid );
+IDiskQueue* openDiskQueue( std::string basename, UID dbgid, int64_t fileSizeWarningLimit ) {
+	return new DiskQueue_PopUncommitted( basename, dbgid, fileSizeWarningLimit );
 }

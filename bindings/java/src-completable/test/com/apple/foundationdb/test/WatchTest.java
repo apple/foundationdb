@@ -99,7 +99,7 @@ public class WatchTest {
 				e.execute(cancel);
 			}
 
-			while(a.get() != 2); {
+			while(a.get() != 2) {
 				try {
 					Thread.sleep(1);
 				} catch (InterruptedException e1) {

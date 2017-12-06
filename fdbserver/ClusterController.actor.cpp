@@ -43,19 +43,20 @@ void failAfter( Future<Void> trigger, Endpoint e );
 
 struct WorkerInfo : NonCopyable {
 	Future<Void> watcher;
-	ReplyPromise<ProcessClass> reply;
+	ReplyPromise<RegisterWorkerReply> reply;
 	Generation gen;
 	int reboots;
 	WorkerInterface interf;
 	ProcessClass initialClass;
 	ProcessClass processClass;
+	bool isExcluded;
 
 	WorkerInfo() : gen(-1), reboots(0) {}
-	WorkerInfo( Future<Void> watcher, ReplyPromise<ProcessClass> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass ) :
-		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass) {}
+	WorkerInfo( Future<Void> watcher, ReplyPromise<RegisterWorkerReply> reply, Generation gen, WorkerInterface interf, ProcessClass initialClass, ProcessClass processClass, bool isExcluded ) :
+		watcher(watcher), reply(reply), gen(gen), reboots(0), interf(interf), initialClass(initialClass), processClass(processClass), isExcluded(isExcluded) {}
 
 	WorkerInfo( WorkerInfo&& r ) noexcept(true) : watcher(std::move(r.watcher)), reply(std::move(r.reply)), gen(r.gen),
-		reboots(r.reboots), interf(std::move(r.interf)), initialClass(r.initialClass), processClass(r.processClass) {}
+		reboots(r.reboots), interf(std::move(r.interf)), initialClass(r.initialClass), processClass(r.processClass), isExcluded(r.isExcluded) {}
 	void operator=( WorkerInfo&& r ) noexcept(true) {
 		watcher = std::move(r.watcher);
 		reply = std::move(r.reply);
@@ -64,6 +65,7 @@ struct WorkerInfo : NonCopyable {
 		interf = std::move(r.interf);
 		initialClass = r.initialClass;
 		processClass = r.processClass;
+		isExcluded = r.isExcluded;
 	}
 };
 
@@ -79,6 +81,7 @@ public:
 		Promise<Void> forceMasterFailure;
 		int64_t masterRegistrationCount;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
+		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
 
 		DBInfo() : masterRegistrationCount(0),
@@ -259,7 +262,7 @@ public:
 		return results;
 	}
 
-	std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogsAcrossDatacenters( DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false )
+	std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogs( DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false )
 	{
 		std::map<ProcessClass::Fitness, vector<std::pair<WorkerInterface, ProcessClass>>> fitness_workers;
 		std::vector<std::pair<WorkerInterface, ProcessClass>> results;
@@ -565,41 +568,29 @@ public:
 		bool operator == (InDatacenterFitness const& r) const { return proxyFit == r.proxyFit && resolverFit == r.resolverFit && proxyCount == r.proxyCount && resolverCount == r.resolverCount; }
 	};
 
-	struct AcrossDatacenterFitness {
+	struct TLogFitness {
 		ProcessClass::Fitness tlogFit;
 		int tlogCount;
 
-		AcrossDatacenterFitness( ProcessClass::Fitness tlogFit, int tlogCount) : tlogFit(tlogFit), tlogCount(tlogCount) {}
+		TLogFitness( ProcessClass::Fitness tlogFit, int tlogCount) : tlogFit(tlogFit), tlogCount(tlogCount) {}
 
-		AcrossDatacenterFitness() : tlogFit( ProcessClass::NeverAssign ), tlogCount(0) {}
+		TLogFitness() : tlogFit( ProcessClass::NeverAssign ), tlogCount(0) {}
 
-		AcrossDatacenterFitness( vector<std::pair<WorkerInterface, ProcessClass>> tlogs ) {
-			std::set<Optional<Standalone<StringRef>>> dcs;
+		TLogFitness( vector<std::pair<WorkerInterface, ProcessClass>> tlogs ) {
 			tlogFit = ProcessClass::BestFit;
 			for(auto it : tlogs) {
-				dcs.insert(it.first.locality.dcId());
 				tlogFit = std::max(tlogFit, it.second.machineClassFitness( ProcessClass::TLog ));
 			}
+			
 			tlogCount = tlogs.size();
 		}
 
-		AcrossDatacenterFitness( vector<OptionalInterface<TLogInterface>> tlogs, std::vector<ProcessClass> processClasses ) {
-			std::set<Optional<Standalone<StringRef>>> dcs;
-			tlogFit = ProcessClass::BestFit;
-			for(int i = 0; i < tlogs.size(); i++) {
-				ASSERT(tlogs[i].present());
-				dcs.insert(tlogs[i].interf().locality.dcId());
-				tlogFit = std::max(tlogFit, processClasses[i].machineClassFitness( ProcessClass::TLog ));
-			}
-			tlogCount = tlogs.size();
-		}
-
-		bool operator < (AcrossDatacenterFitness const& r) const {
-			if(tlogFit != r.tlogFit) return tlogFit < r.tlogFit;
+		bool operator < (TLogFitness const& r) const {
+			if (tlogFit != r.tlogFit) return tlogFit < r.tlogFit;
 			return tlogCount > r.tlogCount;
 		}
 
-		bool operator == (AcrossDatacenterFitness const& r) const { return tlogFit == r.tlogFit && tlogCount == r.tlogCount; }
+		bool operator == (TLogFitness const& r) const { return tlogFit == r.tlogFit && tlogCount == r.tlogCount; }
 	};
 
 	std::set<Optional<Standalone<StringRef>>> getDatacenters( DatabaseConfiguration const& conf, bool checkStable = false ) {
@@ -622,7 +613,7 @@ public:
 
 		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
-		auto tlogs = getWorkersForTlogsAcrossDatacenters( req.configuration, id_used );
+		auto tlogs = getWorkersForTlogs( req.configuration, id_used );
 		for(int i = 0; i < tlogs.size(); i++)
 			result.tLogs.push_back(tlogs[i].first);
 
@@ -670,7 +661,7 @@ public:
 			.detail("desiredResolvers", req.configuration.getDesiredResolvers()).detail("actualResolvers", result.resolvers.size());
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
-			( AcrossDatacenterFitness(tlogs) > AcrossDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
+			( TLogFitness(tlogs) > TLogFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
 			bestFitness > InDatacenterFitness((ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_PROXY_FITNESS, (ProcessClass::Fitness)SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredProxies(), req.configuration.getDesiredResolvers()) ) ) {
 			throw operation_failed();
 		}
@@ -685,15 +676,46 @@ public:
 			return false;
 		}
 
-		std::map< Optional<Standalone<StringRef>>, int> id_used;
-
+		// Get master process
 		auto masterWorker = id_worker.find(dbi.master.locality.processId());
-		if(masterWorker == id_worker.end())
+		if(masterWorker == id_worker.end()) {
 			return false;
+		}
 
-		id_used[clusterControllerProcessId]++;
-		id_used[masterProcessId]++;
+		// Get tlog processes
+		std::vector<std::pair<WorkerInterface, ProcessClass>> tlogs;
+		for( auto& it : dbi.logSystemConfig.tLogs ) {
+			auto tlogWorker = id_worker.find(it.interf().locality.processId());
+			if ( tlogWorker == id_worker.end() )
+				return false;
+			if ( tlogWorker->second.isExcluded )
+				return true;
+			tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
+		}
 
+		// Get proxy classes
+		std::vector<ProcessClass> proxyClasses;
+		for(auto& it : dbi.client.proxies ) {
+			auto proxyWorker = id_worker.find(it.locality.processId());
+			if ( proxyWorker == id_worker.end() )
+				return false;
+			if ( proxyWorker->second.isExcluded )
+				return true;
+			proxyClasses.push_back(proxyWorker->second.processClass);
+		}
+
+		// Get resolver classes
+		std::vector<ProcessClass> resolverClasses;
+		for(auto& it : dbi.resolvers ) {
+			auto resolverWorker = id_worker.find(it.locality.processId());
+			if ( resolverWorker == id_worker.end() )
+				return false;
+			if ( resolverWorker->second.isExcluded )
+				return true;
+			resolverClasses.push_back(resolverWorker->second.processClass);
+		}
+
+		// Check master fitness. Don't return false if master is excluded in case all the processes are excluded, we still need master for recovery.
 		ProcessClass::Fitness oldMasterFit = masterWorker->second.processClass.machineClassFitness( ProcessClass::Master );
 		if(db.config.isExcludedServer(dbi.master.address())) {
 			oldMasterFit = std::max(oldMasterFit, ProcessClass::ExcludeFit);
@@ -705,42 +727,26 @@ public:
 			newMasterFit = std::max(newMasterFit, ProcessClass::ExcludeFit);
 		}
 
-		if(oldMasterFit < newMasterFit) return false;
+		if ( oldMasterFit < newMasterFit )
+			return false;
+		if ( oldMasterFit > newMasterFit && oldMasterFit == ProcessClass::ExcludeFit )
+			return true;
 
-		std::vector<ProcessClass> tlogProcessClasses;
-		for(auto& it : dbi.logSystemConfig.tLogs ) {
-			auto tlogWorker = id_worker.find(it.interf().locality.processId());
-			if ( tlogWorker == id_worker.end() )
-				return false;
-			tlogProcessClasses.push_back(tlogWorker->second.processClass);
-		}
-		AcrossDatacenterFitness oldAcrossFit(dbi.logSystemConfig.tLogs, tlogProcessClasses);
-		AcrossDatacenterFitness newAcrossFit(getWorkersForTlogsAcrossDatacenters(db.config, id_used, true));
+		// Check tLog fitness
+		std::map< Optional<Standalone<StringRef>>, int> id_used;
+		id_used[clusterControllerProcessId]++;
+		id_used[masterProcessId]++;
 
-		if(oldAcrossFit < newAcrossFit) return false;
+		TLogFitness oldTLogFit(tlogs);
+		TLogFitness newTLotFit(getWorkersForTlogs(db.config, id_used, true));
 
+		if(oldTLogFit < newTLotFit) return false;
 
-		std::vector<ProcessClass> proxyClasses;
-		for(auto& it : dbi.client.proxies ) {
-			auto proxyWorker = id_worker.find(it.locality.processId());
-			if ( proxyWorker == id_worker.end() )
-				return false;
-			proxyClasses.push_back(proxyWorker->second.processClass);
-		}
-
-		std::vector<ProcessClass> resolverClasses;
-		for(auto& it : dbi.resolvers ) {
-			auto resolverWorker = id_worker.find(it.locality.processId());
-			if ( resolverWorker == id_worker.end() )
-				return false;
-			resolverClasses.push_back(resolverWorker->second.processClass);
-		}
-
+		// Check proxy/resolver fitness
 		InDatacenterFitness oldInFit(dbi.client.proxies, dbi.resolvers, proxyClasses, resolverClasses);
 
 		auto datacenters = getDatacenters( db.config, true );
 		InDatacenterFitness newInFit;
-
 		for(auto dcId : datacenters) {
 			auto used = id_used;
 			auto first_resolver = getWorkerForRoleInDatacenter( dcId, ProcessClass::Resolver, db.config, used );
@@ -758,16 +764,17 @@ public:
 
 		if(oldInFit.betterInDatacenterFitness(newInFit)) return false;
 
-		if(oldMasterFit > newMasterFit || oldAcrossFit > newAcrossFit || oldInFit > newInFit) {
+		if(oldMasterFit > newMasterFit || oldTLogFit > newTLotFit || oldInFit > newInFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit)
-				.detail("oldAcrossFitC", oldAcrossFit.tlogCount).detail("newAcrossFitC", newAcrossFit.tlogCount)
-				.detail("oldAcrossFitT", oldAcrossFit.tlogFit).detail("newAcrossFitT", newAcrossFit.tlogFit)
+				.detail("oldTLogFitC", oldTLogFit.tlogCount).detail("newTLotFitC", newTLotFit.tlogCount)
+				.detail("oldTLogFitT", oldTLogFit.tlogFit).detail("newTLotFitT", newTLotFit.tlogFit)
 				.detail("oldInFitP", oldInFit.proxyFit).detail("newInFitP", newInFit.proxyFit)
 				.detail("oldInFitR", oldInFit.resolverFit).detail("newInFitR", newInFit.resolverFit)
 				.detail("oldInFitPC", oldInFit.proxyCount).detail("newInFitPC", newInFit.proxyCount)
 				.detail("oldInFitRC", oldInFit.resolverCount).detail("newInFitRC", newInFit.resolverCount);
 			return true;
 		}
+
 		return false;
 	}
 
@@ -775,6 +782,7 @@ public:
 	std::map<  Optional<Standalone<StringRef>>, ProcessClass > id_class; //contains the mapping from process id to process class from the database
 	Standalone<RangeResultRef> lastProcessClasses;
 	bool gotProcessClasses;
+	bool gotFullyRecoveredConfig;
 	Optional<Standalone<StringRef>> masterProcessId;
 	Optional<Standalone<StringRef>> clusterControllerProcessId;
 	UID id;
@@ -789,7 +797,7 @@ public:
 	double startTime;
 
 	explicit ClusterControllerData( ClusterControllerFullInterface ccInterface )
-		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), startTime(now())
+		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now())
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -1067,7 +1075,7 @@ ACTOR Future<Void> workerAvailabilityWatch( WorkerInterface worker, ProcessClass
 			when( Void _ = wait( failed ) ) {  // remove workers that have failed
 				WorkerInfo& failedWorkerInfo = cluster->id_worker[ worker.locality.processId() ];
 				if (!failedWorkerInfo.reply.isSet()) {
-					failedWorkerInfo.reply.send( failedWorkerInfo.processClass );
+					failedWorkerInfo.reply.send( RegisterWorkerReply(failedWorkerInfo.processClass, failedWorkerInfo.isExcluded) );
 				}
 				cluster->id_worker.erase( worker.locality.processId() );
 				cluster->updateWorkerList.set( worker.locality.processId(), Optional<ProcessData>() );
@@ -1101,7 +1109,6 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 	state std::deque<SystemFailureStatus> statusHistory;	// The last change in statusHistory is from currentVersion-1 to currentVersion
 	state Future<Void> periodically = Void();
 	state double lastT = 0;
-	state double clientRequestInterval = FLOW_KNOBS->CLIENT_REQUEST_INTERVAL;
 
 	loop choose {
 		when ( FailureMonitoringRequest req = waitNext( requests ) ) {
@@ -1142,8 +1149,13 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 				TEST(true); // failureDetectionServer sending failure data to requester
 				FailureMonitoringReply reply;
 				reply.failureInformationVersion = currentVersion;
-				reply.clientRequestIntervalMS = clientRequestInterval * 1000;
-				reply.considerServerFailedTimeoutMS = CLIENT_KNOBS->FAILURE_TIMEOUT_DELAY * 1000;
+				if( req.senderStatus.present() ) {
+					reply.clientRequestIntervalMS = FLOW_KNOBS->SERVER_REQUEST_INTERVAL * 1000;
+					reply.considerServerFailedTimeoutMS = CLIENT_KNOBS->FAILURE_TIMEOUT_DELAY * 1000;
+				} else {
+					reply.clientRequestIntervalMS = FLOW_KNOBS->CLIENT_REQUEST_INTERVAL * 1000;
+					reply.considerServerFailedTimeoutMS = CLIENT_KNOBS->CLIENT_FAILURE_TIMEOUT_DELAY * 1000;
+				}
 
 				ASSERT( currentVersion >= (int64_t)statusHistory.size());
 
@@ -1165,7 +1177,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			}
 		}
 		when ( Void _ = wait( periodically ) ) {
-			periodically = delay( FLOW_KNOBS->CLIENT_REQUEST_INTERVAL );
+			periodically = delay( FLOW_KNOBS->SERVER_REQUEST_INTERVAL );
 			double t = now();
 			if (lastT != 0 && t - lastT > 1)
 				TraceEvent("LongDelayOnClusterController").detail("Duration", t - lastT);
@@ -1184,7 +1196,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 				std::nth_element(delays.begin(), delays.begin()+pivot, delays.end());
 				pivotDelay = *(delays.begin()+pivot);
 			}
-			pivotDelay = std::max(0.0, pivotDelay - clientRequestInterval);
+			pivotDelay = std::max(0.0, pivotDelay - FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
 
 			TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
 			//TraceEvent("FailureDetectionAcceptableDelay").detail("ms", acceptableDelay*1000);
@@ -1192,7 +1204,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
 
-				if ( it->first != g_network->getLocalAddress() && ( delay > pivotDelay * 2 + clientRequestInterval + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) {
+				if ( it->first != g_network->getLocalAddress() && ( delay > pivotDelay * 2 + FLOW_KNOBS->SERVER_REQUEST_INTERVAL + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) {
 					//printf("Failure Detection Server: Status of '%s' is now '%s' after %f sec\n", it->first.toString().c_str(), "Failed", now() - it->second.lastRequestTime);
 					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", it->first).detail("Status","Failed").detail("Why", "Timeout").detail("LastRequestAge", delay)
 						.detail("PivotDelay", pivotDelay);
@@ -1278,7 +1290,20 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
-	if(req.configuration.present()) db->config = req.configuration.get();
+	if ( req.configuration.present() ) {
+		db->config = req.configuration.get();
+
+		if ( req.recoveryState >= RecoveryState::FULLY_RECOVERED ) {
+			self->gotFullyRecoveredConfig = true;
+			db->fullyRecoveredConfig = req.configuration.get();
+			for ( auto& it : self->id_worker ) {
+				bool isExcludedFromConfig = db->fullyRecoveredConfig.isExcludedServer(it.second.interf.address());
+				if ( it.second.isExcluded != isExcludedFromConfig && !it.second.reply.isSet() ) {
+					it.second.reply.send( RegisterWorkerReply( it.second.processClass, isExcludedFromConfig) );
+				}
+			}
+		}
+	}
 
 	bool isChanged = false;
 	auto dbInfo = self->db.serverInfo->get();
@@ -1331,6 +1356,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	WorkerInterface w = req.wi;
 	ProcessClass newProcessClass = req.processClass;
+	bool newIsExcluded = req.isExcluded;
 	auto info = self->id_worker.find( w.locality.processId() );
 
 	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
@@ -1339,39 +1365,43 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 		self->clusterControllerProcessId = w.locality.processId();
 	}
 
-	// Check process class if needed
-	if (self->gotProcessClasses && (info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen)) {
-		auto classIter = self->id_class.find(w.locality.processId());
-
-		if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
-			newProcessClass = classIter->second;
-		} else {
-			newProcessClass = req.initialClass;
+	// Check process class and exclusive property
+	if ( info == self->id_worker.end() || info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
+		if ( self->gotProcessClasses ) {
+			auto classIter = self->id_class.find(w.locality.processId());
+			
+			if( classIter != self->id_class.end() && (classIter->second.classSource() == ProcessClass::DBSource || req.initialClass.classType() == ProcessClass::UnsetClass)) {
+				newProcessClass = classIter->second;
+			} else {
+				newProcessClass = req.initialClass;
+			}
 		}
 
-		// Notify the worker to register again with new process class
-		if (newProcessClass != req.processClass && !req.reply.isSet()) {
-			req.reply.send( newProcessClass );
+		if ( self->gotFullyRecoveredConfig ) {
+			newIsExcluded = self->db.fullyRecoveredConfig.isExcludedServer(w.address());
+		}
+
+		// Notify the worker to register again with new process class/exclusive property
+		if ( !req.reply.isSet() && ( newProcessClass != req.processClass || newIsExcluded != req.isExcluded ) ) {
+			req.reply.send( RegisterWorkerReply(newProcessClass, newIsExcluded) );
 		}
 	}
 
 	if( info == self->id_worker.end() ) {
-		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass );
+		self->id_worker[w.locality.processId()] = WorkerInfo( workerAvailabilityWatch( w, newProcessClass, self ), req.reply, req.generation, w, req.initialClass, newProcessClass, req.isExcluded );
 		checkOutstandingRequests( self );
 
 		return;
 	}
 
 	if( info->second.interf.id() != w.id() || req.generation >= info->second.gen ) {
-		if (info->second.processClass != newProcessClass) {
-			info->second.processClass = newProcessClass;
-		}
-
-		info->second.initialClass = req.initialClass;
 		if (!info->second.reply.isSet()) {
 			info->second.reply.send( Never() );
 		}
 		info->second.reply = req.reply;
+		info->second.processClass = newProcessClass;
+		info->second.isExcluded = req.isExcluded;
+		info->second.initialClass = req.initialClass;
 		info->second.gen = req.generation;
 
 		if(info->second.interf.id() != w.id()) {
@@ -1575,7 +1605,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData *self) {
 						if (newProcessClass != w.second.processClass) {
 							w.second.processClass = newProcessClass;
 							if (!w.second.reply.isSet()) {
-								w.second.reply.send( newProcessClass );
+								w.second.reply.send( RegisterWorkerReply(newProcessClass, w.second.isExcluded) );
 							}
 						}
 					}
@@ -1724,14 +1754,14 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	}
 }
 
-ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass ) {
+ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass, Reference<AsyncVar<bool>> asyncIsExcluded ) {
 	loop {
 		state ClusterControllerFullInterface cci;
 		state bool inRole = false;
 		cci.initEndpoints();
 		try {
 			//Register as a possible leader; wait to be elected
-			state Future<Void> leaderFail = tryBecomeLeader( coordinators, cci, currentCC, hasConnected, asyncProcessClass );
+			state Future<Void> leaderFail = tryBecomeLeader( coordinators, cci, currentCC, hasConnected, asyncProcessClass, asyncIsExcluded );
 
 			while (!currentCC->get().present() || currentCC->get().get() != cci) {
 				choose {
@@ -1755,12 +1785,12 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 	}
 }
 
-ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ProcessClass>> asyncProcessClass) {
+ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ProcessClass>> asyncProcessClass, Reference<AsyncVar<bool>> asyncIsExcluded) {
 	state bool hasConnected = false;
 	loop {
 		try {
 			ServerCoordinators coordinators( connFile );
-			Void _ = wait( clusterController( coordinators, currentCC, hasConnected, asyncProcessClass ) );
+			Void _ = wait( clusterController( coordinators, currentCC, hasConnected, asyncProcessClass, asyncIsExcluded ) );
 		} catch( Error &e ) {
 			if( e.code() != error_code_coordinators_changed )
 				throw; // Expected to terminate fdbserver
