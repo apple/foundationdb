@@ -906,13 +906,11 @@ TEST_CASE("backup/containers/localdir") {
 	return Void();
 };
 
-TEST_CASE("backup/containers/blobstore") {
+TEST_CASE("backup/containers/url") {
 	if (!g_network->isSimulated()) {
-		Void _ = wait(
-					testBackupContainer(format("blobstore://AKIAI4YKU2XBLYHQ6RAQ:3qVEsjsWAL8ZtFZMRa6u/ElAgyRl1uD2yoVI/97R@s3.amazonaws.com/test_%llx", timer_int()))
-					&&
-					testBackupContainer(format("blobstore://FDB_TEST:FDB_TEST_KEY@store-test.blobstore.apple.com/test_%llx", timer_int()))
-				 );
+		const char *url = getenv("FDB_TEST_BACKUP_URL");
+		ASSERT(url != nullptr);
+		Void _ = wait(testBackupContainer(url));
 	}
 	return Void();
 };
