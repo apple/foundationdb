@@ -24,7 +24,11 @@
 
 #include "flow/flow.h"
 
-//All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
+// All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
+// The desirability of the above semantic is disputed. Some classes (AsyncFileBlobStore,
+// AsyncFileCached) maintain references, while others (AsyncFileNonDurable) don't, and the comment
+// is unapplicable to some others as well (AsyncFileKAIO). It's safest to assume that all operations
+// must complete or cancel, but you should probably look at the file implementations you'll be using.
 class IAsyncFile {
 public:
 	virtual ~IAsyncFile();
@@ -53,6 +57,7 @@ public:
 	virtual Future<int> read( void* data, int length, int64_t offset ) = 0;  // Returns number of bytes actually read (from [0,length])
 	virtual Future<Void> write( void const* data, int length, int64_t offset ) = 0;
 	// The zeroed data is not guaranteed to be durable after `zeroRange` returns.  A call to sync() would be required.
+	// This operation holds a reference to the AsyncFile, and does not need to be cancelled before a reference is dropped.
 	virtual Future<Void> zeroRange( int64_t offset, int64_t length );
 	virtual Future<Void> truncate( int64_t size ) = 0;
 	virtual Future<Void> sync() = 0;

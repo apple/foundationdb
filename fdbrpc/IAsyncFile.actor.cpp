@@ -30,7 +30,7 @@ IAsyncFile::~IAsyncFile() = default;
 const static unsigned int ONE_MEGABYTE = 1<<20;
 const static unsigned int FOUR_KILOBYTES = 4<<10;
 
-ACTOR static Future<Void> zeroRangeHelper( IAsyncFile* f, int64_t offset, int64_t length, int fixedbyte) {
+ACTOR static Future<Void> zeroRangeHelper( Reference<IAsyncFile> f, int64_t offset, int64_t length, int fixedbyte) {
 	state int64_t pos = offset;
 	state void* zeros = aligned_alloc( ONE_MEGABYTE, ONE_MEGABYTE );
 	memset( zeros, fixedbyte, ONE_MEGABYTE );
@@ -47,7 +47,7 @@ ACTOR static Future<Void> zeroRangeHelper( IAsyncFile* f, int64_t offset, int64_
 }
 
 Future<Void> IAsyncFile::zeroRange(int64_t offset, int64_t length) {
-	return uncancellable(zeroRangeHelper(this, offset, length, 0));
+	return uncancellable(zeroRangeHelper(Reference<IAsyncFile>::addRef(this), offset, length, 0));
 }
 
 TEST_CASE( "fileio/zero" ) {
@@ -65,7 +65,7 @@ TEST_CASE( "fileio/zero" ) {
 	ASSERT( ONE_MEGABYTE == size );
 
 	// Verify that zero() does, in fact, zero.
-	Void _ = wait(zeroRangeHelper(f.getPtr(), 0, ONE_MEGABYTE, 0xff));
+	Void _ = wait(zeroRangeHelper(f, 0, ONE_MEGABYTE, 0xff));
 	Void _ = wait(f->zeroRange(0, ONE_MEGABYTE));
 	state uint8_t* page = (uint8_t*)malloc(FOUR_KILOBYTES);
 	int n = wait( f->read(page, FOUR_KILOBYTES, 0) );
