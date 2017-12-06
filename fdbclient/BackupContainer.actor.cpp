@@ -820,6 +820,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
+	Void _ = wait(c->create());
 
 	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100, 150, 10));
 	Void _ = wait(writeAndVerifyFile(c, log1));
@@ -906,7 +907,12 @@ TEST_CASE("backup/containers/localdir") {
 };
 
 TEST_CASE("backup/containers/blobstore") {
-	if(!g_network->isSimulated())
-		Void _ = wait(testBackupContainer(format("blobstore://FDB_TEST:FDB_TEST_KEY@store-test.blobstore.apple.com/test_%llx", timer_int())));
+	if (!g_network->isSimulated()) {
+		Void _ = wait(
+					testBackupContainer(format("blobstore://AKIAI4YKU2XBLYHQ6RAQ:3qVEsjsWAL8ZtFZMRa6u/ElAgyRl1uD2yoVI/97R@s3.amazonaws.com/test_%llx", timer_int()))
+					&&
+					testBackupContainer(format("blobstore://FDB_TEST:FDB_TEST_KEY@store-test.blobstore.apple.com/test_%llx", timer_int()))
+				 );
+	}
 	return Void();
 };
