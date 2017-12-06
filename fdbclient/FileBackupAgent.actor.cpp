@@ -778,7 +778,6 @@ namespace fileBackup {
 
 			loop {
 				try {
-					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -1067,8 +1066,8 @@ namespace fileBackup {
 			state BackupConfig config(task);
 			state Reference<IBackupContainer> bc;
 
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			loop{
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				// Wait for the read version to pass endVersion
@@ -1086,6 +1085,7 @@ namespace fileBackup {
 						break;
 
 					Void _ = wait(delay(std::max(CLIENT_KNOBS->BACKUP_RANGE_MINWAIT, (double) (endVersion-currentVersion)/CLIENT_KNOBS->CORE_VERSIONSPERSECOND)));
+					tr->reset();
 				}
 				catch (Error &e) {
 					Void _ = wait(tr->onError(e));
@@ -1412,7 +1412,6 @@ namespace fileBackup {
 
 				loop {
 					try {
-						tr->reset();
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -1433,6 +1432,7 @@ namespace fileBackup {
 							break;
 
 						startKey = keyAfter(rangeresults.back().first);
+						tr->reset();
 					} catch(Error &e) {
 						Void _ = wait(tr->onError(e));
 					}
@@ -1485,7 +1485,6 @@ namespace fileBackup {
 				// Now that the manifest is written, the backup is restorable so set last restorable for the tag.
 				loop {
 					try {
-						tr->reset();
 						Void _ = wait(taskBucket->keepRunning(tr, task));
 
 						state std::string tag = wait(config.tag().getOrThrow(tr));
@@ -1752,7 +1751,6 @@ namespace fileBackup {
 
 			loop {
 				try {
-					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -1814,7 +1812,6 @@ namespace fileBackup {
 
 			loop {
 				try {
-					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -1874,6 +1871,7 @@ namespace fileBackup {
 
 					if(start == end)
 						return Void();
+					tr->reset();
 				} catch(Error &e) {
 					TraceEvent(SevWarn, "FileRestoreErrorRangeWrite")
 						.detail("UID", restore.getUid())
@@ -1977,7 +1975,6 @@ namespace fileBackup {
 
 			loop {
 				try {
-					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -2006,7 +2003,6 @@ namespace fileBackup {
 					if(start == end)
 						return Void();
 
-					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -2047,6 +2043,7 @@ namespace fileBackup {
 
 					// Commit succeeded, so advance starting point
 					start = i;
+					tr->reset();
 				} catch(Error &e) {
 					TraceEvent(SevWarn, "FileRestoreErrorLogWrite")
 						.detail("UID", restore.getUid())
@@ -2479,7 +2476,6 @@ namespace fileBackup {
 
 			loop {
 				try {
-					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -2531,7 +2527,6 @@ namespace fileBackup {
 			
 			while(start != end) {
 				try {
-					tr->reset();
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -2563,6 +2558,7 @@ namespace fileBackup {
 						.detail("TaskInstance", (uint64_t)this);
 
 					start = i;
+					tr->reset();
 				} catch(Error &e) {
 					Void _ = wait(tr->onError(e));
 				}
@@ -3047,7 +3043,6 @@ public:
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		loop {
 			try {
-				tr->reset();
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				Void _ = wait(submitRestore(backupAgent, tr, tagName, url, targetVersion, addPrefix, removePrefix, range, lockDB, randomUid));
