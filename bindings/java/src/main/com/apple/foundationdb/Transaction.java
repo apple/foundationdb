@@ -57,7 +57,7 @@ import com.apple.foundationdb.tuple.Tuple;
  *  {@code runAsync()} on a {@code Transaction} will simply attempt the operations
  *  without any retry loop.<br>
  * <br>
- * Note: Client must call {@link #commit()} and wait on the result on all transactions, even
+ * <b>Note:</b> Client must call {@link #commit()} and wait on the result on all transactions, even
  *  ones that only read. This is done automatically when using the retry loops from
  *  {@link Database#run(Function)}. This is because outstanding reads originating from a
  *  {@code Transaction} will be cancelled when a {@code Transaction} is garbage collected.
@@ -67,9 +67,9 @@ import com.apple.foundationdb.tuple.Tuple;
  *  all reads are complete, thereby saving the calling code from this potentially confusing
  *  situation.<br>
  * <br>
- * Note: All keys with a first byte of {@code 0xff} are reserved for internal use.<br>
+ * <b>Note:</b> All keys with a first byte of {@code 0xff} are reserved for internal use.<br>
  * <br>
- * Note: Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
+ * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
  *  option. This is because the Java bindings disallow use of {@code Transaction} objects after {@link #onError}
  *  is called.
  */
@@ -84,7 +84,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * For more information about how to use snapshot reads correctly, see
 	 * <a href="/documentation/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
 	 */
-	public ReadTransaction snapshot();
+	ReadTransaction snapshot();
 
 	/**
 	 * Directly sets the version of the database at which to execute reads.  The
@@ -95,7 +95,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @param version the version at which to read from the database
 	 */
-	public void setReadVersion(long version);
+	void setReadVersion(long version);
 
 
 	/**
@@ -106,7 +106,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @param keyBegin the first key in the range (inclusive)
 	 * @param keyEnd the ending key for the range (exclusive)
 	 */
-	public void addReadConflictRange(byte[] keyBegin, byte[] keyEnd);
+	void addReadConflictRange(byte[] keyBegin, byte[] keyEnd);
 
 	/**
 	 * Adds a key to the transaction's read conflict ranges as if you had read
@@ -115,7 +115,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @param key the key to be added to the range
 	 */
-	public void addReadConflictKey(byte[] key);
+	void addReadConflictKey(byte[] key);
 
 	/**
 	 * Adds a range of keys to the transaction's write conflict ranges as if you
@@ -125,7 +125,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @param keyBegin the first key in the range (inclusive)
 	 * @param keyEnd the ending key for the range (exclusive)
 	 */
-	public void addWriteConflictRange(byte[] keyBegin, byte[] keyEnd);
+	void addWriteConflictRange(byte[] keyBegin, byte[] keyEnd);
 
 	/**
 	 * Adds a key to the transaction's write conflict ranges as if you had
@@ -134,7 +134,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @param key the key to be added to the range
 	 */
-	public void addWriteConflictKey(byte[] key);
+	void addWriteConflictKey(byte[] key);
 
 	/**
 	 * Sets the value for a given key. This will not affect the
@@ -145,7 +145,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws IllegalArgumentException
 	 * @throws FDBException
 	 */
-	public void set(byte[] key, byte[] value);
+	void set(byte[] key, byte[] value);
 
 	/**
 	 * Clears a given key from the database. This will not affect the
@@ -155,7 +155,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws IllegalArgumentException
 	 * @throws FDBException
 	 */
-	public void clear(byte[] key);
+	void clear(byte[] key);
 
 	/**
 	 * Clears a range of keys in the database.  The upper bound of the range is
@@ -169,7 +169,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws IllegalArgumentException
 	 * @throws FDBException
 	 */
-	public void clear(byte[] beginKey, byte[] endKey);
+	void clear(byte[] beginKey, byte[] endKey);
 
 	/**
 	 * Clears a range of keys in the database. The upper bound of the range is
@@ -182,7 +182,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @throws FDBException
 	 */
-	public void clear(Range range);
+	void clear(Range range);
 
 	/**
 	 * Replace with calls to {@link #clear(Range)} with a parameter from a call to
@@ -193,7 +193,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws FDBException
 	 */
 	@Deprecated
-	public void clearRangeStartsWith(byte[] prefix);
+	void clearRangeStartsWith(byte[] prefix);
 
 	/**
 	 * An atomic operation is a single database command that carries out several
@@ -214,7 +214,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
      * that are frequently modified. A common example is the use of a key-value
      * pair as a counter.<br>
      * <br>
-     * Note: If a transaction uses both an atomic operation and a serializable
+     * <b>Note:</b> If a transaction uses both an atomic operation and a serializable
      * read on the same key, the benefits of using the atomic operation (for both
      * conflict checking and performance) are lost.
 	 *
@@ -224,7 +224,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @param key the target of the operation
 	 * @param param the value with which to modify the key
 	 */
-	public void mutate(MutationType optype, byte[] key, byte[] param);
+	void mutate(MutationType optype, byte[] key, byte[] param);
 
 	/**
 	 * Commit this {@code Transaction}. See notes in class description. Consider using
@@ -248,7 +248,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *  throw an error code {@code used_during_commit}(2017). In this case, all 
 	 *  subsequent operations on this transaction will throw this error.
 	 */
-	public Future<Void> commit();
+	Future<Void> commit();
 
 	/**
 	 * Gets the version number at which a successful commit modified the database.
@@ -260,7 +260,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @return the database version at which the commit succeeded
 	 */
-	public Long getCommittedVersion();
+	Long getCommittedVersion();
 
 	/**
 	 * Returns a future which will contain the versionstamp which was used by any versionstamp 
@@ -273,7 +273,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @return a future containing the versionstamp which was used for any versionstamp operations 
 	 * in this transaction
 	 */
-	public Future<byte[]> getVersionstamp();
+	Future<byte[]> getVersionstamp();
 
 	/**
 	 * Resets a transaction and returns a delayed signal for error recovery.  If the error
@@ -290,7 +290,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @param e the error caught while executing get()s and set()s on this {@code Transaction}
 	 * @return a {@code Future} to be set with a reset {@code Transaction} object to retry the transaction
 	 */
-	public Future<Transaction> onError(RuntimeException e);
+	Future<Transaction> onError(RuntimeException e);
 
 	/**
 	 * Resets a transaction and returns a delayed signal for error recovery.  If the error
@@ -304,14 +304,14 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @param e the error caught while executing get()s and set()s on this {@code Transaction}
 	 * @return a {@code PartialFuture} to be set with a reset {@code Transaction} object to retry the transaction
 	 */
-	public PartialFuture<Transaction> onError(Exception e);
+	PartialFuture<Transaction> onError(Exception e);
 
 	/**
 	 * Cancels the {@code Transaction}. All pending and any future uses of the
 	 *  {@code Transaction} will throw an {@link RuntimeException}.
 	 */
 	@Override
-	public void cancel();
+	void cancel();
 
 	/**
 	 * Creates a watch that will become ready when it reports a change to
@@ -355,7 +355,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *  limit defaults to 10,000 and can be modified with a call to
 	 *  {@link DatabaseOptions#setMaxWatches(long)}.
 	 */
-	public Future<Void> watch(byte[] key) throws FDBException;
+	Future<Void> watch(byte[] key) throws FDBException;
 
 	/**
 	 * Returns the {@link Database} that this {@code Transaction} is interacting
@@ -363,7 +363,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @return the {@link Database} object
 	 */
-	public Database getDatabase();
+	Database getDatabase();
 
 	/**
 	 * Run a function once against this {@code Transaction}. This call blocks while
@@ -372,7 +372,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @return the return value of {@code retryable}
 	 */
 	@Override
-	public <T> T run(Function<? super Transaction, T> retryable);
+	<T> T run(Function<? super Transaction, T> retryable);
 
 	/**
 	 * Run a function once against this {@code Transaction}. This call blocks while
@@ -383,7 +383,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws Exception if an error is encountered during execution
 	 */
 	@Override
-	public <T> T run(PartialFunction<? super Transaction, T> retryable)
+	<T> T run(PartialFunction<? super Transaction, T> retryable)
 			throws Exception;
 
 	/**
@@ -393,7 +393,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @return a {@code Future} that will be set to the return value of {@code retryable}
 	 */
 	@Override
-	public <T> Future<T> runAsync(
+	<T> Future<T> runAsync(
 			Function<? super Transaction, Future<T>> retryable);
 
 	/**
@@ -404,6 +404,6 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @return a {@code PartialFuture} that will be set to the return value of {@code retryable}
 	 */
 	@Override
-	public <T> PartialFuture<T> runAsync(
+	<T> PartialFuture<T> runAsync(
 			PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable);
 }

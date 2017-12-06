@@ -50,7 +50,7 @@ public class AsyncUtil {
 		try {
 			return func.apply(value);
 		} catch (RuntimeException e) {
-			CompletableFuture<O> future = new CompletableFuture<O>();
+			CompletableFuture<O> future = new CompletableFuture<>();
 			future.completeExceptionally(e);
 			return future;
 		}
@@ -171,7 +171,7 @@ public class AsyncUtil {
 		final CompletableFuture<Void> done;
 		final Executor executor;
 
-		public LoopPartial(Supplier<? extends CompletableFuture<Boolean>> body, Executor executor) {
+		LoopPartial(Supplier<? extends CompletableFuture<Boolean>> body, Executor executor) {
 			this.body = body;
 			this.done = new CompletableFuture<>();
 			this.executor = executor;
@@ -279,12 +279,7 @@ public class AsyncUtil {
 	 * @return a newly created {@code CompletableFuture} that is set when {@code task} completes
 	 */
 	public static <V> CompletableFuture<Void> success(CompletableFuture<V> task) {
-		return task.thenApply(new Function<V, Void>() {
-			@Override
-			public Void apply(V o) {
-				return null;
-			}
-		});
+		return task.thenApply(o -> null);
 	}
 
 	/**
@@ -298,34 +293,18 @@ public class AsyncUtil {
 	 * @return a new {@link CompletableFuture} that is set when {@code task} is ready.
 	 */
 	public static <V> CompletableFuture<Void> whenReady(CompletableFuture<V> task) {
-		return task.thenApply(new Function<V, Void>() {
-			@Override
-			public Void apply(V o) {
-				return null;
-			}
-		}).exceptionally(new Function<Throwable, Void>() {
-			@Override
-			public Void apply(Throwable o) {
-				return null;
-			}
-		});
+		return task.thenApply(o -> (Void)null)
+				.exceptionally(o -> null);
 	}
 
 	public static <V> CompletableFuture<V> composeExceptionally(CompletableFuture<V> task, Function<Throwable, CompletableFuture<V>> fn) {
-		return task.handle(new BiFunction<V, Throwable, Throwable>() {
-			@Override
-			public Throwable apply(V v, Throwable e) {
-				return e;
-			}
-		}).thenCompose(new Function<Throwable, CompletableFuture<V>>() {
-			@Override
-			public CompletableFuture<V> apply(Throwable e) {
-				if (e != null) {
-					return fn.apply(e);
-				} else {
-					return task;
-				}
-			}
+		return task.handle((v,e) -> e)
+				.thenCompose(e -> {
+					if (e != null) {
+						return fn.apply(e);
+					} else {
+						return task;
+					}
 		});
 	}
 
@@ -338,16 +317,13 @@ public class AsyncUtil {
 	 * @return a {@code CompletableFuture} that will be set to the collective result of the tasks
 	 */
 	public static <V> CompletableFuture<List<V>> getAll(final Collection<CompletableFuture<V>> tasks) {
-		return whenAll(tasks).thenApply(new Function<Void, List<V>>() {
-			@Override
-			public List<V> apply(Void o) {
-				List<V> result = new ArrayList<V>();
-				for(CompletableFuture<V> f : tasks) {
-					assert(f.isDone());
-					result.add(f.getNow(null));
-				}
-				return result;
+		return whenAll(tasks).thenApply(unused -> {
+			List<V> result = new ArrayList<>();
+			for(CompletableFuture<V> f : tasks) {
+				assert(f.isDone());
+				result.add(f.getNow(null));
 			}
+			return result;
 		});
 	}
 
@@ -361,12 +337,7 @@ public class AsyncUtil {
 	 * @return a {@code CompletableFuture} that will be set to {@code value} on completion of {@code task}
 	 */
 	public static <V, T> CompletableFuture<V> tag(CompletableFuture<T> task, final V value) {
-		return task.thenApply(new Function<T, V>() {
-			@Override
-			public V apply(T o) {
-				return value;
-			}
-		});
+		return task.thenApply(o -> value);
 	}
 
 	/**

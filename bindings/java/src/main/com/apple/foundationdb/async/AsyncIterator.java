@@ -43,7 +43,7 @@ public interface AsyncIterator<T> extends Iterator<T>, Cancellable, Disposable {
 	 *  would return another element without blocking or to {@code false} if there are
 	 *  no more elements in the sequence.
 	 */
-	public Future<Boolean> onHasNext();
+	Future<Boolean> onHasNext();
 
 	/**
 	 * Blocking call to determine if the sequence contains more elements. This call
@@ -55,7 +55,7 @@ public interface AsyncIterator<T> extends Iterator<T>, Cancellable, Disposable {
 	 *  otherwise.
 	 */
 	@Override
-	public boolean hasNext();
+	boolean hasNext();
 
 	/**
 	 * Returns the next element in the sequence. This will not block if, since the
@@ -71,18 +71,18 @@ public interface AsyncIterator<T> extends Iterator<T>, Cancellable, Disposable {
 	 * @throws NoSuchElementException if the sequence has been exhausted.
 	 */
 	@Override
-	public T next();
+	T next();
 
 	/**
 	 * Cancels any outstanding asynchronous work associated with this {@code AsyncIterator}.
 	 */
 	@Override
-	public void cancel();
+	void cancel();
 
 	/**
 	 * Cancel this {@code AsyncIterable} and dispose of associated resources. Equivalent
 	 *  to calling {@link AsyncIterator#cancel()}.
 	 */
 	@Override
-	public void dispose();
+	void dispose();
 }

@@ -270,7 +270,6 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 			//   - no more data -or-
 			//   - we are already fetching the next block
 			return mainChunkIsTheLast() ?
-					//new ReadyFuture<Boolean>(false, tr.getExecutor()) :
 					CompletableFuture.completedFuture(false) :
 					nextFuture;
 		}
@@ -279,11 +278,6 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 		public boolean hasNext() {
 			return onHasNext().join();
 		}
-
-		// moves to the last position in the current chunk
-		/*public synchronized void consumeAll() {
-			index = chunk.values.size() - 1;
-		}*/
 
 		@Override
 		public KeyValue next() {
@@ -326,7 +320,12 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 
 			// If there was no result ready then we need to wait on the future
 			//  and return the proper result, throwing if there are no more elements
-			return nextFuture.thenApply(NEXT_MAPPER).join();
+			return nextFuture.thenApply(hasNext -> {
+				if(hasNext) {
+					return next();
+				}
+				throw new NoSuchElementException();
+			}).join();
 		}
 
 		@Override
@@ -347,14 +346,5 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 		public void dispose() {
 			cancel();
 		}
-
-		private final Function<Boolean, KeyValue> NEXT_MAPPER = new Function<Boolean, KeyValue>() {
-			@Override
-			public KeyValue apply(Boolean o) {
-				if(o)
-					return next();
-				throw new NoSuchElementException();
-			}
-		};
 	}
 }

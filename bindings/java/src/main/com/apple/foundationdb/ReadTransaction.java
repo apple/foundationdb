@@ -28,10 +28,9 @@ import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * A read-only subset of a FoundationDB {@link Transaction}. This is the interface that
- *  {@code Transaction}'s {@link Transaction#snapshot snapshot} presents.
- *
+ *  {@code Transaction}'s {@link Transaction#snapshot snapshot} presents.<br>
  * <br>
- * Note: Client must call {@link Transaction#commit()} and wait on the result on all transactions, 
+ * <b>Note:</b> Client must call {@link Transaction#commit()} and wait on the result on all transactions,
  *  even ones that only read. This is done automatically when using the retry loops from
  *  {@link Database#run(Function)}. This is explained more in the intro to {@link Transaction}.
  *
@@ -42,13 +41,13 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * When passed to a {@code getRange()} call that takes a {@code limit} parameter,
 	 *  indicates that the query should return unlimited rows.
 	 */
-	public static final int ROW_LIMIT_UNLIMITED = 0;
+	int ROW_LIMIT_UNLIMITED = 0;
 
 	/**
 	 * Gets the version at which the reads for this {@code Transaction} will access the database.
 	 * @return the version for database reads
 	 */
-	public Future<Long> getReadVersion();
+	Future<Long> getReadVersion();
 
 	/**
 	 * Gets a value from the database. The call will return {@code null} if the key is not
@@ -59,7 +58,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 * @return a {@code Future} which will be set to the value corresponding to
 	 *  the key or to null if the key does not exist.
 	 */
-	public Future<byte[]> get(byte[] key);
+	Future<byte[]> get(byte[] key);
 
 	/**
 	 * Returns the key referenced by the specified {@code KeySelector}.
@@ -74,7 +73,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a {@code Future} which will be set to an absolute database key
 	 */
-	public Future<byte[]> getKey(KeySelector selector);
+	Future<byte[]> getKey(KeySelector selector);
 
 	/**
 	 * Gets an ordered range of keys and values from the database. The begin
@@ -89,7 +88,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end);
+	AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end);
 
 	/**
 	 * Gets an ordered range of keys and values from the database. The begin
@@ -107,7 +106,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
+	AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit);
 
 	/**
@@ -128,7 +127,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
+	AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse);
 
 	/**
@@ -152,7 +151,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
+	AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse, StreamingMode mode);
 
 	/**
@@ -168,7 +167,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end);
+	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end);
 
 	/**
 	 * Gets an ordered range of keys and values from the database.  The begin
@@ -186,7 +185,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
+	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
 			int limit);
 
 	/**
@@ -207,7 +206,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
+	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
 			int limit, boolean reverse);
 
 	/**
@@ -231,7 +230,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
+	AsyncIterable<KeyValue> getRange(byte[] begin, byte[] end,
 			int limit, boolean reverse, StreamingMode mode);
 
 	/**
@@ -250,7 +249,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(Range range);
+	AsyncIterable<KeyValue> getRange(Range range);
 
 	/**
 	 * Gets an ordered range of keys and values from the database.  The begin
@@ -271,7 +270,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(Range range,
+	AsyncIterable<KeyValue> getRange(Range range,
 			int limit);
 
 	/**
@@ -295,7 +294,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(Range range,
+	AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse);
 
 	/**
@@ -322,7 +321,7 @@ public interface ReadTransaction extends ReadTransactionContext {
 	 *
 	 * @return a handle to access the results of the asynchronous call
 	 */
-	public AsyncIterable<KeyValue> getRange(Range range,
+	AsyncIterable<KeyValue> getRange(Range range,
 			int limit, boolean reverse, StreamingMode mode);
 
 	/**
@@ -330,5 +329,5 @@ public interface ReadTransaction extends ReadTransactionContext {
  	 *
  	 * @return a set of transaction-specific options affecting this {@code Transaction}
  	 */
- 	public TransactionOptions options();
+ 	TransactionOptions options();
 }

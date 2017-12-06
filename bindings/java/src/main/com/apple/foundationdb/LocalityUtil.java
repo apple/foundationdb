@@ -226,7 +226,7 @@ public class LocalityUtil {
 		}
 	}
 
-	static Charset ASCII = Charset.forName("US-ASCII");
+	private static Charset ASCII = Charset.forName("US-ASCII");
 	static byte[] keyServersForKey(byte[] key) {
 		return ByteArrayUtil.join(new byte[] { (byte)255 },
 							  "/keyServers/".getBytes(ASCII),
