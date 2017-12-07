@@ -29,7 +29,7 @@ class FutureResult extends NativeFuture<byte[]> {
 	}
 
 	@Override
-	public byte[] getIfDone_internal() throws FDBException {
+	protected byte[] getIfDone_internal(long cPtr) throws FDBException {
 		return FutureResult_get(cPtr);
 	}
 

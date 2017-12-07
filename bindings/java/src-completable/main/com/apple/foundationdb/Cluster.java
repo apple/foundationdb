@@ -25,7 +25,10 @@ import java.util.concurrent.Executor;
 
 /**
  * The {@code Cluster} represents a connection to a physical set of cooperating machines
- *  running FoundationDB. A {@code Cluster} is opened with a reference to a cluster file.
+ *  running FoundationDB. A {@code Cluster} is opened with a reference to a cluster file.<br>
+ * <br>
+ * <b>Note:</b> {@code Cluster} objects must be disposed when no longer in use in order
+ *  to free associated native memory.
  */
 public class Cluster extends DefaultDisposableImpl implements Disposable {
 	private ClusterOptions options;
@@ -56,8 +59,13 @@ public class Cluster extends DefaultDisposableImpl implements Disposable {
 
 	@Override
 	protected void finalize() throws Throwable {
-		dispose();
-		super.finalize();
+		try {
+			checkUndisposed("Cluster");
+			dispose();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	/**

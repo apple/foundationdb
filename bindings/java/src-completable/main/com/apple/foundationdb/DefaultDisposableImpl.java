@@ -48,6 +48,15 @@ abstract class DefaultDisposableImpl implements Disposable {
 		return disposed;
 	}
 
+	public void checkUndisposed(String context) {
+		try {
+			if(FDB.getInstance().warnOnUndisposed && !disposed) {
+				System.err.println(context + " not disposed");
+			}
+		}
+		catch(Exception e) {}
+	}
+
 	@Override
 	public void dispose() {
 		rwl.writeLock().lock();

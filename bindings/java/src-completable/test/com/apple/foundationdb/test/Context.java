@@ -20,13 +20,13 @@
 
 package com.apple.foundationdb.test;
 
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDBException;
@@ -42,12 +42,13 @@ abstract class Context implements Runnable {
 	final Database db;
 	final String preStr;
 	int instructionIndex = 0;
-	String trName;
 	KeySelector nextKey, endKey;
 	Long lastVersion = null;
-	List<Thread> children = new LinkedList<Thread>();
 
-	static ConcurrentHashMap<String, Transaction> transactionMap = new ConcurrentHashMap<>();
+	private String trName;
+	private List<Thread> children = new LinkedList<>();
+	static private Map<String, Transaction> transactionMap = new HashMap<>();
+	static private Map<Transaction, AtomicInteger> transactionRefCounts = new HashMap<>();
 
 	Context(Database db, byte[] prefix) {
 		this.db = db;
@@ -83,43 +84,54 @@ abstract class Context implements Runnable {
 		}
 	}
 
-	public Transaction getCurrentTransaction() {
-	    return Context.transactionMap.get(this.trName);
-	}
-
-	public void updateCurrentTransaction(Transaction tr) {
-	    Context.transactionMap.put(this.trName, tr);
-	}
-
-	public boolean updateCurrentTransaction(Transaction oldTr, Transaction newTr) {
-		return Context.transactionMap.replace(this.trName, oldTr, newTr);
-	}
-
-	public Transaction newTransaction() {
-		Transaction tr = db.createTransaction();
-		Context.transactionMap.put(this.trName, tr);
+	public synchronized Transaction getCurrentTransaction() {
+		Transaction tr = Context.transactionMap.get(this.trName);
+		Context.transactionRefCounts.get(tr).incrementAndGet();
 		return tr;
 	}
 
-	public Transaction newTransaction(Transaction oldTr) {
-		Transaction newTr = db.createTransaction();
-		boolean replaced = Context.transactionMap.replace(this.trName, oldTr, newTr);
-		if(replaced) {
-			return newTr;
-		}
-		else {
-		    newTr.cancel();
-		    return Context.transactionMap.get(this.trName);
+	public synchronized void releaseTransaction(Transaction tr) {
+		if(tr != null) {
+			AtomicInteger count = Context.transactionRefCounts.get(tr);
+			if(count.decrementAndGet() == 0) {
+				Context.transactionRefCounts.remove(tr);
+				tr.dispose();
+			}
 		}
 	}
 
-	public void switchTransaction(byte[] trName) {
-		this.trName = ByteArrayUtil.printable(trName);
-		Transaction tr = db.createTransaction();
-		Transaction previousTr = Context.transactionMap.putIfAbsent(this.trName, tr);
-		if(previousTr != null) {
-			tr.cancel();
+	public synchronized void updateCurrentTransaction(Transaction tr) {
+		Context.transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(1));
+		releaseTransaction(Context.transactionMap.put(this.trName, tr));
+	}
+
+	public synchronized boolean updateCurrentTransaction(Transaction oldTr, Transaction newTr) {
+		if(Context.transactionMap.replace(this.trName, oldTr, newTr)) {
+			AtomicInteger count = Context.transactionRefCounts.computeIfAbsent(newTr, x -> new AtomicInteger(0));
+			count.incrementAndGet();
+			releaseTransaction(oldTr);
+			return true;
 		}
+
+		return false;
+	}
+
+	public void newTransaction() {
+		Transaction tr = db.createTransaction();
+		updateCurrentTransaction(tr);
+	}
+
+	public void newTransaction(Transaction oldTr) {
+		Transaction newTr = db.createTransaction();
+		if(!updateCurrentTransaction(oldTr, newTr)) {
+			newTr.dispose();
+		}
+	}
+
+	public synchronized void switchTransaction(byte[] trName) {
+		this.trName = ByteArrayUtil.printable(trName);
+		Transaction tr = Context.transactionMap.computeIfAbsent(this.trName, x -> db.createTransaction());
+		Context.transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(1));
 	}
 
 	abstract void executeOperations() throws Throwable;
@@ -140,34 +152,31 @@ abstract class Context implements Runnable {
 		throw new IllegalArgumentException("Invalid code: " + code);
 	}
 
-	void popParams(int num, final List<Object> params, final CompletableFuture<Void> done) {
+	private void popParams(int num, final List<Object> params, final CompletableFuture<Void> done) {
 		while(num-- > 0) {
 			Object item = stack.pop().value;
 			if(item instanceof CompletableFuture) {
 				@SuppressWarnings("unchecked")
 				final CompletableFuture<Object> future = (CompletableFuture<Object>)item;
 				final int nextNum = num;
-				future.whenCompleteAsync(new BiConsumer<Object, Throwable>() {
-					@Override
-					public void accept(Object o, Throwable t) {
-						if(t != null) {
-							Throwable root = StackUtils.getRootFDBException(t);
-							if(root instanceof FDBException) {
-								params.add(StackUtils.getErrorBytes((FDBException)root));
-								popParams(nextNum, params, done);
-							}
-							else {
-								done.completeExceptionally(t);
-							}
-						}
-						else {
-							if(o == null)
-								params.add("RESULT_NOT_PRESENT".getBytes());
-							else
-								params.add(o);
-
+				future.whenCompleteAsync((o, t) -> {
+					if(t != null) {
+						FDBException root = StackUtils.getRootFDBException(t);
+						if(root != null) {
+							params.add(StackUtils.getErrorBytes(root));
 							popParams(nextNum, params, done);
 						}
+						else {
+							done.completeExceptionally(t);
+						}
+					}
+					else {
+						if(o == null)
+							params.add("RESULT_NOT_PRESENT".getBytes());
+						else
+							params.add(o);
+
+						popParams(nextNum, params, done);
 					}
 				});
 
@@ -181,15 +190,16 @@ abstract class Context implements Runnable {
 	}
 
 	CompletableFuture<List<Object>> popParams(int num) {
-		final List<Object> params = new LinkedList<Object>();
-		CompletableFuture<Void> done = new CompletableFuture<Void>();
+		final List<Object> params = new LinkedList<>();
+		CompletableFuture<Void> done = new CompletableFuture<>();
 		popParams(num, params, done);
 
-		return done.thenApplyAsync(new Function<Void, List<Object>>() {
-			@Override
-			public List<Object> apply(Void n) {
-				return params;
-			}
-		});
+		return done.thenApplyAsync((x) -> params);
+	}
+
+	void dispose() {
+		for(Transaction tr : transactionMap.values()) {
+			tr.dispose();
+		}
 	}
 }

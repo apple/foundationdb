@@ -1,5 +1,5 @@
 /*
- * FutureVersion.java
+ * DisposableAsyncIterator.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,14 @@
  * limitations under the License.
  */
 
-package com.apple.foundationdb;
+package com.apple.foundationdb.async;
 
-import java.util.concurrent.Executor;
+import com.apple.foundationdb.Disposable;
 
-class FutureVersion extends NativeFuture<Long> {
-	FutureVersion(long cPtr, Executor executor) {
-		super(cPtr);
-		registerMarshalCallback(executor);
-	}
-
-	@Override
-	protected Long getIfDone_internal(long cPtr) throws FDBException {
-		return FutureVersion_get(cPtr);
-	}
-
-	private native long FutureVersion_get(long cPtr) throws FDBException;
-}
+/**
+ * A version of {@link AsyncIterator} that holds native FDB resources and
+ *  must be disposed once it is no longer in use.
+ *
+ * @param <T> the type of object yielded by {@code next()}
+ */
+public interface DisposableAsyncIterator<T> extends Disposable, AsyncIterator<T> {}

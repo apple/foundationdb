@@ -779,7 +779,7 @@ public class DirectoryLayer implements Directory
 					//return new ReadyFuture<Boolean>(false);
 					return CompletableFuture.completedFuture(false);
 
-				AsyncIterator<KeyValue> it = tr.getRange(nodeSubspace.pack(prefix), nodeSubspace.pack(ByteArrayUtil.strinc(prefix)), 1).iterator();
+				final AsyncIterator<KeyValue> it = tr.getRange(nodeSubspace.pack(prefix), nodeSubspace.pack(ByteArrayUtil.strinc(prefix)), 1).iterator();
 				return it.onHasNext()
 				.thenApply(new Function<Boolean, Boolean>() {
 					@Override

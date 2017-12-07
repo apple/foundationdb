@@ -29,7 +29,7 @@ class FutureKey extends NativeFuture<byte[]> {
 	}
 
 	@Override
-	public byte[] getIfDone_internal() throws FDBException {
+	protected byte[] getIfDone_internal(long cPtr) throws FDBException {
 		return FutureKey_get(cPtr);
 	}
 

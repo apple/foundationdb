@@ -29,7 +29,7 @@ class FutureStrings extends NativeFuture<String[]> {
 	}
 
 	@Override
-	public String[] getIfDone_internal() throws FDBException {
+	protected String[] getIfDone_internal(long cPtr) throws FDBException {
 		return FutureStrings_get(cPtr);
 	}
 

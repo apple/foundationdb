@@ -21,7 +21,6 @@
 package com.apple.foundationdb.test;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Function;
 
 import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.ReadTransactionContext;
@@ -54,8 +53,8 @@ class Instruction extends Stack {
 		isSnapshot = op.endsWith(SUFFIX_SNAPSHOT);
 
 		if(isDatabase) {
-			this.tr = context.db.createTransaction();
-			readTr = this.tr;
+			this.tr = null;
+			readTr = null;
 			op = op.substring(0, op.length() - SUFFIX_DATABASE.length());
 		}
 		else if(isSnapshot) {
@@ -73,17 +72,36 @@ class Instruction extends Stack {
 	}
 
 	void setTransaction(Transaction tr) {
-		this.tr = tr;
-		if(isSnapshot) {
-			readTr = this.tr.snapshot();
-		}
-		else {
-			readTr = tr;
-		}
-
 		if(!isDatabase) {
+			context.releaseTransaction(this.tr);
 			context.updateCurrentTransaction(tr);
+
+			this.tr = context.getCurrentTransaction();
+			if(isSnapshot) {
+				readTr = this.tr.snapshot();
+			}
+			else {
+				readTr = tr;
+			}
 		}
+	}
+
+	void setTransaction(Transaction oldTr, Transaction newTr) {
+		if(!isDatabase) {
+			context.updateCurrentTransaction(oldTr, newTr);
+
+			this.tr = context.getCurrentTransaction();
+			if(isSnapshot) {
+				readTr = this.tr.snapshot();
+			}
+			else {
+				readTr = tr;
+			}
+		}
+	}
+
+	void releaseTransaction() {
+		context.releaseTransaction(this.tr);
 	}
 
 	void push(Object o) {
@@ -120,10 +138,6 @@ class Instruction extends Stack {
 
 	CompletableFuture<Object> popParam() {
 		return popParams(1)
-		.thenApplyAsync(new Function<List<Object>, Object>() {
-			public Object apply(List<Object> params) {
-				return params.get(0);
-			}
-		});
+		.thenApplyAsync((params) -> params.get(0));
 	}
 }

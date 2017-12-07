@@ -71,6 +71,18 @@ public class AsyncUtil {
 	/**
 	 * Iterates over a set of items and returns the result as a list.
 	 *
+	 * @param iterator the source of data over which to iterate. This function will exhaust the iterator.
+	 *
+	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
+	 *  from iteration.
+	 */
+	public static <V> CompletableFuture<List<V>> collect(final AsyncIterator<V> iterator) {
+		return collect(iterator, DEFAULT_EXECUTOR);
+	}
+
+	/**
+	 * Iterates over a set of items and returns the result as a list.
+	 *
 	 * @param iterable the source of data over which to iterate
 	 * @param executor the {@link Executor} to use for asynchronous operations
 	 *
@@ -78,29 +90,32 @@ public class AsyncUtil {
 	 *  from iteration.
 	 */
 	public static <V> CompletableFuture<List<V>> collect(final AsyncIterable<V> iterable, final Executor executor) {
-		final AsyncIterator<V> it = iterable.iterator();
-		final List<V> accumulator = new LinkedList<V>();
+		return collect(iterable.iterator(), executor);
+	}
+
+	/**
+	 * Iterates over a set of items and returns the result as a list.
+	 *
+	 * @param iterator the source of data over which to iterate. This function will exhaust the iterator.
+	 * @param executor the {@link Executor} to use for asynchronous operations
+	 *
+	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
+	 *  from iteration.
+	 */
+	public static <V> CompletableFuture<List<V>> collect(final AsyncIterator<V> iterator, final Executor executor) {
+		final List<V> accumulator = new LinkedList<>();
 
 		// The condition of the while loop is simply "onHasNext()" returning true
-		Supplier<CompletableFuture<Boolean>> condition = new Supplier<CompletableFuture<Boolean>>() {
-			@Override
-			public CompletableFuture<Boolean> get() {
-				return it.onHasNext().thenApply(new Function<Boolean, Boolean>() {
-					@Override
-					public Boolean apply(Boolean o) {
-						if(o) {
-							accumulator.add(it.next());
-						}
-						return o;
-					}
-				});
-			}
-		};
+		Supplier<CompletableFuture<Boolean>> condition = () ->
+			iterator.onHasNext().thenApply(hasNext -> {
+				if(hasNext) {
+					accumulator.add(iterator.next());
+				}
+				return hasNext;
+			});
 
 		CompletableFuture<Void> complete = whileTrue(condition, executor);
-		CompletableFuture<List<V>> result = tag(complete, accumulator);
-
-		return result;
+		return tag(complete, accumulator);
 	}
 
 	/**
@@ -116,52 +131,98 @@ public class AsyncUtil {
 		return new AsyncIterable<T>() {
 			@Override
 			public AsyncIterator<T> iterator() {
-				final AsyncIterator<V> it = iterable.iterator();
-				return new AsyncIterator<T>() {
-
-					@Override
-					public void remove() {
-						it.remove();
-					}
-
-					@Override
-					public CompletableFuture<Boolean> onHasNext() {
-						return it.onHasNext();
-					}
-
-					@Override
-					public boolean hasNext() {
-						return it.hasNext();
-					}
-
-					@Override
-					public T next() {
-						return func.apply(it.next());
-					}
-
-					@Override
-					public void cancel() {
-						it.cancel();
-					}
-
-					@Override
-					public void dispose() {
-						it.dispose();
-					}
-				};
+				return mapIterator(iterable.iterator(), func);
 			}
 
 			@Override
 			public CompletableFuture<List<T>> asList() {
-				return iterable.asList().thenApply(new Function<List<V>, List<T>>() {
-					@Override
-					public List<T> apply(List<V> o) {
-						ArrayList<T> out = new ArrayList<T>(o.size());
-						for(V in : o)
-							out.add(func.apply(in));
-						return out;
-					}
+				return iterable.asList().thenApply(result ->  {
+					ArrayList<T> out = new ArrayList<>(result.size());
+					for(V in : result)
+						out.add(func.apply(in));
+					return out;
 				});
+			}
+		};
+	}
+
+	/**
+	 * Map an {@code AsyncIterator} into an {@code AsyncIterator} of another type or with
+	 *  each element modified in some fashion.
+	 *
+	 * @param iterator input
+	 * @param func mapping function applied to each element
+	 * @return a new iterator with each element mapped to a different value
+	 */
+	public static <V, T> AsyncIterator<T> mapIterator(final AsyncIterator<V> iterator,
+													  final Function<V, T> func) {
+		return new AsyncIterator<T>() {
+			@Override
+			public void remove() {
+				iterator.remove();
+			}
+
+			@Override
+			public CompletableFuture<Boolean> onHasNext() {
+				return iterator.onHasNext();
+			}
+
+			@Override
+			public boolean hasNext() {
+				return iterator.hasNext();
+			}
+
+			@Override
+			public T next() {
+				return func.apply(iterator.next());
+			}
+
+			@Override
+			public void cancel() {
+				iterator.cancel();
+			}
+		};
+	}
+
+	/**
+	 * Map a {@code DisposableAsyncIterator} into a {@code DisposableAsyncIterator} of another type or with
+	 *  each element modified in some fashion.
+	 *
+	 * @param iterator input
+	 * @param func mapping function applied to each element
+	 * @return a new iterator with each element mapped to a different value
+	 */
+	public static <V, T> DisposableAsyncIterator<T> mapIterator(final DisposableAsyncIterator<V> iterator,
+													  final Function<V, T> func) {
+		return new DisposableAsyncIterator<T>() {
+			@Override
+			public void remove() {
+				iterator.remove();
+			}
+
+			@Override
+			public CompletableFuture<Boolean> onHasNext() {
+				return iterator.onHasNext();
+			}
+
+			@Override
+			public boolean hasNext() {
+				return iterator.hasNext();
+			}
+
+			@Override
+			public T next() {
+				return func.apply(iterator.next());
+			}
+
+			@Override
+			public void cancel() {
+				iterator.cancel();
+			}
+
+			@Override
+			public void dispose() {
+				iterator.dispose();
 			}
 		};
 	}
@@ -305,7 +366,7 @@ public class AsyncUtil {
 					} else {
 						return task;
 					}
-		});
+				});
 	}
 
 	/**

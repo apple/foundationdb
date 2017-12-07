@@ -68,7 +68,10 @@ import com.apple.foundationdb.tuple.Tuple;
  * <br>
  * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
  *  option. This is because the Java bindings disallow use of {@code Transaction} objects after {@link #onError}
- *  is called.
+ *  is called.<br>
+ * <br>
+ * <b>Note:</b> {@code Transaction} objects must be disposed when no longer in use in order
+ *  to free associated native memory.
  */
 public interface Transaction extends Disposable, ReadTransaction, TransactionContext {
 

@@ -81,6 +81,7 @@ public class FDB {
 	final int apiVersion;
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
+	volatile boolean warnOnUndisposed = true;
 	final private Semaphore netRunning = new Semaphore(1);
 	private final NetworkOptions options;
 
@@ -159,8 +160,28 @@ public class FDB {
 			throw new IllegalArgumentException("API version not supported (minimum 500)");
 		if(version > 510)
 			throw new IllegalArgumentException("API version not supported (maximum 510)");
+
 		Select_API_version(version);
-		return singleton = new FDB(version);
+		FDB fdb = new FDB(version);
+
+		if(version < 510) {
+			fdb.warnOnUndisposed = false;
+		}
+
+		return singleton = fdb;
+	}
+
+	public void setUndisposedWarning(boolean warnOnUndisposed) {
+		this.warnOnUndisposed = warnOnUndisposed;
+	}
+
+	// Singleton is initialized to null and only set once by a call to selectAPIVersion
+	static FDB getInstance() {
+		if(singleton != null) {
+			return singleton;
+		}
+
+		throw new IllegalStateException("API version has not been selected");
 	}
 
 	/**
@@ -277,7 +298,10 @@ public class FDB {
 			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
 		Cluster c = f.join();
-		return c.openDatabase(e);
+		Database db = c.openDatabase(e);
+		c.dispose();
+
+		return db;
 	}
 
 	/**

@@ -60,7 +60,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 				int limit, boolean reverse, StreamingMode mode) {
-			return RangeQuery.start(FDBTransaction.this, true, begin, end, limit, reverse, mode);
+			return new RangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode);
 		}
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -230,7 +230,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse, StreamingMode mode) {
-		return RangeQuery.start(this, false, begin, end, limit, reverse, mode);
+		return new RangeQuery(this, false, begin, end, limit, reverse, mode);
 	}
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -527,10 +527,20 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 	// Must hold pointerReadLock when calling
 	private FDBTransaction transfer() {
-		FDBTransaction tr = new FDBTransaction(getPtr(), database, executor);
-		tr.options().setUsedDuringCommitProtectionDisable();
-		transactionOwner = false;
-		return tr;
+		FDBTransaction tr = null;
+		try {
+			tr = new FDBTransaction(getPtr(), database, executor);
+			tr.options().setUsedDuringCommitProtectionDisable();
+			transactionOwner = false;
+			return tr;
+		}
+		catch(RuntimeException err) {
+			if(tr != null) {
+				tr.dispose();
+			}
+
+			throw err;
+		}
 	}
 
 	@Override
@@ -545,7 +555,13 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 	@Override
 	protected void finalize() throws Throwable {
-		dispose();
+		try {
+			checkUndisposed("Transaction");
+			dispose();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	@Override

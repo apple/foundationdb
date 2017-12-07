@@ -418,7 +418,7 @@ public class AsyncStackTester {
 								inst.context.newTransaction(oldTr); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 							}
 							else {
-								inst.context.updateCurrentTransaction(oldTr, tr);
+								inst.setTransaction(oldTr, tr);
 							}
 						})
 						.thenApply(v -> null);
@@ -709,7 +709,9 @@ public class AsyncStackTester {
 				return inst.tr.commit().thenComposeAsync(new Function<Void, CompletableFuture<Void>>() {
 					@Override
 					public CompletableFuture<Void> apply(Void o) {
-						inst.tr = inst.context.newTransaction();
+						inst.releaseTransaction();
+						inst.context.newTransaction();
+						inst.tr = inst.context.getCurrentTransaction();
 						return logStack(inst, prefix, saved);
 					}
 				});
@@ -718,7 +720,9 @@ public class AsyncStackTester {
 		return inst.tr.commit().thenApplyAsync(new Function<Void, Void>() {
 			@Override
 			public Void apply(Void a) {
-				inst.tr = inst.context.newTransaction();
+				inst.releaseTransaction();
+				inst.context.newTransaction();
+				inst.tr = inst.context.getCurrentTransaction();
 				return null;
 			}
 		});
@@ -784,24 +788,21 @@ public class AsyncStackTester {
 			}*/
 
 			if(inst.op.startsWith(DIRECTORY_PREFIX))
-				return directoryExtension.processInstruction(inst);
+				return directoryExtension.processInstruction(inst).whenComplete((x, t) -> inst.releaseTransaction());
 			else {
-				return AsyncUtil.composeExceptionally(processInstruction(inst),
-					new Function<Throwable, CompletableFuture<Void>>() {
-						@Override
-						public CompletableFuture<Void> apply(Throwable e) {
-							FDBException ex = StackUtils.getRootFDBException(e);
-							if(ex != null) {
-								StackUtils.pushError(inst, ex);
-								return CompletableFuture.completedFuture(null);
-							}
-							else {
-								CompletableFuture<Void> f = new CompletableFuture<Void>();
-								f.completeExceptionally(e);
-								return f;
-							}
-						}
-					});
+				return AsyncUtil.composeExceptionally(processInstruction(inst), (e) -> {
+					FDBException ex = StackUtils.getRootFDBException(e);
+					if(ex != null) {
+						StackUtils.pushError(inst, ex);
+						return CompletableFuture.completedFuture(null);
+					}
+					else {
+						CompletableFuture<Void> f = new CompletableFuture<>();
+						f.completeExceptionally(e);
+						return f;
+					}
+				})
+				.whenComplete((x, t) -> inst.releaseTransaction());
 			}
 		}
 
@@ -810,8 +811,6 @@ public class AsyncStackTester {
 		}
 
 		CompletableFuture<Void> executeRemainingOperations() {
-			Transaction t = db.createTransaction();
-
 			final Function<Void, CompletableFuture<Void>> processNext = new Function<Void, CompletableFuture<Void>>() {
 				@Override
 				public CompletableFuture<Void> apply(Void ignore) {
@@ -821,7 +820,10 @@ public class AsyncStackTester {
 			};
 
 			if(operations == null || ++currentOp == operations.size()) {
-				return t.getRange(nextKey, endKey, 1000).asList()
+				Transaction tr = db.createTransaction();
+
+				return tr.getRange(nextKey, endKey, 1000).asList()
+				.whenComplete((x, t) -> tr.dispose())
 				.thenComposeAsync(new Function<List<KeyValue>, CompletableFuture<Void>>() {
 					@Override
 					public CompletableFuture<Void> apply(List<KeyValue> next) {
@@ -914,6 +916,9 @@ public class AsyncStackTester {
 		/*byte[] key = Tuple.from("test_results".getBytes(), 5).pack();
 		byte[] bs = db.createTransaction().get(key).get();
 		System.out.println("output of " + ByteArrayUtil.printable(key) + " as: " + ByteArrayUtil.printable(bs));*/
+
+		db.dispose();
+		System.gc();
 
 		/*fdb.stopNetwork();
 		executor.shutdown();*/

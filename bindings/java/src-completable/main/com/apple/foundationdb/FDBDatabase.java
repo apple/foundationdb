@@ -88,10 +88,9 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 					return true;
 				});
 			}, e).thenCompose(x -> x);
-		}, e).thenApply(o -> {
-			trRef.get().dispose();
-			return returnValue.get();
-		});
+		}, e)
+		.thenApply(o -> returnValue.get())
+		.whenComplete((v, t) -> trRef.get().dispose());
 	}
 
 	@Override
@@ -102,17 +101,29 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 
 	@Override
 	protected void finalize() throws Throwable {
-		dispose();
-		super.finalize();
+		try {
+			checkUndisposed("Database");
+			dispose();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	@Override
 	public Transaction createTransaction(Executor e) {
 		pointerReadLock.lock();
+		Transaction tr = null;
 		try {
-			Transaction tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e);
+			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e);
 			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;
+		} catch(RuntimeException err) {
+			if(tr != null) {
+				tr.dispose();
+			}
+
+			throw err;
 		} finally {
 			pointerReadLock.unlock();
 		}

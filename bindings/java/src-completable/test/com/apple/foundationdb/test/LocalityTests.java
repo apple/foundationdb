@@ -27,7 +27,7 @@ import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.DisposableAsyncIterator;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
@@ -45,11 +45,15 @@ public class LocalityTests {
 		}
 
 		long start = System.currentTimeMillis();
-		AsyncIterable<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[] { (byte)255 } );
+
+		DisposableAsyncIterator<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[] { (byte)255 } );
 		CompletableFuture<List<byte[]>> collection = AsyncUtil.collect(keys);
 		List<byte[]> list = collection.join();
 		System.out.println("Took " + (System.currentTimeMillis() - start) + "ms to get " +
 				list.size() + " items");
+
+		keys.dispose();
+
 		int i = 0;
 		for(byte[] key : collection.join()) {
 			System.out.println(i++ + ": " + ByteArrayUtil.printable(key));

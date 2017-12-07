@@ -42,7 +42,10 @@ import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.async.DisposableAsyncIterator;
 import com.apple.foundationdb.tuple.Tuple;
+
+import com.apple.foundationdb.async.AsyncUtil;
 
 /**
  * Implements a cross-binding test of the FoundationDB API.
@@ -507,6 +510,8 @@ public class StackTester {
 				directoryExtension.processInstruction(inst);
 			else
 				processInstruction(inst);
+
+			inst.releaseTransaction();
 		}
 
 		@Override
@@ -515,8 +520,10 @@ public class StackTester {
 			while(true) {
 				Transaction t = db.createTransaction();
 				List<KeyValue> keyValues = t.getRange(begin, endKey/*, 1000*/).asList().join();
-				if(keyValues.size() == 0)
+				t.dispose();
+				if(keyValues.size() == 0) {
 					break;
+				}
 				//System.out.println(" * Got " + keyValues.size() + " instructions");
 
 				for(KeyValue next : keyValues) {
@@ -525,6 +532,7 @@ public class StackTester {
 					instructionIndex++;
 				}
 			}
+
 			//System.out.println(" * Completed " + instructionIndex + " instructions");
 		}
 	}
@@ -669,22 +677,27 @@ public class StackTester {
 			tr.options().setTimeout(60*1000);
 			tr.options().setReadSystemKeys();
 			tr.getReadVersion().join();
-			AsyncIterable<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
+			DisposableAsyncIterator<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
 					tr, new byte[0], new byte[]{(byte) 255, (byte) 255});
-			List<byte[]> keys = boundaryKeys.asList().join();
-			for(int i = 0; i < keys.size() - 1; i++) {
-				byte[] start = keys.get(i);
-				byte[] end = tr.getKey(KeySelector.lastLessThan(keys.get(i + 1))).join();
-				List<String> startAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, start).join());
-				List<String> endAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, end).join());
-				for(String a : startAddresses) {
-					if(!endAddresses.contains(a)) {
-						throw new RuntimeException("Locality not internally consistent.");
+			try {
+				List<byte[]> keys = AsyncUtil.collect(boundaryKeys).join();
+				for(int i = 0; i < keys.size() - 1; i++) {
+					byte[] start = keys.get(i);
+					byte[] end = tr.getKey(KeySelector.lastLessThan(keys.get(i + 1))).join();
+					List<String> startAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, start).join());
+					List<String> endAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, end).join());
+					for(String a : startAddresses) {
+						if(!endAddresses.contains(a)) {
+							throw new RuntimeException("Locality not internally consistent.");
+						}
 					}
 				}
-			}
 
-			return null;
+				return null;
+			}
+			finally {
+				boundaryKeys.dispose();
+			}
 		});
 	}
 
@@ -709,6 +722,8 @@ public class StackTester {
 		//System.out.println("Starting test...");
 		c.run();
 		//System.out.println("Done with test.");
+		db.dispose();
+		System.gc();
 	}
 }
 

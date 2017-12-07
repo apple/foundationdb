@@ -34,7 +34,7 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	}
 
 	@Override
-	public RangeResultInfo getIfDone_internal() throws FDBException {
+	protected RangeResultInfo getIfDone_internal(long cPtr) throws FDBException {
 		FDBException err = Future_getError(cPtr);
 
 		if(!err.isSuccess()) {
@@ -45,11 +45,23 @@ class FutureResults extends NativeFuture<RangeResultInfo> {
 	}
 
 	public RangeResultSummary getSummary() {
-		return FutureResults_getSummary(cPtr);
+		try {
+			pointerReadLock.lock();
+			return FutureResults_getSummary(getPtr());
+		}
+		finally {
+			pointerReadLock.unlock();
+		}
 	}
 
 	public RangeResult getResults() {
-		return FutureResults_get(cPtr);
+		try {
+			pointerReadLock.lock();
+			return FutureResults_get(getPtr());
+		}
+		finally {
+			pointerReadLock.unlock();
+		}
 	}
 
 	private native RangeResultSummary FutureResults_getSummary(long ptr) throws FDBException;
