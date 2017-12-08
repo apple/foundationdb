@@ -720,7 +720,7 @@ namespace fileBackup {
 		if (taskVersion > version) {
 			state Error err = task_invalid_version();
 
-			TraceEvent(SevError, "BA_BackupRangeTaskFunc_execute").detail("taskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
+			TraceEvent(SevWarn, "BA_BackupRangeTaskFunc_execute").detail("taskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
 			if (KeyBackedConfig::TaskParams.uid().exists(task)) {
 				std::string msg = format("ERROR: %s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version);
 				Void _ = wait(BackupConfig(task).logError(cx, err, msg));
@@ -1414,7 +1414,7 @@ namespace fileBackup {
 				Void _ = wait(IBackupContainer::openContainer(backupContainer)->renameFile(tempFileName, logFileName));
 			}
 			catch (Error &e) {
-				TraceEvent(SevError, "BA_BackupLogRangeTaskFunc_endLogFileError").error(e).detail("backupContainer", backupContainer).detail("Rename_file_from", tempFileName);
+				TraceEvent(SevWarn, "BA_BackupLogRangeTaskFunc_endLogFileError").error(e).detail("backupContainer", backupContainer).detail("Rename_file_from", tempFileName);
 				throw;
 			}
 
