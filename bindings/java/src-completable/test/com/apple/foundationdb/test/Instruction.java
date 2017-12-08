@@ -34,77 +34,66 @@ class Instruction extends Stack {
 	private final static String SUFFIX_SNAPSHOT = "_SNAPSHOT";
 	private final static String SUFFIX_DATABASE = "_DATABASE";
 
-	String op;
-	Tuple tokens;
-	Context context;
-	boolean isDatabase;
-	boolean isSnapshot;
-	Transaction tr;
-	ReadTransaction readTr;
-	TransactionContext tcx;
-	ReadTransactionContext readTcx;
+	final String op;
+	final Tuple tokens;
+	final Context context;
+	final boolean isDatabase;
+	final boolean isSnapshot;
+	final Transaction tr;
+	final ReadTransaction readTr;
+	final TransactionContext tcx;
+	final ReadTransactionContext readTcx;
 
 	public Instruction(Context context, Tuple tokens) {
 		this.context = context;
 		this.tokens = tokens;
 
-		op = tokens.getString(0);
-		isDatabase = op.endsWith(SUFFIX_DATABASE);
-		isSnapshot = op.endsWith(SUFFIX_SNAPSHOT);
+		String fullOp = tokens.getString(0);
+		isDatabase = fullOp.endsWith(SUFFIX_DATABASE);
+		isSnapshot = fullOp.endsWith(SUFFIX_SNAPSHOT);
 
 		if(isDatabase) {
-			this.tr = null;
+			tr = null;
 			readTr = null;
-			op = op.substring(0, op.length() - SUFFIX_DATABASE.length());
+			op = fullOp.substring(0, fullOp.length() - SUFFIX_DATABASE.length());
 		}
 		else if(isSnapshot) {
-			this.tr = context.getCurrentTransaction();
-			readTr = this.tr.snapshot();
-			op = op.substring(0, op.length() - SUFFIX_SNAPSHOT.length());
+			tr = context.getCurrentTransaction();
+			readTr = tr.snapshot();
+			op = fullOp.substring(0, fullOp.length() - SUFFIX_SNAPSHOT.length());
 		}
 		else {
-			this.tr = context.getCurrentTransaction();
-			readTr = this.tr;
+			tr = context.getCurrentTransaction();
+			readTr = tr;
+			op = fullOp;
 		}
 
-		tcx = isDatabase ? context.db : this.tr;
-		readTcx = isDatabase ? context.db : this.readTr;
+		tcx = isDatabase ? context.db : tr;
+		readTcx = isDatabase ? context.db : readTr;
 	}
 
-	void setTransaction(Transaction tr) {
+	void setTransaction(Transaction newTr) {
 		if(!isDatabase) {
-			context.releaseTransaction(this.tr);
-			context.updateCurrentTransaction(tr);
-
-			this.tr = context.getCurrentTransaction();
-			if(isSnapshot) {
-				readTr = this.tr.snapshot();
-			}
-			else {
-				readTr = tr;
-			}
+			context.updateCurrentTransaction(newTr);
 		}
 	}
 
 	void setTransaction(Transaction oldTr, Transaction newTr) {
 		if(!isDatabase) {
 			context.updateCurrentTransaction(oldTr, newTr);
-
-			this.tr = context.getCurrentTransaction();
-			if(isSnapshot) {
-				readTr = this.tr.snapshot();
-			}
-			else {
-				readTr = tr;
-			}
 		}
 	}
 
 	void releaseTransaction() {
-		context.releaseTransaction(this.tr);
+		Context.releaseTransaction(tr);
 	}
 
 	void push(Object o) {
+		if(o instanceof CompletableFuture && tr != null) {
+			CompletableFuture<?> future = (CompletableFuture<?>)o;
+			Context.addTransactionReference(tr);
+			future.whenComplete((x, t) -> Context.releaseTransaction(tr));
+		}
 		context.stack.push(context.instructionIndex, o);
 	}
 

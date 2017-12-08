@@ -84,36 +84,52 @@ abstract class Context implements Runnable {
 		}
 	}
 
-	public synchronized Transaction getCurrentTransaction() {
-		Transaction tr = Context.transactionMap.get(this.trName);
-		Context.transactionRefCounts.get(tr).incrementAndGet();
+	public static synchronized void addTransactionReference(Transaction tr) {
+		transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(0)).incrementAndGet();
+	}
+
+	private static synchronized Transaction getTransaction(String trName) {
+		Transaction tr = transactionMap.get(trName);
+		addTransactionReference(tr);
 		return tr;
 	}
 
-	public synchronized void releaseTransaction(Transaction tr) {
+	public Transaction getCurrentTransaction() {
+		return getTransaction(trName);
+	}
+
+	public static synchronized void releaseTransaction(Transaction tr) {
 		if(tr != null) {
-			AtomicInteger count = Context.transactionRefCounts.get(tr);
+			AtomicInteger count = transactionRefCounts.get(tr);
 			if(count.decrementAndGet() == 0) {
-				Context.transactionRefCounts.remove(tr);
+				assert !transactionMap.containsValue(tr);
+				transactionRefCounts.remove(tr);
 				tr.dispose();
 			}
 		}
 	}
 
-	public synchronized void updateCurrentTransaction(Transaction tr) {
-		Context.transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(1));
-		releaseTransaction(Context.transactionMap.put(this.trName, tr));
+	private static synchronized void updateTransaction(String trName, Transaction tr) {
+		releaseTransaction(transactionMap.put(trName, tr));
+		addTransactionReference(tr);
 	}
 
-	public synchronized boolean updateCurrentTransaction(Transaction oldTr, Transaction newTr) {
-		if(Context.transactionMap.replace(this.trName, oldTr, newTr)) {
-			AtomicInteger count = Context.transactionRefCounts.computeIfAbsent(newTr, x -> new AtomicInteger(0));
-			count.incrementAndGet();
+	private static synchronized boolean updateTransaction(String trName, Transaction oldTr, Transaction newTr) {
+		if(transactionMap.replace(trName, oldTr, newTr)) {
+			addTransactionReference(newTr);
 			releaseTransaction(oldTr);
 			return true;
 		}
 
 		return false;
+	}
+
+	public void updateCurrentTransaction(Transaction tr) {
+		updateTransaction(trName, tr);
+	}
+
+	public boolean updateCurrentTransaction(Transaction oldTr, Transaction newTr) {
+		return updateTransaction(trName, oldTr, newTr);
 	}
 
 	public void newTransaction() {
@@ -128,10 +144,9 @@ abstract class Context implements Runnable {
 		}
 	}
 
-	public synchronized void switchTransaction(byte[] trName) {
-		this.trName = ByteArrayUtil.printable(trName);
-		Transaction tr = Context.transactionMap.computeIfAbsent(this.trName, x -> db.createTransaction());
-		Context.transactionRefCounts.computeIfAbsent(tr, x -> new AtomicInteger(1));
+	public void switchTransaction(byte[] rawTrName) {
+		trName = ByteArrayUtil.printable(rawTrName);
+		newTransaction(null);
 	}
 
 	abstract void executeOperations() throws Throwable;
