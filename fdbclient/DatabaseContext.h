@@ -66,8 +66,6 @@ public:
 	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
-	void invalidateCache( Reference<LocationInfo> const& );
-	void invalidateCache( std::vector<UID> const& );
 
 	Reference<ProxyInfo> getMasterProxies();
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture();
@@ -127,12 +125,6 @@ public:
 	// Cache of location information
 	int locationCacheSize;
 	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
-	mutable SpinLock locationCacheLock;
-
-	// Maps the non-instance-specific SSI.id() (as stored in keyServers) to a specific instance of
-	//  the interface (as stored in serverList)
-	std::map< UID, Future< Optional<StorageServerInterface> > > SSInterfaceCache;
-	mutable SpinLock SSInterfaceCacheLock;
 
 	std::map< std::vector<UID>, LocationInfo* > ssid_locationInfo;
 
