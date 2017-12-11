@@ -300,6 +300,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		return database;
 	}
 
+	// Users of this function must dispose of the returned FutureResults when finished
 	protected FutureResults getRange_internal(
 			KeySelector begin, KeySelector end,
 			int rowLimit, int targetBytes, int streamingMode,

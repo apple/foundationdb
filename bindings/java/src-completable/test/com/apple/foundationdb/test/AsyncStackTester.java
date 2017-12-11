@@ -696,37 +696,6 @@ public class AsyncStackTester {
 			return AsyncUtil.DONE;
 		});
 	}
-	private static CompletableFuture<Void> logStack(final Instruction inst, final byte[] prefix, int i) {
-		//System.out.println("Logging stack at " + i);
-		while(inst.size() > 0) {
-			StackEntry e = inst.pop();
-			byte[] pk = Tuple.from(i, e.idx).pack(prefix);
-			byte[] pv = Tuple.from(StackUtils.serializeFuture(e.value)).pack();
-			inst.tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
-			i--;
-			if(i % 100 == 0) {
-				final int saved = i;
-				return inst.tr.commit().thenComposeAsync(new Function<Void, CompletableFuture<Void>>() {
-					@Override
-					public CompletableFuture<Void> apply(Void o) {
-						inst.releaseTransaction();
-						inst.context.newTransaction();
-						inst.tr = inst.context.getCurrentTransaction();
-						return logStack(inst, prefix, saved);
-					}
-				});
-			}
-		}
-		return inst.tr.commit().thenApplyAsync(new Function<Void, Void>() {
-			@Override
-			public Void apply(Void a) {
-				inst.releaseTransaction();
-				inst.context.newTransaction();
-				inst.tr = inst.context.getCurrentTransaction();
-				return null;
-			}
-		});
-	}
 
 	private static CompletableFuture<Void> pushRange(Instruction inst, CompletableFuture<List<KeyValue>> range) {
 		return pushRange(inst, range, null);

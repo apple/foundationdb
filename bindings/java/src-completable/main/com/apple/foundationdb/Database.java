@@ -35,8 +35,10 @@ import java.util.function.Function;
  *  in the {@link TransactionContext} interface. When used on a {@code Database} these
  *  methods will call {@code Transaction#commit()} after user code has been
  *  executed. These methods will not return successfully until {@code commit()} has
- *  returned successfully.
- *
+ *  returned successfully.<br>
+ * <br>
+ * <b>Note:</b> {@code Database} objects must be disposed when no longer in use in order
+ *  to free associated native memory.
  */
 public interface Database extends Disposable, TransactionContext {
 	/**
@@ -44,10 +46,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * <br>
 	 * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
 	 *  option. This is because the Java bindings disallow use of {@code Transaction} objects after
-	 *  {@link Transaction#onError} is called.<br>
-	 * <br>
-	 * <b>Note:</b> {@code Database} objects must be disposed when no longer in use in order
-	 *  to free associated native memory.
+	 *  {@link Transaction#onError} is called.
 	 *
 	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
 	 */
