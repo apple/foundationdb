@@ -94,7 +94,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 *
+	 * 
 	 * @see #read(Function)
 	 */
 	<T> T read(Function<? super ReadTransaction, T> retryable, Executor e);
@@ -128,7 +128,7 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 *
+	 * 
 	 * @see #readAsync(Function)
 	 */
 	<T> CompletableFuture<T> readAsync(
