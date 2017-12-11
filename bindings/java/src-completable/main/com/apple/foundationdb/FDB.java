@@ -103,21 +103,8 @@ public class FDB {
 	private FDB(int apiVersion) {
 		this.apiVersion = apiVersion;
 
-		options = new NetworkOptions(new OptionConsumer() {
-			@Override
-			public void setOption(int code, byte[] parameter) {
-				Network_setOption(code, parameter);
-			}
-		});
-
-		Runtime.getRuntime().addShutdownHook(new Thread(
-			new Runnable(){
-				@Override
-				public void run() {
-					FDB.this.stopNetwork();
-				}
-			}
-		));
+		options = new NetworkOptions(this::Network_setOption);
+		Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
 	}
 
 	/**
@@ -345,39 +332,38 @@ public class FDB {
 		Network_setup();
 		netStarted = true;
 
-		e.execute(new Runnable() {
-			@Override
-			public void run() {
-				boolean acquired = false;
-				try {
-					while(!acquired) {
-						try {
-							// make attempt to avoid a needless deadlock
-							synchronized (FDB.this) {
-								if(netStopped) {
-									return;
-								}
-							}
+		e.execute(() -> {
+            boolean acquired = false;
+            try {
+                while(!acquired) {
+                    try {
+                        // make attempt to avoid a needless deadlock
+                        synchronized (FDB.this) {
+                            if(netStopped) {
+                                return;
+                            }
+                        }
 
-							netRunning.acquire();
-							acquired = true;
-						} catch(InterruptedException e) {}
+                        netRunning.acquire();
+                        acquired = true;
+                    } catch(InterruptedException err) {
+                        // Swallow thread interruption
 					}
-					try {
-						Network_run();
-					} catch (Throwable t) {
-						System.err.println("Unhandled error in FoundationDB network thread: " + t.getMessage());
-						// eat this error. we have nowhere to send it.
-					}
-				} finally {
-					if(acquired) {
-						netRunning.release();
-					}
-					synchronized (FDB.this) {
-						netStopped = true;
-					}
-				}
-			}
+                }
+                try {
+                    Network_run();
+                } catch (Throwable t) {
+                    System.err.println("Unhandled error in FoundationDB network thread: " + t.getMessage());
+                    // eat this error. we have nowhere to send it.
+                }
+            } finally {
+                if(acquired) {
+                    netRunning.release();
+                }
+                synchronized (FDB.this) {
+                    netStopped = true;
+                }
+            }
 		});
 	}
 

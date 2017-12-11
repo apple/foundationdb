@@ -24,10 +24,12 @@ import java.nio.charset.Charset;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 import java.util.function.BiFunction;
 
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
+import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.async.DisposableAsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
@@ -137,7 +139,7 @@ public class LocalityUtil {
 
 			firstGet = tr.getRange(keyServersForKey(begin), keyServersForKey(end));
 			block = firstGet.iterator();
-			nextFuture = block.onHasNext().handleAsync(handler, tr.getExecutor()).thenCompose(x -> x);
+			nextFuture = AsyncUtil.composeHandleAsync(block.onHasNext(), handler, tr.getExecutor());
 
 			disposed = false;
 		}
@@ -161,7 +163,7 @@ public class LocalityUtil {
 			block = tr.getRange(
 					keyServersForKey(begin),
 					keyServersForKey(end)).iterator();
-			nextFuture = block.onHasNext().handleAsync(handler, tr.getExecutor()).thenCompose(x -> x);
+			nextFuture = AsyncUtil.composeHandleAsync(block.onHasNext(), handler, tr.getExecutor());
 			return nextFuture;
 		}
 
@@ -174,8 +176,9 @@ public class LocalityUtil {
 				if(o instanceof FDBException) {
 					FDBException err = (FDBException) o;
 					if(err.getCode() == 1007 && !Arrays.equals(begin, lastBegin)) {
+						Executor executor = BoundaryIterator.this.tr.getExecutor();
 						BoundaryIterator.this.tr.dispose();
-						BoundaryIterator.this.tr = BoundaryIterator.this.tr.getDatabase().createTransaction();
+						BoundaryIterator.this.tr = BoundaryIterator.this.tr.getDatabase().createTransaction(executor);
 						return restartGet();
 					}
 				}
@@ -200,7 +203,7 @@ public class LocalityUtil {
 			byte[] key = o.getKey();
 			byte[] suffix = Arrays.copyOfRange(key, 13, key.length);
 			BoundaryIterator.this.begin = ByteArrayUtil.join(suffix, new byte[] { (byte)0 });
-			nextFuture = block.onHasNext().handleAsync(handler, tr.getExecutor()).thenCompose(x -> x);
+			nextFuture = AsyncUtil.composeHandleAsync(block.onHasNext(), handler, tr.getExecutor());
 			return suffix;
 		}
 

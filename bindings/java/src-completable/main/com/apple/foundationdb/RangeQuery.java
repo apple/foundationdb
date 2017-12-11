@@ -234,14 +234,14 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 
 			// We have a chunk and are still working though it
 			if(index < chunk.values.size()) {
-				return CompletableFuture.completedFuture(true);
+			    return AsyncUtil.READY_TRUE;
 			}
 
 			// If we are at the end of the current chunk there is either:
 			//   - no more data -or-
 			//   - we are already fetching the next block
 			return mainChunkIsTheLast() ?
-					CompletableFuture.completedFuture(false) :
+					AsyncUtil.READY_FALSE :
 					nextFuture;
 		}
 

@@ -367,6 +367,6 @@ public interface Transaction extends Disposable, ReadTransaction, TransactionCon
 	 */
 	@Override
 	<T> CompletableFuture<T> runAsync(
-			Function<? super Transaction, CompletableFuture<T>> retryable);
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable);
 
 }

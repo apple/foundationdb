@@ -117,7 +117,7 @@ public interface Database extends Disposable, TransactionContext {
 	 */
 	@Override
 	default <T> CompletableFuture<T> readAsync(
-			Function<? super ReadTransaction, CompletableFuture<T>> retryable) {
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable) {
 		return readAsync(retryable, getExecutor());
 	}
 
@@ -133,7 +133,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * @see #readAsync(Function)
 	 */
 	<T> CompletableFuture<T> readAsync(
-			Function<? super ReadTransaction, CompletableFuture<T>> retryable, Executor e);
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic.
@@ -195,7 +195,7 @@ public interface Database extends Disposable, TransactionContext {
 	 */
 	@Override
 	default <T> CompletableFuture<T> runAsync(
-			Function<? super Transaction, CompletableFuture<T>> retryable) {
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable) {
 		return runAsync(retryable, getExecutor());
 	}
 
@@ -211,5 +211,5 @@ public interface Database extends Disposable, TransactionContext {
 	 * @see #run(Function)
 	 */
 	<T> CompletableFuture<T> runAsync(
-			Function<? super Transaction, CompletableFuture<T>> retryable, Executor e);
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e);
 }

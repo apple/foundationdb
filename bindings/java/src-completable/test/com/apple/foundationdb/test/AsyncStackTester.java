@@ -81,11 +81,11 @@ public class AsyncStackTester {
 				System.out.println(inst.context.preStr + " - " + "Pushing null");
 			else
 				System.out.println(inst.context.preStr + " - " + "Pushing item of type " + item.getClass().getName());*/
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.POP) {
 			inst.pop();
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.DUP) {
 			if(inst.size() == 0)
@@ -93,11 +93,11 @@ public class AsyncStackTester {
 			StackEntry e = inst.pop();
 			inst.push(e);
 			inst.push(e);
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.EMPTY_STACK) {
 			inst.clear();
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.SWAP) {
 			return inst.popParam()
@@ -152,7 +152,7 @@ public class AsyncStackTester {
 		}
 		else if(op == StackOperation.NEW_TRANSACTION) {
 			inst.context.newTransaction();
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.USE_TRANSACTION) {
 			return inst.popParam()
@@ -173,7 +173,7 @@ public class AsyncStackTester {
 						@Override
 						public CompletableFuture<Void> apply(Transaction tr) {
 							tr.set((byte[])params.get(0), (byte[])params.get(1));
-							return CompletableFuture.completedFuture(null);
+							return AsyncUtil.DONE;
 						}
 					});
 				}
@@ -188,7 +188,7 @@ public class AsyncStackTester {
 						@Override
 						public CompletableFuture<Void> apply(Transaction tr) {
 							tr.clear((byte[])param);
-							return CompletableFuture.completedFuture(null);
+							return AsyncUtil.DONE;
 						}
 					});
 				}
@@ -202,7 +202,7 @@ public class AsyncStackTester {
 						@Override
 						public CompletableFuture<Void> apply(Transaction tr) {
 							tr.clear((byte[])params.get(0), (byte[])params.get(1));
-							return CompletableFuture.completedFuture(null);
+							return AsyncUtil.DONE;
 						}
 					});
 				}
@@ -216,7 +216,7 @@ public class AsyncStackTester {
 						@Override
 						public CompletableFuture<Void> apply(Transaction tr) {
 							tr.clear(Range.startsWith((byte[])param));
-							return CompletableFuture.completedFuture(null);
+							return AsyncUtil.DONE;
 						}
 					});
 				}
@@ -232,7 +232,7 @@ public class AsyncStackTester {
 							@Override
 							public CompletableFuture<Void> apply(Transaction tr) {
 								tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
-								return CompletableFuture.completedFuture(null);
+								return AsyncUtil.DONE;
 							}
 						}
 					);
@@ -241,15 +241,15 @@ public class AsyncStackTester {
 		}
 		else if(op == StackOperation.COMMIT) {
 			inst.push(inst.tr.commit());
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.RESET) {
 			inst.context.newTransaction();
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.CANCEL) {
 			inst.tr.cancel();
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.READ_CONFLICT_RANGE) {
 			return inst.popParams(2).thenApplyAsync(new Function<List<Object>, Void>() {
@@ -293,7 +293,7 @@ public class AsyncStackTester {
 		}
 		else if(op == StackOperation.DISABLE_WRITE_CONFLICT) {
 			inst.tr.options().setNextWriteNoWriteConflictRange();
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.GET) {
 			return inst.popParam().thenApplyAsync(new Function<Object, Void>() {
@@ -378,7 +378,7 @@ public class AsyncStackTester {
 				StackUtils.pushError(inst, e);
 			}
 
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.GET_VERSIONSTAMP) {
 			try {
@@ -388,13 +388,13 @@ public class AsyncStackTester {
 				StackUtils.pushError(inst, e);
 			}
 
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.SET_READ_VERSION) {
 			if(inst.context.lastVersion == null)
 				throw new IllegalArgumentException("Read version has not been read");
 			inst.tr.setReadVersion(inst.context.lastVersion);
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.ON_ERROR) {
 			return inst.popParam().thenComposeAsync(new Function<Object, CompletableFuture<Void>>() {
@@ -429,7 +429,7 @@ public class AsyncStackTester {
 					}
 
 					inst.push(f);
-					return CompletableFuture.completedFuture(null);
+					return AsyncUtil.DONE;
 				}
 			});
 		}
@@ -693,7 +693,7 @@ public class AsyncStackTester {
 				tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
 			}
 
-			return CompletableFuture.completedFuture(null);
+			return AsyncUtil.DONE;
 		});
 	}
 	private static CompletableFuture<Void> logStack(final Instruction inst, final byte[] prefix, int i) {
@@ -794,7 +794,7 @@ public class AsyncStackTester {
 					FDBException ex = StackUtils.getRootFDBException(e);
 					if(ex != null) {
 						StackUtils.pushError(inst, ex);
-						return CompletableFuture.completedFuture(null);
+						return AsyncUtil.DONE;
 					}
 					else {
 						CompletableFuture<Void> f = new CompletableFuture<>();
@@ -829,7 +829,7 @@ public class AsyncStackTester {
 					public CompletableFuture<Void> apply(List<KeyValue> next) {
 						if(next.size() < 1) {
 							//System.out.println("No key found after: " + ByteArrayUtil.printable(nextKey.getKey()));
-							return CompletableFuture.completedFuture(null);
+							return AsyncUtil.DONE;
 						}
 
 						operations = next;

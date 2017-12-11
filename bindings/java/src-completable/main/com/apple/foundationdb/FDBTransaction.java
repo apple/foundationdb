@@ -137,7 +137,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 		@Override
 		public <T> CompletableFuture<T> readAsync(
-				Function<? super ReadTransaction, CompletableFuture<T>> retryable) {
+				Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable) {
 			return AsyncUtil.applySafely(retryable, this);
 		}
 
@@ -356,7 +356,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 	@Override
 	public <T> CompletableFuture<T> runAsync(
-			Function<? super Transaction, CompletableFuture<T>> retryable) {
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable) {
 		return AsyncUtil.applySafely(retryable, this);
 	}
 
@@ -367,7 +367,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 	@Override
 	public <T> CompletableFuture<T> readAsync(
-			Function<? super ReadTransaction, CompletableFuture<T>> retryable) {
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable) {
 		return AsyncUtil.applySafely(retryable, this);
 	}
 
