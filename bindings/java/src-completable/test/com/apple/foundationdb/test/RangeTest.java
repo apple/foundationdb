@@ -114,8 +114,8 @@ public class RangeTest {
 			e.printStackTrace();
 			return;
 		}
-		//db.dispose();
-		//cluster.dispose();
+		//db.close();
+		//cluster.close();
 
 		tr = db.createTransaction();
 		checkRange(tr);
@@ -154,8 +154,8 @@ public class RangeTest {
 			System.out.println("range comparisons okay");
 		}
 
-		db.dispose();
-		//cluster.dispose();
+		db.close();
+		//cluster.close();
 		//fdb.stopNetwork();
 		System.out.println("Done with test program");
 	}

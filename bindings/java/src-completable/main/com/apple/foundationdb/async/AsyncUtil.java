@@ -185,16 +185,16 @@ public class AsyncUtil {
 	}
 
 	/**
-	 * Map a {@code DisposableAsyncIterator} into a {@code DisposableAsyncIterator} of another type or with
+	 * Map a {@code CloseableAsyncIterator} into a {@code CloseableAsyncIterator} of another type or with
 	 *  each element modified in some fashion.
 	 *
 	 * @param iterator input
 	 * @param func mapping function applied to each element
 	 * @return a new iterator with each element mapped to a different value
 	 */
-	public static <V, T> DisposableAsyncIterator<T> mapIterator(final DisposableAsyncIterator<V> iterator,
+	public static <V, T> CloseableAsyncIterator<T> mapIterator(final CloseableAsyncIterator<V> iterator,
 													  final Function<V, T> func) {
-		return new DisposableAsyncIterator<T>() {
+		return new CloseableAsyncIterator<T>() {
 			@Override
 			public void remove() {
 				iterator.remove();
@@ -221,8 +221,8 @@ public class AsyncUtil {
 			}
 
 			@Override
-			public void dispose() {
-				iterator.dispose();
+			public void close() {
+				iterator.close();
 			}
 		};
 	}
@@ -283,7 +283,7 @@ public class AsyncUtil {
 	 *
 	 * @param body the asynchronous operation over which to loop
 	 *
-	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 * @return a {@link CompletableFuture} which will be set at completion of the loop.
 	 * @deprecated Since version 5.1.0. Use the version of {@link #whileTrue(Supplier) whileTrue} that takes a
 	 * {@link Supplier} instead.
 	 */
@@ -298,7 +298,7 @@ public class AsyncUtil {
 	 * @param body the asynchronous operation over which to loop
 	 * @param executor the {@link Executor} to use for asynchronous operations
 	 *
-	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 * @return a {@link CompletableFuture} which will be set at completion of the loop.
 	 * @deprecated Since version 5.1.0. Use the version of {@link #whileTrue(Supplier, Executor) whileTrue} that takes a
 	 * {@link Supplier} instead.
 	 */
@@ -312,7 +312,7 @@ public class AsyncUtil {
 	 *
 	 * @param body the asynchronous operation over which to loop
 	 *
-	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 * @return a {@link CompletableFuture} which will be set at completion of the loop.
 	 */
 	public static CompletableFuture<Void> whileTrue(Supplier<CompletableFuture<Boolean>> body) {
 		return whileTrue(body, DEFAULT_EXECUTOR);
@@ -324,7 +324,7 @@ public class AsyncUtil {
 	 * @param body the asynchronous operation over which to loop
 	 * @param executor the {@link Executor} to use for asynchronous operations
 	 *
-	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 * @return a {@link CompletableFuture} which will be set at completion of the loop.
 	 */
 	public static CompletableFuture<Void> whileTrue(Supplier<CompletableFuture<Boolean>> body, Executor executor) {
 		return new LoopPartial(body, executor).run();
@@ -402,10 +402,10 @@ public class AsyncUtil {
 	}
 
 	/**
-	 * Return a {@code CompletableFuture} that will be set when any of the {@code PartialFuture}
+	 * Return a {@code CompletableFuture} that will be set when any of the {@link CompletableFuture}
 	 *  inputs are done. A {@code CompletableFuture} is done both on success and failure.
 	 *
-	 * @param input the list of {@code PartialFuture}s to monitor. This list
+	 * @param input the list of {@link CompletableFuture}s to monitor. This list
 	 *  <b>must not</b> be modified during the execution of this call.
 	 *
 	 * @return a signal that will be set when any of the {@code CompletableFuture}s are done
@@ -418,10 +418,10 @@ public class AsyncUtil {
 	}
 
 	/**
-	 * Return a {@code CompletableFuture} that will be set when all the {@code PartialFuture}
+	 * Return a {@code CompletableFuture} that will be set when all the {@link CompletableFuture}
 	 *  inputs are done. A {@code CompletableFuture} is done both on success and failure.
 	 *
-	 * @param input the list of {@code PartialFuture}s to monitor. This list
+	 * @param input the list of {@link CompletableFuture}s to monitor. This list
 	 *  <b>must not</b> be modified during the execution of this call.
 	 *
 	 * @return a signal that will be set when all of the {@code CompletableFuture}s are done

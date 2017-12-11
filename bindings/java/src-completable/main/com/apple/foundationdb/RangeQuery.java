@@ -85,7 +85,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 					this.begin, this.end, this.rowLimit, 0, StreamingMode.EXACT.code(),
 					1, this.snapshot, this.reverse);
 			return range.thenApply(result -> result.get().values)
-					.whenComplete((result, e) -> range.dispose());
+					.whenComplete((result, e) -> range.close());
 		}
 
 		// If the streaming mode is not EXACT, simply collect the results of an iteration into a list
@@ -197,7 +197,7 @@ class RangeQuery implements AsyncIterable<KeyValue>, Iterable<KeyValue> {
 					promise.complete(Boolean.TRUE);
 				}
 				finally {
-					fetchingChunk.dispose();
+					fetchingChunk.close();
 				}
 			}
 		}

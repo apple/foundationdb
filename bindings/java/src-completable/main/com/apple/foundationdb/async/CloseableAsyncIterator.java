@@ -1,5 +1,5 @@
 /*
- * DisposableAsyncIterator.java
+ * CloseableAsyncIterator.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,12 +20,27 @@
 
 package com.apple.foundationdb.async;
 
-import com.apple.foundationdb.Disposable;
-
 /**
- * A version of {@link AsyncIterator} that holds native FDB resources and
- *  must be disposed once it is no longer in use.
+ * A version of {@link AsyncIterator} that must be closed once no longer in use in order to free
+ *  any associated resources.
  *
  * @param <T> the type of object yielded by {@code next()}
  */
-public interface DisposableAsyncIterator<T> extends Disposable, AsyncIterator<T> {}
+public interface CloseableAsyncIterator<T> extends AutoCloseable, AsyncIterator<T> {
+	/**
+	 * Cancels any outstanding asynchronous work, closes the iterator, and frees any associated
+	 *  resources. This must be called at least once after the object is no longer in use. This
+	 *  can be called multiple times, but care should be taken that an object is not in use
+	 *  in another thread at the time of the call.
+	 */
+	@Override
+	void close();
+
+	/**
+	 * Alias for {@link #close}
+	 */
+	@Override
+	default void cancel() {
+		close();
+	}
+}

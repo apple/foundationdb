@@ -28,7 +28,7 @@ import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
 
-class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable, OptionConsumer {
+class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
 	private DatabaseOptions options;
 	private final Executor executor;
 
@@ -57,7 +57,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 				}
 			}
 		} finally {
-			t.dispose();
+			t.close();
 		}
 	}
 
@@ -90,7 +90,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 			}, e).thenCompose(x -> x);
 		}, e)
 		.thenApply(o -> returnValue.get())
-		.whenComplete((v, t) -> trRef.get().dispose());
+		.whenComplete((v, t) -> trRef.get().close());
 	}
 
 	@Override
@@ -102,8 +102,8 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	@Override
 	protected void finalize() throws Throwable {
 		try {
-			checkUndisposed("Database");
-			dispose();
+			checkUnclosed("Database");
+			close();
 		}
 		finally {
 			super.finalize();
@@ -120,7 +120,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 			return tr;
 		} catch(RuntimeException err) {
 			if(tr != null) {
-				tr.dispose();
+				tr.close();
 			}
 
 			throw err;
@@ -145,7 +145,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	}
 
 	@Override
-	protected void disposeInternal(long cPtr) {
+	protected void closeInternal(long cPtr) {
 		Database_dispose(cPtr);
 	}
 

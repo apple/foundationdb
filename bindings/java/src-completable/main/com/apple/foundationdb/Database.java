@@ -37,10 +37,10 @@ import java.util.function.Function;
  *  executed. These methods will not return successfully until {@code commit()} has
  *  returned successfully.<br>
  * <br>
- * <b>Note:</b> {@code Database} objects must be disposed when no longer in use in order
- *  to free associated native memory.
+ * <b>Note:</b> {@code Database} objects must be {@link #close closed} when no longer
+ *  in use in order to free any associated resources.
  */
-public interface Database extends Disposable, TransactionContext {
+public interface Database extends AutoCloseable, TransactionContext {
 	/**
 	 * Creates a {@link Transaction} that operates on this {@code Database}.<br>
 	 * <br>
@@ -94,7 +94,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 * 
+	 *
 	 * @see #read(Function)
 	 */
 	<T> T read(Function<? super ReadTransaction, T> retryable, Executor e);
@@ -128,7 +128,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 * 
+	 *
 	 * @see #readAsync(Function)
 	 */
 	<T> CompletableFuture<T> readAsync(
@@ -211,4 +211,12 @@ public interface Database extends Disposable, TransactionContext {
 	 */
 	<T> CompletableFuture<T> runAsync(
 			Function<? super Transaction, CompletableFuture<T>> retryable, Executor e);
+
+	/**
+	 * Close the {@code Database} object and release any associated resources. This must be called at
+	 *  least once after the {@code Database} object is no longer in use. This can be called multiple
+	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
+	 */
+	@Override
+	void close();
 }

@@ -81,7 +81,7 @@ public class FDB {
 	final int apiVersion;
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
-	volatile boolean warnOnUndisposed = true;
+	volatile boolean warnOnUnclosed = true;
 	final private Semaphore netRunning = new Semaphore(1);
 	private final NetworkOptions options;
 
@@ -165,14 +165,14 @@ public class FDB {
 		FDB fdb = new FDB(version);
 
 		if(version < 510) {
-			fdb.warnOnUndisposed = false;
+			fdb.warnOnUnclosed = false;
 		}
 
 		return singleton = fdb;
 	}
 
-	public void setUndisposedWarning(boolean warnOnUndisposed) {
-		this.warnOnUndisposed = warnOnUndisposed;
+	public void setUnclosedWarning(boolean warnOnUnclosed) {
+		this.warnOnUnclosed = warnOnUnclosed;
 	}
 
 	// Singleton is initialized to null and only set once by a call to selectAPIVersion
@@ -299,7 +299,7 @@ public class FDB {
 		}
 		Cluster c = f.join();
 		Database db = c.openDatabase(e);
-		c.dispose();
+		c.close();
 
 		return db;
 	}

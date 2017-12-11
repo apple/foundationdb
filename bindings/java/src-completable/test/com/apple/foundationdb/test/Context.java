@@ -37,7 +37,7 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
-abstract class Context implements Runnable {
+abstract class Context implements Runnable, AutoCloseable {
 	final Stack stack = new Stack();
 	final Database db;
 	final String preStr;
@@ -104,7 +104,7 @@ abstract class Context implements Runnable {
 			if(count.decrementAndGet() == 0) {
 				assert !transactionMap.containsValue(tr);
 				transactionRefCounts.remove(tr);
-				tr.dispose();
+				tr.close();
 			}
 		}
 	}
@@ -140,7 +140,7 @@ abstract class Context implements Runnable {
 	public void newTransaction(Transaction oldTr) {
 		Transaction newTr = db.createTransaction();
 		if(!updateCurrentTransaction(oldTr, newTr)) {
-			newTr.dispose();
+			newTr.close();
 		}
 	}
 
@@ -212,9 +212,10 @@ abstract class Context implements Runnable {
 		return done.thenApplyAsync((x) -> params);
 	}
 
-	void dispose() {
+	@Override
+	public void close() {
 		for(Transaction tr : transactionMap.values()) {
-			tr.dispose();
+			tr.close();
 		}
 	}
 }
