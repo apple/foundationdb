@@ -156,21 +156,23 @@ public class FDB {
 			}
 			return singleton;
 		}
-		if(version < 500)
-			throw new IllegalArgumentException("API version not supported (minimum 500)");
+		if(version < 510)
+			throw new IllegalArgumentException("API version not supported (minimum 510)");
 		if(version > 510)
 			throw new IllegalArgumentException("API version not supported (maximum 510)");
 
 		Select_API_version(version);
 		FDB fdb = new FDB(version);
 
-		if(version < 510) {
-			fdb.warnOnUnclosed = false;
-		}
-
 		return singleton = fdb;
 	}
 
+	/**
+	 * Enables or disables the stderr warning that is printed whenever an object with FoundationDB
+	 *  native resources is garbage collected without being closed. By default, this feature is enabled.
+	 *
+	 * @param warnOnUnclosed Whether the warning should be printed for unclosed objects
+	 */
 	public void setUnclosedWarning(boolean warnOnUnclosed) {
 		this.warnOnUnclosed = warnOnUnclosed;
 	}
