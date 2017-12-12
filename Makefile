@@ -35,13 +35,6 @@ ifeq ($(PLATFORM),Linux)
   CXX ?= g++
 
   CXXFLAGS += -std=c++0x
-  HARDENING_CFLAGS := -fstack-protector-all -Wstack-protector --param ssp-buffer-size=4 -fPIC
-  CFLAGS += ${HARDENING_CFLAGS}
-# TODO(alexmiller): boost 1.52.0 prevents us from using most of these with -Werror.
-# Reassess after boost has been upgraded to >1.52.0.
-# CFLAGS += -Wall -Wextra -Wformat-security -Wconversion -Wsign-conversion -Werror
-  HARDENING_LDFLAGS := -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now
-  LDFLAGS := ${HARDENING_CFLAGS} ${HARDENING_LDFLAGS}
 
   BOOSTDIR ?= /opt/boost_1_52_0
   DLEXT := so
@@ -91,6 +84,7 @@ CFLAGS += -g
 # valgrind-compatibile builds are enabled by uncommenting lines in valgind.mk
 
 CXXFLAGS += -Wno-deprecated
+LDFLAGS :=
 LIBS :=
 STATIC_LIBS :=
 
