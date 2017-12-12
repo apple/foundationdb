@@ -35,6 +35,10 @@ struct CpuProfilerWorkload : TestWorkload
 	//How long the profiler should be run; if <= 0 then it will run until the workload's check function is called
 	double duration;
 
+	//What process classes should be profiled as part of this run?
+	//See Locality.h for the list of valid strings to provide.
+	vector<std::string> roles;
+
 	//A list of worker interfaces which have had profiling turned on
 	std::vector<WorkerInterface> profilingWorkers;
 
@@ -43,6 +47,7 @@ struct CpuProfilerWorkload : TestWorkload
 	{
 		initialDelay = getOption(options, LiteralStringRef("initialDelay"), 0.0);
 		duration = getOption(options, LiteralStringRef("duration"), -1.0);
+		roles = getOption(options, LiteralStringRef("roles"), vector<std::string>());
 		success = true;
 	}
 
@@ -66,8 +71,11 @@ struct CpuProfilerWorkload : TestWorkload
 			{
 				vector<std::pair<WorkerInterface, ProcessClass>> _workers = wait( getWorkers( self->dbInfo ) );
 				vector<WorkerInterface> workers;
-				for(int i = 0; i < _workers.size(); i++)
-					workers.push_back(_workers[i].first);
+				for(int i = 0; i < _workers.size(); i++) {
+					if (self->roles.empty() || std::find(self->roles.cbegin(), self->roles.cend(), _workers[i].second.toString()) != self->roles.cend()) {
+						workers.push_back(_workers[i].first);
+					}
+				}
 				self->profilingWorkers = workers;
 			}
 
@@ -97,16 +105,6 @@ struct CpuProfilerWorkload : TestWorkload
 
 			TraceEvent("DoneSignalingProfiler");
 		}
-
-		// Profiling the testers is already covered above, as the workers listed include all testers.
-		// TODO(alexmiller): Create role-restricted profiling, and consider restoring the below.
-		// Enable (or disable) the profiler on the current tester
-		// ProfilerRequest req;
-		// req.type = ProfilerRequest::Type::FLOW;
-		// req.action = enabled ? ProfilerRequest::Action::ENABLE : ProfilerRequest::Action::DISABLE;
-		// req.duration = 0; //unused
-		// req.outputFile = StringRef(SERVER_KNOBS->LOG_DIRECTORY + "/" + toIPString(g_network->getLocalAddress().ip) + "." + format("%d", g_network->getLocalAddress().port) + ".profile.local.bin");
-		// updateCpuProfiler(req);
 
 		return Void();
 	}

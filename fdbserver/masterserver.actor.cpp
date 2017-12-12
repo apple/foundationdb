@@ -433,8 +433,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 				}
 			}
 		}
-		when ( ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> req = waitNext( parent->provisionalProxies[0].getKeyServersLocations.getFuture() ) ) {
-			req.send(Never());
+		when ( GetKeyServerLocationsRequest req = waitNext( parent->provisionalProxies[0].getKeyServersLocations.getFuture() ) ) {
+			req.reply.send(Never());
 		}
 		when ( Void _ = wait( waitFailure ) ) { throw worker_removed(); }
 	}
