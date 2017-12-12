@@ -70,10 +70,10 @@ import com.apple.foundationdb.tuple.Tuple;
  *  option. This is because the Java bindings disallow use of {@code Transaction} objects after {@link #onError}
  *  is called.<br>
  * <br>
- * <b>Note:</b> {@code Transaction} objects must be disposed when no longer in use in order
- *  to free associated native memory.
+ * <b>Note:</b> {@code Transaction} objects must be {@link #close closed} when no longer
+ *  in use in order to free any associated resources.
  */
-public interface Transaction extends Disposable, ReadTransaction, TransactionContext {
+public interface Transaction extends AutoCloseable, ReadTransaction, TransactionContext {
 
 	/**
 	 * Return special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
@@ -369,4 +369,11 @@ public interface Transaction extends Disposable, ReadTransaction, TransactionCon
 	<T> CompletableFuture<T> runAsync(
 			Function<? super Transaction, ? extends CompletableFuture<T>> retryable);
 
+	/**
+	 * Close the {@code Transaction object and release any associated resources. This must be called at
+	 *  least once after the {@code Transaction} object is no longer in use. This can be called multiple
+	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
+	 */
+	@Override
+	void close();
 }

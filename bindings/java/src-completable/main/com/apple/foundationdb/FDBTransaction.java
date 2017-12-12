@@ -29,7 +29,7 @@ import java.util.function.Function;
 import com.apple.foundationdb.async.*;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
-class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transaction, OptionConsumer {
+class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionConsumer {
 	private final Database database;
 	private final Executor executor;
 	private final TransactionOptions options;
@@ -300,7 +300,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		return database;
 	}
 
-	// Users of this function must dispose of the returned FutureResults when finished
+	// Users of this function must close the returned FutureResults when finished
 	protected FutureResults getRange_internal(
 			KeySelector begin, KeySelector end,
 			int rowLimit, int targetBytes, int streamingMode,
@@ -496,13 +496,13 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 			return f.thenApply(v -> tr)
 				.whenComplete((v, t) -> {
 					if(t != null) {
-						tr.dispose();
+						tr.close();
 					}
 				});
 		} finally {
 			pointerReadLock.unlock();
 			if(!transactionOwner) {
-				dispose();
+				close();
 			}
 		}
 	}
@@ -537,7 +537,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		}
 		catch(RuntimeException err) {
 			if(tr != null) {
-				tr.dispose();
+				tr.close();
 			}
 
 			throw err;
@@ -557,8 +557,8 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	@Override
 	protected void finalize() throws Throwable {
 		try {
-			checkUndisposed("Transaction");
-			dispose();
+			checkUnclosed("Transaction");
+			close();
 		}
 		finally {
 			super.finalize();
@@ -566,7 +566,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	}
 
 	@Override
-	protected void disposeInternal(long cPtr) {
+	protected void closeInternal(long cPtr) {
 		if(transactionOwner) {
 			Transaction_dispose(cPtr);
 		}

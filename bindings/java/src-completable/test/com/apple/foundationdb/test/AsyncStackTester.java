@@ -792,7 +792,7 @@ public class AsyncStackTester {
 				Transaction tr = db.createTransaction();
 
 				return tr.getRange(nextKey, endKey, 1000).asList()
-				.whenComplete((x, t) -> tr.dispose())
+				.whenComplete((x, t) -> tr.close())
 				.thenComposeAsync(new Function<List<KeyValue>, CompletableFuture<Void>>() {
 					@Override
 					public CompletableFuture<Void> apply(List<KeyValue> next) {
@@ -886,7 +886,7 @@ public class AsyncStackTester {
 		byte[] bs = db.createTransaction().get(key).get();
 		System.out.println("output of " + ByteArrayUtil.printable(key) + " as: " + ByteArrayUtil.printable(bs));*/
 
-		db.dispose();
+		db.close();
 		System.gc();
 
 		/*fdb.stopNetwork();

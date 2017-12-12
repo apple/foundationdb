@@ -30,7 +30,7 @@ import java.util.function.BiFunction;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.async.DisposableAsyncIterator;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 /**
@@ -42,7 +42,7 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
  */
 public class LocalityUtil {
 	/**
-	 * Returns a {@code DisposableAsyncIterator} of keys {@code k} such that
+	 * Returns a {@code CloseableAsyncIterator} of keys {@code k} such that
 	 * {@code begin <= k < end} and {@code k} is located at the start of a
 	 * contiguous range stored on a single server.<br>
 	 *<br>
@@ -55,12 +55,12 @@ public class LocalityUtil {
 	 *
 	 * @return an sequence of keys denoting the start of single-server ranges
 	 */
-	public static DisposableAsyncIterator<byte[]> getBoundaryKeys(Database db, byte[] begin, byte[] end) {
+	public static CloseableAsyncIterator<byte[]> getBoundaryKeys(Database db, byte[] begin, byte[] end) {
 		return getBoundaryKeys_internal(db.createTransaction(), begin, end);
 	}
 
 	/**
-	 * Returns a {@code DisposableAsyncIterator} of keys {@code k} such that
+	 * Returns a {@code CloseableAsyncIterator} of keys {@code k} such that
 	 * {@code begin <= k < end} and {@code k} is located at the start of a
 	 * contiguous range stored on a single server.<br>
 	 *<br>
@@ -81,7 +81,7 @@ public class LocalityUtil {
 	 *
 	 * @return an sequence of keys denoting the start of single-server ranges
 	 */
-	public static DisposableAsyncIterator<byte[]> getBoundaryKeys(Transaction tr, byte[] begin, byte[] end) {
+	public static CloseableAsyncIterator<byte[]> getBoundaryKeys(Transaction tr, byte[] begin, byte[] end) {
 		Transaction local = tr.getDatabase().createTransaction();
 		CompletableFuture<Long> readVersion = tr.getReadVersion();
 		if(readVersion.isDone() && !readVersion.isCompletedExceptionally()) {
@@ -112,11 +112,11 @@ public class LocalityUtil {
 		return ((FDBTransaction)tr).getAddressesForKey(key);
 	}
 
-	private static DisposableAsyncIterator<byte[]> getBoundaryKeys_internal(Transaction tr, byte[] begin, byte[] end) {
+	private static CloseableAsyncIterator<byte[]> getBoundaryKeys_internal(Transaction tr, byte[] begin, byte[] end) {
 		return new BoundaryIterator(tr, begin, end);
 	}
 
-	static class BoundaryIterator implements DisposableAsyncIterator<byte[]> {
+	static class BoundaryIterator implements CloseableAsyncIterator<byte[]> {
 		Transaction tr;
 		byte[] begin;
 		byte[] lastBegin;
@@ -125,7 +125,7 @@ public class LocalityUtil {
 
 		AsyncIterator<KeyValue> block;
 		private CompletableFuture<Boolean> nextFuture;
-		private boolean disposed;
+		private boolean closed;
 
 		BoundaryIterator(Transaction tr, byte[] begin, byte[] end) {
 			this.tr = tr;
@@ -141,7 +141,7 @@ public class LocalityUtil {
 			block = firstGet.iterator();
 			nextFuture = AsyncUtil.composeHandleAsync(block.onHasNext(), handler, tr.getExecutor());
 
-			disposed = false;
+			closed = false;
 		}
 
 		@Override
@@ -177,7 +177,7 @@ public class LocalityUtil {
 					FDBException err = (FDBException) o;
 					if(err.getCode() == 1007 && !Arrays.equals(begin, lastBegin)) {
 						Executor executor = BoundaryIterator.this.tr.getExecutor();
-						BoundaryIterator.this.tr.dispose();
+						BoundaryIterator.this.tr.close();
 						BoundaryIterator.this.tr = BoundaryIterator.this.tr.getDatabase().createTransaction(executor);
 						return restartGet();
 					}
@@ -213,22 +213,18 @@ public class LocalityUtil {
 																								  }
 
 		@Override
-		public void cancel() {
-			BoundaryIterator.this.tr.dispose();
-			disposed = true;
-		}
-
-		@Override
-		public void dispose() {
-			cancel();
+		public void close() {
+			BoundaryIterator.this.tr.close();
+			closed = true;
 		}
 
 		@Override
 		protected void finalize() throws Throwable {
 			try {
-				if(FDB.getInstance().warnOnUndisposed && !disposed) {
-					System.err.println("DisposableAsyncIterator not disposed (getBoundaryKeys)");
+				if(FDB.getInstance().warnOnUnclosed && !closed) {
+					System.err.println("CloseableAsyncIterator not closed (getBoundaryKeys)");
 				}
+				close();
 			}
 			finally {
 				super.finalize();

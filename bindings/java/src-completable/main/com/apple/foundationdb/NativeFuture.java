@@ -25,7 +25,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposable {
+abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoCloseable {
 	private final ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
 	protected final Lock pointerReadLock = rwl.readLock();
 
@@ -42,7 +42,7 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposabl
 	// lead to a race where the marshalWhenDone tries to run on an
 	// unconstructed subclass.
 	//
-	// Since this must be called from a constructor, we assume that dispose
+	// Since this must be called from a constructor, we assume that close
 	// cannot be called concurrently.
 	protected void registerMarshalCallback(Executor executor) {
 		if(cPtr != 0) {
@@ -69,10 +69,8 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposabl
 				complete(val);
 			}
 		} catch(FDBException t) {
-			assert(t.getCode() != 2015); // future_not_set not possible
-			if(t.getCode() != 1102) { // future_released
-				completeExceptionally(t);
-			}
+			assert(t.getCode() != 1102 && t.getCode() != 2015); // future_released, future_not_set not possible
+			completeExceptionally(t);
 		} catch(Throwable t) {
 			completeExceptionally(t);
 		} finally {
@@ -81,13 +79,13 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposabl
 	}
 
 	protected void postMarshal() {
-		dispose();
+		close();
 	}
 
 	abstract protected T getIfDone_internal(long cPtr) throws FDBException;
 
 	@Override
-	public void dispose() {
+	public void close() {
 		long ptr = 0;
 
 		rwl.writeLock().lock();
@@ -100,7 +98,7 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposabl
 		if(ptr != 0) {
 			Future_dispose(ptr);
 			if(!isDone()) {
-				completeExceptionally(new IllegalStateException("Future has been disposed"));
+				completeExceptionally(new IllegalStateException("Future has been closed"));
 			}
 		}
 	}
@@ -127,7 +125,7 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements Disposabl
 		assert( rwl.getReadHoldCount() > 0 );
 
 		if(cPtr == 0)
-			throw new IllegalStateException("Cannot access disposed object");
+			throw new IllegalStateException("Cannot access closed object");
 
 		return cPtr;
 	}

@@ -37,15 +37,13 @@ import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
-import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
-import com.apple.foundationdb.tuple.ByteArrayUtil;
-import com.apple.foundationdb.async.DisposableAsyncIterator;
-import com.apple.foundationdb.tuple.Tuple;
-
 import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 /**
  * Implements a cross-binding test of the FoundationDB API.
@@ -520,7 +518,7 @@ public class StackTester {
 			while(true) {
 				Transaction t = db.createTransaction();
 				List<KeyValue> keyValues = t.getRange(begin, endKey/*, 1000*/).asList().join();
-				t.dispose();
+				t.close();
 				if(keyValues.size() == 0) {
 					break;
 				}
@@ -677,7 +675,7 @@ public class StackTester {
 			tr.options().setTimeout(60*1000);
 			tr.options().setReadSystemKeys();
 			tr.getReadVersion().join();
-			DisposableAsyncIterator<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
+			CloseableAsyncIterator<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
 					tr, new byte[0], new byte[]{(byte) 255, (byte) 255});
 			try {
 				List<byte[]> keys = AsyncUtil.collect(boundaryKeys).join();
@@ -696,7 +694,7 @@ public class StackTester {
 				return null;
 			}
 			finally {
-				boundaryKeys.dispose();
+				boundaryKeys.close();
 			}
 		});
 	}
@@ -722,7 +720,7 @@ public class StackTester {
 		//System.out.println("Starting test...");
 		c.run();
 		//System.out.println("Done with test.");
-		db.dispose();
+		db.close();
 		System.gc();
 	}
 }
