@@ -30,9 +30,6 @@ abstract class NativeObjectWrapper implements AutoCloseable {
 	private boolean closed = false;
 	private long cPtr;
 
-	public NativeObjectWrapper() {
-	}
-
 	public NativeObjectWrapper(long cPtr) {
 		this.cPtr = cPtr;
 		if(this.cPtr == 0)

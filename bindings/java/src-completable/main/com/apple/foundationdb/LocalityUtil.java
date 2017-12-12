@@ -221,6 +221,7 @@ public class LocalityUtil {
 				if(FDB.getInstance().warnOnUnclosed && !closed) {
 					System.err.println("CloseableAsyncIterator not closed (getBoundaryKeys)");
 				}
+				close();
 			}
 			finally {
 				super.finalize();

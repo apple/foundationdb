@@ -69,10 +69,8 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 				complete(val);
 			}
 		} catch(FDBException t) {
-			assert(t.getCode() != 2015); // future_not_set not possible
-			if(t.getCode() != 1102) { // future_released
-				completeExceptionally(t);
-			}
+			assert(t.getCode() != 1102 && t.getCode() != 2015); // future_released, future_not_set not possible
+			completeExceptionally(t);
 		} catch(Throwable t) {
 			completeExceptionally(t);
 		} finally {
@@ -130,10 +128,6 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 			throw new IllegalStateException("Cannot access closed object");
 
 		return cPtr;
-	}
-
-	boolean isCleanedUp() {
-		return isDone() && cPtr == 0;
 	}
 
 	private native void Future_registerCallback(long cPtr, Runnable callback);
