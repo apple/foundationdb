@@ -37,7 +37,7 @@ public interface CloseableAsyncIterator<T> extends AutoCloseable, AsyncIterator<
 	void close();
 
 	/**
-	 * Alias for {@link #close}
+	 * Alias for {@link #close}.
 	 */
 	@Override
 	default void cancel() {

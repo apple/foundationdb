@@ -40,11 +40,10 @@ import com.apple.foundationdb.Range;
 import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
-
-import com.apple.foundationdb.async.AsyncUtil;
 
 /**
  * Implements a cross-binding test of the FoundationDB API.
