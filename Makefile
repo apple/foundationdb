@@ -127,7 +127,7 @@ else
 endif
 	@echo "#define FDB_VT_PACKAGE_NAME \"$(PACKAGE_NAME)\"" >> $@
 
-bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_java-completable fdb_node fdb_flow fdb_flow_tester fdb_go fdb_go_tester
+bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_node fdb_flow fdb_flow_tester fdb_go fdb_go_tester
 
 Makefiles: $(MK_GENERATED)
 

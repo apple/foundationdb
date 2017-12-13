@@ -13,13 +13,13 @@ pom.xml like: <br>
 {@code
 <dependency>
     <groupId>com.apple.cie.foundationdb</groupId>
-    <artifactId>fdb-java-completable</artifactId>
+    <artifactId>fdb-java</artifactId>
     <version>VERSION</version>
 </dependency>
 }
 </pre>
 Alternatively, simply download the JAR from
-<a href="https://files.foundationdb.org/fdb-java-completable/">Artifactory</a>
+<a href="https://files.foundationdb.org/fdb-java/">Artifactory</a>
 and add it to your classpath.<br>
 <br>
 <h3>Getting started</h3>
