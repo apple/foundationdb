@@ -370,7 +370,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 			Function<? super Transaction, CompletableFuture<T>> retryable);
 
 	/**
-	 * Close the {@code Transaction object and release any associated resources. This must be called at
+	 * Close the {@code Transaction} object and release any associated resources. This must be called at
 	 *  least once after the {@code Transaction} object is no longer in use. This can be called multiple
 	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
 	 */
