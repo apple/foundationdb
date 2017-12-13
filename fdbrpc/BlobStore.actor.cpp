@@ -451,7 +451,7 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 	if(prefix.present())
 		resource.append("&prefix=").append(HTTP::urlEncode(prefix.get()));
 	if(delimiter.present())
-		resource.append("&delimiter=").append(HTTP::urlEncode(std::string(delimiter.get(), 1)));
+		resource.append("&delimiter=").append(HTTP::urlEncode(std::string(1, delimiter.get())));
 	resource.append("&marker=");
 	state std::string lastFile;
 	state bool more = true;
