@@ -512,6 +512,32 @@ public:
 		m_path = path;
 	}
 
+	static Future<std::vector<std::string>> listURLs(std::string url) {
+		std::string path;
+		if(url.find("file://") != 0) {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Invalid URL for BackupContainerLocalDirectory").detail("URL", url);
+		}
+
+		path = url.substr(7);
+		// Remove trailing slashes on path
+		path.erase(path.find_last_not_of("\\/") + 1);
+
+		if(!g_network->isSimulated() && path != abspath(path)) {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path);
+			throw io_error();
+		}
+		std::vector<std::string> dirs = platform::listDirectories(path);
+		std::vector<std::string> results;
+
+		for(auto &r : dirs) {
+			if(r == "." || r == "..")
+				continue;
+			results.push_back(std::string("file://") + joinPath(path, r));
+		}
+
+		return results;
+	}
+
 	Future<Void> create() {
 		// Nothing should be done here because create() can be called by any process working with the container URL, such as fdbbackup.
 		// Since "local directory" containers are by definition local to the machine they are accessed from,
@@ -651,6 +677,15 @@ public:
 					m_bstore->knobs.read_cache_blocks_per_file
 				)
 			);
+	}
+
+	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore) {
+		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(BACKUP_BUCKET, {}, '/'));
+		std::vector<std::string> results;
+		for(auto &f : contents.commonPrefixes) {
+			results.push_back(bstore->getResourceURL(f));
+		}
+		return results;
 	}
 
 	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
@@ -800,6 +835,44 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 	}
 }
 
+// Get a list of URLS to backup containers based on some a shorter URL.  This function knows about some set of supported
+// URL types which support this sort of backup discovery.
+ACTOR Future<std::vector<std::string>> IBackupContainer::listContainers(std::string baseURL) {
+	try {
+		StringRef u(baseURL);
+		if(u.startsWith(LiteralStringRef("file://"))) {
+			std::vector<std::string> results = wait(BackupContainerLocalDirectory::listURLs(baseURL));
+			return results;
+		}
+		else if(u.startsWith(LiteralStringRef("blobstore://"))) {
+			std::string resource;
+			Reference<BlobStoreEndpoint> bstore = BlobStoreEndpoint::fromString(baseURL, &resource, &IBackupContainer::lastOpenError);
+			if(!resource.empty()) {
+				TraceEvent(SevWarn, "BackupContainer").detail("Description", "Invalid backup container base URL, resource aka path should be blank.").detail("URL", baseURL);
+				throw backup_invalid_url();
+			}
+
+			std::vector<std::string> results = wait(BackupContainerBlobStore::listURLs(bstore));
+			return results;
+		}
+		else {
+			IBackupContainer::lastOpenError = "invalid URL prefix";
+			throw backup_invalid_url();
+		}
+
+	} catch(Error &e) {
+		if(e.code() == error_code_actor_cancelled)
+			throw;
+
+		TraceEvent m(SevWarn, "BackupContainer");
+		m.detail("Description", "Invalid backup container URL prefix.  See help.").detail("URL", baseURL);
+
+		if(e.code() == error_code_backup_invalid_url)
+			m.detail("lastOpenError", IBackupContainer::lastOpenError);
+		throw;
+	}
+}
+
 ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f) {
 	state Standalone<StringRef> content = makeString(g_random->randomInt(0, 10000000));
 	for(int i = 0; i < content.size(); ++i)
@@ -820,6 +893,8 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
+	// Make sure container doesn't exist, then create it.
+	Void _ = wait(c->deleteContainer());
 	Void _ = wait(c->create());
 
 	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100, 150, 10));
@@ -911,6 +986,17 @@ TEST_CASE("backup/containers/url") {
 		const char *url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);
 		Void _ = wait(testBackupContainer(url));
+	}
+	return Void();
+};
+
+TEST_CASE("backup/containers/list") {
+	state const char *url = getenv("FDB_TEST_BACKUP_URL");
+	ASSERT(url != nullptr);
+	printf("Listing %s\n", url);
+	std::vector<std::string> urls = wait(IBackupContainer::listContainers(url));
+	for(auto &u : urls) {
+		printf("%s\n", u.c_str());
 	}
 	return Void();
 };
