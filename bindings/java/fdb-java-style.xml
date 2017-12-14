@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	The style for code written within the FDB Java bindings.
+	Note that this style guide grew up somewhat organically from
+	the idiosyncracies of the committers involved. It aims to
+	be at least a little idiomatically Java while at the same time
+	trying not to look too incongruous when compared to the style
+	of our core products (e.g., fdbserver). It also isn't
+	borrowed from some other style guide, because that would
+	be too easy.
+-->
+<!DOCTYPE module PUBLIC
+		  "-//Puppy Crawl//DTD Check Configuration 1.3//EN"
+		  "http://www.puppycrawl.com/dtds/configuration_1_3.dtd">
+
+
+<module name="Checker">
+	<module name="SuppressionFilter">
+		<property name="file" value="suppressions.xml"/>
+	</module>
+
+	<module name="TreeWalker">
+		<property name="tabWidth" value="4"/>
+
+		<!-- Blocks -->
+		<module name="AvoidNestedBlocks"/>
+		<module name="EmptyBlock"/>
+		<module name="EmptyCatchBlock"/>
+		<module name="LeftCurly">
+			<property name="option" value="eol"/>
+			<property name="ignoreEnums" value="false"/>
+		</module>
+		<!-- We have about 76 errors with value = "alone" and 27 with value = "same". We should pick one.
+		<module name="RightCurly">
+			<property name="option" value="same"/>
+		</module>
+		-->
+
+		<!-- Design -->
+		<!-- We might get some helpful errors if we turned this on, but not right now.
+		<module name="DesignForExtension"/>
+		-->
+		<!-- We have some classes violating this. It seems like a reasonable thing to add, but it is technically API breaking.
+		<module name="FinalClass"/>
+		-->
+		<module name="HideUtilityClassConstructor"/>
+		<module name="MutableException"/>
+		<module name="OneTopLevelClass"/>
+
+		<!-- Coding -->
+		<module name="CovariantEquals"/>
+		<module name="DefaultComesLast"/>
+		<module name="EmptyStatement"/>
+		<module name="EqualsHashCode"/>
+		<module name="FallThrough"/>
+		<!-- We should probably clean these up at some point, but not today.
+		<module name="MagicNumber">
+			<property name="ignoreNumbers" value="-1, 0, 1, 2, 255, 65535"/>
+			<property name="ignoreHashCodeMethod" value="true"/>
+		</module>
+		-->
+		<module name="MissingSwitchDefault"/>
+		<module name="NoClone"/>
+		<module name="PackageDeclaration"/>
+		<module name="SimplifyBooleanExpression"/>
+		<module name="SimplifyBooleanReturn"/>
+		<module name="StringLiteralEquality"/>
+		<module name="SuperClone"/>
+		<module name="SuperFinalize"/>
+
+		<!-- Imports -->
+		<module name="CustomImportOrder">
+			<property name="customImportOrderRules" value="STATIC###STANDARD_JAVA_PACKAGE###SAME_PACKAGE(3)"/>
+		</module>
+		<module name="AvoidStarImport"/>
+		<module name="UnusedImports"/>
+		<module name="RedundantImport"/>
+
+		<!-- Javadoc -->
+		<!-- TODO -->
+
+		<!-- Miscellaneous -->
+		<module name="ArrayTypeStyle"/>
+		<module name="CommentsIndentation"/>
+		<module name="Indentation"/>
+		<module name="OuterTypeFilename"/>
+		<module name="UpperEll"/>
+
+		<!-- Modifiers -->
+		<module name="ModifierOrder"/>
+		<module name="RedundantModifier"/>
+
+		<!-- Naming conventions -->
+		<module name="CatchParameterName">
+			<property name="format" value="^(e\d*|t\d*|ex\d*|err\d*)$"/>
+		</module>
+		<module name="ClassTypeParameterName"/>
+		<module name="InterfaceTypeParameterName"/>
+		<module name="LocalFinalVariableName"/>
+		<module name="LocalVariableName"/>
+		<module name="MemberName"/>
+		<module name="MethodName">
+			<property name="applyToProtected" value="false"/>
+			<property name="applyToPackage" value="false"/>
+			<property name="applyToPrivate" value="false"/>
+		</module>
+		<module name="MethodTypeParameterName"/>
+		<module name="PackageName"/>
+		<module name="ParameterName"/>
+		<module name="StaticVariableName"/>
+		<module name="TypeName"/>
+
+		<!-- Whitespace -->
+		<module name="EmptyForInitializerPad"/>
+		<module name="EmptyForIteratorPad"/>
+		<module name="GenericWhitespace"/>
+		<module name="MethodParamPad"/>
+		<module name="NoLineWrap"/>
+		<module name="NoWhitespaceAfter">
+			<property name="tokens" value="AT, INC, DEC, UNARY_MINUS, UNARY_PLUS, BNOT, LNOT, DOT, ARRAY_DECLARATOR, INDEX_OP, METHOD_REF"/> 
+		</module>
+		<module name="NoWhitespaceBefore">
+			<property name="allowLineBreaks" value="true"/>
+			<property name="tokens" value="COMMA, SEMI, POST_INC, POST_DEC, DOT, ELLIPSIS, METHOD_REF"/> 
+		</module>
+		<module name="OperatorWrap">
+			<property name="option" value="eol"/>
+		</module>
+		<module name="ParenPad"/>
+		<module name="SeparatorWrap">
+			<property name="option" value="eol"/>
+			<property name="tokens" value="COMMA"/>
+		</module>
+		<module name="SeparatorWrap">
+			<property name="option" value="nl"/>
+			<property name="tokens" value="DOT"/>
+		</module>
+		<module name="TypecastParenPad">
+			<property name="option" value="nospace"/>
+		</module>
+		<module name="WhitespaceAfter">
+			<property name="tokens" value="SEMI"/>
+		</module>
+
+	</module>
+</module>

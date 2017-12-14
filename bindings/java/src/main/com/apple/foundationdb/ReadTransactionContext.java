@@ -21,7 +21,6 @@
 package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 
@@ -62,7 +61,7 @@ public interface ReadTransactionContext {
 	 *  to {@code retryable}
 	 */
 	<T> CompletableFuture<T> readAsync(
-			Function<? super ReadTransaction, CompletableFuture<T>> retryable);
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable);
 
 	/**
 	 * Retrieves the {@link Executor} used by this {@code TransactionContext} when running

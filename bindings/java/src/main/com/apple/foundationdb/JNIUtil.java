@@ -179,4 +179,6 @@ class JNIUtil {
 			return OS.OSX;
 		throw new IllegalStateException("Unknown or unsupported OS: " + osname);
 	}
+
+	private JNIUtil() {}
 }

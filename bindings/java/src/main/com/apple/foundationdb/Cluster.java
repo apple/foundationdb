@@ -55,7 +55,9 @@ public class Cluster extends NativeObjectWrapper {
 	 *
 	 * @return a set of cluster-specific options affecting this {@code Cluster}
 	 */
-	public ClusterOptions options() { return options; }
+	public ClusterOptions options() {
+		return options;
+	}
 
 	@Override
 	protected void finalize() throws Throwable {

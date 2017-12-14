@@ -20,13 +20,6 @@
 
 package com.apple.foundationdb.test;
 
-import com.apple.foundationdb.Database;
-import com.apple.foundationdb.KeySelector;
-import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.TransactionContext;
-import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.tuple.ByteArrayUtil;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -39,6 +32,13 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.KeySelector;
+import com.apple.foundationdb.Transaction;
+import com.apple.foundationdb.TransactionContext;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 public class PerformanceTester extends AbstractTester {
     private final int keyCount;

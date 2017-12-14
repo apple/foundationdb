@@ -82,7 +82,7 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 		close();
 	}
 
-	abstract protected T getIfDone_internal(long cPtr) throws FDBException;
+	protected abstract T getIfDone_internal(long cPtr) throws FDBException;
 
 	@Override
 	public void close() {
@@ -122,7 +122,7 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 		// we must have a read lock for this function to make sense, however it
 		//  does not make sense to take the lock here, since the code that uses
 		//  the result must inherently have the read lock itself.
-		assert( rwl.getReadHoldCount() > 0 );
+		assert(rwl.getReadHoldCount() > 0);
 
 		if(cPtr == 0)
 			throw new IllegalStateException("Cannot access closed object");

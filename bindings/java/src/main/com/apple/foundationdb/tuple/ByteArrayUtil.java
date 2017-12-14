@@ -59,29 +59,29 @@ public class ByteArrayUtil {
 		if(interlude == null)
 			interlude = new byte[0];
 
-		int element_totals = 0;
+		int elementTotals = 0;
 		int interludeSize = interlude.length;
 		for(byte[] e : parts) {
-			element_totals += e.length;
+			elementTotals += e.length;
 		}
 
-		byte[] dest = new byte[(interludeSize * (partCount - 1)) + element_totals];
+		byte[] dest = new byte[(interludeSize * (partCount - 1)) + elementTotals];
 
 		//System.out.println(" interlude -> " + ArrayUtils.printable(interlude));
 
-		int start_byte = 0;
+		int startByte = 0;
 		int index = 0;
 		for(byte[] part : parts) {
 			//System.out.println(" section -> " + ArrayUtils.printable(parts.get(i)));
 			int length = part.length;
 			if(length > 0) {
-				System.arraycopy(part, 0, dest, start_byte, length);
-				start_byte += length;
+				System.arraycopy(part, 0, dest, startByte, length);
+				startByte += length;
 			}
 			if(index < partCount - 1 && interludeSize > 0) {
 				// If this is not the last element, append the interlude
-				System.arraycopy(interlude, 0, dest, start_byte, interludeSize);
-				start_byte += interludeSize;
+				System.arraycopy(interlude, 0, dest, startByte, interludeSize);
+				startByte += interludeSize;
 			}
 			index++;
 		}
@@ -97,7 +97,7 @@ public class ByteArrayUtil {
 	 *
 	 * @return a newly created concatenation of the input
 	 */
-	public static byte[] join(byte[] ... parts) {
+	public static byte[] join(byte[]... parts) {
 		return join(null, Arrays.asList(parts));
 	}
 

@@ -25,10 +25,10 @@ import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 
 abstract class OptionsSet {
-	private final static Charset CHARSET_UTF8 = Charset.forName("UTF-8");
+	private static final Charset CHARSET_UTF8 = Charset.forName("UTF-8");
 	OptionConsumer consumer;
 
-	public OptionsSet(OptionConsumer provider) {
+	OptionsSet(OptionConsumer provider) {
 		this.consumer = provider;
 	}
 
@@ -39,7 +39,9 @@ abstract class OptionsSet {
 	 *
 	 * @return target of option set calls
 	 */
-	public OptionConsumer getOptionConsumer() { return consumer; }
+	public OptionConsumer getOptionConsumer() {
+		return consumer;
+	}
 
 	protected void setOption(int code) {
 		consumer.setOption(code, null);
@@ -57,6 +59,6 @@ abstract class OptionsSet {
 		ByteBuffer b = ByteBuffer.allocate(8);
 		b.order(ByteOrder.LITTLE_ENDIAN);
 		b.putLong(param);
-		consumer.setOption(code, b.array() );
+		consumer.setOption(code, b.array());
 	}
 }

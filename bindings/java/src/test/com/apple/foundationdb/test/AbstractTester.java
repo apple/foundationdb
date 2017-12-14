@@ -20,11 +20,11 @@
 
 package com.apple.foundationdb.test;
 
-import com.apple.foundationdb.Database;
-import com.apple.foundationdb.FDB;
-
 import java.nio.charset.Charset;
 import java.util.Random;
+
+import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
 
 public abstract class AbstractTester {
     public static final int API_VERSION = 510;

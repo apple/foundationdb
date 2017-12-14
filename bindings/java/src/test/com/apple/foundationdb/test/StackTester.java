@@ -21,10 +21,15 @@
 package com.apple.foundationdb.test;
 
 import java.math.BigInteger;
-import java.util.*;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -110,7 +115,7 @@ public class StackTester {
 			}
 			else if(op == StackOperation.WAIT_EMPTY) {
 				List<Object> params = inst.popParams(1).join();
-				inst.context.db.run(new WaitEmpty((byte [])params.get(0)));
+				inst.context.db.run(new WaitEmpty((byte[])params.get(0)));
 				inst.push("WAITED_FOR_EMPTY".getBytes());
 			}
 			else if(op == StackOperation.START_THREAD) {
@@ -129,62 +134,40 @@ public class StackTester {
 				final List<Object> params = inst.popParams(2).join();
 				//System.out.println(inst.context.preStr + " - " + "Setting '" + ArrayUtils.printable((byte[]) params.get(0)) +
 				//		"' to '" + ArrayUtils.printable((byte[]) params.get(1)) + "'");
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.set((byte[])params.get(0), (byte[])params.get(1));
-							return null;
-						}
-					});
+				executeMutation(inst, tr -> {
+					tr.set((byte[])params.get(0), (byte[])params.get(1));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR) {
 				final List<Object> params = inst.popParams(1).join();
 				//System.out.println(inst.context.preStr + " - " + "Clearing: '" + ByteArrayUtil.printable((byte[]) params.get(0)) + "'");
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear((byte[])params.get(0));
-							return null;
-						}
-					}
-				);
+				executeMutation(inst, tr -> {
+					tr.clear((byte[])params.get(0));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR_RANGE) {
 				final List<Object> params = inst.popParams(2).join();
-				executeMutation(inst,
-						new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear((byte[])params.get(0), (byte[])params.get(1));
-							return null;
-						}
-					});
+				executeMutation(inst, tr -> {
+					tr.clear((byte[])params.get(0), (byte[])params.get(1));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR_RANGE_STARTS_WITH) {
 				final List<Object> params = inst.popParams(1).join();
-				executeMutation(inst,
-						new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear(Range.startsWith((byte[])params.get(0)));
-							return null;
-						}
-					});
+				executeMutation(inst, tr -> {
+					tr.clear(Range.startsWith((byte[])params.get(0)));
+					return null;
+				});
 			}
 			else if(op == StackOperation.ATOMIC_OP) {
 				final List<Object> params = inst.popParams(3).join();
 				final MutationType optype = MutationType.valueOf((String)params.get(0));
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
-							return null;
-						}
-					}
-				);
+				executeMutation(inst, tr -> {
+					tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
+					return null;
+				});
 			}
 			else if(op == StackOperation.COMMIT) {
 				inst.push(inst.tr.commit());
@@ -678,7 +661,7 @@ public class StackTester {
 			CloseableAsyncIterator<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
 					tr, new byte[0], new byte[]{(byte) 255, (byte) 255});
 			try {
-				List<byte[]> keys = AsyncUtil.collect(boundaryKeys).join();
+				List<byte[]> keys = AsyncUtil.collectRemaining(boundaryKeys).join();
 				for(int i = 0; i < keys.size() - 1; i++) {
 					byte[] start = keys.get(i);
 					byte[] end = tr.getKey(KeySelector.lastLessThan(keys.get(i + 1))).join();
@@ -723,5 +706,7 @@ public class StackTester {
 		db.close();
 		System.gc();
 	}
+
+	private StackTester() {}
 }
 

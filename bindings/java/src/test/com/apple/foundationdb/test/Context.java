@@ -20,6 +20,7 @@
 
 package com.apple.foundationdb.test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CompletableFuture;
 
 import com.apple.foundationdb.Database;
+import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.Range;
@@ -47,8 +49,8 @@ abstract class Context implements Runnable, AutoCloseable {
 
 	private String trName;
 	private List<Thread> children = new LinkedList<>();
-	static private Map<String, Transaction> transactionMap = new HashMap<>();
-	static private Map<Transaction, AtomicInteger> transactionRefCounts = new HashMap<>();
+	private static Map<String, Transaction> transactionMap = new HashMap<>();
+	private static Map<Transaction, AtomicInteger> transactionRefCounts = new HashMap<>();
 
 	Context(Database db, byte[] prefix) {
 		this.db = db;
@@ -171,8 +173,7 @@ abstract class Context implements Runnable, AutoCloseable {
 		while(num-- > 0) {
 			Object item = stack.pop().value;
 			if(item instanceof CompletableFuture) {
-				@SuppressWarnings("unchecked")
-				final CompletableFuture<Object> future = (CompletableFuture<Object>)item;
+				final CompletableFuture<?> future = (CompletableFuture<?>)item;
 				final int nextNum = num;
 				future.whenCompleteAsync((o, t) -> {
 					if(t != null) {
@@ -193,7 +194,7 @@ abstract class Context implements Runnable, AutoCloseable {
 
 						popParams(nextNum, params, done);
 					}
-				});
+				}, FDB.DEFAULT_EXECUTOR);
 
 				return;
 			}
@@ -205,11 +206,11 @@ abstract class Context implements Runnable, AutoCloseable {
 	}
 
 	CompletableFuture<List<Object>> popParams(int num) {
-		final List<Object> params = new LinkedList<>();
+		final List<Object> params = new ArrayList<>(num);
 		CompletableFuture<Void> done = new CompletableFuture<>();
 		popParams(num, params, done);
 
-		return done.thenApplyAsync((x) -> params);
+		return done.thenApply(x -> params);
 	}
 
 	@Override
