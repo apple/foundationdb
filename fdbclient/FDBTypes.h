@@ -236,6 +236,13 @@ inline KeyRangeRef singleKeyRange( KeyRef const& key, Arena& arena ) {
 	t[key.size()] = 0;
 	return KeyRangeRef( KeyRef(t,key.size()), KeyRef(t, key.size()+1) );
 }
+inline KeyRange prefixRange( KeyRef prefix ) {
+	Standalone<KeyRangeRef> range;
+	KeyRef start = KeyRef(range.arena(), prefix);
+	KeyRef end = strinc(prefix, range.arena());
+	range.contents() = KeyRangeRef(start, end);
+	return range;
+}
 inline KeyRef keyBetween( const KeyRangeRef& keys ) {
 	// Returns (one of) the shortest key(s) either contained in keys or equal to keys.end,
 	// assuming its length is no more than CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT. If the length of

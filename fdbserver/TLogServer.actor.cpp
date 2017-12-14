@@ -200,11 +200,6 @@ struct CompareFirst {
 	}
 };
 
-KeyRange prefixRange( KeyRef prefix ) {
-	Key end = strinc(prefix);
-	return KeyRangeRef( prefix, end );
-}
-
 ////// Persistence format (for self->persistentData)
 
 // Immutable keys
