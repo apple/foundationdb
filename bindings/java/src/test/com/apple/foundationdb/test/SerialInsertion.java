@@ -84,14 +84,15 @@ public class SerialInsertion {
 						buf.putInt(0, insertionStart + done + i);
 						tr.set(buf.array(), value);
 					}
-					tr.commit().get();
+					tr.commit().join();
 					tr = db.createTransaction();
 					done += i;
 				} catch(RuntimeException e) {
-					tr = tr.onError(e).get();
+					tr = tr.onError(e).join();
 				}
 			}
 		}
 	}
 
+	private SerialInsertion() {}
 }

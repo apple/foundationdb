@@ -20,12 +20,9 @@
 
 package com.apple.foundationdb;
 
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.PartialFunction;
-import com.apple.foundationdb.async.PartialFuture;
-
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.Function;
 
 /**
  * A mutable, lexicographically ordered mapping from binary keys to binary values.
@@ -38,10 +35,12 @@ import java.util.concurrent.Executor;
  *  in the {@link TransactionContext} interface. When used on a {@code Database} these
  *  methods will call {@code Transaction#commit()} after user code has been
  *  executed. These methods will not return successfully until {@code commit()} has
- *  returned successfully.
- *
+ *  returned successfully.<br>
+ * <br>
+ * <b>Note:</b> {@code Database} objects must be {@link #close closed} when no longer
+ *  in use in order to free any associated resources.
  */
-public interface Database extends Disposable, TransactionContext {
+public interface Database extends AutoCloseable, TransactionContext {
 	/**
 	 * Creates a {@link Transaction} that operates on this {@code Database}.<br>
 	 * <br>
@@ -51,7 +50,9 @@ public interface Database extends Disposable, TransactionContext {
 	 *
 	 * @return a newly created {@code Transaction} that reads from and writes to this {@code Database}.
 	 */
-	Transaction createTransaction();
+	default Transaction createTransaction() {
+		return createTransaction(getExecutor());
+	}
 
 	/**
 	 * Creates a {@link Transaction} that operates on this {@code Database} with the given {@link Executor}
@@ -81,7 +82,9 @@ public interface Database extends Disposable, TransactionContext {
 	 *  this database
 	 */
 	@Override
-	<T> T read(Function<? super ReadTransaction, T> retryable);
+	default <T> T read(Function<? super ReadTransaction, T> retryable) {
+		return read(retryable, getExecutor());
+	}
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
@@ -97,54 +100,25 @@ public interface Database extends Disposable, TransactionContext {
 	<T> T read(Function<? super ReadTransaction, T> retryable, Executor e);
 
 	/**
-	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
-	 *  this formulation of {@link #read(Function)} if the user code being executed
-	 *  throws a checked exception.
-	 *
-	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
-	 *  this database
-	 *
-	 * @throws Exception if non-transient database errors are encountered or user code throws any other error
-	 *
-	 * @see #read(Function)
-	 */
-	@Override
-	<T> T read(PartialFunction<? super ReadTransaction, T> retryable) throws Exception;
-
-	/**
-	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
-	 *  this formulation of {@link #read(Function)} if the user code being executed
-	 *  throws a checked exception and one wants to set a custom {@link Executor} for the
-	 *  transaction when run.
-	 *
-	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
-	 *  this database
-	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 *
-	 * @throws Exception if non-transient database errors are encountered or user code throws any other error
-	 *
-	 * @see #read(Function)
-	 */
-	<T> T read(PartialFunction<? super ReadTransaction, T> retryable, Executor e) throws Exception;
-
-	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
 	 *  {@link Function#apply(Object) apply(ReadTransaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
 	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown. This call is non-blocking -- this
-	 *  method will return immediately and with a {@link Future} that will be
+	 *  method will return immediately and with a {@link CompletableFuture} that will be
 	 *  set when the {@code Function} has been called and completed without error.<br>
 	 * <br>
 	 * Any errors encountered executing {@code retryable}, or received from the
-	 *  database, will be set on the returned {@code Future}.
+	 *  database, will be set on the returned {@code CompletableFuture}.
 	 *
 	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
 	 *  this database
 	 */
 	@Override
-	<T> Future<T> readAsync(
-			Function<? super ReadTransaction, Future<T>> retryable);
+	default <T> CompletableFuture<T> readAsync(
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable) {
+		return readAsync(retryable, getExecutor());
+	}
 
 	/**
 	 * Runs a read-only transactional function against this {@code Database} with retry logic.
@@ -157,38 +131,8 @@ public interface Database extends Disposable, TransactionContext {
 	 * 
 	 * @see #readAsync(Function)
 	 */
-	<T> Future<T> readAsync(
-			Function<? super ReadTransaction, Future<T>> retryable, Executor e);
-
-	/**
-	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
-	 *  this formulation of the non-blocking {@link #readAsync(Function)} if the user code being executed
-	 *  throws a checked exception.
-	 *
-	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
-	 *  this database
-	 *
-	 * @see #read(Function)
-	 */
-	@Override
-	<T> PartialFuture<T> readAsync(
-			PartialFunction<? super ReadTransaction, ? extends PartialFuture<T>> retryable);
-
-	/**
-	 * Runs a read-only transactional function against this {@code Database} with retry logic. Use
-	 *  this formulation of the non-blocking {@link #readAsync(Function)} if the user code being executed
-	 *  throws a checked exception and one wants to set a custom {@link Executor} for the
-	 *  transaction when run.
-	 *
-	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
-	 *  this database
-	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 *
-	 * @see #read(Function)
-	 */
-	<T> PartialFuture<T> readAsync(
-			PartialFunction<? super ReadTransaction, ? extends PartialFuture<T>> retryable, Executor e);
-
+	<T> CompletableFuture<T> readAsync(
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic.
@@ -210,13 +154,14 @@ public interface Database extends Disposable, TransactionContext {
 	 *  this database
 	 */
 	@Override
-	<T> T run(Function<? super Transaction, T> retryable);
+	default <T> T run(Function<? super Transaction, T> retryable) {
+		return run(retryable, getExecutor());
+	}
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic.
-	 *  Use this formulation of {@link #run(Function)} if the user code will not throw
-	 *  a checked exception but one would like to set a custom {@link Executor}
-	 *  for the transaction when run.
+	 *  Use this formulation of {@link #run(Function)} if one would like to set a
+	 *  custom {@link Executor} for the transaction when run.
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
@@ -225,44 +170,13 @@ public interface Database extends Disposable, TransactionContext {
 	<T> T run(Function<? super Transaction, T> retryable, Executor e);
 
 	/**
-	 * Runs a transactional function against this {@code Database} with retry logic. Use
-	 *  this formulation of {@link #run(Function)} if the user code being executed
-	 *  throws a checked exception.
-	 *
-	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
-	 *
-	 * @throws Exception if non-transient database errors are encountered or user code throws any other error
-	 *
-	 * @see #run(Function)
-	 */
-	@Override
-	<T> T run(PartialFunction<? super Transaction, T> retryable) throws Exception;
-
-	/**
-	 * Runs a transactional function against this {@code Database} with retry logic. Use
-	 *  this formulation of {@link #run(Function)} if the user code being executed
-	 *  throws a checked exception and one would like to set a custom executor for the
-	 *  transaction when run.
-	 *
-	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
-	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 *
-	 * @throws Exception if non-transient database errors are encountered or user code throws any other error
-	 *
-	 * @see #run(Function)
-	 */
-	<T> T run(PartialFunction<? super Transaction, T> retryable, Executor e) throws Exception;
-
-	/**
 	 * Runs a transactional function against this {@code Database} with retry logic.
 	 *  {@link Function#apply(Object) apply(Transaction)} will be called on the
 	 *  supplied {@link Function} until a non-retryable
 	 *  {@link FDBException} (or any {@code Throwable} other than an {@code FDBException})
 	 *  is thrown or {@link Transaction#commit() commit()},
 	 *  when called after {@code apply()}, returns success. This call is non-blocking -- this
-	 *  method will return immediately and with a {@link Future} that will be
+	 *  method will return immediately and with a {@link CompletableFuture} that will be
 	 *  set when {@code commit()} has been called and returned success.<br>
 	 * <br>
 	 * As with other client/server databases, in some failure scenarios a client may
@@ -273,14 +187,16 @@ public interface Database extends Disposable, TransactionContext {
 	 *   target="_blank">the FounationDB Developer Guide</a><br>
 	 * <br>
 	 * Any errors encountered executing {@code retryable}, or received from the
-	 *  database, will be set on the returned {@code Future}.
+	 *  database, will be set on the returned {@code CompletableFuture}.
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
 	 */
 	@Override
-	<T> Future<T> runAsync(
-			Function<? super Transaction, Future<T>> retryable);
+	default <T> CompletableFuture<T> runAsync(
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable) {
+		return runAsync(retryable, getExecutor());
+	}
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic. Use
@@ -293,36 +209,14 @@ public interface Database extends Disposable, TransactionContext {
 	 *
 	 * @see #run(Function)
 	 */
-	<T> Future<T> runAsync(
-			Function<? super Transaction, Future<T>> retryable, Executor e);
+	<T> CompletableFuture<T> runAsync(
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
 	/**
-	 * Runs a transactional function against this {@code Database} with retry logic. Use
-	 *  this formulation of the non-blocking {@link #runAsync(Function)} if the user code being executed
-	 *  throws a checked exception.
-	 *
-	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
-	 *
-	 * @see #run(Function)
+	 * Close the {@code Database} object and release any associated resources. This must be called at
+	 *  least once after the {@code Database} object is no longer in use. This can be called multiple
+	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
 	 */
 	@Override
-	<T> PartialFuture<T> runAsync(
-			PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable);
-
-	/**
-	 * Runs a transactional function against this {@code Database} with retry logic. Use
-	 *  this formulation of the non-blocking {@link #runAsync(Function)} if the user code being executed
-	 *  throws a checked exception and one wants to set a custom {@link Executor} for the transaction
-	 *  when run.
-	 *
-	 * @param retryable the block of logic to execute in a {@link Transaction} against
-	 *  this database
-	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 *
-	 * @see #run(Function)
-	 */
-	<T> PartialFuture<T> runAsync(
-			PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable, Executor e);
-
+	void close();
 }

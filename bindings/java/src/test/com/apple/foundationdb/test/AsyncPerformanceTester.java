@@ -1,5 +1,5 @@
 /*
- * FutureVersion.java
+ * AsyncPerformanceTester.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,11 @@
  * limitations under the License.
  */
 
-package com.apple.foundationdb;
+package com.apple.foundationdb.test;
 
-import java.util.concurrent.Executor;
+public class AsyncPerformanceTester {
 
-class FutureVersion extends NativeFuture<Long> {
-	FutureVersion(long cPtr, Executor executor) {
-		super(cPtr);
-		registerMarshalCallback(executor);
-	}
-
-	@Override
-	protected Long getIfDone_internal(long cPtr) throws FDBException {
-		return FutureVersion_get(cPtr);
-	}
-
-	private native long FutureVersion_get(long cPtr) throws FDBException;
+    public static void main(String[] args) {
+        System.out.println("Running Java async performance test on Java version " + System.getProperty("java.version"));
+    }
 }

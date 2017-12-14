@@ -22,10 +22,11 @@ package com.apple.foundationdb.test;
 
 import java.math.BigInteger;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 
 import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.KeySelector;
-import com.apple.foundationdb.async.Future;
 import com.apple.foundationdb.tuple.Tuple;
 
 public class StackUtils {
@@ -47,23 +48,21 @@ public class StackUtils {
 
 	static Object serializeFuture(Object item) {
 		try {
-			if(!(item instanceof Future)) {
+			if(!(item instanceof CompletableFuture)) {
 				return item;
 			}
-			Future<?> future = (Future<?>)item;
-			item = future.get();
+			CompletableFuture<?> future = (CompletableFuture<?>)item;
+			item = future.join();
 			if(item == null)
 				item = "RESULT_NOT_PRESENT".getBytes();
 		}
-		catch(FDBException e) {
-			item = getErrorBytes(e);
-		}
-		catch(IllegalStateException e) {
-			//Java throws this instead of an FDBException for error code 2015, so we have to translate it
-			if(e.getMessage().equals("Future not ready"))
-				item = getErrorBytes(new FDBException("", 2015));
-			else
+		catch(CompletionException e) {
+			FDBException ex = getRootFDBException(e);
+			if(ex == null) {
 				throw e;
+			}
+
+            item = getErrorBytes(ex);
 		}
 		return item;
 	}
@@ -120,4 +119,13 @@ public class StackUtils {
 		return new KeySelector((byte[])key, orEqual, offset);
 	}
 
+	static FDBException getRootFDBException(Throwable t) {
+		while(t != null && t != t.getCause() && !(t instanceof FDBException)){
+			t = t.getCause();
+		}
+
+		return (t instanceof FDBException) ? (FDBException)t : null;
+	}
+
+	private StackUtils() {}
 }

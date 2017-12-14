@@ -20,20 +20,19 @@
 
 package com.apple.foundationdb;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.function.Function;
 
-import com.apple.foundationdb.async.*;
-import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.PartialFunction;
-import com.apple.foundationdb.async.PartialFuture;
-import com.apple.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
-class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transaction, OptionConsumer {
-	private final Executor executor;
+class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionConsumer {
 	private final Database database;
+	private final Executor executor;
 	private final TransactionOptions options;
 
 	private boolean transactionOwner;
@@ -42,17 +41,17 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 	class ReadSnapshot implements ReadTransaction {
 		@Override
-		public Future<Long> getReadVersion() {
+		public CompletableFuture<Long> getReadVersion() {
 			return FDBTransaction.this.getReadVersion();
 		}
 
 		@Override
-		public Future<byte[]> get(byte[] key) {
+		public CompletableFuture<byte[]> get(byte[] key) {
 			return get_internal(key, true);
 		}
 
 		@Override
-		public Future<byte[]> getKey(KeySelector selector) {
+		public CompletableFuture<byte[]> getKey(KeySelector selector) {
 			return getKey_internal(selector, true);
 		}
 
@@ -62,7 +61,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 				int limit, boolean reverse, StreamingMode mode) {
-			return RangeQuery.start(FDBTransaction.this, true, begin, end, limit, reverse, mode);
+			return new RangeQuery(FDBTransaction.this, true, begin, end, limit, reverse, mode);
 		}
 		@Override
 		public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -138,20 +137,8 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		}
 
 		@Override
-		public <T> T read(PartialFunction<? super ReadTransaction, T> retryable)
-				throws Exception {
-			return retryable.apply(this);
-		}
-
-		@Override
-		public <T> Future<T> readAsync(
-				Function<? super ReadTransaction, Future<T>> retryable) {
-			return AsyncUtil.applySafely(retryable, this);
-		}
-
-		@Override
-		public <T> PartialFuture<T> readAsync(
-				PartialFunction<? super ReadTransaction, ? extends PartialFuture<T>> retryable) {
+		public <T> CompletableFuture<T> readAsync(
+				Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable) {
 			return AsyncUtil.applySafely(retryable, this);
 		}
 
@@ -194,10 +181,10 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	 * {@inheritDoc}
 	 */
 	@Override
-	public Future<Long> getReadVersion() {
+	public CompletableFuture<Long> getReadVersion() {
 		pointerReadLock.lock();
 		try {
-			return new FutureVersion( Transaction_getReadVersion(getPtr()), this.executor );
+			return new FutureVersion(Transaction_getReadVersion(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -207,14 +194,14 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	 * {@inheritDoc}
 	 */
 	@Override
-	public Future<byte[]> get(byte[] key) {
+	public CompletableFuture<byte[]> get(byte[] key) {
 		return get_internal(key, false);
 	}
 
-	private Future<byte[]> get_internal(byte[] key, boolean isSnapshot) {
+	private CompletableFuture<byte[]> get_internal(byte[] key, boolean isSnapshot) {
 		pointerReadLock.lock();
 		try {
-			return new FutureResult( Transaction_get(getPtr(), key, isSnapshot), this.executor );
+			return new FutureResult(Transaction_get(getPtr(), key, isSnapshot), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -224,15 +211,15 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	 * {@inheritDoc}
 	 */
 	@Override
-	public Future<byte[]> getKey(KeySelector selector) {
+	public CompletableFuture<byte[]> getKey(KeySelector selector) {
 		return getKey_internal(selector, false);
 	}
 
-	private Future<byte[]> getKey_internal(KeySelector selector, boolean isSnapshot) {
+	private CompletableFuture<byte[]> getKey_internal(KeySelector selector, boolean isSnapshot) {
 		pointerReadLock.lock();
 		try {
-			return new FutureKey( Transaction_getKey(getPtr(),
-					selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot), this.executor );
+			return new FutureKey(Transaction_getKey(getPtr(),
+					selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -244,7 +231,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
 			int limit, boolean reverse, StreamingMode mode) {
-		return RangeQuery.start(this, false, begin, end, limit, reverse, mode);
+		return new RangeQuery(this, false, begin, end, limit, reverse, mode);
 	}
 	@Override
 	public AsyncIterable<KeyValue> getRange(KeySelector begin, KeySelector end,
@@ -314,6 +301,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		return database;
 	}
 
+	// Users of this function must close the returned FutureResults when finished
 	protected FutureResults getRange_internal(
 			KeySelector begin, KeySelector end,
 			int rowLimit, int targetBytes, int streamingMode,
@@ -327,7 +315,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 			return new FutureResults(Transaction_getRange(
 					getPtr(), begin.getKey(), begin.orEqual(), begin.getOffset(),
 					end.getKey(), end.orEqual(), end.getOffset(), rowLimit, targetBytes,
-					streamingMode, iteration, isSnapshot, reverse), this.executor);
+					streamingMode, iteration, isSnapshot, reverse), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -369,19 +357,8 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	}
 
 	@Override
-	public <T> T run(PartialFunction<? super Transaction, T> retryable) throws Exception {
-		return retryable.apply(this);
-	}
-
-	@Override
-	public <T> Future<T> runAsync(
-			Function<? super Transaction, Future<T>> retryable) {
-		return AsyncUtil.applySafely(retryable, this);
-	}
-
-	@Override
-	public <T> PartialFuture<T> runAsync(
-			PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable) {
+	public <T> CompletableFuture<T> runAsync(
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable) {
 		return AsyncUtil.applySafely(retryable, this);
 	}
 
@@ -391,20 +368,8 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	}
 
 	@Override
-	public <T> T read(PartialFunction<? super ReadTransaction, T> retryable)
-			throws Exception {
-		return retryable.apply(this);
-	}
-
-	@Override
-	public <T> Future<T> readAsync(
-			Function<? super ReadTransaction, Future<T>> retryable) {
-		return AsyncUtil.applySafely(retryable, this);
-	}
-
-	@Override
-	public <T> PartialFuture<T> readAsync(
-			PartialFunction<? super ReadTransaction, ? extends PartialFuture<T>> retryable) {
+	public <T> CompletableFuture<T> readAsync(
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable) {
 		return AsyncUtil.applySafely(retryable, this);
 	}
 
@@ -476,10 +441,10 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	}
 
 	@Override
-	public Future<Void> commit() {
+	public CompletableFuture<Void> commit() {
 		pointerReadLock.lock();
 		try {
-			return new FutureVoid(Transaction_commit(getPtr()), this.executor);
+			return new FutureVoid(Transaction_commit(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -496,61 +461,51 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 	}
 
 	@Override
-	public Future<byte[]> getVersionstamp() {
+	public CompletableFuture<byte[]> getVersionstamp() {
 		pointerReadLock.lock();
 		try {
-			return new FutureKey( Transaction_getVersionstamp(getPtr()), this.executor );
+			return new FutureKey(Transaction_getVersionstamp(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
 	}
 
 	@Override
-	public Future<Void> watch(byte[] key) throws FDBException {
+	public CompletableFuture<Void> watch(byte[] key) throws FDBException {
 		pointerReadLock.lock();
 		try {
-			return new FutureVoid(Transaction_watch(getPtr(), key), this.executor);
+			return new FutureVoid(Transaction_watch(getPtr(), key), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
 	}
 
 	@Override
-	public Future<Transaction> onError(RuntimeException e) {
+	public CompletableFuture<Transaction> onError(Throwable e) {
+		if((e instanceof CompletionException || e instanceof ExecutionException) && e.getCause() != null) {
+			e = e.getCause();
+		}
 		if(!(e instanceof FDBException)) {
-			return new ReadyFuture<Transaction>(e, getExecutor());
+			CompletableFuture<Transaction> future = new CompletableFuture<>();
+			future.completeExceptionally(e);
+			return future;
 		}
 		pointerReadLock.lock();
 		try {
-			FutureVoid f = new FutureVoid(Transaction_onError(getPtr(), ((FDBException)e).getCode()), this.executor);
+			CompletableFuture<Void> f = new FutureVoid(Transaction_onError(getPtr(), ((FDBException)e).getCode()), executor);
 			final Transaction tr = transfer();
-			return f.map(new Function<Void, Transaction>() {
-				@Override
-				public Transaction apply(Void o) {
-					return tr;
-				}
-			})
-			.rescueRuntime(new Function<RuntimeException, Future<Transaction>>() {
-				@Override
-				public Future<Transaction> apply(RuntimeException e) {
-					tr.dispose();
-					throw e;
-				}
-			});
+			return f.thenApply(v -> tr)
+				.whenComplete((v, t) -> {
+					if(t != null) {
+						tr.close();
+					}
+				});
 		} finally {
 			pointerReadLock.unlock();
 			if(!transactionOwner) {
-				dispose();
+				close();
 			}
 		}
-	}
-
-	@Override
-	public PartialFuture<Transaction> onError(Exception e) {
-		if (!(e instanceof RuntimeException))
-			return new ReadyPartialFuture<Transaction>(e, getExecutor());
-
-		return onError((RuntimeException)e);
 	}
 
 	@Override
@@ -563,18 +518,13 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		}
 	}
 
-	public Future<String[]> getAddressesForKey(byte[] key) {
+	public CompletableFuture<String[]> getAddressesForKey(byte[] key) {
 		pointerReadLock.lock();
 		try {
-			return new FutureStrings(Transaction_getKeyLocations(getPtr(), key), this.executor);
+			return new FutureStrings(Transaction_getKeyLocations(getPtr(), key), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
-	}
-
-	@Override
-	public Executor getExecutor() {
-		return executor;
 	}
 
 	// Must hold pointerReadLock when calling
@@ -588,7 +538,7 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 		}
 		catch(RuntimeException err) {
 			if(tr != null) {
-				tr.dispose();
+				tr.close();
 			}
 
 			throw err;
@@ -607,14 +557,25 @@ class FDBTransaction extends DefaultDisposableImpl implements Disposable, Transa
 
 	@Override
 	protected void finalize() throws Throwable {
-		dispose();
+		try {
+			checkUnclosed("Transaction");
+			close();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	@Override
-	protected void disposeInternal(long cPtr) {
+	protected void closeInternal(long cPtr) {
 		if(transactionOwner) {
 			Transaction_dispose(cPtr);
 		}
+	}
+
+	@Override
+	public Executor getExecutor() {
+		return executor;
 	}
 
 	private native long Transaction_getReadVersion(long cPtr);

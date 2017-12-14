@@ -26,10 +26,10 @@ and add it to your classpath.<br>
 To start using FoundationDB from Java, create an instance of the 
 {@link com.apple.foundationdb.FDB FoundationDB API interface} with the version of the
 API that you want to use (this release of the FoundationDB Java API supports versions between {@code 500} and {@code 510}).
-With this API object you can then open {@link com.apple.foundationdb.Cluster}s and
-{@link com.apple.foundationdb.Database}s and start using
-{@link com.apple.foundationdb.Transaction}s. Here we give an example. The example relies on a
-cluster file at the
+With this API object you can then open {@link com.apple.foundationdb.Cluster Cluster}s and
+{@link com.apple.foundationdb.Database Database}s and start using
+{@link com.apple.foundationdb.Transaction Transactions}s.
+Here we give an example. The example relies on a cluster file at the
 <a href="/documentation/api-general.html#default-cluster-file">default location</a> 
 for your platform and a running server.<br>
 <br>
@@ -86,17 +86,6 @@ A path is represented as a List of strings. Each directory has an associated
 subspace used to store its content. The layer maps each path to a short prefix used 
 for the corresponding subspace. In effect, directories provide a level of indirection 
 for access to subspaces.
-<br>
-<h3>{@link com.apple.foundationdb.async.Future Future}s and asynchronous operation</h3>
-Asynchronous FoundationDB operations return {@link com.apple.foundationdb.async.Future Future}s.
-A {@link com.apple.foundationdb.async.Future Future} can be used in a blocking way using the
-{@link com.apple.foundationdb.async.Future#get() get()} method or in a
-fully-asynchronous way using the 
-{@link com.apple.foundationdb.async.Future#map(Function) map()} and
-{@link com.apple.foundationdb.async.Future#flatMap(Function) flatMap()}
-methods. Generally, the blocking style is more straightforward and the asynchronous style
-is more efficient. Mixing the two styles correctly can be tricky, so consider choosing
-one or the other. See the {@linkplain com.apple.foundationdb.async async Package documentation}
-for more information. 
 </BODY>
 </HTML>
+

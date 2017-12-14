@@ -20,18 +20,17 @@
 
 package com.apple.foundationdb;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.PartialFunction;
-import com.apple.foundationdb.async.PartialFuture;
 
-class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable, OptionConsumer {
-	private Executor executor;
+class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
 	private DatabaseOptions options;
+	private final Executor executor;
 
 	protected FDBDatabase(long cPtr, Executor executor) {
 		super(cPtr);
@@ -45,216 +44,70 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	}
 
 	@Override
-	public <T> T run(Function<? super Transaction, T> retryable) {
-		return this.run(retryable, executor);
-	}
-
-	@Override
 	public <T> T run(Function<? super Transaction, T> retryable, Executor e) {
-		Transaction t = this.createTransaction(e);
+		Transaction t = this.createTransaction();
 		try {
 			while (true) {
 				try {
 					T returnVal = retryable.apply(t);
-					t.commit().get();
+					t.commit().join();
 					return returnVal;
 				} catch (RuntimeException err) {
-					t = t.onError(err).get();
+					t = t.onError(err).join();
 				}
 			}
 		} finally {
-			t.dispose();
+			t.close();
 		}
-	}
-
-	@Override
-	public <T> T read(Function<? super ReadTransaction, T> retryable) {
-		return this.read(retryable, executor);
 	}
 
 	@Override
 	public <T> T read(Function<? super ReadTransaction, T> retryable, Executor e) {
-		return this.run(retryable, e);
+		return this.run(retryable);
 	}
 
 	@Override
-	public <T> T run(PartialFunction<? super Transaction, T> retryable) throws Exception {
-		return this.run(retryable, executor);
+	public <T> CompletableFuture<T> runAsync(final Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e) {
+		final AtomicReference<Transaction> trRef = new AtomicReference<>(createTransaction(e));
+		final AtomicReference<T> returnValue = new AtomicReference<>();
+		return AsyncUtil.whileTrue(() -> {
+			CompletableFuture<T> process = AsyncUtil.applySafely(retryable, trRef.get());
+
+			return AsyncUtil.composeHandleAsync(process.thenComposeAsync(returnVal ->
+				trRef.get().commit().thenApply(o -> {
+					returnValue.set(returnVal);
+					return false;
+				}), e),
+				(value, t) -> {
+					if(t == null)
+						return CompletableFuture.completedFuture(value);
+					if(!(t instanceof RuntimeException))
+						throw new CompletionException(t);
+					return trRef.get().onError(t).thenApply(newTr -> {
+						trRef.set(newTr);
+						return true;
+					});
+				}, e);
+		}, e)
+		.thenApply(o -> returnValue.get())
+		.whenComplete((v, t) -> trRef.get().close());
 	}
 
 	@Override
-	public <T> T run(PartialFunction<? super Transaction, T> retryable, Executor e) throws Exception {
-		Transaction t = this.createTransaction(e);
-		try {
-			while (true) {
-				try {
-					T returnVal = retryable.apply(t);
-					t.commit().get();
-					return returnVal;
-				} catch (RuntimeException err) {
-					t = t.onError(err).get();
-				}
-			}
-		} finally {
-			t.dispose();
-		}
-	}
-
-	@Override
-	public <T> T read(PartialFunction<? super ReadTransaction, T> retryable)
-			throws Exception {
-		return this.read(retryable, executor);
-	}
-
-	@Override
-	public <T> T read(PartialFunction<? super ReadTransaction, T> retryable, Executor e)
-			throws Exception {
-		return this.run(retryable, e);
-	}
-
-	@Override
-	public <T> Future<T> runAsync(final Function<? super Transaction, Future<T>> retryable) {
-		return this.runAsync(retryable, executor);
-	}
-
-	@Override
-	public <T> Future<T> runAsync(final Function<? super Transaction, Future<T>> retryable, Executor e) {
-		final AtomicReference<Transaction> trRef = new AtomicReference<Transaction>(createTransaction(e));
-		final AtomicReference<T> returnValue = new AtomicReference<T>();
-		Future<T> result = AsyncUtil.whileTrue(new Function<Void, Future<Boolean>>() {
-			@Override
-			public Future<Boolean> apply(Void v) {
-				Future<T> process = AsyncUtil.applySafely(retryable, trRef.get());
-
-				return process.flatMap(new Function<T, Future<Boolean>>() {
-					@Override
-					public Future<Boolean> apply(final T returnVal) {
-						return trRef.get().commit().map(new Function<Void, Boolean>() {
-							@Override
-							public Boolean apply(Void o)  {
-								returnValue.set(returnVal);
-								return false;
-							}
-						});
-					}
-				}).rescueRuntime(new Function<RuntimeException, Future<Boolean>>() {
-					@Override
-					public Future<Boolean> apply(RuntimeException err) {
-						return trRef.get().onError(err).map(new Function<Transaction, Boolean>() {
-						    @Override
-							public Boolean apply(final Transaction tr) {
-								trRef.set(tr);
-								return true;
-							}
-						});
-					}
-				});
-			}
-		}).map(new Function<Void, T>() {
-			@Override
-			public T apply(Void o) {
-				return returnValue.get();
-			}
-		});
-
-		result.onReady(new Runnable() {
-			@Override
-			public void run() {
-				trRef.get().dispose();
-			}
-		});
-
-		return result;
-	}
-
-	@Override
-	public <T> Future<T> readAsync(
-			Function<? super ReadTransaction, Future<T>> retryable) {
-		return this.readAsync(retryable, executor);
-	}
-
-	@Override
-	public <T> Future<T> readAsync(
-			Function<? super ReadTransaction, Future<T>> retryable, Executor e) {
-		return this.runAsync(retryable, e);
-	}
-
-	@Override
-	public <T> PartialFuture<T> runAsync(final PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable) {
-		return this.runAsync(retryable, executor);
-	}
-
-	@Override
-	public <T> PartialFuture<T> runAsync(final PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable, Executor e) {
-		final AtomicReference<Transaction> trRef = new AtomicReference<Transaction>(createTransaction());
-		final AtomicReference<T> returnValue = new AtomicReference<T>();
-		PartialFuture<T> result = AsyncUtil.whileTrue(new Function<Void, PartialFuture<Boolean>>() {
-			@Override
-			public PartialFuture<Boolean> apply(Void v) {
-				PartialFuture<T> process = AsyncUtil.applySafely(retryable, trRef.get());
-
-				return process.flatMap(new Function<T, Future<Boolean>>() {
-					@Override
-					public Future<Boolean> apply(final T returnVal) {
-						return trRef.get().commit().map(new Function<Void, Boolean>() {
-							@Override
-							public Boolean apply(Void o)  {
-								returnValue.set(returnVal);
-								return false;
-							}
-						});
-					}
-				}).rescue(new Function<Exception, PartialFuture<Boolean>>() {
-					@Override
-					public PartialFuture<Boolean> apply(Exception err) {
-						return trRef.get().onError(err).map(new Function<Transaction, Boolean>() {
-							@Override
-							public Boolean apply(final Transaction tr) {
-								trRef.set(tr);
-								return true;
-							}
-						});
-					}
-				});
-			}
-		}).map(new Function<Void, T>() {
-			@Override
-			public T apply(Void o) {
-				return returnValue.get();
-			}
-		});
-
-		result.onReady(new Runnable() {
-			@Override
-			public void run() {
-				trRef.get().dispose();
-			}
-		});
-
-		return result;
-	}
-
-	@Override
-	public <T> PartialFuture<T> readAsync(
-			PartialFunction<? super ReadTransaction, ? extends PartialFuture<T>> retryable) {
-		return this.readAsync(retryable, executor);
-	}
-
-	@Override
-	public <T> PartialFuture<T> readAsync(
-			PartialFunction<? super ReadTransaction, ? extends PartialFuture<T>> retryable, Executor e) {
+	public <T> CompletableFuture<T> readAsync(
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable, Executor e) {
 		return this.runAsync(retryable, e);
 	}
 
 	@Override
 	protected void finalize() throws Throwable {
-		dispose();
-		super.finalize();
-	}
-
-	@Override
-	public Transaction createTransaction() {
-		return createTransaction(executor);
+		try {
+			checkUnclosed("Database");
+			close();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	@Override
@@ -267,7 +120,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 			return tr;
 		} catch(RuntimeException err) {
 			if(tr != null) {
-				tr.dispose();
+				tr.close();
 			}
 
 			throw err;
@@ -292,7 +145,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	}
 
 	@Override
-	protected void disposeInternal(long cPtr) {
+	protected void closeInternal(long cPtr) {
 		Database_dispose(cPtr);
 	}
 

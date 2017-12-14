@@ -21,6 +21,7 @@
 package com.apple.foundationdb.async;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 
 /**
@@ -44,7 +45,7 @@ public interface AsyncIterable<T> extends Iterable<T> {
 	 *
 	 * @see AsyncUtil#collect(AsyncIterable)
 	 *
-	 * @return a {@code Future} that will be set to contents of this operation
+	 * @return a {@code CompletableFuture} that will be set to contents of this operation
 	 */
-	Future<List<T>> asList();
+	CompletableFuture<List<T>> asList();
 }

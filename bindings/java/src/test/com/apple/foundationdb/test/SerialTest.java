@@ -25,9 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
-import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.TransactionContext;
-import com.apple.foundationdb.async.Function;
 
 public class SerialTest {
 
@@ -56,16 +54,14 @@ public class SerialTest {
 		final AtomicInteger lastcount = new AtomicInteger(0);
 		for(int i = 0; i < reps; i++) {
 			try {
-				db.run(new Function<Transaction, Void>() {
-					@Override
-					public Void apply(Transaction tr) {
-						byte[] val = tr.get("count".getBytes()).get();
-						//System.out.println("Got value");
-						int count = Integer.parseInt(new String(val));
-						tr.set("count".getBytes(), Integer.toString(count + 1).getBytes());
-						lastcount.set(count);
-						return null;
-					}
+				db.run(tr -> {
+					byte[] val = tr.get("count".getBytes()).join();
+					//System.out.println("Got value");
+					int count = Integer.parseInt(new String(val));
+					tr.set("count".getBytes(), Integer.toString(count + 1).getBytes());
+					lastcount.set(count);
+
+					return null;
 				});
 			} catch (Throwable e) {
 				e.printStackTrace();
@@ -82,4 +78,5 @@ public class SerialTest {
 		System.exit(0);
 	}
 
+	private SerialTest() {}
 }

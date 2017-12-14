@@ -52,7 +52,7 @@ public class TestResult {
     }
 
     public void save(String directory) {
-        String file = "javacompletableresult-" + id + ".json";
+        String file = "javaresult-" + id + ".json";
         if(directory.length() > 0) {
             file = directory + "/" + file;
         }

@@ -20,52 +20,142 @@
 
 package com.apple.foundationdb.async;
 
+import static com.apple.foundationdb.FDB.DEFAULT_EXECUTOR;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.function.BiFunction;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
- * Provided utilities for using and manipulating {@link Future}s. Many of the methods
- *  in this class have two versions -- one for dealing with {@link PartialFuture}s and
- *  one for {@code Future}s.
+ * Provided utilities for using and manipulating {@link CompletableFuture}s.
  */
 public class AsyncUtil {
 	/**
+	 * A completed future of type {@link Void}. In particular, it is completed to {@code null},
+	 *  but that shouldn't really matter for the {@link Void} type. This can be used instead
+	 *  of creating a new future if one wants to signal that some asynchronous task has
+	 *  already been completed.
+	 */
+	public static final CompletableFuture<Void> DONE = CompletableFuture.completedFuture(null);
+	/**
+	 * A completed future of type {@link Boolean} that is set to {@code true}. This can be
+	 *  used instead of creating a new future if one wants to signal that some task has
+	 *  already been completed with a {@code true} result.
+	 */
+	public static final CompletableFuture<Boolean> READY_TRUE = CompletableFuture.completedFuture(Boolean.TRUE);
+	/**
+	 * A completed future of type {@link Boolean} that is set to {@code false}. This can be
+	 *  used instead of creating a new future if one wants to signal that some task has
+	 *  already been completed with a {@code false} result.
+	 */
+	public static final CompletableFuture<Boolean> READY_FALSE = CompletableFuture.completedFuture(Boolean.FALSE);
+
+	/**
 	 * Run {@code Function} {@code func}, returning all caught exceptions as a
-	 *  {@code Future} in an error state.
+	 *  {@code CompletableFuture} in an error state.
 	 *
 	 * @param func the {@code Function} to run
 	 * @param value the input to pass to {@code func}
 	 *
-	 * @return the output of {@code func}, or a {@code Future} carrying any exception
+	 * @return the output of {@code func}, or a {@code CompletableFuture} carrying any exception
 	 *  caught in the process.
 	 */
-	public static <I,O> Future<O> applySafely( Function<I,Future<O>> func, I value ) {
+	public static <I,O> CompletableFuture<O> applySafely(Function<I, ? extends CompletableFuture<O>> func, I value) {
 		try {
 			return func.apply(value);
 		} catch (RuntimeException e) {
-			return new ReadyFuture<O>(e);
+			CompletableFuture<O> future = new CompletableFuture<>();
+			future.completeExceptionally(e);
+			return future;
 		}
 	}
 
 	/**
-	 * Run {@code PartialFunction} {@code func}, returning all caught exceptions as a
-	 *  {@code PartialFuture} in an error state.
+	 * Run the {@code consumer} on each element of the iterable in order. The future will
+	 *  complete with either the first error encountered by either the iterable itself
+	 *  or by the consumer provided or with {@code null} if the future completes
+	 *  successfully. Items are processed in order from the iterable, and each item
+	 *  will be processed only after the item before it has finished processing.
 	 *
-	 * @param func the {@code PartialFunction} to run
-	 * @param value the input to pass to {@code func}
+	 * @param iterable the source of data over from which to consume
+	 * @param consumer operation to apply to each item
+	 * @param <V> type of the items returned by the iterable
 	 *
-	 * @return the output of {@code func}, or a {@code PartialFuture} carrying any exception
-	 *  caught in the process.
+	 * @return a future that is ready once the asynchronous operation completes
 	 */
-	public static <I,O> PartialFuture<O> applySafely( PartialFunction<I,? extends PartialFuture<O>> func, I value ) {
-		try {
-			return func.apply(value);
-		} catch (Exception e) {
-			return new ReadyPartialFuture<O>(e);
-		}
+	public static <V> CompletableFuture<Void> forEach(final AsyncIterable<V> iterable, final Consumer<? super V> consumer) {
+		return forEachRemaining(iterable.iterator(), consumer);
+	}
+
+	/**
+	 * Run the {@code consumer} on each element of the iterable in order. The future will
+	 *  complete with either the first error encountered by either the iterable itself
+	 *  or by the consumer provided or with {@code null} if the future completes
+	 *  successfully. Items are processed in order from the iterable, and each item
+	 *  will be processed only after the item before it has finished processing. Asynchronous
+	 *  tasks needed to complete this operation are scheduled on the provided executor.
+	 *
+	 * @param iterable the source of data over from which to consume
+	 * @param consumer operation to apply to each item
+	 * @param executor executor on which to schedule asynchronous tasks
+	 * @param <V> type of the items returned by the iterable
+	 *
+	 * @return a future that is ready once the asynchronous operation completes
+	 */
+	public static <V> CompletableFuture<Void> forEach(final AsyncIterable<V> iterable, final Consumer<? super V> consumer, final Executor executor) {
+		return forEachRemaining(iterable.iterator(), consumer, executor);
+	}
+
+	/**
+	 * Run the {@code consumer} on each element remaining in the iterator in order. The future will
+	 *  complete with either the first error encountered by either the iterator itself
+	 *  or by the consumer provided or with {@code null} if the future completes
+	 *  successfully. Items are processed in order from the iterator, and each item
+	 *  will be processed only after the item before it has finished processing.
+	 *
+	 * @param iterator the source of data over from which to consume
+	 * @param consumer operation to apply to each item
+	 * @param <V> type of the items returned by the iterator
+	 *
+	 * @return a future that is ready once the asynchronous operation completes
+	 */
+	public static <V> CompletableFuture<Void> forEachRemaining(final AsyncIterator<V> iterator, final Consumer<? super V> consumer) {
+		return forEachRemaining(iterator, consumer, DEFAULT_EXECUTOR);
+	}
+
+	/**
+	 * Run the {@code consumer} on each element remaining if the iterator in order. The future will
+	 *  complete with either the first error encountered by either the iterator itself
+	 *  or by the consumer provided or with {@code null} if the future completes
+	 *  successfully. Items are processed in order from the iterator, and each item
+	 *  will be processed only after the item before it has finished processing. Asynchronous
+	 *  tasks needed to complete this operation are scheduled on the provided executor.
+	 *
+	 * @param iterator the source of data over from which to consume
+	 * @param consumer operation to apply to each item
+	 * @param executor executor on which to schedule asynchronous tasks
+	 * @param <V> type of the items returned by the iterator
+	 *
+	 * @return a future that is ready once the asynchronous operation completes
+	 */
+	public static <V> CompletableFuture<Void> forEachRemaining(final AsyncIterator<V> iterator, final Consumer<? super V> consumer, final Executor executor) {
+		return iterator.onHasNext().thenComposeAsync(hasAny -> {
+			if (hasAny) {
+				return whileTrue(() -> {
+					consumer.accept(iterator.next());
+					return iterator.onHasNext();
+				}, executor);
+			} else {
+				return DONE;
+			}
+		}, executor);
 	}
 
 	/**
@@ -73,40 +163,50 @@ public class AsyncUtil {
 	 *
 	 * @param iterable the source of data over which to iterate
 	 *
-	 * @return a {@code Future} which will be set to the amalgamation of results
+	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
 	 *  from iteration.
 	 */
-	public static <V> Future<List<V>> collect(final AsyncIterable<V> iterable) {
-		final AsyncIterator<V> it = iterable.iterator();
-		final List<V> accumulator = new LinkedList<V>();
+	public static <V> CompletableFuture<List<V>> collect(final AsyncIterable<V> iterable) {
+		return collect(iterable, DEFAULT_EXECUTOR);
+	}
 
-		// The condition of the while loop is simply "onHasNext()" returning true
-		Function<Void, Future<Boolean>> condition = new Function<Void, Future<Boolean>>() {
-			@Override
-			public Future<Boolean> apply(Void v) {
-				return it.onHasNext().map(new Function<Boolean, Boolean>() {
-					@Override
-					public Boolean apply(Boolean o) {
-						if(o) {
-							accumulator.add(it.next());
-						}
-						return o;
-					}
-				});
-			}
-		};
+	/**
+	 * Iterates over a set of items and returns the remaining results as a list.
+	 *
+	 * @param iterator the source of data over which to iterate. This function will exhaust the iterator.
+	 *
+	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
+	 *  from iteration.
+	 */
+	public static <V> CompletableFuture<List<V>> collectRemaining(final AsyncIterator<V> iterator) {
+		return collectRemaining(iterator, DEFAULT_EXECUTOR);
+	}
 
-		Future<Void> complete = whileTrue(condition);
-		Future<List<V>> result = tag(complete, accumulator);
+	/**
+	 * Iterates over a set of items and returns the result as a list.
+	 *
+	 * @param iterable the source of data over which to iterate
+	 * @param executor the {@link Executor} to use for asynchronous operations
+	 *
+	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
+	 *  from iteration.
+	 */
+	public static <V> CompletableFuture<List<V>> collect(final AsyncIterable<V> iterable, final Executor executor) {
+		return collectRemaining(iterable.iterator(), executor);
+	}
 
-		result.onReady(new Runnable() {
-			@Override
-			public void run() {
-				it.dispose();
-			}
-		});
-
-		return result;
+	/**
+	 * Iterates over a set of items and returns the remaining results as a list.
+	 *
+	 * @param iterator the source of data over which to iterate. This function will exhaust the iterator.
+	 * @param executor the {@link Executor} to use for asynchronous operations
+	 *
+	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
+	 *  from iteration.
+	 */
+	public static <V> CompletableFuture<List<V>> collectRemaining(final AsyncIterator<V> iterator, final Executor executor) {
+		final List<V> accumulator = new LinkedList<>();
+		return tag(forEachRemaining(iterator, accumulator::add, executor), accumulator);
 	}
 
 	/**
@@ -122,132 +222,146 @@ public class AsyncUtil {
 		return new AsyncIterable<T>() {
 			@Override
 			public AsyncIterator<T> iterator() {
-				final AsyncIterator<V> it = iterable.iterator();
-				return new AsyncIterator<T>() {
-
-					@Override
-					public void remove() {
-						it.remove();
-					}
-
-					@Override
-					public Future<Boolean> onHasNext() {
-						return it.onHasNext();
-					}
-
-					@Override
-					public boolean hasNext() {
-						return it.hasNext();
-					}
-
-					@Override
-					public T next() {
-						return func.apply(it.next());
-					}
-
-					@Override
-					public void cancel() {
-						it.cancel();
-					}
-
-					@Override
-					public void dispose() {
-						it.dispose();
-					}
-				};
+				return mapIterator(iterable.iterator(), func);
 			}
 
 			@Override
-			public Future<List<T>> asList() {
-				return iterable.asList().map(new Function<List<V>, List<T>>() {
-					@Override
-					public List<T> apply(List<V> o) {
-						ArrayList<T> out = new ArrayList<T>(o.size());
-						for(V in : o)
-							out.add(func.apply(in));
-						return out;
-					}
-				});
+			public CompletableFuture<List<T>> asList() {
+				final List<T> accumulator = new LinkedList<>();
+				return tag(AsyncUtil.forEach(iterable, value -> accumulator.add(func.apply(value))), accumulator);
 			}
 		};
 	}
 
 	/**
-	 * Cast a checked {@link Exception} in a {@code RuntimeException} for when code
-	 *  knows that a {@code PartialFuture} is an instance of a {@code Future}.
+	 * Map an {@code AsyncIterator} into an {@code AsyncIterator} of another type or with
+	 *  each element modified in some fashion.
+	 *
+	 * @param iterator input
+	 * @param func mapping function applied to each element
+	 * @return a new iterator with each element mapped to a different value
 	 */
-	private static Function<Exception, Future<Void>> makeTotal = new Function<Exception, Future<Void>>() {
-		@Override
-		public Future<Void> apply(Exception e) {
-			throw (RuntimeException)e;
-		}
-	};
+	public static <V, T> AsyncIterator<T> mapIterator(final AsyncIterator<V> iterator,
+													  final Function<V, T> func) {
+		return new AsyncIterator<T>() {
+			@Override
+			public void remove() {
+				iterator.remove();
+			}
 
-	private static class LoopPartial {
-		final PartialFunction<Void, ? extends PartialFuture<Boolean>> body;
-		final SettablePartialFuture<Void> done;
-		PartialFuture<Boolean> process;
-		boolean m_cancelled = false;
+			@Override
+			public CompletableFuture<Boolean> onHasNext() {
+				return iterator.onHasNext();
+			}
 
-		LoopPartial(PartialFunction<Void, ? extends PartialFuture<Boolean>> body) {
+			@Override
+			public boolean hasNext() {
+				return iterator.hasNext();
+			}
+
+			@Override
+			public T next() {
+				return func.apply(iterator.next());
+			}
+
+			@Override
+			public void cancel() {
+				iterator.cancel();
+			}
+		};
+	}
+
+	/**
+	 * Map a {@code CloseableAsyncIterator} into a {@code CloseableAsyncIterator} of another type or with
+	 *  each element modified in some fashion.
+	 *
+	 * @param iterator input
+	 * @param func mapping function applied to each element
+	 * @return a new iterator with each element mapped to a different value
+	 */
+	public static <V, T> CloseableAsyncIterator<T> mapIterator(final CloseableAsyncIterator<V> iterator,
+													  final Function<V, T> func) {
+		return new CloseableAsyncIterator<T>() {
+			@Override
+			public void remove() {
+				iterator.remove();
+			}
+
+			@Override
+			public CompletableFuture<Boolean> onHasNext() {
+				return iterator.onHasNext();
+			}
+
+			@Override
+			public boolean hasNext() {
+				return iterator.hasNext();
+			}
+
+			@Override
+			public T next() {
+				return func.apply(iterator.next());
+			}
+
+			@Override
+			public void cancel() {
+				iterator.cancel();
+			}
+
+			@Override
+			public void close() {
+				iterator.close();
+			}
+		};
+	}
+
+	private static class LoopPartial implements BiFunction<Boolean, Throwable, Void> {
+		final Supplier<? extends CompletableFuture<Boolean>> body;
+		final CompletableFuture<Void> done;
+		final Executor executor;
+
+		LoopPartial(Supplier<? extends CompletableFuture<Boolean>> body, Executor executor) {
 			this.body = body;
-			this.done = new SettablePartialFuture<Void>();
-			this.done.onCancelled(new Runnable() {
-				@Override
-				public void run() {
-					synchronized( LoopPartial.this ) {
-						LoopPartial.this.m_cancelled = true;
-						LoopPartial.this.process.cancel();
-					}
-				}
-			});
-			this.run();
+			this.done = new CompletableFuture<>();
+			this.executor = executor;
 		}
 
-		private boolean shouldContinue(PartialFuture<Boolean> process) {
-			try {
-				// Any exception encountered on process will be re-thrown here
-				if(process.get())
-					return true;
-			} catch (Exception e) {
-				done.setError(e);
-				return false;
-			} catch (Error e) {
-				done.setError(e);
-				throw e;
+		@Override
+		public Void apply(Boolean more, Throwable error) {
+			if (error != null) {
+				done.completeExceptionally(error);
+			} else {
+				while (true) {
+					if (!more) {
+						done.complete(null);
+						break;
+					}
+					CompletableFuture<Boolean> result;
+					try {
+						result = body.get();
+					} catch (Exception e) {
+						done.completeExceptionally(e);
+						break;
+					}
+					if (result.isDone()) {
+						if (result.isCompletedExceptionally()) {
+							result.handle(this);
+							break;
+						} else {
+							more = result.join();
+						}
+					} else {
+						result.handleAsync(this, executor);
+						break;
+					}
+				}
 			}
-			done.set(null);
-			return false;
+
+			return null;
 		}
 
-		private void run() {
-			while(true) {
-				try {
-					final PartialFuture<Boolean> process = body.apply(null);
-					synchronized (this) {
-						if (m_cancelled) process.cancel();
-						this.process = process;
-					}
-
-					if(process.onReadyAlready(new Runnable() {
-						@Override
-						public void run() {
-							if(shouldContinue(process))
-								LoopPartial.this.run();
-						}}))
-					{
-						if(shouldContinue(process))
-							continue;
-					}
-				} catch(Exception e) {
-					done.setError(e);
-				} catch (Error e) {
-					done.setError(e);
-					throw e;
-				}
-
-				break;
-			};
+		public CompletableFuture<Void> run() {
+			apply(true, null);
+			return done;
 		}
 	}
 
@@ -256,10 +370,28 @@ public class AsyncUtil {
 	 *
 	 * @param body the asynchronous operation over which to loop
 	 *
-	 * @return a {@code PartialFuture} which will be set at completion of the loop.
+	 * @return a {@link CompletableFuture} which will be set at completion of the loop.
+	 * @deprecated Since version 5.1.0. Use the version of {@link #whileTrue(Supplier) whileTrue} that takes a
+	 * {@link Supplier} instead.
 	 */
-	public static PartialFuture<Void> whileTrue(PartialFunction<Void,? extends PartialFuture<Boolean>> body) {
-		return new LoopPartial(body).done;
+	@Deprecated
+	public static CompletableFuture<Void> whileTrue(Function<Void,? extends CompletableFuture<Boolean>> body) {
+		return whileTrue(body, DEFAULT_EXECUTOR);
+	}
+
+	/**
+	 * Executes an asynchronous operation repeatedly until it returns {@code False}.
+	 *
+	 * @param body the asynchronous operation over which to loop
+	 * @param executor the {@link Executor} to use for asynchronous operations
+	 *
+	 * @return a {@link CompletableFuture} which will be set at completion of the loop.
+	 * @deprecated Since version 5.1.0. Use the version of {@link #whileTrue(Supplier, Executor) whileTrue} that takes a
+	 * {@link Supplier} instead.
+	 */
+	@Deprecated
+	public static CompletableFuture<Void> whileTrue(Function<Void,? extends CompletableFuture<Boolean>> body, Executor executor) {
+		return whileTrue(() -> body.apply(null), executor);
 	}
 
 	/**
@@ -267,114 +399,121 @@ public class AsyncUtil {
 	 *
 	 * @param body the asynchronous operation over which to loop
 	 *
-	 * @return a {@code Future} which will be set at completion of the loop.
+	 * @return a {@link CompletableFuture} which will be set at completion of the loop.
 	 */
-	public static Future<Void> whileTrue(Function<Void,Future<Boolean>> body) {
-		// Since body can't throw checked exceptions and the implementation of LoopPartial
-		// doesn't create any, we can use the partial version of the while loop and then
-		// simply force any resulting Exceptions to type RuntimeException
-		return new LoopPartial(body).done.rescue(makeTotal);
+	public static CompletableFuture<Void> whileTrue(Supplier<CompletableFuture<Boolean>> body) {
+		return whileTrue(body, DEFAULT_EXECUTOR);
 	}
 
 	/**
-	 * Executes {@code body} repeatedly after each time {@code condition} returns {@code true}.
-	 * At each iteration, {@code condition} is evaluated <i>before</i> the call to {@code body}.
+	 * Executes an asynchronous operation repeatedly until it returns {@code False}.
 	 *
-	 * @param condition evaluated at the start of each loop, if it returns {@code true},
-	 *  {@code body} is called.
-	 * @param body called each time that {@code condition} returns {@code true}.
+	 * @param body the asynchronous operation over which to loop
+	 * @param executor the {@link Executor} to use for asynchronous operations
 	 *
-	 * @return a signal set when the condition finally returns {@code false} and the loop is
-	 *  complete.
+	 * @return a {@link CompletableFuture} which will be set at completion of the loop.
 	 */
-	/*public static Future<Void> whileTrue(
-			final Callable<Future<Boolean>> condition,
-			final Callable<Future<Void>> body )
-	{
-// This WOULD be the lambda version of this function, but we're on Java 6!
-//		return While( () ->
-//			condition.apply(null).flatMap( cond_true ->
-//				cond_true ? tag(body.apply(null), true) : new Settable<Boolean>(false)
-//					) );
-
-		return whileTrue(new Callable<Future<Boolean>>() {
-			@Override
-			public Future<Boolean> call() {
-				try {
-					return condition.call().flatMap(new Function<Boolean, Future<Boolean>>() {
-						@Override
-						public Future<Boolean> apply(Boolean cond_true) throws Exception {
-							if(cond_true) {
-								return tag(body.call(), Boolean.TRUE);
-							} else {
-								return new ReadyPartialFuture<Boolean>(false);
-							}
-						}});
-				} catch (Throwable e) {
-					return new ReadyPartialFuture<Boolean>(e);
-				}
-			}
-		});
-	}*/
-
-	/**
-	 * Maps the outcome of a task into a completion signal. Can be useful if {@code task} has
-	 *  side-effects for which all is needed is a signal of completion.
-	 *  All errors from {@code task} will be passed to the resulting {@code Future}.
-	 *
-	 * @param task the asynchronous process for which to signal completion
-	 *
-	 * @return a newly created {@code Future} that is set when {@code task} completes
-	 */
-	public static <V> Future<Void> success(Future<V> task) {
-		return task.map(new Function<V, Void>() {
-			@Override
-			public Void apply(V o) {
-				return null;
-			}
-		});
+	public static CompletableFuture<Void> whileTrue(Supplier<CompletableFuture<Boolean>> body, Executor executor) {
+		return new LoopPartial(body, executor).run();
 	}
 
 	/**
 	 * Maps the outcome of a task into a completion signal. Can be useful if {@code task} has
 	 *  side-effects for which all is needed is a signal of completion.
-	 *  All errors from {@code task} will be passed to the resulting {@code PartialFuture}.
+	 *  All errors from {@code task} will be passed to the resulting {@code CompletableFuture}.
 	 *
 	 * @param task the asynchronous process for which to signal completion
 	 *
-	 * @return a newly created {@code Future} that is set when {@code task} completes
+	 * @return a newly created {@code CompletableFuture} that is set when {@code task} completes
 	 */
-	public static <V> PartialFuture<Void> success(PartialFuture<V> task) {
-		return task.map(new Function<V, Void>() {
-			@Override
-			public Void apply(V o) {
-				return null;
-			}
-		});
+	public static <V> CompletableFuture<Void> success(CompletableFuture<V> task) {
+		return task.thenApply(o -> null);
 	}
 
 	/**
-	 * Maps the readiness of a {@link PartialFuture} into a completion signal.  When
-	 * the given {@link PartialFuture} is set to a value or an error, the returned {@link Future}
-	 * will be set to null.  The returned {@link Future} will never be set to an error unless
+	 * Maps the readiness of a {@link CompletableFuture} into a completion signal.  When
+	 * the given {@link CompletableFuture} is set to a value or an error, the returned {@link CompletableFuture}
+	 * will be set to null.  The returned {@link CompletableFuture} will never be set to an error unless
 	 * it is explicitly cancelled.
 	 *
 	 * @param task the asynchronous process to monitor the readiness of
 	 *
-	 * @return a new {@link Future} that is set when {@code task} is ready.
+	 * @return a new {@link CompletableFuture} that is set when {@code task} is ready.
 	 */
-	public static <V> Future<Void> whenReady(PartialFuture<V> task) {
-		return task.map(new PartialFunction<V, Void>() {
-			@Override
-			public Void apply(V o) throws Exception {
-				return null;
-			}
-		}).rescue(new Function<Exception, Future<Void>>() {
-			@Override
-			public Future<Void> apply(Exception o) {
-				return ReadyFuture.DONE;
-			}
-		});
+	public static <V> CompletableFuture<Void> whenReady(CompletableFuture<V> task) {
+		return task.handle((v, t) -> null);
+	}
+
+	public static <V> CompletableFuture<V> composeExceptionally(CompletableFuture<V> task, Function<Throwable, CompletableFuture<V>> fn) {
+		return task.handle((v,e) -> e)
+				.thenCompose(e -> {
+					if (e != null) {
+						return fn.apply(e);
+					} else {
+						return task;
+					}
+				});
+	}
+
+	/**
+	 * Compose a handler bi-function to the result of a future. Unlike the
+	 *  {@link CompletableFuture#handle(BiFunction) CompletableFuture.handle()}
+	 *  function, which requires that the handler return a regular value, this
+	 *  method requires that the handler return a {@link CompletableFuture}.
+	 *  The returned future will then be ready with the result of the
+	 *  handler's future (or an error if that future completes exceptionally).
+	 *
+	 * @param future future to compose the handler onto
+	 * @param handler handler bi-function to compose onto the passed future
+	 * @param <V> return type of original future
+	 * @param <T> return type of final future
+	 *
+	 * @return future with same completion properties as the future returned by the handler
+	 */
+	public static <V, T> CompletableFuture<T> composeHandle(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> handler) {
+		return future.handle(handler).thenCompose(Function.identity());
+	}
+
+	/**
+	 * Compose a handler bi-function to the result of a future. Unlike the
+	 *  {@link CompletableFuture#handle(BiFunction) CompletableFuture.handle()}
+	 *  function, which requires that the handler return a regular value, this
+	 *  method requires that the handler return a {@link CompletableFuture}.
+	 *  The returned future will then be ready with the result of the
+	 *  handler's future (or an error if that future completes exceptionally).
+	 *  The handler will execute on the {@link com.apple.foundationdb.FDB#DEFAULT_EXECUTOR default executor}
+	 *  used for asychronous tasks.
+	 *
+	 * @param future future to compose the handler onto
+	 * @param handler handler bi-function to compose onto the passed future
+	 * @param <V> return type of original future
+	 * @param <T> return type of final future
+	 *
+	 * @return future with same completion properties as the future returned by the handler
+	 */
+	public static <V, T> CompletableFuture<T> composeHandleAsync(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> handler) {
+		return composeHandleAsync(future, handler, DEFAULT_EXECUTOR);
+	}
+
+	/**
+	 * Compose a handler bi-function to the result of a future. Unlike the
+	 *  {@link CompletableFuture#handle(BiFunction) CompletableFuture.handle()}
+	 *  function, which requires that the handler return a regular value, this
+	 *  method requires that the handler return a {@link CompletableFuture}.
+	 *  The returned future will then be ready with the result of the
+	 *  handler's future (or an error if that future completes excpetionally).
+	 *  The handler will execute on the passed {@link Executor}.
+	 *
+	 * @param future future to compose the handler onto
+	 * @param handler handler bi-function to compose onto the passed future
+	 * @param executor executor on which to execute the handler function
+	 * @param <V> return type of original future
+	 * @param <T> return type of final future
+	 *
+	 * @return future with same completion properties as the future returned by the handler
+	 */
+	public static <V, T> CompletableFuture<T> composeHandleAsync(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> handler, Executor executor) {
+		return future.handleAsync(handler, executor).thenCompose(Function.identity());
 	}
 
 	/**
@@ -383,37 +522,16 @@ public class AsyncUtil {
 	 *
 	 * @param tasks the tasks whose output is to be added to the output
 	 *
-	 * @return a {@code Future} that will be set to the collective result of the tasks
+	 * @return a {@code CompletableFuture} that will be set to the collective result of the tasks
 	 */
-	public static <V> Future<List<V>> getAll(final Collection<Future<V>> tasks) {
-		return whenAll(tasks).map(new Function<Void, List<V>>() {
-			@Override
-			public List<V> apply(Void o) {
-				List<V> result = new ArrayList<V>();
-				for(Future<V> f : tasks)
-					result.add(f.get());
-				return result;
+	public static <V> CompletableFuture<List<V>> getAll(final Collection<CompletableFuture<V>> tasks) {
+		return whenAll(tasks).thenApply(unused -> {
+			List<V> result = new ArrayList<>(tasks.size());
+			for(CompletableFuture<V> f : tasks) {
+				assert(f.isDone());
+				result.add(f.getNow(null));
 			}
-		});
-	}
-
-	/**
-	 * Collects the results of many asynchronous processes into one asynchronous output. If
-	 *  any of the tasks returns an error, the output is set to that error.
-	 *
-	 * @param tasks the tasks whose output is to be added to the output
-	 *
-	 * @return a {@code Future} that will be set to the collective result of the tasks
-	 */
-	public static <V> PartialFuture<List<V>> getAllPartial(final Collection<PartialFuture<V>> tasks) {
-		return whenAll(tasks).map(new PartialFunction<Void, List<V>>() {
-			@Override
-			public List<V> apply(Void o) throws Exception {
-				List<V> result = new ArrayList<V>();
-				for(PartialFuture<V> f : tasks)
-					result.add( f.get() );
-				return result;
-			}
+			return result;
 		});
 	}
 
@@ -424,181 +542,40 @@ public class AsyncUtil {
 	 *
 	 * @param value the predetermined value to be returned on success of {@code task}
 	 *
-	 * @return a {@code Future} that will be set to {@code value} on completion of {@code task}
+	 * @return a {@code CompletableFuture} that will be set to {@code value} on completion of {@code task}
 	 */
-	public static <V, T> Future<V> tag(Future<T> task, final V value) {
-		return task.map(new Function<T, V>() {
-			@Override
-			public V apply(T o) {
-				return value;
-			}
-		});
+	public static <V, T> CompletableFuture<V> tag(CompletableFuture<T> task, final V value) {
+		return task.thenApply(o -> value);
 	}
 
 	/**
-	 * Replaces the output of an asynchronous task with a predetermined value.
+	 * Return a {@code CompletableFuture} that will be set when any of the {@link CompletableFuture}
+	 *  inputs are done. A {@code CompletableFuture} is done both on success and failure.
 	 *
-	 * @param task the asynchronous process whose output is to be replaced
-	 *
-	 * @param value the predetermined value to be returned on success of {@code task}
-	 *
-	 * @return a {@code Future} that will be set to {@code value} on completion of {@code task}
-	 */
-	public static <V, T> PartialFuture<V> tag(PartialFuture<T> task, final V value) {
-		return task.map(new Function<T, V>() {
-			@Override
-			public V apply(T o) {
-				return value;
-			}
-		});
-	}
-
-	/**
-	 * Return a {@code Future} that will be set when any of the {@code PartialFuture}
-	 *  inputs are done. A {@code Future} is done both on success and failure.
-	 *
-	 * @param input the list of {@code PartialFuture}s to monitor. This list
+	 * @param input the list of {@link CompletableFuture}s to monitor. This list
 	 *  <b>must not</b> be modified during the execution of this call.
 	 *
-	 * @return a signal that will be set when any of the {@code Future}s are done
+	 * @return a signal that will be set when any of the {@code CompletableFuture}s are done
 	 */
-	public static <V> Future<Void> whenAny(final Collection<? extends PartialFuture<V>> input) {
-		// Short-circuit work for the case that there is no need for the callback mechanism
-		for(PartialFuture<?> a : input) {
-			if(a.isDone()) {
-				return ReadyFuture.DONE;
-			}
-		}
-
-		final SettableFuture<Void> p = new SettableFuture<Void>();
-		for(PartialFuture<?> a : input) {
-			p.onCancelledCancel(a);
-			a.onReady(new Runnable() {
-				@Override
-				public void run() {
-					if(p.isSet())
-						return;
-					try {
-						p.set((Void)null);
-					} catch(Exception e) {
-						// There is significant chance that this is a race to set the
-						//  promise, therefore this being an error is not surprising.
-						//  Also, there is nowhere for an exception to go, aside from
-						//  from going to a default handler.
-					}
-				}
-			});
-		}
-		return p;
+	public static <V> CompletableFuture<Void> whenAny(final Collection<? extends CompletableFuture<V>> input) {
+		CompletableFuture<?>[] array = input.toArray(new CompletableFuture<?>[input.size()]);
+		CompletableFuture<Object> anyOf = CompletableFuture.anyOf(array);
+		return success(anyOf);
 	}
 
 	/**
-	 * Return a {@code Future} that will be set when all the {@code PartialFuture}
-	 *  inputs are done. A {@code Future} is done both on success and failure.
+	 * Return a {@code CompletableFuture} that will be set when all the {@link CompletableFuture}
+	 *  inputs are done. A {@code CompletableFuture} is done both on success and failure.
 	 *
-	 * @param input the list of {@code PartialFuture}s to monitor. This list
+	 * @param input the list of {@link CompletableFuture}s to monitor. This list
 	 *  <b>must not</b> be modified during the execution of this call.
 	 *
-	 * @return a signal that will be set when all of the {@code Future}s are done
+	 * @return a signal that will be set when all of the {@code CompletableFuture}s are done
 	 */
-	public static <V> Future<Void> whenAll(final Collection<? extends PartialFuture<V>> input) {
-		int count = input.size();
-		if(count == 0) {
-			return ReadyFuture.DONE;
-		}
-
-		// Is this possibly susceptible to a race where the count is taken before
-		//  the iteration and therefore the collection could have been modified?
-		//  This could lead to a mismatch in the
-		final AtomicInteger outstanding = new AtomicInteger(count);
-		final SettableFuture<Void> p = new SettableFuture<Void>();
-		for(PartialFuture<?> a : input) {
-			p.onCancelledCancel(a);
-			a.onReady(new Runnable() {
-				@Override
-				public void run() {
-					if(outstanding.decrementAndGet() == 0) {
-						p.set((Void)null);
-					}
-				}
-			});
-		}
-		return p;
+	public static <V> CompletableFuture<Void> whenAll(final Collection<? extends CompletableFuture<V>> input) {
+		CompletableFuture<?>[] array = input.toArray(new CompletableFuture<?>[input.size()]);
+		return CompletableFuture.allOf(array);
 	}
 
 	private AsyncUtil() {}
-
-	/*
-	private static <T> AsyncIterable<T> readyIterable(final Iterable<T> it) {
-		return new AsyncIterable<T>() {
-			@Override
-			public AsyncIterator<T> iterator() {
-				return new ReadyIterator<T>(it.iterator());
-			}
-
-			@Override
-			public Future<List<T>> asList() {
-				ArrayList<T> c = new ArrayList<T>();
-				for(T t: it) {
-					c.add(t);
-				}
-				return new ReadyFuture<List<T>>(c);
-			}
-		};
-	}
-
-	private static class ReadyIterator<T> implements AsyncIterator<T> {
-		private Iterator<T> iterator;
-
-		public ReadyIterator(Iterator<T> iterator) {
-			this.iterator = iterator;
-		}
-
-		@Override
-		public boolean hasNext() {
-			return iterator.hasNext();
-		}
-
-		@Override
-		public T next() {
-			return iterator.next();
-		}
-
-		@Override
-		public void remove() {
-			// This will throw if the underlying container does not support it
-			iterator.remove();
-		}
-
-		@Override
-		public Future<Boolean> onHasNext() {
-			return new ReadyFuture<Boolean>(iterator.hasNext());
-		}
-	}
-
-	private static void testCollectionAction(AsyncIterable<Integer> readyIterable) {
-		Future<List<Integer>> collected = collect(readyIterable);
-		try {
-			List<Integer> list = collected.get();
-			System.out.println("Via dual parameter (default) collect(): List of " + list.size() + " items");
-		} catch(Throwable t) {
-			t.printStackTrace();
-		}
-
-		collected = singleBodyTest(readyIterable);
-		try {
-			List<Integer> list = collected.get();
-			System.out.println("Via single parmeter (test) collections: List of " + list.size() + " items");
-		} catch(Throwable t) {
-			t.printStackTrace();
-		}
-	}
-
-	public static void main(String[] args) {
-		// test collect over large set of items
-		AsyncIterable<Integer> readyIterable = readyIterable(Collections.nCopies(10000, Integer.valueOf(14)));
-		for(int i = 0; i < 100; i++) {
-			testCollectionAction(readyIterable);
-		}
-	}*/
 }

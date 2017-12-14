@@ -22,6 +22,7 @@ package com.apple.foundationdb.test;
 
 import java.nio.ByteBuffer;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -32,8 +33,6 @@ import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 public class ParallelRandomScan {
@@ -60,7 +59,7 @@ public class ParallelRandomScan {
 		final AtomicInteger errors = new AtomicInteger(0);
 		final Transaction tr = database.createTransaction();
 		final Semaphore coordinator = new Semaphore(parallelism);
-		final ContinuousSample<Long> latencies = new ContinuousSample<Long>(1000);
+		final ContinuousSample<Long> latencies = new ContinuousSample<>(1000);
 
 		tr.options().setReadYourWritesDisable();
 
@@ -73,7 +72,7 @@ public class ParallelRandomScan {
 		ByteBuffer buf = ByteBuffer.allocate(4);
 
 		// Eat the cost of the read version up-front
-		tr.getReadVersion().get();
+		tr.getReadVersion().join();
 
 		final long start = System.currentTimeMillis();
 		while(true) {
@@ -91,35 +90,26 @@ public class ParallelRandomScan {
 			final long launch = System.nanoTime();
 
 			final AsyncIterator<KeyValue> it = range.iterator();
-			final Future<KeyValue> f = it.onHasNext().map(
-					new Function<Boolean, KeyValue>() {
-						@Override
-						public KeyValue apply(Boolean o) {
-							if(!o) {
-								return null;
-							}
-							return it.next();
-						}
-					}
-				);
-			f.onReady(new Runnable() {
-				@Override
-				public void run() {
-					try {
-						@SuppressWarnings("unused")
-						KeyValue kv = f.get();
-						readsCompleted.incrementAndGet();
-						long timeTaken = System.nanoTime() - launch;
-						synchronized(latencies) {
-							latencies.addSample(timeTaken);
-						}
-					} catch(Throwable t) {
-						errors.incrementAndGet();
-					} finally {
-						coordinator.release();
+			final CompletableFuture<KeyValue> f = it.onHasNext().thenApplyAsync(hasFirst -> {
+				if(!hasFirst) {
+					return null;
+				}
+				return it.next();
+			}, FDB.DEFAULT_EXECUTOR);
+			f.whenCompleteAsync((kv, t) -> {
+				if(kv != null) {
+					readsCompleted.incrementAndGet();
+					long timeTaken = System.nanoTime() - launch;
+					synchronized(latencies) {
+						latencies.addSample(timeTaken);
 					}
 				}
-			});
+				else if(t != null) {
+					errors.incrementAndGet();
+				}
+
+				coordinator.release();
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 
 		// Block for ALL tasks to end!
@@ -133,4 +123,6 @@ public class ParallelRandomScan {
 		System.out.println(String.format("  Mean: %.2f, Median: %d, 98%%: %d",
 				latencies.mean(), latencies.median(), latencies.percentile(0.98)));
 	}
+
+	private ParallelRandomScan() {}
 }

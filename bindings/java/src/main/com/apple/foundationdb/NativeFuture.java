@@ -20,135 +20,115 @@
 
 package com.apple.foundationdb;
 
-import java.io.IOException;
-import java.nio.channels.AsynchronousCloseException;
-import java.nio.channels.spi.AbstractInterruptibleChannel;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import com.apple.foundationdb.async.AbstractFuture;
+abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoCloseable {
+	private final ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
+	protected final Lock pointerReadLock = rwl.readLock();
 
-abstract class NativeFuture<T> extends AbstractFuture<T> {
-	protected final long cPtr;
+	private long cPtr;
 
-	private final Object valueLock = new Object();
-	private boolean valueSet = false;
-	private T value;
-
-	protected NativeFuture(long cPtr, Executor e) {
-		super(e);
+	protected NativeFuture(long cPtr) {
 		this.cPtr = cPtr;
 	}
 
-	@Override
-	protected void registerSingleCallback(Runnable callback) {
-		if(isDone()) {
-			callback.run();
-		} else {
-			Future_registerCallback(cPtr, callback);
+	// Adds a callback to call marshalWhenDone when the C-future
+	// has completed. Every subclass should add this to its constructor
+	// after it has initialized its members. This is excluded from the
+	// constructor of this class because a quickly completing future can  
+	// lead to a race where the marshalWhenDone tries to run on an
+	// unconstructed subclass.
+	//
+	// Since this must be called from a constructor, we assume that close
+	// cannot be called concurrently.
+	protected void registerMarshalCallback(Executor executor) {
+		if(cPtr != 0) {
+			Future_registerCallback(cPtr, () -> executor.execute(this::marshalWhenDone));
 		}
 	}
 
-
-	@Override
-	public void blockInterruptibly() throws InterruptedException {
-		if(this.isDone())
-			return;
-		blockChannel.blockUntilReady();
-	}
-
-	/**
-	 * Blocks until this {@code Future} is set to either a value or an error.
-	 * @throws FDBException
-	 */
-	@Override
-	public void blockUntilReady() {
-		NativeFuture.this.Future_blockUntilReady(cPtr);
-	}
-
-	/**
-	 * Gets the readiness of this {@code Future}.  A {@code Future} is ready
-	 *  if the value has been set or set to an error.
-	 *
-	 * @return <code>true</code> if the {@code Future} is set to a value or error
-	 */
-	@Override
-	public boolean isDone() {
-		return Future_isReady(cPtr);
-	}
-
-	@Override
-	public boolean isError() {
-		int code = Future_getError(cPtr).getCode();
-		if(code==1102) throw new RuntimeException("");
-		// is an error if is not success, future_not_set, or future_released
-		return code != 0 && code != 2015 && code != 1102;
-	}
-
-	@Override
-	public FDBException getError() {
-		FDBException err = Future_getError(cPtr);
-
-		// If this is not an error
-		int code = err.getCode();
-		if(code == 2015) // future_not_set
-			throw new IllegalStateException("Future not ready");
-		if(code == 1102 || code == 0) // future_released, success
-			throw new IllegalStateException("Future set to value, not error");
-
-		return err;
-	}
-
-	@Override
-	protected T getIfDone() {
+	private void marshalWhenDone() {
 		try {
-			T val = getIfDone_internal();
-			synchronized (valueLock) {
-				this.value = val;
-				this.valueSet = true;
+			T val = null;
+			boolean shouldComplete = false;
+			try {
+				pointerReadLock.lock();
+				if(cPtr != 0) {
+					val = getIfDone_internal(cPtr);
+					shouldComplete = true;
+				}
 			}
-			Future_releaseMemory(cPtr);
+			finally {
+				pointerReadLock.unlock();
+			}
+
+			if(shouldComplete) {
+				complete(val);
+			}
 		} catch(FDBException t) {
-			if(t.getCode() == 2015) { // future_not_set
-				throw new IllegalStateException("Future not ready");
+			assert(t.getCode() != 1102 && t.getCode() != 2015); // future_released, future_not_set not possible
+			completeExceptionally(t);
+		} catch(Throwable t) {
+			completeExceptionally(t);
+		} finally {
+			postMarshal();
+		}
+	}
+
+	protected void postMarshal() {
+		close();
+	}
+
+	protected abstract T getIfDone_internal(long cPtr) throws FDBException;
+
+	@Override
+	public void close() {
+		long ptr = 0;
+
+		rwl.writeLock().lock();
+		if(cPtr != 0) {
+			ptr = cPtr;
+			cPtr = 0;
+		}
+		rwl.writeLock().unlock();
+
+		if(ptr != 0) {
+			Future_dispose(ptr);
+			if(!isDone()) {
+				completeExceptionally(new IllegalStateException("Future has been closed"));
 			}
-			if(t.getCode() != 1102) { // future_released
-				throw t;
+		}
+	}
+
+	@Override
+	public boolean cancel(boolean mayInterruptIfRunning) {
+		boolean result = super.cancel(mayInterruptIfRunning);
+		try {
+			rwl.readLock().lock();
+			if(cPtr != 0) {
+				Future_cancel(cPtr);
 			}
+			return result;
 		}
-
-		synchronized (valueLock) {
-			// For us to get here with no value set that means that
-			//  someone else called releaseMemory without also first
-			//  setting "value". The only way this could happen is
-			//  through a call to dispose().
-			if(!valueSet)
-				throw new IllegalStateException("Future value accessed after disposal");
-			return this.value;
+		finally {
+			rwl.readLock().unlock();
 		}
 	}
 
-	abstract T getIfDone_internal() throws FDBException;
+	protected long getPtr() {
+		// we must have a read lock for this function to make sense, however it
+		//  does not make sense to take the lock here, since the code that uses
+		//  the result must inherently have the read lock itself.
+		assert(rwl.getReadHoldCount() > 0);
 
-	@Override
-	public void cancel() {
-		Future_cancel(cPtr);
+		if(cPtr == 0)
+			throw new IllegalStateException("Cannot access closed object");
+
+		return cPtr;
 	}
-
-	@Override
-	public void dispose()  {
-	    Future_releaseMemory(cPtr);
-	    synchronized (valueLock) {
-			this.value = null;
-			this.valueSet = false;
-		}
-	}
-
-	@Override
-	protected void finalize() throws Throwable {
-		Future_dispose(cPtr);
-	}
-
-	FutureChannel blockChannel = new FutureChannel();
 
 	private native void Future_registerCallback(long cPtr, Runnable callback);
 	private native void Future_blockUntilReady(long cPtr);
@@ -159,27 +139,4 @@ abstract class NativeFuture<T> extends AbstractFuture<T> {
 
 	// Used by FutureVoid
 	protected native FDBException Future_getError(long cPtr);
-
-	private final class FutureChannel extends AbstractInterruptibleChannel {
-		@Override
-		protected void implCloseChannel() throws IOException {
-			NativeFuture.this.cancel();
-		}
-
-		void blockUntilReady() throws InterruptedException {
-			boolean completed = false;
-			try {
-				begin();
-				NativeFuture.this.Future_blockUntilReady(cPtr);    // Perform blocking I/O operation
-				completed = true;
-			} finally {
-				try {
-					end(completed);
-				} catch (AsynchronousCloseException e) {
-					throw new InterruptedException();
-				}
-			}
-		}
-	}
-
 }

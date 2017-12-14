@@ -23,7 +23,15 @@ package com.apple.foundationdb.test;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
@@ -33,41 +41,33 @@ import com.apple.foundationdb.KeySelector;
 import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
-import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.ReadyFuture;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
 public class AsyncStackTester {
 	static final String DIRECTORY_PREFIX = "DIRECTORY_";
 
-	static class WaitEmpty implements Function<Transaction, Future<Void>> {
+	static class WaitEmpty implements Function<Transaction, CompletableFuture<Void>> {
 		private final byte[] prefix;
 		WaitEmpty(byte[] prefix) {
 			this.prefix = prefix;
 		}
 
 		@Override
-		public Future<Void> apply(Transaction tr) {
-			return tr.getRange(Range.startsWith(prefix)).asList().map(new Function<List<KeyValue>, Void>() {
-				@Override
-				public Void apply(List<KeyValue> list) {
-					if(list.size() > 0) {
-						//System.out.println(" - Throwing new fake commit error...");
-						throw new FDBException("ERROR: Fake commit conflict", 1020);
-					}
-					return null;
+		public CompletableFuture<Void> apply(Transaction tr) {
+			return tr.getRange(Range.startsWith(prefix)).asList().thenAcceptAsync(list -> {
+				if(list.size() > 0) {
+					//System.out.println(" - Throwing new fake commit error...");
+					throw new FDBException("ERROR: Fake commit conflict", 1020);
 				}
-			});
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 	}
 
-	static Future<Void> processInstruction(final Instruction inst) {
+	static CompletableFuture<Void> processInstruction(final Instruction inst) {
 		StackOperation op = StackOperation.valueOf(inst.op);
 		if(op == StackOperation.PUSH) {
 			Object item = inst.tokens.get(1);
@@ -82,11 +82,11 @@ public class AsyncStackTester {
 				System.out.println(inst.context.preStr + " - " + "Pushing null");
 			else
 				System.out.println(inst.context.preStr + " - " + "Pushing item of type " + item.getClass().getName());*/
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.POP) {
 			inst.pop();
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.DUP) {
 			if(inst.size() == 0)
@@ -94,312 +94,183 @@ public class AsyncStackTester {
 			StackEntry e = inst.pop();
 			inst.push(e);
 			inst.push(e);
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.EMPTY_STACK) {
 			inst.clear();
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.SWAP) {
-			return inst.popParam()
-			.flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					int index = StackUtils.getInt(param);
-					if(index >= inst.size())
-						throw new IllegalArgumentException("Stack index not valid");
+			return inst.popParam().thenAcceptAsync(param -> {
+				int index = StackUtils.getInt(param);
+				if(index >= inst.size())
+					throw new IllegalArgumentException("Stack index not valid");
 
-					inst.swap(index);
-					return ReadyFuture.DONE;
-				}
-			});
+				inst.swap(index);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.WAIT_FUTURE) {
-			return popAndWait(inst)
-			.flatMap(new Function<StackEntry, Future<Void>>() {
-				@Override
-				public Future<Void> apply(StackEntry e) {
-					inst.push(e);
-					return ReadyFuture.DONE;
-				}
-			});
+			return popAndWait(inst).thenAccept(inst::push);
 		}
 		else if(op == StackOperation.WAIT_EMPTY) {
-			return inst.popParam()
-			.flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					WaitEmpty retryable = new WaitEmpty((byte[])param);
-					return inst.context.db.runAsync(retryable).map(new Function<Void, Void>() {
-						@Override
-						public Void apply(Void o) {
-							inst.push( "WAITED_FOR_EMPTY".getBytes());
-							return null;
-						}
-					});
-				}
-			});
+			return inst.popParam().thenComposeAsync(param -> {
+				WaitEmpty retryable = new WaitEmpty((byte[])param);
+				return inst.context.db.runAsync(retryable).thenRun(() -> inst.push("WAITED_FOR_EMPTY".getBytes()));
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.START_THREAD) {
-			return inst.popParam()
-			.flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					//System.out.println(inst.context.preStr + " - " + "Starting new thread at prefix: " + ByteArrayUtil.printable((byte[]) params.get(0)));
-					inst.context.addContext((byte[])param);
-					return ReadyFuture.DONE;
-				}
-			});
+			return inst.popParam().thenAcceptAsync(param -> {
+				//System.out.println(inst.context.preStr + " - " + "Starting new thread at prefix: " + ByteArrayUtil.printable((byte[]) params.get(0)));
+				inst.context.addContext((byte[])param);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.NEW_TRANSACTION) {
 			inst.context.newTransaction();
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.USE_TRANSACTION) {
-			return inst.popParam()
-			.map(new Function<Object, Void>() {
-				public Void apply(Object param) {
-					inst.context.switchTransaction((byte[])param);
-					return null;
-				}
-			});
+			return inst.popParam().thenAcceptAsync(param -> {
+				inst.context.switchTransaction((byte[])param);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.SET) {
-			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final List<Object> params) {
-					/*System.out.println(inst.context.preStr + " - " + "Setting '" + ByteArrayUtil.printable((byte[]) params.get(0)) +
-							"' to '" + ByteArrayUtil.printable((byte[]) params.get(1)) + "'"); */
-					return executeMutation(inst, new Function<Transaction, Future<Void>>() {
-						@Override
-						public Future<Void> apply(Transaction tr) {
-							tr.set((byte[])params.get(0), (byte[])params.get(1));
-							return ReadyFuture.DONE;
-						}
-					});
-				}
-			});
+			return inst.popParams(2).thenComposeAsync(params -> {
+				/*System.out.println(inst.context.preStr + " - " + "Setting '" + ByteArrayUtil.printable((byte[]) params.get(0)) +
+						"' to '" + ByteArrayUtil.printable((byte[]) params.get(1)) + "'"); */
+				return executeMutation(inst, tr -> {
+					tr.set((byte[])params.get(0), (byte[])params.get(1));
+					return AsyncUtil.DONE;
+				});
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.CLEAR) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final Object param) {
-					//System.out.println(inst.context.preStr + " - " + "Clearing: '" + ByteArrayUtil.printable((byte[])param) + "'");
-					return executeMutation(inst, new Function<Transaction, Future<Void>>() {
-						@Override
-						public Future<Void> apply(Transaction tr) {
-							tr.clear((byte[])param);
-							return ReadyFuture.DONE;
-						}
-					});
-				}
-			});
+			return inst.popParam().thenComposeAsync(param -> {
+				//System.out.println(inst.context.preStr + " - " + "Clearing: '" + ByteArrayUtil.printable((byte[])param) + "'");
+				return executeMutation(inst, tr -> {
+					tr.clear((byte[])param);
+					return AsyncUtil.DONE;
+				});
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.CLEAR_RANGE) {
-			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final List<Object> params) {
-					return executeMutation(inst, new Function<Transaction, Future<Void>>() {
-						@Override
-						public Future<Void> apply(Transaction tr) {
-							tr.clear((byte[])params.get(0), (byte[])params.get(1));
-							return ReadyFuture.DONE;
-						}
-					});
-				}
-			});
+			return inst.popParams(2).thenComposeAsync(params ->
+				executeMutation(inst, tr -> {
+					tr.clear((byte[])params.get(0), (byte[])params.get(1));
+					return AsyncUtil.DONE;
+				}),
+				FDB.DEFAULT_EXECUTOR
+			);
 		}
 		else if(op == StackOperation.CLEAR_RANGE_STARTS_WITH) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final Object param) {
-					return executeMutation(inst, new Function<Transaction, Future<Void>>() {
-						@Override
-						public Future<Void> apply(Transaction tr) {
-							tr.clear(Range.startsWith((byte[])param));
-							return ReadyFuture.DONE;
-						}
-					});
-				}
-			});
+			return inst.popParam().thenComposeAsync(param ->
+				executeMutation(inst, tr -> {
+					tr.clear(Range.startsWith((byte[])param));
+					return AsyncUtil.DONE;
+				}),
+				FDB.DEFAULT_EXECUTOR
+			);
 		}
 		else if(op == StackOperation.ATOMIC_OP) {
-			return inst.popParams(3).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final List<Object> params) {
-					final MutationType optype = MutationType.valueOf((String)params.get(0));
-					return executeMutation(inst,
-						new Function<Transaction, Future<Void>>() {
-							@Override
-							public Future<Void> apply(Transaction tr) {
-								tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
-								return ReadyFuture.DONE;
-							}
-						}
-					);
-				}
-			});
+			return inst.popParams(3).thenComposeAsync(params -> {
+				final MutationType optype = MutationType.valueOf((String)params.get(0));
+				return executeMutation(inst, tr -> {
+					tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
+					return AsyncUtil.DONE;
+				});
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.COMMIT) {
 			inst.push(inst.tr.commit());
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.RESET) {
 			inst.context.newTransaction();
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.CANCEL) {
 			inst.tr.cancel();
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.READ_CONFLICT_RANGE) {
-			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(List<Object> params) {
-					inst.tr.addReadConflictRange((byte[])params.get(0), (byte[])params.get(1));
-					inst.push("SET_CONFLICT_RANGE".getBytes());
-					return ReadyFuture.DONE;
-				}
-			});
+			return inst.popParams(2).thenAcceptAsync(params -> {
+				inst.tr.addReadConflictRange((byte[])params.get(0), (byte[])params.get(1));
+				inst.push("SET_CONFLICT_RANGE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.WRITE_CONFLICT_RANGE) {
-			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(List<Object> params) {
-					inst.tr.addWriteConflictRange((byte[])params.get(0), (byte[])params.get(1));
-					inst.push("SET_CONFLICT_RANGE".getBytes());
-					return ReadyFuture.DONE;
-				}
-			});
+			return inst.popParams(2).thenAcceptAsync(params -> {
+				inst.tr.addWriteConflictRange((byte[])params.get(0), (byte[])params.get(1));
+				inst.push("SET_CONFLICT_RANGE".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.READ_CONFLICT_KEY) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					inst.tr.addReadConflictKey((byte[])param);
-					inst.push("SET_CONFLICT_KEY".getBytes());
-					return ReadyFuture.DONE;
-				}
-			});
+			return inst.popParam().thenAcceptAsync(param -> {
+				inst.tr.addReadConflictKey((byte[])param);
+				inst.push("SET_CONFLICT_KEY".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.WRITE_CONFLICT_KEY) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					inst.tr.addWriteConflictKey((byte[])param);
-					inst.push("SET_CONFLICT_KEY".getBytes());
-					return ReadyFuture.DONE;
-				}
+			return inst.popParam().thenAcceptAsync(param -> {
+				inst.tr.addWriteConflictKey((byte[])param);
+				inst.push("SET_CONFLICT_KEY".getBytes());
 			});
 		}
 		else if(op == StackOperation.DISABLE_WRITE_CONFLICT) {
 			inst.tr.options().setNextWriteNoWriteConflictRange();
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.GET) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final Object param) {
-					Future<byte[]> f = inst.readTcx.readAsync(new Function<ReadTransaction, Future<byte[]>>() {
-						@Override
-						public Future<byte[]> apply(ReadTransaction readTr) {
-							return inst.readTr.get((byte[])param);
-						}
-					});
-					inst.push(f);
-					return ReadyFuture.DONE;
-				}
+			return inst.popParam().thenAcceptAsync(param -> {
+				inst.push(inst.readTcx.readAsync(readTr -> readTr.get((byte[]) param)));
 			});
 		}
 		else if(op == StackOperation.GET_RANGE) {
-			return inst.popParams(5).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final List<Object> params) {
-					final int limit = StackUtils.getInt(params.get(2));
-					final boolean reverse = StackUtils.getBoolean(params.get(3));
-					final StreamingMode mode = inst.context.streamingModeFromCode(
-							StackUtils.getInt(params.get(4), StreamingMode.ITERATOR.code()));
+			return inst.popParams(5).thenComposeAsync(params -> {
+				int limit = StackUtils.getInt(params.get(2));
+				boolean reverse = StackUtils.getBoolean(params.get(3));
+				StreamingMode mode = inst.context.streamingModeFromCode(
+						StackUtils.getInt(params.get(4), StreamingMode.ITERATOR.code()));
 
-					Future<List<KeyValue>> range = inst.readTcx.readAsync(new Function<ReadTransaction, Future<List<KeyValue>>>() {
-						@Override
-						public Future<List<KeyValue>> apply(ReadTransaction readTr) {
-							return readTr.getRange((byte[])params.get(0), (byte[])params.get(1), limit, reverse, mode).asList();
-						}
-					});
-
-					return pushRange(inst, range);
-				}
-			});
+				CompletableFuture<List<KeyValue>> range = inst.readTcx.readAsync(readTr -> readTr.getRange((byte[])params.get(0), (byte[])params.get(1), limit, reverse, mode).asList());
+				return pushRange(inst, range);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.GET_RANGE_SELECTOR) {
-			return inst.popParams(10).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final List<Object> params) {
-					final int limit = StackUtils.getInt(params.get(6));
-					final boolean reverse = StackUtils.getBoolean(params.get(7));
-					final StreamingMode mode = inst.context.streamingModeFromCode(
-							StackUtils.getInt(params.get(8), StreamingMode.ITERATOR.code()));
+			return inst.popParams(10).thenComposeAsync(params -> {
+				int limit = StackUtils.getInt(params.get(6));
+				boolean reverse = StackUtils.getBoolean(params.get(7));
+				StreamingMode mode = inst.context.streamingModeFromCode(
+						StackUtils.getInt(params.get(8), StreamingMode.ITERATOR.code()));
 
-					final KeySelector start = StackUtils.createSelector(params.get(0),params.get(1), params.get(2));
-					final KeySelector end = StackUtils.createSelector(params.get(3), params.get(4), params.get(5));
+				KeySelector start = StackUtils.createSelector(params.get(0),params.get(1), params.get(2));
+				KeySelector end = StackUtils.createSelector(params.get(3), params.get(4), params.get(5));
 
-					Future<List<KeyValue>> range = inst.readTcx.readAsync(new Function<ReadTransaction, Future<List<KeyValue>>>() {
-						@Override
-						public Future<List<KeyValue>> apply(ReadTransaction readTr) {
-							return readTr.getRange(start, end, limit, reverse, mode).asList();
-						}
-					});
-
-					return pushRange(inst, range, (byte[])params.get(9));
-				}
-			});
+				CompletableFuture<List<KeyValue>> range = inst.readTcx.readAsync(readTr -> readTr.getRange(start, end, limit, reverse, mode).asList());
+				return pushRange(inst, range, (byte[])params.get(9));
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.GET_RANGE_STARTS_WITH) {
-			return inst.popParams(4).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(final List<Object> params) {
-					final int limit = StackUtils.getInt(params.get(1));
-					final boolean reverse = StackUtils.getBoolean(params.get(2));
-					final StreamingMode mode = inst.context.streamingModeFromCode(
-							StackUtils.getInt(params.get(3), StreamingMode.ITERATOR.code()));
+			return inst.popParams(4).thenComposeAsync(params -> {
+				int limit = StackUtils.getInt(params.get(1));
+				boolean reverse = StackUtils.getBoolean(params.get(2));
+				StreamingMode mode = inst.context.streamingModeFromCode(
+						StackUtils.getInt(params.get(3), StreamingMode.ITERATOR.code()));
 
-					Future<List<KeyValue>> range = inst.readTcx.readAsync(new Function<ReadTransaction, Future<List<KeyValue>>>() {
-						@Override
-						public Future<List<KeyValue>> apply(ReadTransaction readTr) {
-							return readTr.getRange(Range.startsWith((byte[])params.get(0)), limit, reverse, mode).asList();
-						}
-					});
-
-					return pushRange(inst, range);
-				}
+				CompletableFuture<List<KeyValue>> range = inst.readTcx.readAsync(readTr -> readTr.getRange(Range.startsWith((byte[])params.get(0)), limit, reverse, mode).asList());
+				return pushRange(inst, range);
 			});
 		}
 		else if(op == StackOperation.GET_KEY) {
-			return inst.popParams(4).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(List<Object> params) {
-					final KeySelector start = StackUtils.createSelector(params.get(0),params.get(1), params.get(2));
-					Future<byte[]> key = inst.readTcx.readAsync(new Function<ReadTransaction, Future<byte[]>>() {
-						@Override
-						public Future<byte[]> apply(ReadTransaction readTr) {
-							return inst.readTr.getKey(start);
-						}
-					});
-
-					inst.push(executeGetKey(key, (byte[])params.get(3)));
-					return ReadyFuture.DONE;
-				}
-			});
+			return inst.popParams(4).thenAcceptAsync(params -> {
+				KeySelector start = StackUtils.createSelector(params.get(0),params.get(1), params.get(2));
+				inst.push(inst.readTcx.readAsync(readTr -> executeGetKey(readTr.getKey(start), (byte[])params.get(3))));
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.GET_READ_VERSION) {
-			return inst.readTr.getReadVersion().map(new Function<Long, Void>() {
-				@Override
-				public Void apply(Long readVersion) {
-					inst.context.lastVersion = readVersion;
-					inst.push("GOT_READ_VERSION".getBytes());
-					return null;
-				}
-			});
+			return inst.readTr.getReadVersion().thenAcceptAsync(readVersion -> {
+				inst.context.lastVersion = readVersion;
+				inst.push("GOT_READ_VERSION".getBytes());
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.GET_COMMITTED_VERSION) {
 			try {
@@ -410,7 +281,7 @@ public class AsyncStackTester {
 				StackUtils.pushError(inst, e);
 			}
 
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.GET_VERSIONSTAMP) {
 			try {
@@ -420,358 +291,253 @@ public class AsyncStackTester {
 				StackUtils.pushError(inst, e);
 			}
 
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.SET_READ_VERSION) {
 			if(inst.context.lastVersion == null)
 				throw new IllegalArgumentException("Read version has not been read");
 			inst.tr.setReadVersion(inst.context.lastVersion);
-			return ReadyFuture.DONE;
+			return AsyncUtil.DONE;
 		}
 		else if(op == StackOperation.ON_ERROR) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					int errorCode = StackUtils.getInt(param);
+			return inst.popParam().thenComposeAsync(param -> {
+				int errorCode = StackUtils.getInt(param);
 
-					// 1102 (future_released) is not an error to Java. This is never encountered by user code,
-					//  so we have to do something rather messy here to get compatibility with other languages.
-					//
-					// First, try on error with a retryable error. If it fails, then the transaction is in
-					//  a failed state and we should rethrow the error. Otherwise, throw the original error.
-					boolean filteredError = errorCode == 1102;
+				// 1102 (future_released) and 2015 (future_not_set) are not errors to Java.
+				//  This is never encountered by user code, so we have to do something rather
+				//  messy here to get compatibility with other languages.
+				//
+				// First, try on error with a retryable error. If it fails, then the transaction is in
+				//  a failed state and we should rethrow the error. Otherwise, throw the original error.
+				boolean filteredError = errorCode == 1102 || errorCode == 2015;
 
-					FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
-					final Transaction oldTr = inst.tr;
-					Future<Void> f = oldTr.onError(err)
-						.map(new Function<Transaction, Void>() {
-							@Override
-							public Void apply(final Transaction tr) {
-								// Replace the context's transaction if it is still using the old one
-								inst.context.updateCurrentTransaction(oldTr, tr);
-								return null;
-							}
-						})
-						.rescueRuntime(new Function<RuntimeException, Future<Void>>() {
-							@Override
-							public Future<Void> apply(RuntimeException ex) {
-								// Create a new transaction for the context if it is still using the old one
-								inst.context.newTransaction(oldTr);
-								throw ex;
-							}
-						});
-
-					if(filteredError) {
-						f.get();
-						throw new FDBException("Fake testing error", errorCode);
+				FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
+				final Transaction oldTr = inst.tr;
+				CompletableFuture<Void> f = oldTr.onError(err).whenComplete((tr, t) -> {
+					if(t != null) {
+						inst.context.newTransaction(oldTr); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
 					}
+					else {
+						inst.setTransaction(oldTr, tr);
+					}
+				}).thenApply(v -> null);
 
-					inst.push(f);
-					return ReadyFuture.DONE;
+				if(filteredError) {
+					f.join();
+					throw new FDBException("Fake testing error", errorCode);
 				}
-			});
+
+				inst.push(f);
+				return AsyncUtil.DONE;
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.SUB) {
-			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(List<Object> params) {
-					BigInteger result = StackUtils.getBigInteger(params.get(0)).subtract(
-							StackUtils.getBigInteger(params.get(1))
-					);
-					inst.push(result);
-					return ReadyFuture.DONE;
-				}
+			return inst.popParams(2).thenAcceptAsync(params -> {
+				BigInteger result = StackUtils.getBigInteger(params.get(0)).subtract(
+						StackUtils.getBigInteger(params.get(1))
+				);
+				inst.push(result);
 			});
 		}
 		else if(op == StackOperation.CONCAT) {
-			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(List<Object> params) {
-					if(params.get(0) instanceof String) {
-						inst.push((String)params.get(0) + (String)params.get(1));
-					}
-					else {
-						inst.push(ByteArrayUtil.join((byte[])params.get(0), (byte[])params.get(1)));
-					}
-
-					return ReadyFuture.DONE;
+			return inst.popParams(2).thenAcceptAsync(params -> {
+				if(params.get(0) instanceof String) {
+					inst.push((String)params.get(0) + (String)params.get(1));
 				}
-			});
+				else {
+					inst.push(ByteArrayUtil.join((byte[])params.get(0), (byte[])params.get(1)));
+				}
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.TUPLE_PACK) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					int tupleSize = StackUtils.getInt(param);
-					//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
-					return inst.popParams(tupleSize).flatMap(new Function<List<Object>, Future<Void>>() {
-						@Override
-						public Future<Void> apply(List<Object> elements) {
-							byte[] coded = Tuple.fromItems(elements).pack();
-							//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
-							inst.push(coded);
-							return ReadyFuture.DONE;
-						}
-					});
-				}
-			});
+			return inst.popParam().thenComposeAsync(param -> {
+				int tupleSize = StackUtils.getInt(param);
+				//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
+				return inst.popParams(tupleSize).thenAcceptAsync(elements -> {
+					byte[] coded = Tuple.fromItems(elements).pack();
+					//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
+					inst.push(coded);
+				}, FDB.DEFAULT_EXECUTOR);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
-			return inst.popParams(2).flatMap(new Function<List<Object>, Future<Void>>() {
-				@Override
-				public Future<Void> apply(List<Object> params) {
-					final byte[] prefix = (byte[])params.get(0);
-					int tupleSize = StackUtils.getInt(params.get(1));
-					//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
-					return inst.popParams(tupleSize).flatMap(new Function<List<Object>, Future<Void>>() {
-						@Override
-						public Future<Void> apply(List<Object> elements) {
-							Tuple tuple = Tuple.fromItems(elements);
-							if(!tuple.hasIncompleteVersionstamp() && Math.random() < 0.5) {
-								inst.push("ERROR: NONE".getBytes());
-								return ReadyFuture.DONE;
-							}
-							try {
-								byte[] coded = tuple.packWithVersionstamp(prefix);
-								//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
-								inst.push("OK".getBytes());
-								inst.push(coded);
-							} catch(IllegalArgumentException e) {
-								//System.out.println(inst.context.preStr + " - " + " -> result '" + e.getMessage() + "'");
-								if(e.getMessage().startsWith("No incomplete"))
-									inst.push("ERROR: NONE".getBytes());
-								else if(e.getMessage().startsWith("Multiple incomplete"))
-									inst.push("ERROR: MULTIPLE".getBytes());
-								else
-									throw e;
-							}
-							return ReadyFuture.DONE;
+			return inst.popParams(2).thenComposeAsync(params -> {
+				byte[] prefix = (byte[])params.get(0);
+				int tupleSize = StackUtils.getInt(params.get(1));
+				//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
+				return inst.popParams(tupleSize).thenAcceptAsync(elements -> {
+					Tuple tuple = Tuple.fromItems(elements);
+					if(!tuple.hasIncompleteVersionstamp() && Math.random() < 0.5) {
+						inst.push("ERROR: NONE".getBytes());
+						return;
+					}
+					try {
+						byte[] coded = tuple.packWithVersionstamp(prefix);
+						inst.push("OK".getBytes());
+						inst.push(coded);
+					} catch(IllegalArgumentException e) {
+						if(e.getMessage().startsWith("No incomplete")) {
+							inst.push("ERROR: NONE".getBytes());
+						} else {
+							inst.push("ERROR: MULTIPLE".getBytes());
 						}
-					});
-				}
-			});
+					}
+				}, FDB.DEFAULT_EXECUTOR);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.TUPLE_UNPACK) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					/*System.out.println(inst.context.preStr + " - " + "Unpacking tuple code: " +
-							ByteArrayUtil.printable((byte[]) param)); */
-					Tuple t = Tuple.fromBytes((byte[])param);
-					for(Object o : t.getItems()) {
-						byte[] itemBytes = Tuple.from(o).pack();
-						inst.push(itemBytes);
-					}
-					return ReadyFuture.DONE;
+			return inst.popParam().thenAcceptAsync(param -> {
+				/*System.out.println(inst.context.preStr + " - " + "Unpacking tuple code: " +
+						ByteArrayUtil.printable((byte[]) param)); */
+				Tuple t = Tuple.fromBytes((byte[])param);
+				for(Object o : t.getItems()) {
+					byte[] itemBytes = Tuple.from(o).pack();
+					inst.push(itemBytes);
 				}
-			});
-		}
-		else if(op == StackOperation.TUPLE_SORT) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					final int listSize = StackUtils.getInt(param);
-					return inst.popParams(listSize).flatMap(new Function<List<Object>, Future<Void>>() {
-						@Override
-						public Future<Void> apply(List<Object> rawElements) {
-							List<Tuple> tuples = new ArrayList<Tuple>(listSize);
-							for(Object o : rawElements) {
-								tuples.add(Tuple.fromBytes((byte[])o));
-							}
-							Collections.sort(tuples);
-							for(Tuple t : tuples) {
-								inst.push(t.pack());
-							}
-							return ReadyFuture.DONE;
-						}
-					});
-				}
-			});
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.TUPLE_RANGE) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					int tupleSize = StackUtils.getInt(param);
-					//System.out.println(inst.context.preStr + " - " + "Tuple range with top " + tupleSize + " items from stack");
-					return inst.popParams(tupleSize).flatMap(new Function<List<Object>, Future<Void>>() {
-						@Override
-						public Future<Void> apply(List<Object> elements) {
-							Range range = Tuple.fromItems(elements).range();
-							inst.push(range.begin);
-							inst.push(range.end);
-							return ReadyFuture.DONE;
-						}
-					});
-				}
-			});
+			return inst.popParam().thenComposeAsync(param -> {
+				int tupleSize = StackUtils.getInt(param);
+				//System.out.println(inst.context.preStr + " - " + "Tuple range with top " + tupleSize + " items from stack");
+				return inst.popParams(tupleSize).thenAcceptAsync(elements -> {
+					Range range = Tuple.fromItems(elements).range();
+					inst.push(range.begin);
+					inst.push(range.end);
+				}, FDB.DEFAULT_EXECUTOR);
+			}, FDB.DEFAULT_EXECUTOR);
+		}
+		else if(op == StackOperation.TUPLE_SORT) {
+			return inst.popParam().thenComposeAsync(param -> {
+				final int listSize = StackUtils.getInt(param);
+				return inst.popParams(listSize).thenAcceptAsync(rawElements -> {
+					List<Tuple> tuples = new ArrayList<>(listSize);
+					for(Object o : rawElements) {
+						tuples.add(Tuple.fromBytes((byte[])o));
+					}
+					Collections.sort(tuples);
+					for(Tuple t : tuples) {
+						inst.push(t.pack());
+					}
+				}, FDB.DEFAULT_EXECUTOR);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.ENCODE_FLOAT) {
-			return inst.popParam().map(new Function<Object, Void>() {
-				@Override
-				public Void apply(Object param) {
-					byte[] fBytes = (byte[])param;
-					float value = ByteBuffer.wrap(fBytes).order(ByteOrder.BIG_ENDIAN).getFloat();
-					inst.push(value);
-					return null;
-				}
-			});
+			return inst.popParam().thenAcceptAsync(param -> {
+				byte[] fBytes = (byte[])param;
+				float value = ByteBuffer.wrap(fBytes).order(ByteOrder.BIG_ENDIAN).getFloat();
+				inst.push(value);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.ENCODE_DOUBLE) {
-			return inst.popParam().map(new Function<Object, Void>() {
-				@Override
-				public Void apply(Object param) {
-					byte[] dBytes = (byte[])param;
-					double value = ByteBuffer.wrap(dBytes).order(ByteOrder.BIG_ENDIAN).getDouble();
-					inst.push(value);
-					return null;
-				}
-			});
+			return inst.popParam().thenAcceptAsync(param -> {
+				byte[] dBytes = (byte[])param;
+				double value = ByteBuffer.wrap(dBytes).order(ByteOrder.BIG_ENDIAN).getDouble();
+				inst.push(value);
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.DECODE_FLOAT) {
-			return inst.popParam().map(new Function<Object, Void>() {
-				@Override
-				public Void apply(Object param) {
-					float value = ((Number)param).floatValue();
-					inst.push(ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putFloat(value).array());
-					return null;
-				}
-			});
+			return inst.popParam().thenAcceptAsync(param -> {
+				float value = ((Number)param).floatValue();
+				inst.push(ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putFloat(value).array());
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if (op == StackOperation.DECODE_DOUBLE) {
-			return inst.popParam().map(new Function<Object, Void>() {
-				@Override
-				public Void apply(Object param) {
-					double value = ((Number)param).doubleValue();
-					inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
-					return null;
-				}
-			});
+			return inst.popParam().thenAcceptAsync(param -> {
+				double value = ((Number)param).doubleValue();
+				inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 		else if(op == StackOperation.UNIT_TESTS) {
 			inst.context.db.options().setLocationCacheSize(100001);
+			return inst.context.db.runAsync(tr -> {
+				tr.options().setPrioritySystemImmediate();
+				tr.options().setPriorityBatch();
+				tr.options().setCausalReadRisky();
+				tr.options().setCausalWriteRisky();
+				tr.options().setReadYourWritesDisable();
+				tr.options().setReadAheadDisable();
+				tr.options().setReadSystemKeys();
+				tr.options().setAccessSystemKeys();
+				tr.options().setDurabilityDevNullIsWebScale();
+				tr.options().setTimeout(60*1000);
+				tr.options().setRetryLimit(50);
+				tr.options().setMaxRetryDelay(100);
+				tr.options().setUsedDuringCommitProtectionDisable();
+				tr.options().setTransactionLoggingEnable("my_transaction");
+				tr.options().setReadLockAware();
+				tr.options().setLockAware();
 
-			return inst.context.db.runAsync(new Function<Transaction, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Transaction tr) {
-					tr.options().setPrioritySystemImmediate();
-					tr.options().setPriorityBatch();
-					tr.options().setCausalReadRisky();
-					tr.options().setCausalWriteRisky();
-					tr.options().setReadYourWritesDisable();
-					tr.options().setReadAheadDisable();
-					tr.options().setReadSystemKeys();
-					tr.options().setAccessSystemKeys();
-					tr.options().setDurabilityDevNullIsWebScale();
-					tr.options().setTimeout(60*1000);
-					tr.options().setRetryLimit(50);
-					tr.options().setMaxRetryDelay(100);
-					tr.options().setUsedDuringCommitProtectionDisable();
-					tr.options().setTransactionLoggingEnable("my_transaction");
-					tr.options().setReadLockAware();
-					tr.options().setLockAware();
+				if(!(new FDBException("Fake", 1020)).isRetryable() ||
+						(new FDBException("Fake", 10)).isRetryable())
+					throw new RuntimeException("Unit test failed: Error predicate incorrect");
 
-					if(!(new FDBException("Fake", 1020)).isRetryable() ||
-							(new FDBException("Fake", 10)).isRetryable())
-						throw new RuntimeException("Unit test failed: Error predicate incorrect");
-
-					byte[] test = {(byte)0xff};
-					return tr.get(test).map(new Function<byte[], Void>() {
-						@Override
-						public Void apply(byte[] val) {
-							return null;
-						}
-					});
-				}
-			}).rescue(new Function<Exception, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Exception t) {
-					throw new RuntimeException("Unit tests failed: " + t.getMessage());
-				}
+				byte[] test = {(byte)0xff};
+				return tr.get(test).thenRunAsync(() -> {});
+			}).exceptionally(t -> {
+				throw new RuntimeException("Unit tests failed: " + t.getMessage());
 			});
 		}
 		else if(op == StackOperation.LOG_STACK) {
-			return inst.popParam().flatMap(new Function<Object, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Object param) {
-					final byte[] prefix = (byte[])param;
-					return doLogStack(inst, prefix);
-
-				}
-			});
+			return inst.popParam().thenComposeAsync(prefix -> doLogStack(inst, (byte[])prefix), FDB.DEFAULT_EXECUTOR);
 		}
 
 		throw new IllegalArgumentException("Unrecognized (or unimplemented) operation");
 	}
 
-	private static Future<Void> executeMutation(final Instruction inst, Function<Transaction, Future<Void>> r) {
+	private static CompletableFuture<Void> executeMutation(final Instruction inst, Function<Transaction, CompletableFuture<Void>> r) {
 		// run this with a retry loop
-		return inst.tcx.runAsync(r).map(new Function<Void, Void>() {
-			@Override
-			public Void apply(Void a) {
-				if(inst.isDatabase)
-					inst.push("RESULT_NOT_PRESENT".getBytes());
-				return null;
-			}
-		});
+		return inst.tcx.runAsync(r).thenRunAsync(() -> {
+			if(inst.isDatabase)
+				inst.push("RESULT_NOT_PRESENT".getBytes());
+		}, FDB.DEFAULT_EXECUTOR);
 	}
 
-	private static Future<byte[]> executeGetKey(final Future<byte[]> keyFuture, final byte[] prefixFilter) {
-		return keyFuture.map(new Function<byte[], byte[]>() {
-			@Override
-			public byte[] apply(byte[] key) {
-				if(ByteArrayUtil.startsWith(key, prefixFilter)) {
-					return key;
-				}
-				else if(ByteArrayUtil.compareUnsigned(key, prefixFilter) < 0) { 
-					return prefixFilter;
-				}
-				else {
-					return ByteArrayUtil.strinc(prefixFilter);
-				}
+	private static CompletableFuture<byte[]> executeGetKey(final CompletableFuture<byte[]> keyFuture, final byte[] prefixFilter) {
+		return keyFuture.thenApplyAsync(key -> {
+			if(ByteArrayUtil.startsWith(key, prefixFilter)) {
+				return key;
 			}
-		});
+			else if(ByteArrayUtil.compareUnsigned(key, prefixFilter) < 0) {
+				return prefixFilter;
+			}
+			else {
+				return ByteArrayUtil.strinc(prefixFilter);
+			}
+		}, FDB.DEFAULT_EXECUTOR);
 	}
 
-	private static Future<Void> doLogStack(final Instruction inst, final byte[] prefix) {
-		Map<Integer, StackEntry> entries = new HashMap<Integer, StackEntry>();
+	private static CompletableFuture<Void> doLogStack(final Instruction inst, final byte[] prefix) {
+		Map<Integer, StackEntry> entries = new HashMap<>();
 		while(inst.size() > 0) {
 			entries.put(inst.size() - 1, inst.pop());
 			if(entries.size() == 100) {
-				return logStack(inst.context.db, entries, prefix).flatMap(new Function<Void, Future<Void>>() {
-					@Override
-					public Future<Void> apply(Void v) {
-						return doLogStack(inst, prefix);
-					}
-				});
+				return logStack(inst.context.db, entries, prefix).thenComposeAsync(v -> doLogStack(inst, prefix), FDB.DEFAULT_EXECUTOR);
 			}
 		}
 
 		return logStack(inst.context.db, entries, prefix);
 	}
 
-	private static Future<Void> logStack(final Database db, final Map<Integer, StackEntry> entries, final byte[] prefix) {
-		return db.runAsync(new Function<Transaction, Future<Void>>() {
-			@Override
-			public Future<Void> apply(Transaction tr) {
-				for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
-					byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
-					byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
-					tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
-				}
-
-				return ReadyFuture.DONE;
+	private static CompletableFuture<Void> logStack(final Database db, final Map<Integer, StackEntry> entries, final byte[] prefix) {
+		return db.runAsync(tr -> {
+			for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
+				byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
+				byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
+				tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
 			}
+
+			return AsyncUtil.DONE;
 		});
 	}
 
-	private static Future<Void> pushRange(Instruction inst, Future<List<KeyValue>> range) {
+	private static CompletableFuture<Void> pushRange(Instruction inst, CompletableFuture<List<KeyValue>> range) {
 		return pushRange(inst, range, null);
 	}
 
-	private static Future<Void> pushRange(Instruction inst, Future<List<KeyValue>> range, byte[] prefixFilter) {
+	private static CompletableFuture<Void> pushRange(Instruction inst, CompletableFuture<List<KeyValue>> range, byte[] prefixFilter) {
 		//System.out.println("Waiting on range data to push...");
-		return range.map(new ListPusher(inst, prefixFilter));
+		return range.thenApplyAsync(new ListPusher(inst, prefixFilter));
 	}
 
 	/**
@@ -779,7 +545,7 @@ public class AsyncStackTester {
 	 */
 	private static class ListPusher implements Function<List<KeyValue>, Void> {
 		final Instruction inst;
-		final byte[] prefixFilter; 
+		final byte[] prefixFilter;
 
 		ListPusher(Instruction inst, byte[] prefixFilter) {
 			this.inst = inst;
@@ -787,7 +553,7 @@ public class AsyncStackTester {
 		}
 		@Override
 		public Void apply(List<KeyValue> list) {
-			List<byte[]> o = new LinkedList<byte[]>();
+			List<byte[]> o = new LinkedList<>();
 			for(KeyValue kv : list) {
 				if(prefixFilter == null || ByteArrayUtil.startsWith(kv.getKey(), prefixFilter)) {
 					o.add(kv.getKey());
@@ -815,7 +581,7 @@ public class AsyncStackTester {
 			return new AsynchronousContext(this.db, prefix);
 		}
 
-		Future<Void> processOp(byte[] operation) {
+		CompletableFuture<Void> processOp(byte[] operation) {
 			Tuple tokens = Tuple.fromBytes(operation);
 			final Instruction inst = new Instruction(this, tokens);
 
@@ -825,110 +591,89 @@ public class AsyncStackTester {
 			}*/
 
 			if(inst.op.startsWith(DIRECTORY_PREFIX))
-				return directoryExtension.processInstruction(inst);
+				return directoryExtension.processInstruction(inst).whenComplete((x, t) -> inst.releaseTransaction());
 			else {
-				return processInstruction(inst)
-				.rescueRuntime(new Function<RuntimeException, Future<Void>>() {
-					@Override
-					public Future<Void> apply(RuntimeException e) {
-						if(e instanceof FDBException) {
-							StackUtils.pushError(inst, (FDBException)e);
-							return ReadyFuture.DONE;
-						}
-						else if(e instanceof IllegalStateException && e.getMessage().equals("Future not ready")) {
-							StackUtils.pushError(inst, new FDBException("", 2015));
-							return ReadyFuture.DONE;
-						}
-						else
-							return new ReadyFuture<Void>(e);
+				return AsyncUtil.composeExceptionally(processInstruction(inst), (e) -> {
+					FDBException ex = StackUtils.getRootFDBException(e);
+					if(ex != null) {
+						StackUtils.pushError(inst, ex);
+						return AsyncUtil.DONE;
 					}
-				});
+					else {
+						CompletableFuture<Void> f = new CompletableFuture<>();
+						f.completeExceptionally(e);
+						return f;
+					}
+				})
+				.whenComplete((x, t) -> inst.releaseTransaction());
 			}
 		}
 
-		@Override void executeOperations() throws Throwable {
-			executeRemainingOperations().get();
+		@Override void executeOperations() {
+			executeRemainingOperations().join();
 		}
 
-		Future<Void> executeRemainingOperations() {
-			final Function<Void, Future<Void>> processNext = new Function<Void, Future<Void>>() {
-				@Override
-				public Future<Void> apply(Void ignore) {
-					instructionIndex++;
-					return executeRemainingOperations();
-				}
+		CompletableFuture<Void> executeRemainingOperations() {
+			final Function<Void, CompletableFuture<Void>> processNext = ignore -> {
+				instructionIndex++;
+				return executeRemainingOperations();
 			};
 
 			if(operations == null || ++currentOp == operations.size()) {
-				return db.runAsync(new Function<Transaction, Future<List<KeyValue>>>() {
-					@Override
-					public Future<List<KeyValue>> apply(Transaction tr) {
-						return tr.getRange(nextKey, endKey, 1000).asList();
-					}
-				})
-				.flatMap(new Function<List<KeyValue>, Future<Void>>() {
-					@Override
-					public Future<Void> apply(List<KeyValue> next) {
-						if(next.size() < 1) {
-							//System.out.println("No key found after: " + ByteArrayUtil.printable(nextKey.getKey()));
-							return ReadyFuture.DONE;
-						}
+				Transaction tr = db.createTransaction();
 
-						operations = next;
-						currentOp = 0;
-						nextKey = KeySelector.firstGreaterThan(next.get(next.size()-1).getKey());
-
-						return processOp(next.get(0).getValue()).flatMap(processNext);
+				return tr.getRange(nextKey, endKey, 1000).asList()
+				.whenComplete((x, t) -> tr.close())
+				.thenComposeAsync(next -> {
+					if(next.size() < 1) {
+						//System.out.println("No key found after: " + ByteArrayUtil.printable(nextKey.getKey()));
+						return AsyncUtil.DONE;
 					}
-				});
+
+					operations = next;
+					currentOp = 0;
+					nextKey = KeySelector.firstGreaterThan(next.get(next.size()-1).getKey());
+
+					return processOp(next.get(0).getValue()).thenComposeAsync(processNext);
+				}, FDB.DEFAULT_EXECUTOR);
 			}
 
-			return processOp(operations.get(currentOp).getValue()).flatMap(processNext);
+			return processOp(operations.get(currentOp).getValue()).thenComposeAsync(processNext, FDB.DEFAULT_EXECUTOR);
 		}
 	}
 
-	static Future<StackEntry> popAndWait(Stack stack) {
+	static CompletableFuture<StackEntry> popAndWait(Stack stack) {
 		StackEntry entry = stack.pop();
 		Object item = entry.value;
-		if(!(item instanceof Future)) {
-			return new ReadyFuture<StackEntry>(entry);
+		if(!(item instanceof CompletableFuture)) {
+			return CompletableFuture.completedFuture(entry);
 		}
 		final int idx = entry.idx;
 
-		@SuppressWarnings("unchecked")
-		final Future<Object> future = (Future<Object>)item;
-		Future<Object> flattened = flatten(future);
+		final CompletableFuture<?> future = (CompletableFuture<?>)item;
+		CompletableFuture<Object> flattened = flatten(future);
 
-		return flattened.map(new Function<Object, StackEntry>() {
-			@Override
-			public StackEntry apply(Object o) {
-				return new StackEntry(idx, o);
-			}
-		});
+		return flattened.thenApplyAsync(o -> new StackEntry(idx, o));
 	}
 
-	private static Future<Object> flatten(final Future<Object> future) {
-		return future.map(new Function<Object, Object>() {
-			@Override
-			public Object apply(Object o) {
-				if(o == null)
-					return "RESULT_NOT_PRESENT".getBytes();
-				return o;
+	private static CompletableFuture<Object> flatten(final CompletableFuture<?> future) {
+		CompletableFuture<Object> f = future.thenApply(o -> {
+			if(o == null)
+				return "RESULT_NOT_PRESENT".getBytes();
+			return o;
+		});
+
+		return AsyncUtil.composeExceptionally(f, t -> {
+			FDBException e = StackUtils.getRootFDBException(t);
+			if(e != null) {
+				return CompletableFuture.completedFuture(StackUtils.getErrorBytes(e));
 			}
-		}).rescue(new Function<Exception, Future<Object>>() {
-			@Override
-			public Future<Object> apply(Exception t) {
-				if(t instanceof FDBException) {
-					return new ReadyFuture<Object>(StackUtils.getErrorBytes((FDBException)t));
-				}
-				else if(t instanceof IllegalStateException && t.getMessage().equals("Future not ready")) {
-					return new ReadyFuture<Object>(StackUtils.getErrorBytes(new FDBException("", 2015)));
-				}
-				return new ReadyFuture<Object>(t);
-			}
+
+			CompletableFuture<Object> error = new CompletableFuture<>();
+			error.completeExceptionally(t);
+			return error;
 		});
 	}
-
 
 	/**
 	 * Run a stack-machine based test.
@@ -956,8 +701,12 @@ public class AsyncStackTester {
 		byte[] bs = db.createTransaction().get(key).get();
 		System.out.println("output of " + ByteArrayUtil.printable(key) + " as: " + ByteArrayUtil.printable(bs));*/
 
+		db.close();
+		System.gc();
+
 		/*fdb.stopNetwork();
 		executor.shutdown();*/
 	}
 
+	private AsyncStackTester() {}
 }

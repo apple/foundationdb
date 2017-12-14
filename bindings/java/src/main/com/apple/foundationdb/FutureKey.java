@@ -22,14 +22,14 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.Executor;
 
-
 class FutureKey extends NativeFuture<byte[]> {
-	FutureKey(long cPtr, Executor e) {
-		super(cPtr, e);
+	FutureKey(long cPtr, Executor executor) {
+		super(cPtr);
+		registerMarshalCallback(executor);
 	}
 
 	@Override
-	public byte[] getIfDone_internal() throws FDBException {
+	protected byte[] getIfDone_internal(long cPtr) throws FDBException {
 		return FutureKey_get(cPtr);
 	}
 

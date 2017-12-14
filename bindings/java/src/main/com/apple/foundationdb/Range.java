@@ -64,7 +64,7 @@ public class Range {
 	public static Range startsWith(byte[] prefix) {
 		if(prefix == null)
 			throw new NullPointerException("prefix cannot be null");
-		return new Range( prefix, ByteArrayUtil.strinc(prefix) );
+		return new Range(prefix, ByteArrayUtil.strinc(prefix));
 	}
 
 	/**
@@ -113,7 +113,7 @@ public class Range {
 	 */
 	@Override
 	public String toString() {
-		return "Range(" + (begin == null ? "null" : "\"" + ByteArrayUtil.printable(begin) + "\"")
-				 + ", " + (end == null ? "null" : "\"" + ByteArrayUtil.printable(end) + "\"") + ")";
+		return "Range(" + (begin == null ? "null" : "\"" + ByteArrayUtil.printable(begin) + "\"") +
+				", " + (end == null ? "null" : "\"" + ByteArrayUtil.printable(end) + "\"") + ")";
 	}
 }

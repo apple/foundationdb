@@ -20,12 +20,8 @@
 
 package com.apple.foundationdb;
 
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.PartialFunction;
-import com.apple.foundationdb.async.PartialFuture;
-
-import java.util.concurrent.Executor;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 /**
  * A context in which a {@code Transaction} is available for database operations. The
@@ -49,55 +45,19 @@ public interface TransactionContext extends ReadTransactionContext {
 	 *
 	 * @return a result of the last call to {@code retryable}
 	 */
-	public abstract <T> T run(Function<? super Transaction, T> retryable);
-
-	/**
-	 * Runs a function in this context that takes a transaction. Use this formulation of
-	 *  {@link #run(Function)} if the called user code throws checked exceptions.
-	 *
-	 * @param retryable the block of logic to execute against a {@link Transaction}
-	 *  in this context
-	 *
-	 * @return a result of the last call to {@code retryable}
-	 *
-	 * @see #run(Function)
-	 */
-	public abstract <T> T run(PartialFunction<? super Transaction, T> retryable) throws Exception;
+	<T> T run(Function<? super Transaction, T> retryable);
 
 	/**
 	 * Runs a function in this context that takes a transaction. Depending on the type of
 	 *  context, this may execute the supplied function multiple times if an error is
 	 *  encountered. This call is non-blocking -- control flow will return immediately
-	 *  with a {@code Future} that will be set when the process is complete.
+	 *  with a {@code CompletableFuture} that will be set when the process is complete.
 	 *
 	 * @param retryable the block of logic to execute against a {@link Transaction}
 	 *  in this context
 	 *
-	 * @return a {@code Future} that will be set to the value returned by the last call
+	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
 	 *  to {@code retryable}
 	 */
-	public abstract <T> Future<T> runAsync(
-			Function<? super Transaction, Future<T>> retryable);
-
-	/**
-	 * Runs a function in this context that takes a transaction. Use this formulation of
-	 *  {@link #runAsync(Function)} if the called user code throws checked exceptions.
-	 *
-	 * @param retryable the block of logic to execute against a {@link Transaction}
-	 *  in this context
-	 *
-	 * @return a {@code PartialFuture} that will be set to the value returned by the last call
-	 *  to {@code retryable}
-	 */
-	public abstract <T> PartialFuture<T> runAsync(
-			PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable);
-
-	/**
-	 * Retrieves the {@link Executor} used by this {@code TransactionContext} when running
-	 * asynchronous callbacks.
-	 *
-	 * @return the {@link Executor} used by this {@code TransactionContext}
-	 */
-	public abstract Executor getExecutor();
-
+	<T> CompletableFuture<T> runAsync(Function<? super Transaction, ? extends CompletableFuture<T>> retryable);
 }

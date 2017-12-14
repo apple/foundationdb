@@ -24,8 +24,6 @@ function run_scripted() {
 	scripted ruby
 	scripted java
 	scripted java_async
-	scripted java_completable
-	scripted java_completable_async
 	scripted node
 	scripted go
 	scripted flow
@@ -42,8 +40,6 @@ while `true`; do
 	run ruby
 	run java
 	run java_async
-	run java_completable
-	run java_completable_async
 	run node
 	#run streamline
 	run go

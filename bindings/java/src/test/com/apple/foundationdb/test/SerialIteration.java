@@ -133,4 +133,6 @@ public class SerialIteration {
 		}
 		return counter;
 	}
+
+	private SerialIteration() {}
 }

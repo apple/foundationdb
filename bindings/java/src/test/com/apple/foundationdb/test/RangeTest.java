@@ -21,6 +21,8 @@
 package com.apple.foundationdb.test;
 
 import java.util.List;
+import java.util.concurrent.CompletionException;
+import java.util.function.Function;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
@@ -30,12 +32,11 @@ import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.Range;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
-import com.apple.foundationdb.async.Function;
 
 public class RangeTest {
 	private static final int API_VERSION = 510;
 
-	public static void main(String[] args) throws Exception {
+	public static void main(String[] args) {
 		System.out.println("About to use version " + API_VERSION);
 		FDB fdb = FDB.selectAPIVersion(API_VERSION);
 
@@ -54,21 +55,19 @@ public class RangeTest {
 		Database db = fdb.open();
 
 		try {
-			db.run(new Function<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) {
-					long version = tr.getReadVersion().get();
-					System.out.println("DB version: " + version);
-					tr.get("apple1".getBytes()).get();
-					tr.set("apple1".getBytes(), "crunchy1".getBytes());
-					tr.set("apple2".getBytes(), "crunchy2".getBytes());
-					tr.set("apple3".getBytes(), "crunchy3".getBytes());
-					tr.set("apple4".getBytes(), "crunchy4".getBytes());
-					tr.set("apple5".getBytes(), "crunchy5".getBytes());
-					tr.set("apple6".getBytes(), "crunchy6".getBytes());
-					System.out.println("Attempting to commit apple/crunchy pairs...");
-					return null;
-				}
+			db.run((Function<Transaction, Void>) tr -> {
+				long version = tr.getReadVersion().join();
+				System.out.println("DB version: " + version);
+				tr.get("apple1".getBytes()).join();
+				tr.set("apple1".getBytes(), "crunchy1".getBytes());
+				tr.set("apple2".getBytes(), "crunchy2".getBytes());
+				tr.set("apple3".getBytes(), "crunchy3".getBytes());
+				tr.set("apple4".getBytes(), "crunchy4".getBytes());
+				tr.set("apple5".getBytes(), "crunchy5".getBytes());
+				tr.set("apple6".getBytes(), "crunchy6".getBytes());
+				System.out.println("Attempting to commit apple/crunchy pairs...");
+
+				return null;
 			});
 		} catch (Throwable e){
 			e.printStackTrace();
@@ -80,17 +79,18 @@ public class RangeTest {
 		checkRange(db.createTransaction());
 
 		Transaction tr = db.createTransaction();
-		long version = tr.getReadVersion().get();
+		long version = tr.getReadVersion().join();
 		System.out.println("DB version: " + version);
 
-		byte[] bs = tr.get("apple3".getBytes()).get();
+		byte[] bs = tr.get("apple3".getBytes()).join();
 		System.out.println("Got apple3: " + new String(bs));
 
 		tr.cancel();
 		try {
-			tr.get("apple3".getBytes()).get();
+			tr.get("apple3".getBytes()).join();
 			throw new RuntimeException("The get() should have thrown an error!");
-		} catch(FDBException e) {
+		} catch(CompletionException ex) {
+			FDBException e = (FDBException)ex.getCause();
 			if(e.getCode() != 1025) {
 				System.err.println("Transaction was not cancelled correctly (" + e.getCode() + ")");
 				throw e;
@@ -99,20 +99,20 @@ public class RangeTest {
 		}
 
 		tr = db.createTransaction();
-		version = tr.getReadVersion().get();
+		version = tr.getReadVersion().join();
 		System.out.println("DB version: " + version);
 
 		tr.clear("apple3".getBytes(), "apple6".getBytes());
 		try {
-			tr.commit().get();
+			tr.commit().join();
 			System.out.println("Clear range transaction was successful");
 		} catch(FDBException e) {
 			System.err.println("Error in the clear of a single value");
 			e.printStackTrace();
 			return;
 		}
-		//db.dispose();
-		//cluster.dispose();
+		//db.close();
+		//cluster.close();
 
 		tr = db.createTransaction();
 		checkRange(tr);
@@ -151,23 +151,23 @@ public class RangeTest {
 			System.out.println("range comparisons okay");
 		}
 
-		db.dispose();
-		//cluster.dispose();
+		db.close();
+		//cluster.close();
 		//fdb.stopNetwork();
 		System.out.println("Done with test program");
 	}
 
-	private static void checkRange(Transaction tr) throws FDBException {
-		long version = tr.getReadVersion().get();
+	private static void checkRange(Transaction tr) {
+		long version = tr.getReadVersion().join();
 		System.out.println("DB version: " + version);
-		byte[] val = tr.get("apple4".getBytes()).get();
+		byte[] val = tr.get("apple4".getBytes()).join();
 		System.out.println("Value is " +
 				(val != null ? new String(val) : "not present"));
 
-		 AsyncIterable<KeyValue> entryList = tr.getRange(
+		AsyncIterable<KeyValue> entryList = tr.getRange(
 				KeySelector.firstGreaterOrEqual("apple".getBytes()),
 				KeySelector.firstGreaterOrEqual("banana".getBytes()),4);
-		List<KeyValue> entries = entryList.asList().get();
+		List<KeyValue> entries = entryList.asList().join();
 
 		System.out.println("List size is " + entries.size());
 		for(int i=0; i < entries.size(); i++) {
@@ -184,4 +184,6 @@ public class RangeTest {
 		}
 
 	}
+
+	private RangeTest() {}
 }

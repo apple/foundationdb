@@ -28,10 +28,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
-import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.ReadyFuture;
 
 public class ConcurrentGetSetGet {
 	public static final Charset UTF8 = Charset.forName("UTF-8");
@@ -56,25 +52,22 @@ public class ConcurrentGetSetGet {
 		new ConcurrentGetSetGet().apply(database);
 	}
 
-	public void apply(Database d) {
-		new Thread(new Runnable() {
-			@Override
-			public void run() {
-				int loops = 0;
-				try {
-					Thread.sleep(5000);
-					System.out.println("Loop " + loops++ + ":");
-					System.out.println(" attempts: " + attemptCount.get());
-					System.out.println(" gets complete: " + getCompleteCount.get());
-					System.out.println(" errors: " + errorCount.get());
-					System.out.println(" sem: " + semaphore);
-					System.out.println();
-				} catch (InterruptedException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-
+	public void apply(Database db) {
+		new Thread(() -> {
+			int loops = 0;
+			try {
+				Thread.sleep(5000);
+				System.out.println("Loop " + loops++ + ":");
+				System.out.println(" attempts: " + attemptCount.get());
+				System.out.println(" gets complete: " + getCompleteCount.get());
+				System.out.println(" errors: " + errorCount.get());
+				System.out.println(" sem: " + semaphore);
+				System.out.println();
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
 			}
+
 		}).start();
 		final Random random = new SecureRandom();
 		try {
@@ -87,79 +80,37 @@ public class ConcurrentGetSetGet {
 					System.out.println("Waited " + wait + "ms");
 				}
 				current = System.currentTimeMillis();
-				d.runAsync(new Function<Transaction, Future<Void>>() {
-					@Override
-					public Future<Void> apply(final Transaction r) {
-						attemptCount.addAndGet(1);
-						final String key = "test:" + random.nextInt();
-						return r.get($(key)).flatMap(new Function<byte[], Future<Void>>() {
-							@Override
-							public Future<Void> apply(byte[] o) {
-								r.set($(key), $("value"));
-								return r.get($(key)).map(new Function<byte[], Void>() {
-									@Override
-									public Void apply(byte[] o) {
-										getCompleteCount.addAndGet(1);
-										semaphore.release();
-										return null;
-									}
-								});
-							}
-						}).rescue(new Function<Exception, Future<Void>>() {
-							@Override
-							public Future<Void> apply(Exception o) {
-								errorCount.addAndGet(1);
-								System.err.println("Fail (" + o.getMessage() + ")");
-								semaphore.release();
-								return ReadyFuture.DONE;
-							}
-						});
-					}
-/*							@Override
-							public void apply(byte[] value) {
-								getCompleteCount.addAndGet(1);
-								r.set($(key), $("value"));
-								r.get($(key)).onSuccess(new Block<byte[]>() {
-									@Override
-									public void apply(byte[] value) {
-										getCompleteCount.addAndGet(1);
-										semaphore.release();
-									}
-								}).onFailure(new Block<Throwable>() {
-									@Override
-									public void apply(Throwable value) {
-										errorCount.addAndGet(1);
-										System.err.println("Inner fail (" + value.getMessage() + ")");
-										semaphore.release();
-									}
-								});
-							}
-						}).onFailure(new Block<Throwable>() {
-							@Override
-							public void apply(Throwable value) {
-								errorCount.addAndGet(1);
-								System.err.println("Outer fail (" + value.getMessage() + ")");
-								semaphore.release();
-							}
-						});
-						//return ReadyFuture.DONE;
-					}
-*/				});
+				db.runAsync(tr -> {
+					attemptCount.addAndGet(1);
+					final String key = "test:" + random.nextInt();
+					return tr.get($(key)).thenComposeAsync(ignore -> {
+						tr.set($(key), $("value"));
+						return tr.get($(key)).thenRunAsync(() -> {
+							getCompleteCount.addAndGet(1);
+							semaphore.release();
+						}, FDB.DEFAULT_EXECUTOR);
+					}, FDB.DEFAULT_EXECUTOR).exceptionally(t -> {
+						errorCount.addAndGet(1);
+						System.err.println("Fail (" + t.getMessage() + ")");
+						semaphore.release();
+						return null;
+					});
+				});
 			}
 			semaphore.acquire(CONCURRENCY);
 			long diff = System.currentTimeMillis() - start;
 			System.out.println("time taken (ms): " + diff);
-			System.out.println("tr/sec:" + COUNT * 1000l / diff);
+			System.out.println("tr/sec:" + COUNT * 1000L / diff);
 			System.out.println("attempts: " + attemptCount.get());
 			System.out.println("gets complete: " + getCompleteCount.get());
 			System.out.println("errors: " + errorCount.get());
 			System.out.println();
 			// Can be enabled in Database.java
-			//System.out.println("db success: " + d.commitSuccessCount.get());
-			//System.out.println("db errors: " + d.commitErrorCount.get());
+			//System.out.println("db success: " + db.commitSuccessCount.get());
+			//System.out.println("db errors: " + db.commitErrorCount.get());
 			System.exit(0);
-		} catch (Throwable throwable) {
-			throwable.printStackTrace();
+		} catch (Throwable t) {
+			t.printStackTrace();
 			System.exit(1);
 		}
 	}

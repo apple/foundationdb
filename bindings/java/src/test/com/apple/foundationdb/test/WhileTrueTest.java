@@ -20,31 +20,19 @@
 
 package com.apple.foundationdb.test;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.ReadyFuture;
 
 public class WhileTrueTest {
-    private static int count;
-
     public static void main(String[] args) {
-        // This should caused memory issues using the old implementation within the
-        // completable implementation of whileTrue. This does not appear to be
-        // a problem with the non-completable implementation, which was more like
-        // the new implementation over there.
+        // This should cause memory issues using the old implementation but not the new one.
         // Pro tip: Run with options -Xms16m -Xmx16m -XX:+HeadDumpOnOutOfMemoryError
-        count = 10000000;
-
-        //AsyncUtil.whileTrue(v -> CompletableFuture.completedFuture(count.decrementAndGet()).thenApplyAsync(c -> c > 0)).join();
-        AsyncUtil.whileTrue(new Function<Void,Future<Boolean>>() {
-            @Override
-            public Future<Boolean> apply(Void v) {
-                count -= 1;
-                return new ReadyFuture<Boolean>(count > 0);
-            }
-        }).get();
-
-        System.out.println("Final value: " + count);
+        AtomicInteger count = new AtomicInteger(1000000);
+        AsyncUtil.whileTrue(() -> CompletableFuture.completedFuture(count.decrementAndGet()).thenApplyAsync(c -> c > 0)).join();
+        System.out.println("Final value: " + count.get());
     }
+
+    private WhileTrueTest() {}
 }

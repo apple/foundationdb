@@ -33,5 +33,3 @@
  *    documentation on FoundationDB transactions</a>.
  */
 package com.apple.foundationdb;
-
-import com.apple.foundationdb.async.Function;

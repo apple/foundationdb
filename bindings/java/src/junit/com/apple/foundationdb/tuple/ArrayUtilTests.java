@@ -29,7 +29,6 @@ import static org.junit.Assert.fail;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.apple.foundationdb.tuple.ByteArrayUtil;
 import org.junit.Test;
 
 /**

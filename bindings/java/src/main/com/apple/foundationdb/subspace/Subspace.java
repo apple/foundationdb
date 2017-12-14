@@ -45,8 +45,7 @@ import com.apple.foundationdb.tuple.Versionstamp;
  *   As a best practice, API clients should use at least one subspace for application data.
  * </p>
  */
-public class Subspace
-{
+public class Subspace {
     static final Tuple EMPTY_TUPLE = Tuple.from();
     static final byte[] EMPTY_BYTES = new byte[0];
 
@@ -112,7 +111,7 @@ public class Subspace
             return false;
         }
         Subspace other = (Subspace)rhs;
-        return Arrays.equals(rawPrefix, other.rawPrefix) ;
+        return Arrays.equals(rawPrefix, other.rawPrefix);
     }
 
     /**
