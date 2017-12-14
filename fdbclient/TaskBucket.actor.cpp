@@ -714,7 +714,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task, bool updateParams) {
+	ACTOR static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task, bool updateParams, Version newTimeoutVersion) {
 		taskBucket->setOptions(tr);
 
 		// First make sure it's safe to keep running
@@ -725,11 +725,14 @@ public:
 		state Subspace oldTimeoutSpace = taskBucket->timeouts.get(task->timeoutVersion).get(task->key);
 		// Update the task's timeout
 		Version version = wait(tr->getReadVersion());
-		// Ensure that the time extension is to the future
-		state Version newTimeout = std::max<Version>(version + taskBucket->timeout, task->timeoutVersion + 1);
+
+		if(newTimeoutVersion == invalidVersion)
+			newTimeoutVersion = version + taskBucket->timeout;
+		else if(newTimeoutVersion <= version)  // Ensure that the time extension is to the future
+			newTimeoutVersion = version + 1;
 
 		// This is where the task definition is being moved to
-		state Subspace newTimeoutSpace = taskBucket->timeouts.get(newTimeout).get(task->key);
+		state Subspace newTimeoutSpace = taskBucket->timeouts.get(newTimeoutVersion).get(task->key);
 
 		tr->addReadConflictRange(oldTimeoutSpace.range());
 		tr->addWriteConflictRange(newTimeoutSpace.range());
@@ -752,7 +755,7 @@ public:
 
 		tr->clear(oldTimeoutSpace.range());
 
-		return newTimeout;
+		return newTimeoutVersion;
 	}
 };
 
@@ -798,7 +801,17 @@ Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task>
 
 	Key key(g_random->randomUniqueID().toString());
 
-	Subspace taskSpace = getAvailableSpace(task->getPriority()).get(key);
+	Subspace taskSpace;
+
+	// If scheduledVersion is valid then place the task directly into the timeout
+	// space for its scheduled time, otherwise place it in the available space by priority.
+	Version scheduledVersion = ReservedTaskParams.scheduledVersion().getOrDefault(task, invalidVersion);
+	if(scheduledVersion != invalidVersion) {
+		taskSpace = timeouts.get(scheduledVersion).get(key);
+	}
+	else {
+		taskSpace = getAvailableSpace(task->getPriority()).get(key);
+	}
 
 	for (auto & param : task->params)
 		tr->set(taskSpace.pack(param.key), param.value);
@@ -878,8 +891,8 @@ Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Referen
 	return Void();
 }
 
-Future<Version> TaskBucket::extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams) {
-	return TaskBucketImpl::extendTimeout(tr, Reference<TaskBucket>::addRef(this), task, updateParams);
+Future<Version> TaskBucket::extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams, Version newTimeoutVersion) {
+	return TaskBucketImpl::extendTimeout(tr, Reference<TaskBucket>::addRef(this), task, updateParams, newTimeoutVersion);
 }
 
 Future<bool> TaskBucket::isFinished(Reference<ReadYourWritesTransaction> tr, Reference<Task> task){
@@ -1045,13 +1058,28 @@ public:
 		Standalone<RangeResultRef> values = wait(tr->getRange(taskFuture->callbacks.range(), CLIENT_KNOBS->TOO_MANY));
 		tr->clear(taskFuture->callbacks.range());
 
-		state Reference<Task> task(new Task());
-		for (auto & s : values) {
-			Key key = taskFuture->callbacks.unpack(s.key).getString(1);
-			task->params[key] = s.value;
+		std::vector<Future<Void>> actions;
+
+		if(values.size() != 0) {
+			state Reference<Task> task(new Task());
+			Key lastTaskID;
+			for (auto & s : values) {
+				Tuple t = taskFuture->callbacks.unpack(s.key);
+				Key taskID = t.getString(0);
+				Key key = t.getString(1);
+				// If we see a new task ID and the old one isn't empty then process the task accumulated so far and make a new task
+				if(taskID.size() != 0 && taskID != lastTaskID) {
+					actions.push_back(performAction(tr, taskBucket, taskFuture, task));
+					task = Reference<Task>(new Task());
+				}
+				task->params[key] = s.value;
+				lastTaskID = taskID;
+			}
+			// Process the last task
+			actions.push_back(performAction(tr, taskBucket, taskFuture, task));
 		}
 
-		Void _ = wait(performAction(tr, taskBucket, taskFuture, task));
+		Void _ = wait(waitForAll(actions));
 
 		return Void();
 	}

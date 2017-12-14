@@ -138,7 +138,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
-			Void _ = wait(backupAgent->submitBackup(cx, StringRef(backupContainer), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
+			Void _ = wait(backupAgent->submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
 		}
 		catch (Error& e) {
 			TraceEvent("BARW_doBackupSubmitBackupException", randomID).detail("tag", printable(tag)).error(e);
@@ -321,7 +321,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			if (!self->locked && BUGGIFY) {
 				TraceEvent("BARW_submitBackup2", randomID).detail("tag", printable(self->backupTag));
 				try {
-					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"), self->backupTag.toString(), self->backupRanges, true);
+					extraBackup = backupAgent.submitBackup(cx, LiteralStringRef("file://simfdb/backups/"), g_random->randomInt(0, 100), self->backupTag.toString(), self->backupRanges, true);
 				}
 				catch (Error& e) {
 					TraceEvent("BARW_submitBackup2Exception", randomID).detail("backupTag", printable(self->backupTag)).error(e);

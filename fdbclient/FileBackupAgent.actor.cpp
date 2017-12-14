@@ -37,6 +37,11 @@
 
 const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable");
 
+template<class T>
+Future<Void> store(Future<T> what, T &out) {
+	return map(what, [&out](T const &v) { out = v; return Void(); });
+}
+
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
 
@@ -724,6 +729,21 @@ namespace fileBackup {
 		}
 	};
 
+	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr, Key beginKey, Key endKey, int limit) {
+
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		state Standalone<VectorRef<KeyRef>> results;
+		Standalone<RangeResultRef> values = wait(tr->getRange(KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
+
+		for (auto &s : values) {
+			KeyRef k = s.key.removePrefix(keyServersPrefix);
+			results.push_back_deep(results.arena(), k);
+		}
+
+		return results;
+	}
+
 	struct BackupRangeTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
@@ -809,22 +829,7 @@ namespace fileBackup {
 			return usedFile;
 		}
 
-		ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<ReadYourWritesTransaction> tr, Key beginKey, Key endKey, int limit) {
-
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Standalone<VectorRef<KeyRef>> results;
-			Standalone<RangeResultRef> values = wait(tr->getRange(KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
-
-			for (auto &s : values) {
-				KeyRef k = s.key.removePrefix(keyServersPrefix);
-				results.push_back_deep(results.arena(), k);
-			}
-
-			return results;
-		}
-
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Key begin, Key end, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), int priority = 0) {
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Key begin, Key end, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), int priority = 0, Version scheduledVersion = invalidVersion) {
 			TraceEvent(SevInfo, "FBA_schedBackupRangeTask").detail("begin", printable(begin)).detail("end", printable(end));
 			Key key = wait(addBackupTask(BackupRangeTaskFunc::name,
 										 BackupRangeTaskFunc::version,
@@ -835,6 +840,8 @@ namespace fileBackup {
 											 Params.beginKey().set(task, begin);
 											 Params.endKey().set(task, end);
 											 Params.addBackupRangeTasks().set(task, false);
+											 if(scheduledVersion != invalidVersion)
+												 ReservedTaskParams.scheduledVersion().set(task, scheduledVersion);
 										 },
 										 priority));
 			return key;
@@ -990,6 +997,390 @@ namespace fileBackup {
 	StringRef BackupRangeTaskFunc::name = LiteralStringRef("file_backup_range");
 	const uint32_t BackupRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupRangeTaskFunc);
+
+	struct BackupSnapshotDispatch : BackupTaskFuncBase {
+		static StringRef name;
+		static const uint32_t version;
+
+		static struct {
+			// Set by Execute, used by Finish
+			TaskParam<bool> snapshotFinished() {
+				return LiteralStringRef(__FUNCTION__);
+			}
+			// Set by Execute, used by Finish
+			TaskParam<Version> nextDispatchVersion() {
+				return LiteralStringRef(__FUNCTION__);
+			}
+		} Params;
+
+		StringRef getName() const { return name; };
+
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), int priority = 1, Version scheduledVersion = invalidVersion) {
+			Key key = wait(addBackupTask(name,
+										 version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(parentTask),
+										 waitFor,
+										 [=](Reference<Task> task) {
+											 if(scheduledVersion != invalidVersion)
+												 ReservedTaskParams.scheduledVersion().set(task, scheduledVersion);
+										 },
+										 priority));
+			return key;
+		}
+
+		enum DispatchState { SKIP, NOT_DONE, DONE };
+
+		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+			Void _ = wait(checkTaskVersion(cx, task, name, version));
+
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+
+			state KeyRangeMap<DispatchState> shardMap(NOT_DONE, normalKeys.end);
+			state Key beginKey = normalKeys.begin;
+
+			// Read all shard boundaries and add them to the map
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					state Future<Standalone<VectorRef<KeyRef>>> shardBoundaries = getBlockOfShards(tr, beginKey, normalKeys.end, CLIENT_KNOBS->TOO_MANY);
+					Void _ = wait(success(shardBoundaries) && taskBucket->keepRunning(tr, task));
+
+					if(shardBoundaries.get().size() == 0)
+						break;
+
+					for(auto &boundary : shardBoundaries.get()) {
+						shardMap.rawInsert(boundary, NOT_DONE);
+					}
+
+					beginKey = keyAfter(shardBoundaries.get().back());
+					tr->reset();
+				} catch(Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
+
+			// Read required stuff from backup config
+			state BackupConfig config(task);
+			state Version recentReadVersion;
+			state Version snapshotBeginVersion;
+			state int64_t snapshotIntervalSeconds;
+			state std::vector<KeyRange> backupRanges;
+			state Optional<Version> snapshotTargetEndVersion;
+			state Optional<Key> snapshotBatchFutureKey;
+			state Reference<TaskFuture> snapshotBatchFuture;
+
+			tr->reset();
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					Void _ = wait( store(config.snapshotBeginVersion().getOrThrow(tr), snapshotBeginVersion)
+								&& store(config.backupRanges().getOrThrow(tr), backupRanges)
+								&& store(config.snapshotIntervalSeconds().getOrThrow(tr), snapshotIntervalSeconds) 
+								// The next two parameters are optional
+								&& store(config.snapshotBatchFuture().get(tr), snapshotBatchFutureKey)
+								&& store(config.snapshotTargetEndVersion().get(tr), snapshotTargetEndVersion)
+								&& store(tr->getReadVersion(), recentReadVersion)
+								&& taskBucket->keepRunning(tr, task));
+
+					// If the snapshot batch future key does not exist, create it, set it, and commit
+					// Also initialize the target snapshot end version if it is not yet set.
+					if(!snapshotBatchFutureKey.present()) {
+						snapshotBatchFuture = futureBucket->future(tr);
+						config.snapshotBatchFuture().set(tr, snapshotBatchFuture->pack());
+
+						// The dispatch of this batch can take multiple separate executions if the executor fails
+						// so store a completion key for the dispatch finish() to set when dispatching the batch is done.
+						state TaskCompletionKey dispatchCompletionKey = TaskCompletionKey::joinWith(snapshotBatchFuture);
+						Void _ = wait(map(dispatchCompletionKey.get(tr, taskBucket), [=](Key const &k) {
+							config.snapshotBatchDispatchDoneKey().set(tr, k);
+							return Void();
+						}));
+
+						// Update snapshot target end version using default snapshot interval unless it's already set.
+						if(!snapshotTargetEndVersion.present())
+							config.snapshotTargetEndVersion().set(tr, recentReadVersion + snapshotIntervalSeconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+
+						Void _ = wait(tr->commit());
+
+						if(!snapshotTargetEndVersion.present())
+							snapshotTargetEndVersion = recentReadVersion + snapshotIntervalSeconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+					}
+					else {
+						ASSERT(snapshotTargetEndVersion.present());
+						// Batch future key exists in the config so create future from it
+						snapshotBatchFuture = Reference<TaskFuture>(new TaskFuture(futureBucket, snapshotBatchFutureKey.get()));
+					}
+
+					break;
+				} catch(Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
+
+			// Read all dispatched ranges
+			state std::vector<std::pair<Key, bool>> dispatchBoundaries;
+			tr->reset();
+			beginKey = normalKeys.begin;
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+					state Future<std::vector<std::pair<Key, bool>>> bounds = config.rangeDispatchMap().getRange(tr, beginKey, keyAfter(normalKeys.end), CLIENT_KNOBS->TOO_MANY);
+					Void _ = wait(success(bounds) && taskBucket->keepRunning(tr, task) && store(tr->getReadVersion(), recentReadVersion));
+
+					if(bounds.get().empty())
+						break;
+
+					dispatchBoundaries.reserve(dispatchBoundaries.size() + bounds.get().size());
+					dispatchBoundaries.insert(dispatchBoundaries.end(), bounds.get().begin(), bounds.get().end());
+
+					beginKey = keyAfter(bounds.get().back().first);
+					tr->reset();
+				} catch(Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
+
+			// Set anything inside a dispatched range to DONE.
+			// Also ensure that the boundary value are true, false, [true, false]...
+			if(dispatchBoundaries.size() > 0) {
+				bool lastValue = false;
+				Key lastKey;
+				for(auto &boundary : dispatchBoundaries) {
+					// Values must alternate
+					ASSERT(boundary.second == !lastValue);
+					// If this was the end of a dispatched range
+					if(!boundary.second) {
+						// Ensure that the dispatched boundaries exist AND set all ranges in the dispatched boundary to DONE.
+						for(auto &range : shardMap.modify(KeyRangeRef(lastKey, boundary.first))) {
+							range.value() = DONE;
+						}
+					}
+					lastValue = boundary.second;
+					lastKey = boundary.first;
+				}
+				ASSERT(lastValue == false);
+			}
+
+			// Set anything outside the backup ranges to SKIP.  We can use insert() here instead of modify()
+			// because it's OK to delete shard boundaries in the skipped ranges.
+			if(backupRanges.size() > 0) {
+				shardMap.insert(KeyRangeRef(normalKeys.begin, backupRanges.front().begin), SKIP);
+				for(int i = 0; i < backupRanges.size() - 1; ++i) {
+					shardMap.insert(KeyRangeRef(backupRanges[i].end, backupRanges[i + 1].begin), SKIP);
+				}
+				shardMap.insert(KeyRangeRef(backupRanges.back().end, normalKeys.end), SKIP);
+			}
+
+			state int countShardsDone = 0;
+			state int countShardsNotDone = 0;
+
+			// Scan through the shard map, counting the DONE and NOT_DONE shards.
+			for(auto &range : shardMap.ranges()) {
+				if(range.value() == DONE) {
+					++countShardsDone;
+				}
+				else if(range.value() == NOT_DONE)
+					++countShardsNotDone;
+			}
+
+			// Scan the shard map a second time, coalescing the DONE shards so that finding random NOT_DONE
+			// ranges is more efficient when there are only a few left.
+			for(auto &range : shardMap.ranges()) {
+				if(range->value() == DONE)
+					shardMap.coalesce(Key(range.begin()));
+			}
+
+			// In this context "all" refers to all of the shards relevant for this particular backup
+			state int countAllShards = countShardsDone + countShardsNotDone;
+
+			if(countShardsNotDone == 0) {
+				TraceEvent("FileBackupSnapshotDispatchFinished")
+					.detail("BackupUID", config.getUid())
+					.detail("AllShards", countAllShards)
+					.detail("ShardsDone", countShardsDone)
+					.detail("ShardsNotDone", countShardsNotDone)
+					.detail("SnapshotBeginVersion", snapshotBeginVersion)
+					.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion.get())
+					.detail("CurrentVersion", recentReadVersion)
+					.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
+				Params.snapshotFinished().set(task, true);
+				return Void();
+			}
+
+			// Calculate number of shards that should be done before the next interval end
+			state Version nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (g_network->isSimulated() ? (snapshotIntervalSeconds / 5.0) : CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC);
+			Params.nextDispatchVersion().set(task, nextDispatchVersion);
+			// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
+			double timeElapsed = (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotTargetEndVersion.get() - snapshotBeginVersion);
+			state int countExpectedShardsDone = std::min<int>(countAllShards, countAllShards * timeElapsed);
+			state int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
+
+			TraceEvent("FileBackupSnapshotDispatch1")
+				.detail("BackupUID", config.getUid())
+				.detail("AllShards", countAllShards)
+				.detail("ShardsDone", countShardsDone)
+				.detail("ShardsNotDone", countShardsNotDone)
+				.detail("ExpectedShardsDone", countExpectedShardsDone)
+				.detail("ShardsToDispatch", countShardsToDispatch)
+				.detail("SnapshotBeginVersion", snapshotBeginVersion)
+				.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion.get())
+				.detail("NextDispatchVersion", nextDispatchVersion)
+				.detail("CurrentVersion", recentReadVersion)
+				.detail("TimeElapsed", timeElapsed)
+				.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
+			// Dispatch random shards to catch up to the expected progress
+			state int taskBatchSize = CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+
+			while(countShardsToDispatch > 0) {
+				// First select ranges to add
+				state std::vector<KeyRange> rangesToAdd;
+				int added = 0;
+				while(countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {
+
+
+					// Get a random range.
+					auto it = shardMap.randomRange();
+					// Find a NOT_DONE range and add it to rangesToAdd
+					while(1) {
+						if(it->value() == NOT_DONE) {
+							rangesToAdd.push_back(it->range());
+							it->value() = DONE;
+							shardMap.coalesce(Key(it->begin()));
+							++added;
+							++countShardsDone;
+							--countShardsToDispatch;
+							--countShardsNotDone;
+							break;
+						}
+						if(it->end() == shardMap.mapEnd)
+							break;
+						++it;
+					}
+				}
+
+				// Now add the ranges in a single transaction
+				tr->reset();
+				loop {
+					try {
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+						// For each range, make sure it isn't set in the dispatched range map.
+						state std::vector<Future<Optional<bool>>> beginReads;
+						state std::vector<Future<Optional<bool>>> endReads;
+
+						for(auto &range : rangesToAdd) {
+							beginReads.push_back(config.rangeDispatchMap().get(tr, range.begin));
+							endReads.push_back(  config.rangeDispatchMap().get(tr, range.end));
+						}
+
+						Void _ = wait(waitForAll(beginReads) && waitForAll(endReads) && taskBucket->keepRunning(tr, task));
+
+						// Count the undispatched ranges while checking the boundaries
+						int undispatchedRanges = 0;
+						state std::vector<Future<Void>> addTaskFutures;
+
+						for(int i = 0; i < beginReads.size(); ++i) {
+							KeyRange &range = rangesToAdd[i];
+
+							// This loop might have made changes to begin or end boundaries in a prior
+							// iteration.  If so, the updated values exist in the RYW cache so re-read both entries.
+							Optional<bool> beginValue = config.rangeDispatchMap().get(tr, range.begin).get();
+							Optional<bool> endValue =   config.rangeDispatchMap().get(tr, range.end).get();
+
+							ASSERT(!beginValue.present() || !endValue.present() || beginValue != endValue);
+
+							// If begin is present, it must be a range end so value must be false
+							// If end is present, it must be a range begin so value must be true
+							if(    (!beginValue.present() || !beginValue.get())
+								&& (!endValue.present()   ||  endValue.get())   )
+							{
+								++undispatchedRanges;
+								if(beginValue.present()) {
+									config.rangeDispatchMap().erase(tr, range.begin);
+								}
+								else {
+									config.rangeDispatchMap().set(tr, range.begin, true);
+								}
+								if(endValue.present()) {
+									config.rangeDispatchMap().erase(tr, range.end);
+								}
+								else {
+									config.rangeDispatchMap().set(tr, range.end, false);
+								}
+
+								// Choose a random version between now and the next dispatch version at which to start this range task
+								Version randomVersion = recentReadVersion + g_random->random01() * (nextDispatchVersion - recentReadVersion);
+								addTaskFutures.push_back(success(BackupRangeTaskFunc::addTask(tr, taskBucket, task, range.begin, range.end, TaskCompletionKey::joinWith(snapshotBatchFuture), Reference<TaskFuture>(), 0, randomVersion)));
+							}
+						}
+						if(undispatchedRanges == 0)
+							break;
+
+						ASSERT(undispatchedRanges == rangesToAdd.size());
+
+						Void _ = wait(waitForAll(addTaskFutures));
+						Void _ = wait(tr->commit());
+						break;
+					} catch(Error &e) {
+						Void _ = wait(tr->onError(e));
+					}
+				}
+			}
+
+			return Void();
+		}
+
+		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
+			state BackupConfig config(task);
+
+			// If done, then set the done future
+			if(Params.snapshotFinished().getOrDefault(task, false)) {
+				Void _ = wait(taskFuture->set(tr, taskBucket));
+			}
+			else {
+				// Otherwise set the done future for this dispatch batch and queue the next dispatch task to run after the
+				// rest of the range tasks from this batch are finished.
+				// Get and then clear the snapshot batch future
+				state Key snapshotBatchFutureKey;
+				state Key snapshotBatchDispatchDoneKey;
+
+				Void _ = wait( store(config.snapshotBatchFuture().getOrThrow(tr), snapshotBatchFutureKey)
+							&& store(config.snapshotBatchDispatchDoneKey().getOrThrow(tr), snapshotBatchDispatchDoneKey));
+
+				state Reference<TaskFuture> snapshotBatchFuture = futureBucket->unpack(snapshotBatchFutureKey);
+				state Reference<TaskFuture> snapshotBatchDispatchDoneFuture = futureBucket->unpack(snapshotBatchDispatchDoneKey);
+				config.snapshotBatchFuture().clear(tr);
+				config.snapshotBatchDispatchDoneKey().clear(tr);
+
+				// Otherwise, add a follow-on SnapshotDispatch task scheduled for the next time the dispatcher should run and pass the done future on to it
+				// The task should wait for the previous snapshot batch to complete.
+				Void _ = wait(success(addTask(tr, taskBucket, task, TaskCompletionKey::signal(taskFuture), snapshotBatchFuture, 1, Params.nextDispatchVersion().get(task))));
+				// If any other tasks joinedWith this future then this set won't activate the task, but in case this dispatch round was empty
+				// then it will enable the follow-on to be scheduled immediately.
+				Void _ = wait(snapshotBatchDispatchDoneFuture->set(tr, taskBucket));
+			}
+
+			Void _ = wait(taskBucket->finish(tr, task));
+			return Void();
+		}
+
+	};
+	StringRef BackupSnapshotDispatch::name = LiteralStringRef("file_backup_snapshot_dispatch");
+	const uint32_t BackupSnapshotDispatch::version = 1;
+	REGISTER_TASKFUNC(BackupSnapshotDispatch);
 
 	struct FinishFullBackupTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
@@ -1616,10 +2007,8 @@ namespace fileBackup {
 			state Reference<TaskFuture>	kvBackupComplete = futureBucket->future(tr);
 			state int rangeCount = 0;
 
-			for (; rangeCount < backupRanges.size(); ++rangeCount) {
-				// Add the initial range task as high priority.
-				Key _ = wait(BackupRangeTaskFunc::addTask(tr, taskBucket, task, backupRanges[rangeCount].begin, backupRanges[rangeCount].end, TaskCompletionKey::joinWith(kvBackupRangeComplete), Reference<TaskFuture>(), 1));
-			}
+			config.snapshotBeginVersion().set(tr, beginVersion);
+			Void _ = wait(success(BackupSnapshotDispatch::addTask(tr, taskBucket, task, TaskCompletionKey::signal(kvBackupRangeComplete), Reference<TaskFuture>(), 1)));
 
 			// After the BackupRangeTask completes, set the stop key which will stop the BackupLogsTask
 			Key _ = wait(FinishFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), kvBackupRangeComplete));
@@ -2524,7 +2913,8 @@ namespace fileBackup {
 
 			state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
 			state std::vector<RestoreConfig::RestoreFile>::iterator end = files.end();
-			
+
+			tr->reset();
 			while(start != end) {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2674,7 +3064,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key outContainer, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
+	ACTOR static Future<Void> submitBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -2753,6 +3143,7 @@ public:
 		config.backupContainer().set(tr, bc);
 		config.stopWhenDone().set(tr, stopWhenDone);
 		config.backupRanges().set(tr, normalizedRanges);
+		config.snapshotIntervalSeconds().set(tr, snapshotIntervalSeconds);
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
 
@@ -3164,8 +3555,8 @@ Future<ERestoreState> FileBackupAgent::waitRestore(Database cx, Key tagName, boo
 	return FileBackupAgentImpl::waitRestore(cx, tagName, verbose);
 };
 
-Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
-	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, tagName, backupRanges, stopWhenDone);
+Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone) {
+	return FileBackupAgentImpl::submitBackup(this, tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName){

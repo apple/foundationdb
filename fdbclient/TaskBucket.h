@@ -58,6 +58,14 @@ public:
 	static Key reservedTaskParamKeyVersion;
 	static Key reservedTaskParamValidKey;
 	static Key reservedTaskParamValidValue;
+
+	std::string toString() const {
+		std::string s = format("TASK [key=%s timeoutVersion=%lld ", key.printable().c_str(), timeoutVersion);
+		for(auto &param : params)
+			s.append(format("%s=%s ", param.key.printable().c_str(), param.value.printable().c_str()));
+		s.append("]");
+		return s;
+	}
 };
 
 template <typename T>
@@ -80,6 +88,12 @@ public:
 	}
 	StringRef key;
 };
+
+struct {
+	TaskParam<Version> scheduledVersion() {
+		return LiteralStringRef(__FUNCTION__);
+	}
+} ReservedTaskParams;
 
 class FutureBucket;
 
@@ -151,11 +165,11 @@ public:
 	}
 
 	// Extend the task's timeout as if it just started and also save any parameter changes made to the task
-	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams);
-	Future<Void> extendTimeout(Database cx, Reference<Task> task, bool updateParams){
+	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams, Version newTimeoutVersion = invalidVersion);
+	Future<Void> extendTimeout(Database cx, Reference<Task> task, bool updateParams, Version newTimeoutVersion = invalidVersion){
 		return map(
 			runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
-				return extendTimeout(tr, task, updateParams);
+				return extendTimeout(tr, task, updateParams, newTimeoutVersion);
 			}),
 			[=](Version v) {
 				task->timeoutVersion = v; 
@@ -393,7 +407,7 @@ struct TaskCompletionKey {
 	static TaskCompletionKey noSignal() {
 		return TaskCompletionKey(StringRef());
 	}
-
+	TaskCompletionKey() {}
 private:
 	TaskCompletionKey(Reference<TaskFuture> f) : joinFuture(f) { }
 	TaskCompletionKey(Key k) : key(k) { }

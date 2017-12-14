@@ -67,7 +67,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
-			Void _ = wait(backupAgent.submitBackup(cx, StringRef(backupContainer), BackupAgentBase::getDefaultTagName(), self->backupRanges, false));
+			Void _ = wait(backupAgent.submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), BackupAgentBase::getDefaultTagName(), self->backupRanges, false));
 		}
 		catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
