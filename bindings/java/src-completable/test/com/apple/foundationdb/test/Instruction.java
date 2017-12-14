@@ -21,6 +21,7 @@
 package com.apple.foundationdb.test;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.List;
 
 import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.ReadTransactionContext;
@@ -28,11 +29,10 @@ import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.TransactionContext;
 import com.apple.foundationdb.tuple.Tuple;
 
-import java.util.List;
 
 class Instruction extends Stack {
-	private final static String SUFFIX_SNAPSHOT = "_SNAPSHOT";
-	private final static String SUFFIX_DATABASE = "_DATABASE";
+	private static final String SUFFIX_SNAPSHOT = "_SNAPSHOT";
+	private static final String SUFFIX_DATABASE = "_DATABASE";
 
 	final String op;
 	final Tuple tokens;

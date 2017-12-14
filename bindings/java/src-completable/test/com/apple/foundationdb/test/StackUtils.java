@@ -27,7 +27,6 @@ import java.util.concurrent.CompletionException;
 
 import com.apple.foundationdb.FDBException;
 import com.apple.foundationdb.KeySelector;
-import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
 public class StackUtils {
@@ -127,4 +126,6 @@ public class StackUtils {
 
 		return (t instanceof FDBException) ? (FDBException)t : null;
 	}
+
+	private StackUtils() {}
 }

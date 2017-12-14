@@ -36,17 +36,16 @@ public class LocalityTests {
 	public static void main(String[] args) {
 		FDB fdb = FDB.selectAPIVersion(510);
 		Database database = fdb.open(args[0]);
-		{
-			Transaction tr = database.createTransaction();
-			String[] keyAddresses = LocalityUtil.getAddressesForKey(tr, "a".getBytes()).join();
-			for(String s : keyAddresses) {
-				System.out.println(" @ " + s);
-			}
+
+		Transaction tr = database.createTransaction();
+		String[] keyAddresses = LocalityUtil.getAddressesForKey(tr, "a".getBytes()).join();
+		for(String s : keyAddresses) {
+			System.out.println(" @ " + s);
 		}
 
 		long start = System.currentTimeMillis();
 
-		CloseableAsyncIterator<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[] { (byte)255 } );
+		CloseableAsyncIterator<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[] { (byte)255 });
 		CompletableFuture<List<byte[]>> collection = AsyncUtil.collect(keys);
 		List<byte[]> list = collection.join();
 		System.out.println("Took " + (System.currentTimeMillis() - start) + "ms to get " +
@@ -59,4 +58,6 @@ public class LocalityTests {
 			System.out.println(i++ + ": " + ByteArrayUtil.printable(key));
 		}
 	}
+
+	private LocalityTests() {}
 }

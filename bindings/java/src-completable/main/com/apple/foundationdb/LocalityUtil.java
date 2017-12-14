@@ -209,8 +209,8 @@ public class LocalityUtil {
 
 		@Override
 		public void remove() {
-						   throw new UnsupportedOperationException("Boundary keys are read-only");
-																								  }
+			throw new UnsupportedOperationException("Boundary keys are read-only");
+		}
 
 		@Override
 		public void close() {
@@ -232,7 +232,7 @@ public class LocalityUtil {
 		}
 	}
 
-	private static Charset ASCII = Charset.forName("US-ASCII");
+	private static final Charset ASCII = Charset.forName("US-ASCII");
 	static byte[] keyServersForKey(byte[] key) {
 		return ByteArrayUtil.join(new byte[] { (byte)255 },
 							  "/keyServers/".getBytes(ASCII),

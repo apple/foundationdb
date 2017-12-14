@@ -82,7 +82,7 @@ public class FDB {
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
 	volatile boolean warnOnUnclosed = true;
-	final private Semaphore netRunning = new Semaphore(1);
+	private final Semaphore netRunning = new Semaphore(1);
 	private final NetworkOptions options;
 
 	static {
@@ -116,7 +116,9 @@ public class FDB {
 	 *
 	 * @return a set of options affecting this instance of the FoundationDB API
 	 */
-	public NetworkOptions options() { return options; }
+	public NetworkOptions options() {
+		return options;
+	}
 
 	/**
 	 * Select the version for the client API. An exception will be thrown if the
@@ -135,7 +137,7 @@ public class FDB {
 	 *
 	 * @return the FoundationDB API object
 	 */
-	public synchronized static FDB selectAPIVersion(final int version) throws FDBException {
+	public static synchronized FDB selectAPIVersion(final int version) throws FDBException {
 		if(singleton != null) {
 			if(version != singleton.apiVersion) {
 				throw new IllegalArgumentException(
@@ -398,7 +400,10 @@ public class FDB {
 				//  that we will never again be able to call runNetwork()
 				netRunning.acquire();
 				return;
-			} catch (InterruptedException e) {}
+			} catch (InterruptedException e) {
+				// If the thread is interrupted while trying to acquire
+				// the semaphore, we just want to try again.
+			}
 		}
 	}
 

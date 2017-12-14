@@ -40,7 +40,7 @@ abstract class NativeObjectWrapper implements AutoCloseable {
 		// we must have a read lock for this function to make sense, however it
 		//  does not make sense to take the lock here, since the code that uses
 		//  the result must inherently have the read lock itself.
-		assert( rwl.getReadHoldCount() > 0 );
+		assert(rwl.getReadHoldCount() > 0);
 
 		return closed;
 	}
@@ -51,7 +51,10 @@ abstract class NativeObjectWrapper implements AutoCloseable {
 				System.err.println(context + " not closed");
 			}
 		}
-		catch(Exception e) {}
+		catch(Exception e) {
+			// Eat this error. This is called from the finalizer,
+			// so there isn't much we can do.
+		}
 	}
 
 	@Override
@@ -76,7 +79,7 @@ abstract class NativeObjectWrapper implements AutoCloseable {
 		// we must have a read lock for this function to make sense, however it
 		//  does not make sense to take the lock here, since the code that uses
 		//  the result must inherently have the read lock itself.
-		assert( rwl.getReadHoldCount() > 0 );
+		assert(rwl.getReadHoldCount() > 0);
 
 		if(this.closed)
 			throw new IllegalStateException("Cannot access closed object");

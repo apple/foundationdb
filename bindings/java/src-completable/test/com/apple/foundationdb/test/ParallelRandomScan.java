@@ -25,8 +25,6 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
-import java.util.function.Function;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
@@ -92,34 +90,26 @@ public class ParallelRandomScan {
 			final long launch = System.nanoTime();
 
 			final AsyncIterator<KeyValue> it = range.iterator();
-			final CompletableFuture<KeyValue> f = it.onHasNext().thenApplyAsync(
-					new Function<Boolean, KeyValue>() {
-						@Override
-						public KeyValue apply(Boolean o) {
-							if(!o) {
-								return null;
-							}
-							return it.next();
-						}
-					}
-				);
-			f.whenCompleteAsync(new BiConsumer<KeyValue, Throwable>() {
-				@Override
-				public void accept(KeyValue kv, Throwable t) {
-					if(kv != null) {
-						readsCompleted.incrementAndGet();
-						long timeTaken = System.nanoTime() - launch;
-						synchronized(latencies) {
-							latencies.addSample(timeTaken);
-						}
-					}
-					else if(t != null) {
-						errors.incrementAndGet();
-					}
-
-					coordinator.release();
+			final CompletableFuture<KeyValue> f = it.onHasNext().thenApplyAsync(hasFirst -> {
+				if(!hasFirst) {
+					return null;
 				}
-			});
+				return it.next();
+			}, FDB.DEFAULT_EXECUTOR);
+			f.whenCompleteAsync((kv, t) -> {
+				if(kv != null) {
+					readsCompleted.incrementAndGet();
+					long timeTaken = System.nanoTime() - launch;
+					synchronized(latencies) {
+						latencies.addSample(timeTaken);
+					}
+				}
+				else if(t != null) {
+					errors.incrementAndGet();
+				}
+
+				coordinator.release();
+			}, FDB.DEFAULT_EXECUTOR);
 		}
 
 		// Block for ALL tasks to end!
@@ -133,4 +123,6 @@ public class ParallelRandomScan {
 		System.out.println(String.format("  Mean: %.2f, Median: %d, 98%%: %d",
 				latencies.mean(), latencies.median(), latencies.percentile(0.98)));
 	}
+
+	private ParallelRandomScan() {}
 }

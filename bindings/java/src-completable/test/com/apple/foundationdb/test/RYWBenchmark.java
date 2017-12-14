@@ -20,13 +20,16 @@
 
 package com.apple.foundationdb.test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
-
-import java.util.*;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 public class RYWBenchmark extends AbstractTester {
     private int keyCount;
@@ -156,7 +159,7 @@ public class RYWBenchmark extends AbstractTester {
     public Double getRangeBasic(Transaction tr, int count) {
         long start = System.nanoTime();
         for (int i = 0; i < count; i++) {
-           tr.getRange(key(0), key(keyCount)).asList().join();
+            tr.getRange(key(0), key(keyCount)).asList().join();
         }
         long end = System.nanoTime();
 

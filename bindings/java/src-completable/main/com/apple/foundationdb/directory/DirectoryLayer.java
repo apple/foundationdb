@@ -66,8 +66,7 @@ import com.apple.foundationdb.tuple.Tuple;
  *     access to subspaces.
  * </p>
  */
-public class DirectoryLayer implements Directory
-{
+public class DirectoryLayer implements Directory {
 	private static final Charset UTF_8 = Charset.forName("UTF-8");
 	private static final byte[] LITTLE_ENDIAN_LONG_ONE = { 1, 0, 0, 0, 0, 0, 0, 0 };
 	private static final byte[] HIGH_CONTENTION_KEY = "hca".getBytes(UTF_8);
@@ -181,22 +180,22 @@ public class DirectoryLayer implements Directory
 	 * Creates a new {@code DirectoryLayer} formed with a specified node subspace and default content subspace.
 	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
-	 * @param node_subspace a {@link Subspace} used to store directory metadata
-	 * @return a {@code DirectoryLayer} formed with {@code node_subspace} and a default content subspace
+	 * @param nodeSubspace a {@link Subspace} used to store directory metadata
+	 * @return a {@code DirectoryLayer} formed with {@code nodeSubspace} and a default content subspace
 	 */
-	public static Directory createWithNodeSubspace(Subspace node_subspace) {
-		return new DirectoryLayer(node_subspace, DEFAULT_CONTENT_SUBSPACE);
+	public static Directory createWithNodeSubspace(Subspace nodeSubspace) {
+		return new DirectoryLayer(nodeSubspace, DEFAULT_CONTENT_SUBSPACE);
 	}
 
 	/**
 	 * Creates a new {@code DirectoryLayer} formed with a default node subspace and specified content subspace.
 	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
-	 * @param content_subspace a {@link Subspace} used to store directory content
-	 * @return a {@code DirectoryLayer} formed with a {@code content_subspace} and a default node subspace
+	 * @param contentSubspace a {@link Subspace} used to store directory content
+	 * @return a {@code DirectoryLayer} formed with a {@code contentSubspace} and a default node subspace
 	 */
-	public static Directory createWithContentSubspace(Subspace content_subspace) {
-		return new DirectoryLayer(DEFAULT_NODE_SUBSPACE, content_subspace);
+	public static Directory createWithContentSubspace(Subspace contentSubspace) {
+		return new DirectoryLayer(DEFAULT_NODE_SUBSPACE, contentSubspace);
 	}
 
 	/**
@@ -229,9 +228,9 @@ public class DirectoryLayer implements Directory
 		}
 		DirectoryLayer other = (DirectoryLayer)rhs;
 
-		return (path == other.path || path.equals(other.path))
-			&& nodeSubspace.equals(other.nodeSubspace)
-			&& contentSubspace.equals(other.contentSubspace);
+		return (path == other.path || path.equals(other.path)) &&
+				nodeSubspace.equals(other.nodeSubspace) &&
+				contentSubspace.equals(other.contentSubspace);
 	}
 
 	/**
@@ -410,47 +409,46 @@ public class DirectoryLayer implements Directory
 		final List<String> newPathCopy = new ArrayList<>(newPath);
 
 		return tcx.runAsync(tr -> checkOrWriteVersion(tr).thenComposeAsync(ignore -> {
-                if(oldPathCopy.size() <= newPathCopy.size() && oldPathCopy.equals(newPathCopy.subList(0, oldPathCopy.size())))
-                    throw new DirectoryMoveException("The destination directory cannot be a subdirectory of the source directory.", toAbsolutePath(oldPathCopy), toAbsolutePath(newPathCopy));
+			if(oldPathCopy.size() <= newPathCopy.size() && oldPathCopy.equals(newPathCopy.subList(0, oldPathCopy.size())))
+				throw new DirectoryMoveException("The destination directory cannot be a subdirectory of the source directory.", toAbsolutePath(oldPathCopy), toAbsolutePath(newPathCopy));
 
-                ArrayList<CompletableFuture<Node>> futures = new ArrayList<>();
-                futures.add(new NodeFinder(oldPathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()));
-                futures.add(new NodeFinder(newPathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()));
+			ArrayList<CompletableFuture<Node>> futures = new ArrayList<>();
+			futures.add(new NodeFinder(oldPathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()));
+			futures.add(new NodeFinder(newPathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()));
 
-                return AsyncUtil.getAll(futures);
-            }, tr.getExecutor())
-            .thenComposeAsync(nodes -> {
-                final Node oldNode = nodes.get(0);
-                final Node newNode = nodes.get(1);
+			return AsyncUtil.getAll(futures);
+		}, tr.getExecutor())
+		.thenComposeAsync(nodes -> {
+			final Node oldNode = nodes.get(0);
+			final Node newNode = nodes.get(1);
 
-                if(!oldNode.exists())
-                    throw new NoSuchDirectoryException(toAbsolutePath(oldPathCopy));
+			if(!oldNode.exists())
+				throw new NoSuchDirectoryException(toAbsolutePath(oldPathCopy));
 
-                if(oldNode.isInPartition(false) || newNode.isInPartition(false)) {
-                    if(!oldNode.isInPartition(false) || !newNode.isInPartition(false) || !oldNode.path.equals(newNode.path))
-                        throw new DirectoryMoveException("Cannot move between partitions.", toAbsolutePath(oldPathCopy), toAbsolutePath(newPathCopy));
+			if(oldNode.isInPartition(false) || newNode.isInPartition(false)) {
+				if(!oldNode.isInPartition(false) || !newNode.isInPartition(false) || !oldNode.path.equals(newNode.path))
+					throw new DirectoryMoveException("Cannot move between partitions.", toAbsolutePath(oldPathCopy), toAbsolutePath(newPathCopy));
 
-                    return newNode.getContents().move(tr, oldNode.getPartitionSubpath(), newNode.getPartitionSubpath());
-                }
+				return newNode.getContents().move(tr, oldNode.getPartitionSubpath(), newNode.getPartitionSubpath());
+			}
 
-                if(newNode.exists())
-                    throw new DirectoryAlreadyExistsException(toAbsolutePath(newPathCopy));
+			if(newNode.exists())
+				throw new DirectoryAlreadyExistsException(toAbsolutePath(newPathCopy));
 
-                final List<String> parentPath = PathUtil.popBack(newPathCopy);
-                return new NodeFinder(parentPath).find(tr).thenComposeAsync(parentNode -> {
-                    if(!parentNode.exists())
-                        throw new NoSuchDirectoryException(toAbsolutePath(parentPath));
+			final List<String> parentPath = PathUtil.popBack(newPathCopy);
+			return new NodeFinder(parentPath).find(tr).thenComposeAsync(parentNode -> {
+				if(!parentNode.exists())
+					throw new NoSuchDirectoryException(toAbsolutePath(parentPath));
 
-                    tr.set(
-                        parentNode.subspace.get(SUB_DIR_KEY).get(getLast(newPathCopy)).getKey(),
-                        contentsOfNode(oldNode.subspace, EMPTY_PATH, EMPTY_BYTES).getKey()
-                    );
+				tr.set(
+					parentNode.subspace.get(SUB_DIR_KEY).get(getLast(newPathCopy)).getKey(),
+					contentsOfNode(oldNode.subspace, EMPTY_PATH, EMPTY_BYTES).getKey()
+				);
 
-                    return removeFromParent(tr, oldPathCopy)
+				return removeFromParent(tr, oldPathCopy)
 							.thenApply(ignore -> contentsOfNode(oldNode.subspace, newPathCopy, oldNode.layer));
-                }, tr.getExecutor());
-            }, tr.getExecutor())
-		);
+			}, tr.getExecutor());
+		}, tr.getExecutor()));
 	}
 
 	/**
@@ -528,8 +526,8 @@ public class DirectoryLayer implements Directory
 
             return AsyncUtil.collect(
                     AsyncUtil.mapIterable(tr.getRange(subdir.range()),
-                            kv -> subdir.unpack(kv.getKey()).getString(0),
-                            tr.getExecutor()
+						kv -> subdir.unpack(kv.getKey()).getString(0),
+						tr.getExecutor()
                     )
             );
         }, tr.getExecutor())
@@ -624,29 +622,28 @@ public class DirectoryLayer implements Directory
 		final List<String> pathCopy = new ArrayList<>(path);
 
 		return tcx.runAsync(tr -> checkOrWriteVersion(tr).thenComposeAsync(ignore -> {
-                    if(pathCopy.size() == 0)
-                        throw new DirectoryException("The root directory cannot be removed.", toAbsolutePath(pathCopy));
+			if(pathCopy.size() == 0)
+				throw new DirectoryException("The root directory cannot be removed.", toAbsolutePath(pathCopy));
 
-                    return new NodeFinder(pathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor());
-            }, tr.getExecutor())
-            .thenComposeAsync(node ->  {
-                if(!node.exists()) {
-                    if(mustExist)
-                        throw new NoSuchDirectoryException(toAbsolutePath(pathCopy));
-                    else
-                        return AsyncUtil.READY_FALSE;
-                }
+			return new NodeFinder(pathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor());
+		}, tr.getExecutor())
+		.thenComposeAsync(node ->  {
+			if(!node.exists()) {
+				if(mustExist)
+					throw new NoSuchDirectoryException(toAbsolutePath(pathCopy));
+				else
+					return AsyncUtil.READY_FALSE;
+			}
 
-                if(node.isInPartition(false))
-                    return node.getContents().getDirectoryLayer().removeInternal(tr, node.getPartitionSubpath(), mustExist);
-                else {
-                    ArrayList<CompletableFuture<Void>> futures = new ArrayList<>();
-                    futures.add(removeRecursive(tr, node.subspace));
-                    futures.add(removeFromParent(tr, pathCopy));
-                    return AsyncUtil.tag(AsyncUtil.whenAll(futures), true);
-                }
-            }, tr.getExecutor())
-		);
+			if(node.isInPartition(false))
+				return node.getContents().getDirectoryLayer().removeInternal(tr, node.getPartitionSubpath(), mustExist);
+			else {
+				ArrayList<CompletableFuture<Void>> futures = new ArrayList<>();
+				futures.add(removeRecursive(tr, node.subspace));
+				futures.add(removeFromParent(tr, pathCopy));
+				return AsyncUtil.tag(AsyncUtil.whenAll(futures), true);
+			}
+		}, tr.getExecutor()));
 	}
 
 	private CompletableFuture<Void> removeFromParent(final Transaction tr, final List<String> path) {
@@ -706,8 +703,7 @@ public class DirectoryLayer implements Directory
 																   final byte[] layer,
 																   final byte[] prefix,
 																   final boolean allowCreate,
-																   final boolean allowOpen)
-	{
+																   final boolean allowOpen) {
 		final List<String> pathCopy = new ArrayList<>(path);
 
 		if(prefix != null && !allowManualPrefixes) {
@@ -723,35 +719,34 @@ public class DirectoryLayer implements Directory
 		}
 
 		return checkVersion(rtr).thenComposeAsync(ignore -> {
-                // Root directory contains node metadata and so may not be opened.
-                if(pathCopy.size() == 0) {
-                    throw new IllegalArgumentException("The root directory may not be opened.");
-                }
+			// Root directory contains node metadata and so may not be opened.
+			if(pathCopy.size() == 0) {
+				throw new IllegalArgumentException("The root directory may not be opened.");
+			}
 
-                return new NodeFinder(pathCopy).find(rtr).thenComposeAsync(new NodeMetadataLoader(rtr), rtr.getExecutor());
-			}, rtr.getExecutor())
-			.thenComposeAsync(existingNode -> {
-                if(existingNode.exists()) {
-                    if(existingNode.isInPartition(false)) {
-                        List<String> subpath = existingNode.getPartitionSubpath();
-                        DirectoryLayer directoryLayer = existingNode.getContents().getDirectoryLayer();
-                        return directoryLayer.createOrOpenInternal(
-                                rtr, tr, subpath, layer, prefix, allowCreate, allowOpen);
-                    }
+			return new NodeFinder(pathCopy).find(rtr).thenComposeAsync(new NodeMetadataLoader(rtr), rtr.getExecutor());
+		}, rtr.getExecutor())
+		.thenComposeAsync(existingNode -> {
+			if(existingNode.exists()) {
+				if(existingNode.isInPartition(false)) {
+					List<String> subpath = existingNode.getPartitionSubpath();
+					DirectoryLayer directoryLayer = existingNode.getContents().getDirectoryLayer();
+					return directoryLayer.createOrOpenInternal(
+							rtr, tr, subpath, layer, prefix, allowCreate, allowOpen);
+				}
 
-                    DirectorySubspace opened = openInternal(pathCopy, layer, existingNode, allowOpen);
-                    return CompletableFuture.completedFuture(opened);
-                }
-                else
-                    return createInternal(tr, pathCopy, layer, prefix, allowCreate);
-			}, rtr.getExecutor());
+				DirectorySubspace opened = openInternal(pathCopy, layer, existingNode, allowOpen);
+				return CompletableFuture.completedFuture(opened);
+			}
+			else
+				return createInternal(tr, pathCopy, layer, prefix, allowCreate);
+		}, rtr.getExecutor());
 	}
 
 	private DirectorySubspace openInternal(final List<String> path,
 															final byte[] layer,
 															final Node existingNode,
-															final boolean allowOpen)
-	{
+															final boolean allowOpen) {
 		if(!allowOpen) {
 			throw new DirectoryAlreadyExistsException(toAbsolutePath(path));
 		}
@@ -768,8 +763,7 @@ public class DirectoryLayer implements Directory
 															final List<String> path,
 															final byte[] layer,
 															final byte[] prefix,
-															final boolean allowCreate)
-	{
+															final boolean allowCreate) {
 		if(!allowCreate) {
 			throw new NoSuchDirectoryException(toAbsolutePath(path));
 		}
@@ -845,7 +839,7 @@ public class DirectoryLayer implements Directory
 			ByteBuffer versionBuf = ByteBuffer.wrap(versionBytes);
 			versionBuf.order(ByteOrder.LITTLE_ENDIAN);
 
-			Integer version[] = new Integer[3];
+			Integer[] version = new Integer[3];
 			for(int i = 0; i < version.length; ++i)
 				version[i] = versionBuf.getInt();
 

@@ -51,7 +51,7 @@ public class AsyncUtil {
 	 * @return the output of {@code func}, or a {@code CompletableFuture} carrying any exception
 	 *  caught in the process.
 	 */
-	public static <I,O> CompletableFuture<O> applySafely( Function<I, ? extends CompletableFuture<O>> func, I value ) {
+	public static <I,O> CompletableFuture<O> applySafely(Function<I, ? extends CompletableFuture<O>> func, I value) {
 		try {
 			return func.apply(value);
 		} catch (RuntimeException e) {
@@ -61,18 +61,74 @@ public class AsyncUtil {
 		}
 	}
 
+	/**
+	 * Run the {@code consumer} on each element of the iterable in order. The future will
+	 *  complete with either the first error encountered by either the iterable itself
+	 *  or by the consumer provided or with {@code null} if the future completes
+	 *  successfully. Items are processed in order from the iterable, and each item
+	 *  will be processed only after the item before it has finished processing.
+	 *
+	 * @param iterable the source of data over from which to consume
+	 * @param consumer operation to apply to each item
+	 * @param <V> type of the items returned by the iterable
+	 *
+	 * @return a future that is ready once the asynchronous operation completes
+	 */
 	public static <V> CompletableFuture<Void> forEach(final AsyncIterable<V> iterable, final Consumer<? super V> consumer) {
 		return forEach(iterable.iterator(), consumer);
 	}
 
+	/**
+	 * Run the {@code consumer} on each element of the iterable in order. The future will
+	 *  complete with either the first error encountered by either the iterable itself
+	 *  or by the consumer provided or with {@code null} if the future completes
+	 *  successfully. Items are processed in order from the iterable, and each item
+	 *  will be processed only after the item before it has finished processing. Asynchronous
+	 *  tasks needed to complete this operation are scheduled on the provided executor.
+	 *
+	 * @param iterable the source of data over from which to consume
+	 * @param consumer operation to apply to each item
+	 * @param executor executor on which to schedule asynchronous tasks
+	 * @param <V> type of the items returned by the iterable
+	 *
+	 * @return a future that is ready once the asynchronous operation completes
+	 */
 	public static <V> CompletableFuture<Void> forEach(final AsyncIterable<V> iterable, final Consumer<? super V> consumer, final Executor executor) {
 		return forEach(iterable.iterator(), consumer, executor);
 	}
 
+	/**
+	 * Run the {@code consumer} on each element of the iterator in order. The future will
+	 *  complete with either the first error encountered by either the iterator itself
+	 *  or by the consumer provided or with {@code null} if the future completes
+	 *  successfully. Items are processed in order from the iterator, and each item
+	 *  will be processed only after the item before it has finished processing.
+	 *
+	 * @param iterator the source of data over from which to consume
+	 * @param consumer operation to apply to each item
+	 * @param <V> type of the items returned by the iterator
+	 *
+	 * @return a future that is ready once the asynchronous operation completes
+	 */
 	public static <V> CompletableFuture<Void> forEach(final AsyncIterator<V> iterator, final Consumer<? super V> consumer) {
 		return forEach(iterator, consumer, DEFAULT_EXECUTOR);
 	}
 
+	/**
+	 * Run the {@code consumer} on each element of the iterator in order. The future will
+	 *  complete with either the first error encountered by either the iterator itself
+	 *  or by the consumer provided or with {@code null} if the future completes
+	 *  successfully. Items are processed in order from the iterator, and each item
+	 *  will be processed only after the item before it has finished processing. Asynchronous
+	 *  tasks needed to complete this operation are scheduled on the provided executor.
+	 *
+	 * @param iterator the source of data over from which to consume
+	 * @param consumer operation to apply to each item
+	 * @param executor executor on which to schedule asynchronous tasks
+	 * @param <V> type of the items returned by the iterator
+	 *
+	 * @return a future that is ready once the asynchronous operation completes
+	 */
 	public static <V> CompletableFuture<Void> forEach(final AsyncIterator<V> iterator, final Consumer<? super V> consumer, final Executor executor) {
 		return iterator.onHasNext().thenComposeAsync(hasAny -> {
 			if (hasAny) {
@@ -387,16 +443,65 @@ public class AsyncUtil {
 				});
 	}
 
-	public static <V, T> CompletableFuture<T> composeHandle(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> fn) {
-	    return future.handle(fn).thenCompose(Function.identity());
+	/**
+	 * Compose a handler bi-function to the result of a future. Unlike the
+	 *  {@link CompletableFuture#handle(BiFunction) CompletableFuture.handle()}
+	 *  function, which requires that the handler return a regular value, this
+	 *  method requires that the handler return a {@link CompletableFuture}.
+	 *  The returned future will then be ready with the result of the
+	 *  handler's future (or an error if that future completes exceptionally).
+	 *
+	 * @param future future to compose the handler onto
+	 * @param handler handler bi-function to compose onto the passed future
+	 * @param <V> return type of original future
+	 * @param <T> return type of final future
+	 *
+	 * @return future with same completion properties as the future returned by the handler
+	 */
+	public static <V, T> CompletableFuture<T> composeHandle(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> handler) {
+	    return future.handle(handler).thenCompose(Function.identity());
 	}
 
-	public static <V, T> CompletableFuture<T> composeHandleAsync(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> fn) {
-	    return composeHandleAsync(future, fn, DEFAULT_EXECUTOR);
+	/**
+	 * Compose a handler bi-function to the result of a future. Unlike the
+	 *  {@link CompletableFuture#handle(BiFunction) CompletableFuture.handle()}
+	 *  function, which requires that the handler return a regular value, this
+	 *  method requires that the handler return a {@link CompletableFuture}.
+	 *  The returned future will then be ready with the result of the
+	 *  handler's future (or an error if that future completes exceptionally).
+	 *  The handler will execute on the {@link com.apple.foundationdb.FDB#DEFAULT_EXECUTOR default executor}
+	 *  used for asychronous tasks.
+	 *
+	 * @param future future to compose the handler onto
+	 * @param handler handler bi-function to compose onto the passed future
+	 * @param <V> return type of original future
+	 * @param <T> return type of final future
+	 *
+	 * @return future with same completion properties as the future returned by the handler
+	 */
+	public static <V, T> CompletableFuture<T> composeHandleAsync(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> handler) {
+	    return composeHandleAsync(future, handler, DEFAULT_EXECUTOR);
 	}
 
-	public static <V, T> CompletableFuture<T> composeHandleAsync(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> fn, Executor executor) {
-		return future.handleAsync(fn, executor).thenCompose(Function.identity());
+	/**
+	 * Compose a handler bi-function to the result of a future. Unlike the
+	 *  {@link CompletableFuture#handle(BiFunction) CompletableFuture.handle()}
+	 *  function, which requires that the handler return a regular value, this
+	 *  method requires that the handler return a {@link CompletableFuture}.
+	 *  The returned future will then be ready with the result of the
+	 *  handler's future (or an error if that future completes excpetionally).
+	 *  The handler will execute on the passed {@link Executor}.
+	 *
+	 * @param future future to compose the handler onto
+	 * @param handler handler bi-function to compose onto the passed future
+	 * @param executor executor on which to execute the handler function
+	 * @param <V> return type of original future
+	 * @param <T> return type of final future
+	 *
+	 * @return future with same completion properties as the future returned by the handler
+	 */
+	public static <V, T> CompletableFuture<T> composeHandleAsync(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> handler, Executor executor) {
+		return future.handleAsync(handler, executor).thenCompose(Function.identity());
 	}
 
 	/**

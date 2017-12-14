@@ -77,17 +77,17 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 				trRef.get().commit().thenApply(o -> {
 					returnValue.set(returnVal);
 					return false;
-				})
-			, e), (value, t) -> {
-				if(t == null)
-					return CompletableFuture.completedFuture(value);
-				if(!(t instanceof RuntimeException))
-					throw new CompletionException(t);
-				return trRef.get().onError(t).thenApply(newTr -> {
-					trRef.set(newTr);
-					return true;
-				});
-			}, e);
+				}), e),
+				(value, t) -> {
+					if(t == null)
+						return CompletableFuture.completedFuture(value);
+					if(!(t instanceof RuntimeException))
+						throw new CompletionException(t);
+					return trRef.get().onError(t).thenApply(newTr -> {
+						trRef.set(newTr);
+						return true;
+					});
+				}, e);
 		}, e)
 		.thenApply(o -> returnValue.get())
 		.whenComplete((v, t) -> trRef.get().close());

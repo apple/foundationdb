@@ -45,28 +45,28 @@ import com.apple.foundationdb.subspace.Subspace;
  * </p>
  */
 public class DirectorySubspace extends Subspace implements Directory {
-    private final List<String> path;
-    private final byte[] layer;
-    private final DirectoryLayer directoryLayer;
+	private final List<String> path;
+	private final byte[] layer;
+	private final DirectoryLayer directoryLayer;
 
-    DirectorySubspace(List<String> path, byte[] prefix, DirectoryLayer directoryLayer) {
-        this(path, prefix, directoryLayer, EMPTY_BYTES);
-    }
+	DirectorySubspace(List<String> path, byte[] prefix, DirectoryLayer directoryLayer) {
+		this(path, prefix, directoryLayer, EMPTY_BYTES);
+	}
 
-    DirectorySubspace(List<String> path, byte[] prefix, DirectoryLayer directoryLayer, byte[] layer) {
-        super(prefix);
-        this.path = path;
-        this.layer = layer;
-        this.directoryLayer = directoryLayer;
-    }
+	DirectorySubspace(List<String> path, byte[] prefix, DirectoryLayer directoryLayer, byte[] layer) {
+		super(prefix);
+		this.path = path;
+		this.layer = layer;
+		this.directoryLayer = directoryLayer;
+	}
 
 	/**
 	 * @return a printable representation of this {@code DirectorySubspace}
 	 */
-    @Override
-    public String toString() {
-        return getClass().getSimpleName() + '(' + DirectoryUtil.pathStr(path) + ", " + printable(getKey()) + ')';
-    }
+	@Override
+	public String toString() {
+		return getClass().getSimpleName() + '(' + DirectoryUtil.pathStr(path) + ", " + printable(getKey()) + ')';
+	}
 
 	/**
 	 * Returns whether this {@code DirectorySubspace} is equal to {@code rhs}.
@@ -76,91 +76,103 @@ public class DirectorySubspace extends Subspace implements Directory {
 	 * @param rhs the {@code} Object to test for equality
 	 * @return true if this is equal to {@code rhs}
 	 */
-    @Override
-    public boolean equals(Object rhs) {
-        if(this == rhs) {
-            return true;
-        }
-        if(rhs == null || getClass() != rhs.getClass()) {
-            return false;
-        }
-        DirectorySubspace other = (DirectorySubspace)rhs;
-        return (path == other.path || path.equals(other.path)) &&
-               Arrays.equals(layer, other.layer) &&
+	@Override
+	public boolean equals(Object rhs) {
+		if(this == rhs) {
+			return true;
+		}
+		if(rhs == null || getClass() != rhs.getClass()) {
+			return false;
+		}
+		DirectorySubspace other = (DirectorySubspace)rhs;
+		return (path == other.path || path.equals(other.path)) &&
+			   Arrays.equals(layer, other.layer) &&
 			   directoryLayer.equals(other.directoryLayer) &&
 			   super.equals(rhs);
-    }
+	}
 
-    @Override
-    public List<String> getPath() {
-        return Collections.unmodifiableList(path);
-    }
+	/**
+	 * Computes a hash code compatible with the {@link #equals(Object) equals()} method of
+	 * this class. In particular, it will produce a hash code that is based off of the hashes
+	 * of its path, its layer, and its subspace prefix.
+	 *
+	 * @return a hash compatible with this class's {@code equals()} method
+	 */
+	@Override
+	public int hashCode() {
+		return path.hashCode() ^ (Arrays.hashCode(layer) * 1153) ^ (directoryLayer.hashCode() * 929) ^ (super.hashCode() * 419);
+	}
 
-    @Override
-    public byte[] getLayer() {
-        return Arrays.copyOf(layer, layer.length);
-    }
+	@Override
+	public List<String> getPath() {
+		return Collections.unmodifiableList(path);
+	}
+
+	@Override
+	public byte[] getLayer() {
+		return Arrays.copyOf(layer, layer.length);
+	}
 
 	@Override
 	public DirectoryLayer getDirectoryLayer() {
 		return directoryLayer;
 	}
 
-    @Override
-    public CompletableFuture<DirectorySubspace> createOrOpen(TransactionContext tcx, List<String> subpath, byte[] otherLayer) {
-        return directoryLayer.createOrOpen(tcx, getPartitionSubpath(subpath), otherLayer);
-    }
+	@Override
+	public CompletableFuture<DirectorySubspace> createOrOpen(TransactionContext tcx, List<String> subpath, byte[] otherLayer) {
+		return directoryLayer.createOrOpen(tcx, getPartitionSubpath(subpath), otherLayer);
+	}
 
-    @Override
-    public CompletableFuture<DirectorySubspace> open(ReadTransactionContext tcx, List<String> subpath, byte[] otherLayer) {
-        return directoryLayer.open(tcx, getPartitionSubpath(subpath), otherLayer);
-    }
+	@Override
+	public CompletableFuture<DirectorySubspace> open(ReadTransactionContext tcx, List<String> subpath, byte[] otherLayer) {
+		return directoryLayer.open(tcx, getPartitionSubpath(subpath), otherLayer);
+	}
 
-    @Override
-    public CompletableFuture<DirectorySubspace> create(TransactionContext tcx, List<String> subpath, byte[] otherLayer, byte[] prefix) {
-        return directoryLayer.create(tcx, getPartitionSubpath(subpath), otherLayer, prefix);
-    }
+	@Override
+	public CompletableFuture<DirectorySubspace> create(TransactionContext tcx, List<String> subpath, byte[] otherLayer, byte[] prefix) {
+		return directoryLayer.create(tcx, getPartitionSubpath(subpath), otherLayer, prefix);
+	}
 
-    @Override
-    public CompletableFuture<List<String>> list(ReadTransactionContext tcx, List<String> subpath) {
-        return directoryLayer.list(tcx, getPartitionSubpath(subpath));
-    }
+	@Override
+	public CompletableFuture<List<String>> list(ReadTransactionContext tcx, List<String> subpath) {
+		return directoryLayer.list(tcx, getPartitionSubpath(subpath));
+	}
 
-    @Override
-    public CompletableFuture<DirectorySubspace> move(TransactionContext tcx, List<String> oldSubpath, List<String> newSubpath) {
-        return directoryLayer.move(tcx, getPartitionSubpath(oldSubpath), getPartitionSubpath(newSubpath));
-    }
+	@Override
+	public CompletableFuture<DirectorySubspace> move(TransactionContext tcx, List<String> oldSubpath, List<String> newSubpath) {
+		return directoryLayer.move(tcx, getPartitionSubpath(oldSubpath), getPartitionSubpath(newSubpath));
+	}
 
-    @Override
-    public CompletableFuture<DirectorySubspace> moveTo(TransactionContext tcx, List<String> newAbsolutePath) {
+	@Override
+	public CompletableFuture<DirectorySubspace> moveTo(TransactionContext tcx, List<String> newAbsolutePath) {
 		DirectoryLayer dir = getLayerForPath(EMPTY_PATH);
 		int partitionLen = dir.getPath().size();
 		List<String> partitionPath = newAbsolutePath.subList(0, Math.min(newAbsolutePath.size(), partitionLen));
 		if(!partitionPath.equals(dir.getPath()))
 			throw new DirectoryMoveException("Cannot move between partitions", path, newAbsolutePath);
 
-        return dir.move(tcx,
+		return dir.move(tcx,
 						getPartitionSubpath(EMPTY_PATH, dir),
 						newAbsolutePath.subList(partitionLen, newAbsolutePath.size()));
-    }
+	}
 
-    @Override
-    public CompletableFuture<Void> remove(TransactionContext tcx, List<String> subpath) {
+	@Override
+	public CompletableFuture<Void> remove(TransactionContext tcx, List<String> subpath) {
 		DirectoryLayer dir = getLayerForPath(subpath);
-        return dir.remove(tcx, getPartitionSubpath(subpath, dir));
-    }
+		return dir.remove(tcx, getPartitionSubpath(subpath, dir));
+	}
 
-    @Override
-    public CompletableFuture<Boolean> removeIfExists(TransactionContext tcx, List<String> subpath) {
+	@Override
+	public CompletableFuture<Boolean> removeIfExists(TransactionContext tcx, List<String> subpath) {
 		DirectoryLayer dir = getLayerForPath(subpath);
-        return dir.removeIfExists(tcx, getPartitionSubpath(subpath, dir));
-    }
+		return dir.removeIfExists(tcx, getPartitionSubpath(subpath, dir));
+	}
 
-    @Override
-    public CompletableFuture<Boolean> exists(ReadTransactionContext tcx, List<String> subpath) {
+	@Override
+	public CompletableFuture<Boolean> exists(ReadTransactionContext tcx, List<String> subpath) {
 		DirectoryLayer dir = getLayerForPath(subpath);
-        return dir.exists(tcx, getPartitionSubpath(subpath, dir));
-    }
+		return dir.exists(tcx, getPartitionSubpath(subpath, dir));
+	}
 
 	private List<String> getPartitionSubpath(List<String> path) {
 		return getPartitionSubpath(path, directoryLayer);

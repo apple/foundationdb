@@ -92,4 +92,6 @@ public class PathUtil {
 
 		return new LinkedList<String>(path.subList(0, path.size() - 1));
 	}
+
+	private PathUtil() {}
 }

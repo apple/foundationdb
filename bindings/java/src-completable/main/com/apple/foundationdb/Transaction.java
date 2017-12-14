@@ -22,6 +22,7 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+
 import com.apple.foundationdb.tuple.Tuple;
 
 /**

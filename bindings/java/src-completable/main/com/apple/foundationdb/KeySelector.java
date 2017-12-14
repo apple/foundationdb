@@ -71,8 +71,8 @@ public class KeySelector {
 	 *
 	 * @return a newly created {@code KeySelector}
 	 */
-	public static KeySelector lastLessThan( byte[] key ) {
-		return new KeySelector( key, false, 0 );
+	public static KeySelector lastLessThan(byte[] key) {
+		return new KeySelector(key, false, 0);
 	}
 
 	/**
@@ -82,8 +82,8 @@ public class KeySelector {
 	 *
 	 * @return a newly created {@code KeySelector}
 	 */
-	public static KeySelector lastLessOrEqual( byte[] key ) {
-		return new KeySelector( key, true, 0 );
+	public static KeySelector lastLessOrEqual(byte[] key) {
+		return new KeySelector(key, true, 0);
 	}
 
 	/**
@@ -93,8 +93,8 @@ public class KeySelector {
 	 *
 	 * @return a newly created {@code KeySelector}
 	 */
-	public static KeySelector firstGreaterThan( byte[] key ) {
-		return new KeySelector( key, true, +1 );
+	public static KeySelector firstGreaterThan(byte[] key) {
+		return new KeySelector(key, true, +1);
 	}
 
 	/**
@@ -104,8 +104,8 @@ public class KeySelector {
 	 *
 	 * @return a newly created {@code KeySelector}
 	 */
-	public static KeySelector firstGreaterOrEqual( byte[] key ) {
-		return new KeySelector( key, false, +1 );
+	public static KeySelector firstGreaterOrEqual(byte[] key) {
+		return new KeySelector(key, false, +1);
 	}
 
 	/**
@@ -126,8 +126,8 @@ public class KeySelector {
 	 *
 	 * @return a newly created {@code KeySelector} that is offset by a number of keys.
 	 */
-	public KeySelector add( int offset ) {
-		return new KeySelector( getKey(), orEqual(), getOffset() + offset );
+	public KeySelector add(int offset) {
+		return new KeySelector(getKey(), orEqual(), getOffset() + offset);
 	}
 
 	/**

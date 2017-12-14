@@ -26,7 +26,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 
-import com.apple.foundationdb.async.*;
+import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionConsumer {
@@ -183,7 +184,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	public CompletableFuture<Long> getReadVersion() {
 		pointerReadLock.lock();
 		try {
-			return new FutureVersion( Transaction_getReadVersion(getPtr()), executor);
+			return new FutureVersion(Transaction_getReadVersion(getPtr()), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -200,7 +201,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private CompletableFuture<byte[]> get_internal(byte[] key, boolean isSnapshot) {
 		pointerReadLock.lock();
 		try {
-			return new FutureResult( Transaction_get(getPtr(), key, isSnapshot), executor);
+			return new FutureResult(Transaction_get(getPtr(), key, isSnapshot), executor);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -217,7 +218,7 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 	private CompletableFuture<byte[]> getKey_internal(KeySelector selector, boolean isSnapshot) {
 		pointerReadLock.lock();
 		try {
-			return new FutureKey( Transaction_getKey(getPtr(),
+			return new FutureKey(Transaction_getKey(getPtr(),
 					selector.getKey(), selector.orEqual(), selector.getOffset(), isSnapshot), executor);
 		} finally {
 			pointerReadLock.unlock();

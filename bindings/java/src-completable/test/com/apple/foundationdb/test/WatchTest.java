@@ -75,20 +75,17 @@ public class WatchTest {
 					a.incrementAndGet();
 				}
 			};
-			Runnable get = new Runnable() {
-				@Override
-				public void run() {
-					try {
-						System.err.println("`f' get()...");
-						f.join();
-						System.err.println("`f' changed");
-					} catch(FDBException e) {
-						System.err.println("`f' watch error -> " + e.getMessage());
-						if(e.getCode() != 1101)
-							throw e;
-					} finally {
-						a.incrementAndGet();
-					}
+			Runnable get = () -> {
+				try {
+					System.err.println("`f' get()...");
+					f.join();
+					System.err.println("`f' changed");
+				} catch(FDBException e12) {
+					System.err.println("`f' watch error -> " + e12.getMessage());
+					if(e12.getCode() != 1101)
+						throw e12;
+				} finally {
+					a.incrementAndGet();
 				}
 			};
 			if(r.nextBoolean()) {
@@ -109,8 +106,10 @@ public class WatchTest {
 			}
 
 			//if(i % 1000 == 0) {
-				System.out.println("Done with " + i);
+			System.out.println("Done with " + i);
 			//}
 		}
 	}
+
+	private WatchTest() {}
 }
