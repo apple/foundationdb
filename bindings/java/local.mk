@@ -30,23 +30,23 @@ JAVADOC_DIR ?= bindings/java
 fdb_java_LIBS := lib/libfdb_c.$(DLEXT)
 
 ifeq ($(RELEASE),true)
-	JARVER = $(VERSION)
-	APPLEJARVER = $(VERSION)
+  JARVER = $(VERSION)
+  APPLEJARVER = $(VERSION)
 else
-	JARVER = $(VERSION)-PRERELEASE
-	APPLEJARVER = $(VERSION)-SNAPSHOT
+  JARVER = $(VERSION)-PRERELEASE
+  APPLEJARVER = $(VERSION)-SNAPSHOT
 endif
 
 ifeq ($(PLATFORM),linux)
-	fdb_java_CFLAGS += -I/usr/lib/jvm/java-8-openjdk-amd64/include -I/usr/lib/jvm/java-8-openjdk-amd64/include/linux
-	fdb_java_LDFLAGS += -static-libgcc
+  fdb_java_CFLAGS += -I/usr/lib/jvm/java-8-openjdk-amd64/include -I/usr/lib/jvm/java-8-openjdk-amd64/include/linux
+  fdb_java_LDFLAGS += -static-libgcc
 
-	java_ARCH := amd64
+  java_ARCH := amd64
 else ifeq ($(PLATFORM),osx)
-	# FIXME: Surely there is a better way to grab the JNI headers on any version of macOS.
-	fdb_java_CFLAGS += -I/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.11.sdk/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers
+  # FIXME: Surely there is a better way to grab the JNI headers on any version of macOS.
+  fdb_java_CFLAGS += -I/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.11.sdk/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers
 
-	java_ARCH := x86_64
+  java_ARCH := x86_64
 endif
 
 JAVA_GENERATED_SOURCES := bindings/java/src/main/com/apple/foundationdb/NetworkOptions.java bindings/java/src/main/com/apple/foundationdb/ClusterOptions.java bindings/java/src/main/com/apple/foundationdb/DatabaseOptions.java bindings/java/src/main/com/apple/foundationdb/TransactionOptions.java bindings/java/src/main/com/apple/foundationdb/StreamingMode.java bindings/java/src/main/com/apple/foundationdb/ConflictRangeType.java bindings/java/src/main/com/apple/foundationdb/MutationType.java bindings/java/src/main/com/apple/foundationdb/FDBException.java
