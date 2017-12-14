@@ -907,14 +907,14 @@ public class DirectoryLayer implements Directory {
 
 			return AsyncUtil.whileTrue(() -> {
                 if(index == path.size())
-                    return CompletableFuture.completedFuture(false);
+                    return AsyncUtil.READY_FALSE;
 
                 return tr.get(node.subspace.get(SUB_DIR_KEY).get(path.get(index)).getKey()).thenComposeAsync(key -> {
                     currentPath.add(path.get(index));
                     node = new Node(nodeWithPrefix(key), currentPath, path);
 
                     if(!node.exists())
-                        return CompletableFuture.completedFuture(false);
+                        return AsyncUtil.READY_FALSE;
 
                     return node.loadMetadata(tr).thenApply(ignore -> {
                         ++index;

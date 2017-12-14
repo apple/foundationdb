@@ -156,7 +156,7 @@ public class LocalityUtil {
 
 		CompletableFuture<Boolean> restartGet() {
 			if(ByteArrayUtil.compareUnsigned(begin, end) >= 0) {
-				return CompletableFuture.completedFuture(false);
+				return AsyncUtil.READY_FALSE;
 			}
 			lastBegin = begin;
 			tr.options().setReadSystemKeys();

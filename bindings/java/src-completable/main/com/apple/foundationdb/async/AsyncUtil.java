@@ -37,9 +37,25 @@ import java.util.function.Supplier;
  * Provided utilities for using and manipulating {@link CompletableFuture}s.
  */
 public class AsyncUtil {
+	/**
+	 * A completed future of type {@link Void}. In particular, it is completed to {@code null},
+	 *  but that shouldn't really matter for the {@link Void} type. This can be used instead
+	 *  of creating a new future if one wants to signal that some asynchronous task has
+	 *  already been completed.
+	 */
 	public static final CompletableFuture<Void> DONE = CompletableFuture.completedFuture(null);
-	public static final CompletableFuture<Boolean> READY_TRUE = CompletableFuture.completedFuture(true);
-	public static final CompletableFuture<Boolean> READY_FALSE = CompletableFuture.completedFuture(false);
+	/**
+	 * A completed future of type {@link Boolean} that is set to {@code true}. This can be
+	 *  used instead of creating a new future if one wants to signal that some task has
+	 *  already been completed with a {@code true} result.
+	 */
+	public static final CompletableFuture<Boolean> READY_TRUE = CompletableFuture.completedFuture(Boolean.TRUE);
+	/**
+	 * A completed future of type {@link Boolean} that is set to {@code false}. This can be
+	 *  used instead of creating a new future if one wants to signal that some task has
+	 *  already been completed with a {@code false} result.
+	 */
+	public static final CompletableFuture<Boolean> READY_FALSE = CompletableFuture.completedFuture(Boolean.FALSE);
 
 	/**
 	 * Run {@code Function} {@code func}, returning all caught exceptions as a
