@@ -39,7 +39,7 @@ class AsyncDirectoryExtension {
 	int dirIndex = 0;
 	int errorIndex = 0;
 
-	public AsyncDirectoryExtension() {
+	AsyncDirectoryExtension() {
 		dirList.add(DirectoryLayer.getDefault());
 	}
 

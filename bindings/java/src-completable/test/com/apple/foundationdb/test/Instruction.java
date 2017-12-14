@@ -44,7 +44,7 @@ class Instruction extends Stack {
 	final TransactionContext tcx;
 	final ReadTransactionContext readTcx;
 
-	public Instruction(Context context, Tuple tokens) {
+	Instruction(Context context, Tuple tokens) {
 		this.context = context;
 		this.tokens = tokens;
 

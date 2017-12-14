@@ -64,7 +64,7 @@ public class FDB {
 	static class DaemonThreadFactory implements ThreadFactory {
 		private final ThreadFactory factory;
 
-		public DaemonThreadFactory(ThreadFactory factory) {
+		DaemonThreadFactory(ThreadFactory factory) {
 			this.factory = factory;
 		}
 

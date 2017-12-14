@@ -33,5 +33,5 @@ public interface Cancellable {
 	 *  is not an error to call this method on an operation that has already completed or
 	 *  already been cancelled. This method will not block or throw non-fatal exceptions.
 	 */
-	public abstract void cancel();
+	void cancel();
 }

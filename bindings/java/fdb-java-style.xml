@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <!--
 	The style for code written within the FDB Java bindings.
 	Note that this style guide grew up somewhat organically from
@@ -8,7 +9,6 @@
 	borrowed from some other style guide, because that would
 	be too easy.
 -->
-<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE module PUBLIC
 		  "-//Puppy Crawl//DTD Check Configuration 1.3//EN"
 		  "http://www.puppycrawl.com/dtds/configuration_1_3.dtd">
@@ -88,9 +88,7 @@
 
 		<!-- Modifiers -->
 		<module name="ModifierOrder"/>
-		<!-- I think we want this, just maybe not right now.
 		<module name="RedundantModifier"/>
-		-->
 
 		<!-- Naming conventions -->
 		<module name="CatchParameterName">

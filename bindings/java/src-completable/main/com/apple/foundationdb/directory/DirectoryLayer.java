@@ -896,7 +896,7 @@ public class DirectoryLayer implements Directory {
 		private Node node;
 		private List<String> currentPath;
 
-		public NodeFinder(List<String> path) {
+		NodeFinder(List<String> path) {
 			this.path = path;
 		}
 
@@ -929,7 +929,7 @@ public class DirectoryLayer implements Directory {
 	private static class NodeMetadataLoader implements Function<Node, CompletableFuture<Node>> {
 		private final ReadTransaction tr;
 
-		public NodeMetadataLoader(ReadTransaction tr) {
+		NodeMetadataLoader(ReadTransaction tr) {
 			this.tr = tr;
 		}
 
@@ -947,7 +947,7 @@ public class DirectoryLayer implements Directory {
 
 		private boolean loadedMetadata;
 
-		public Node(Subspace subspace, List<String> path, List<String> targetPath) {
+		Node(Subspace subspace, List<String> path, List<String> targetPath) {
 			this.subspace = subspace;
 			this.path = path;
 			this.targetPath = targetPath;
@@ -1004,7 +1004,7 @@ public class DirectoryLayer implements Directory {
 		private long candidate;
 		private boolean restart;
 
-		public PrefixFinder() {
+		PrefixFinder() {
 			this.random = new Random();
 			this.windowStart = 0;
 		}
@@ -1126,7 +1126,7 @@ public class DirectoryLayer implements Directory {
 		public final Subspace counters;
 		public final Subspace recent;
 
-		public HighContentionAllocator(Subspace subspace) {
+		HighContentionAllocator(Subspace subspace) {
 			this.counters = subspace.get(0);
 			this.recent = subspace.get(1);
 		}

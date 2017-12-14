@@ -28,7 +28,7 @@ abstract class OptionsSet {
 	private static final Charset CHARSET_UTF8 = Charset.forName("UTF-8");
 	OptionConsumer consumer;
 
-	public OptionsSet(OptionConsumer provider) {
+	OptionsSet(OptionConsumer provider) {
 		this.consumer = provider;
 	}
 

@@ -82,7 +82,7 @@ public class LocalityUtil {
 	 * @return an sequence of keys denoting the start of single-server ranges
 	 */
 	public static CloseableAsyncIterator<byte[]> getBoundaryKeys(Transaction tr, byte[] begin, byte[] end) {
-		Transaction local = tr.getDatabase().createTransaction();
+		Transaction local = tr.getDatabase().createTransaction(tr.getExecutor());
 		CompletableFuture<Long> readVersion = tr.getReadVersion();
 		if(readVersion.isDone() && !readVersion.isCompletedExceptionally()) {
 			local.setReadVersion(readVersion.getNow(null));
