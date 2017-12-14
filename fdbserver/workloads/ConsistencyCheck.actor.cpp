@@ -315,9 +315,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 			state Reference<ProxyInfo> proxyInfo = wait(cx->getMasterProxiesFuture());
 
 			//Try getting key server locations from the master proxies
-			state vector<Future<ErrorOr<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>>>> keyServerLocationFutures;
+			state vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
+			state KeyRange keyServerRange = keyServersKeys;
 			for(int i = 0; i < proxyInfo->size(); i++)
-				keyServerLocationFutures.push_back(proxyInfo->get(i,&MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>>(), 2, 0));
+				keyServerLocationFutures.push_back(proxyInfo->get(i,&MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(keyServerRange, 1000, keyServerRange.arena()), 2, 0));
 
 			choose {
 				when( Void _ = wait(waitForAll(keyServerLocationFutures)) ) {
@@ -326,7 +327,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					state bool successful = true;
 					for(int i = 0; i < keyServerLocationFutures.size(); i++)
 					{
-						ErrorOr<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> shards = keyServerLocationFutures[i].get();
+						ErrorOr<GetKeyServerLocationsReply> shards = keyServerLocationFutures[i].get();
 
 						//If performing quiescent check, then all master proxies should be reachable.  Otherwise, only one needs to be reachable
 						if(self->performQuiescentChecks && !shards.present())
@@ -340,7 +341,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						//If we are doing a quiescent check, then we only need to do this for the first shard.
 						if(shards.present() && (i == 0 || !self->performQuiescentChecks))
 						{
-							keyServers = shards.get();
+							keyServers = shards.get().results;
 							if(!self->performQuiescentChecks)
 								break;
 						}
