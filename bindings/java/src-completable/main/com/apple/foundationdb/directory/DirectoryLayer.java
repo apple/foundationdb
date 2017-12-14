@@ -526,9 +526,9 @@ public class DirectoryLayer implements Directory {
 
 			return AsyncUtil.collect(
 					AsyncUtil.mapIterable(tr.getRange(subdir.range()),
-						kv -> subdir.unpack(kv.getKey()).getString(0),
-						tr.getExecutor()
-					)
+						kv -> subdir.unpack(kv.getKey()).getString(0)
+					),
+					tr.getExecutor()
 			);
 		}, tr.getExecutor())
 		);
