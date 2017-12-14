@@ -661,7 +661,7 @@ public class StackTester {
 			CloseableAsyncIterator<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
 					tr, new byte[0], new byte[]{(byte) 255, (byte) 255});
 			try {
-				List<byte[]> keys = AsyncUtil.collect(boundaryKeys).join();
+				List<byte[]> keys = AsyncUtil.collectRemaining(boundaryKeys).join();
 				for(int i = 0; i < keys.size() - 1; i++) {
 					byte[] start = keys.get(i);
 					byte[] end = tr.getKey(KeySelector.lastLessThan(keys.get(i + 1))).join();

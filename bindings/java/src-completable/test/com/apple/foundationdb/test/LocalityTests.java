@@ -46,7 +46,7 @@ public class LocalityTests {
 		long start = System.currentTimeMillis();
 
 		CloseableAsyncIterator<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[] { (byte)255 });
-		CompletableFuture<List<byte[]>> collection = AsyncUtil.collect(keys);
+		CompletableFuture<List<byte[]>> collection = AsyncUtil.collectRemaining(keys);
 		List<byte[]> list = collection.join();
 		System.out.println("Took " + (System.currentTimeMillis() - start) + "ms to get " +
 				list.size() + " items");

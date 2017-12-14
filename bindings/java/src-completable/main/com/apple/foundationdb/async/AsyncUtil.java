@@ -91,7 +91,7 @@ public class AsyncUtil {
 	 * @return a future that is ready once the asynchronous operation completes
 	 */
 	public static <V> CompletableFuture<Void> forEach(final AsyncIterable<V> iterable, final Consumer<? super V> consumer) {
-		return forEach(iterable.iterator(), consumer);
+		return forEachRemaining(iterable.iterator(), consumer);
 	}
 
 	/**
@@ -110,11 +110,11 @@ public class AsyncUtil {
 	 * @return a future that is ready once the asynchronous operation completes
 	 */
 	public static <V> CompletableFuture<Void> forEach(final AsyncIterable<V> iterable, final Consumer<? super V> consumer, final Executor executor) {
-		return forEach(iterable.iterator(), consumer, executor);
+		return forEachRemaining(iterable.iterator(), consumer, executor);
 	}
 
 	/**
-	 * Run the {@code consumer} on each element of the iterator in order. The future will
+	 * Run the {@code consumer} on each element remaining in the iterator in order. The future will
 	 *  complete with either the first error encountered by either the iterator itself
 	 *  or by the consumer provided or with {@code null} if the future completes
 	 *  successfully. Items are processed in order from the iterator, and each item
@@ -126,12 +126,12 @@ public class AsyncUtil {
 	 *
 	 * @return a future that is ready once the asynchronous operation completes
 	 */
-	public static <V> CompletableFuture<Void> forEach(final AsyncIterator<V> iterator, final Consumer<? super V> consumer) {
-		return forEach(iterator, consumer, DEFAULT_EXECUTOR);
+	public static <V> CompletableFuture<Void> forEachRemaining(final AsyncIterator<V> iterator, final Consumer<? super V> consumer) {
+		return forEachRemaining(iterator, consumer, DEFAULT_EXECUTOR);
 	}
 
 	/**
-	 * Run the {@code consumer} on each element of the iterator in order. The future will
+	 * Run the {@code consumer} on each element remaining if the iterator in order. The future will
 	 *  complete with either the first error encountered by either the iterator itself
 	 *  or by the consumer provided or with {@code null} if the future completes
 	 *  successfully. Items are processed in order from the iterator, and each item
@@ -145,7 +145,7 @@ public class AsyncUtil {
 	 *
 	 * @return a future that is ready once the asynchronous operation completes
 	 */
-	public static <V> CompletableFuture<Void> forEach(final AsyncIterator<V> iterator, final Consumer<? super V> consumer, final Executor executor) {
+	public static <V> CompletableFuture<Void> forEachRemaining(final AsyncIterator<V> iterator, final Consumer<? super V> consumer, final Executor executor) {
 		return iterator.onHasNext().thenComposeAsync(hasAny -> {
 			if (hasAny) {
 				return whileTrue(() -> {
@@ -171,15 +171,15 @@ public class AsyncUtil {
 	}
 
 	/**
-	 * Iterates over a set of items and returns the result as a list.
+	 * Iterates over a set of items and returns the remaining results as a list.
 	 *
 	 * @param iterator the source of data over which to iterate. This function will exhaust the iterator.
 	 *
 	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
 	 *  from iteration.
 	 */
-	public static <V> CompletableFuture<List<V>> collect(final AsyncIterator<V> iterator) {
-		return collect(iterator, DEFAULT_EXECUTOR);
+	public static <V> CompletableFuture<List<V>> collectRemaining(final AsyncIterator<V> iterator) {
+		return collectRemaining(iterator, DEFAULT_EXECUTOR);
 	}
 
 	/**
@@ -192,11 +192,11 @@ public class AsyncUtil {
 	 *  from iteration.
 	 */
 	public static <V> CompletableFuture<List<V>> collect(final AsyncIterable<V> iterable, final Executor executor) {
-		return collect(iterable.iterator(), executor);
+		return collectRemaining(iterable.iterator(), executor);
 	}
 
 	/**
-	 * Iterates over a set of items and returns the result as a list.
+	 * Iterates over a set of items and returns the remaining results as a list.
 	 *
 	 * @param iterator the source of data over which to iterate. This function will exhaust the iterator.
 	 * @param executor the {@link Executor} to use for asynchronous operations
@@ -204,13 +204,9 @@ public class AsyncUtil {
 	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
 	 *  from iteration.
 	 */
-	public static <V> CompletableFuture<List<V>> collect(final AsyncIterator<V> iterator, final Executor executor) {
+	public static <V> CompletableFuture<List<V>> collectRemaining(final AsyncIterator<V> iterator, final Executor executor) {
 		final List<V> accumulator = new LinkedList<>();
-		return forEach(iterator, accumulator::add, executor).thenApply(ignore -> accumulator);
-	}
-
-	public static <V, T> AsyncIterable<T> mapIterable(final AsyncIterable<V> iterable, final Function<V, T> func) {
-		return mapIterable(iterable, func, DEFAULT_EXECUTOR);
+		return tag(forEachRemaining(iterator, accumulator::add, executor), accumulator);
 	}
 
 	/**
@@ -222,7 +218,7 @@ public class AsyncUtil {
 	 * @return a new iterable with each element mapped to a different value
 	 */
 	public static <V, T> AsyncIterable<T> mapIterable(final AsyncIterable<V> iterable,
-			final Function<V, T> func, final Executor executor) {
+			final Function<V, T> func) {
 		return new AsyncIterable<T>() {
 			@Override
 			public AsyncIterator<T> iterator() {
