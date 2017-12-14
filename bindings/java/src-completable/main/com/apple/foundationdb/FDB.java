@@ -337,37 +337,37 @@ public class FDB {
 		netStarted = true;
 
 		e.execute(() -> {
-            boolean acquired = false;
-            try {
-                while(!acquired) {
-                    try {
-                        // make attempt to avoid a needless deadlock
-                        synchronized (FDB.this) {
-                            if(netStopped) {
-                                return;
-                            }
-                        }
+			boolean acquired = false;
+			try {
+				while(!acquired) {
+					try {
+						// make attempt to avoid a needless deadlock
+						synchronized (FDB.this) {
+							if(netStopped) {
+								return;
+							}
+						}
 
-                        netRunning.acquire();
-                        acquired = true;
-                    } catch(InterruptedException err) {
-                        // Swallow thread interruption
+						netRunning.acquire();
+						acquired = true;
+					} catch(InterruptedException err) {
+						// Swallow thread interruption
 					}
-                }
-                try {
-                    Network_run();
-                } catch (Throwable t) {
-                    System.err.println("Unhandled error in FoundationDB network thread: " + t.getMessage());
-                    // eat this error. we have nowhere to send it.
-                }
-            } finally {
-                if(acquired) {
-                    netRunning.release();
-                }
-                synchronized (FDB.this) {
-                    netStopped = true;
-                }
-            }
+				}
+				try {
+					Network_run();
+				} catch (Throwable t) {
+					System.err.println("Unhandled error in FoundationDB network thread: " + t.getMessage());
+					// eat this error. we have nowhere to send it.
+				}
+			} finally {
+				if(acquired) {
+					netRunning.release();
+				}
+				synchronized (FDB.this) {
+					netStopped = true;
+				}
+			}
 		});
 	}
 
