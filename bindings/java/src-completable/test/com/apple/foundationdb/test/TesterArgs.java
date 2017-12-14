@@ -20,12 +20,11 @@
 
 package com.apple.foundationdb.test;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.apple.foundationdb.subspace.Subspace;
 import com.apple.foundationdb.tuple.Tuple;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 public class TesterArgs {
     private String outputDirectory;
@@ -45,15 +44,15 @@ public class TesterArgs {
     }
 
     public static void printUsage() {
-        String usage = "Arguments:  [-o/--output-directory DIR] [--disable-multiversion-api] [--enable-callbacks-on-external-threads] [--use-external-client] [--tests-to-run TEST [TEST ...]] [-h/--help]\n"
-                     + "\n"
-                     + "Arguments:\n"
-                     + "   -o/--output-directory DIR                Directory to store JSON output. If not set, the current directory is used.\n"
-                     + "   --disable-multiversion-api               Disables the multi-version client API\n"
-                     + "   --enable-callbacks-on-external-threads   Allows callbacks to be called on threads created by the client library.\n"
-                     + "   --use-external-client                    Connect to the server using an external client.\n"
-                     + "   --tests-to-run TEST [TEST ...]           List of test names to run.\n"
-                     + "   -h/--help                                Print this help message and then quit.\n";
+        String usage = "Arguments:  [-o/--output-directory DIR] [--disable-multiversion-api] [--enable-callbacks-on-external-threads] [--use-external-client] [--tests-to-run TEST [TEST ...]] [-h/--help]\n" +
+                       "\n" +
+                       "Arguments:\n" +
+                       "   -o/--output-directory DIR                Directory to store JSON output. If not set, the current directory is used.\n" +
+                       "   --disable-multiversion-api               Disables the multi-version client API\n" +
+                       "   --enable-callbacks-on-external-threads   Allows callbacks to be called on threads created by the client library.\n" +
+                       "   --use-external-client                    Connect to the server using an external client.\n" +
+                       "   --tests-to-run TEST [TEST ...]           List of test names to run.\n" +
+                       "   -h/--help                                Print this help message and then quit.\n";
 
         System.out.print(usage);
     }

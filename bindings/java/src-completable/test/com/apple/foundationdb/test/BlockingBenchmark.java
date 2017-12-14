@@ -44,78 +44,59 @@ public class BlockingBenchmark {
 
 		Transaction tr = database.createTransaction();
 		tr.setReadVersion(100000);
-		final Function<Long,Long> identity = new Function<Long, Long>() {
-			@Override
-			public Long apply(Long o) {
-				return o;
-			}
-		};
-
 
 		System.out.println("readVersion().join():");
-		runTests(tr, new Function<CompletableFuture<Long>, Void>() {
-			@Override
-			public Void apply(CompletableFuture<Long> o) {
-				try {
-					o.join();
-				} catch(Exception e) { }
-
-				return null;
+		runTests(tr, o -> {
+			try {
+				o.join();
+			} catch(Exception e) {
+				// Ignore
 			}
+			return null;
 		});
 
 		System.out.println("readVersion().get():");
-		runTests(tr, new Function<CompletableFuture<Long>, Void>() {
-			@Override
-			public Void apply(CompletableFuture<Long> o) {
-				try {
-					o.get();
-				} catch (InterruptedException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				} catch(Exception e) { }
-
-				return null;
+		runTests(tr, o -> {
+			try {
+				o.get();
+			} catch(Exception e) {
+				// Ignore
 			}
+			return null;
 		});
 
 		System.out.println("readVersion().thenApplyAsync(identity).get():");
-		runTests(tr, new Function<CompletableFuture<Long>, Void>() {
-			@Override
-			public Void apply(CompletableFuture<Long> o) {
-				try {
-					o.thenApplyAsync(identity).get();
-				} catch(Exception e) { }
-
-				return null;
+		runTests(tr, o -> {
+			try {
+				o.thenApplyAsync(Function.identity(), FDB.DEFAULT_EXECUTOR).get();
+			} catch(Exception e) {
+				// Ignore
 			}
+			return null;
 		});
 
 		System.out.println("readVersion().thenApplyAsync^10(identity).get():");
-		runTests(tr, new Function<CompletableFuture<Long>, Void>() {
-			@Override
-			public Void apply(CompletableFuture<Long> o) {
-				for(int i=0; i<10; i++)
-					o = o.thenApplyAsync(identity);
-				try {
-					o.get();
-				} catch(Exception e) { }
-
-				return null;
+		runTests(tr, o -> {
+			for(int i=0; i<10; i++)
+				o = o.thenApplyAsync(Function.identity(), FDB.DEFAULT_EXECUTOR);
+			try {
+				o.get();
+			} catch(Exception e) {
+				// Ignore
 			}
+			return null;
 		});
 
 		System.out.println("readVersion().get^100():");
-		runTests(tr, new Function<CompletableFuture<Long>, Void>() {
-			@Override
-			public Void apply(CompletableFuture<Long> o) {
-				for(int i=0; i<100; i++) {
-					try {
-						o.get();
-					} catch(Exception e) { }
+		runTests(tr, o -> {
+			for(int i=0; i<100; i++) {
+				try {
+					o.get();
+				} catch(Exception e) {
+					// Ignore
 				}
-				return null;
 			}
+			return null;
 		});
 
 	}
@@ -124,7 +105,7 @@ public class BlockingBenchmark {
 		for(int r=0; r<4; r++) {
 			long start = System.currentTimeMillis();
 			for(int i = 0; i < REPS; i++) {
-				blockMethod.apply( tr.getReadVersion() );
+				blockMethod.apply(tr.getReadVersion());
 			}
 
 			long taken = System.currentTimeMillis() - start;
@@ -145,4 +126,6 @@ public class BlockingBenchmark {
 			System.out.println("  " + REPS + " done in " + taken + "ms -> " + (REPS / (taken)) + " KHz");
 		}
 	}
+
+	private BlockingBenchmark() {}
 }

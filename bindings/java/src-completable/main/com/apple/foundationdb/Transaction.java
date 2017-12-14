@@ -22,6 +22,7 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
+
 import com.apple.foundationdb.tuple.Tuple;
 
 /**
@@ -367,7 +368,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 */
 	@Override
 	<T> CompletableFuture<T> runAsync(
-			Function<? super Transaction, CompletableFuture<T>> retryable);
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable);
 
 	/**
 	 * Close the {@code Transaction} object and release any associated resources. This must be called at

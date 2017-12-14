@@ -20,12 +20,9 @@
 
 package com.apple.foundationdb.test;
 
-import java.util.function.Function;
-
 import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
-import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.TransactionContext;
 import com.apple.foundationdb.tuple.Tuple;
 
@@ -47,19 +44,16 @@ public class TupleTest {
 		System.out.println("Running tests...");
 		long start = System.currentTimeMillis();
 		try {
-			db.run(new Function<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) {
-					Tuple t = new Tuple();
-					t.add(100230045000L);
-					t.add("Hello!");
-					t.add("foo".getBytes());
+			db.run(tr -> {
+				Tuple t = new Tuple();
+				t.add(100230045000L);
+				t.add("Hello!");
+				t.add("foo".getBytes());
 
-					/*for(Map.Entry<byte[], byte[]> e : tr.getRange("vcount".getBytes(), "zz".getBytes())) {
-						System.out.println("K: " + new String(e.getKey()) + ", V: " + new String(e.getValue()));
-					}*/
-					return null;
-				}
+				/*for(Map.Entry<byte[], byte[]> e : tr.getRange("vcount".getBytes(), "zz".getBytes())) {
+					System.out.println("K: " + new String(e.getKey()) + ", V: " + new String(e.getValue()));
+				}*/
+				return null;
 			});
 		} catch (Throwable e) {
 			e.printStackTrace();
@@ -73,4 +67,6 @@ public class TupleTest {
 
 		System.exit(0);
 	}
+
+	private TupleTest() {}
 }

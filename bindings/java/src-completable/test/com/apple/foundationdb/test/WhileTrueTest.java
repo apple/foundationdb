@@ -20,9 +20,10 @@
 
 package com.apple.foundationdb.test;
 
-import com.apple.foundationdb.async.AsyncUtil;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import com.apple.foundationdb.async.AsyncUtil;
 
 public class WhileTrueTest {
     public static void main(String[] args) {
@@ -32,4 +33,6 @@ public class WhileTrueTest {
         AsyncUtil.whileTrue(() -> CompletableFuture.completedFuture(count.decrementAndGet()).thenApplyAsync(c -> c > 0)).join();
         System.out.println("Final value: " + count.get());
     }
+
+    private WhileTrueTest() {}
 }

@@ -21,11 +21,8 @@
 package com.apple.foundationdb.tuple;
 
 import java.math.BigInteger;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -852,12 +849,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *
 	 * @return a newly created {@code Tuple}
 	 */
-	public static Tuple from(Object ... items) {
+	public static Tuple from(Object... items) {
 		return fromList(Arrays.asList(items));
 	}
 
 	static void main(String[] args) {
-		for( int i : new int[] {10, 100, 1000, 10000, 100000, 1000000} ) {
+		for(int i : new int[] {10, 100, 1000, 10000, 100000, 1000000}) {
 			createTuple(i);
 		}
 

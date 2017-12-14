@@ -59,5 +59,5 @@ public interface TransactionContext extends ReadTransactionContext {
 	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
 	 *  to {@code retryable}
 	 */
-	<T> CompletableFuture<T> runAsync(Function<? super Transaction, CompletableFuture<T>> retryable);
+	<T> CompletableFuture<T> runAsync(Function<? super Transaction, ? extends CompletableFuture<T>> retryable);
 }

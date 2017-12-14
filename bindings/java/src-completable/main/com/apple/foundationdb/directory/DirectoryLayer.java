@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.MutationType;
@@ -67,8 +66,7 @@ import com.apple.foundationdb.tuple.Tuple;
  *     access to subspaces.
  * </p>
  */
-public class DirectoryLayer implements Directory
-{
+public class DirectoryLayer implements Directory {
 	private static final Charset UTF_8 = Charset.forName("UTF-8");
 	private static final byte[] LITTLE_ENDIAN_LONG_ONE = { 1, 0, 0, 0, 0, 0, 0, 0 };
 	private static final byte[] HIGH_CONTENTION_KEY = "hca".getBytes(UTF_8);
@@ -182,22 +180,22 @@ public class DirectoryLayer implements Directory
 	 * Creates a new {@code DirectoryLayer} formed with a specified node subspace and default content subspace.
 	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
-	 * @param node_subspace a {@link Subspace} used to store directory metadata
-	 * @return a {@code DirectoryLayer} formed with {@code node_subspace} and a default content subspace
+	 * @param nodeSubspace a {@link Subspace} used to store directory metadata
+	 * @return a {@code DirectoryLayer} formed with {@code nodeSubspace} and a default content subspace
 	 */
-	public static Directory createWithNodeSubspace(Subspace node_subspace) {
-		return new DirectoryLayer(node_subspace, DEFAULT_CONTENT_SUBSPACE);
+	public static Directory createWithNodeSubspace(Subspace nodeSubspace) {
+		return new DirectoryLayer(nodeSubspace, DEFAULT_CONTENT_SUBSPACE);
 	}
 
 	/**
 	 * Creates a new {@code DirectoryLayer} formed with a default node subspace and specified content subspace.
 	 * Prefixes can not be specified in calls to {@link Directory#create(TransactionContext, List, byte[], byte[])}.
 	 *
-	 * @param content_subspace a {@link Subspace} used to store directory content
-	 * @return a {@code DirectoryLayer} formed with a {@code content_subspace} and a default node subspace
+	 * @param contentSubspace a {@link Subspace} used to store directory content
+	 * @return a {@code DirectoryLayer} formed with a {@code contentSubspace} and a default node subspace
 	 */
-	public static Directory createWithContentSubspace(Subspace content_subspace) {
-		return new DirectoryLayer(DEFAULT_NODE_SUBSPACE, content_subspace);
+	public static Directory createWithContentSubspace(Subspace contentSubspace) {
+		return new DirectoryLayer(DEFAULT_NODE_SUBSPACE, contentSubspace);
 	}
 
 	/**
@@ -230,9 +228,9 @@ public class DirectoryLayer implements Directory
 		}
 		DirectoryLayer other = (DirectoryLayer)rhs;
 
-		return (path == other.path || path.equals(other.path))
-			&& nodeSubspace.equals(other.nodeSubspace)
-			&& contentSubspace.equals(other.contentSubspace);
+		return (path == other.path || path.equals(other.path)) &&
+				nodeSubspace.equals(other.nodeSubspace) &&
+				contentSubspace.equals(other.contentSubspace);
 	}
 
 	/**
@@ -244,7 +242,7 @@ public class DirectoryLayer implements Directory
 	 */
 	@Override
 	public int hashCode() {
-	    return path.hashCode() ^ (nodeSubspace.hashCode() * 179) ^ (contentSubspace.hashCode() * 937);
+		return path.hashCode() ^ (nodeSubspace.hashCode() * 179) ^ (contentSubspace.hashCode() * 937);
 	}
 
 	/**
@@ -308,12 +306,7 @@ public class DirectoryLayer implements Directory
 	 */
 	@Override
 	public CompletableFuture<DirectorySubspace> createOrOpen(TransactionContext tcx, final List<String> path, final byte[] layer) {
-		return tcx.runAsync(new Function<Transaction, CompletableFuture<DirectorySubspace>>() {
-			@Override
-			public CompletableFuture<DirectorySubspace> apply(Transaction tr) {
-				return createOrOpenInternal(tr, tr, path, layer, null, true, true);
-			}
-		});
+		return tcx.runAsync(tr -> createOrOpenInternal(tr, tr, path, layer, null, true, true));
 	}
 
 	/**
@@ -334,12 +327,7 @@ public class DirectoryLayer implements Directory
 	 */
 	@Override
 	public CompletableFuture<DirectorySubspace> open(ReadTransactionContext tcx, final List<String> path, final byte[] layer) {
-		return tcx.readAsync(new Function<ReadTransaction, CompletableFuture<DirectorySubspace>>() {
-			@Override
-			public CompletableFuture<DirectorySubspace> apply(ReadTransaction rtr) {
-				return createOrOpenInternal(rtr, null, path, layer, null, false, true);
-			}
-		});
+		return tcx.readAsync(rtr -> createOrOpenInternal(rtr, null, path, layer, null, false, true));
 	}
 
 	/**
@@ -361,12 +349,7 @@ public class DirectoryLayer implements Directory
 	 */
 	@Override
 	public CompletableFuture<DirectorySubspace> create(TransactionContext tcx, final List<String> path, final byte[] layer, final byte[] prefix) {
-		return tcx.runAsync(new Function<Transaction, CompletableFuture<DirectorySubspace>>() {
-			@Override
-			public CompletableFuture<DirectorySubspace> apply(Transaction tr) {
-				return createOrOpenInternal(tr, tr, path, layer, prefix, true, false);
-			}
-		});
+		return tcx.runAsync(tr -> createOrOpenInternal(tr, tr, path, layer, prefix, true, false));
 	}
 
 	/**
@@ -384,7 +367,7 @@ public class DirectoryLayer implements Directory
 	 */
 	@Override
 	public CompletableFuture<DirectorySubspace> moveTo(TransactionContext tcx, List<String> newAbsolutePath) {
-		CompletableFuture<DirectorySubspace> future = new CompletableFuture<DirectorySubspace>();
+		CompletableFuture<DirectorySubspace> future = new CompletableFuture<>();
 		future.completeExceptionally(new DirectoryMoveException("The root directory cannot be moved.", path, newAbsolutePath));
 		return future;
 	}
@@ -422,71 +405,50 @@ public class DirectoryLayer implements Directory
 	 */
 	@Override
 	public CompletableFuture<DirectorySubspace> move(final TransactionContext tcx, final List<String> oldPath, final List<String> newPath) {
-		final List<String> oldPathCopy = new ArrayList<String>(oldPath);
-		final List<String> newPathCopy = new ArrayList<String>(newPath);
+		final List<String> oldPathCopy = new ArrayList<>(oldPath);
+		final List<String> newPathCopy = new ArrayList<>(newPath);
 
-		return tcx.runAsync(new Function<Transaction, CompletableFuture<DirectorySubspace>>() {
-			@Override
-			public CompletableFuture<DirectorySubspace> apply(final Transaction tr) {
-				return checkOrWriteVersion(tr)
-				.thenComposeAsync(new Function<Void, CompletableFuture<List<Node>>>() {
-					@Override
-					public CompletableFuture<List<Node>> apply(Void ignore) {
-						if(oldPathCopy.size() <= newPathCopy.size() && oldPathCopy.equals(newPathCopy.subList(0, oldPathCopy.size())))
-							throw new DirectoryMoveException("The destination directory cannot be a subdirectory of the source directory.", toAbsolutePath(oldPathCopy), toAbsolutePath(newPathCopy));
+		return tcx.runAsync(tr -> checkOrWriteVersion(tr).thenComposeAsync(ignore -> {
+			if(oldPathCopy.size() <= newPathCopy.size() && oldPathCopy.equals(newPathCopy.subList(0, oldPathCopy.size())))
+				throw new DirectoryMoveException("The destination directory cannot be a subdirectory of the source directory.", toAbsolutePath(oldPathCopy), toAbsolutePath(newPathCopy));
 
-						ArrayList<CompletableFuture<Node>> futures = new ArrayList<CompletableFuture<Node>>();
-						futures.add(new NodeFinder(oldPathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()));
-						futures.add(new NodeFinder(newPathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()));
+			ArrayList<CompletableFuture<Node>> futures = new ArrayList<>();
+			futures.add(new NodeFinder(oldPathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()));
+			futures.add(new NodeFinder(newPathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()));
 
-						return AsyncUtil.getAll(futures);
-					}
-				}, tr.getExecutor())
-				.thenCompose(new Function<List<Node>, CompletableFuture<DirectorySubspace>>() {
-					@Override
-					public CompletableFuture<DirectorySubspace> apply(List<Node> nodes) {
-						final Node oldNode = nodes.get(0);
-						final Node newNode = nodes.get(1);
+			return AsyncUtil.getAll(futures);
+		}, tr.getExecutor())
+		.thenComposeAsync(nodes -> {
+			final Node oldNode = nodes.get(0);
+			final Node newNode = nodes.get(1);
 
-						if(!oldNode.exists())
-							throw new NoSuchDirectoryException(toAbsolutePath(oldPathCopy));
+			if(!oldNode.exists())
+				throw new NoSuchDirectoryException(toAbsolutePath(oldPathCopy));
 
-						if(oldNode.isInPartition(false) || newNode.isInPartition(false)) {
-							if(!oldNode.isInPartition(false) || !newNode.isInPartition(false) || !oldNode.path.equals(newNode.path))
-								throw new DirectoryMoveException("Cannot move between partitions.", toAbsolutePath(oldPathCopy), toAbsolutePath(newPathCopy));
+			if(oldNode.isInPartition(false) || newNode.isInPartition(false)) {
+				if(!oldNode.isInPartition(false) || !newNode.isInPartition(false) || !oldNode.path.equals(newNode.path))
+					throw new DirectoryMoveException("Cannot move between partitions.", toAbsolutePath(oldPathCopy), toAbsolutePath(newPathCopy));
 
-							return newNode.getContents().move(tr, oldNode.getPartitionSubpath(), newNode.getPartitionSubpath());
-						}
-
-						if(newNode.exists())
-							throw new DirectoryAlreadyExistsException(toAbsolutePath(newPathCopy));
-
-						final List<String> parentPath = PathUtil.popBack(newPathCopy);
-						return new NodeFinder(parentPath).find(tr)
-						.thenComposeAsync(new Function<Node, CompletableFuture<DirectorySubspace>>() {
-							@Override
-							public CompletableFuture<DirectorySubspace> apply(Node parentNode) {
-								if(!parentNode.exists())
-									throw new NoSuchDirectoryException(toAbsolutePath(parentPath));
-
-								tr.set(
-									parentNode.subspace.get(SUB_DIR_KEY).get(getLast(newPathCopy)).getKey(),
-									contentsOfNode(oldNode.subspace, EMPTY_PATH, EMPTY_BYTES).getKey()
-								);
-
-								return removeFromParent(tr, oldPathCopy)
-								.thenApply(new Function<Void, DirectorySubspace>() {
-									@Override
-									public DirectorySubspace apply(Void ignore) {
-										return contentsOfNode(oldNode.subspace, newPathCopy, oldNode.layer);
-									}
-								});
-							}
-						}, tr.getExecutor());
-					}
-				});
+				return newNode.getContents().move(tr, oldNode.getPartitionSubpath(), newNode.getPartitionSubpath());
 			}
-		});
+
+			if(newNode.exists())
+				throw new DirectoryAlreadyExistsException(toAbsolutePath(newPathCopy));
+
+			final List<String> parentPath = PathUtil.popBack(newPathCopy);
+			return new NodeFinder(parentPath).find(tr).thenComposeAsync(parentNode -> {
+				if(!parentNode.exists())
+					throw new NoSuchDirectoryException(toAbsolutePath(parentPath));
+
+				tr.set(
+					parentNode.subspace.get(SUB_DIR_KEY).get(getLast(newPathCopy)).getKey(),
+					contentsOfNode(oldNode.subspace, EMPTY_PATH, EMPTY_BYTES).getKey()
+				);
+
+				return removeFromParent(tr, oldPathCopy)
+							.thenApply(ignore -> contentsOfNode(oldNode.subspace, newPathCopy, oldNode.layer));
+			}, tr.getExecutor());
+		}, tr.getExecutor()));
 	}
 
 	/**
@@ -549,39 +511,27 @@ public class DirectoryLayer implements Directory
 	public CompletableFuture<List<String>> list(final ReadTransactionContext tcx, final List<String> path) {
 		final List<String> pathCopy = new ArrayList<String>(path);
 
-		return tcx.readAsync(new Function<ReadTransaction, CompletableFuture<List<String>>>() {
-			@Override
-			public CompletableFuture<List<String>> apply(final ReadTransaction tr) {
-				return checkVersion(tr)
-				.thenComposeAsync(new Function<Void, CompletableFuture<Node>>() {
-					@Override
-					public CompletableFuture<Node> apply(Void ignore) {
-						return new NodeFinder(pathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor());
-					}
-				}, tr.getExecutor())
-				.thenComposeAsync(new Function<Node, CompletableFuture<List<String>>>() {
-					@Override
-					public CompletableFuture<List<String>> apply(Node node) {
-						if(!node.exists())
-							throw new NoSuchDirectoryException(toAbsolutePath(pathCopy));
+		return tcx.readAsync(tr -> checkVersion(tr)
+		.thenComposeAsync(ignore ->
+				new NodeFinder(pathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()),
+				tr.getExecutor())
+		.thenComposeAsync(node -> {
+			if(!node.exists())
+				throw new NoSuchDirectoryException(toAbsolutePath(pathCopy));
 
-						if(node.isInPartition(true))
-							return node.getContents().list(tr, node.getPartitionSubpath());
+			if(node.isInPartition(true))
+				return node.getContents().list(tr, node.getPartitionSubpath());
 
-						final Subspace subdir = node.subspace.get(SUB_DIR_KEY);
+			final Subspace subdir = node.subspace.get(SUB_DIR_KEY);
 
-						return AsyncUtil.collect(
-								AsyncUtil.mapIterable(tr.getRange(subdir.range()),
-									new Function<KeyValue, String>() {
-										@Override
-										public String apply(KeyValue o) {
-											return subdir.unpack(o.getKey()).getString(0);
-										}
-									}), tr.getExecutor());
-					}
-				}, tr.getExecutor());
-			}
-		});
+			return AsyncUtil.collect(
+					AsyncUtil.mapIterable(tr.getRange(subdir.range()),
+						kv -> subdir.unpack(kv.getKey()).getString(0)
+					),
+					tr.getExecutor()
+			);
+		}, tr.getExecutor())
+		);
 	}
 
 	/**
@@ -592,7 +542,7 @@ public class DirectoryLayer implements Directory
 	 */
 	@Override
 	public CompletableFuture<Boolean> exists(ReadTransactionContext tcx) {
-		return CompletableFuture.completedFuture(true);
+		return AsyncUtil.READY_TRUE;
 	}
 
 	/**
@@ -605,33 +555,20 @@ public class DirectoryLayer implements Directory
 	 */
 	@Override
 	public CompletableFuture<Boolean> exists(final ReadTransactionContext tcx, final List<String> path) {
-		final List<String> pathCopy = new ArrayList<String>(path);
+		final List<String> pathCopy = new ArrayList<>(path);
 
-		return tcx.readAsync(new Function<ReadTransaction, CompletableFuture<Boolean>>() {
-			@Override
-			public CompletableFuture<Boolean> apply(final ReadTransaction tr) {
-				return checkVersion(tr)
-				.thenComposeAsync(new Function<Void, CompletableFuture<Node>>() {
-					@Override
-					public CompletableFuture<Node> apply(Void ignore) {
-						return new NodeFinder(pathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor());
-					};
-				}, tr.getExecutor())
-				.thenComposeAsync(new Function<Node, CompletableFuture<Boolean>>() {
-					@Override
-					public CompletableFuture<Boolean> apply(Node node) {
-						if(!node.exists())
-							//return new ReadyFuture<Boolean>(false);
-							return CompletableFuture.completedFuture(false);
-						else if(node.isInPartition(false))
-							return node.getContents().exists(tr, node.getPartitionSubpath());
+		return tcx.readAsync(tr -> checkVersion(tr)
+		.thenComposeAsync(ignore ->
+				new NodeFinder(pathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor()),
+				tr.getExecutor())
+		.thenComposeAsync(node -> {
+			if(!node.exists())
+				return AsyncUtil.READY_FALSE;
+			else if(node.isInPartition(false))
+				return node.getContents().exists(tr, node.getPartitionSubpath());
 
-						//return new ReadyFuture<Boolean>(true);
-						return CompletableFuture.completedFuture(true);
-					}
-				}, tr.getExecutor());
-			}
-		});
+			return AsyncUtil.READY_TRUE;
+		}, tr.getExecutor()));
 	}
 
 	//
@@ -655,19 +592,16 @@ public class DirectoryLayer implements Directory
 
 		return tr.getRange(nodeSubspace.range().begin, ByteArrayUtil.join(nodeSubspace.pack(key), new byte[]{0x00}), 1, true)
 		.asList()
-		.thenApply(new Function<List<KeyValue>, Subspace>() {
-			@Override
-			public Subspace apply(List<KeyValue> results) {
-				if(results.size() > 0) {
-					byte[] resultKey = results.get(0).getKey();
-					byte[] prevPrefix = nodeSubspace.unpack(resultKey).getBytes(0);
-					if(ByteArrayUtil.startsWith(key, prevPrefix)) {
-						return nodeWithPrefix(prevPrefix);
-					}
+		.thenApply(results -> {
+			if(results.size() > 0) {
+				byte[] resultKey = results.get(0).getKey();
+				byte[] prevPrefix = nodeSubspace.unpack(resultKey).getBytes(0);
+				if(ByteArrayUtil.startsWith(key, prevPrefix)) {
+					return nodeWithPrefix(prevPrefix);
 				}
-
-				return null;
 			}
+
+			return null;
 		});
 	}
 
@@ -685,55 +619,36 @@ public class DirectoryLayer implements Directory
 	}
 
 	private CompletableFuture<Boolean> removeInternal(final TransactionContext tcx, final List<String> path, final boolean mustExist) {
-		final List<String> pathCopy = new ArrayList<String>(path);
+		final List<String> pathCopy = new ArrayList<>(path);
 
-		return tcx.runAsync(new Function<Transaction, CompletableFuture<Boolean>>() {
-			@Override
-			public CompletableFuture<Boolean> apply(final Transaction tr) {
-				return checkOrWriteVersion(tr)
-				.thenComposeAsync(new Function<Void, CompletableFuture<Node>>() {
-					@Override
-					public CompletableFuture<Node> apply(Void ignore) {
-						if(pathCopy.size() == 0)
-							throw new DirectoryException("The root directory cannot be removed.", toAbsolutePath(pathCopy));
+		return tcx.runAsync(tr -> checkOrWriteVersion(tr).thenComposeAsync(ignore -> {
+			if(pathCopy.size() == 0)
+				throw new DirectoryException("The root directory cannot be removed.", toAbsolutePath(pathCopy));
 
-						return new NodeFinder(pathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor());
-					}
-				}, tr.getExecutor())
-				.thenComposeAsync(new Function<Node, CompletableFuture<Boolean>>() {
-					@Override
-					public CompletableFuture<Boolean> apply(Node node) {
-						if(!node.exists()) {
-							if(mustExist)
-								throw new NoSuchDirectoryException(toAbsolutePath(pathCopy));
-							else
-								return CompletableFuture.completedFuture(false);
-						}
-
-						if(node.isInPartition(false))
-							return node.getContents().getDirectoryLayer().removeInternal(tr, node.getPartitionSubpath(), mustExist);
-						else {
-							ArrayList<CompletableFuture<Void>> futures = new ArrayList<CompletableFuture<Void>>();
-							futures.add(removeRecursive(tr, node.subspace));
-							futures.add(removeFromParent(tr, pathCopy));
-
-							return AsyncUtil.tag(AsyncUtil.whenAll(futures), true);
-						}
-					}
-				}, tr.getExecutor());
+			return new NodeFinder(pathCopy).find(tr).thenComposeAsync(new NodeMetadataLoader(tr), tr.getExecutor());
+		}, tr.getExecutor())
+		.thenComposeAsync(node ->  {
+			if(!node.exists()) {
+				if(mustExist)
+					throw new NoSuchDirectoryException(toAbsolutePath(pathCopy));
+				else
+					return AsyncUtil.READY_FALSE;
 			}
-		});
+
+			if(node.isInPartition(false))
+				return node.getContents().getDirectoryLayer().removeInternal(tr, node.getPartitionSubpath(), mustExist);
+			else {
+				ArrayList<CompletableFuture<Void>> futures = new ArrayList<>();
+				futures.add(removeRecursive(tr, node.subspace));
+				futures.add(removeFromParent(tr, pathCopy));
+				return AsyncUtil.tag(AsyncUtil.whenAll(futures), true);
+			}
+		}, tr.getExecutor()));
 	}
 
 	private CompletableFuture<Void> removeFromParent(final Transaction tr, final List<String> path) {
 		return new NodeFinder(PathUtil.popBack(path)).find(tr)
-		.thenApply(new Function<Node, Void>() {
-			@Override
-			public Void apply(Node parent) {
-				tr.clear(parent.subspace.get(SUB_DIR_KEY).get(getLast(path)).getKey());
-				return null;
-			}
-		});
+				.thenAccept(parent -> tr.clear(parent.subspace.get(SUB_DIR_KEY).get(getLast(path)).getKey()));
 	}
 
 	private CompletableFuture<Void> removeRecursive(final Transaction tr, final Subspace node) {
@@ -743,23 +658,14 @@ public class DirectoryLayer implements Directory
 		tr.clear(Range.startsWith(nodeSubspace.unpack(node.getKey()).getBytes(0)));
 		tr.clear(node.range());
 
-		return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
-			@Override
-			public CompletableFuture<Boolean> get() {
-				CompletableFuture<Void> subdirRemoveFuture;
-				if(rangeItr.onHasNext().isDone() && rangeItr.hasNext())
-					subdirRemoveFuture = removeRecursive(tr, nodeWithPrefix(rangeItr.next().getValue()));
-				else
-					subdirRemoveFuture = CompletableFuture.completedFuture(null);
+		return AsyncUtil.whileTrue(() -> {
+			CompletableFuture<Void> subdirRemoveFuture;
+			if(rangeItr.onHasNext().isDone() && rangeItr.hasNext())
+				subdirRemoveFuture = removeRecursive(tr, nodeWithPrefix(rangeItr.next().getValue()));
+			else
+				subdirRemoveFuture = AsyncUtil.DONE;
 
-				return subdirRemoveFuture
-				.thenComposeAsync(new Function<Void, CompletableFuture<Boolean>>() {
-					@Override
-					public CompletableFuture<Boolean> apply(Void ignore) {
-						return rangeItr.onHasNext();
-					}
-				}, tr.getExecutor());
-			}
+			return subdirRemoveFuture.thenCompose(ignore -> rangeItr.onHasNext());
 		}, tr.getExecutor());
 	}
 
@@ -768,26 +674,14 @@ public class DirectoryLayer implements Directory
 		// allocated prefix (including the root node). This means that it neither
 		// contains any other prefix nor is contained by any other prefix.
 		if(prefix == null || prefix.length == 0)
-			//return new ReadyFuture<Boolean>(false);
-			return CompletableFuture.completedFuture(false);
+			return AsyncUtil.READY_FALSE;
 
-		return nodeContainingKey(tr, prefix)
-		.thenComposeAsync(new Function<Subspace, CompletableFuture<Boolean>>() {
-			@Override
-			public CompletableFuture<Boolean> apply(Subspace node) {
-				if(node != null)
-					//return new ReadyFuture<Boolean>(false);
-					return CompletableFuture.completedFuture(false);
+		return nodeContainingKey(tr, prefix).thenComposeAsync(node -> {
+			if(node != null)
+				return AsyncUtil.READY_FALSE;
 
-				final AsyncIterator<KeyValue> it = tr.getRange(nodeSubspace.pack(prefix), nodeSubspace.pack(ByteArrayUtil.strinc(prefix)), 1).iterator();
-				return it.onHasNext()
-				.thenApply(new Function<Boolean, Boolean>() {
-					@Override
-					public Boolean apply(Boolean hasNext) {
-						return !hasNext;
-					}
-				});
-			}
+			final AsyncIterator<KeyValue> it = tr.getRange(nodeSubspace.pack(prefix), nodeSubspace.pack(ByteArrayUtil.strinc(prefix)), 1).iterator();
+			return it.onHasNext().thenApply(hasNext -> !hasNext);
 		}, tr.getExecutor());
 	}
 
@@ -809,9 +703,8 @@ public class DirectoryLayer implements Directory
 																   final byte[] layer,
 																   final byte[] prefix,
 																   final boolean allowCreate,
-																   final boolean allowOpen)
-	{
-		final List<String> pathCopy = new ArrayList<String>(path);
+																   final boolean allowOpen) {
+		final List<String> pathCopy = new ArrayList<>(path);
 
 		if(prefix != null && !allowManualPrefixes) {
 			String errorMessage;
@@ -820,48 +713,40 @@ public class DirectoryLayer implements Directory
 			else
 				errorMessage = "Cannot specify a prefix in a partition.";
 
-			CompletableFuture<DirectorySubspace> future = new CompletableFuture<DirectorySubspace>();
+			CompletableFuture<DirectorySubspace> future = new CompletableFuture<>();
 			future.completeExceptionally(new IllegalArgumentException(errorMessage));
 			return future;
 		}
 
-		return checkVersion(rtr)
-			.thenComposeAsync(new Function<Void, CompletableFuture<Node>>() {
-				@Override
-				public CompletableFuture<Node> apply(Void ignore) {
-					// Root directory contains node metadata and so may not be opened.
-					if(pathCopy.size() == 0) {
-						throw new IllegalArgumentException("The root directory may not be opened.");
-					}
+		return checkVersion(rtr).thenComposeAsync(ignore -> {
+			// Root directory contains node metadata and so may not be opened.
+			if(pathCopy.size() == 0) {
+				throw new IllegalArgumentException("The root directory may not be opened.");
+			}
 
-					return new NodeFinder(pathCopy).find(rtr).thenComposeAsync(new NodeMetadataLoader(rtr), rtr.getExecutor());
+			return new NodeFinder(pathCopy).find(rtr).thenComposeAsync(new NodeMetadataLoader(rtr), rtr.getExecutor());
+		}, rtr.getExecutor())
+		.thenComposeAsync(existingNode -> {
+			if(existingNode.exists()) {
+				if(existingNode.isInPartition(false)) {
+					List<String> subpath = existingNode.getPartitionSubpath();
+					DirectoryLayer directoryLayer = existingNode.getContents().getDirectoryLayer();
+					return directoryLayer.createOrOpenInternal(
+							rtr, tr, subpath, layer, prefix, allowCreate, allowOpen);
 				}
-			}, rtr.getExecutor())
-			.thenComposeAsync(new Function<Node, CompletableFuture<DirectorySubspace>>() {
-				@Override
-				public CompletableFuture<DirectorySubspace> apply(final Node existingNode) {
-					if(existingNode.exists()) {
-						if(existingNode.isInPartition(false)) {
-							List<String> subpath = existingNode.getPartitionSubpath();
-							DirectoryLayer directoryLayer = existingNode.getContents().getDirectoryLayer();
-							return directoryLayer.createOrOpenInternal(
-									rtr, tr, subpath, layer, prefix, allowCreate, allowOpen);
-						}
 
-						DirectorySubspace opened = openInternal(pathCopy, layer, existingNode, allowOpen);
-						return CompletableFuture.completedFuture(opened);
-					}
-					else
-						return createInternal(tr, pathCopy, layer, prefix, allowCreate);
-				}
-			}, rtr.getExecutor());
+				DirectorySubspace opened = openInternal(pathCopy, layer, existingNode, allowOpen);
+				return CompletableFuture.completedFuture(opened);
+			}
+			else
+				return createInternal(tr, pathCopy, layer, prefix, allowCreate);
+		}, rtr.getExecutor());
 	}
 
 	private DirectorySubspace openInternal(final List<String> path,
 															final byte[] layer,
 															final Node existingNode,
-															final boolean allowOpen)
-	{
+															final boolean allowOpen) {
 		if(!allowOpen) {
 			throw new DirectoryAlreadyExistsException(toAbsolutePath(path));
 		}
@@ -878,84 +763,52 @@ public class DirectoryLayer implements Directory
 															final List<String> path,
 															final byte[] layer,
 															final byte[] prefix,
-															final boolean allowCreate)
-	{
+															final boolean allowCreate) {
 		if(!allowCreate) {
 			throw new NoSuchDirectoryException(toAbsolutePath(path));
 		}
 
-		return checkOrWriteVersion(tr)
-		.thenComposeAsync(new Function<Void, CompletableFuture<byte[]>>() {
-			@Override
-			public CompletableFuture<byte[]> apply(Void ignore) {
-				if(prefix == null) {
-					return allocator.allocate(tr)
-					.thenComposeAsync(new Function<byte[], CompletableFuture<byte[]>>() {
-						@Override
-						public CompletableFuture<byte[]> apply(byte[] allocated) {
-							final byte[] finalPrefix = ByteArrayUtil.join(contentSubspace.getKey(), allocated);
-							return tr.getRange(Range.startsWith(finalPrefix), 1)
-							.asList()
-							.thenApply(new Function<List<KeyValue>, byte[]>() {
-								@Override
-								public byte[] apply(List<KeyValue> results) {
-									if(results.size() > 0) {
-										throw new IllegalStateException("The database has keys stored at the prefix chosen by the automatic " +
-																		"prefix allocator: " + ByteArrayUtil.printable(finalPrefix) + ".");
-									}
-
-									return finalPrefix;
-								}
-							});
+		return checkOrWriteVersion(tr).thenComposeAsync(ignore -> {
+			if(prefix == null) {
+				return allocator.allocate(tr).thenComposeAsync(allocated -> {
+					final byte[] finalPrefix = ByteArrayUtil.join(contentSubspace.getKey(), allocated);
+					return tr.getRange(Range.startsWith(finalPrefix), 1).iterator().onHasNext().thenApply(hasAny -> {
+						if(hasAny) {
+							throw new IllegalStateException("The database has keys stored at the prefix chosen by the automatic " +
+							                                "prefix allocator: " + ByteArrayUtil.printable(finalPrefix) + ".");
 						}
-					}, tr.getExecutor());
+						return finalPrefix;
+					});
+				}, tr.getExecutor());
+			}
+			else
+				return CompletableFuture.completedFuture(prefix);
+		}, tr.getExecutor())
+		.thenComposeAsync(actualPrefix -> isPrefixFree(prefix == null ? tr.snapshot() : tr, actualPrefix)
+			.thenComposeAsync(prefixFree -> {
+				if(!prefixFree) {
+					if(prefix == null) {
+						throw new IllegalStateException("The directory layer has manually allocated prefixes that conflict " +
+						                                "with the automatic prefix allocator.");
+					}
+					else
+						throw new IllegalArgumentException("Prefix already in use: " + ByteArrayUtil.printable(actualPrefix) + ".");
+				}
+				else if(path.size() > 1) {
+					return createOrOpen(tr, PathUtil.popBack(path)).thenApply(dir -> nodeWithPrefix(dir.getKey()));
 				}
 				else
-					return CompletableFuture.completedFuture(prefix);
-					//return new ReadyFuture<byte[]>(prefix);
-			}
-		}, tr.getExecutor())
-		.thenComposeAsync(new Function<byte[], CompletableFuture<DirectorySubspace>>() {
-			@Override
-			public CompletableFuture<DirectorySubspace> apply(final byte[] actualPrefix) {
-				return isPrefixFree(prefix == null ? tr.snapshot() : tr, actualPrefix)
-				.thenComposeAsync(new Function<Boolean, CompletableFuture<Subspace>>() {
-					@Override
-					public CompletableFuture<Subspace> apply(Boolean prefixFree) {
-						if(!prefixFree) {
-							if(prefix == null) {
-								throw new IllegalStateException("The directory layer has manually allocated prefixes that conflict " +
-																"with the automatic prefix allocator.");
-							}
-							else
-								throw new IllegalArgumentException("Prefix already in use: " + ByteArrayUtil.printable(actualPrefix) + ".");
-						}
-						else if(path.size() > 1) {
-							return createOrOpen(tr, PathUtil.popBack(path))
-							.thenApply(new Function<DirectorySubspace, Subspace>() {
-								@Override
-								public Subspace apply(DirectorySubspace dir) {
-									return nodeWithPrefix(dir.getKey());
-								}
-							});
-						}
-						else
-							return CompletableFuture.completedFuture(rootNode);
-					}
-				}, tr.getExecutor())
-				.thenApply(new Function<Subspace, DirectorySubspace>() {
-					@Override
-					public DirectorySubspace apply(Subspace parentNode) {
-						if(parentNode == null)
-							throw new IllegalStateException("The parent directory does not exist."); //Shouldn't happen
-						Subspace node = nodeWithPrefix(actualPrefix);
-						tr.set(parentNode.get(SUB_DIR_KEY).get(getLast(path)).getKey(), actualPrefix);
-						tr.set(node.get(LAYER_KEY).getKey(), layer);
-						return contentsOfNode(node, path, layer);
-					}
-				});
-			}
-		}, tr.getExecutor());
+					return CompletableFuture.completedFuture(rootNode);
+			}, tr.getExecutor())
+			.thenApplyAsync(parentNode -> {
+				if(parentNode == null)
+					throw new IllegalStateException("The parent directory does not exist."); //Shouldn't happen
+				Subspace node = nodeWithPrefix(actualPrefix);
+				tr.set(parentNode.get(SUB_DIR_KEY).get(getLast(path)).getKey(), actualPrefix);
+				tr.set(node.get(LAYER_KEY).getKey(), layer);
+				return contentsOfNode(node, path, layer);
+			}, tr.getExecutor()),
+		tr.getExecutor());
 	}
 
 	//
@@ -986,7 +839,7 @@ public class DirectoryLayer implements Directory
 			ByteBuffer versionBuf = ByteBuffer.wrap(versionBytes);
 			versionBuf.order(ByteOrder.LITTLE_ENDIAN);
 
-			Integer version[] = new Integer[3];
+			Integer[] version = new Integer[3];
 			for(int i = 0; i < version.length; ++i)
 				version[i] = versionBuf.getInt();
 
@@ -1043,56 +896,40 @@ public class DirectoryLayer implements Directory
 		private Node node;
 		private List<String> currentPath;
 
-		public NodeFinder(List<String> path) {
+		NodeFinder(List<String> path) {
 			this.path = path;
 		}
 
 		public CompletableFuture<Node> find(final ReadTransaction tr) {
 			index = 0;
 			node = new Node(rootNode, currentPath, path);
-			currentPath = new ArrayList<String>();
+			currentPath = new ArrayList<>();
 
-			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
-				@Override
-				public CompletableFuture<Boolean> get() {
-					if(index == path.size())
-						return CompletableFuture.completedFuture(false);
+			return AsyncUtil.whileTrue(() -> {
+				if(index == path.size())
+					return AsyncUtil.READY_FALSE;
 
-					return tr.get(node.subspace.get(SUB_DIR_KEY).get(path.get(index)).getKey())
-					.thenComposeAsync(new Function<byte[], CompletableFuture<Boolean>>() {
-						@Override
-						public CompletableFuture<Boolean> apply(byte[] key) {
-							currentPath.add(path.get(index));
-							node = new Node(nodeWithPrefix(key), currentPath, path);
+				return tr.get(node.subspace.get(SUB_DIR_KEY).get(path.get(index)).getKey()).thenComposeAsync(key -> {
+					currentPath.add(path.get(index));
+					node = new Node(nodeWithPrefix(key), currentPath, path);
 
-							if(!node.exists())
-								return CompletableFuture.completedFuture(false);
+					if(!node.exists())
+						return AsyncUtil.READY_FALSE;
 
-							return node.loadMetadata(tr)
-							.thenApply(new Function<Node, Boolean>() {
-								@Override
-								public Boolean apply(Node ignore) {
-									++index;
-									return !Arrays.equals(node.layer, DirectoryLayer.PARTITION_LAYER);
-								}
-							});
-						}
-					}, tr.getExecutor());
-				}
+					return node.loadMetadata(tr).thenApply(ignore -> {
+						++index;
+						return !Arrays.equals(node.layer, DirectoryLayer.PARTITION_LAYER);
+					});
+				}, tr.getExecutor());
 			}, tr.getExecutor())
-			.thenApply(new Function<Void, Node>() {
-				@Override
-				public Node apply(Void ignore) {
-					return node;
-				}
-			});
+			.thenApply(ignore -> node);
 		}
 	}
 
 	private static class NodeMetadataLoader implements Function<Node, CompletableFuture<Node>> {
 		private final ReadTransaction tr;
 
-		public NodeMetadataLoader(ReadTransaction tr) {
+		NodeMetadataLoader(ReadTransaction tr) {
 			this.tr = tr;
 		}
 
@@ -1110,7 +947,7 @@ public class DirectoryLayer implements Directory
 
 		private boolean loadedMetadata;
 
-		public Node(Subspace subspace, List<String> path, List<String> targetPath) {
+		Node(Subspace subspace, List<String> path, List<String> targetPath) {
 			this.subspace = subspace;
 			this.path = path;
 			this.targetPath = targetPath;
@@ -1130,13 +967,10 @@ public class DirectoryLayer implements Directory
 			}
 
 			return tr.get(subspace.pack(new Tuple().add(LAYER_KEY)))
-			.thenApply(new Function<byte[], Node>() {
-				@Override
-				public Node apply(byte[] value) {
-					layer = value;
-					loadedMetadata = true;
-					return Node.this;
-				}
+			.thenApply(value -> {
+				layer = value;
+				loadedMetadata = true;
+				return Node.this;
 			});
 		}
 
@@ -1170,152 +1004,106 @@ public class DirectoryLayer implements Directory
 		private long candidate;
 		private boolean restart;
 
-		public PrefixFinder() {
+		PrefixFinder() {
 			this.random = new Random();
 			this.windowStart = 0;
 		}
 
 		public CompletableFuture<byte[]> find(final Transaction tr, final HighContentionAllocator allocator) {
-			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
-				@Override
-				public CompletableFuture<Boolean> get() {
-					final AsyncIterator<KeyValue> rangeItr = tr.snapshot().getRange(allocator.counters.range(), 1, true).iterator();
-					return rangeItr.onHasNext()
-					.thenApply(new Function<Boolean, Void>() {
-						@Override
-						public Void apply(Boolean hasNext) {
-							if(hasNext) {
-								KeyValue kv = rangeItr.next();
-								windowStart = allocator.counters.unpack(kv.getKey()).getLong(0);
-							}
+			return AsyncUtil.whileTrue(() -> {
+				final AsyncIterator<KeyValue> rangeItr = tr.snapshot().getRange(allocator.counters.range(), 1, true).iterator();
+				return rangeItr.onHasNext().thenApply(hasNext -> {
+					if(hasNext) {
+						KeyValue kv = rangeItr.next();
+						windowStart = allocator.counters.unpack(kv.getKey()).getLong(0);
+					}
 
-							return null;
-						}
-					})
-					.thenComposeAsync(new Function<Void, CompletableFuture<Void>>() {
-						@Override
-						public CompletableFuture<Void> apply(Void ignore) {
-							return chooseWindow(tr, allocator);
-						}
-					}, tr.getExecutor())
-					.thenComposeAsync(new Function<Void, CompletableFuture<Boolean>>() {
-						@Override
-						public CompletableFuture<Boolean> apply(Void ignore) {
-							return choosePrefix(tr, allocator); // false exits the loop (i.e. we have a valid prefix)
-						}
-					}, tr.getExecutor());
-				}
+					return null;
+				})
+				.thenComposeAsync(ignore -> chooseWindow(tr, allocator), tr.getExecutor())
+				.thenComposeAsync(ignore -> choosePrefix(tr, allocator), tr.getExecutor());
 			}, tr.getExecutor())
-			.thenApply(new Function<Void, byte[]>() {
-				@Override
-				public byte[] apply(Void ignore) {
-					return Tuple.from(candidate).pack();
-				}
-			});
+			.thenApply(ignore -> Tuple.from(candidate).pack());
 		}
 
 		public CompletableFuture<Void> chooseWindow(final Transaction tr, final HighContentionAllocator allocator) {
 			final long initialWindowStart = windowStart;
-			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
-				@Override
-				public CompletableFuture<Boolean> get() {
-					final byte[] counterKey = allocator.counters.get(windowStart).getKey();
+			return AsyncUtil.whileTrue(() -> {
+				final byte[] counterKey = allocator.counters.get(windowStart).getKey();
 
-					Range oldCounters = new Range(allocator.counters.getKey(), counterKey);
-					Range oldAllocations = new Range(allocator.recent.getKey(), allocator.recent.get(windowStart).getKey());
+				Range oldCounters = new Range(allocator.counters.getKey(), counterKey);
+				Range oldAllocations = new Range(allocator.recent.getKey(), allocator.recent.get(windowStart).getKey());
 
-					CompletableFuture<byte[]> newCountRead;
-					// SOMEDAY: synchronize on something transaction local
-					synchronized(HighContentionAllocator.class) {
-						if(windowStart > initialWindowStart) {
-							tr.clear(oldCounters);
-							tr.options().setNextWriteNoWriteConflictRange();
-							tr.clear(oldAllocations);
-						}
-
-						tr.mutate(MutationType.ADD, counterKey, LITTLE_ENDIAN_LONG_ONE);
-						newCountRead = tr.snapshot().get(counterKey);
+				CompletableFuture<byte[]> newCountRead;
+				// SOMEDAY: synchronize on something transaction local
+				synchronized(HighContentionAllocator.class) {
+					if(windowStart > initialWindowStart) {
+						tr.clear(oldCounters);
+						tr.options().setNextWriteNoWriteConflictRange();
+						tr.clear(oldAllocations);
 					}
 
-					return newCountRead
-					.thenApply(new Function<byte[], Boolean>() {
-						@Override
-						public Boolean apply(byte[] newCountBytes) {
-							long newCount = newCountBytes == null ? 0 : unpackLittleEndian(newCountBytes);
-							windowSize = getWindowSize(windowStart);
-							if(newCount * 2 >= windowSize) {
-								windowStart += windowSize;
-								return true;
-							}
-
-							return false; // exit the loop
-						}
-					});
+					tr.mutate(MutationType.ADD, counterKey, LITTLE_ENDIAN_LONG_ONE);
+					newCountRead = tr.snapshot().get(counterKey);
 				}
+
+				return newCountRead.thenApply(newCountBytes -> {
+					long newCount = newCountBytes == null ? 0 : unpackLittleEndian(newCountBytes);
+					windowSize = getWindowSize(windowStart);
+					if(newCount * 2 >= windowSize) {
+						windowStart += windowSize;
+						return true;
+					}
+
+					return false; // exit the loop
+				});
 			}, tr.getExecutor());
 		}
 
 		public CompletableFuture<Boolean> choosePrefix(final Transaction tr, final HighContentionAllocator allocator) {
 			restart = false;
-			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
-				@Override
-				public CompletableFuture<Boolean> get() {
-					// As of the snapshot being read from, the window is less than half
-					// full, so this should be expected to take 2 tries.  Under high
-					// contention (and when the window advances), there is an additional
-					// subsequent risk of conflict for this transaction.
-					candidate = windowStart + random.nextInt(windowSize);
-					final byte[] allocationKey = allocator.recent.get(candidate).getKey();
-					Range countersRange = allocator.counters.range();
+			return AsyncUtil.whileTrue(() -> {
+				// As of the snapshot being read from, the window is less than half
+				// full, so this should be expected to take 2 tries.  Under high
+				// contention (and when the window advances), there is an additional
+				// subsequent risk of conflict for this transaction.
+				candidate = windowStart + random.nextInt(windowSize);
+				final byte[] allocationKey = allocator.recent.get(candidate).getKey();
+				Range countersRange = allocator.counters.range();
 
-					AsyncIterable<KeyValue> counterRange;
-					CompletableFuture<byte[]> allocationTemp;
-					// SOMEDAY: synchronize on something transaction local
-					synchronized(HighContentionAllocator.class) {
-						counterRange = tr.snapshot().getRange(countersRange, 1, true);
-						allocationTemp = tr.get(allocationKey);
-						tr.options().setNextWriteNoWriteConflictRange();
-						tr.set(allocationKey, EMPTY_BYTES);
+				AsyncIterable<KeyValue> counterRange;
+				CompletableFuture<byte[]> allocationTemp;
+				// SOMEDAY: synchronize on something transaction local
+				synchronized(HighContentionAllocator.class) {
+					counterRange = tr.snapshot().getRange(countersRange, 1, true);
+					allocationTemp = tr.get(allocationKey);
+					tr.options().setNextWriteNoWriteConflictRange();
+					tr.set(allocationKey, EMPTY_BYTES);
+				}
+
+				final CompletableFuture<List<KeyValue>> lastCounter = counterRange.asList();
+				final CompletableFuture<byte[]> allocation = allocationTemp;
+
+				return lastCounter.thenCombineAsync(allocation, (result, allocationValue) -> {
+					long currentWindowStart = 0;
+					if(!result.isEmpty()) {
+						currentWindowStart = allocator.counters.unpack(result.get(0).getKey()).getLong(0);
 					}
 
-					final CompletableFuture<List<KeyValue>> lastCounter = counterRange.asList();
-					final CompletableFuture<byte[]> allocation = allocationTemp;
+					if(currentWindowStart > windowStart) {
+						restart = true;
+						return false; // exit the loop and rerun the allocation from the beginning
+					}
 
-					List<CompletableFuture<Void>> futures = new ArrayList<CompletableFuture<Void>>();
-					futures.add(AsyncUtil.success(lastCounter));
-					futures.add(AsyncUtil.success(allocation));
+					if(allocationValue == null) {
+						tr.addWriteConflictKey(allocationKey);
+						return false; // exit the loop and return this candidate
+					}
 
-					return AsyncUtil.whenAll(futures)
-					.thenApply(new Function<Void, Boolean>() {
-						@Override
-						public Boolean apply(Void ignore) {
-							long currentWindowStart = 0;
-							List<KeyValue> result = lastCounter.join();
-							if(!result.isEmpty()) {
-								currentWindowStart = allocator.counters.unpack(result.get(0).getKey()).getLong(0);
-							}
-
-							if(currentWindowStart > windowStart) {
-								restart = true;
-								return false; // exit the loop and rerun the allocation from the beginning
-							}
-
-							if(allocation.join() == null) {
-								tr.addWriteConflictKey(allocationKey);
-								return false; // exit the loop and return this candidate
-							}
-
-							return true;
-						}
-					});
-				}
+					return true;
+				}, tr.getExecutor());
 			}, tr.getExecutor())
-			.thenApply(new Function<Void, Boolean>() {
-				@Override
-				public Boolean apply(Void ignore) {
-					return restart;
-				}
-			});
+			.thenApply(ignore -> restart);
 		}
 
 		private static int getWindowSize(long start) {
@@ -1338,7 +1126,7 @@ public class DirectoryLayer implements Directory
 		public final Subspace counters;
 		public final Subspace recent;
 
-		public HighContentionAllocator(Subspace subspace) {
+		HighContentionAllocator(Subspace subspace) {
 			this.counters = subspace.get(0);
 			this.recent = subspace.get(1);
 		}
@@ -1346,8 +1134,8 @@ public class DirectoryLayer implements Directory
 		/**
 		 * Returns a byte string that:
 		 * <ol>
-		 *     <li>has never and will never be returned by another call to this method on the same subspace</li>
-		 *     <li>is nearly as short as possible given the above</li>
+		 *    <li>has never and will never be returned by another call to this method on the same subspace</li>
+		 *    <li>is nearly as short as possible given the above</li>
 		 * </ol>
 		 */
 		public CompletableFuture<byte[]> allocate(final Transaction tr) {

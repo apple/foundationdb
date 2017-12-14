@@ -67,27 +67,27 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	}
 
 	@Override
-	public <T> CompletableFuture<T> runAsync(final Function<? super Transaction, CompletableFuture<T>> retryable, Executor e) {
+	public <T> CompletableFuture<T> runAsync(final Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e) {
 		final AtomicReference<Transaction> trRef = new AtomicReference<>(createTransaction(e));
 		final AtomicReference<T> returnValue = new AtomicReference<>();
 		return AsyncUtil.whileTrue(() -> {
 			CompletableFuture<T> process = AsyncUtil.applySafely(retryable, trRef.get());
 
-			return process.thenComposeAsync(returnVal ->
+			return AsyncUtil.composeHandleAsync(process.thenComposeAsync(returnVal ->
 				trRef.get().commit().thenApply(o -> {
 					returnValue.set(returnVal);
 					return false;
-				})
-			, e).handleAsync((value, t) -> {
-				if(t == null)
-					return CompletableFuture.completedFuture(value);
-				if(!(t instanceof RuntimeException))
-					throw new CompletionException(t);
-				return trRef.get().onError(t).thenApply(newTr -> {
-					trRef.set(newTr);
-					return true;
-				});
-			}, e).thenCompose(x -> x);
+				}), e),
+				(value, t) -> {
+					if(t == null)
+						return CompletableFuture.completedFuture(value);
+					if(!(t instanceof RuntimeException))
+						throw new CompletionException(t);
+					return trRef.get().onError(t).thenApply(newTr -> {
+						trRef.set(newTr);
+						return true;
+					});
+				}, e);
 		}, e)
 		.thenApply(o -> returnValue.get())
 		.whenComplete((v, t) -> trRef.get().close());
@@ -95,7 +95,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 
 	@Override
 	public <T> CompletableFuture<T> readAsync(
-			Function<? super ReadTransaction, CompletableFuture<T>> retryable, Executor e) {
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable, Executor e) {
 		return this.runAsync(retryable, e);
 	}
 

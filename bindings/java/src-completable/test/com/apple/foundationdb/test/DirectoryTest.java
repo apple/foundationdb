@@ -24,12 +24,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import java.util.function.Function;
-
 import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
-import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.TransactionContext;
 import com.apple.foundationdb.directory.DirectoryLayer;
 import com.apple.foundationdb.directory.DirectorySubspace;
@@ -52,33 +49,30 @@ public class DirectoryTest {
 		final DirectoryLayer dir = new DirectoryLayer();
 
 		try {
-			db.run(new Function<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) {
-					List<String> path = new ArrayList<>();
-					path.add("foo");
-					DirectorySubspace foo = dir.create(tr, path).join();//, "partition".getBytes("UTF-8")).get();
-					System.out.println(foo.getPath());
-					path.add("bar");
-					DirectorySubspace bar = dir.create(tr, path).join();//, "partition".getBytes("UTF-8")).get();
-					System.out.println(foo.getPath());
-					path.add("baz");
-					DirectorySubspace baz = dir.create(tr, path).join();
-					System.out.println(foo.getPath());
-					System.out.println("Created foo: " + foo.exists(tr).join());
-					System.out.println("Created bar: " + bar.exists(tr).join());
-					System.out.println("Created baz: " + baz.exists(tr).join());
+			db.run(tr -> {
+				List<String> path = new ArrayList<>();
+				path.add("foo");
+				DirectorySubspace foo = dir.create(tr, path).join(); //, "partition".getBytes("UTF-8")).get();
+				System.out.println(foo.getPath());
+				path.add("bar");
+				DirectorySubspace bar = dir.create(tr, path).join(); //, "partition".getBytes("UTF-8")).get();
+				System.out.println(foo.getPath());
+				path.add("baz");
+				DirectorySubspace baz = dir.create(tr, path).join();
+				System.out.println(foo.getPath());
+				System.out.println("Created foo: " + foo.exists(tr).join());
+				System.out.println("Created bar: " + bar.exists(tr).join());
+				System.out.println("Created baz: " + baz.exists(tr).join());
 
-					DirectorySubspace bat = baz.moveTo(tr, Arrays.asList("foo", "bar", "bat")).join();
+				DirectorySubspace bat = baz.moveTo(tr, Arrays.asList("foo", "bar", "bat")).join();
 
-					System.out.println("Moved baz to bat: " + bat.exists(tr).join());
+				System.out.println("Moved baz to bat: " + bat.exists(tr).join());
 
-					foo.removeIfExists(tr).join();
+				foo.removeIfExists(tr).join();
 
-					System.out.println("Removed foo: " + foo.exists(tr).join());
+				System.out.println("Removed foo: " + foo.exists(tr).join());
 
-					return null;
-				}
+				return null;
 			});
 		} catch (Throwable e) {
 			e.printStackTrace();
@@ -86,4 +80,6 @@ public class DirectoryTest {
 
 		System.exit(0);
 	}
+
+	private DirectoryTest() {}
 }

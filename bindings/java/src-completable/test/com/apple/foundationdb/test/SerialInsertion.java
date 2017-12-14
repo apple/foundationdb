@@ -94,4 +94,5 @@ public class SerialInsertion {
 		}
 	}
 
+	private SerialInsertion() {}
 }
