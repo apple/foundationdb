@@ -421,10 +421,10 @@ class TupleUtil {
 
 			// Convert to long if in range -- otherwise, leave as BigInteger.
 			if (val.compareTo(BigInteger.valueOf(Long.MIN_VALUE))<0||
-					val.compareTo(BigInteger.valueOf(Long.MAX_VALUE))>0) {
-					// This can occur if the thing can be represented with 8 bytes but not
-					// the right sign information.
-					return new DecodeResult(end, val);
+				val.compareTo(BigInteger.valueOf(Long.MAX_VALUE))>0) {
+				// This can occur if the thing can be represented with 8 bytes but not
+				// the right sign information.
+				return new DecodeResult(end, val);
 			}
 			return new DecodeResult(end, val.longValue());
 		}
@@ -610,18 +610,18 @@ class TupleUtil {
 
 	public static void main(String[] args) {
 		try {
-			byte[] bytes = pack(Collections.singletonList(4), null );
-			assert 4 == (Integer)(decode( bytes, 0, bytes.length ).o);
+			byte[] bytes = pack(Collections.singletonList(4), null);
+			assert 4 == (Integer)(decode(bytes, 0, bytes.length).o);
 		} catch (Exception e) {
 			e.printStackTrace();
 			System.out.println("Error " + e.getMessage());
 		}
 
 		try {
-			byte[] bytes = pack( Collections.singletonList("\u021Aest \u0218tring"), null );
-			String string = (String)(decode( bytes, 0, bytes.length ).o);
+			byte[] bytes = pack(Collections.singletonList("\u021Aest \u0218tring"), null);
+			String string = (String)(decode(bytes, 0, bytes.length).o);
 			System.out.println("contents -> " + string);
-			assert "\u021Aest \u0218tring" == string;
+			assert "\u021Aest \u0218tring".equals(string);
 		} catch (Exception e) {
 			e.printStackTrace();
 			System.out.println("Error " + e.getMessage());

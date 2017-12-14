@@ -64,7 +64,7 @@ public class FDB {
 	static class DaemonThreadFactory implements ThreadFactory {
 		private final ThreadFactory factory;
 
-		public DaemonThreadFactory(ThreadFactory factory) {
+		DaemonThreadFactory(ThreadFactory factory) {
 			this.factory = factory;
 		}
 
@@ -81,7 +81,8 @@ public class FDB {
 	final int apiVersion;
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
-	final private Semaphore netRunning = new Semaphore(1);
+	volatile boolean warnOnUnclosed = true;
+	private final Semaphore netRunning = new Semaphore(1);
 	private final NetworkOptions options;
 
 	static {
@@ -102,21 +103,8 @@ public class FDB {
 	private FDB(int apiVersion) {
 		this.apiVersion = apiVersion;
 
-		options = new NetworkOptions(new OptionConsumer() {
-			@Override
-			public void setOption(int code, byte[] parameter) {
-				Network_setOption(code, parameter);
-			}
-		});
-
-		Runtime.getRuntime().addShutdownHook(new Thread(
-			new Runnable(){
-				@Override
-				public void run() {
-					FDB.this.stopNetwork();
-				}
-			}
-		));
+		options = new NetworkOptions(this::Network_setOption);
+		Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
 	}
 
 	/**
@@ -128,7 +116,9 @@ public class FDB {
 	 *
 	 * @return a set of options affecting this instance of the FoundationDB API
 	 */
-	public NetworkOptions options() { return options; }
+	public NetworkOptions options() {
+		return options;
+	}
 
 	/**
 	 * Select the version for the client API. An exception will be thrown if the
@@ -147,7 +137,7 @@ public class FDB {
 	 *
 	 * @return the FoundationDB API object
 	 */
-	public synchronized static FDB selectAPIVersion(final int version) throws FDBException {
+	public static synchronized FDB selectAPIVersion(final int version) throws FDBException {
 		if(singleton != null) {
 			if(version != singleton.apiVersion) {
 				throw new IllegalArgumentException(
@@ -155,12 +145,34 @@ public class FDB {
 			}
 			return singleton;
 		}
-		if(version < 500)
-			throw new IllegalArgumentException("API version not supported (minimum 500)");
+		if(version < 510)
+			throw new IllegalArgumentException("API version not supported (minimum 510)");
 		if(version > 510)
 			throw new IllegalArgumentException("API version not supported (maximum 510)");
+
 		Select_API_version(version);
-		return singleton = new FDB(version);
+		FDB fdb = new FDB(version);
+
+		return singleton = fdb;
+	}
+
+	/**
+	 * Enables or disables the stderr warning that is printed whenever an object with FoundationDB
+	 *  native resources is garbage collected without being closed. By default, this feature is enabled.
+	 *
+	 * @param warnOnUnclosed Whether the warning should be printed for unclosed objects
+	 */
+	public void setUnclosedWarning(boolean warnOnUnclosed) {
+		this.warnOnUnclosed = warnOnUnclosed;
+	}
+
+	// Singleton is initialized to null and only set once by a call to selectAPIVersion
+	static FDB getInstance() {
+		if(singleton != null) {
+			return singleton;
+		}
+
+		throw new IllegalStateException("API version has not been selected");
 	}
 
 	/**
@@ -277,7 +289,10 @@ public class FDB {
 			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
 		Cluster c = f.join();
-		return c.openDatabase(e);
+		Database db = c.openDatabase(e);
+		c.close();
+
+		return db;
 	}
 
 	/**
@@ -321,37 +336,36 @@ public class FDB {
 		Network_setup();
 		netStarted = true;
 
-		e.execute(new Runnable() {
-			@Override
-			public void run() {
-				boolean acquired = false;
-				try {
-					while(!acquired) {
-						try {
-							// make attempt to avoid a needless deadlock
-							synchronized (FDB.this) {
-								if(netStopped) {
-									return;
-								}
-							}
-
-							netRunning.acquire();
-							acquired = true;
-						} catch(InterruptedException e) {}
-					}
+		e.execute(() -> {
+			boolean acquired = false;
+			try {
+				while(!acquired) {
 					try {
-						Network_run();
-					} catch (Throwable t) {
-						System.err.println("Unhandled error in FoundationDB network thread: " + t.getMessage());
-						// eat this error. we have nowhere to send it.
+						// make attempt to avoid a needless deadlock
+						synchronized (FDB.this) {
+							if(netStopped) {
+								return;
+							}
+						}
+
+						netRunning.acquire();
+						acquired = true;
+					} catch(InterruptedException err) {
+						// Swallow thread interruption
 					}
-				} finally {
-					if(acquired) {
-						netRunning.release();
-					}
-					synchronized (FDB.this) {
-						netStopped = true;
-					}
+				}
+				try {
+					Network_run();
+				} catch (Throwable t) {
+					System.err.println("Unhandled error in FoundationDB network thread: " + t.getMessage());
+					// eat this error. we have nowhere to send it.
+				}
+			} finally {
+				if(acquired) {
+					netRunning.release();
+				}
+				synchronized (FDB.this) {
+					netStopped = true;
 				}
 			}
 		});
@@ -388,7 +402,10 @@ public class FDB {
 				//  that we will never again be able to call runNetwork()
 				netRunning.acquire();
 				return;
-			} catch (InterruptedException e) {}
+			} catch (InterruptedException e) {
+				// If the thread is interrupted while trying to acquire
+				// the semaphore, we just want to try again.
+			}
 		}
 	}
 

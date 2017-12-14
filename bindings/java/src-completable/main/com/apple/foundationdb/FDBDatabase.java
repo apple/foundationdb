@@ -28,7 +28,7 @@ import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncUtil;
 
-class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable, OptionConsumer {
+class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsumer {
 	private DatabaseOptions options;
 	private final Executor executor;
 
@@ -57,7 +57,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 				}
 			}
 		} finally {
-			t.dispose();
+			t.close();
 		}
 	}
 
@@ -67,52 +67,63 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	}
 
 	@Override
-	public <T> CompletableFuture<T> runAsync(final Function<? super Transaction, CompletableFuture<T>> retryable, Executor e) {
+	public <T> CompletableFuture<T> runAsync(final Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e) {
 		final AtomicReference<Transaction> trRef = new AtomicReference<>(createTransaction(e));
 		final AtomicReference<T> returnValue = new AtomicReference<>();
 		return AsyncUtil.whileTrue(() -> {
 			CompletableFuture<T> process = AsyncUtil.applySafely(retryable, trRef.get());
 
-			return process.thenComposeAsync(returnVal ->
+			return AsyncUtil.composeHandleAsync(process.thenComposeAsync(returnVal ->
 				trRef.get().commit().thenApply(o -> {
 					returnValue.set(returnVal);
 					return false;
-				})
-			, e).handleAsync((value, t) -> {
-				if(t == null)
-					return CompletableFuture.completedFuture(value);
-				if(!(t instanceof RuntimeException))
-					throw new CompletionException(t);
-				return trRef.get().onError(t).thenApply(newTr -> {
-					trRef.set(newTr);
-					return true;
-				});
-			}, e).thenCompose(x -> x);
-		}, e).thenApply(o -> {
-			trRef.get().dispose();
-			return returnValue.get();
-		});
+				}), e),
+				(value, t) -> {
+					if(t == null)
+						return CompletableFuture.completedFuture(value);
+					if(!(t instanceof RuntimeException))
+						throw new CompletionException(t);
+					return trRef.get().onError(t).thenApply(newTr -> {
+						trRef.set(newTr);
+						return true;
+					});
+				}, e);
+		}, e)
+		.thenApply(o -> returnValue.get())
+		.whenComplete((v, t) -> trRef.get().close());
 	}
 
 	@Override
 	public <T> CompletableFuture<T> readAsync(
-			Function<? super ReadTransaction, CompletableFuture<T>> retryable, Executor e) {
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable, Executor e) {
 		return this.runAsync(retryable, e);
 	}
 
 	@Override
 	protected void finalize() throws Throwable {
-		dispose();
-		super.finalize();
+		try {
+			checkUnclosed("Database");
+			close();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	@Override
 	public Transaction createTransaction(Executor e) {
 		pointerReadLock.lock();
+		Transaction tr = null;
 		try {
-			Transaction tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e);
+			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e);
 			tr.options().setUsedDuringCommitProtectionDisable();
 			return tr;
+		} catch(RuntimeException err) {
+			if(tr != null) {
+				tr.close();
+			}
+
+			throw err;
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -134,7 +145,7 @@ class FDBDatabase extends DefaultDisposableImpl implements Database, Disposable,
 	}
 
 	@Override
-	protected void disposeInternal(long cPtr) {
+	protected void closeInternal(long cPtr) {
 		Database_dispose(cPtr);
 	}
 

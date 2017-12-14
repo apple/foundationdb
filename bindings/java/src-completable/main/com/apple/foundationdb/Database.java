@@ -35,10 +35,12 @@ import java.util.function.Function;
  *  in the {@link TransactionContext} interface. When used on a {@code Database} these
  *  methods will call {@code Transaction#commit()} after user code has been
  *  executed. These methods will not return successfully until {@code commit()} has
- *  returned successfully.
- *
+ *  returned successfully.<br>
+ * <br>
+ * <b>Note:</b> {@code Database} objects must be {@link #close closed} when no longer
+ *  in use in order to free any associated resources.
  */
-public interface Database extends Disposable, TransactionContext {
+public interface Database extends AutoCloseable, TransactionContext {
 	/**
 	 * Creates a {@link Transaction} that operates on this {@code Database}.<br>
 	 * <br>
@@ -114,7 +116,7 @@ public interface Database extends Disposable, TransactionContext {
 	 */
 	@Override
 	default <T> CompletableFuture<T> readAsync(
-			Function<? super ReadTransaction, CompletableFuture<T>> retryable) {
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable) {
 		return readAsync(retryable, getExecutor());
 	}
 
@@ -130,7 +132,7 @@ public interface Database extends Disposable, TransactionContext {
 	 * @see #readAsync(Function)
 	 */
 	<T> CompletableFuture<T> readAsync(
-			Function<? super ReadTransaction, CompletableFuture<T>> retryable, Executor e);
+			Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable, Executor e);
 
 	/**
 	 * Runs a transactional function against this {@code Database} with retry logic.
@@ -192,7 +194,7 @@ public interface Database extends Disposable, TransactionContext {
 	 */
 	@Override
 	default <T> CompletableFuture<T> runAsync(
-			Function<? super Transaction, CompletableFuture<T>> retryable) {
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable) {
 		return runAsync(retryable, getExecutor());
 	}
 
@@ -208,5 +210,13 @@ public interface Database extends Disposable, TransactionContext {
 	 * @see #run(Function)
 	 */
 	<T> CompletableFuture<T> runAsync(
-			Function<? super Transaction, CompletableFuture<T>> retryable, Executor e);
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e);
+
+	/**
+	 * Close the {@code Database} object and release any associated resources. This must be called at
+	 *  least once after the {@code Database} object is no longer in use. This can be called multiple
+	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
+	 */
+	@Override
+	void close();
 }

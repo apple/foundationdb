@@ -29,7 +29,7 @@ class FutureVersion extends NativeFuture<Long> {
 	}
 
 	@Override
-	Long getIfDone_internal() throws FDBException {
+	protected Long getIfDone_internal(long cPtr) throws FDBException {
 		return FutureVersion_get(cPtr);
 	}
 

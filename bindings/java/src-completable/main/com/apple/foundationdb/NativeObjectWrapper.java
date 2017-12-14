@@ -1,5 +1,5 @@
 /*
- * DefaultDisposableImpl.java
+ * NativeObjectWrapper.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,60 +23,69 @@ package com.apple.foundationdb;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-abstract class DefaultDisposableImpl implements Disposable {
+abstract class NativeObjectWrapper implements AutoCloseable {
 	private final ReentrantReadWriteLock rwl = new ReentrantReadWriteLock();
 	protected final Lock pointerReadLock = rwl.readLock();
 
-	private boolean disposed = false;
+	private boolean closed = false;
 	private long cPtr;
 
-	public DefaultDisposableImpl() {
-	}
-
-	public DefaultDisposableImpl(long cPtr) {
+	NativeObjectWrapper(long cPtr) {
 		this.cPtr = cPtr;
 		if(this.cPtr == 0)
-			this.disposed = true;
+			this.closed = true;
 	}
 
-	public boolean isDisposed() {
+	public boolean isClosed() {
 		// we must have a read lock for this function to make sense, however it
 		//  does not make sense to take the lock here, since the code that uses
 		//  the result must inherently have the read lock itself.
-		assert( rwl.getReadHoldCount() > 0 );
+		assert(rwl.getReadHoldCount() > 0);
 
-		return disposed;
+		return closed;
+	}
+
+	public void checkUnclosed(String context) {
+		try {
+			if(FDB.getInstance().warnOnUnclosed && !closed) {
+				System.err.println(context + " not closed");
+			}
+		}
+		catch(Exception e) {
+			// Eat this error. This is called from the finalizer,
+			// so there isn't much we can do.
+		}
 	}
 
 	@Override
-	public void dispose() {
+	public void close() {
 		rwl.writeLock().lock();
 		long ptr = 0;
 		try {
-			if(disposed)
+			if(closed)
 				return;
 
 			ptr = cPtr;
 			this.cPtr = 0;
-			disposed = true;
+			closed = true;
 		} finally {
 			rwl.writeLock().unlock();
 		}
 
-		disposeInternal(ptr);
+		closeInternal(ptr);
 	}
 
 	protected long getPtr() {
 		// we must have a read lock for this function to make sense, however it
 		//  does not make sense to take the lock here, since the code that uses
 		//  the result must inherently have the read lock itself.
-		assert( rwl.getReadHoldCount() > 0 );
+		assert(rwl.getReadHoldCount() > 0);
 
-		if(this.disposed)
-			throw new IllegalStateException("Cannot access disposed object");
+		if(this.closed)
+			throw new IllegalStateException("Cannot access closed object");
 
 		return this.cPtr;
 	}
 
-	protected abstract void disposeInternal(long cPtr);
+	protected abstract void closeInternal(long cPtr);
 }

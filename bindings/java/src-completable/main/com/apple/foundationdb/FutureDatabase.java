@@ -32,7 +32,7 @@ class FutureDatabase extends NativeFuture<Database> {
 	}
 
 	@Override
-	public Database getIfDone_internal() throws FDBException {
+	protected Database getIfDone_internal(long cPtr) throws FDBException {
 		return new FDBDatabase(FutureDatabase_get(cPtr), executor);
 	}
 

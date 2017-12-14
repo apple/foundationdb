@@ -21,10 +21,15 @@
 package com.apple.foundationdb.test;
 
 import java.math.BigInteger;
-import java.util.*;
-
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -37,10 +42,11 @@ import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
-import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
@@ -109,7 +115,7 @@ public class StackTester {
 			}
 			else if(op == StackOperation.WAIT_EMPTY) {
 				List<Object> params = inst.popParams(1).join();
-				inst.context.db.run(new WaitEmpty((byte [])params.get(0)));
+				inst.context.db.run(new WaitEmpty((byte[])params.get(0)));
 				inst.push("WAITED_FOR_EMPTY".getBytes());
 			}
 			else if(op == StackOperation.START_THREAD) {
@@ -128,62 +134,40 @@ public class StackTester {
 				final List<Object> params = inst.popParams(2).join();
 				//System.out.println(inst.context.preStr + " - " + "Setting '" + ArrayUtils.printable((byte[]) params.get(0)) +
 				//		"' to '" + ArrayUtils.printable((byte[]) params.get(1)) + "'");
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.set((byte[])params.get(0), (byte[])params.get(1));
-							return null;
-						}
-					});
+				executeMutation(inst, tr -> {
+					tr.set((byte[])params.get(0), (byte[])params.get(1));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR) {
 				final List<Object> params = inst.popParams(1).join();
 				//System.out.println(inst.context.preStr + " - " + "Clearing: '" + ByteArrayUtil.printable((byte[]) params.get(0)) + "'");
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear((byte[])params.get(0));
-							return null;
-						}
-					}
-				);
+				executeMutation(inst, tr -> {
+					tr.clear((byte[])params.get(0));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR_RANGE) {
 				final List<Object> params = inst.popParams(2).join();
-				executeMutation(inst,
-						new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear((byte[])params.get(0), (byte[])params.get(1));
-							return null;
-						}
-					});
+				executeMutation(inst, tr -> {
+					tr.clear((byte[])params.get(0), (byte[])params.get(1));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR_RANGE_STARTS_WITH) {
 				final List<Object> params = inst.popParams(1).join();
-				executeMutation(inst,
-						new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear(Range.startsWith((byte[])params.get(0)));
-							return null;
-						}
-					});
+				executeMutation(inst, tr -> {
+					tr.clear(Range.startsWith((byte[])params.get(0)));
+					return null;
+				});
 			}
 			else if(op == StackOperation.ATOMIC_OP) {
 				final List<Object> params = inst.popParams(3).join();
 				final MutationType optype = MutationType.valueOf((String)params.get(0));
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
-							return null;
-						}
-					}
-				);
+				executeMutation(inst, tr -> {
+					tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
+					return null;
+				});
 			}
 			else if(op == StackOperation.COMMIT) {
 				inst.push(inst.tr.commit());
@@ -507,6 +491,8 @@ public class StackTester {
 				directoryExtension.processInstruction(inst);
 			else
 				processInstruction(inst);
+
+			inst.releaseTransaction();
 		}
 
 		@Override
@@ -515,8 +501,10 @@ public class StackTester {
 			while(true) {
 				Transaction t = db.createTransaction();
 				List<KeyValue> keyValues = t.getRange(begin, endKey/*, 1000*/).asList().join();
-				if(keyValues.size() == 0)
+				t.close();
+				if(keyValues.size() == 0) {
 					break;
+				}
 				//System.out.println(" * Got " + keyValues.size() + " instructions");
 
 				for(KeyValue next : keyValues) {
@@ -525,6 +513,7 @@ public class StackTester {
 					instructionIndex++;
 				}
 			}
+
 			//System.out.println(" * Completed " + instructionIndex + " instructions");
 		}
 	}
@@ -669,22 +658,27 @@ public class StackTester {
 			tr.options().setTimeout(60*1000);
 			tr.options().setReadSystemKeys();
 			tr.getReadVersion().join();
-			AsyncIterable<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
+			CloseableAsyncIterator<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
 					tr, new byte[0], new byte[]{(byte) 255, (byte) 255});
-			List<byte[]> keys = boundaryKeys.asList().join();
-			for(int i = 0; i < keys.size() - 1; i++) {
-				byte[] start = keys.get(i);
-				byte[] end = tr.getKey(KeySelector.lastLessThan(keys.get(i + 1))).join();
-				List<String> startAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, start).join());
-				List<String> endAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, end).join());
-				for(String a : startAddresses) {
-					if(!endAddresses.contains(a)) {
-						throw new RuntimeException("Locality not internally consistent.");
+			try {
+				List<byte[]> keys = AsyncUtil.collectRemaining(boundaryKeys).join();
+				for(int i = 0; i < keys.size() - 1; i++) {
+					byte[] start = keys.get(i);
+					byte[] end = tr.getKey(KeySelector.lastLessThan(keys.get(i + 1))).join();
+					List<String> startAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, start).join());
+					List<String> endAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, end).join());
+					for(String a : startAddresses) {
+						if(!endAddresses.contains(a)) {
+							throw new RuntimeException("Locality not internally consistent.");
+						}
 					}
 				}
-			}
 
-			return null;
+				return null;
+			}
+			finally {
+				boundaryKeys.close();
+			}
 		});
 	}
 
@@ -709,6 +703,10 @@ public class StackTester {
 		//System.out.println("Starting test...");
 		c.run();
 		//System.out.println("Done with test.");
+		db.close();
+		System.gc();
 	}
+
+	private StackTester() {}
 }
 

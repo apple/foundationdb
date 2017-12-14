@@ -23,9 +23,8 @@ package com.apple.foundationdb.test;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.Function;
-import java.util.function.Supplier;
 
+import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.async.AsyncUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
@@ -41,34 +40,18 @@ class DirectoryUtil {
 		}
 
 		CompletableFuture<List<Tuple>> pop() {
-			return AsyncUtil.whileTrue(new Supplier<CompletableFuture<Boolean>>() {
-				@Override
-				public CompletableFuture<Boolean> get() {
-					if(num-- == 0) {
-						return CompletableFuture.completedFuture(false);
-					}
-					return inst.popParam()
-					.thenComposeAsync(new Function<Object, CompletableFuture<List<Object>>>() {
-						@Override
-						public CompletableFuture<List<Object>> apply(Object count) {
-							return inst.popParams(StackUtils.getInt(count));
-						}
-					})
-					.thenApplyAsync(new Function<List<Object>, Boolean>() {
-						@Override
-						public Boolean apply(List<Object> elements) {
+			return AsyncUtil.whileTrue(() -> {
+				if(num-- == 0) {
+					return AsyncUtil.READY_FALSE;
+				}
+				return inst.popParam()
+						.thenComposeAsync(count -> inst.popParams(StackUtils.getInt(count)), FDB.DEFAULT_EXECUTOR)
+						.thenApplyAsync(elements -> {
 							tuples.add(Tuple.fromItems(elements));
 							return num > 0;
-						}
-					});
-				}
+						}, FDB.DEFAULT_EXECUTOR);
 			})
-			.thenApplyAsync(new Function<Void, List<Tuple>>() {
-				@Override
-				public List<Tuple> apply(Void ignore) {
-					return tuples;
-				}
-			});
+			.thenApply(ignore -> tuples);
 		}
 	}
 
@@ -77,42 +60,26 @@ class DirectoryUtil {
 	}
 
 	static CompletableFuture<Tuple> popTuple(Instruction inst) {
-		return popTuples(inst, 1)
-		.thenApplyAsync(new Function<List<Tuple>, Tuple>() {
-			@Override
-			public Tuple apply(List<Tuple> tuples) {
-				return tuples.get(0);
-			}
-		});
+		return popTuples(inst, 1).thenApply(tuples -> tuples.get(0));
 	}
 
 	static CompletableFuture<List<List<String>>> popPaths(Instruction inst, int num) {
-		return popTuples(inst, num)
-		.thenApplyAsync(new Function<List<Tuple>, List<List<String>>>() {
-			@Override
-			public List<List<String>> apply(List<Tuple> tuples) {
-				List<List<String>> paths = new ArrayList<List<String>>();
-				for(Tuple t : tuples) {
-					List<String> path = new ArrayList<String>();
-					for(int i = 0; i < t.size(); ++i)
-						path.add(t.getString(i));
+		return popTuples(inst, num).thenApplyAsync(tuples -> {
+			List<List<String>> paths = new ArrayList<>(tuples.size());
+			for(Tuple t : tuples) {
+				List<String> path = new ArrayList<>(t.size());
+				for(int i = 0; i < t.size(); ++i)
+					path.add(t.getString(i));
 
-					paths.add(path);
-				}
-
-				return paths;
+				paths.add(path);
 			}
-		});
+
+			return paths;
+		}, FDB.DEFAULT_EXECUTOR);
 	}
 
 	static CompletableFuture<List<String>> popPath(Instruction inst) {
-		return popPaths(inst, 1)
-		.thenApplyAsync(new Function<List<List<String>>, List<String>>() {
-			@Override
-			public List<String> apply(List<List<String>> paths) {
-				return paths.get(0);
-			}
-		});
+		return popPaths(inst, 1).thenApply(paths -> paths.get(0));
 	}
 
 	static void pushError(Instruction inst, Throwable t, List<Object> dirList) {
@@ -123,4 +90,6 @@ class DirectoryUtil {
 		if(op.createsDirectory)
 			dirList.add(null);
 	}
+
+	private DirectoryUtil() {}
 }

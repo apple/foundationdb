@@ -32,7 +32,7 @@ class FutureCluster extends NativeFuture<Cluster> {
 	}
 
 	@Override
-	public Cluster getIfDone_internal() throws FDBException {
+	protected Cluster getIfDone_internal(long cPtr) throws FDBException {
 		return new Cluster(FutureCluster_get(cPtr), executor);
 	}
 

@@ -1,5 +1,5 @@
 /*
- * CloneableException.java
+ * CloseableAsyncIterator.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -21,14 +21,26 @@
 package com.apple.foundationdb.async;
 
 /**
- * An {@link Exception} that can be duplicated with a new backtrace.
+ * A version of {@link AsyncIterator} that must be closed once no longer in use in order to free
+ *  any associated resources.
+ *
+ * @param <T> the type of object yielded by {@code next()}
  */
-public interface CloneableException {
+public interface CloseableAsyncIterator<T> extends AutoCloseable, AsyncIterator<T> {
 	/**
-	 * Create and return a new {@code Exception} that has a backtrace including the
-	 *  calling line of code.
-	 *
-	 * @return a newly created {@code Exception}.
+	 * Cancels any outstanding asynchronous work, closes the iterator, and frees any associated
+	 *  resources. This must be called at least once after the object is no longer in use. This
+	 *  can be called multiple times, but care should be taken that an object is not in use
+	 *  in another thread at the time of the call.
 	 */
-	Exception retargetClone();
+	@Override
+	void close();
+
+	/**
+	 * Alias for {@link #close}.
+	 */
+	@Override
+	default void cancel() {
+		close();
+	}
 }

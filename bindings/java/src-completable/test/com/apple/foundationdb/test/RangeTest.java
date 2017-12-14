@@ -55,22 +55,19 @@ public class RangeTest {
 		Database db = fdb.open();
 
 		try {
-			db.run(new Function<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) {
-					long version = tr.getReadVersion().join();
-					System.out.println("DB version: " + version);
-					tr.get("apple1".getBytes()).join();
-					tr.set("apple1".getBytes(), "crunchy1".getBytes());
-					tr.set("apple2".getBytes(), "crunchy2".getBytes());
-					tr.set("apple3".getBytes(), "crunchy3".getBytes());
-					tr.set("apple4".getBytes(), "crunchy4".getBytes());
-					tr.set("apple5".getBytes(), "crunchy5".getBytes());
-					tr.set("apple6".getBytes(), "crunchy6".getBytes());
-					System.out.println("Attempting to commit apple/crunchy pairs...");
+			db.run((Function<Transaction, Void>) tr -> {
+				long version = tr.getReadVersion().join();
+				System.out.println("DB version: " + version);
+				tr.get("apple1".getBytes()).join();
+				tr.set("apple1".getBytes(), "crunchy1".getBytes());
+				tr.set("apple2".getBytes(), "crunchy2".getBytes());
+				tr.set("apple3".getBytes(), "crunchy3".getBytes());
+				tr.set("apple4".getBytes(), "crunchy4".getBytes());
+				tr.set("apple5".getBytes(), "crunchy5".getBytes());
+				tr.set("apple6".getBytes(), "crunchy6".getBytes());
+				System.out.println("Attempting to commit apple/crunchy pairs...");
 
-					return null;
-				}
+				return null;
 			});
 		} catch (Throwable e){
 			e.printStackTrace();
@@ -114,8 +111,8 @@ public class RangeTest {
 			e.printStackTrace();
 			return;
 		}
-		//db.dispose();
-		//cluster.dispose();
+		//db.close();
+		//cluster.close();
 
 		tr = db.createTransaction();
 		checkRange(tr);
@@ -154,8 +151,8 @@ public class RangeTest {
 			System.out.println("range comparisons okay");
 		}
 
-		db.dispose();
-		//cluster.dispose();
+		db.close();
+		//cluster.close();
 		//fdb.stopNetwork();
 		System.out.println("Done with test program");
 	}
@@ -167,7 +164,7 @@ public class RangeTest {
 		System.out.println("Value is " +
 				(val != null ? new String(val) : "not present"));
 
-		 AsyncIterable<KeyValue> entryList = tr.getRange(
+		AsyncIterable<KeyValue> entryList = tr.getRange(
 				KeySelector.firstGreaterOrEqual("apple".getBytes()),
 				KeySelector.firstGreaterOrEqual("banana".getBytes()),4);
 		List<KeyValue> entries = entryList.asList().join();
@@ -187,4 +184,6 @@ public class RangeTest {
 		}
 
 	}
+
+	private RangeTest() {}
 }

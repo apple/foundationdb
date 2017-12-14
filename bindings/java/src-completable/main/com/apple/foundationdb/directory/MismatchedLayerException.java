@@ -20,9 +20,9 @@
 
 package com.apple.foundationdb.directory;
 
-import com.apple.foundationdb.tuple.ByteArrayUtil;
-
 import java.util.List;
+
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 /**
  * A {@link DirectoryException} that is thrown when a directory is opened with an incompatible layer.

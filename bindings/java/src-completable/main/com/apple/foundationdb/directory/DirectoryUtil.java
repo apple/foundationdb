@@ -42,4 +42,6 @@ class DirectoryUtil {
 		sb.append(')');
 		return sb.toString();
 	}
+
+	private DirectoryUtil() {}
 }

@@ -38,7 +38,7 @@ class DirectoryExtension {
 	int dirIndex = 0;
 	int errorIndex = 0;
 
-	public DirectoryExtension() {
+	DirectoryExtension() {
 		dirList.add(DirectoryLayer.getDefault());
 	}
 
