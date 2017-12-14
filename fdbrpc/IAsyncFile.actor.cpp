@@ -42,7 +42,7 @@ ACTOR static Future<Void> zeroRangeHelper( Reference<IAsyncFile> f, int64_t offs
 		Void _ = wait( yield() );
 	}
 
-	free(zeros);
+	aligned_free(zeros);
 	return Void();
 }
 
