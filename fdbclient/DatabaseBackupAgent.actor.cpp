@@ -1616,7 +1616,7 @@ public:
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
+				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				int backupStateInt = wait(backupAgent->getStateValue(tr, logUid));
 				state BackupAgentBase::enumState backupState = (BackupAgentBase::enumState)backupStateInt;
 
@@ -1702,9 +1702,9 @@ public:
 					}
 				}
 
-				Optional<Value> disabled = wait(fDisabled);
-				if(disabled.present()) {
-					statusText += format("\nAll DR agents have been disabled.\n");
+				Optional<Value> paused = wait(fPaused);
+				if(paused.present()) {
+					statusText += format("\nAll DR agents have been paused.\n");
 				}
 
 				break;
