@@ -63,8 +63,8 @@ class AsyncDirectoryExtension {
 
 		if(op == DirectoryOperation.DIRECTORY_CREATE_SUBSPACE) {
 			return DirectoryUtil.popTuple(inst)
-					.thenComposeAsync(prefix -> inst.popParam()
-						.thenAccept(rawPrefix -> dirList.add(new Subspace(prefix, (byte[])rawPrefix))));
+			.thenComposeAsync(prefix -> inst.popParam()
+			.thenAccept(rawPrefix -> dirList.add(new Subspace(prefix, (byte[])rawPrefix))));
 		}
 		else if(op == DirectoryOperation.DIRECTORY_CREATE_LAYER) {
 			return inst.popParams(3).thenAcceptAsync(params -> {
