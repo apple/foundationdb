@@ -227,7 +227,7 @@ public class AsyncUtil {
 
 			@Override
 			public CompletableFuture<List<T>> asList() {
-			    final List<T> accumulator = new LinkedList<>();
+				final List<T> accumulator = new LinkedList<>();
 				return tag(AsyncUtil.forEach(iterable, value -> accumulator.add(func.apply(value))), accumulator);
 			}
 		};
@@ -441,7 +441,7 @@ public class AsyncUtil {
 	 * @return a new {@link CompletableFuture} that is set when {@code task} is ready.
 	 */
 	public static <V> CompletableFuture<Void> whenReady(CompletableFuture<V> task) {
-	    return task.handle((v, t) -> null);
+		return task.handle((v, t) -> null);
 	}
 
 	public static <V> CompletableFuture<V> composeExceptionally(CompletableFuture<V> task, Function<Throwable, CompletableFuture<V>> fn) {
@@ -471,7 +471,7 @@ public class AsyncUtil {
 	 * @return future with same completion properties as the future returned by the handler
 	 */
 	public static <V, T> CompletableFuture<T> composeHandle(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> handler) {
-	    return future.handle(handler).thenCompose(Function.identity());
+		return future.handle(handler).thenCompose(Function.identity());
 	}
 
 	/**
@@ -492,7 +492,7 @@ public class AsyncUtil {
 	 * @return future with same completion properties as the future returned by the handler
 	 */
 	public static <V, T> CompletableFuture<T> composeHandleAsync(CompletableFuture<V> future, BiFunction<V,Throwable,? extends CompletableFuture<T>> handler) {
-	    return composeHandleAsync(future, handler, DEFAULT_EXECUTOR);
+		return composeHandleAsync(future, handler, DEFAULT_EXECUTOR);
 	}
 
 	/**
