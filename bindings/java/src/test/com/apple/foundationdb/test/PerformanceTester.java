@@ -220,42 +220,44 @@ public class PerformanceTester extends AbstractTester {
     }
 
     public Double clear(Database db, int count) {
-        Transaction tr = db.createTransaction();
-        long start = System.nanoTime();
-        for (int i = 0; i < count; i++) {
-            tr.clear(randomKey());
-        }
-        long end = System.nanoTime();
-        tr.cancel();
+        try(Transaction tr = db.createTransaction()) {
+            long start = System.nanoTime();
+            for(int i = 0; i < count; i++) {
+                tr.clear(randomKey());
+            }
+            long end = System.nanoTime();
+            tr.cancel();
 
-        return count*1_000_000_000.0/(end - start);
+            return count * 1_000_000_000.0 / (end - start);
+        }
     }
 
     public Double clearRange(Database db, int count) {
-        Transaction tr = db.createTransaction();
+        try(Transaction tr = db.createTransaction()) {
+            long start = System.nanoTime();
+            for(int i = 0; i < count; i++) {
+                int keyIndex = randomKeyIndex();
+                tr.clear(key(keyIndex), key(keyIndex + 1));
+            }
+            long end = System.nanoTime();
+            tr.cancel();
 
-        long start = System.nanoTime();
-        for (int i = 0; i < count; i++) {
-            int keyIndex = randomKeyIndex();
-            tr.clear(key(keyIndex), key(keyIndex+1));
+            return count * 1_000_000_000.0 / (end - start);
         }
-        long end = System.nanoTime();
-        tr.cancel();
-
-        return count*1_000_000_000.0/(end - start);
     }
 
     public Double set(Database db, int count) {
-        Transaction tr = db.createTransaction();
-        long start = System.nanoTime();
-        for (int i = 0; i < count; i++) {
-            int keyIndex = randomKeyIndex();
-            tr.set(key(keyIndex), value(keyIndex));
-        }
-        long end = System.nanoTime();
-        tr.cancel();
+        try(Transaction tr = db.createTransaction()) {
+            long start = System.nanoTime();
+            for(int i = 0; i < count; i++) {
+                int keyIndex = randomKeyIndex();
+                tr.set(key(keyIndex), value(keyIndex));
+            }
+            long end = System.nanoTime();
+            tr.cancel();
 
-        return count*1_000_000_000.0/(end - start);
+            return count * 1_000_000_000.0 / (end - start);
+        }
     }
 
     public Double parallelGet(TransactionContext tcx, int count) {

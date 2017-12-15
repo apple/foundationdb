@@ -87,53 +87,58 @@ public class RYWBenchmark extends AbstractTester {
 
     @Override
     public void testPerformance(Database db) {
-        Transaction tr = db.createTransaction();
-        insertData(tr);
+        try(Transaction tr = db.createTransaction()) {
+			insertData(tr);
 
-        List<String> testsToRun;
-        if (args.getTestsToRun().isEmpty()) {
-            testsToRun = Arrays.stream(Tests.values()).map(Tests::name).map(String::toLowerCase).sorted().collect(Collectors.toList());
-        } else {
-            testsToRun = args.getTestsToRun();
-        }
+			List<String> testsToRun;
+			if(args.getTestsToRun().isEmpty()) {
+				testsToRun = Arrays.stream(Tests.values()).map(Tests::name).map(String::toLowerCase).sorted().collect(Collectors.toList());
+			}
+			else {
+				testsToRun = args.getTestsToRun();
+			}
 
-        for (String test : testsToRun) {
-            Tests testObj;
-            try {
-                testObj = Tests.valueOf(test.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                result.addError(new IllegalArgumentException("Test " + test + " not implemented"));
-                continue;
-            }
+			for(String test : testsToRun) {
+				Tests testObj;
+				try {
+					testObj = Tests.valueOf(test.toUpperCase());
+				}
+				catch(IllegalArgumentException e) {
+					result.addError(new IllegalArgumentException("Test " + test + " not implemented"));
+					continue;
+				}
 
-            Function<? super Transaction, ? extends Double> function = testObj.getFunction();
+				Function<? super Transaction, ? extends Double> function = testObj.getFunction();
 
-            try {
-                Thread.sleep(5_000);
-            } catch (InterruptedException e) {
-                result.addError(wrapAndPrintError(e, "Interrupted while sleeping"));
-            }
+				try {
+					Thread.sleep(5_000);
+				}
+				catch(InterruptedException e) {
+					result.addError(wrapAndPrintError(e, "Interrupted while sleeping"));
+				}
 
-            System.out.println("Running test " + test);
+				System.out.println("Running test " + test);
 
-            List<Double> results = new ArrayList<>(NUM_RUNS);
+				List<Double> results = new ArrayList<>(NUM_RUNS);
 
-            for (int i = 0; i < NUM_RUNS; i++) {
-                try {
-                    results.add(function.apply(tr));
-                } catch (Exception e) {
-                    result.addError(wrapAndPrintError(e, "Performance test failed: " + test));
-                    break;
-                }
-            }
+				for(int i = 0; i < NUM_RUNS; i++) {
+					try {
+						results.add(function.apply(tr));
+					}
+					catch(Exception e) {
+						result.addError(wrapAndPrintError(e, "Performance test failed: " + test));
+						break;
+					}
+				}
 
-            if (results.size() == NUM_RUNS) {
-                Collections.sort(results);
-                result.addKpi(String.format("%s", testObj.getKpi()), results.get(results.size() / 2).intValue(), "keys/s");
-            }
-        }
+				if(results.size() == NUM_RUNS) {
+					Collections.sort(results);
+					result.addKpi(String.format("%s", testObj.getKpi()), results.get(results.size() / 2).intValue(), "keys/s");
+				}
+			}
 
-        tr.cancel();
+			tr.cancel();
+		}
     }
 
     public Double getSingle(Transaction tr, int count) {

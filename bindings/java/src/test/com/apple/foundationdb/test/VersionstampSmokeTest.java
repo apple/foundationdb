@@ -33,32 +33,32 @@ import com.apple.foundationdb.tuple.Versionstamp;
 public class VersionstampSmokeTest {
     public static void main(String[] args) {
         FDB fdb = FDB.selectAPIVersion(510);
-        Database db = fdb.open();
+        try(Database db = fdb.open()) {
+			db.run(tr -> {
+				tr.clear(Tuple.from("prefix").range());
+				return null;
+			});
 
-        db.run(tr -> {
-			tr.clear(Tuple.from("prefix").range());
-			return null;
-        });
+			CompletableFuture<byte[]> trVersionFuture = db.run((Transaction tr) -> {
+				// The incomplete Versionstamp will have tr's version information when committed.
+				Tuple t = Tuple.from("prefix", Versionstamp.incomplete());
+				tr.mutate(MutationType.SET_VERSIONSTAMPED_KEY, t.packWithVersionstamp(), new byte[0]);
+				return tr.getVersionstamp();
+			});
 
-        CompletableFuture<byte[]> trVersionFuture = db.run((Transaction tr) -> {
-			// The incomplete Versionstamp will have tr's version information when committed.
-			Tuple t = Tuple.from("prefix", Versionstamp.incomplete());
-			tr.mutate(MutationType.SET_VERSIONSTAMPED_KEY, t.packWithVersionstamp(), new byte[0]);
-			return tr.getVersionstamp();
-        });
+			byte[] trVersion = trVersionFuture.join();
 
-        byte[] trVersion = trVersionFuture.join();
+			Versionstamp v = db.run((Transaction tr) -> {
+				Subspace subspace = new Subspace(Tuple.from("prefix"));
+				byte[] serialized = tr.getRange(subspace.range(), 1).iterator().next().getKey();
+				Tuple t = subspace.unpack(serialized);
+				return t.getVersionstamp(0);
+			});
 
-        Versionstamp v = db.run((Transaction tr) -> {
-			Subspace subspace = new Subspace(Tuple.from("prefix"));
-			byte[] serialized = tr.getRange(subspace.range(), 1).iterator().next().getKey();
-			Tuple t = subspace.unpack(serialized);
-			return t.getVersionstamp(0);
-        });
-
-        System.out.println(v);
-        System.out.println(Versionstamp.complete(trVersion));
-        assert v.equals(Versionstamp.complete(trVersion));
+			System.out.println(v);
+			System.out.println(Versionstamp.complete(trVersion));
+			assert v.equals(Versionstamp.complete(trVersion));
+		}
     }
 
     private VersionstampSmokeTest() {}

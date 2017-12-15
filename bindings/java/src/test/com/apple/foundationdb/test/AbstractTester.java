@@ -43,19 +43,17 @@ public abstract class AbstractTester {
     }
 
     public void runTest() {
-        Database db;
-
-        try {
-            db = fdb.open();
-        } catch (Exception e) {
+        try(Database db = fdb.open()) {
+            try {
+                testPerformance(db);
+            }
+            catch (Exception e) {
+                result.addError(wrapAndPrintError(e, "Failed to complete all tests"));
+            }
+        }
+        catch (Exception e) {
             result.addError(wrapAndPrintError(e, "fdb.open failed"));
             return;
-        }
-
-        try {
-            testPerformance(db);
-        } catch (Exception e) {
-            result.addError(wrapAndPrintError(e, "Failed to complete all tests"));
         }
     }
 

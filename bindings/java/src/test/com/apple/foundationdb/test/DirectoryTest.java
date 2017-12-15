@@ -32,14 +32,14 @@ import com.apple.foundationdb.directory.DirectoryLayer;
 import com.apple.foundationdb.directory.DirectorySubspace;
 
 public class DirectoryTest {
-	private static final String CLUSTER_FILE = "/home/ajb/fdb.cluster";
-
 	public static void main(String[] args) throws Exception {
 		try {
-			Cluster c = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
-			Database db = c.openDatabase();
-			runTests(db);
-		} catch(Throwable t) {
+			FDB fdb = FDB.selectAPIVersion(510);
+			try(Database db = fdb.open()) {
+				runTests(db);
+			}
+		}
+		catch(Throwable t) {
 			t.printStackTrace();
 		}
 	}

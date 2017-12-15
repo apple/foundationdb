@@ -28,21 +28,13 @@ import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.TransactionContext;
 
 public class SerialTest {
-
-	private static final String CLUSTER_FILE = "T:\\Ben\\cluster";
-
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			Cluster c = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
-			Database db = c.openDatabase();
-			runTests(reps, db);
-
-			/*Cluster fCluster = Cluster.create("C:\\Users\\Ben\\workspace\\fdb\\fdb.cluster").get();
-			System.out.println("I now have the cluster");
-			Database db = cluster.openDatabase().get();
-
-			runTests(reps, db);*/
+			FDB fdb = FDB.selectAPIVersion(510);
+			try(Database db = fdb.open()) {
+				runTests(reps, db);
+			}
 		} catch(Throwable t) {
 			t.printStackTrace();
 		}

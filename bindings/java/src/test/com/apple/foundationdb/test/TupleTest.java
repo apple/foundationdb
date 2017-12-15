@@ -27,14 +27,13 @@ import com.apple.foundationdb.TransactionContext;
 import com.apple.foundationdb.tuple.Tuple;
 
 public class TupleTest {
-	private static final String CLUSTER_FILE = "C:\\Users\\Ben\\workspace\\fdb\\fdb.cluster";
-
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			Cluster c = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
-			Database db = c.openDatabase();
-			runTests(reps, db);
+			FDB fdb = FDB.selectAPIVersion(510);
+			try(Database db = fdb.open()) {
+				runTests(reps, db);
+			}
 		} catch(Throwable t) {
 			t.printStackTrace();
 		}

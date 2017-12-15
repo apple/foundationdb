@@ -35,29 +35,31 @@ public class SerialInsertion {
 
 	public static void main(String[] args) {
 		FDB api = FDB.selectAPIVersion(510);
-		Database database = api.open("T:\\circus\\tags\\RebarCluster-bbc\\cluster_id.txt");
-		long start = System.currentTimeMillis();
+		try(Database database = api.open()) {
+			long start = System.currentTimeMillis();
 
-		List<InsertionThread> threads = new ArrayList<InsertionThread>(THREAD_COUNT);
-		int nodesPerThread = NODES / THREAD_COUNT;
-		for(int i = 0; i < THREAD_COUNT; i++) {
-			// deal with non even division by adding remainder onto last thread's work
-			if(i == THREAD_COUNT - 1) {
-				nodesPerThread += (NODES % THREAD_COUNT);
+			List<InsertionThread> threads = new ArrayList<InsertionThread>(THREAD_COUNT);
+			int nodesPerThread = NODES / THREAD_COUNT;
+			for(int i = 0; i < THREAD_COUNT; i++) {
+				// deal with non even division by adding remainder onto last thread's work
+				if(i == THREAD_COUNT - 1) {
+					nodesPerThread += (NODES % THREAD_COUNT);
+				}
+				InsertionThread t = new InsertionThread(database, nodesPerThread * i, nodesPerThread);
+				t.start();
+				threads.add(t);
 			}
-			InsertionThread t = new InsertionThread(database, nodesPerThread * i, nodesPerThread);
-			t.start();
-			threads.add(t);
-		}
-		for(InsertionThread t : threads) {
-			try {
-				t.join();
-			} catch (InterruptedException e) {
-				e.printStackTrace();
+			for(InsertionThread t : threads) {
+				try {
+					t.join();
+				}
+				catch(InterruptedException e) {
+					e.printStackTrace();
+				}
 			}
-		}
 
-		System.out.println("Time taken: " + (System.currentTimeMillis() - start) + "ms");
+			System.out.println("Time taken: " + (System.currentTimeMillis() - start) + "ms");
+		}
 	}
 
 	static class InsertionThread extends Thread {
@@ -77,19 +79,25 @@ public class SerialInsertion {
 			int done = 0;
 			ByteBuffer buf = ByteBuffer.allocate(4);
 			Transaction tr = db.createTransaction();
-			while(done < insertionCount) {
-				try {
-					int i = 0;
-					for(; i < BATCH_SIZE && done + i < insertionCount; i++) {
-						buf.putInt(0, insertionStart + done + i);
-						tr.set(buf.array(), value);
+			try {
+				while(done < insertionCount) {
+					try {
+						int i = 0;
+						for(; i < BATCH_SIZE && done + i < insertionCount; i++) {
+							buf.putInt(0, insertionStart + done + i);
+							tr.set(buf.array(), value);
+						}
+						tr.commit().join();
+						tr = db.createTransaction();
+						done += i;
 					}
-					tr.commit().join();
-					tr = db.createTransaction();
-					done += i;
-				} catch(RuntimeException e) {
-					tr = tr.onError(e).join();
+					catch(RuntimeException e) {
+						tr = tr.onError(e).join();
+					}
 				}
+			}
+			finally {
+				tr.close();
 			}
 		}
 	}

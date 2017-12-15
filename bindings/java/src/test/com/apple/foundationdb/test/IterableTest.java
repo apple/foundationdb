@@ -29,15 +29,15 @@ import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.TransactionContext;
 
 public class IterableTest {
-	private static final String CLUSTER_FILE = "C:\\Users\\Ben\\workspace\\fdb\\fdb.cluster";
-
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			Cluster cluster = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
-			Database db = cluster.openDatabase();
-			runTests(reps, db);
-		} catch(Throwable t) {
+			FDB fdb = FDB.selectAPIVersion(510);
+			try(Database db = fdb.open()) {
+				runTests(reps, db);
+			}
+		}
+		catch(Throwable t) {
 			t.printStackTrace();
 		}
 	}
@@ -53,7 +53,8 @@ public class IterableTest {
 				}
 				return null;
 			});
-		} catch (Throwable e) {
+		}
+		catch (Throwable e) {
 			e.printStackTrace();
 		}
 		long end = System.currentTimeMillis();

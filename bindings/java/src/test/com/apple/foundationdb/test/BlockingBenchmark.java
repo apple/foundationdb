@@ -37,68 +37,70 @@ public class BlockingBenchmark {
 
 		// The cluster file DOES NOT need to be valid, although it must exist.
 		//  This is because the database is never really contacted in this test.
-		Database database = fdb.open("T:\\circus\\tags\\RebarCluster-bbc\\cluster_id.txt");
+		try(Database database = fdb.open()) {
+			try(Transaction tr = database.createTransaction()) {
+				tr.setReadVersion(100000);
 
-		byte[] key = {0x1, 0x1, 0x1, 0x1, 0x1};
-		byte[] val = {0x2, 0x2, 0x2, 0x2, 0x2};
+				System.out.println("readVersion().join():");
+				runTests(tr, o -> {
+					try {
+						o.join();
+					}
+					catch(Exception e) {
+						// Ignore
+					}
+					return null;
+				});
 
-		Transaction tr = database.createTransaction();
-		tr.setReadVersion(100000);
+				System.out.println("readVersion().get():");
+				runTests(tr, o -> {
+					try {
+						o.get();
+					}
+					catch(Exception e) {
+						// Ignore
+					}
+					return null;
+				});
 
-		System.out.println("readVersion().join():");
-		runTests(tr, o -> {
-			try {
-				o.join();
-			} catch(Exception e) {
-				// Ignore
+				System.out.println("readVersion().thenApplyAsync(identity).get():");
+				runTests(tr, o -> {
+					try {
+						o.thenApplyAsync(Function.identity(), FDB.DEFAULT_EXECUTOR).get();
+					}
+					catch(Exception e) {
+						// Ignore
+					}
+					return null;
+				});
+
+				System.out.println("readVersion().thenApplyAsync^10(identity).get():");
+				runTests(tr, o -> {
+					for(int i = 0; i < 10; i++)
+						o = o.thenApplyAsync(Function.identity(), FDB.DEFAULT_EXECUTOR);
+					try {
+						o.get();
+					}
+					catch(Exception e) {
+						// Ignore
+					}
+					return null;
+				});
+
+				System.out.println("readVersion().get^100():");
+				runTests(tr, o -> {
+					for(int i = 0; i < 100; i++) {
+						try {
+							o.get();
+						}
+						catch(Exception e) {
+							// Ignore
+						}
+					}
+					return null;
+				});
 			}
-			return null;
-		});
-
-		System.out.println("readVersion().get():");
-		runTests(tr, o -> {
-			try {
-				o.get();
-			} catch(Exception e) {
-				// Ignore
-			}
-			return null;
-		});
-
-		System.out.println("readVersion().thenApplyAsync(identity).get():");
-		runTests(tr, o -> {
-			try {
-				o.thenApplyAsync(Function.identity(), FDB.DEFAULT_EXECUTOR).get();
-			} catch(Exception e) {
-				// Ignore
-			}
-			return null;
-		});
-
-		System.out.println("readVersion().thenApplyAsync^10(identity).get():");
-		runTests(tr, o -> {
-			for(int i=0; i<10; i++)
-				o = o.thenApplyAsync(Function.identity(), FDB.DEFAULT_EXECUTOR);
-			try {
-				o.get();
-			} catch(Exception e) {
-				// Ignore
-			}
-			return null;
-		});
-
-		System.out.println("readVersion().get^100():");
-		runTests(tr, o -> {
-			for(int i=0; i<100; i++) {
-				try {
-					o.get();
-				} catch(Exception e) {
-					// Ignore
-				}
-			}
-			return null;
-		});
-
+		}
 	}
 
 	private static void runTests(Transaction tr, Function<CompletableFuture<Long>, Void> blockMethod) {

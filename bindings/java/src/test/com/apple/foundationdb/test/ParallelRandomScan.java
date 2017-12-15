@@ -44,84 +44,86 @@ public class ParallelRandomScan {
 
 	public static void main(String[] args) throws InterruptedException {
 		FDB api = FDB.selectAPIVersion(510);
-		Database database = api.open(args[0]);
-
-		for(int i = PARALLELISM_MIN; i <= PARALLELISM_MAX; i += PARALLELISM_STEP) {
-			runTest(database, i, ROWS, DURATION_MS);
-			Thread.sleep(1000);
+		try(Database database = api.open(args[0])) {
+			for(int i = PARALLELISM_MIN; i <= PARALLELISM_MAX; i += PARALLELISM_STEP) {
+				runTest(database, i, ROWS, DURATION_MS);
+				Thread.sleep(1000);
+			}
 		}
 	}
 
 	private static void runTest(Database database,
-			int parallelism, int rows, int duration) throws InterruptedException {
+			int parallelism, int rows, int duration) throws InterruptedException
+	{
 		final Random r = new Random();
 		final AtomicInteger readsCompleted = new AtomicInteger(0);
 		final AtomicInteger errors = new AtomicInteger(0);
-		final Transaction tr = database.createTransaction();
 		final Semaphore coordinator = new Semaphore(parallelism);
 		final ContinuousSample<Long> latencies = new ContinuousSample<>(1000);
 
-		tr.options().setReadYourWritesDisable();
+		try(final Transaction tr = database.createTransaction()) {
+			tr.options().setReadYourWritesDisable();
 
-		// Clearing the whole database before starting means all reads are local
-		/*ByteBuffer buf = ByteBuffer.allocate(4);
-		buf.putInt(0, Integer.MAX_VALUE);
-		tr.clear(new byte[0], buf.array());*/
+			// Clearing the whole database before starting means all reads are local
+			/*ByteBuffer buf = ByteBuffer.allocate(4);
+			buf.putInt(0, Integer.MAX_VALUE);
+			tr.clear(new byte[0], buf.array());*/
 
-		// We use this for the key generation
-		ByteBuffer buf = ByteBuffer.allocate(4);
+			// We use this for the key generation
+			ByteBuffer buf = ByteBuffer.allocate(4);
 
-		// Eat the cost of the read version up-front
-		tr.getReadVersion().join();
+			// Eat the cost of the read version up-front
+			tr.getReadVersion().join();
 
-		final long start = System.currentTimeMillis();
-		while(true) {
-			coordinator.acquire();
-			if(System.currentTimeMillis() - start > duration) {
-				coordinator.release();
-				break;
+			final long start = System.currentTimeMillis();
+			while(true) {
+				coordinator.acquire();
+				if(System.currentTimeMillis() - start > duration) {
+					coordinator.release();
+					break;
+				}
+
+				int row = r.nextInt(rows - 1);
+				buf.putInt(0, row);
+				AsyncIterable<KeyValue> range = tr.getRange(
+						buf.array(), ByteArrayUtil.strinc(buf.array()), 1, false, StreamingMode.SMALL);
+
+				final long launch = System.nanoTime();
+
+				final AsyncIterator<KeyValue> it = range.iterator();
+				final CompletableFuture<KeyValue> f = it.onHasNext().thenApplyAsync(hasFirst -> {
+					if(!hasFirst) {
+						return null;
+					}
+					return it.next();
+				}, FDB.DEFAULT_EXECUTOR);
+				f.whenCompleteAsync((kv, t) -> {
+					if(kv != null) {
+						readsCompleted.incrementAndGet();
+						long timeTaken = System.nanoTime() - launch;
+						synchronized(latencies) {
+							latencies.addSample(timeTaken);
+						}
+					}
+					else if(t != null) {
+						errors.incrementAndGet();
+					}
+
+					coordinator.release();
+				}, FDB.DEFAULT_EXECUTOR);
 			}
 
-			int row = r.nextInt(rows - 1);
-			buf.putInt(0, row);
-			AsyncIterable<KeyValue> range = tr.getRange(
-					buf.array(), ByteArrayUtil.strinc(buf.array()), 1, false, StreamingMode.SMALL);
+			// Block for ALL tasks to end!
+			coordinator.acquire(parallelism);
+			long end = System.currentTimeMillis();
 
-			final long launch = System.nanoTime();
-
-			final AsyncIterator<KeyValue> it = range.iterator();
-			final CompletableFuture<KeyValue> f = it.onHasNext().thenApplyAsync(hasFirst -> {
-				if(!hasFirst) {
-					return null;
-				}
-				return it.next();
-			}, FDB.DEFAULT_EXECUTOR);
-			f.whenCompleteAsync((kv, t) -> {
-				if(kv != null) {
-					readsCompleted.incrementAndGet();
-					long timeTaken = System.nanoTime() - launch;
-					synchronized(latencies) {
-						latencies.addSample(timeTaken);
-					}
-				}
-				else if(t != null) {
-					errors.incrementAndGet();
-				}
-
-				coordinator.release();
-			}, FDB.DEFAULT_EXECUTOR);
+			double rowsPerSecond = readsCompleted.get() / ((end - start) / 1000.0);
+			System.out.println(parallelism + " ->\t" + rowsPerSecond);
+			System.out.println(String.format("  Reads: %d, errors: %d, time: %dms",
+					readsCompleted.get(), errors.get(), (int) (end - start)));
+			System.out.println(String.format("  Mean: %.2f, Median: %d, 98%%: %d",
+					latencies.mean(), latencies.median(), latencies.percentile(0.98)));
 		}
-
-		// Block for ALL tasks to end!
-		coordinator.acquire(parallelism);
-		long end = System.currentTimeMillis();
-
-		double rowsPerSecond = readsCompleted.get() / ((end - start) / 1000.0);
-		System.out.println(parallelism + " ->\t" + rowsPerSecond);
-		System.out.println(String.format("  Reads: %d, errors: %d, time: %dms",
-				readsCompleted.get(), errors.get(), (int)(end - start)));
-		System.out.println(String.format("  Mean: %.2f, Median: %d, 98%%: %d",
-				latencies.mean(), latencies.median(), latencies.percentile(0.98)));
 	}
 
 	private ParallelRandomScan() {}
