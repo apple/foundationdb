@@ -114,7 +114,7 @@ javadoc: $(JAVA_SOURCES) bindings/java/src/main/overview.html
 
 javadoc_clean:
 	@rm -rf $(JAVADOC_DIR)/javadoc
-	@rm bindings/java/src/main/overview.html
+	@rm -f bindings/java/src/main/overview.html
 
 ifeq ($(PLATFORM),linux)
 
