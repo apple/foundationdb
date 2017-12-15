@@ -300,15 +300,19 @@ public class FDB {
 
 	/**
 	 * Initializes networking. Can only be called once. This version of
-	 * {@code startNetwork()} will use the default thread pool to execute the
-	 * FoundationDB network.<br>
+	 * {@code startNetwork()} will create a new thread and execute the networking
+	 * event loop on that thread. This method is called upon {@link Database} or
+	 * {@link Cluster} creation by default if the network has not yet
+	 * been started. If one wishes to control what thread the network runs on,
+	 * one should use the version of {@link #startNetwork(Executor) startNetwork()}
+	 * that takes an {@link Executor}.<br>
 	 * <br>
 	 * Configuration of the networking engine can be achieved through calls to the methods
 	 *  in {@link NetworkOptions}.
 	 *
-	 * @throws IllegalStateException if the network has already been stopped
-	 *
 	 * @see NetworkOptions
+	 *
+	 * @throws IllegalStateException if the network has already been stopped
 	 */
 	public void startNetwork() throws FDBException, IllegalStateException {
 		startNetwork(Executors.newSingleThreadExecutor(r -> {
@@ -323,7 +327,7 @@ public class FDB {
 	 * Initializes networking. Can only be called once. The FoundationDB
 	 * networking event loop will be run in the specified {@code Executor}. This
 	 * event loop is a blocking operation that is not
-	 * expected to terminate until the program in complete. This will therefore consume an
+	 * expected to terminate until the program is complete. This will therefore consume an
 	 * entire thread from {@code e} if {@code e} is a thread pool or will completely block
 	 * operation of a single threaded {@code Executor}.<br>
 	 * <br>
