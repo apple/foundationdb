@@ -5,7 +5,7 @@ This documents the client API for using FoundationDB from Java.<br>
 <h3>Installation</h3>
 FoundationDB's Java bindings rely on native libraries that are installed as part of the 
 FoundationDB client binaries installation (see 
-<a href="/documentation/api-general.html#installing-client-binaries" target="_blank">
+<a href="/foundationdb/api-general.html#installing-client-binaries" target="_blank">
 Installing FoundationDB client binaries</a>). The FoundationDB Java bindings are available
 through Artifactory. To use them in your Maven-enabled project, add a dependency to your 
 pom.xml like: <br>
@@ -28,9 +28,9 @@ To start using FoundationDB from Java, create an instance of the
 API that you want to use (this release of the FoundationDB Java API supports versions between {@code 500} and {@code 510}).
 With this API object you can then open {@link com.apple.foundationdb.Cluster Cluster}s and
 {@link com.apple.foundationdb.Database Database}s and start using
-{@link com.apple.foundationdb.Transaction Transactions}s.
+{@link com.apple.foundationdb.Transaction Transaction}s.
 Here we give an example. The example relies on a cluster file at the
-<a href="/documentation/api-general.html#default-cluster-file">default location</a> 
+<a href="/foundationdb/api-general.html#default-cluster-file">default location</a> 
 for your platform and a running server.<br>
 <br>
 <pre>
@@ -71,7 +71,7 @@ cross-language support for storing and retrieving typed data from the
 binary data that FoundationDB supports. And, just as importantly, data packed into 
 {@code Tuple}s and used as keys sort in predictable and useful ways. See the 
 {@link com.apple.foundationdb.tuple Tuple class documentation} for information about use in Java
-and <a href="/documentation/data-modeling.html#tuples">general Tuple documentation</a>
+and <a href="/foundationdb/data-modeling.html#tuples">general Tuple documentation</a>
 for information about how Tuples sort and can be used to efficiently model data.
 <br>
 <h3>FoundationDB {@link com.apple.foundationdb.directory Directory API}</h3>

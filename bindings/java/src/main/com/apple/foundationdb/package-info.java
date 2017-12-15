@@ -29,7 +29,7 @@
  *  assure that {@link com.apple.foundationdb.Transaction#commit()} has returned successfully
  *  before itself returning. If you are not able to use these functions for some reason
  *  please closely read and understand the other
- *  <a href="/documentation/data-modeling.html#tuples">developer
+ *  <a href="/foundationdb/data-modeling.html#tuples">developer
  *    documentation on FoundationDB transactions</a>.
  */
 package com.apple.foundationdb;

@@ -55,7 +55,7 @@ import com.apple.foundationdb.tuple.Tuple;
  *     to manage its subspaces.
  *
  *     For general guidance on directory usage, see the discussion in the
- *     <a href="/documentation/developer-guide.html#developer-guide-directories" target="_blank">Developer Guide</a>.
+ *     <a href="/foundationdb/developer-guide.html#developer-guide-directories" target="_blank">Developer Guide</a>.
  * </p>
  * <p>
  *     Directories are identified by hierarchical paths analogous to the paths
