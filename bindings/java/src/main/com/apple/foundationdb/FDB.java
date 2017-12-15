@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The starting point for accessing FoundationDB.
@@ -63,6 +64,7 @@ public class FDB {
 
 	static class DaemonThreadFactory implements ThreadFactory {
 		private final ThreadFactory factory;
+		private static AtomicInteger threadCount = new AtomicInteger();
 
 		DaemonThreadFactory(ThreadFactory factory) {
 			this.factory = factory;
@@ -71,6 +73,7 @@ public class FDB {
 		@Override
 		public Thread newThread(Runnable r) {
 			Thread t = factory.newThread(r);
+			t.setName("fdb-java-" + threadCount.incrementAndGet());
 			t.setDaemon(true);
 			return t;
 		}
