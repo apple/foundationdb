@@ -574,15 +574,23 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// Interval to use for determining the target end version for new snapshots
 	KeyBackedProperty<int64_t> snapshotIntervalSeconds() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// When the current snapshot began
 	KeyBackedProperty<Version> snapshotBeginVersion() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// When the current snapshot is desired to end.  
+	// This can be changed at runtime to speed up or slow down a snapshot 
 	KeyBackedProperty<Version> snapshotTargetEndVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<int64_t> snapshotBatchSize() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
