@@ -50,22 +50,6 @@
     <IntDir>$(SystemDrive)\temp\msvcfdb\$(Platform)$(Configuration)\$(MSBuildProjectName)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
-    <PreBuildEvent>
-      <Command>echo "Removing java jars from directory: $(OutDir)"
-if exist "$(OutDir)fdb-java-*.jar" del "$(OutDir)fdb-java-*.jar"</Command>
-    </PreBuildEvent>
-    <PostBuildEvent>
-      <Command>rmdir /S /Q classes
-mkdir classes\main
-mkdir classes\test
-"C:\Program Files\Java\jdk6\bin\javac.exe" -source 1.6 -target 1.6 -d classes\main src\main\com\apple\foundationdb\*.java src\main\com\apple\foundationdb\async\*.java src\main\com\apple\foundationdb\tuple\*.java src\main\com\apple\foundationdb\directory\*.java src\main\com\apple\foundationdb\subspace\*.java
-"C:\Program Files\Java\jdk6\bin\javac.exe" -source 1.6 -target 1.6 -cp classes\main -d classes\test src\test\com\apple\foundationdb\test\*.java
-mkdir classes\main\lib\windows\amd64
-copy "$(TargetPath)" "classes\main\lib\windows\amd64"
-"C:\Program Files\Java\jdk6\bin\jar.exe" cf "$(OutDir)fdb-java-$(Version)$(PreReleaseDecoration)-windows-$(Platform).jar" -C classes\main com\apple\foundationdb -C classes\main lib\windows\amd64
-"C:\Program Files\Java\jdk6\bin\jar.exe" cf "$(OutDir)foundationdb-tests.jar" -C classes\test com\apple\foundationdb
-FOR /F "tokens=1" %%i in ('hg.exe id') do copy /Y "$(TargetPath)" "$(TargetPath)-%%i"</Command>
-    </PostBuildEvent>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(SolutionDir)bin\$(Configuration)\fdb_c.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -111,14 +95,11 @@ FOR /F "tokens=1" %%i in ('hg.exe id') do copy /Y "$(TargetPath)" "$(TargetPath)
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="AfterClean">
     <ItemGroup>
-      <FilesToDelete Include="$(OutDir)fdb-java-*.jar">
-        <Visible>false</Visible>
-      </FilesToDelete>
       <FilesToDelete Include="$(OutDir)fdb_java.dll-*">
         <Visible>false</Visible>
       </FilesToDelete>
     </ItemGroup>
-    <Message Text="Cleaning old jar and dll files" Importance="high" />
+    <Message Text="Cleaning old dll files" Importance="high" />
     <Delete Files="@(FilesToDelete)" />
   </Target>
 </Project>
