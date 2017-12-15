@@ -236,7 +236,7 @@ public class FDB {
 		FutureCluster f;
 		synchronized (this) {
 			if (!isConnected()) {
-				startNetwork(e);
+				startNetwork();
 			}
 			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
@@ -311,7 +311,12 @@ public class FDB {
 	 * @see NetworkOptions
 	 */
 	public void startNetwork() throws FDBException, IllegalStateException {
-		startNetwork(DEFAULT_EXECUTOR);
+		startNetwork(Executors.newSingleThreadExecutor(r -> {
+			Thread t = new Thread(r);
+			t.setDaemon(true);
+			t.setName("fdb-network-thread");
+			return t;
+		}));
 	}
 
 	/**
