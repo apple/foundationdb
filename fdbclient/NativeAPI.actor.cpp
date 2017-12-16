@@ -1028,53 +1028,40 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Before");
 	
-	state Key submitKey = isBackward ? key : keyAfter(key);
 	loop {
 		choose {
 			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetKeyServerLocationsReply rep = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(KeyRangeRef(submitKey,submitKey), 1000, submitKey.arena()), TaskDefaultPromiseEndpoint ) ) ) {
+			when ( GetKeyServerLocationsReply rep = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 1000, isBackward, key.arena()), TaskDefaultPromiseEndpoint ) ) ) {
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
-				ASSERT( rep.results.size() );
+				ASSERT( rep.results.size() == 1 );
 
-				Reference<LocationInfo> cachedLocation;
-				KeyRangeRef range;
-				for (pair<KeyRangeRef, vector<StorageServerInterface>> shard : rep.results) {
-					auto locationInfo = cx->setCachedLocation(shard.first, shard.second);
-
-					if (isBackward ? (shard.first.begin < key && shard.first.end >= key) : shard.first.contains(key)) {
-						range = shard.first;
-						cachedLocation = locationInfo;
-					}
-				}
-
-				ASSERT(isBackward ? (range.begin < key && range.end >= key) : range.contains(key));
-
-				return make_pair(range, cachedLocation);
+				auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
+				return std::make_pair(KeyRange(rep.results[0].first, rep.arena), locationInfo);
 			}
 		}
 	}
 }
 
 ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
-	state Arena arena = keys.arena();
-	state KeyRef newBegin = keyAfter(keys.begin, arena);
-	state KeyRangeRef requestRange = KeyRangeRef(newBegin, keys.end);
-
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
 	loop {
 		choose {
 			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
-			when ( GetKeyServerLocationsReply rep = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(requestRange, (reverse?-1:1)*(limit+1), arena), TaskDefaultPromiseEndpoint ) ) ) {
+			when ( GetKeyServerLocationsReply _rep = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskDefaultPromiseEndpoint ) ) ) {
+				state GetKeyServerLocationsReply rep = _rep;
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.After");
 				ASSERT( rep.results.size() );
 
-				vector< pair<KeyRange,Reference<LocationInfo>> > results;
-				for (pair<KeyRangeRef, vector<StorageServerInterface>> shard : rep.results) {
-					results.push_back( make_pair(shard.first & keys, cx->setCachedLocation(shard.first, shard.second)) );
+				state vector< pair<KeyRange,Reference<LocationInfo>> > results;
+				state int shard = 0;
+				for (; shard < rep.results.size(); shard++) {
+					//FIXME: these shards are being inserted into the map sequentially, it would be much more CPU efficient to save the map pairs and insert them all at once.
+					results.push_back( make_pair(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second)) );
+					Void _ = wait(yield());
 				}
 
 				return results;

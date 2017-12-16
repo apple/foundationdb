@@ -137,26 +137,29 @@ struct GetReadVersionRequest {
 };
 
 struct GetKeyServerLocationsReply {
+	Arena arena;
 	vector<pair<KeyRangeRef, vector<StorageServerInterface>>> results;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & results;
+		ar & results & arena;
 	}
 };
 
 struct GetKeyServerLocationsRequest {
 	Arena arena;
-	KeyRangeRef range;
+	KeyRef begin;
+	Optional<KeyRef> end;
 	int limit;
+	bool reverse;
 	ReplyPromise<GetKeyServerLocationsReply> reply;
 
-	GetKeyServerLocationsRequest() : limit(0) {}
-	GetKeyServerLocationsRequest( KeyRangeRef const& range, int limit, Arena const& arena ) : range( range ), limit( limit ), arena( arena ) {}
+	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
+	GetKeyServerLocationsRequest( KeyRef const& begin, Optional<KeyRef> const& end, int limit, bool reverse, Arena const& arena ) : begin( begin ), end( end ), limit( limit ), reverse( reverse ), arena( arena ) {}
 	
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & range & limit & reply & arena;
+		ar & begin & end & limit & reverse & reply & arena;
 	}
 };
 

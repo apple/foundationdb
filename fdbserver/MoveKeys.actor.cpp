@@ -782,8 +782,8 @@ void seedShardServers(
 	tr.read_conflict_ranges.push_back_deep( arena, allKeys );
 
 	for(int s=0; s<servers.size(); s++) {
-		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
 		tr.set(arena, serverTagKeyFor(servers[s].id()), serverTagValue(server_tag[servers[s].id()]));
+		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
 	}
 	tr.set(arena, serverTagMaxKey, serverTagMaxValue(servers.size()-1));
 

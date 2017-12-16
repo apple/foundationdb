@@ -318,7 +318,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			state vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
 			state KeyRange keyServerRange = keyServersKeys;
 			for(int i = 0; i < proxyInfo->size(); i++)
-				keyServerLocationFutures.push_back(proxyInfo->get(i,&MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(keyServerRange, 1000, keyServerRange.arena()), 2, 0));
+				keyServerLocationFutures.push_back(proxyInfo->get(i,&MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(keyServerRange.begin, keyServerRange.end, 1000, false, keyServerRange.arena()), 2, 0));
 
 			choose {
 				when( Void _ = wait(waitForAll(keyServerLocationFutures)) ) {
