@@ -569,8 +569,15 @@ public:
 		}
 	};
 
+	// Map of range end boundaries to info about the backup file written for that range.
 	typedef KeyBackedMap<Key, RangeSlice> RangeFileMapT;
-	RangeFileMapT rangeFileMap() {
+	RangeFileMapT snapshotRangeFileMap() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Coalesced set of ranges already dispatched for writing.
+	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
+	RangeDispatchMapT snapshotRangeDispatchMap() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
@@ -602,10 +609,31 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	// Coalesced set of ranges already dispatched for writing.
-	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
-	RangeDispatchMapT rangeDispatchMap() {
-		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	Future<Void> initNewSnapshot(Reference<ReadYourWritesTransaction> tr, int64_t intervalSeconds = -1) {
+		BackupConfig &copy = *this;  // Capture this by value instead of this ptr
+
+		Future<Version> beginVersion = tr->getReadVersion();
+		Future<int64_t> defaultInterval = 0;
+		if(intervalSeconds < 0)
+			defaultInterval = copy.snapshotIntervalSeconds().getOrThrow(tr);
+
+		// Make sure read version and possibly the snapshot interval value are ready, then clear/init the snapshot config members
+		return map(success(beginVersion) && success(defaultInterval), [=](Void) mutable {
+			copy.snapshotRangeFileMap().clear(tr);
+			copy.snapshotRangeDispatchMap().clear(tr);
+			copy.snapshotBatchSize().clear(tr);
+			copy.snapshotBatchFuture().clear(tr);
+			copy.snapshotBatchDispatchDoneKey().clear(tr);
+
+			if(intervalSeconds < 0)
+				intervalSeconds = defaultInterval.get();
+			Version endVersion = beginVersion.get() + intervalSeconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+			
+			copy.snapshotBeginVersion().set(tr, beginVersion.get());
+			copy.snapshotTargetEndVersion().set(tr, endVersion);
+
+			return Void();
+		});
 	}
 
 	KeyBackedBinaryValue<int64_t> rangeBytesWritten() {
@@ -634,8 +662,26 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	KeyBackedProperty<Version> stopVersion() {
+	// Latest version for which all prior versions have had their log copy tasks completed
+	KeyBackedProperty<Version> latestLogEndVersion() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// The end version of the last complete snapshot
+	KeyBackedProperty<Version> latestSnapshotEndVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
+		auto &copy = *this;
+		auto lastLog = latestLogEndVersion().get(tr);
+		auto lastSnapshot = latestSnapshotEndVersion().get(tr);
+		return map(success(lastLog) && success(lastSnapshot), [=](Void) -> Optional<Version> {
+			if(lastLog.get().present() && lastSnapshot.get().present()
+				&& lastLog.get().get() >= lastSnapshot.get().get())
+					return lastLog.get().get();
+			return {};
+		});
 	}
 
 	KeyBackedProperty<std::vector<KeyRange>> backupRanges() {

@@ -21,6 +21,10 @@
 #include "TaskBucket.h"
 #include "ReadYourWrites.h"
 
+Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
+	return fb->unpack(params[reservedTaskParamKeyDone]);
+}
+
 struct UnblockFutureTaskFunc : TaskFuncBase {
 	static StringRef name;
 

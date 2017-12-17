@@ -812,9 +812,9 @@ namespace fileBackup {
 					backup.rangeBytesWritten().atomicOp(tr, file->size(), MutationRef::AddValue);
 
 					// See if there is already a file for this key which has an earlier begin, update the map if not.
-					Optional<BackupConfig::RangeSlice> s = wait(backup.rangeFileMap().get(tr, range.end));
+					Optional<BackupConfig::RangeSlice> s = wait(backup.snapshotRangeFileMap().get(tr, range.end));
 					if(!s.present() || s.get().begin >= range.begin) {
-						backup.rangeFileMap().set(tr, range.end, {range.begin, version, file->getFileName(), file->size()});
+						backup.snapshotRangeFileMap().set(tr, range.end, {range.begin, version, file->getFileName(), file->size()});
 						usedFile = true;
 					}
 
@@ -998,7 +998,7 @@ namespace fileBackup {
 	const uint32_t BackupRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupRangeTaskFunc);
 
-	struct BackupSnapshotDispatch : BackupTaskFuncBase {
+	struct BackupSnapshotDispatchTask : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
 
@@ -1074,9 +1074,9 @@ namespace fileBackup {
 			state BackupConfig config(task);
 			state Version recentReadVersion;
 			state Version snapshotBeginVersion;
+			state Version snapshotTargetEndVersion;
 			state int64_t snapshotIntervalSeconds;
 			state std::vector<KeyRange> backupRanges;
-			state Optional<Version> snapshotTargetEndVersion;
 			state Optional<Key> snapshotBatchFutureKey;
 			state Reference<TaskFuture> snapshotBatchFuture;
 			state Optional<int64_t> snapshotBatchSize;
@@ -1088,11 +1088,11 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 					Void _ = wait( store(config.snapshotBeginVersion().getOrThrow(tr), snapshotBeginVersion)
+								&& store(config.snapshotTargetEndVersion().getOrThrow(tr), snapshotTargetEndVersion)
 								&& store(config.backupRanges().getOrThrow(tr), backupRanges)
 								&& store(config.snapshotIntervalSeconds().getOrThrow(tr), snapshotIntervalSeconds)
 								// The next two parameters are optional
 								&& store(config.snapshotBatchFuture().get(tr), snapshotBatchFutureKey)
-								&& store(config.snapshotTargetEndVersion().get(tr), snapshotTargetEndVersion)
 								&& store(config.snapshotBatchSize().get(tr), snapshotBatchSize)
 								&& store(tr->getReadVersion(), recentReadVersion)
 								&& taskBucket->keepRunning(tr, task));
@@ -1113,17 +1113,9 @@ namespace fileBackup {
 							return Void();
 						}));
 
-						// Update snapshot target end version using default snapshot interval unless it's already set.
-						if(!snapshotTargetEndVersion.present())
-							config.snapshotTargetEndVersion().set(tr, recentReadVersion + snapshotIntervalSeconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-
 						Void _ = wait(tr->commit());
-
-						if(!snapshotTargetEndVersion.present())
-							snapshotTargetEndVersion = recentReadVersion + snapshotIntervalSeconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 					}
 					else {
-						ASSERT(snapshotTargetEndVersion.present());
 						ASSERT(snapshotBatchSize.present());
 						// Batch future key exists in the config so create future from it
 						snapshotBatchFuture = Reference<TaskFuture>(new TaskFuture(futureBucket, snapshotBatchFutureKey.get()));
@@ -1144,7 +1136,7 @@ namespace fileBackup {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					state Future<std::vector<std::pair<Key, bool>>> bounds = config.rangeDispatchMap().getRange(tr, beginKey, keyAfter(normalKeys.end), CLIENT_KNOBS->TOO_MANY);
+					state Future<std::vector<std::pair<Key, bool>>> bounds = config.snapshotRangeDispatchMap().getRange(tr, beginKey, keyAfter(normalKeys.end), CLIENT_KNOBS->TOO_MANY);
 					Void _ = wait(success(bounds) && taskBucket->keepRunning(tr, task) && store(tr->getReadVersion(), recentReadVersion));
 
 					if(bounds.get().empty())
@@ -1210,13 +1202,13 @@ namespace fileBackup {
 			state int countAllShards = countShardsDone + countShardsNotDone;
 
 			if(countShardsNotDone == 0) {
-				TraceEvent("FileBackupSnapshotDispatchFinished")
+				TraceEvent("FileBackupSnapshotDispatchTaskFinished")
 					.detail("BackupUID", config.getUid())
 					.detail("AllShards", countAllShards)
 					.detail("ShardsDone", countShardsDone)
 					.detail("ShardsNotDone", countShardsNotDone)
 					.detail("SnapshotBeginVersion", snapshotBeginVersion)
-					.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion.get())
+					.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
 					.detail("CurrentVersion", recentReadVersion)
 					.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
 				Params.snapshotFinished().set(task, true);
@@ -1227,11 +1219,11 @@ namespace fileBackup {
 			state Version nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (g_network->isSimulated() ? (snapshotIntervalSeconds / 5.0) : CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC);
 			Params.nextDispatchVersion().set(task, nextDispatchVersion);
 			// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
-			double timeElapsed = (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotTargetEndVersion.get() - snapshotBeginVersion);
+			double timeElapsed = (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion);
 			state int countExpectedShardsDone = std::min<int>(countAllShards, countAllShards * timeElapsed);
 			state int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
 
-			TraceEvent("FileBackupSnapshotDispatch1")
+			TraceEvent("FileBackupSnapshotDispatchTask1")
 				.detail("BackupUID", config.getUid())
 				.detail("AllShards", countAllShards)
 				.detail("ShardsDone", countShardsDone)
@@ -1239,7 +1231,7 @@ namespace fileBackup {
 				.detail("ExpectedShardsDone", countExpectedShardsDone)
 				.detail("ShardsToDispatch", countShardsToDispatch)
 				.detail("SnapshotBeginVersion", snapshotBeginVersion)
-				.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion.get())
+				.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
 				.detail("NextDispatchVersion", nextDispatchVersion)
 				.detail("CurrentVersion", recentReadVersion)
 				.detail("TimeElapsed", timeElapsed)
@@ -1287,8 +1279,8 @@ namespace fileBackup {
 						state std::vector<Future<Optional<bool>>> endReads;
 
 						for(auto &range : rangesToAdd) {
-							beginReads.push_back(config.rangeDispatchMap().get(tr, range.begin));
-							endReads.push_back(  config.rangeDispatchMap().get(tr, range.end));
+							beginReads.push_back(config.snapshotRangeDispatchMap().get(tr, range.begin));
+							endReads.push_back(  config.snapshotRangeDispatchMap().get(tr, range.end));
 						}
 
 						Void _ = wait(store(config.snapshotBatchSize().getOrThrow(tr), snapshotBatchSize.get())
@@ -1313,8 +1305,8 @@ namespace fileBackup {
 
 							// This loop might have made changes to begin or end boundaries in a prior
 							// iteration.  If so, the updated values exist in the RYW cache so re-read both entries.
-							Optional<bool> beginValue = config.rangeDispatchMap().get(tr, range.begin).get();
-							Optional<bool> endValue =   config.rangeDispatchMap().get(tr, range.end).get();
+							Optional<bool> beginValue = config.snapshotRangeDispatchMap().get(tr, range.begin).get();
+							Optional<bool> endValue =   config.snapshotRangeDispatchMap().get(tr, range.end).get();
 
 							ASSERT(!beginValue.present() || !endValue.present() || beginValue != endValue);
 
@@ -1325,16 +1317,16 @@ namespace fileBackup {
 							{
 								++undispatchedRanges;
 								if(beginValue.present()) {
-									config.rangeDispatchMap().erase(tr, range.begin);
+									config.snapshotRangeDispatchMap().erase(tr, range.begin);
 								}
 								else {
-									config.rangeDispatchMap().set(tr, range.begin, true);
+									config.snapshotRangeDispatchMap().set(tr, range.begin, true);
 								}
 								if(endValue.present()) {
-									config.rangeDispatchMap().erase(tr, range.end);
+									config.snapshotRangeDispatchMap().erase(tr, range.end);
 								}
 								else {
-									config.rangeDispatchMap().set(tr, range.end, false);
+									config.snapshotRangeDispatchMap().set(tr, range.end, false);
 								}
 
 								// Choose a random version between now and the next dispatch version at which to start this range task
@@ -1357,13 +1349,13 @@ namespace fileBackup {
 			}
 
 			if(countShardsNotDone == 0) {
-				TraceEvent("FileBackupSnapshotDispatchFinished")
+				TraceEvent("FileBackupSnapshotDispatchTaskFinished")
 					.detail("BackupUID", config.getUid())
 					.detail("AllShards", countAllShards)
 					.detail("ShardsDone", countShardsDone)
 					.detail("ShardsNotDone", countShardsNotDone)
 					.detail("SnapshotBeginVersion", snapshotBeginVersion)
-					.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion.get())
+					.detail("SnapshotTargetEndVersion", snapshotTargetEndVersion)
 					.detail("CurrentVersion", recentReadVersion)
 					.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
 				Params.snapshotFinished().set(task, true);
@@ -1372,85 +1364,51 @@ namespace fileBackup {
 			return Void();
 		}
 
+		// This function is just a wrapper for BackupSnapshotManifest::addTask() which is defined below.
+		// The BackupSnapshotDispatchTask and BackupSnapshotManifest tasks reference each other so in order to keep their execute and finish phases
+		// defined together inside their class definitions this wrapper is declared here but defined after BackupSnapshotManifest is defined.
+		static Future<Key> addSnapshotManifestTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>());
+
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 			state BackupConfig config(task);
 
-			// If done, then set the done future
+			// Get the batch future and dispatch done keys, then clear them.
+			state Key snapshotBatchFutureKey;
+			state Key snapshotBatchDispatchDoneKey;
+
+			Void _ = wait( store(config.snapshotBatchFuture().getOrThrow(tr), snapshotBatchFutureKey)
+						&& store(config.snapshotBatchDispatchDoneKey().getOrThrow(tr), snapshotBatchDispatchDoneKey));
+
+			state Reference<TaskFuture> snapshotBatchFuture = futureBucket->unpack(snapshotBatchFutureKey);
+			state Reference<TaskFuture> snapshotBatchDispatchDoneFuture = futureBucket->unpack(snapshotBatchDispatchDoneKey);
+			config.snapshotBatchFuture().clear(tr);
+			config.snapshotBatchDispatchDoneKey().clear(tr);
+			config.snapshotBatchSize().clear(tr);
+
+			state Reference<TaskFuture> snapshotFinishedFuture = task->getDoneFuture(futureBucket);
+
+			// If the snapshot is finished, the next task is to write a snapshot manifest, otherwise it's another snapshot dispatch task.
+			// In either case, the task should wait for snapshotBatchFuture.
+			// The snapshot done key, passed to the current task, is also passed on.
 			if(Params.snapshotFinished().getOrDefault(task, false)) {
-				Void _ = wait(taskFuture->set(tr, taskBucket));
+				Void _ = wait(success(addSnapshotManifestTask(tr, taskBucket, task, TaskCompletionKey::signal(snapshotFinishedFuture), snapshotBatchFuture)));
 			}
 			else {
-				// Otherwise set the done future for this dispatch batch and queue the next dispatch task to run after the
-				// rest of the range tasks from this batch are finished.
-				// Get and then clear the snapshot batch future
-				state Key snapshotBatchFutureKey;
-				state Key snapshotBatchDispatchDoneKey;
-
-				Void _ = wait( store(config.snapshotBatchFuture().getOrThrow(tr), snapshotBatchFutureKey)
-							&& store(config.snapshotBatchDispatchDoneKey().getOrThrow(tr), snapshotBatchDispatchDoneKey));
-
-				state Reference<TaskFuture> snapshotBatchFuture = futureBucket->unpack(snapshotBatchFutureKey);
-				state Reference<TaskFuture> snapshotBatchDispatchDoneFuture = futureBucket->unpack(snapshotBatchDispatchDoneKey);
-				config.snapshotBatchFuture().clear(tr);
-				config.snapshotBatchDispatchDoneKey().clear(tr);
-
-				// Otherwise, add a follow-on SnapshotDispatch task scheduled for the next time the dispatcher should run and pass the done future on to it
-				// The task should wait for the previous snapshot batch to complete.
-				Void _ = wait(success(addTask(tr, taskBucket, task, TaskCompletionKey::signal(taskFuture), snapshotBatchFuture, 1, Params.nextDispatchVersion().get(task))));
-				// If any other tasks joinedWith this future then this set won't activate the task, but in case this dispatch round was empty
-				// then it will enable the follow-on to be scheduled immediately.
-				Void _ = wait(snapshotBatchDispatchDoneFuture->set(tr, taskBucket));
+				Void _ = wait(success(addTask(tr, taskBucket, task, TaskCompletionKey::signal(snapshotFinishedFuture), snapshotBatchFuture, 1, Params.nextDispatchVersion().get(task))));
 			}
 
-			Void _ = wait(taskBucket->finish(tr, task));
-			return Void();
-		}
-
-	};
-	StringRef BackupSnapshotDispatch::name = LiteralStringRef("file_backup_snapshot_dispatch");
-	const uint32_t BackupSnapshotDispatch::version = 1;
-	REGISTER_TASKFUNC(BackupSnapshotDispatch);
-
-	struct FinishFullBackupTaskFunc : BackupTaskFuncBase {
-		static StringRef name;
-		static const uint32_t version;
-
-		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version));
-
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			state BackupConfig config(task);
-
-			// Enable the stop key
-			state Version readVersion = wait(tr->getReadVersion());
-			config.stopVersion().set(tr, readVersion);
-			TraceEvent(SevInfo, "FBA_setStopVersion").detail("stopVersion", readVersion);
+			// This snapshot batch is finished, so set the batch done future.
+			Void _ = wait(snapshotBatchDispatchDoneFuture->set(tr, taskBucket));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key key = wait(addBackupTask(FinishFullBackupTaskFunc::name,
-										 FinishFullBackupTaskFunc::version,
-										 tr, taskBucket, completionKey,
-										 BackupConfig(parentTask), waitFor));
-			return key;
-		}
-
-		StringRef getName() const { return name; };
-
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
-
 	};
-	StringRef FinishFullBackupTaskFunc::name = LiteralStringRef("file_finish_full_backup");
-	const uint32_t FinishFullBackupTaskFunc::version = 1;
-	REGISTER_TASKFUNC(FinishFullBackupTaskFunc);
+	StringRef BackupSnapshotDispatchTask::name = LiteralStringRef("file_backup_snapshot_dispatch");
+	const uint32_t BackupSnapshotDispatchTask::version = 1;
+	REGISTER_TASKFUNC(BackupSnapshotDispatchTask);
 
 	struct BackupLogRangeTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
@@ -1640,7 +1598,7 @@ namespace fileBackup {
 	const uint32_t BackupLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupLogRangeTaskFunc);
 
-	struct BackupLogsTaskFunc : BackupTaskFuncBase {
+	struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
 
@@ -1651,45 +1609,45 @@ namespace fileBackup {
 		} Params;
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupLogsTaskFunc::name, BackupLogsTaskFunc::version));
-
-			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-			state Reference<TaskFuture> allPartsDone;
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupLogsDispatchTask::name, BackupLogsDispatchTask::version));
 
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state BackupConfig config(task);
-			state Version stopVersionData = wait(config.stopVersion().getD(tr, -1));
-
+			state Reference<TaskFuture> onDone = task->getDoneFuture(futureBucket);
 			state Version beginVersion = Params.beginVersion().get(task);
+			state BackupConfig config(task);
+			config.latestLogEndVersion().set(tr, beginVersion);
+
+			state bool stopWhenDone;
+			state Optional<Version> restorableVersion;
+			Void _ = wait(store(config.stopWhenDone().getOrThrow(tr), stopWhenDone) && store(config.getLatestRestorableVersion(tr), restorableVersion));
+
+			// If stopWhenDone is set and there is a restorable version, set the done future and do not create further tasks.
+			if(stopWhenDone && restorableVersion.present()) {
+				Void _ = wait(onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
+				return Void();
+			}
+
 			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
 
 			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
-				TraceEvent("FBA_BackupLogs").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("stopVersionData", stopVersionData);
+				TraceEvent("FileBackupLogDispatch").detail("BeginVersion", beginVersion).detail("EndVersion", endVersion).detail("RestorableVersion", restorableVersion.orDefault(-1));
 			}
 
-			// Only consider stopping, if the stop key is set and less than begin version
-			if ((stopVersionData > 0) && (stopVersionData < beginVersion)) {
-				allPartsDone = onDone;
+			state Reference<TaskFuture> logDispatchBatchFuture = futureBucket->future(tr);
 
-				// Updated the stop version
-				config.stopVersion().set(tr, endVersion);
-			}
-			else {
-				allPartsDone = futureBucket->future(tr);
-				Key _ = wait(BackupLogsTaskFunc::addTask(tr, taskBucket, task, endVersion, TaskCompletionKey::signal(onDone), allPartsDone));
-			}
-
-			Key _ = wait(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, beginVersion, endVersion, TaskCompletionKey::joinWith(allPartsDone)));
+			// Add the next logs dispatch task which will run after this batch is done
+			Key _ = wait(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, beginVersion, endVersion, TaskCompletionKey::joinWith(logDispatchBatchFuture)));
+			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key key = wait(addBackupTask(BackupLogsTaskFunc::name,
-										 BackupLogsTaskFunc::version,
+			Key key = wait(addBackupTask(BackupLogsDispatchTask::name,
+										 BackupLogsDispatchTask::version,
 										 tr, taskBucket, completionKey,
 										 BackupConfig(parentTask),
 										 waitFor,
@@ -1704,9 +1662,9 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef BackupLogsTaskFunc::name = LiteralStringRef("file_backup_logs");
-	const uint32_t BackupLogsTaskFunc::version = 1;
-	REGISTER_TASKFUNC(BackupLogsTaskFunc);
+	StringRef BackupLogsDispatchTask::name = LiteralStringRef("file_backup_logs");
+	const uint32_t BackupLogsDispatchTask::version = 1;
+	REGISTER_TASKFUNC(BackupLogsDispatchTask);
 
 	struct FinishedFullBackupTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
@@ -1746,238 +1704,125 @@ namespace fileBackup {
 	const uint32_t FinishedFullBackupTaskFunc::version = 1;
 	REGISTER_TASKFUNC(FinishedFullBackupTaskFunc);
 
-	struct BackupDiffLogsTaskFunc : BackupTaskFuncBase {
+	// TODO:  Register a task that will finish/delete any tasks of these types:
+	//LiteralStringRef("file_backup_diff_logs");
+	//LiteralStringRef("file_finish_full_backup");
+
+	struct BackupSnapshotManifest : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
-
 		static struct {
-			static TaskParam<Version> beginVersion() {
-				return LiteralStringRef(__FUNCTION__);
-			}
+			static TaskParam<Version> endVersion() { return LiteralStringRef(__FUNCTION__); }
 		} Params;
-
-		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupDiffLogsTaskFunc::name, BackupDiffLogsTaskFunc::version));
-
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			state BackupConfig config(task);
-			state std::string tagName = wait(config.tag().getOrThrow(tr));
-
-			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-			state Reference<TaskFuture> allPartsDone;
-
-			state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
-
-			state Version beginVersion = Params.beginVersion().get(task);
-			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
-
-			FileBackupAgent().setLastRestorable(tr, KeyRef(tagName), beginVersion);
-
-			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
-				TraceEvent("FBA_DiffLogs").detail("beginVersion", beginVersion).detail("endVersion", endVersion).detail("stopWhenDone", stopWhenDone);
-			}
-
-			if (stopWhenDone) {
-				allPartsDone = onDone;
-				config.stopVersion().set(tr, endVersion);
-			}
-			else {
-				allPartsDone = futureBucket->future(tr);
-				Key _ = wait(BackupDiffLogsTaskFunc::addTask(tr, taskBucket, task, endVersion, TaskCompletionKey::signal(onDone), allPartsDone));
-			}
-
-			Key _ = wait(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, beginVersion, endVersion, TaskCompletionKey::joinWith(allPartsDone)));
-
-			Void _ = wait(taskBucket->finish(tr, task));
-			return Void();
-		}
-
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key key = wait(addBackupTask(BackupDiffLogsTaskFunc::name,
-										 BackupDiffLogsTaskFunc::version,
-										 tr, taskBucket, completionKey,
-										 BackupConfig(parentTask),
-										 waitFor,
-										 [=](Reference<Task> task) {
-											 Params.beginVersion().set(task, beginVersion);
-										 }));
-			return key;
-		}
-
-		StringRef getName() const { return name; };
-
-		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
-		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
-	};
-	StringRef BackupDiffLogsTaskFunc::name = LiteralStringRef("file_backup_diff_logs");
-	const uint32_t BackupDiffLogsTaskFunc::version = 1;
-	REGISTER_TASKFUNC(BackupDiffLogsTaskFunc);
-
-	struct BackupRestorableTaskFunc : BackupTaskFuncBase {
-		static StringRef name;
-		static const uint32_t version;
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state BackupConfig config(task);
 			state Reference<IBackupContainer> bc;
 
-			try {
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-				// Read the entire range file map into memory, then walk it backwards from its last entry to produce a list of non overlapping key range files
-				state std::map<Key, BackupConfig::RangeSlice> localmap;
-				state Key startKey;
-				state int batchSize = BUGGIFY ? 1 : 1000000;
+			// Read the entire range file map into memory, then walk it backwards from its last entry to produce a list of non overlapping key range files
+			state std::map<Key, BackupConfig::RangeSlice> localmap;
+			state Key startKey;
+			state int batchSize = BUGGIFY ? 1 : 1000000;
 
-				loop {
-					try {
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-						Void _ = wait(taskBucket->keepRunning(tr, task));
+					Void _ = wait(taskBucket->keepRunning(tr, task));
 
-						if(!bc) {
-							// Backup container must be present if we're still here
-							Reference<IBackupContainer> _bc = wait(config.backupContainer().getOrThrow(tr));
-							bc = _bc;
-						}
-
-						BackupConfig::RangeFileMapT::PairsType rangeresults = wait(config.rangeFileMap().getRange(tr, startKey, {}, batchSize));
-
-						for(auto &p : rangeresults) {
-							localmap.insert(p);
-						}
-
-						if(rangeresults.size() < batchSize)
-							break;
-
-						startKey = keyAfter(rangeresults.back().first);
-						tr->reset();
-					} catch(Error &e) {
-						Void _ = wait(tr->onError(e));
+					if(!bc) {
+						// Backup container must be present if we're still here
+						Void _ = wait(store(config.backupContainer().getOrThrow(tr), bc));
 					}
-				}
 
-				std::vector<std::string> files;
-				state Version maxVer = 0;
-				state Version minVer = std::numeric_limits<Version>::max();
-				state int64_t totalBytes = 0;
+					BackupConfig::RangeFileMapT::PairsType rangeresults = wait(config.snapshotRangeFileMap().getRange(tr, startKey, {}, batchSize));
 
-				if(!localmap.empty()) {
-					// Get iterator that points to greatest key, start there.
-					auto ri = localmap.rbegin();
-					auto i = (++ri).base();
-
-					while(1) {
-						const BackupConfig::RangeSlice &r = i->second;
-
-						// Add file to final file list
-						files.push_back(r.fileName);
-
-						// Update version range seen
-						if(r.version < minVer)
-							minVer = r.version;
-						if(r.version > maxVer)
-							maxVer = r.version;
-
-						// Update total bytes counted.
-						totalBytes += r.fileSize;
-
-						// Jump to file that either ends where this file begins or has the greatest end that is less than
-						// the begin of this file.  In other words find the map key that is <= begin of this file.  To do this
-						// find the first end strictly greater than begin and then back up one.
-						i = localmap.upper_bound(i->second.begin);
-						// If we get begin then we're done, there are no more ranges that end at or before the last file's begin
-						if(i == localmap.begin())
-							break;
-						--i;
+					for(auto &p : rangeresults) {
+						localmap.insert(p);
 					}
-				}
 
-				Void _ = wait(bc->writeKeyspaceSnapshotFile(files, totalBytes));
-
-				TraceEvent(SevInfo, "FileBackupWroteKVManifestFile")
-					.detail("Container", bc->getURL())
-					.detail("BeginVersion", maxVer)
-					.detail("EndVersion", maxVer)
-					.detail("TotalBytes", totalBytes);
-
-				// Now that the manifest is written, the backup is restorable so set last restorable for the tag.
-				loop {
-					try {
-						Void _ = wait(taskBucket->keepRunning(tr, task));
-
-						state std::string tag = wait(config.tag().getOrThrow(tr));
-						// stopVersion must be set or the current task would not be running
-						state Version ver = wait(config.stopVersion().getOrThrow(tr));
-						
-						FileBackupAgent().setLastRestorable(tr, StringRef(tag), ver);
-						Void _ = wait(tr->commit());
-						TraceEvent("FileBackupRestorable")
-							.detail("logUid", config.getUid())
-							.detail("stopVersion", ver)
-							.detail("backupContainer", bc->getURL())
-							.detail("backupTag", tag);
+					if(rangeresults.size() < batchSize)
 						break;
-					} catch(Error &e) {
-						Void _ = wait(tr->onError(e));
-					}
-				}
 
-			} catch(Error &e) {
-				if(e.code() == error_code_actor_cancelled)
-					throw;
-				state Error err = e;
-				if(bc) {
-					Void _ = wait(config.logError(cx, err, format("Failed to write restorable metadata to `%s'", bc->getURL().c_str())));
+					startKey = keyAfter(rangeresults.back().first);
+					tr->reset();
+				} catch(Error &e) {
+					Void _ = wait(tr->onError(e));
 				}
-				throw err;
 			}
+
+			std::vector<std::string> files;
+			state Version maxVer = 0;
+			state Version minVer = std::numeric_limits<Version>::max();
+			state int64_t totalBytes = 0;
+
+			if(!localmap.empty()) {
+				// Get iterator that points to greatest key, start there.
+				auto ri = localmap.rbegin();
+				auto i = (++ri).base();
+
+				while(1) {
+					const BackupConfig::RangeSlice &r = i->second;
+
+					// Add file to final file list
+					files.push_back(r.fileName);
+
+					// Update version range seen
+					if(r.version < minVer)
+						minVer = r.version;
+					if(r.version > maxVer)
+						maxVer = r.version;
+
+					// Update total bytes counted.
+					totalBytes += r.fileSize;
+
+					// Jump to file that either ends where this file begins or has the greatest end that is less than
+					// the begin of this file.  In other words find the map key that is <= begin of this file.  To do this
+					// find the first end strictly greater than begin and then back up one.
+					i = localmap.upper_bound(i->second.begin);
+					// If we get begin then we're done, there are no more ranges that end at or before the last file's begin
+					if(i == localmap.begin())
+						break;
+					--i;
+				}
+			}
+
+			Params.endVersion().set(task, maxVer);
+			Void _ = wait(bc->writeKeyspaceSnapshotFile(files, totalBytes));
+
+			TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
+				.detail("Container", bc->getURL())
+				.detail("BeginVersion", minVer)
+				.detail("EndVersion", maxVer)
+				.detail("TotalBytes", totalBytes);
 
 			return Void();
 		}
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupSnapshotManifest::name, BackupSnapshotManifest::version));
 
 			state BackupConfig config(task);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			config.latestSnapshotEndVersion().set(tr, Params.endVersion().get(task));
 
-			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
+			// Start the next snapshot unless stopWhenDone is set.
+			bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr, false));
+			if(!stopWhenDone)
+				Void _ = wait(config.initNewSnapshot(tr) && success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
 
-			state Version restoreVersion = wait(config.stopVersion().getD(tr, -1));
+			// Set the done future as the snapshot is now complete and finish the task.
+			Reference<TaskFuture> snapshotDoneFuture = task->getDoneFuture(futureBucket);
+			Void _ = wait(snapshotDoneFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 
-			state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
-			state Reference<TaskFuture> allPartsDone;
-
-			TraceEvent("FileBackupRestorable").detail("restoreVersion", restoreVersion).detail("differential", stopWhenDone);
-
-			// Start the complete task, if differential is not enabled
-			if (stopWhenDone) {
-				// After the Backup completes, clear the backup subspace and update the status
-				Key _ = wait(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal()));
-			}
-			else { // Start the writing of logs, if differential
-				config.stateEnum().set(tr, EBackupState::STATE_DIFFERENTIAL);
-
-				allPartsDone = futureBucket->future(tr);
-
-				Key _ = wait(BackupDiffLogsTaskFunc::addTask(tr, taskBucket, task, restoreVersion, TaskCompletionKey::joinWith(allPartsDone)));
-
-				// After the Backup completes, clear the backup subspace and update the status
-				Key _ = wait(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), allPartsDone));
-			}
-
-			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key key = wait(addBackupTask(BackupRestorableTaskFunc::name,
-										 BackupRestorableTaskFunc::version,
+			Key key = wait(addBackupTask(BackupSnapshotManifest::name,
+										 BackupSnapshotManifest::version,
 										 tr, taskBucket, completionKey,
 										 BackupConfig(parentTask), waitFor));
 			return key;
@@ -1988,9 +1833,13 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef BackupRestorableTaskFunc::name = LiteralStringRef("file_backup_restorable");
-	const uint32_t BackupRestorableTaskFunc::version = 1;
-	REGISTER_TASKFUNC(BackupRestorableTaskFunc);
+	StringRef BackupSnapshotManifest::name = LiteralStringRef("file_backup_snapshot_manifest");
+	const uint32_t BackupSnapshotManifest::version = 1;
+	REGISTER_TASKFUNC(BackupSnapshotManifest);
+
+	Future<Key> BackupSnapshotDispatchTask::addSnapshotManifestTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor) {
+		return BackupSnapshotManifest::addTask(tr, taskBucket, parentTask, completionKey, waitFor);
+	}
 
 	struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 		static StringRef name;
@@ -2034,20 +1883,16 @@ namespace fileBackup {
 
 			config.stateEnum().set(tr, EBackupState::STATE_BACKUP);
 
-			state Reference<TaskFuture>	kvBackupRangeComplete = futureBucket->future(tr);
-			state Reference<TaskFuture>	kvBackupComplete = futureBucket->future(tr);
+			state Reference<TaskFuture>	backupFinished = futureBucket->future(tr);
 
-			config.snapshotBeginVersion().set(tr, beginVersion);
-			Void _ = wait(success(BackupSnapshotDispatch::addTask(tr, taskBucket, task, TaskCompletionKey::signal(kvBackupRangeComplete), Reference<TaskFuture>(), 1)));
+			// Initialize a new snapshot and create tasks to continually write logs and snapshots
+			Void _ = wait(config.initNewSnapshot(tr));
+			Key _ = wait(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, TaskCompletionKey::joinWith(backupFinished)));
+			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(backupFinished)));
 
-			// After the BackupRangeTask completes, set the stop key which will stop the BackupLogsTask
-			Key _ = wait(FinishFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), kvBackupRangeComplete));
-
-			// Backup the logs which will create BackupLogRange tasks
-			Key _ = wait(BackupLogsTaskFunc::addTask(tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(kvBackupComplete)));
-
-			// After the Backup completes, clear the backup subspace and update the status
-			Key _ = wait(BackupRestorableTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), kvBackupComplete));
+			// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the following
+			// task will clean up and set the completed state.
+			Key _ = wait(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
@@ -3380,7 +3225,7 @@ public:
 				} else {
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					state Reference<IBackupContainer> bc = wait(config.backupContainer().getOrThrow(tr));
-					state Version stopVersion = wait(config.stopVersion().getD(tr, -1));
+					state Optional<Version> stopVersion = wait(config.getLatestRestorableVersion(tr));
 
 					switch (backupState) {
 						case BackupAgentBase::STATE_SUBMITTED:
@@ -3393,7 +3238,7 @@ public:
 							statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " + bc->getURL() + ".\n";
 							break;
 						case BackupAgentBase::STATE_COMPLETED:
-							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed at version " + format("%lld", stopVersion) + ".\n";
+							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed at version " + format("%lld", stopVersion.orDefault(-1)) + ".\n";
 							break;
 						default:
 							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " + backupStatus + ".\n";

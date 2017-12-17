@@ -32,6 +32,9 @@
 #include "Subspace.h"
 #include "KeyBackedTypes.h"
 
+class FutureBucket;
+class TaskFuture;
+
 class Task : public ReferenceCounted<Task> {
 public:
 	Task(Value type = StringRef(), uint32_t version = 0, Value done = StringRef(), unsigned int priority = 0);
@@ -49,6 +52,7 @@ public:
 
 	Map<Key, Value> params; // SOMEDAY: use one arena?
 
+	// New reserved task parameter keys should be added in ReservedTaskParams below instead of here.
 	static Key reservedTaskParamKeyPriority;
 	static Key reservedTaskParamKeyType;
 	static Key reservedTaskParamKeyAddTask;
@@ -58,6 +62,8 @@ public:
 	static Key reservedTaskParamKeyVersion;
 	static Key reservedTaskParamValidKey;
 	static Key reservedTaskParamValidValue;
+
+	Reference<TaskFuture> getDoneFuture(Reference<FutureBucket> fb);
 
 	std::string toString() const {
 		std::string s = format("TASK [key=%s timeoutVersion=%lld ", key.printable().c_str(), timeoutVersion);
