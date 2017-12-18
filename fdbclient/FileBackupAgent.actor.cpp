@@ -1240,13 +1240,16 @@ namespace fileBackup {
 				.detail("CurrentVersion", recentReadVersion)
 				.detail("TimeElapsed", timeElapsed)
 				.detail("SnapshotIntervalSeconds", snapshotIntervalSeconds);
-			// Dispatch random shards to catch up to the expected progress
-			state int taskBatchSize = CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
 
+			// Dispatch random shards to catch up to the expected progress
 			while(countShardsToDispatch > 0) {
 				// First select ranges to add
 				state std::vector<KeyRange> rangesToAdd;
+
+				// Limit number of tasks added per transaction
+				int taskBatchSize = BUGGIFY ? g_random->randomInt(1, countShardsToDispatch + 1) : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
 				int added = 0;
+
 				while(countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {
 					// Get a random range.
 					auto it = shardMap.randomRange();
@@ -1271,7 +1274,7 @@ namespace fileBackup {
 				state int64_t oldBatchSize = snapshotBatchSize.get();
 				state int64_t newBatchSize = oldBatchSize + rangesToAdd.size();
 
-				// Now add the ranges in a single transaction
+				// Now add the selected ranges in a single transaction.  
 				tr->reset();
 				loop {
 					try {
@@ -2416,8 +2419,8 @@ namespace fileBackup {
 			state bool addingToExistingBatch = remainingInBatch > 0;
 
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
-			// previous batch can be applied.
-			if(!addingToExistingBatch)
+			// previous batch can be applied.  Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
+			if(!addingToExistingBatch && beginVersion > 0)
 				restore.setApplyEndVersion(tr, beginVersion);
 
 			// Get the apply version lag
@@ -2634,7 +2637,7 @@ namespace fileBackup {
 			// If beginFile is not empty then we had to stop in the middle of a version (possibly within a file) so we cannot end 
 			// the batch here because we do not know if we got all of the files and blocks from the last version queued, so
 			// make sure remainingInBatch is at least 1.
-			if(beginFile.size() != 0)
+			if(!beginFile.empty())
 				remainingInBatch = std::max<int64_t>(1, remainingInBatch);
 
 			// If more blocks need to be dispatched in this batch then add a follow-on task that is part of the allPartsDone group which will won't wait
