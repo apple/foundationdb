@@ -1197,7 +1197,6 @@ namespace fileBackup {
 
 			shardMap.coalesce(normalKeys);
 
-
 			// In this context "all" refers to all of the shards relevant for this particular backup
 			state int countAllShards = countShardsDone + countShardsNotDone;
 
@@ -1244,8 +1243,6 @@ namespace fileBackup {
 				state std::vector<KeyRange> rangesToAdd;
 				int added = 0;
 				while(countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {
-
-
 					// Get a random range.
 					auto it = shardMap.randomRange();
 					// Find a NOT_DONE range and add it to rangesToAdd
@@ -1267,6 +1264,8 @@ namespace fileBackup {
 				}
 
 				state int64_t oldBatchSize = snapshotBatchSize.get();
+				state int64_t newBatchSize = oldBatchSize + rangesToAdd.size();
+
 				// Now add the ranges in a single transaction
 				tr->reset();
 				loop {
@@ -1286,15 +1285,15 @@ namespace fileBackup {
 						Void _ = wait(store(config.snapshotBatchSize().getOrThrow(tr), snapshotBatchSize.get())
 								&& waitForAll(beginReads) && waitForAll(endReads) && taskBucket->keepRunning(tr, task));
 
-						// If the snapshot batch size was already changed to oldBatchSize + rangesToAdd.size() then this transaction
-						// was already committed
-						if(snapshotBatchSize.get() == oldBatchSize) {
-							config.snapshotBatchSize().set(tr, oldBatchSize + rangesToAdd.size());
+						// Snapshot batch size should be either oldBatchSize or newBatchSize. If new, this transaction is already done.
+						if(snapshotBatchSize.get() == newBatchSize) {
+							break;
 						}
 						else {
-							ASSERT(snapshotBatchSize.get() == oldBatchSize + rangesToAdd.size());
-							break;
-						}	
+							ASSERT(snapshotBatchSize.get() == oldBatchSize);
+							config.snapshotBatchSize().set(tr, newBatchSize);
+							snapshotBatchSize = newBatchSize;
+						}
 
 						// Count the undispatched ranges while checking the boundaries
 						int undispatchedRanges = 0;
