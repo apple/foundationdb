@@ -1295,8 +1295,6 @@ namespace fileBackup {
 							snapshotBatchSize = newBatchSize;
 						}
 
-						// Count the undispatched ranges while checking the boundaries
-						int undispatchedRanges = 0;
 						state std::vector<Future<Void>> addTaskFutures;
 
 						for(int i = 0; i < beginReads.size(); ++i) {
@@ -1314,7 +1312,6 @@ namespace fileBackup {
 							if(    (!beginValue.present() || !beginValue.get())
 								&& (!endValue.present()   ||  endValue.get())   )
 							{
-								++undispatchedRanges;
 								if(beginValue.present()) {
 									config.snapshotRangeDispatchMap().erase(tr, range.begin);
 								}
@@ -1332,11 +1329,12 @@ namespace fileBackup {
 								Version randomVersion = recentReadVersion + g_random->random01() * (nextDispatchVersion - recentReadVersion);
 								addTaskFutures.push_back(success(BackupRangeTaskFunc::addTask(tr, taskBucket, task, range.begin, range.end, TaskCompletionKey::joinWith(snapshotBatchFuture), Reference<TaskFuture>(), 0, randomVersion)));
 							}
+							else {
+								// This shouldn't happen because if the transaction was already done or if another execution
+								// of this task is making progress it should have been detected above.
+								ASSERT(false);
+							}
 						}
-						if(undispatchedRanges == 0)
-							break;
-
-						ASSERT(undispatchedRanges == rangesToAdd.size());
 
 						Void _ = wait(waitForAll(addTaskFutures));
 						Void _ = wait(tr->commit());
@@ -1620,7 +1618,15 @@ namespace fileBackup {
 
 			state bool stopWhenDone;
 			state Optional<Version> restorableVersion;
-			Void _ = wait(store(config.stopWhenDone().getOrThrow(tr), stopWhenDone) && store(config.getLatestRestorableVersion(tr), restorableVersion));
+			state EBackupState backupState;
+
+			Void _ = wait(store(config.stopWhenDone().getOrThrow(tr), stopWhenDone) 
+						&& store(config.getLatestRestorableVersion(tr), restorableVersion)
+						&& store(config.stateEnum().getOrThrow(tr), backupState));
+
+			// If the backup is restorable but the state is not differential then set state to differential
+			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_DIFFERENTIAL)
+				config.stateEnum().set(tr, BackupAgentBase::STATE_DIFFERENTIAL);
 
 			// If stopWhenDone is set and there is a restorable version, set the done future and do not create further tasks.
 			if(stopWhenDone && restorableVersion.present()) {
@@ -1805,10 +1811,23 @@ namespace fileBackup {
 			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, BackupSnapshotManifest::name, BackupSnapshotManifest::version));
 
 			state BackupConfig config(task);
+
+			// Set the latest snapshot end version, which was set during the execute phase
 			config.latestSnapshotEndVersion().set(tr, Params.endVersion().get(task));
 
-			// Start the next snapshot unless stopWhenDone is set.
-			bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr, false));
+			state bool stopWhenDone;
+			state EBackupState backupState;
+			state Optional<Version> restorableVersion;
+
+			Void _ = wait(store(config.stopWhenDone().getOrThrow(tr), stopWhenDone) 
+						&& store(config.stateEnum().getOrThrow(tr), backupState)
+						&& store(config.getLatestRestorableVersion(tr), restorableVersion));
+
+			// If the backup is restorable and the state isn't differential the set state to differential
+			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_DIFFERENTIAL)
+				config.stateEnum().set(tr, BackupAgentBase::STATE_DIFFERENTIAL);
+
+			// Unless we are to stop, start the next snapshot using the default interval
 			if(!stopWhenDone)
 				Void _ = wait(config.initNewSnapshot(tr) && success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
 
