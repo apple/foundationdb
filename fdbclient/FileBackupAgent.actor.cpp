@@ -1218,7 +1218,12 @@ namespace fileBackup {
 			state Version nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (g_network->isSimulated() ? (snapshotIntervalSeconds / 5.0) : CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC);
 			Params.nextDispatchVersion().set(task, nextDispatchVersion);
 			// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
-			double timeElapsed = (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion);
+			double timeElapsed;
+			if(snapshotTargetEndVersion > snapshotBeginVersion)
+				timeElapsed = std::max(1.0, (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion));
+			else
+				timeElapsed = 1.0;
+
 			state int countExpectedShardsDone = std::min<int>(countAllShards, countAllShards * timeElapsed);
 			state int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
 
