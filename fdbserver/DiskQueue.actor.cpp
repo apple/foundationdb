@@ -298,7 +298,11 @@ public:
 			for(int i=1; i<syncFiles.size(); i++) sync = sync && syncFiles[i]->onSync();
 			Void _ = wait( sync );
 			Void _ = wait( lastCommit );
-			Void _ = wait( yield() );
+
+			//Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
+			if(g_network->check_yield(g_network->getCurrentTask())) {
+				Void _ = wait(delay(0, g_network->getCurrentTask()));
+			}
 
 			self->updatePopped( poppedPages*sizeof(Page) );
 
