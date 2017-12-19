@@ -2158,23 +2158,6 @@ namespace fileBackup {
 
 					Void _ = wait( checkLock );
 
-					TraceEvent("FileRestoreCommittingRange")
-						.detail("RestoreUID", restore.getUid())
-						.detail("FileName", rangeFile.fileName)
-						.detail("FileVersion", rangeFile.version)
-						.detail("FileSize", rangeFile.fileSize)
-						.detail("ReadOffset", readOffset)
-						.detail("ReadLen", readLen)
-						.detail("CommitVersion", tr->getCommittedVersion())
-						.detail("BeginRange", printable(trRange.begin))
-						.detail("EndRange", printable(trRange.end))
-						.detail("StartIndex", start)
-						.detail("EndIndex", i)
-						.detail("DataSize", data.size())
-						.detail("Bytes", txBytes)
-						.detail("OriginalFileRange", printable(originalFileRange))
-						.detail("TaskInstance", (uint64_t)this);
-
 					Void _ = wait(tr->commit());
 
 					TraceEvent("FileRestoreCommittedRange")
