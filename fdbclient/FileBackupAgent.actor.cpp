@@ -297,7 +297,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(), (int64_t)now() - lastError.get().second);
 
 	TraceEvent("FileRestoreProgress")
-		.detail("UID", uid)
+		.detail("RestoreUID", uid)
 		.detail("Tag", tag.get())
 		.detail("State", status.get().toString())
 		.detail("FileCount", fileCount.get())
@@ -830,7 +830,6 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Key begin, Key end, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>(), int priority = 0, Version scheduledVersion = invalidVersion) {
-			TraceEvent(SevInfo, "FBA_schedBackupRangeTask").detail("begin", printable(begin)).detail("end", printable(end));
 			Key key = wait(addBackupTask(BackupRangeTaskFunc::name,
 										 BackupRangeTaskFunc::version,
 										 tr, taskBucket, completionKey,
@@ -913,13 +912,15 @@ namespace fileBackup {
 
 						bool usedFile = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
 						TraceEvent("FileBackupWroteRangeFile")
+							.detail("BackupUID", backup.getUid())
+							.detail("BackupURL", bc->getURL())
 							.detail("Size", outFile->size())
 							.detail("Keys", nrKeys)
+							.detail("ReadVersion", outVersion)
 							.detail("BeginKey", beginKey.printable())
 							.detail("EndKey", nextKey.printable())
 							.detail("AddedFileToMap", usedFile);
 
-						
 						nrKeys = 0;
 						beginKey = nextKey;
 					}
@@ -963,6 +964,12 @@ namespace fileBackup {
 			for (int idx = 0; idx < keys.size(); ++idx) {
 				if (nextKey != keys[idx]) {
 					addTaskVector.push_back(addTask(tr, taskBucket, task, nextKey, keys[idx], TaskCompletionKey::joinWith(onDone)));
+					TraceEvent("FileBackupRangeSplit")
+						.detail("BackupUID", BackupConfig(task).getUid())
+						.detail("BeginKey", Params.beginKey().get(task).printable())
+						.detail("EndKey", Params.endKey().get(task).printable())
+						.detail("SliceBeginKey", nextKey.printable())
+						.detail("SliceEndKey", keys[idx].printable());
 				}
 				nextKey = keys[idx];
 			}
@@ -986,8 +993,6 @@ namespace fileBackup {
 			else {
 				Void _ = wait(taskFuture->set(tr, taskBucket));
 			}
-
-			TraceEvent(SevInfo, "FBA_endBackupRangeTask").detail("begin", printable(Params.beginKey().get(task))).detail("end", printable(Params.endKey().get(task)));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
@@ -1336,6 +1341,13 @@ namespace fileBackup {
 								// Choose a random version between now and the next dispatch version at which to start this range task
 								Version randomVersion = recentReadVersion + g_random->random01() * (nextDispatchVersion - recentReadVersion);
 								addTaskFutures.push_back(success(BackupRangeTaskFunc::addTask(tr, taskBucket, task, range.begin, range.end, TaskCompletionKey::joinWith(snapshotBatchFuture), Reference<TaskFuture>(), 0, randomVersion)));
+
+								TraceEvent("FileBackupSnapshotRangeDispatched")
+									.detail("BackupUID", config.getUid())
+									.detail("CurrentVersion", recentReadVersion)
+									.detail("ScheduledVersion", randomVersion)
+									.detail("BeginKey", range.begin.printable())
+									.detail("EndKey", range.end.printable());
 							}
 							else {
 								// This shouldn't happen because if the transaction was already done or if another execution
@@ -1529,6 +1541,14 @@ namespace fileBackup {
 			Void _ = wait(taskBucket->keepRunning(cx, task));
 
 			Void _ = wait(outFile->finish());
+
+			TraceEvent("FileBackupWroteLogFile")
+				.detail("BackupUID", config.getUid())
+				.detail("BackupURL", bc->getURL())
+				.detail("Size", outFile->size())
+				.detail("BeginVersion", beginVersion)
+				.detail("EndVersion", endVersion);
+
 			Params.fileSize().set(task, outFile->size());
 
 			return Void();
@@ -1807,7 +1827,8 @@ namespace fileBackup {
 			Void _ = wait(bc->writeKeyspaceSnapshotFile(files, totalBytes));
 
 			TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
-				.detail("Container", bc->getURL())
+				.detail("BackupUID", config.getUid())
+				.detail("BackupURL", bc->getURL())
 				.detail("BeginVersion", minVer)
 				.detail("EndVersion", maxVer)
 				.detail("TotalBytes", totalBytes);
@@ -2025,7 +2046,7 @@ namespace fileBackup {
 			state int64_t readLen = Params.readLen().get(task);
 
 			TraceEvent("FileRestoreRangeStart")
-				.detail("UID", restore.getUid())
+				.detail("RestoreUID", restore.getUid())
 				.detail("FileName", rangeFile.fileName)
 				.detail("FileVersion", rangeFile.version)
 				.detail("FileSize", rangeFile.fileSize)
@@ -2137,10 +2158,27 @@ namespace fileBackup {
 
 					Void _ = wait( checkLock );
 
+					TraceEvent("FileRestoreCommittingRange")
+						.detail("RestoreUID", restore.getUid())
+						.detail("FileName", rangeFile.fileName)
+						.detail("FileVersion", rangeFile.version)
+						.detail("FileSize", rangeFile.fileSize)
+						.detail("ReadOffset", readOffset)
+						.detail("ReadLen", readLen)
+						.detail("CommitVersion", tr->getCommittedVersion())
+						.detail("BeginRange", printable(trRange.begin))
+						.detail("EndRange", printable(trRange.end))
+						.detail("StartIndex", start)
+						.detail("EndIndex", i)
+						.detail("DataSize", data.size())
+						.detail("Bytes", txBytes)
+						.detail("OriginalFileRange", printable(originalFileRange))
+						.detail("TaskInstance", (uint64_t)this);
+
 					Void _ = wait(tr->commit());
 
 					TraceEvent("FileRestoreCommittedRange")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("FileName", rangeFile.fileName)
 						.detail("FileVersion", rangeFile.version)
 						.detail("FileSize", rangeFile.fileSize)
@@ -2164,7 +2202,7 @@ namespace fileBackup {
 					tr->reset();
 				} catch(Error &e) {
 					TraceEvent(SevWarn, "FileRestoreErrorRangeWrite")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("FileName", rangeFile.fileName)
 						.detail("FileVersion", rangeFile.version)
 						.detail("FileSize", rangeFile.fileSize)
@@ -2251,7 +2289,7 @@ namespace fileBackup {
 			state int64_t readLen = Params.readLen().get(task);
 
 			TraceEvent("FileRestoreLogStart")
-				.detail("UID", restore.getUid())
+				.detail("RestoreUID", restore.getUid())
 				.detail("FileName", logFile.fileName)
 				.detail("FileBeginVersion", logFile.version)
 				.detail("FileEndVersion", logFile.endVersion)
@@ -2317,7 +2355,7 @@ namespace fileBackup {
 					Void _ = wait(tr->commit());
 
 					TraceEvent("FileRestoreCommittedLog")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("FileName", logFile.fileName)
 						.detail("FileBeginVersion", logFile.version)
 						.detail("FileEndVersion", logFile.endVersion)
@@ -2336,7 +2374,7 @@ namespace fileBackup {
 					tr->reset();
 				} catch(Error &e) {
 					TraceEvent(SevWarn, "FileRestoreErrorLogWrite")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("FileName", logFile.fileName)
 						.detail("FileBeginVersion", logFile.version)
 						.detail("FileEndVersion", logFile.endVersion)
@@ -2425,8 +2463,14 @@ namespace fileBackup {
 
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
 			// previous batch can be applied.  Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
-			if(!addingToExistingBatch && beginVersion > 0)
+			if(!addingToExistingBatch && beginVersion > 0) {
 				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion));
+				TraceEvent("FileRestoreDispatchSetApplyEndVersion")
+					.detail("RestoreUID", restore.getUid())
+					.detail("BeginVersion", beginVersion)
+					.detail("ApplyLag", applyLag)
+					.detail("TaskInstance", (uint64_t)this);
+			}
 
 			state int64_t batchSize = Params.batchSize().get(task);
 
@@ -2437,7 +2481,7 @@ namespace fileBackup {
 				Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize, remainingInBatch));
 
 				TraceEvent("FileRestoreDispatch")
-					.detail("UID", restore.getUid())
+					.detail("RestoreUID", restore.getUid())
 					.detail("BeginVersion", beginVersion)
 					.detail("ApplyLag", applyLag)
 					.detail("BatchSize", batchSize)
@@ -2476,7 +2520,7 @@ namespace fileBackup {
 					Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion + 1, "", 0, batchSize, 0, TaskCompletionKey::noSignal(), allPartsDone));
 
 					TraceEvent("FileRestoreDispatch")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
 						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
@@ -2490,7 +2534,7 @@ namespace fileBackup {
 					Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion, "", 0, batchSize));
 
 					TraceEvent("FileRestoreDispatch")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
 						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
@@ -2504,7 +2548,7 @@ namespace fileBackup {
 					Key _ = wait(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal()));
 
 					TraceEvent("FileRestoreDispatch")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
 						.detail("BeginFile", Params.beginFile().get(task))
 						.detail("BeginBlock", Params.beginBlock().get(task))
@@ -2517,7 +2561,7 @@ namespace fileBackup {
 					Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, beginVersion, "", 0, batchSize));
 
 					TraceEvent("FileRestoreDispatch")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("BeginVersion", beginVersion)
 						.detail("ApplyLag", applyLag)
 						.detail("Decision", "apply_still_behind")
@@ -2591,7 +2635,7 @@ namespace fileBackup {
 				beginFile = beginFile + '\x00';
 				beginBlock = 0;
 
-				//TraceEvent("FileRestoreDispatchedFile").detail("UID", restore.getUid()).detail("FileName", fi.filename).detail("TaskInstance", (uint64_t)this);
+				//TraceEvent("FileRestoreDispatchedFile").detail("RestoreUID", restore.getUid()).detail("FileName", fi.filename).detail("TaskInstance", (uint64_t)this);
 			}
 
 			// If no blocks were dispatched then the next dispatch task should run now and be joined with the allPartsDone future
@@ -2608,7 +2652,7 @@ namespace fileBackup {
 					decision = "all_files_were_empty";
 
 				TraceEvent("FileRestoreDispatch")
-					.detail("UID", restore.getUid())
+					.detail("RestoreUID", restore.getUid())
 					.detail("BeginVersion", beginVersion)
 					.detail("BeginFile", Params.beginFile().get(task))
 					.detail("BeginBlock", Params.beginBlock().get(task))
@@ -2652,6 +2696,7 @@ namespace fileBackup {
 			Void _ = wait(setDone && waitForAll(addTaskFutures) && taskBucket->finish(tr, task));
 
 			TraceEvent("FileRestoreDispatch")
+				.detail("RestoreUID", restore.getUid())
 				.detail("BeginVersion", beginVersion)
 				.detail("BeginFile", Params.beginFile().get(task))
 				.detail("BeginBlock", Params.beginBlock().get(task))
@@ -2811,7 +2856,7 @@ namespace fileBackup {
 				files.push_back({f.version, f.fileName, true, f.blockSize, f.fileSize});
 			}
 			for(const LogFile &f : restorable.get().logs) {
-				files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize});
+				files.push_back({f.beginVersion, f.fileName, false, f.blockSize, f.fileSize, f.endVersion});
 			}
 
 			state std::vector<RestoreConfig::RestoreFile>::iterator start = files.begin();
@@ -2844,7 +2889,7 @@ namespace fileBackup {
 					Void _ = wait(tr->commit());
 
 					TraceEvent("FileRestoreLoadedFiles")
-						.detail("UID", restore.getUid())
+						.detail("RestoreUID", restore.getUid())
 						.detail("FileCount", nFiles)
 						.detail("FileBlockCount", nFileBlocks)
 						.detail("Bytes", txBytes)
