@@ -2414,17 +2414,20 @@ namespace fileBackup {
 			state Version beginVersion = Params.beginVersion().get(task);
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 			state int64_t remainingInBatch = Params.remainingInBatch().get(task);
 			state bool addingToExistingBatch = remainingInBatch > 0;
+			state Version restoreVersion;
+			state int64_t applyLag;
+
+			Void _ = wait(store(restore.getApplyVersionLag(tr), applyLag)
+					&& store(restore.restoreVersion().getOrThrow(tr), restoreVersion)
+					&& checkTaskVersion(tr->getDatabase(), task, name, version));
 
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
 			// previous batch can be applied.  Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
 			if(!addingToExistingBatch && beginVersion > 0)
-				restore.setApplyEndVersion(tr, beginVersion);
+				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion));
 
-			// Get the apply version lag
-			state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 			state int64_t batchSize = Params.batchSize().get(task);
 
 			// If starting a new batch and the apply lag is too large then re-queue and wait
@@ -2467,11 +2470,10 @@ namespace fileBackup {
 
 			// If there were no files to load then this batch is done and restore is almost done.
 			if(files.size() == 0) {
-				state Version restoreVersion = wait(restore.restoreVersion().getD(tr));
-
 				// If adding to existing batch then blocks could be in progress so create a new Dispatch task that waits for them to finish
 				if(addingToExistingBatch) {
-					Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion, "", 0, batchSize, 0, TaskCompletionKey::noSignal(), allPartsDone));
+					// Setting next begin to restoreVersion + 1 so that any files in the file map at the restore version won't be dispatched again.
+					Key _ = wait(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, restoreVersion + 1, "", 0, batchSize, 0, TaskCompletionKey::noSignal(), allPartsDone));
 
 					TraceEvent("FileRestoreDispatch")
 						.detail("UID", restore.getUid())
