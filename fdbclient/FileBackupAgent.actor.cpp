@@ -1004,11 +1004,11 @@ namespace fileBackup {
 
 		static struct {
 			// Set by Execute, used by Finish
-			TaskParam<bool> snapshotFinished() {
+			static TaskParam<bool> snapshotFinished() {
 				return LiteralStringRef(__FUNCTION__);
 			}
 			// Set by Execute, used by Finish
-			TaskParam<Version> nextDispatchVersion() {
+			static TaskParam<Version> nextDispatchVersion() {
 				return LiteralStringRef(__FUNCTION__);
 			}
 		} Params;
