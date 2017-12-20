@@ -138,12 +138,12 @@ public:
 		// Get a task key that is <= a random UID task key, if successful then return it
 		Key k = wait(tr->getKey(lastLessOrEqual(space.pack(uid)), true));
 		if(space.contains(k))
-			return k;
+			return Optional<Key>(k);
 
 		// Get a task key that is <= the maximum possible UID, if successful return it.
 		Key k = wait(tr->getKey(lastLessOrEqual(space.pack(maxUIDKey)), true));
 		if(space.contains(k))
-			return k;
+			return Optional<Key>(k);
 
 		return Optional<Key>();
 	}
@@ -389,13 +389,13 @@ public:
 				}));
 			}
 		} catch(Error &e) {
+			state Error e2 = e;
 			TraceEvent(SevWarn, "TB_ExecuteFailure")
 				.detail("TaskUID", task->key.printable())
 				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
 				.detail("Priority", task->getPriority())
 				.error(e);
 			try {
-				state Error e2 = e;
 				Void _ = wait(taskFunc->handleError(cx, task, e2));
 			} catch(Error &e) {
 				TraceEvent(SevWarn, "TB_ExecuteFailureLogErrorFailed")
@@ -809,7 +809,7 @@ Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task>
 
 	// If scheduledVersion is valid then place the task directly into the timeout
 	// space for its scheduled time, otherwise place it in the available space by priority.
-	Version scheduledVersion = ReservedTaskParams.scheduledVersion().getOrDefault(task, invalidVersion);
+	Version scheduledVersion = ReservedTaskParams::scheduledVersion().getOrDefault(task, invalidVersion);
 	if(scheduledVersion != invalidVersion) {
 		taskSpace = timeouts.get(scheduledVersion).get(key);
 	}

@@ -388,7 +388,7 @@ public:
 
 			// No logs needed if there is a complete key space snapshot at a single version.
 			if(snapshot.get().beginVersion == snapshot.get().endVersion)
-				return restorable;
+				return Optional<RestorableFileSet>(restorable);
 
 			std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion));
 
@@ -410,7 +410,7 @@ public:
 				}
 
 				if(end >= targetVersion) {
-					return restorable;
+					return Optional<RestorableFileSet>(restorable);
 				}
 			}
 		}
@@ -837,7 +837,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 
 // Get a list of URLS to backup containers based on some a shorter URL.  This function knows about some set of supported
 // URL types which support this sort of backup discovery.
-ACTOR Future<std::vector<std::string>> IBackupContainer::listContainers(std::string baseURL) {
+ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) {
 	try {
 		StringRef u(baseURL);
 		if(u.startsWith(LiteralStringRef("file://"))) {
@@ -873,6 +873,10 @@ ACTOR Future<std::vector<std::string>> IBackupContainer::listContainers(std::str
 	}
 }
 
+Future<std::vector<std::string>> IBackupContainer::listContainers(std::string baseURL) {
+	return listContainers_impl(baseURL);
+}
+
 ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f) {
 	state Standalone<StringRef> content = makeString(g_random->randomInt(0, 10000000));
 	for(int i = 0; i < content.size(); ++i)
@@ -880,10 +884,10 @@ ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<I
 
 	Void _ = wait(f->append(content.begin(), content.size()));
 	Void _ = wait(f->finish());
-	state Reference<IAsyncFile> in = wait(c->readFile(f->getFileName()));
-	int64_t size = wait(in->size());
+	state Reference<IAsyncFile> inputFile = wait(c->readFile(f->getFileName()));
+	int64_t size = wait(inputFile->size());
 	state Standalone<StringRef> buf = makeString(size);
-	int b = wait(in->read(mutateString(buf), buf.size(), 0));
+	int b = wait(inputFile->read(mutateString(buf), buf.size(), 0));
 	ASSERT(b == buf.size());
 	ASSERT(buf == content);
 	return Void();

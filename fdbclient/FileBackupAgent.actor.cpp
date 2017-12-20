@@ -835,7 +835,7 @@ namespace fileBackup {
 											 Params.endKey().set(task, end);
 											 Params.addBackupRangeTasks().set(task, false);
 											 if(scheduledVersion != invalidVersion)
-												 ReservedTaskParams.scheduledVersion().set(task, scheduledVersion);
+												 ReservedTaskParams::scheduledVersion().set(task, scheduledVersion);
 										 },
 										 priority));
 			return key;
@@ -1026,7 +1026,7 @@ namespace fileBackup {
 										 waitFor,
 										 [=](Reference<Task> task) {
 											 if(scheduledVersion != invalidVersion)
-												 ReservedTaskParams.scheduledVersion().set(task, scheduledVersion);
+												 ReservedTaskParams::scheduledVersion().set(task, scheduledVersion);
 										 },
 										 priority));
 			return key;

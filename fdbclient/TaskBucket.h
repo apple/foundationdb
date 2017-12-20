@@ -95,11 +95,11 @@ public:
 	StringRef key;
 };
 
-struct {
-	TaskParam<Version> scheduledVersion() {
+struct ReservedTaskParams {
+	static TaskParam<Version> scheduledVersion() {
 		return LiteralStringRef(__FUNCTION__);
 	}
-} ReservedTaskParams;
+};
 
 class FutureBucket;
 

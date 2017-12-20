@@ -169,7 +169,7 @@ public:
 	// Get an IBackupContainer based on a container spec string
 	static Reference<IBackupContainer> openContainer(std::string url);
 	static std::vector<std::string> getURLFormats();
-	static Future<std::vector<std::string>> listContainers(std::string const &baseURL);
+	static Future<std::vector<std::string>> listContainers(std::string baseURL);
 
 	std::string getURL() const {
 		return URL;
