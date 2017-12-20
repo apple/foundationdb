@@ -890,6 +890,7 @@ namespace dbBackup {
 				return Void();
 			}
 
+			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			UID logUid = BinaryReader::fromStringRef<UID>(task->params[DatabaseBackupAgent::keyConfigLogUid], Unversioned());
 			Key logsPath = uidPrefixKey(applyLogKeys.begin, logUid);
 			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
@@ -1491,13 +1492,15 @@ public:
 
 	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent, Database cx, Key tagName, bool partial) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Key logUid;
 		state Value backupUid;
 
 		loop {
 			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
+
 				UID _logUid = wait(backupAgent->getLogUid(tr, tagName));
 				logUid = BinaryWriter::toValue(_logUid, Unversioned());
 
