@@ -38,15 +38,14 @@ import com.apple.foundationdb.tuple.Versionstamp;
  *
  * <p>
  *   For general guidance on subspace usage, see the discussion in
- *   <a href="/documentation/developer-guide.html#subspaces-of-keys" target="_blank">Developer Guide</a>.
+ *   <a href="/foundationdb/developer-guide.html#subspaces-of-keys" target="_blank">Developer Guide</a>.
  * </p>
  *
  * <p>
  *   As a best practice, API clients should use at least one subspace for application data.
  * </p>
  */
-public class Subspace
-{
+public class Subspace {
     static final Tuple EMPTY_TUPLE = Tuple.from();
     static final byte[] EMPTY_BYTES = new byte[0];
 
@@ -112,7 +111,7 @@ public class Subspace
             return false;
         }
         Subspace other = (Subspace)rhs;
-        return Arrays.equals(rawPrefix, other.rawPrefix) ;
+        return Arrays.equals(rawPrefix, other.rawPrefix);
     }
 
     /**

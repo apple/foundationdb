@@ -23,7 +23,16 @@ package com.apple.foundationdb.test;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.function.Function;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
@@ -33,13 +42,11 @@ import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.MutationType;
 import com.apple.foundationdb.Range;
-import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.StreamingMode;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.async.AsyncIterable;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.async.AsyncUtil;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.tuple.Tuple;
 
@@ -58,7 +65,7 @@ public class StackTester {
 
 		@Override
 		public Void apply(Transaction tr) {
-			List<KeyValue> asList = tr.getRange(Range.startsWith(prefix)).asList().get();
+			List<KeyValue> asList = tr.getRange(Range.startsWith(prefix)).asList().join();
 			if(asList.size() > 0) {
 				//System.out.println(" - Throwing new fake commit error...");
 				throw new FDBException("ERROR: Fake commit conflict", 1020);
@@ -67,7 +74,7 @@ public class StackTester {
 		}
 	}
 
-	static void processInstruction(final Instruction inst) throws Throwable {
+	static void processInstruction(Instruction inst) {
 		try {
 			StackOperation op = StackOperation.valueOf(inst.op);
 			if(op == StackOperation.PUSH) {
@@ -98,7 +105,7 @@ public class StackTester {
 				inst.clear();
 			}
 			else if(op == StackOperation.SWAP) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				int index = StackUtils.getInt(params, 0);
 				inst.swap(index);
 			}
@@ -107,12 +114,12 @@ public class StackTester {
 				inst.push(e.idx, StackUtils.serializeFuture(e.value));
 			}
 			else if(op == StackOperation.WAIT_EMPTY) {
-				List<Object> params = inst.popParams(1).get();
-				inst.context.db.run(new WaitEmpty((byte [])params.get(0)));
+				List<Object> params = inst.popParams(1).join();
+				inst.context.db.run(new WaitEmpty((byte[])params.get(0)));
 				inst.push("WAITED_FOR_EMPTY".getBytes());
 			}
 			else if(op == StackOperation.START_THREAD) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				//System.out.println(inst.context.preStr + " - " + "Starting new thread at prefix: " + ByteArrayUtil.printable((byte[]) params.get(0)));
 				inst.context.addContext((byte[])params.get(0));
 			}
@@ -120,90 +127,68 @@ public class StackTester {
 				inst.context.newTransaction();
 			}
 			else if (op == StackOperation.USE_TRANSACTION) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				inst.context.switchTransaction((byte[])params.get(0));
 			}
 			else if(op == StackOperation.SET) {
-				final List<Object> params = inst.popParams(2).get();
+				final List<Object> params = inst.popParams(2).join();
 				//System.out.println(inst.context.preStr + " - " + "Setting '" + ArrayUtils.printable((byte[]) params.get(0)) +
 				//		"' to '" + ArrayUtils.printable((byte[]) params.get(1)) + "'");
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.set((byte[])params.get(0), (byte[])params.get(1));
-							return null;
-						}
-					});
+				executeMutation(inst, tr -> {
+					tr.set((byte[])params.get(0), (byte[])params.get(1));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR) {
-				final List<Object> params = inst.popParams(1).get();
+				final List<Object> params = inst.popParams(1).join();
 				//System.out.println(inst.context.preStr + " - " + "Clearing: '" + ByteArrayUtil.printable((byte[]) params.get(0)) + "'");
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear((byte[])params.get(0));
-							return null;
-						}
-					}
-				);
+				executeMutation(inst, tr -> {
+					tr.clear((byte[])params.get(0));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR_RANGE) {
-				final List<Object> params = inst.popParams(2).get();
-				executeMutation(inst,
-						new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear((byte[])params.get(0), (byte[])params.get(1));
-							return null;
-						}
-					});
+				final List<Object> params = inst.popParams(2).join();
+				executeMutation(inst, tr -> {
+					tr.clear((byte[])params.get(0), (byte[])params.get(1));
+					return null;
+				});
 			}
 			else if(op == StackOperation.CLEAR_RANGE_STARTS_WITH) {
-				final List<Object> params = inst.popParams(1).get();
-				executeMutation(inst,
-						new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.clear(Range.startsWith((byte[])params.get(0)));
-							return null;
-						}
-					});
+				final List<Object> params = inst.popParams(1).join();
+				executeMutation(inst, tr -> {
+					tr.clear(Range.startsWith((byte[])params.get(0)));
+					return null;
+				});
 			}
 			else if(op == StackOperation.ATOMIC_OP) {
-				final List<Object> params = inst.popParams(3).get();
+				final List<Object> params = inst.popParams(3).join();
 				final MutationType optype = MutationType.valueOf((String)params.get(0));
-				executeMutation(inst,
-					new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
-							return null;
-						}
-					}
-				);
+				executeMutation(inst, tr -> {
+					tr.mutate(optype, (byte[])params.get(1), (byte[])params.get(2));
+					return null;
+				});
 			}
 			else if(op == StackOperation.COMMIT) {
 				inst.push(inst.tr.commit());
 			}
 			else if(op == StackOperation.READ_CONFLICT_RANGE) {
-				List<Object> params = inst.popParams(2).get();
+				List<Object> params = inst.popParams(2).join();
 				inst.tr.addReadConflictRange((byte[])params.get(0), (byte[])params.get(1));
 				inst.push("SET_CONFLICT_RANGE".getBytes());
 			}
 			else if(op == StackOperation.WRITE_CONFLICT_RANGE) {
-				List<Object> params = inst.popParams(2).get();
+				List<Object> params = inst.popParams(2).join();
 				inst.tr.addWriteConflictRange((byte[])params.get(0), (byte[])params.get(1));
 				inst.push("SET_CONFLICT_RANGE".getBytes());
 			}
 			else if(op == StackOperation.READ_CONFLICT_KEY) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				inst.tr.addReadConflictKey((byte[])params.get(0));
 				inst.push("SET_CONFLICT_KEY".getBytes());
 			}
 			else if(op == StackOperation.WRITE_CONFLICT_KEY) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				inst.tr.addWriteConflictKey((byte[])params.get(0));
 				inst.push("SET_CONFLICT_KEY".getBytes());
 			}
@@ -217,90 +202,59 @@ public class StackTester {
 				inst.tr.cancel();
 			}
 			else if(op == StackOperation.GET) {
-				final List<Object> params = inst.popParams(1).get();
-				Future<byte[]> f = inst.readTcx.read(new Function<ReadTransaction, Future<byte[]>>() {
-					@Override
-					public Future<byte[]> apply(ReadTransaction readTr) {
-						return inst.readTr.get((byte[])params.get(0));
-					}
-				});
-
+				List<Object> params = inst.popParams(1).join();
+				CompletableFuture<byte[]> f = inst.readTcx.read(readTr -> readTr.get((byte[])params.get(0)));
 				inst.push(f);
 			}
 			else if(op == StackOperation.GET_RANGE) {
-				List<Object> params = inst.popParams(5).get();
+				List<Object> params = inst.popParams(5).join();
 
-				final byte[] begin = (byte[])params.get(0);
-				final byte[] end = (byte[])params.get(1);
-				final int limit = StackUtils.getInt(params.get(2));
-				final boolean reverse = StackUtils.getBoolean(params.get(3));
-				final StreamingMode mode = inst.context.streamingModeFromCode(
+				byte[] begin = (byte[])params.get(0);
+				byte[] end = (byte[])params.get(1);
+				int limit = StackUtils.getInt(params.get(2));
+				boolean reverse = StackUtils.getBoolean(params.get(3));
+				StreamingMode mode = inst.context.streamingModeFromCode(
 						StackUtils.getInt(params.get(4), StreamingMode.ITERATOR.code()));
 
 				/*System.out.println("GetRange: " + ByteArrayUtil.printable(begin) +
 						", " + ByteArrayUtil.printable(end));*/
 
-				List<byte[]> items = inst.readTcx.read(new Function<ReadTransaction, List<byte[]>>() {
-					@Override
-					public List<byte[]> apply(ReadTransaction readTr) {
-						return executeRangeQuery(readTr.getRange(begin, end, limit, reverse, mode));
-					}
-				});
-
+				List<byte[]> items = inst.readTcx.read(readTr -> executeRangeQuery(readTr.getRange(begin, end, limit, reverse, mode)));
 				inst.push(Tuple.fromItems(items).pack());
 			}
 			else if(op == StackOperation.GET_RANGE_SELECTOR) {
-				final List<Object> params = inst.popParams(10).get();
+				List<Object> params = inst.popParams(10).join();
 
-				final KeySelector start = StackUtils.createSelector(params.get(0),params.get(1), params.get(2));
-				final KeySelector end = StackUtils.createSelector(params.get(3), params.get(4), params.get(5));
-				final int limit = StackUtils.getInt(params.get(6));
-				final boolean reverse = StackUtils.getBoolean(params.get(7));
-				final StreamingMode mode = inst.context.streamingModeFromCode(
+				KeySelector start = StackUtils.createSelector(params.get(0),params.get(1), params.get(2));
+				KeySelector end = StackUtils.createSelector(params.get(3), params.get(4), params.get(5));
+				int limit = StackUtils.getInt(params.get(6));
+				boolean reverse = StackUtils.getBoolean(params.get(7));
+				StreamingMode mode = inst.context.streamingModeFromCode(
 						StackUtils.getInt(params.get(8), StreamingMode.ITERATOR.code()));
 
-				List<byte[]> items = inst.readTcx.read(new Function<ReadTransaction, List<byte[]>>() {
-					@Override
-					public List<byte[]> apply(ReadTransaction readTr) {
-						return executeRangeQuery(readTr.getRange(start, end, limit, reverse, mode), (byte[])params.get(9));
-					}
-				});
-
+				List<byte[]> items = inst.readTcx.read(readTr -> executeRangeQuery(readTr.getRange(start, end, limit, reverse, mode), (byte[])params.get(9)));
 				inst.push(Tuple.fromItems(items).pack());
 			}
 			else if(op == StackOperation.GET_RANGE_STARTS_WITH) {
-				List<Object> params = inst.popParams(4).get();
+				List<Object> params = inst.popParams(4).join();
 
-				final byte[] prefix = (byte[])params.get(0);
-				final int limit = StackUtils.getInt(params.get(1));
-				final boolean reverse = StackUtils.getBoolean(params.get(2));
-				final StreamingMode mode = inst.context.streamingModeFromCode(
+				byte[] prefix = (byte[])params.get(0);
+				int limit = StackUtils.getInt(params.get(1));
+				boolean reverse = StackUtils.getBoolean(params.get(2));
+				StreamingMode mode = inst.context.streamingModeFromCode(
 						StackUtils.getInt(params.get(3), StreamingMode.ITERATOR.code()));
 
-				List<byte[]> items = inst.readTcx.read(new Function<ReadTransaction, List<byte[]>>() {
-					@Override
-					public List<byte[]> apply(ReadTransaction readTr) {
-						return executeRangeQuery(readTr.getRange(Range.startsWith(prefix), limit, reverse, mode));
-					}
-				});
-
+				List<byte[]> items = inst.readTcx.read(readTr -> executeRangeQuery(readTr.getRange(Range.startsWith(prefix), limit, reverse, mode)));
 				inst.push(Tuple.fromItems(items).pack());
 			}
 			else if(op == StackOperation.GET_KEY) {
-				List<Object> params = inst.popParams(4).get();
-				final KeySelector start = StackUtils.createSelector(params.get(0),params.get(1), params.get(2));
-
-				byte[] key = inst.readTcx.read(new Function<ReadTransaction, byte[]>() {
-					@Override
-					public byte[] apply(ReadTransaction readTr) {
-						return inst.readTr.getKey(start).get();
-					}
-				});
-
-				inst.push(filterKeyResult(key, (byte[])params.get(3)));
+				List<Object> params = inst.popParams(4).join();
+				KeySelector start = StackUtils.createSelector(params.get(0),params.get(1), params.get(2));
+				byte[] key = inst.readTcx.read(readTr -> filterKeyResult(readTr.getKey(start).join(), (byte[])params.get(3)));
+				inst.push(key);
 			}
 			else if(op == StackOperation.GET_READ_VERSION) {
-				inst.context.lastVersion = inst.readTr.getReadVersion().get();
+				inst.context.lastVersion = inst.readTr.getReadVersion().join();
 				inst.push("GOT_READ_VERSION".getBytes());
 			}
 			else if(op == StackOperation.GET_COMMITTED_VERSION) {
@@ -316,20 +270,21 @@ public class StackTester {
 				inst.tr.setReadVersion(inst.context.lastVersion);
 			}
 			else if(op == StackOperation.ON_ERROR) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				int errorCode = StackUtils.getInt(params, 0);
 
-				// 1102 (future_released) is not an error to Java. This is never encountered by user code,
-				//  so we have to do something rather messy here to get compatibility with other languages.
+				// 1102 (future_released) and 2015 (future_not_set) are not errors to Java.
+				//  This is never encountered by user code, so we have to do something rather
+				//  messy here to get compatibility with other languages.
 				//
 				// First, try on error with a retryable error. If it fails, then the transaction is in
 				//  a failed state and we should rethrow the error. Otherwise, throw the original error.
-				boolean filteredError = errorCode == 1102;
+				boolean filteredError = errorCode == 1102 || errorCode == 2015;
 
 				FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
 
 				try {
-					inst.setTransaction(inst.tr.onError(err).get());
+					inst.setTransaction(inst.tr.onError(err).join());
 				}
 				catch(Throwable t) {
 					inst.context.newTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
@@ -340,16 +295,16 @@ public class StackTester {
 					throw new FDBException("Fake testing error", errorCode);
 				}
 
-				inst.push(ReadyFuture.DONE);
+				inst.push(CompletableFuture.completedFuture((Void)null));
 			}
 			else if(op == StackOperation.SUB) {
-				List<Object> params = inst.popParams(2).get();
+				List<Object> params = inst.popParams(2).join();
 				BigInteger a = StackUtils.getBigInteger(params.get(0));
 				BigInteger b = StackUtils.getBigInteger(params.get(1));
 				inst.push(a.subtract(b));
 			}
 			else if(op == StackOperation.CONCAT) {
-				List<Object> params = inst.popParams(2).get();
+				List<Object> params = inst.popParams(2).join();
 				if(params.get(0) instanceof String) {
 					inst.push((String)params.get(0) + (String)params.get(1));
 				}
@@ -358,20 +313,20 @@ public class StackTester {
 				}
 			}
 			else if(op == StackOperation.TUPLE_PACK) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				int tupleSize = StackUtils.getInt(params.get(0));
 				//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
-				List<Object> elements = inst.popParams(tupleSize).get();
+				List<Object> elements = inst.popParams(tupleSize).join();
 				byte[] coded = Tuple.fromItems(elements).pack();
 				//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
 				inst.push(coded);
 			}
 			else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
-				List<Object> params = inst.popParams(2).get();
+				List<Object> params = inst.popParams(2).join();
 				byte[] prefix = (byte[])params.get(0);
 				int tupleSize = StackUtils.getInt(params.get(1));
 				//System.out.println(inst.context.preStr + " - " + "Packing top " + tupleSize + " items from stack");
-				Tuple tuple = Tuple.fromItems(inst.popParams(tupleSize).get());
+				Tuple tuple = Tuple.fromItems(inst.popParams(tupleSize).join());
 				if(!tuple.hasIncompleteVersionstamp() && Math.random() < 0.5) {
 					inst.push("ERROR: NONE".getBytes());
 				} else {
@@ -387,10 +342,9 @@ public class StackTester {
 						}
 					}
 				}
-				//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
 			}
 			else if(op == StackOperation.TUPLE_UNPACK) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				/*System.out.println(inst.context.preStr + " - " + "Unpacking tuple code: " +
 						ByteArrayUtil.printable((byte[]) params.get(0)));*/
 				Tuple t = Tuple.fromBytes((byte[])params.get(0));
@@ -399,9 +353,18 @@ public class StackTester {
 					inst.push(itemBytes);
 				}
 			}
+			else if(op == StackOperation.TUPLE_RANGE) {
+				List<Object> params = inst.popParams(1).join();
+				int tupleSize = StackUtils.getInt(params, 0);
+				//System.out.println(inst.context.preStr + " - " + "Tuple range with top " + tupleSize + " items from stack");
+				List<Object> elements = inst.popParams(tupleSize).join();
+				Range range = Tuple.fromItems(elements).range();
+				inst.push(range.begin);
+				inst.push(range.end);
+			}
 			else if (op == StackOperation.TUPLE_SORT) {
-				int listSize = StackUtils.getInt(inst.popParam().get());
-				List<Object> rawElements = inst.popParams(listSize).get();
+				int listSize = StackUtils.getInt(inst.popParam().join());
+				List<Object> rawElements = inst.popParams(listSize).join();
 				List<Tuple> tuples = new ArrayList<Tuple>(listSize);
 				for(Object o : rawElements) {
 					tuples.add(Tuple.fromBytes((byte[])o));
@@ -411,92 +374,80 @@ public class StackTester {
 					inst.push(t.pack());
 				}
 			}
-			else if(op == StackOperation.TUPLE_RANGE) {
-				List<Object> params = inst.popParams(1).get();
-				int tupleSize = StackUtils.getInt(params, 0);
-				//System.out.println(inst.context.preStr + " - " + "Tuple range with top " + tupleSize + " items from stack");
-				List<Object> elements = inst.popParams(tupleSize).get();
-				Range range = Tuple.fromItems(elements).range();
-				inst.push(range.begin);
-				inst.push(range.end);
-			}
 			else if (op == StackOperation.ENCODE_FLOAT) {
-				Object param = inst.popParam().get();
+				Object param = inst.popParam().join();
 				byte[] fBytes = (byte[])param;
 				float value = ByteBuffer.wrap(fBytes).order(ByteOrder.BIG_ENDIAN).getFloat();
 				inst.push(value);
 			}
 			else if (op == StackOperation.ENCODE_DOUBLE) {
-				Object param = inst.popParam().get();
+				Object param = inst.popParam().join();
 				byte[] dBytes = (byte[])param;
 				double value = ByteBuffer.wrap(dBytes).order(ByteOrder.BIG_ENDIAN).getDouble();
 				inst.push(value);
 			}
 			else if (op == StackOperation.DECODE_FLOAT) {
-				Object param = inst.popParam().get();
+				Object param = inst.popParam().join();
 				float value = ((Number)param).floatValue();
 				inst.push(ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putFloat(value).array());
 			}
 			else if (op == StackOperation.DECODE_DOUBLE) {
-				Object param = inst.popParam().get();
+				Object param = inst.popParam().join();
 				double value = ((Number)param).doubleValue();
 				inst.push(ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putDouble(value).array());
 			}
 			else if(op == StackOperation.UNIT_TESTS) {
 				try {
 					inst.context.db.options().setLocationCacheSize(100001);
-					inst.context.db.run(new Function<Transaction, Void>() {
-						@Override
-						public Void apply(Transaction tr) {
-							tr.options().setPrioritySystemImmediate();
-							tr.options().setPriorityBatch();
-							tr.options().setCausalReadRisky();
-							tr.options().setCausalWriteRisky();
-							tr.options().setReadYourWritesDisable();
-							tr.options().setReadAheadDisable();
-							tr.options().setReadSystemKeys();
-							tr.options().setAccessSystemKeys();
-							tr.options().setDurabilityDevNullIsWebScale();
-							tr.options().setTimeout(60*1000);
-							tr.options().setRetryLimit(50);
-							tr.options().setMaxRetryDelay(100);
-							tr.options().setUsedDuringCommitProtectionDisable();
-							tr.options().setTransactionLoggingEnable("my_transaction");
-							tr.options().setReadLockAware();
-							tr.options().setLockAware();
+					inst.context.db.run(tr -> {
+						tr.options().setPrioritySystemImmediate();
+						tr.options().setPriorityBatch();
+						tr.options().setCausalReadRisky();
+						tr.options().setCausalWriteRisky();
+						tr.options().setReadYourWritesDisable();
+						tr.options().setReadAheadDisable();
+						tr.options().setReadSystemKeys();
+						tr.options().setAccessSystemKeys();
+						tr.options().setDurabilityDevNullIsWebScale();
+						tr.options().setTimeout(60*1000);
+						tr.options().setRetryLimit(50);
+						tr.options().setMaxRetryDelay(100);
+						tr.options().setUsedDuringCommitProtectionDisable();
+						tr.options().setTransactionLoggingEnable("my_transaction");
+						tr.options().setReadLockAware();
+						tr.options().setLockAware();
 
-							if(!(new FDBException("Fake", 1020)).isRetryable() ||
-									(new FDBException("Fake", 10)).isRetryable())
-								throw new RuntimeException("Unit test failed: Error predicate incorrect");
+						if(!(new FDBException("Fake", 1020)).isRetryable() ||
+								(new FDBException("Fake", 10)).isRetryable())
+							throw new RuntimeException("Unit test failed: Error predicate incorrect");
 
-							byte[] test = {(byte) 0xff};
-							tr.get(test).get();
+						byte[] test = {(byte) 0xff};
+						tr.get(test).join();
 
-							return null;
-						}
+						return null;
 					});
 
 					testWatches(inst.context.db);
 					testLocality(inst.context.db);
 				}
 				catch(Exception e) {
-					throw new Exception("Unit tests failed: " + e.getMessage());
+					throw new RuntimeException("Unit tests failed: " + e.getMessage());
 				}
 			}
 			else if(op == StackOperation.LOG_STACK) {
-				List<Object> params = inst.popParams(1).get();
+				List<Object> params = inst.popParams(1).join();
 				byte[] prefix = (byte[]) params.get(0);
 
-				Map<Integer, StackEntry> entries = new HashMap<Integer, StackEntry>();
-				while(inst.size() > 0) {
+				Map<Integer, StackEntry> entries = new HashMap<>();
+                while(inst.size() > 0) {
 					entries.put(inst.size()-1, inst.pop());
 					if(entries.size() == 100) {
 						logStack(inst.context.db, entries, prefix);
 						entries.clear();
 					}
-				}
+                }
 
-				logStack(inst.context.db, entries, prefix);
+                logStack(inst.context.db, entries, prefix);
 			}
 			else {
 				throw new IllegalArgumentException("Unrecognized (or unimplemented) operation");
@@ -505,12 +456,13 @@ public class StackTester {
 			//System.out.println(" Pushing error! (" + e.getMessage() + ")");
 			StackUtils.pushError(inst, e);
 			//throw e;
-		} catch (IllegalStateException e) {
-			//Java throws this instead of an FDBException for error code 2015, so we have to translate it
-			if(e.getMessage().equals("Future not ready")) 
-				StackUtils.pushError(inst, new FDBException("", 2015));
-			else
+		} catch (CompletionException e) {
+			FDBException ex = StackUtils.getRootFDBException(e);
+			if(ex == null) {
 				throw e;
+			}
+
+			StackUtils.pushError(inst, ex);
 		}
 	}
 
@@ -526,38 +478,34 @@ public class StackTester {
 			return new SynchronousContext(this.db, prefix);
 		}
 
-		void processOp(byte[] operation) throws FDBException, Throwable {
+		void processOp(byte[] operation) {
 			Tuple tokens = Tuple.fromBytes(operation);
 			Instruction inst = new Instruction(this, tokens);
 			
 			//if(!inst.op.equals("PUSH") && !inst.op.equals("SWAP"))
 			//	System.out.println(inst.context.preStr + " - " + "OP (" + inst.context.instructionIndex + "):" + inst.op);
-			/*for(Object o : op.tokens.getItems())
+			/*for(Object o : inst.tokens.getItems())
 				System.out.print(", " + o);*/
 
 			if(inst.op.startsWith(DIRECTORY_PREFIX))
 				directoryExtension.processInstruction(inst);
 			else
 				processInstruction(inst);
+
+			inst.releaseTransaction();
 		}
 
 		@Override
-		void executeOperations() throws Throwable {
+		void executeOperations() {
 			KeySelector begin = nextKey;
-			Transaction t = db.createTransaction();
 			while(true) {
-				List<KeyValue> keyValues = null;
-				try {
-					keyValues = t.getRange(begin, endKey/*, 1000*/).asList().get();
-				}
-				catch(FDBException e) {
-					t = t.onError(e).get();
-					continue;
-				}
-
-				//System.out.println(" * Got " + keyValues.size() + " instructions");
-				if(keyValues.size() == 0)
+				Transaction t = db.createTransaction();
+				List<KeyValue> keyValues = t.getRange(begin, endKey/*, 1000*/).asList().join();
+				t.close();
+				if(keyValues.size() == 0) {
 					break;
+				}
+				//System.out.println(" * Got " + keyValues.size() + " instructions");
 
 				for(KeyValue next : keyValues) {
 					begin = KeySelector.firstGreaterThan(next.getKey());
@@ -565,19 +513,19 @@ public class StackTester {
 					instructionIndex++;
 				}
 			}
+
 			//System.out.println(" * Completed " + instructionIndex + " instructions");
 		}
 	}
 
-	private static void executeMutation(Instruction inst, Function<Transaction, Void> r)
-	throws FDBException, Exception {
+	private static void executeMutation(Instruction inst, Function<Transaction, Void> r) {
 		// run this with a retry loop (and commit)
 		inst.tcx.run(r);
 		if(inst.isDatabase)
 			inst.push("RESULT_NOT_PRESENT".getBytes());
 	}
 
-	private static byte[] filterKeyResult(byte[] key, final byte[] prefixFilter) {
+	static byte[] filterKeyResult(byte[] key, final byte[] prefixFilter) {
 		if(ByteArrayUtil.startsWith(key, prefixFilter)) {
 			return key;
 		}
@@ -602,7 +550,7 @@ public class StackTester {
 
 	private static List<byte[]> getRange(AsyncIterable<KeyValue> itr, byte[] prefixFilter) {
 		//System.out.println("GetRange");
-		List<byte[]> o = new LinkedList<byte[]>();
+		List<byte[]> o = new LinkedList<>();
 		for(KeyValue kv : itr) {
 			if(prefixFilter == null || ByteArrayUtil.startsWith(kv.getKey(), prefixFilter)) {
 				o.add(kv.getKey());
@@ -615,8 +563,8 @@ public class StackTester {
 
 	private static List<byte[]> getRangeAsList(AsyncIterable<KeyValue> itr, byte[] prefixFilter) {
 		//System.out.println("GetRangeAsList");
-		List<KeyValue> list = itr.asList().get();
-		List<byte[]> o = new LinkedList<byte[]>();
+		List<KeyValue> list = itr.asList().join();
+		List<byte[]> o = new LinkedList<>();
 		for(KeyValue kv : list) {
 			if(prefixFilter == null || ByteArrayUtil.startsWith(kv.getKey(), prefixFilter)) {
 				o.add(kv.getKey());
@@ -627,33 +575,30 @@ public class StackTester {
 		return o;
 	}
 
-	private static void logStack(final Database db, final Map<Integer, StackEntry> entries, final byte[] prefix) {
-		db.run(new Function<Transaction, Void>() {
-			@Override
-			public Void apply(Transaction tr) {
-				for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
-					byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
-					byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
-					tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
-				}
-
-				return null;
+	private static void logStack(Database db, Map<Integer, StackEntry> entries, byte[] prefix) {
+	    db.run(tr -> {
+			for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
+				byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
+				byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
+				tr.set(pk, pv.length < 40000 ? pv : Arrays.copyOfRange(pv, 0, 40000));
 			}
+
+			return null;
 		});
 	}
 
-	private static boolean checkWatches(List<Future<Void>> watches, Database db, boolean expected) {
-		for(Future<Void> w : watches) {
+	private static boolean checkWatches(List<CompletableFuture<Void>> watches, Database db, boolean expected) {
+	    for(CompletableFuture<Void> w : watches) {
 			if(w.isDone() || expected) {
 				try {
-					w.get();
+					w.join();
 					if(!expected) {
 						throw new IllegalStateException("A watch triggered too early");
 					}
 				}
 				catch(FDBException e) {
 					Transaction tr = db.createTransaction();
-					tr.onError(e).get();
+					tr.onError(e).join();
 					return false;
 				}
 			}
@@ -664,32 +609,24 @@ public class StackTester {
 
 	private static void testWatches(Database db) {
 		while(true) {
-			db.run(new Function<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) {
-					tr.set("foo".getBytes(), "f".getBytes());
-					tr.clear("bar".getBytes());
-					return null;
-				}
+			db.run(tr -> {
+				tr.set("foo".getBytes(), "f".getBytes());
+				tr.clear("bar".getBytes());
+				return null;
 			});
 
-			List<Future<Void>> watches = db.run(new Function<Transaction, List<Future<Void>>>() {
-				@Override
-				public List<Future<Void>> apply(Transaction tr) {
-					List<Future<Void>> watchList = new LinkedList<Future<Void>>();
-					watchList.add(tr.watch("foo".getBytes()));
-					watchList.add(tr.watch("bar".getBytes()));
-					tr.set("foo".getBytes(), "f".getBytes());
-					return watchList;
-				}
+			List<CompletableFuture<Void>> watches = db.run(tr -> {
+				List<CompletableFuture<Void>> watchList = new LinkedList<>();
+				watchList.add(tr.watch("foo".getBytes()));
+				watchList.add(tr.watch("bar".getBytes()));
+
+				tr.set("foo".getBytes(), "f".getBytes());
+				return watchList;
 			});
 
-			db.run(new Function<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) {
-					tr.clear("bar".getBytes());
-					return null;
-				}
+			db.run(tr -> {
+				tr.clear("bar".getBytes());
+				return null;
 			});
 
 			try {
@@ -704,38 +641,32 @@ public class StackTester {
 				continue;
 			}
 
-			db.run(new Function<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) {
-					tr.set("foo".getBytes(), "bar".getBytes());
-					tr.set("bar".getBytes(), "foo".getBytes());
-					return null;
-				}
+			db.run(tr -> {
+				tr.set("foo".getBytes(), "bar".getBytes());
+				tr.set("bar".getBytes(), "foo".getBytes());
+				return null;
 			});
 
-			if(checkWatches(watches, db, true)) {
-				return;
+            if(checkWatches(watches, db, true)) {
+            	return;
 			}
 		}
 	}
 
 	private static void testLocality(Database db) {
-		db.run(new Function<Transaction, Void>() {
-			@Override
-			public Void apply(Transaction tr) {
-				tr.options().setTimeout(60*1000);
-				tr.options().setReadSystemKeys();
-				tr.getReadVersion().get();
-
-				AsyncIterable<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
-						tr, new byte[0], new byte[]{(byte) 255, (byte) 255});
-
-				List<byte[]> keys = boundaryKeys.asList().get();
+		db.run(tr -> {
+			tr.options().setTimeout(60*1000);
+			tr.options().setReadSystemKeys();
+			tr.getReadVersion().join();
+			CloseableAsyncIterator<byte[]> boundaryKeys = LocalityUtil.getBoundaryKeys(
+					tr, new byte[0], new byte[]{(byte) 255, (byte) 255});
+			try {
+				List<byte[]> keys = AsyncUtil.collectRemaining(boundaryKeys).join();
 				for(int i = 0; i < keys.size() - 1; i++) {
 					byte[] start = keys.get(i);
-					byte[] end = tr.getKey(KeySelector.lastLessThan(keys.get(i + 1))).get();
-					List<String> startAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, start).get());
-					List<String> endAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, end).get());
+					byte[] end = tr.getKey(KeySelector.lastLessThan(keys.get(i + 1))).join();
+					List<String> startAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, start).join());
+					List<String> endAddresses = Arrays.asList(LocalityUtil.getAddressesForKey(tr, end).join());
 					for(String a : startAddresses) {
 						if(!endAddresses.contains(a)) {
 							throw new RuntimeException("Locality not internally consistent.");
@@ -744,6 +675,9 @@ public class StackTester {
 				}
 
 				return null;
+			}
+			finally {
+				boundaryKeys.close();
 			}
 		});
 	}
@@ -756,41 +690,10 @@ public class StackTester {
 	public static void main(String[] args) {
 		if(args.length < 1)
 			throw new IllegalArgumentException("StackTester needs parameters <prefix> <optional_cluster_file>");
-
-		/*Thread t = new Thread(new Runnable(){
-			@Override
-			public void run() {
-				try {
-					Thread.sleep(1000 * 60 * 2);
-				} catch (InterruptedException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-				Map<Thread, StackTraceElement[]> traces = Thread.getAllStackTraces();
-				System.out.println("Printing traces for " + traces.size() + " threads.");
-				for(Thread thread : traces.keySet()) {
-					System.out.println(" Thread (" + thread.getName() + ")");
-					StackTraceElement[] tr = traces.get(thread);
-					for(StackTraceElement e : tr) {
-						System.out.println("  " + e);
-					}
-				}
-			}});
-		t.setDaemon(true);
-		t.start();*/
-
 		byte[] prefix = args[0].getBytes();
 
 		FDB fdb = FDB.selectAPIVersion(Integer.parseInt(args[1]));
 		Database db;
-		/*fdb.startNetwork();
-		Cluster cluster = fdb.createCluster(args.length > 1 ? args[1] : null, new Executor() {
-			public void execute(Runnable r) {
-				r.run();
-			}
-		});
-
-		db = cluster.openDatabase();*/
 		if(args.length == 2)
 			db = fdb.open();
 		else
@@ -800,6 +703,10 @@ public class StackTester {
 		//System.out.println("Starting test...");
 		c.run();
 		//System.out.println("Done with test.");
+		db.close();
+		System.gc();
 	}
+
+	private StackTester() {}
 }
 

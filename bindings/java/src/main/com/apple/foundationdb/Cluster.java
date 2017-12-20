@@ -23,29 +23,28 @@ package com.apple.foundationdb;
 import java.nio.charset.Charset;
 import java.util.concurrent.Executor;
 
-
 /**
  * The {@code Cluster} represents a connection to a physical set of cooperating machines
- *  running FoundationDB. A {@code Cluster} is opened with a reference to a cluster file.
+ *  running FoundationDB. A {@code Cluster} is opened with a reference to a cluster file.<br>
+ * <br>
+ * <b>Note:</b> {@code Cluster} objects must be {@link #close closed} when no longer in use
+ *  in order to free any associated resources.
  */
-public class Cluster extends DefaultDisposableImpl implements Disposable {
-	private Executor executor;
+public class Cluster extends NativeObjectWrapper {
 	private ClusterOptions options;
+	private final Executor executor;
 
 	private static final Charset UTF8 = Charset.forName("UTF-8");
 
-	protected Cluster(long cPtr, Executor e) {
+	protected Cluster(long cPtr, Executor executor) {
 		super(cPtr);
-		this.executor = e;
-		this.options = new ClusterOptions(new OptionConsumer() {
-			@Override
-			public void setOption(int code, byte[] parameter) {
-				pointerReadLock.lock();
-				try {
-					Cluster_setOption(getPtr(), code, parameter);
-				} finally {
-					pointerReadLock.unlock();
-				}
+		this.executor = executor;
+		this.options = new ClusterOptions((code, parameter) -> {
+			pointerReadLock.lock();
+			try {
+				Cluster_setOption(getPtr(), code, parameter);
+			} finally {
+				pointerReadLock.unlock();
 			}
 		});
 	}
@@ -56,12 +55,19 @@ public class Cluster extends DefaultDisposableImpl implements Disposable {
 	 *
 	 * @return a set of cluster-specific options affecting this {@code Cluster}
 	 */
-	public ClusterOptions options() { return options; }
+	public ClusterOptions options() {
+		return options;
+	}
 
 	@Override
 	protected void finalize() throws Throwable {
-		dispose();
-		super.finalize();
+		try {
+			checkUnclosed("Cluster");
+			close();
+		}
+		finally {
+			super.finalize();
+		}
 	}
 
 	/**
@@ -81,18 +87,18 @@ public class Cluster extends DefaultDisposableImpl implements Disposable {
 	 *         successful connection.
 	 */
 	public Database openDatabase(Executor e) throws FDBException {
-		FutureDatabase futureDatabase = null;
+		FutureDatabase futureDatabase;
 		pointerReadLock.lock();
 		try {
 			futureDatabase = new FutureDatabase(Cluster_createDatabase(getPtr(), "DB".getBytes(UTF8)), e);
 		} finally {
 			pointerReadLock.unlock();
 		}
-		return futureDatabase.get();
+		return futureDatabase.join();
 	}
 
 	@Override
-	protected void disposeInternal(long cPtr) {
+	protected void closeInternal(long cPtr) {
 		Cluster_dispose(cPtr);
 	}
 

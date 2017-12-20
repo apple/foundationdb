@@ -24,8 +24,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import java.util.concurrent.CompletableFuture;
+
 import com.apple.foundationdb.Range;
-import com.apple.foundationdb.async.Future;
 import com.apple.foundationdb.directory.Directory;
 import com.apple.foundationdb.directory.DirectoryLayer;
 import com.apple.foundationdb.directory.DirectorySubspace;
@@ -37,7 +38,7 @@ class DirectoryExtension {
 	int dirIndex = 0;
 	int errorIndex = 0;
 
-	public DirectoryExtension() {
+	DirectoryExtension() {
 		dirList.add(DirectoryLayer.getDefault());
 	}
 
@@ -81,7 +82,7 @@ class DirectoryExtension {
 				List<String> path = DirectoryUtil.popPath(inst).get();
 				byte[] layer = (byte[])inst.popParam().get();
 
-				Future<DirectorySubspace> dir;
+				CompletableFuture<DirectorySubspace> dir;
 				if(layer == null) {
 					if(op == DirectoryOperation.DIRECTORY_CREATE_OR_OPEN)
 						dir = directory().createOrOpen(inst.tcx, path);
@@ -104,7 +105,7 @@ class DirectoryExtension {
 				byte[] layer = (byte[])params.get(0);
 				byte[] prefix = (byte[])params.get(1);
 
-				Future<DirectorySubspace> dir;
+				CompletableFuture<DirectorySubspace> dir;
 				if(layer == null && prefix == null)
 					dir = directory().create(inst.tcx, path);
 				else if(prefix == null)

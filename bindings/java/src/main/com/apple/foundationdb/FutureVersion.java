@@ -23,12 +23,13 @@ package com.apple.foundationdb;
 import java.util.concurrent.Executor;
 
 class FutureVersion extends NativeFuture<Long> {
-	FutureVersion(long cPtr, Executor e) {
-		super(cPtr, e);
+	FutureVersion(long cPtr, Executor executor) {
+		super(cPtr);
+		registerMarshalCallback(executor);
 	}
 
 	@Override
-	Long getIfDone_internal() throws FDBException {
+	protected Long getIfDone_internal(long cPtr) throws FDBException {
 		return FutureVersion_get(cPtr);
 	}
 

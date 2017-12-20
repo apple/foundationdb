@@ -21,8 +21,6 @@
 package com.apple.foundationdb.tuple;
 
 import java.math.BigInteger;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -30,6 +28,8 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.apple.foundationdb.Range;
 
@@ -343,6 +343,15 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 */
 	public List<Object> getItems() {
 		return new ArrayList<Object>(elements);
+	}
+
+	/**
+	 * Gets a {@link Stream} of the unserialized contents of this {@code Tuple}.
+	 *
+	 * @return a {@link Stream} of the elements that make up this {@code Tuple}.
+	 */
+	public Stream<Object> stream() {
+		return elements.stream();
 	}
 
 	/**
@@ -695,7 +704,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  {@code Tuple}
 	 */
 	public boolean hasIncompleteVersionstamp() {
-		return TupleUtil.hasIncompleteVersionstamp(this);
+		return TupleUtil.hasIncompleteVersionstamp(stream());
 	}
 
 	/**
@@ -815,6 +824,22 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
+	 * Efficiently creates a new {@code Tuple} from a {@link Stream} of objects. The
+	 *  elements must follow the type guidelines from {@link Tuple#addObject(Object) add},
+	 *  and so can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
+	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
+	 *
+	 * @param items the {@link Stream} of items from which to create the {@code Tuple}.
+	 *
+	 * @return a newly created {@code Tuple}
+	 */
+	public static Tuple fromStream(Stream<? extends Object> items) {
+		Tuple t = new Tuple();
+		t.elements = items.collect(Collectors.toList());
+		return t;
+	}
+
+	/**
 	 * Creates a new {@code Tuple} from a variable number of elements. The elements
 	 *  must follow the type guidelines from {@link Tuple#addObject(Object) add}, and so
 	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
@@ -824,12 +849,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *
 	 * @return a newly created {@code Tuple}
 	 */
-	public static Tuple from(Object ... items) {
+	public static Tuple from(Object... items) {
 		return fromList(Arrays.asList(items));
 	}
 
 	static void main(String[] args) {
-		for( int i : new int[] {10, 100, 1000, 10000, 100000, 1000000} ) {
+		for(int i : new int[] {10, 100, 1000, 10000, 100000, 1000000}) {
 			createTuple(i);
 		}
 
@@ -867,6 +892,17 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 			else
 				System.out.println(" -> type: (null): null");
 		}
+
+
+		t = Tuple.fromStream(t.stream().map(item -> {
+			if(item instanceof String) {
+				return ((String)item).toUpperCase();
+			} else {
+				return item;
+			}
+		}));
+		System.out.println("Upper cased: " + t);
+
 		Tuple t2 = Tuple.fromBytes(bytes);
 		System.out.println("t2.getLong(0): " + t2.getLong(0));
 		System.out.println("t2.getBigInteger(1): " + t2.getBigInteger(1));

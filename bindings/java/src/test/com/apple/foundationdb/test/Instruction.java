@@ -20,72 +20,80 @@
 
 package com.apple.foundationdb.test;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.List;
+
 import com.apple.foundationdb.ReadTransaction;
 import com.apple.foundationdb.ReadTransactionContext;
 import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.TransactionContext;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
 import com.apple.foundationdb.tuple.Tuple;
 
-import java.util.List;
 
 class Instruction extends Stack {
-	private final static String SUFFIX_SNAPSHOT = "_SNAPSHOT";
-	private final static String SUFFIX_DATABASE = "_DATABASE";
+	private static final String SUFFIX_SNAPSHOT = "_SNAPSHOT";
+	private static final String SUFFIX_DATABASE = "_DATABASE";
 
-	String op;
-	Tuple tokens;
-	Context context;
-	boolean isDatabase;
-	boolean isSnapshot;
-	Transaction tr;
-	ReadTransaction readTr;
-	TransactionContext tcx;
-	ReadTransactionContext readTcx;
+	final String op;
+	final Tuple tokens;
+	final Context context;
+	final boolean isDatabase;
+	final boolean isSnapshot;
+	final Transaction tr;
+	final ReadTransaction readTr;
+	final TransactionContext tcx;
+	final ReadTransactionContext readTcx;
 
-	public Instruction(Context context, Tuple tokens) {
+	Instruction(Context context, Tuple tokens) {
 		this.context = context;
 		this.tokens = tokens;
 
-		op = tokens.getString(0);
-		isDatabase = op.endsWith(SUFFIX_DATABASE);
-		isSnapshot = op.endsWith(SUFFIX_SNAPSHOT);
+		String fullOp = tokens.getString(0);
+		isDatabase = fullOp.endsWith(SUFFIX_DATABASE);
+		isSnapshot = fullOp.endsWith(SUFFIX_SNAPSHOT);
 
 		if(isDatabase) {
-			this.tr = context.db.createTransaction();
-			readTr = this.tr;
-			op = op.substring(0, op.length() - SUFFIX_DATABASE.length());
+			tr = null;
+			readTr = null;
+			op = fullOp.substring(0, fullOp.length() - SUFFIX_DATABASE.length());
 		}
 		else if(isSnapshot) {
-			this.tr = context.getCurrentTransaction();
-			readTr = this.tr.snapshot();
-			op = op.substring(0, op.length() - SUFFIX_SNAPSHOT.length());
+			tr = context.getCurrentTransaction();
+			readTr = tr.snapshot();
+			op = fullOp.substring(0, fullOp.length() - SUFFIX_SNAPSHOT.length());
 		}
 		else {
-			this.tr = context.getCurrentTransaction();
-			readTr = this.tr;
+			tr = context.getCurrentTransaction();
+			readTr = tr;
+			op = fullOp;
 		}
 
-		tcx = isDatabase ? context.db : this.tr;
-		readTcx = isDatabase ? context.db : this.readTr;
+		tcx = isDatabase ? context.db : tr;
+		readTcx = isDatabase ? context.db : readTr;
 	}
 
-	void setTransaction(Transaction tr) {
-		this.tr = tr;
-		if(isSnapshot) {
-			readTr = this.tr.snapshot();
-		}
-		else {
-			readTr = tr;
-		}
-
+	void setTransaction(Transaction newTr) {
 		if(!isDatabase) {
-			context.updateCurrentTransaction(tr);
+			context.updateCurrentTransaction(newTr);
 		}
+	}
+
+	void setTransaction(Transaction oldTr, Transaction newTr) {
+		if(!isDatabase) {
+			context.updateCurrentTransaction(oldTr, newTr);
+		}
+	}
+
+	void releaseTransaction() {
+		Context.releaseTransaction(tr);
 	}
 
 	void push(Object o) {
+		if(o instanceof CompletableFuture && tr != null) {
+			CompletableFuture<?> future = (CompletableFuture<?>)o;
+			Context.addTransactionReference(tr);
+			future.whenComplete((x, t) -> Context.releaseTransaction(tr));
+		}
 		context.stack.push(context.instructionIndex, o);
 	}
 
@@ -113,16 +121,12 @@ class Instruction extends Stack {
 		context.stack.clear();
 	}
 
-	Future<List<Object>> popParams(int num) {
+	CompletableFuture<List<Object>> popParams(int num) {
 		return context.popParams(num);
 	}
 
-	Future<Object> popParam() {
+	CompletableFuture<Object> popParam() {
 		return popParams(1)
-		.map(new Function<List<Object>, Object>() {
-			public Object apply(List<Object> params) {
-				return params.get(0);
-			}
-		});
+		.thenApplyAsync((params) -> params.get(0));
 	}
 }

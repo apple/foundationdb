@@ -21,12 +21,12 @@
 package com.apple.foundationdb.test;
 
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
 
 public class BlockingBenchmark {
 	private static final int REPS = 100000;
@@ -37,87 +37,83 @@ public class BlockingBenchmark {
 
 		// The cluster file DOES NOT need to be valid, although it must exist.
 		//  This is because the database is never really contacted in this test.
-		Database database = fdb.open("T:\\circus\\tags\\RebarCluster-bbc\\cluster_id.txt");
+		try(Database database = fdb.open()) {
+			try(Transaction tr = database.createTransaction()) {
+				tr.setReadVersion(100000);
 
-		byte[] key = {0x1, 0x1, 0x1, 0x1, 0x1};
-		byte[] val = {0x2, 0x2, 0x2, 0x2, 0x2};
+				System.out.println("readVersion().join():");
+				runTests(tr, o -> {
+					try {
+						o.join();
+					}
+					catch(Exception e) {
+						// Ignore
+					}
+					return null;
+				});
 
-		Transaction tr = database.createTransaction();
-		tr.setReadVersion(100000);
-		final Function<Long,Long> identity = new Function<Long, Long>() {
-			@Override
-			public Long apply(Long o) {
-				return o;
+				System.out.println("readVersion().get():");
+				runTests(tr, o -> {
+					try {
+						o.get();
+					}
+					catch(Exception e) {
+						// Ignore
+					}
+					return null;
+				});
+
+				System.out.println("readVersion().thenApplyAsync(identity).get():");
+				runTests(tr, o -> {
+					try {
+						o.thenApplyAsync(Function.identity(), FDB.DEFAULT_EXECUTOR).get();
+					}
+					catch(Exception e) {
+						// Ignore
+					}
+					return null;
+				});
+
+				System.out.println("readVersion().thenApplyAsync^10(identity).get():");
+				runTests(tr, o -> {
+					for(int i = 0; i < 10; i++)
+						o = o.thenApplyAsync(Function.identity(), FDB.DEFAULT_EXECUTOR);
+					try {
+						o.get();
+					}
+					catch(Exception e) {
+						// Ignore
+					}
+					return null;
+				});
+
+				System.out.println("readVersion().get^100():");
+				runTests(tr, o -> {
+					for(int i = 0; i < 100; i++) {
+						try {
+							o.get();
+						}
+						catch(Exception e) {
+							// Ignore
+						}
+					}
+					return null;
+				});
 			}
-		};
-
-
-		System.out.println("readVersion().blockUntilReady():");
-		runTests(tr, new Function<Future<Long>, Void>() {
-			@Override
-			public Void apply(Future<Long> o) {
-				o.blockUntilReady();
-				return null;
-			}
-		});
-
-		System.out.println("readVersion().blockInterruptibly():");
-		runTests(tr, new Function<Future<Long>, Void>() {
-			@Override
-			public Void apply(Future<Long> o) {
-				try {
-					o.blockInterruptibly();
-				} catch (InterruptedException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}
-				return null;
-			}
-		});
-
-		System.out.println("readVersion().map(identity).blockUntilReady():");
-		runTests(tr, new Function<Future<Long>, Void>() {
-			@Override
-			public Void apply(Future<Long> o) {
-				o.map(identity).blockUntilReady();
-				return null;
-			}
-		});
-
-		System.out.println("readVersion().map^10(identity).blockUntilReady():");
-		runTests(tr, new Function<Future<Long>, Void>() {
-			@Override
-			public Void apply(Future<Long> o) {
-				for(int i=0; i<10; i++)
-					o = o.map(identity);
-				o.blockUntilReady();
-				return null;
-			}
-		});
-
-		System.out.println("readVersion().blockUntilReady^100():");
-		runTests(tr, new Function<Future<Long>, Void>() {
-			@Override
-			public Void apply(Future<Long> o) {
-				for(int i=0; i<100; i++)
-					o.blockUntilReady();
-				return null;
-			}
-		});
-
+		}
 	}
 
-	private static void runTests(Transaction tr, Function<Future<Long>, Void> blockMethod) {
+	private static void runTests(Transaction tr, Function<CompletableFuture<Long>, Void> blockMethod) {
 		for(int r=0; r<4; r++) {
 			long start = System.currentTimeMillis();
 			for(int i = 0; i < REPS; i++) {
-				blockMethod.apply( tr.getReadVersion() );
+				blockMethod.apply(tr.getReadVersion());
 			}
 
 			long taken = System.currentTimeMillis() - start;
 			System.out.println("  " + REPS + " done in " + taken + "ms -> " + ((taken * 1000.0) / REPS) + " us latency");
 
-			ArrayList<Future<Long>> futures = new ArrayList<Future<Long>>(PARALLEL);
+			ArrayList<CompletableFuture<Long>> futures = new ArrayList<CompletableFuture<Long>>(PARALLEL);
 			for(int j=0; j<PARALLEL; j++)
 				futures.add(null);
 
@@ -132,4 +128,6 @@ public class BlockingBenchmark {
 			System.out.println("  " + REPS + " done in " + taken + "ms -> " + (REPS / (taken)) + " KHz");
 		}
 	}
+
+	private BlockingBenchmark() {}
 }

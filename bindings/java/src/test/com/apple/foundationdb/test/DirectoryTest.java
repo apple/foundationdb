@@ -27,21 +27,19 @@ import java.util.List;
 import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
-import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.TransactionContext;
-import com.apple.foundationdb.async.PartialFunction;
 import com.apple.foundationdb.directory.DirectoryLayer;
 import com.apple.foundationdb.directory.DirectorySubspace;
 
 public class DirectoryTest {
-	private static final String CLUSTER_FILE = "/home/ajb/fdb.cluster";
-
 	public static void main(String[] args) throws Exception {
 		try {
-			Cluster c = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
-			Database db = c.openDatabase();
-			runTests(db);
-		} catch(Throwable t) {
+			FDB fdb = FDB.selectAPIVersion(510);
+			try(Database db = fdb.open()) {
+				runTests(db);
+			}
+		}
+		catch(Throwable t) {
 			t.printStackTrace();
 		}
 	}
@@ -51,33 +49,30 @@ public class DirectoryTest {
 		final DirectoryLayer dir = new DirectoryLayer();
 
 		try {
-			db.run(new PartialFunction<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) throws Exception {
-					List<String> path = new ArrayList<String>();
-					path.add("foo");
-					DirectorySubspace foo = dir.create(tr, path).get();//, "partition".getBytes("UTF-8")).get();
-					System.out.println(foo.getPath());
-					path.add("bar");
-					DirectorySubspace bar = dir.create(tr, path).get();//, "partition".getBytes("UTF-8")).get();
-					System.out.println(foo.getPath());
-					path.add("baz");
-					DirectorySubspace baz = dir.create(tr, path).get();
-					System.out.println(foo.getPath());
-					System.out.println("Created foo: " + foo.exists(tr).get());
-					System.out.println("Created bar: " + bar.exists(tr).get());
-					System.out.println("Created baz: " + baz.exists(tr).get());
+			db.run(tr -> {
+				List<String> path = new ArrayList<>();
+				path.add("foo");
+				DirectorySubspace foo = dir.create(tr, path).join(); //, "partition".getBytes("UTF-8")).get();
+				System.out.println(foo.getPath());
+				path.add("bar");
+				DirectorySubspace bar = dir.create(tr, path).join(); //, "partition".getBytes("UTF-8")).get();
+				System.out.println(foo.getPath());
+				path.add("baz");
+				DirectorySubspace baz = dir.create(tr, path).join();
+				System.out.println(foo.getPath());
+				System.out.println("Created foo: " + foo.exists(tr).join());
+				System.out.println("Created bar: " + bar.exists(tr).join());
+				System.out.println("Created baz: " + baz.exists(tr).join());
 
-					DirectorySubspace bat = baz.moveTo(tr, Arrays.asList("foo", "bar", "bat")).get();
+				DirectorySubspace bat = baz.moveTo(tr, Arrays.asList("foo", "bar", "bat")).join();
 
-					System.out.println("Moved baz to bat: " + bat.exists(tr).get());
+				System.out.println("Moved baz to bat: " + bat.exists(tr).join());
 
-					foo.removeIfExists(tr).get();
+				foo.removeIfExists(tr).join();
 
-					System.out.println("Removed foo: " + foo.exists(tr).get());
+				System.out.println("Removed foo: " + foo.exists(tr).join());
 
-					return null;
-				}
+				return null;
 			});
 		} catch (Throwable e) {
 			e.printStackTrace();
@@ -85,4 +80,6 @@ public class DirectoryTest {
 
 		System.exit(0);
 	}
+
+	private DirectoryTest() {}
 }

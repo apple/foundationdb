@@ -23,12 +23,13 @@ package com.apple.foundationdb;
 import java.util.concurrent.Executor;
 
 class FutureVoid extends NativeFuture<Void> {
-	FutureVoid(long cPtr, Executor e) {
-		super(cPtr, e);
+	FutureVoid(long cPtr, Executor executor) {
+		super(cPtr);
+		registerMarshalCallback(executor);
 	}
 
 	@Override
-	public Void getIfDone_internal() throws FDBException {
+	protected Void getIfDone_internal(long cPtr) throws FDBException {
 		// With "future-cleanup" we get rid of FutureVoid_get and replace instead
 		//  with a get on the error and throw if the error is not success.
 		FDBException err = Future_getError(cPtr);

@@ -111,11 +111,11 @@ private:
 
 class RawDiskQueue_TwoFiles {
 public:
-	RawDiskQueue_TwoFiles( std::string basename, UID dbgid )
+	RawDiskQueue_TwoFiles( std::string basename, UID dbgid, int64_t fileSizeWarningLimit )
 		: basename(basename), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
 		readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
 		dbg_file0BeginSeq(0), fileExtensionBytes(10<<20), readingBuffer( dbgid ),
-		readyToPush(Void())
+		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void())
 	{
 		if(BUGGIFY)
 			fileExtensionBytes = 8<<10;
@@ -184,12 +184,13 @@ public:
 
 	UID dbgid;
 	int64_t dbg_file0BeginSeq;
+	int64_t fileSizeWarningLimit;
 
 	Promise<Void> error, stopped;
 	Future<Void> onError, onStopped;
 
 	Future<Void> readyToPush;
-	AndFuture lastCommit;
+	Future<Void> lastCommit;
 
 	StringBuffer readingBuffer; // Pages that have been read and not yet returned
 	int readingFile;  // i if the next page after readingBuffer should be read from files[i], 2 if recovery is complete
@@ -249,6 +250,10 @@ public:
 				int64_t minExtension = pageData.size() + writingPos - files[1].size;
 				files[1].size += std::min(std::max(fileExtensionBytes, minExtension), files[0].size+files[1].size+minExtension);
 				waitfor.push_back( files[1].f->truncate( files[1].size ) );
+
+				if(fileSizeWarningLimit > 0 && files[1].size > fileSizeWarningLimit) {
+					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", dbgid).detail("filename", filename(1)).detail("size", files[1].size).suppressFor(1.0);
+				}
 			}
 		}
 
@@ -268,12 +273,13 @@ public:
 		state std::string filename = self->files[0].dbgFilename;
 		state UID dbgid = self->dbgid;
 		state vector<Reference<SyncQueue>> syncFiles;
+		state Future<Void> lastCommit = self->lastCommit;
 		try {
 			// pushing might need to wait for previous pushes to start (to maintain order) or for
 			// a previous commit to finish if stall() was called
 			Future<Void> ready = self->readyToPush;
 			self->readyToPush = pushing.getFuture();
-			self->lastCommit.add( committed.getFuture() );
+			self->lastCommit = committed.getFuture();
 
 			Void _ = wait( ready );
 
@@ -291,6 +297,12 @@ public:
 			Future<Void> sync = syncFiles[0]->onSync();
 			for(int i=1; i<syncFiles.size(); i++) sync = sync && syncFiles[i]->onSync();
 			Void _ = wait( sync );
+			Void _ = wait( lastCommit );
+
+			//Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
+			if(g_network->check_yield(g_network->getCurrentTask())) {
+				Void _ = wait(delay(0, g_network->getCurrentTask()));
+			}
 
 			self->updatePopped( poppedPages*sizeof(Page) );
 
@@ -298,10 +310,6 @@ public:
 				.detail("File0Size", self->files[0].size).detail("File1Size", self->files[1].size)
 				.detail("File0Name", self->files[0].dbgFilename).detail("SyncedFiles", syncFiles.size());*/
 
-			if(g_random->random01() < 0.01) {
-				//occasionally delete all the ready future in the AndFuture
-				self->lastCommit.cleanup();
-			}
 			committed.send(Void());
 		} catch (Error& e) {
 			delete pageMem;
@@ -394,7 +402,7 @@ public:
 		// Wait for all reads and writes on the file, and all actors referencing self, to be finished
 		state Error error = success();
 		try {
-			ErrorOr<Void> _ = wait(errorOr(self->lastCommit.getFuture()));
+			ErrorOr<Void> _ = wait(errorOr(self->lastCommit));
 			while (self->recoveryActorCount.get(false))
 				Void _ = wait( self->recoveryActorCount.onChange(false) );
 
@@ -405,8 +413,8 @@ public:
 				TraceEvent("DiskQueueShutdownDeleting", self->dbgid)
 					.detail("File0", self->filename(0))
 					.detail("File1", self->filename(1));
-				Void _ = wait( IAsyncFile::incrementalDelete( self->filename(0), false ) );
-				Void _ = wait( IAsyncFile::incrementalDelete( self->filename(1), true ) );
+				Void _ = wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename(0), false ) );
+				Void _ = wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename(1), true ) );
 			}
 			TraceEvent("DiskQueueShutdownComplete", self->dbgid)
 				.detail("DeleteFiles", deleteFiles)
@@ -581,20 +589,11 @@ public:
 
 	ACTOR static UNCANCELLABLE Future<Void> truncateFile(RawDiskQueue_TwoFiles* self, int file, int64_t pos) {
 		state TrackMe trackMe(self);
-		state StringBuffer zeros( self->dbgid );
-
 		TraceEvent("DQTruncateFile", self->dbgid).detail("File", file).detail("Pos", pos).detail("File0Name", self->files[0].dbgFilename);
-
-		zeros.alignReserve( sizeof(Page), 1<<20 );
-		memset( zeros.append(1<<20), 0, 1<<20 );
-
-		while(pos < self->files[file].size) {
-			state int len = std::min<int64_t>(zeros.size(), self->files[file].size-pos);
-			Void _ = wait( self->files[file].f->write( zeros.str.begin(), len, pos ) );
-			pos += len;
-		}
-
+		state Reference<IAsyncFile> f = self->files[file].f;  // Hold onto a reference in the off-chance that the DQ is removed from underneath us.
+		Void _ = wait( f->zeroRange( pos, self->files[file].size-pos ) );
 		Void _ = wait(self->files[file].syncQueue->onSync());
+		// We intentionally don't return the f->zero future, so that TrackMe is destructed after f->zero finishes.
 		return Void();
 	}
 
@@ -636,8 +635,8 @@ public:
 
 class DiskQueue : public IDiskQueue {
 public:
-	DiskQueue( std::string basename, UID dbgid )
-		: rawQueue( new RawDiskQueue_TwoFiles(basename, dbgid) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
+	DiskQueue( std::string basename, UID dbgid, int64_t fileSizeWarningLimit )
+		: rawQueue( new RawDiskQueue_TwoFiles(basename, dbgid,fileSizeWarningLimit) ), dbgid(dbgid), anyPopped(false), nextPageSeq(0), poppedSeq(0), lastPoppedSeq(0),
 		  nextReadLocation(-1), readBufPage(NULL), readBufPos(0), pushed_page_buffer(NULL), recovered(false), lastCommittedSeq(0), warnAlwaysForMemory(true)
 	{
 	}
@@ -1029,7 +1028,7 @@ private:
 class DiskQueue_PopUncommitted : public IDiskQueue {
 
 public:
-	DiskQueue_PopUncommitted( std::string basename, UID dbgid ) : queue(new DiskQueue(basename, dbgid)), pushed(0), popped(0), committed(0) { };
+	DiskQueue_PopUncommitted( std::string basename, UID dbgid, int64_t fileSizeWarningLimit ) : queue(new DiskQueue(basename, dbgid, fileSizeWarningLimit)), pushed(0), popped(0), committed(0) { };
 
 	//IClosable
 	Future<Void> getError() { return queue->getError(); }
@@ -1097,6 +1096,6 @@ private:
 	}
 };
 
-IDiskQueue* openDiskQueue( std::string basename, UID dbgid ) {
-	return new DiskQueue_PopUncommitted( basename, dbgid );
+IDiskQueue* openDiskQueue( std::string basename, UID dbgid, int64_t fileSizeWarningLimit ) {
+	return new DiskQueue_PopUncommitted( basename, dbgid, fileSizeWarningLimit );
 }

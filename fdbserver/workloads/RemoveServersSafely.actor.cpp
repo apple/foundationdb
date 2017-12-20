@@ -281,6 +281,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> workloadMain( RemoveServersSafelyWorkload* self, Database cx, double waitSeconds,
 			std::set<AddressExclusion> toKill1, std::set<AddressExclusion> toKill2 ) {
+		state Future<Void> disabler = disableConnectionFailuresAfter( 500.0, "RemoveServersSafely" );
 		Void _ = wait( delay( waitSeconds ) );
 
 		// Removing the first set of machines might legitimately bring the database down, so a timeout is not an error
@@ -318,7 +319,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 		// The second set of machines is selected so that we can always make progress without it, even after the permitted number of other permanent failures
 		// so we expect to succeed after a finite amount of time
-		state Future<Void> disabler = disableConnectionFailuresAfter( self->kill2Timeout/2, "RemoveServersSafely" );
 		TraceEvent("RemoveAndKill").detail("Step", "exclude second list").detail("toKill2", describe(toKill2)).detail("KillTotal", toKill2.size())
 			.detail("Processes", killProcArray.size()).detail("ClusterAvailable", g_simulator.isAvailable());
 		Void _ = wait( reportErrors( timeoutError( removeAndKill( self, cx, toKill2, bClearedFirst ? &toKill1 : NULL), self->kill2Timeout ), "RemoveServersSafelyError", UID() ) );

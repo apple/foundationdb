@@ -181,7 +181,7 @@ struct ProxyCommitData {
 	uint64_t commitVersionRequestNumber;
 	uint64_t mostRecentProcessedRequestNumber;
 	KeyRangeMap<Deque<std::pair<Version,int>>> keyResolvers;
-	KeyRangeMap<std::vector<Tag>> keyTags;
+	KeyRangeMap<ServerCacheInfo> keyInfo;
 	std::map<Key, applyMutationsData> uid_applyMutationsData;
 	bool firstProxy;
 	double lastCoalesceTime;
@@ -198,7 +198,7 @@ struct ProxyCommitData {
 	Database cx;
 	EventMetricHandle<SingleKeyMutation> singleKeyMutationEvent;
 
-	std::map<UID, Tag> tagCache;
+	std::map<UID, Reference<StorageInfo>> storageCache;
 
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
 		: dbgid(dbgid), stats(dbgid, &version, &committedVersion), master(master), 
@@ -427,7 +427,7 @@ ACTOR Future<Void> commitBatch(
 			for (int resolver = 0; resolver < resolution.size(); resolver++)
 				committed = committed && resolution[resolver].stateMutations[versionIndex][transactionIndex].committed;
 			if (committed)
-				applyMetadataMutations( self->dbgid, arena, resolution[0].stateMutations[versionIndex][transactionIndex].mutations, self->txnStateStore, NULL, &forceRecovery, self->logSystem, 0, &self->vecBackupKeys, &self->keyTags, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->tagCache );
+				applyMetadataMutations( self->dbgid, arena, resolution[0].stateMutations[versionIndex][transactionIndex].mutations, self->txnStateStore, NULL, &forceRecovery, self->logSystem, 0, &self->vecBackupKeys, &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache );
 			
 			if( resolution[0].stateMutations[versionIndex][transactionIndex].mutations.size() && firstStateMutations ) {
 				ASSERT(committed);
@@ -489,7 +489,7 @@ ACTOR Future<Void> commitBatch(
 	{
 		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware)) {
 			commitCount++;
-			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit, &forceRecovery, self->logSystem, commitVersion+1, &self->vecBackupKeys, &self->keyTags, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->tagCache);
+			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit, &forceRecovery, self->logSystem, commitVersion+1, &self->vecBackupKeys, &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache);
 		}
 		if(firstStateMutations) {
 			ASSERT(committed[t] == ConflictBatch::TransactionCommitted);
@@ -536,10 +536,10 @@ ACTOR Future<Void> commitBatch(
 				// FIXME: Make this process not disgustingly CPU intensive
 
 				if (isSingleKeyMutation((MutationRef::Type) m.type)) {
-					auto& tags = self->keyTags[m.param1];
+					auto& tags = self->keyInfo[m.param1].tags;
 	
 					if(self->singleKeyMutationEvent->enabled) {
-						KeyRangeRef shard = self->keyTags.rangeContaining(m.param1).range();
+						KeyRangeRef shard = self->keyInfo.rangeContaining(m.param1).range();
 						self->singleKeyMutationEvent->tag1 = (int64_t)tags[0];
 						self->singleKeyMutationEvent->tag2 = (int64_t)tags[1];
 						self->singleKeyMutationEvent->tag3 = (int64_t)tags[2];
@@ -555,21 +555,21 @@ ACTOR Future<Void> commitBatch(
 					toCommit.addTypedMessage(m);
 				}
 				else if (m.type == MutationRef::ClearRange) {
-					auto ranges = self->keyTags.intersectingRanges(KeyRangeRef(m.param1, m.param2));
+					auto ranges = self->keyInfo.intersectingRanges(KeyRangeRef(m.param1, m.param2));
 					auto firstRange = ranges.begin();
 					++firstRange;
 					if (firstRange == ranges.end()) {
 						// Fast path
 						if (debugMutation("ProxyCommit", commitVersion, m))
-							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(ranges.begin().value())).detail("Mutation", m.toString()).detail("Version", commitVersion);
-						for (auto& tag : ranges.begin().value())
+							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(ranges.begin().value().tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
+						for (auto& tag : ranges.begin().value().tags)
 							toCommit.addTag(tag);
 					}
 					else {
 						TEST(true); //A clear range extends past a shard boundary
 						std::set<Tag> allSources;
 						for (auto r : ranges)
-							allSources.insert(r.value().begin(), r.value().end());
+							allSources.insert(r.value().tags.begin(), r.value().tags.end());
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(allSources)).detail("Mutation", m.toString()).detail("Version", commitVersion);
 						for (auto& tag : allSources)
@@ -681,7 +681,7 @@ ACTOR Future<Void> commitBatch(
 				backupMutation.param1 = wr.toStringRef();
 				ASSERT( backupMutation.param1.startsWith(logRangeMutation.first) );  // We are writing into the configured destination
 					
-				auto& tags = self->keyTags[backupMutation.param1];
+				auto& tags = self->keyInfo[backupMutation.param1].tags;
 				for (auto& tag : tags)
 					toCommit.addTag(tag);
 				toCommit.addTypedMessage(backupMutation);
@@ -705,7 +705,7 @@ ACTOR Future<Void> commitBatch(
 		TEST(true);  // Semi-committed pipeline limited by MVCC window
 		//TraceEvent("ProxyWaitingForCommitted", self->dbgid).detail("CommittedVersion", self->committedVersion.get()).detail("NeedToCommit", commitVersion);
 		choose{
-			when(Void _ = wait(self->committedVersion.whenAtLeast(commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) { 
+			when(Void _ = wait(self->committedVersion.whenAtLeast(commitVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS))) {
 				Void _ = wait(yield());
 				break; 
 			}
@@ -1002,60 +1002,59 @@ ACTOR static Future<Void> readRequestServer(
 
 	TraceEvent("ProxyReadyForReads", proxy.id());
 
-	loop choose{
-		when(ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> req = waitNext(proxy.getKeyServersLocations.getFuture())) {
-			Standalone<VectorRef<KeyValueRef>> keyServersBegin = commitData->txnStateStore->readRange(KeyRangeRef(allKeys.begin, keyServersKeyServersKeys.begin), -1).get();
-			Standalone<VectorRef<KeyValueRef>> keyServersEnd = commitData->txnStateStore->readRange(KeyRangeRef(keyServersKeyServersKeys.end, allKeys.end), 2).get();
-			Standalone<VectorRef<KeyValueRef>> keyServersShardBoundaries = commitData->txnStateStore->readRange(KeyRangeRef(keyServersBegin[0].key, keyServersEnd[1].key)).get();
-
-			Standalone<VectorRef<KeyValueRef>> serverListBegin = commitData->txnStateStore->readRange(KeyRangeRef(allKeys.begin, keyServersKey(serverListKeys.begin)), -1).get();
-			Standalone<VectorRef<KeyValueRef>> serverListEnd = commitData->txnStateStore->readRange(KeyRangeRef(keyServersKey(serverListKeys.end), allKeys.end), 2).get();
-			Standalone<VectorRef<KeyValueRef>> serverListShardBoundaries = commitData->txnStateStore->readRange(KeyRangeRef(serverListBegin[0].key, serverListEnd[1].key)).get();
-
-			bool ignoreFirstServerListShard = false;
-			if (keyServersShardBoundaries.back().key > serverListShardBoundaries.front().key)
-				ignoreFirstServerListShard = true;
-
-			// shards include all keyServers and serverLists information
-			vector<pair<KeyRangeRef, vector<StorageServerInterface>>> shards;
-			int reserveSize = keyServersShardBoundaries.size() + serverListShardBoundaries.size() - 2 - (ignoreFirstServerListShard ? 1 : 0);
-			shards.reserve(reserveSize);
-
-			for (int i = 0; i < keyServersShardBoundaries.size() - 1; i++) {
-				vector<UID> src, dest;
-				decodeKeyServersValue(keyServersShardBoundaries[i].value, src, dest);
-				vector<StorageServerInterface> ssis;
-				ssis.reserve(src.size());
-				for (auto const& id : src) {
-					ssis.push_back(decodeServerListValue(commitData->txnStateStore->readValue(serverListKeyFor(id)).get().get()));
+	loop {
+		choose{
+			when(GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture())) {
+				GetKeyServerLocationsReply rep;
+				if(!req.end.present()) {
+					auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin) : commitData->keyInfo.rangeContaining(req.begin);
+					vector<StorageServerInterface> ssis;
+					ssis.reserve(r.value().info.size());
+					for(auto& it : r.value().info) {
+						ssis.push_back(it->interf);
+					}
+					rep.results.push_back(std::make_pair(r.range(), ssis));
+				} else if(!req.reverse) {
+					int count = 0;
+					for(auto r = commitData->keyInfo.rangeContaining(req.begin); r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get(); ++r) {
+						vector<StorageServerInterface> ssis;
+						ssis.reserve(r.value().info.size());
+						for(auto& it : r.value().info) {
+							ssis.push_back(it->interf);
+						}
+						rep.results.push_back(std::make_pair(r.range(), ssis));
+						count++;
+					}
+				} else {
+					int count = 0;
+					auto r = commitData->keyInfo.rangeContainingKeyBefore(req.end.get());
+					while( count < req.limit && req.begin < r.end() ) {
+						vector<StorageServerInterface> ssis;
+						ssis.reserve(r.value().info.size());
+						for(auto& it : r.value().info) {
+							ssis.push_back(it->interf);
+						}
+						rep.results.push_back(std::make_pair(r.range(), ssis));
+						if(r == commitData->keyInfo.ranges().begin()) {
+							break;
+						}
+						count++;
+						--r;
+					}
 				}
-
-				shards.push_back(std::make_pair(KeyRangeRef(keyServersShardBoundaries[i].key.removePrefix(keyServersPrefix), keyServersShardBoundaries[i + 1].key.removePrefix(keyServersPrefix)), ssis));
-			}
-
-			for (int i = ignoreFirstServerListShard ? 1 : 0 ; i < serverListShardBoundaries.size() - 1; i++) {
-				vector<UID> src, dest;
-				decodeKeyServersValue(serverListShardBoundaries[i].value, src, dest);
-				vector<StorageServerInterface> ssis;
-				ssis.reserve(src.size());
-				for (auto const& id : src) {
-					ssis.push_back(decodeServerListValue(commitData->txnStateStore->readValue(serverListKeyFor(id)).get().get()));
-				}
-
-				shards.push_back(std::make_pair(KeyRangeRef(serverListShardBoundaries[i].key.removePrefix(keyServersPrefix), serverListShardBoundaries[i + 1].key.removePrefix(keyServersPrefix)), ssis));
-			}
-
-			req.send(shards);
-		}
-		when(GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture())) {
-			if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
-				GetStorageServerRejoinInfoReply rep;
-				rep.version = commitData->version;
-				rep.tag = decodeServerTagValue( commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get() );
 				req.reply.send(rep);
-			} else
-				req.reply.sendError(worker_removed());
+			}
+			when(GetStorageServerRejoinInfoRequest req = waitNext(proxy.getStorageServerRejoinInfo.getFuture())) {
+				if (commitData->txnStateStore->readValue(serverListKeyFor(req.id)).get().present()) {
+					GetStorageServerRejoinInfoReply rep;
+					rep.version = commitData->version;
+					rep.tag = decodeServerTagValue( commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get() );
+					req.reply.send(rep);
+				} else
+					req.reply.sendError(worker_removed());
+			}
 		}
+		Void _ = wait(yield());
 	}
 }
 
@@ -1161,37 +1160,46 @@ ACTOR Future<Void> masterProxyServerCore(
 						((KeyRangeRef&)txnKeys) = KeyRangeRef( keyAfter(data.back().key, txnKeys.arena()), txnKeys.end );
 
 						Standalone<VectorRef<MutationRef>> mutations;
-						std::vector<std::pair<MapPair<Key,std::vector<Tag>>,int>> keyTagData;
+						std::vector<std::pair<MapPair<Key,ServerCacheInfo>,int>> keyInfoData;
 						vector<UID> src, dest;
-						std::set<Tag> tags;
-						Tag tag;
+						Reference<StorageInfo> storageInfo;
+						ServerCacheInfo info;
 						for(auto &kv : data) {
 							if( kv.key.startsWith(keyServersPrefix) ) {
 								KeyRef k = kv.key.removePrefix(keyServersPrefix);
 								if(k != allKeys.end) {
 									decodeKeyServersValue(kv.value, src, dest);
-									tags.clear();
-									for(auto id : src) {
-										auto tagItr = commitData.tagCache.find(id);
-										if(tagItr == commitData.tagCache.end()) {
-											tag = decodeServerTagValue( commitData.txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-											commitData.tagCache[id] = tag;
+									info.tags.clear();
+									info.info.clear();
+									for(auto& id : src) {
+										auto cacheItr = commitData.storageCache.find(id);
+										if(cacheItr == commitData.storageCache.end()) {
+											storageInfo = Reference<StorageInfo>( new StorageInfo() );
+											storageInfo->tag = decodeServerTagValue( commitData.txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
+											storageInfo->interf = decodeServerListValue( commitData.txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
+											commitData.storageCache[id] = storageInfo;
 										} else {
-											tag = tagItr->second;
+											storageInfo = cacheItr->second;
 										}
-										tags.insert( tag );
+										ASSERT(storageInfo->tag != invalidTag);
+										info.tags.push_back( storageInfo->tag );
+										info.info.push_back( storageInfo );
 									}
-									for(auto id : dest) {
-										auto tagItr = commitData.tagCache.find(id);
-										if(tagItr == commitData.tagCache.end()) {
-											tag = decodeServerTagValue( commitData.txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-											commitData.tagCache[id] = tag;
+									for(auto& id : dest) {
+										auto cacheItr = commitData.storageCache.find(id);
+										if(cacheItr == commitData.storageCache.end()) {
+											storageInfo = Reference<StorageInfo>( new StorageInfo() );
+											storageInfo->tag = decodeServerTagValue( commitData.txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
+											storageInfo->interf = decodeServerListValue( commitData.txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
+											commitData.storageCache[id] = storageInfo;
 										} else {
-											tag = tagItr->second;
+											storageInfo = cacheItr->second;
 										}
-										tags.insert( tag );
+										ASSERT(storageInfo->tag != invalidTag);
+										info.tags.push_back( storageInfo->tag );
 									}
-									keyTagData.push_back( std::make_pair(MapPair<Key,std::vector<Tag>>(k, std::vector<Tag>(tags.begin(), tags.end())), 1) );
+									uniquify(info.tags);
+									keyInfoData.push_back( std::make_pair(MapPair<Key,ServerCacheInfo>(k, info), 1) );
 								}
 							} else {
 								mutations.push_back(mutations.arena(), MutationRef(MutationRef::SetValue, kv.key, kv.value));
@@ -1199,11 +1207,11 @@ ACTOR Future<Void> masterProxyServerCore(
 						}
 						
 						//insert keyTag data separately from metadata mutations so that we can do one bulk insert which avoids a lot of map lookups.
-						commitData.keyTags.rawInsert(keyTagData); 
+						commitData.keyInfo.rawInsert(keyInfoData); 
 
 						Arena arena;
 						bool confChanges;
-						applyMetadataMutations(commitData.dbgid, arena, mutations, commitData.txnStateStore, NULL, &confChanges, Reference<ILogSystem>(), 0, &commitData.vecBackupKeys, &commitData.keyTags, commitData.firstProxy ? &commitData.uid_applyMutationsData : NULL, commitData.commit, commitData.cx, &commitData.committedVersion, &commitData.tagCache, true);
+						applyMetadataMutations(commitData.dbgid, arena, mutations, commitData.txnStateStore, NULL, &confChanges, Reference<ILogSystem>(), 0, &commitData.vecBackupKeys, &commitData.keyInfo, commitData.firstProxy ? &commitData.uid_applyMutationsData : NULL, commitData.commit, commitData.cx, &commitData.committedVersion, &commitData.storageCache, true);
 					}
 
 					auto lockedKey = commitData.txnStateStore->readValue(databaseLockedKey).get();

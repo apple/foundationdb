@@ -26,20 +26,18 @@ import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.KeyValue;
-import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.TransactionContext;
-import com.apple.foundationdb.async.Function;
 
 public class IterableTest {
-	private static final String CLUSTER_FILE = "C:\\Users\\Ben\\workspace\\fdb\\fdb.cluster";
-
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			Cluster cluster = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
-			Database db = cluster.openDatabase();
-			runTests(reps, db);
-		} catch(Throwable t) {
+			FDB fdb = FDB.selectAPIVersion(510);
+			try(Database db = fdb.open()) {
+				runTests(reps, db);
+			}
+		}
+		catch(Throwable t) {
 			t.printStackTrace();
 		}
 	}
@@ -49,16 +47,14 @@ public class IterableTest {
 		long start = System.currentTimeMillis();
 		final AtomicInteger lastcount = new AtomicInteger(0);
 		try {
-			db.run(new Function<Transaction, Void>() {
-				@Override
-				public Void apply(Transaction tr) {
-					for(KeyValue e : tr.getRange("vcount".getBytes(), "zz".getBytes())) {
-						System.out.println("K: " + new String(e.getKey()) + ", V: " + new String(e.getValue()));
-					}
-					return null;
+			db.run(tr -> {
+				for(KeyValue e : tr.getRange("vcount".getBytes(), "zz".getBytes())) {
+					System.out.println("K: " + new String(e.getKey()) + ", V: " + new String(e.getValue()));
 				}
+				return null;
 			});
-		} catch (Throwable e) {
+		}
+		catch (Throwable e) {
 			e.printStackTrace();
 		}
 		long end = System.currentTimeMillis();
@@ -71,4 +67,6 @@ public class IterableTest {
 
 		System.exit(0);
 	}
+
+	private IterableTest() {}
 }

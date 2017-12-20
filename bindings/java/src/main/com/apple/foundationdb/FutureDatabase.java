@@ -22,18 +22,17 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.Executor;
 
-
-
 class FutureDatabase extends NativeFuture<Database> {
-	private Executor executor;
+	private final Executor executor;
 
-	FutureDatabase(long cPtr, Executor e) {
-		super(cPtr, e);
-		this.executor = e;
+	FutureDatabase(long cPtr, Executor executor) {
+		super(cPtr);
+		this.executor = executor;
+		registerMarshalCallback(executor);
 	}
 
 	@Override
-	public Database getIfDone_internal() throws FDBException {
+	protected Database getIfDone_internal(long cPtr) throws FDBException {
 		return new FDBDatabase(FutureDatabase_get(cPtr), executor);
 	}
 

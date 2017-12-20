@@ -538,9 +538,6 @@ Database DatabaseContext::create( Reference<AsyncVar<ClientDBInfo>> info, Future
 
 DatabaseContext::~DatabaseContext() {
 	monitorMasterProxiesInfoChange.cancel();
-	locationCacheLock.assertNotEntered();
-	SSInterfaceCacheLock.assertNotEntered();
-	SSInterfaceCache.clear();
 	for(auto it = ssid_locationInfo.begin(); it != ssid_locationInfo.end(); it = ssid_locationInfo.erase(it))
 		it->second->notifyContextDestroyed();
 	ASSERT( ssid_locationInfo.empty() );
@@ -548,7 +545,6 @@ DatabaseContext::~DatabaseContext() {
 }
 
 pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const KeyRef& key, bool isBackward ) {
-	SpinLockHolder hold( locationCacheLock );
 	if( isBackward ) {
 		auto range = locationCache.rangeContainingKeyBefore(key);
 		return std::make_pair(range->range(), range->value());
@@ -561,7 +557,6 @@ pair<KeyRange,Reference<LocationInfo>> DatabaseContext::getCachedLocation( const
 
 bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::pair<KeyRange,Reference<LocationInfo>>>& result, int limit, bool reverse ) {
 	result.clear();
-	SpinLockHolder hold( locationCacheLock );
 	auto locRanges = locationCache.intersectingRanges(range);
 
 	auto begin = locationCache.rangeContaining(range.begin);
@@ -592,15 +587,12 @@ bool DatabaseContext::getCachedLocations( const KeyRangeRef& range, vector<std::
 
 Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& keys, const vector<StorageServerInterface>& servers ) {
 	int maxEvictionAttempts = 100, attempts = 0;
-	SpinLockHolder hold( locationCacheLock );
 	Reference<LocationInfo> loc = LocationInfo::getInterface( this, servers, clientLocality);
 	while( locationCache.size() > locationCacheSize && attempts < maxEvictionAttempts) {
 		TEST( true ); // NativeAPI storage server locationCache entry evicted
 		attempts++;
 		auto r = locationCache.randomRange();
 		Key begin = r.begin(), end = r.end();  // insert invalidates r, so can't be passed a mere reference into it
-		if( begin >= keyServersPrefix && attempts > maxEvictionAttempts / 2)
-			continue;
 		locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
 	}
 	locationCache.insert( keys, loc );
@@ -608,7 +600,6 @@ Reference<LocationInfo> DatabaseContext::setCachedLocation( const KeyRangeRef& k
 }
 
 void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
-	SpinLockHolder hold( locationCacheLock );
 	if( isBackward )
 		locationCache.rangeContainingKeyBefore(key)->value() = Reference<LocationInfo>();
 	else
@@ -616,26 +607,9 @@ void DatabaseContext::invalidateCache( const KeyRef& key, bool isBackward ) {
 }
 
 void DatabaseContext::invalidateCache( const KeyRangeRef& keys ) {
-	SpinLockHolder hold( locationCacheLock );
 	auto rs = locationCache.intersectingRanges(keys);
 	Key begin = rs.begin().begin(), end = rs.end().begin();  // insert invalidates rs, so can't be passed a mere reference into it
 	locationCache.insert( KeyRangeRef(begin, end), Reference<LocationInfo>() );
-}
-
-void DatabaseContext::invalidateCache( Reference<LocationInfo> const& ref ) {
-	if( !ref )
-		return;
-
-	SpinLockHolder hold( SSInterfaceCacheLock );
-	for(int i=0; i<ref->size(); i++)
-		SSInterfaceCache.erase( ref->getId(i) );
-}
-
-void DatabaseContext::invalidateCache( std::vector<UID> const& ids ) {
-	SpinLockHolder hold( SSInterfaceCacheLock );
-	for( auto id : ids ) {
-		SSInterfaceCache.erase( id );
-	}
 }
 
 Future<Void> DatabaseContext::onMasterProxiesChanged() {
@@ -665,7 +639,6 @@ uint64_t extractHexOption( StringRef value ) {
 }
 
 void DatabaseContext::setOption( FDBDatabaseOptions::Option option, Optional<StringRef> value) {
-	SpinLockHolder hold( locationCacheLock );
 	switch(option) {
 		case FDBDatabaseOptions::LOCATION_CACHE_SIZE:
 			locationCacheSize = (int)extractIntOption(value, 0, std::numeric_limits<int>::max());
@@ -1022,52 +995,6 @@ ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface( Database cx
 	return decodeServerListValue(val.get());
 }
 
-Future<Optional<StorageServerInterface>> _getServerInterfaceImpl( Database cx, TransactionInfo info, UID id ) {
-	// check the cache
-	SpinLockHolder hold( cx->SSInterfaceCacheLock );
-	auto it = cx->SSInterfaceCache.find( id );
-	if( it != cx->SSInterfaceCache.end() ) {
-		return it->second;
-	}
-
-	auto fetcher = fetchServerInterface(cx, info, id);
-	if( BUGGIFY) {
-		fetcher = Optional<StorageServerInterface>();
-	}
-	cx->SSInterfaceCache[ id ] = fetcher;
-	return fetcher;
-}
-
-ACTOR Future<Optional<StorageServerInterface>> getServerInterface( Database cx, TransactionInfo info, UID id ) {
-	try {
-		Optional<StorageServerInterface> result = wait( _getServerInterfaceImpl(cx, info, id) );
-		return result;
-	} catch( Error& ) {
-		SpinLockHolder hold( cx->SSInterfaceCacheLock );
-		cx->SSInterfaceCache.erase( id );
-		throw;
-	}
-}
-
-ACTOR Future<Optional<vector<StorageServerInterface>>> getServerInterfaces(
-		Database cx, TransactionInfo info, vector<UID> ids ) {
-	state vector< Future< Optional<StorageServerInterface> > > serverListEntries;
-	for( int s = 0; s < ids.size(); s++ ) {
-		serverListEntries.push_back( getServerInterface( cx, info, ids[s] ) );
-	}
-
-	vector<Optional<StorageServerInterface>> serverListValues = wait( getAll(serverListEntries) );
-	vector<StorageServerInterface> serverInterfaces;
-	for( int s = 0; s < serverListValues.size(); s++ ) {
-		if( !serverListValues[s].present() ) {
-			// A storage server has been removed from ServerList since we read keyServers
-			return Optional<vector<StorageServerInterface>>();
-		}
-		serverInterfaces.push_back( serverListValues[s].get() );
-	}
-	return serverInterfaces;
-}
-
 ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInterfaces( Future<Version> ver, Database cx, TransactionInfo info, vector<UID> ids ) {
 	state vector< Future< Optional<StorageServerInterface> > > serverListEntries;
 	for( int s = 0; s < ids.size(); s++ ) {
@@ -1088,176 +1015,58 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInt
 
 //If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key). Otherwise returns the shard containing key
 ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database cx, Key key, TransactionInfo info, bool isBackward = false ) {
-	if (isBackward)
+	if (isBackward) {
 		ASSERT( key != allKeys.begin && key <= allKeys.end );
-	else
+	} else {
 		ASSERT( key < allKeys.end );
+	}
 
 	auto loc = cx->getCachedLocation( key, isBackward );
 	if (loc.second)
 		return loc;
 
-	state vector<StorageServerInterface> serverInterfaces;
-	state KeyRangeRef range;
+	if( info.debugID.present() )
+		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Before");
 	
-	// We assume that not only /FF/keyServers but /FF/serverList is present on the keyServersLocations since we now need both of them to terminate our search. Currently this is guaranteed because nothing after /FF/keyServers is split.
-	if ( ( key.startsWith( serverListPrefix) && (!isBackward || key.size() > serverListPrefix.size()) ) ||
-		( key.startsWith( keyServersPrefix ) && (!isBackward || key.size() > keyServersPrefix.size()) )) {
-		if( info.debugID.present() )
-			g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Before");	
-		loop {
-			choose {
-				when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
-				when ( vector<pair<KeyRangeRef, vector<StorageServerInterface>>> keyServersShards = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>>(), TaskDefaultPromiseEndpoint ) ) ) {
-					if( info.debugID.present() )
-						g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
-					ASSERT( keyServersShards.size() );  // There should always be storage servers, except on version 0 which should not get to this function
-
-					Reference<LocationInfo> cachedLocation;
-					for (pair<KeyRangeRef, vector<StorageServerInterface>> keyServersShard : keyServersShards) {
-						auto locationInfo = cx->setCachedLocation(keyServersShard.first, keyServersShard.second);
-
-						if (isBackward ? (keyServersShard.first.begin < key && keyServersShard.first.end >= key) : keyServersShard.first.contains(key)) {
-							range = keyServersShard.first;
-							cachedLocation = locationInfo;
-						}
-					}
-
-					ASSERT(isBackward ? (range.begin < key && range.end >= key) : range.contains(key));
-
-					return make_pair(range, cachedLocation);
-				}
-			}
-		}
-	} else {
-		loop {
-			auto keyServersK = keyServersKey(key);
-			state Standalone<RangeResultRef> results;
-			if( isBackward ) {
-				Standalone<RangeResultRef> _results = wait(
-						getRange( cx, latestVersion,
-							lastLessThan( keyServersK ),
-							firstGreaterOrEqual( keyServersK ) + 1,
-							GetRangeLimits( 2 ), false, info ) );
-				results = _results;
-			} else {
-				Standalone<RangeResultRef> _results = wait(
-						getRange( cx, latestVersion,
-							lastLessOrEqual( keyServersK ),
-							firstGreaterThan( keyServersK ) + 1,
-							GetRangeLimits( 2 ), false, info ) );
-				results = _results;
-			}
-
-			ASSERT( results.size() == 2 );
-			ASSERT( results[0].key.startsWith( keyServersPrefix ) );
-			ASSERT( results[1].key.startsWith( keyServersPrefix ) );
-
-			range = KeyRangeRef(
-				results[0].key.removePrefix( keyServersPrefix ),
-				results[1].key.removePrefix( keyServersPrefix ));
-
-			state vector<UID> src;
-			vector<UID> dest;
-			decodeKeyServersValue( results[0].value, src, dest );
-
-			if (!src.size()) {
-				vector<UID> src1;
-				if (results[1].value.size())
-					decodeKeyServersValue( results[1].value, src1, dest );
-				TraceEvent(SevError, "getKeyLocation_ZeroShardServers")
-					.detail("Key", printable(key))
-					.detail("r0Key", printable(results[0].key))
-					.detail("r0SrcCount", (int)src.size())
-					.detail("r1Key", printable(results[1].key))
-					.detail("r1SrcCount", (int)src1.size());
-				ASSERT(false);
-			}
-
-			Optional<vector<StorageServerInterface>> interfs = wait( getServerInterfaces(cx, info, src) );
-			if( interfs.present() ) {
+	loop {
+		choose {
+			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( GetKeyServerLocationsReply rep = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 1000, isBackward, key.arena()), TaskDefaultPromiseEndpoint ) ) ) {
 				if( info.debugID.present() )
-					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Interfs.present");
-				serverInterfaces = interfs.get();
-				break;
-			} else {
-				if( info.debugID.present() )
-					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Interfs.notpresent");
-				TEST( true ); //GetKeyLocation did not find server in serverlist
-				cx->invalidateCache( src );
-				Void _ = wait( delay( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
+					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
+				ASSERT( rep.results.size() == 1 );
+
+				auto locationInfo = cx->setCachedLocation(rep.results[0].first, rep.results[0].second);
+				return std::make_pair(KeyRange(rep.results[0].first, rep.arena), locationInfo);
 			}
 		}
 	}
-
-	ASSERT(isBackward ? (range.begin < key && range.end >= key) : range.contains(key));
-
-	return make_pair(range, cx->setCachedLocation( range, serverInterfaces ));
 }
 
 ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
-	//printf("getKeyRangeLocations: getting '%s'-'%s'\n", keyServersKey(keys.begin).toString().c_str(), keyServersKey(keys.end).toString().c_str());
+	if( info.debugID.present() )
+		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.Before");
+
 	loop {
-		state vector< pair<KeyRange,Reference<LocationInfo>> > result;
-		state vector< pair< KeyRangeRef, Future< Optional< vector<StorageServerInterface> > > > > serverListReads;
-		state vector< vector< UID > > serverListServers;
-		state bool ok = true;
-		state Standalone<RangeResultRef> keyServersEntries  =
-			wait(
-				getRange( cx, latestVersion,
-					lastLessOrEqual( keyServersKey(keys.begin) ),
-					firstGreaterOrEqual( keyServersKey(keys.end) ) + 1,
-					GetRangeLimits( limit + 1 ), reverse, info ) );
-
-		//printf("getKeyRangeLocations: got %d\n", keyServersEntries.size());
-
-		int startOffset = reverse ? 1 : 0;
-		int endOffset = 1 - startOffset;
-		state int shard;
-
-		KeyRangeRef range;
-
-		for(shard=0; shard < keyServersEntries.size() - 1; shard++) {
-			range = KeyRangeRef(
-				keyServersEntries[shard + startOffset].key.substr(keyServersPrefix.size()),
-				keyServersEntries[shard + endOffset].key.substr(keyServersPrefix.size()) );
-
-			vector<UID> servers;
-			vector<UID> destServers;
-			decodeKeyServersValue( keyServersEntries[shard + startOffset].value, servers, destServers );
-
-			ASSERT( servers.size() );
-
-			serverListReads.push_back( make_pair( range, getServerInterfaces(cx, info, servers) ) );
-			serverListServers.push_back( servers );
-		}
-
-		for(shard=0; shard < keyServersEntries.size() - 1; shard++) {
-			state Optional< vector<StorageServerInterface> > serverListValues = wait( serverListReads[shard].second );
-			Void _ = wait(yield(info.taskID));
-			if( !serverListValues.present() ) {
-				TEST( true ); //GetKeyLocations did not find server in serverlist
+		choose {
+			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( GetKeyServerLocationsReply _rep = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskDefaultPromiseEndpoint ) ) ) {
+				state GetKeyServerLocationsReply rep = _rep;
 				if( info.debugID.present() )
-					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.Interfs.notpresent");
-				cx->invalidateCache( serverListServers[shard] );
-				ok = false;
-				break;
+					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.After");
+				ASSERT( rep.results.size() );
+
+				state vector< pair<KeyRange,Reference<LocationInfo>> > results;
+				state int shard = 0;
+				for (; shard < rep.results.size(); shard++) {
+					//FIXME: these shards are being inserted into the map sequentially, it would be much more CPU efficient to save the map pairs and insert them all at once.
+					results.push_back( make_pair(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second)) );
+					Void _ = wait(yield());
+				}
+
+				return results;
 			}
-			if( info.debugID.present() )
-				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.Interfs.present");
-			result.push_back(
-				make_pair( keys & serverListReads[shard].first,
-							cx->setCachedLocation( serverListReads[shard].first, serverListValues.get() ) ) );
 		}
-		if (ok) {
-			ASSERT(result.size());
-			ASSERT(reverse || (result[0].first.begin == keys.begin && result[result.size() - 1].first.end <= keys.end));
-			ASSERT(!reverse || (result[0].first.end == keys.end && result[result.size() - 1].first.begin >= keys.begin));
-
-			return result;
-		}
-
-		Void _ = wait( delay( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
 	}
 }
 
@@ -1311,7 +1120,6 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 
 			if( onlyEndpointFailed ) {
 				cx->invalidateCache( key );
-				cx->invalidateCache( ssi.second );
 				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
 				ssi = std::move(ssi2);
 			}
@@ -1368,7 +1176,6 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				(e.code() == error_code_transaction_too_old && ver == latestVersion) ) {
 				cx->invalidateCache( key );
-				cx->invalidateCache( ssi.second );
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				if (trLogInfo)
@@ -1408,7 +1215,6 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(k.getKey(), k.isBackward());
-				cx->invalidateCache( ssi.second );
 
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
@@ -1483,7 +1289,6 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache( key );
-				cx->invalidateCache( ssi.second );
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else if( e.code() == error_code_watch_cancelled ) {
 				TEST( true ); // Too many watches on the storage server, poll for changes instead
@@ -1634,7 +1439,6 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 						keys = KeyRangeRef( range.begin, keys.end );
 
 					cx->invalidateCache( keys );
-					cx->invalidateCache( locations[shard].second );
 					Void _ = wait( delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID ));
 					break;
 				} else {
@@ -1925,7 +1729,6 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 					(e.code() == error_code_transaction_too_old && readVersion == latestVersion))
 				{
 					cx->invalidateCache( reverse ? end.getKey() : begin.getKey(), reverse ? (end-1).isBackward() : begin.isBackward() );
-					cx->invalidateCache( beginServer.second );
 
 					if (e.code() == error_code_wrong_shard_server) {
 						Standalone<RangeResultRef> result = wait( getRangeFallback(cx, version, originalBegin, originalEnd, originalLimits, reverse, info ) );
@@ -3047,9 +2850,6 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 					throw;
 				}
 				cx->invalidateCache(keys);
-				for( auto const& location : locations ) {
-					cx->invalidateCache( location.second );
-				}
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskDataDistribution));
 			}
 		}
@@ -3118,9 +2918,6 @@ ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, 
 					throw;
 				}
 				cx->invalidateCache( keys );
-				for( auto const& location : locations ) {
-					cx->invalidateCache( location.second );
-				}
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskDataDistribution));
 			}
 		}

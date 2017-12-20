@@ -22,31 +22,27 @@ package com.apple.foundationdb.test;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
-import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.*;
-import com.apple.foundationdb.async.Function;
 import com.apple.foundationdb.tuple.Tuple;
 
 public class Example {
-  public static void main(String[] args) {
-    FDB fdb = FDB.selectAPIVersion(510);
-    Database db = fdb.open();
+	public static void main(String[] args) {
+		FDB fdb = FDB.selectAPIVersion(510);
 
-    // Run an operation on the database
-    db.run(new Function<Transaction, Void>() {
-      public Void apply(Transaction tr) {
-        tr.set(Tuple.from("hello").pack(), Tuple.from("world").pack());
-        return null;
-      }
-    });
+		try(Database db = fdb.open()) {
+			// Run an operation on the database
+			db.run(tr -> {
+				tr.set(Tuple.from("hello").pack(), Tuple.from("world").pack());
+				return null;
+			});
 
-    // Get the value of 'hello' from the database
-    String hello = db.run(new Function<Transaction, String>() {
-      public String apply(Transaction tr) {
-        byte[] result = tr.get(Tuple.from("hello").pack()).get();
-        return Tuple.fromBytes(result).getString(0);
-      }
-    });
-    System.out.println("Hello " + hello);
-  }
+			// Get the value of 'hello' from the database
+			String hello = db.run(tr -> {
+				byte[] result = tr.get(Tuple.from("hello").pack()).join();
+				return Tuple.fromBytes(result).getString(0);
+			});
+			System.out.println("Hello " + hello);
+		}
+	}
+
+	private Example() {}
 }

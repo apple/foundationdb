@@ -26,10 +26,12 @@ import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 class TupleUtil {
 	private static final byte nil = 0x00;
@@ -96,11 +98,6 @@ class TupleUtil {
 		return 0;
 	}
 
-	// The Integer.compare method was introduced in Java 1.7. This exists to support Java 1.6.
-	static int compareIntegers(int first, int second) {
-		return (first < second) ? -1 : (first == second ? 0 : 1);
-	}
-
 	/**
 	 * Takes the Big-Endian byte representation of a floating point number and adjusts
 	 * it so that it sorts correctly. For encoding, if the sign bit is 1 (the number
@@ -129,7 +126,6 @@ class TupleUtil {
 
 		return bytes;
 	}
-
 
 	public static byte[] join(List<byte[]> items) {
 		return ByteArrayUtil.join(null, items);
@@ -425,10 +421,10 @@ class TupleUtil {
 
 			// Convert to long if in range -- otherwise, leave as BigInteger.
 			if (val.compareTo(BigInteger.valueOf(Long.MIN_VALUE))<0||
-					val.compareTo(BigInteger.valueOf(Long.MAX_VALUE))>0) {
-					// This can occur if the thing can be represented with 8 bytes but not
-					// the right sign information.
-					return new DecodeResult(end, val);
+				val.compareTo(BigInteger.valueOf(Long.MAX_VALUE))>0) {
+				// This can occur if the thing can be represented with 8 bytes but not
+				// the right sign information.
+				return new DecodeResult(end, val);
 			}
 			return new DecodeResult(end, val.longValue());
 		}
@@ -477,7 +473,7 @@ class TupleUtil {
 		int code2 = TupleUtil.getCodeFor(item2);
 
 		if(code1 != code2) {
-			return compareIntegers(code1, code2);
+			return Integer.compare(code1, code2);
 		}
 
 		if(code1 == nil) {
@@ -520,23 +516,16 @@ class TupleUtil {
 			return compareSignedBigEndian(fBytes1, fBytes2);
 		}
 		if(code1 == FALSE_CODE) {
-			boolean b1 = (Boolean)item1;
-			boolean b2 = (Boolean)item2;
-			return (b1 && !b2) ? 1 : (!b1 && b2 ? -1 : 0);
+			return Boolean.compare((Boolean)item1, (Boolean)item2);
 		}
 		if(code1 == UUID_CODE) {
-			// Java UUID.compareTo is signed.
+			// Java UUID.compareTo is signed, so we have to used the unsigned methods.
 			UUID uuid1 = (UUID)item1;
 			UUID uuid2 = (UUID)item2;
-			byte[] encoded1 = ByteBuffer.allocate(16).order(ByteOrder.BIG_ENDIAN)
-					.putLong(uuid1.getMostSignificantBits())
-					.putLong(uuid1.getLeastSignificantBits())
-					.array();
-			byte[] encoded2 = ByteBuffer.allocate(16).order(ByteOrder.BIG_ENDIAN)
-					.putLong(uuid2.getMostSignificantBits())
-					.putLong(uuid2.getLeastSignificantBits())
-					.array();
-			return ByteArrayUtil.compareUnsigned(encoded1, encoded2);
+			int cmp1 = Long.compareUnsigned(uuid1.getMostSignificantBits(), uuid2.getMostSignificantBits());
+			if(cmp1 != 0)
+				return cmp1;
+			return Long.compareUnsigned(uuid1.getLeastSignificantBits(), uuid2.getLeastSignificantBits());
 		}
 		if(code1 == VERSIONSTAMP_CODE) {
 			return ((Versionstamp)item1).compareTo((Versionstamp)item2);
@@ -603,40 +592,36 @@ class TupleUtil {
 		}
 	}
 
-	static boolean hasIncompleteVersionstamp(Iterable<?> items) {
-		for(Object o : items) {
-			if(o == null) {
-				continue;
+	static boolean hasIncompleteVersionstamp(Stream<?> items) {
+		return items.anyMatch(item -> {
+			if(item == null) {
+				return false;
+			} else if(item instanceof Versionstamp) {
+				return !((Versionstamp) item).isComplete();
+			} else if(item instanceof Tuple) {
+				return hasIncompleteVersionstamp(((Tuple) item).stream());
+			} else if(item instanceof Collection<?>) {
+				return hasIncompleteVersionstamp(((Collection) item).stream());
+			} else {
+				return false;
 			}
-			if(o instanceof Versionstamp) {
-				if(!((Versionstamp) o).isComplete()) {
-					return true;
-				}
-			}
-			else if(o instanceof Iterable<?>) {
-				if(hasIncompleteVersionstamp((Iterable<?>)o)) {
-					return true;
-				}
-			}
-		}
-
-		return false;
+		});
 	}
 
 	public static void main(String[] args) {
 		try {
-			byte[] bytes = pack( Collections.singletonList((Object)4), null );
-			assert 4 == (Integer)(decode( bytes, 0, bytes.length ).o);
+			byte[] bytes = pack(Collections.singletonList(4), null);
+			assert 4 == (Integer)(decode(bytes, 0, bytes.length).o);
 		} catch (Exception e) {
 			e.printStackTrace();
 			System.out.println("Error " + e.getMessage());
 		}
 
 		try {
-			byte[] bytes = pack( Collections.singletonList((Object)"\u021Aest \u0218tring"), null );
-			String string = (String)(decode( bytes, 0, bytes.length ).o);
+			byte[] bytes = pack(Collections.singletonList("\u021Aest \u0218tring"), null);
+			String string = (String)(decode(bytes, 0, bytes.length).o);
 			System.out.println("contents -> " + string);
-			assert "\u021Aest \u0218tring" == string;
+			assert "\u021Aest \u0218tring".equals(string);
 		} catch (Exception e) {
 			e.printStackTrace();
 			System.out.println("Error " + e.getMessage());

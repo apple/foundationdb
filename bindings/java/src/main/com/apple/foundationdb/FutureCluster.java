@@ -22,17 +22,17 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.Executor;
 
-
 class FutureCluster extends NativeFuture<Cluster> {
-	private Executor executor;
+	private final Executor executor;
 
-	protected FutureCluster(long cPtr, Executor e) {
-		super(cPtr, e);
-		this.executor = e;
+	protected FutureCluster(long cPtr, Executor executor) {
+		super(cPtr);
+		this.executor = executor;
+		registerMarshalCallback(executor);
 	}
 
 	@Override
-	public Cluster getIfDone_internal() throws FDBException {
+	protected Cluster getIfDone_internal(long cPtr) throws FDBException {
 		return new Cluster(FutureCluster_get(cPtr), executor);
 	}
 

@@ -1109,7 +1109,6 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 	state std::deque<SystemFailureStatus> statusHistory;	// The last change in statusHistory is from currentVersion-1 to currentVersion
 	state Future<Void> periodically = Void();
 	state double lastT = 0;
-	state double clientRequestInterval = FLOW_KNOBS->CLIENT_REQUEST_INTERVAL;
 
 	loop choose {
 		when ( FailureMonitoringRequest req = waitNext( requests ) ) {
@@ -1150,8 +1149,13 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 				TEST(true); // failureDetectionServer sending failure data to requester
 				FailureMonitoringReply reply;
 				reply.failureInformationVersion = currentVersion;
-				reply.clientRequestIntervalMS = clientRequestInterval * 1000;
-				reply.considerServerFailedTimeoutMS = CLIENT_KNOBS->FAILURE_TIMEOUT_DELAY * 1000;
+				if( req.senderStatus.present() ) {
+					reply.clientRequestIntervalMS = FLOW_KNOBS->SERVER_REQUEST_INTERVAL * 1000;
+					reply.considerServerFailedTimeoutMS = CLIENT_KNOBS->FAILURE_TIMEOUT_DELAY * 1000;
+				} else {
+					reply.clientRequestIntervalMS = FLOW_KNOBS->CLIENT_REQUEST_INTERVAL * 1000;
+					reply.considerServerFailedTimeoutMS = CLIENT_KNOBS->CLIENT_FAILURE_TIMEOUT_DELAY * 1000;
+				}
 
 				ASSERT( currentVersion >= (int64_t)statusHistory.size());
 
@@ -1173,7 +1177,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			}
 		}
 		when ( Void _ = wait( periodically ) ) {
-			periodically = delay( FLOW_KNOBS->CLIENT_REQUEST_INTERVAL );
+			periodically = delay( FLOW_KNOBS->SERVER_REQUEST_INTERVAL );
 			double t = now();
 			if (lastT != 0 && t - lastT > 1)
 				TraceEvent("LongDelayOnClusterController").detail("Duration", t - lastT);
@@ -1192,7 +1196,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 				std::nth_element(delays.begin(), delays.begin()+pivot, delays.end());
 				pivotDelay = *(delays.begin()+pivot);
 			}
-			pivotDelay = std::max(0.0, pivotDelay - clientRequestInterval);
+			pivotDelay = std::max(0.0, pivotDelay - FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
 
 			TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
 			//TraceEvent("FailureDetectionAcceptableDelay").detail("ms", acceptableDelay*1000);
@@ -1200,7 +1204,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
 
-				if ( it->first != g_network->getLocalAddress() && ( delay > pivotDelay * 2 + clientRequestInterval + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) {
+				if ( it->first != g_network->getLocalAddress() && ( delay > pivotDelay * 2 + FLOW_KNOBS->SERVER_REQUEST_INTERVAL + CLIENT_KNOBS->FAILURE_MIN_DELAY || delay > CLIENT_KNOBS->FAILURE_MAX_DELAY ) ) {
 					//printf("Failure Detection Server: Status of '%s' is now '%s' after %f sec\n", it->first.toString().c_str(), "Failed", now() - it->second.lastRequestTime);
 					TraceEvent("FailureDetectionStatus", uniqueID).detail("System", it->first).detail("Status","Failed").detail("Why", "Timeout").detail("LastRequestAge", delay)
 						.detail("PivotDelay", pivotDelay);
