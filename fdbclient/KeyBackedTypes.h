@@ -229,10 +229,10 @@ public:
 	typedef std::vector<PairType> PairsType;
 
 	// If end is not present one key past the end of the map is used.
-	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr, KeyType const &begin, Optional<KeyType> const &end, int limit, bool snapshot = false) const {
+	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr, KeyType const &begin, Optional<KeyType> const &end, int limit, bool snapshot = false, bool reverse = false) const {
 		Subspace s = space;  // 'this' could be invalid inside lambda
 		Key endKey = end.present() ? s.pack(Codec<KeyType>::pack(end.get())) : space.range().end;
-		return map(tr->getRange(KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot),
+		return map(tr->getRange(KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot, reverse),
 					[s] (Standalone<RangeResultRef> const &kvs) -> PairsType {
 						PairsType results;
 						for(int i = 0; i < kvs.size(); ++i) {

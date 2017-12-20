@@ -3298,7 +3298,7 @@ public:
 				statusText = "";
 				tag = makeBackupTag(tagName);
 				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
-				state Future<Optional<Value>> fDisabled = tr->get(backupAgent->taskBucket->getDisableKey());
+				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
 					EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
@@ -3340,9 +3340,9 @@ public:
 					}
 				}
 
-				Optional<Value> disabled = wait(fDisabled);
-				if(disabled.present()) {
-					statusText += format("\nAll backup agents have been disabled.\n");
+				Optional<Value> paused = wait(fPaused);
+				if(paused.present()) {
+					statusText += format("\nAll backup agents have been paused.\n");
 				}
 
 				break;
