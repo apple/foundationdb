@@ -1852,13 +1852,15 @@ namespace fileBackup {
 				config.stateEnum().set(tr, BackupAgentBase::STATE_DIFFERENTIAL);
 
 			// Unless we are to stop, start the next snapshot using the default interval
-			if(!stopWhenDone)
-				Void _ = wait(config.initNewSnapshot(tr) && success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
-
-			// Set the done future as the snapshot is now complete and finish the task.
 			Reference<TaskFuture> snapshotDoneFuture = task->getDoneFuture(futureBucket);
-			Void _ = wait(snapshotDoneFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
+			if(!stopWhenDone) {
+				Void _ = wait(config.initNewSnapshot(tr) && success(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, TaskCompletionKey::signal(snapshotDoneFuture))));
+			} else {
+				// Set the done future as the snapshot is now complete.
+				Void _ = wait(snapshotDoneFuture->set(tr, taskBucket));
+			}
 
+			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
