@@ -695,8 +695,10 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 			// Suppress the entire message
 			enabled = false;
 		} else {
-			if (error.isInjectedFault())
+			if (error.isInjectedFault()) {
 				detail("ErrorIsInjectedFault", true);
+				if (severity == SevError) severity = SevWarnAlways;
+			}
 			detail("Error", error.name());
 			detail("ErrorDescription", error.what());
 			detail("ErrorCode", error.code());
@@ -856,6 +858,14 @@ TraceEvent& TraceEvent::GetLastError() {
 #endif
 }
 
+// We're cheating in counting, as in practice, we only use {10,20,30,40}.
+static_assert(SevMaxUsed / 10 + 1 == 5, "Please bump eventCounts[5] to SevMaxUsed/10+1");
+unsigned long TraceEvent::eventCounts[5] = {0,0,0,0,0};
+
+unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
+  return TraceEvent::eventCounts[sev/10];
+}
+
 TraceEvent& TraceEvent::backtrace(std::string prefix) {
 	if (this->severity == SevError) return *this; // We'll backtrace this later in ~TraceEvent
 	return detail((prefix + "Backtrace").c_str(), platform::get_backtrace());
@@ -898,6 +908,7 @@ TraceEvent::~TraceEvent() {
 			if (g_traceLog.isOpen()) {
 				writef("/>\r\n");
 				g_traceLog.write( buffer, length );
+				TraceEvent::eventCounts[severity/10]++;
 
 				// Log Metrics
 				if(g_traceLog.logTraceEventMetrics && *type != '\0' && isNetworkThread()) {
