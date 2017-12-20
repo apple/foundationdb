@@ -1927,8 +1927,9 @@ namespace fileBackup {
 
 			state Reference<TaskFuture>	backupFinished = futureBucket->future(tr);
 
-			// Initialize a new snapshot and create tasks to continually write logs and snapshots
-			Void _ = wait(config.initNewSnapshot(tr));
+			// Initialize the initial snapshot and create tasks to continually write logs and snapshots
+			// The initial snapshot has a desired duration of 0, meaning go as fast as possible.
+			Void _ = wait(config.initNewSnapshot(tr, 0));
 			Key _ = wait(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, TaskCompletionKey::joinWith(backupFinished)));
 			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(backupFinished)));
 
