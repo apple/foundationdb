@@ -580,7 +580,7 @@ public:
 		}
 
 		ACTOR static Future<Void> finish_impl(Reference<BackupFile> f) {
-			Void _ = wait(f->m_file->truncate(f->m_offset));
+			Void _ = wait(f->m_file->truncate(f->size()));  // Some IAsyncFile implementations extend in whole block sizes.
 			Void _ = wait(f->m_file->sync());
 			std::string name = f->m_file->getFilename();
 			f->m_file.clear();
