@@ -24,7 +24,6 @@
 #include "libb64/encode.h"
 #include "sha1/SHA1.h"
 #include "time.h"
-#include "fdbclient/json_spirit/json_spirit_reader_template.h"
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 
@@ -51,6 +50,7 @@ BlobStoreEndpoint::Stats BlobStoreEndpoint::s_stats;
 BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	connect_tries = CLIENT_KNOBS->BLOBSTORE_CONNECT_TRIES;
 	connect_timeout = CLIENT_KNOBS->BLOBSTORE_CONNECT_TIMEOUT;
+	max_connection_life = CLIENT_KNOBS->BLOBSTORE_MAX_CONNECTION_LIFE;
 	request_tries = CLIENT_KNOBS->BLOBSTORE_REQUEST_TRIES;
 	request_timeout = CLIENT_KNOBS->BLOBSTORE_REQUEST_TIMEOUT;
 	requests_per_second = CLIENT_KNOBS->BLOBSTORE_REQUESTS_PER_SECOND;
@@ -65,14 +65,13 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	read_cache_blocks_per_file = CLIENT_KNOBS->BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE;
 	max_send_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_RECV_BYTES_PER_SECOND;
 	max_recv_bytes_per_second = CLIENT_KNOBS->BLOBSTORE_MAX_SEND_BYTES_PER_SECOND;
-	buckets_to_span = CLIENT_KNOBS->BLOBSTORE_BACKUP_BUCKETS;
 }
 
 bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	#define TRY_PARAM(n, sn) if(name == LiteralStringRef(#n) || name == LiteralStringRef(#sn)) { n = value; return true; }
-	TRY_PARAM(buckets_to_span, bts);
 	TRY_PARAM(connect_tries, ct);
 	TRY_PARAM(connect_timeout, cto);
+	TRY_PARAM(max_connection_life, mcl);
 	TRY_PARAM(request_tries, rt);
 	TRY_PARAM(request_timeout, rto);
 	TRY_PARAM(requests_per_second, rps);
@@ -96,9 +95,9 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	static BlobKnobs defaults;
 	std::string r;
 	#define _CHECK_PARAM(n, sn) if(n != defaults. n) { r += format("%s%s=%d", r.empty() ? "" : "&", #sn, n); }
-	_CHECK_PARAM(buckets_to_span, bts);
 	_CHECK_PARAM(connect_tries, ct);
 	_CHECK_PARAM(connect_timeout, cto);
+	_CHECK_PARAM(max_connection_life, mcl);
 	_CHECK_PARAM(request_tries, rt);
 	_CHECK_PARAM(request_timeout, rto);
 	_CHECK_PARAM(requests_per_second, rps);
@@ -147,34 +146,16 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 			throw std::string("Invalid blobstore URL.");
 		StringRef key =      t.tok(":");
 		StringRef secret =   t.tok("@");
-		StringRef hosts =    t.tok(":");
-		StringRef port =     t.tok("/");
+		StringRef hostPort = t.tok("/");
 		StringRef resource = t.tok("?");
 
-		// The host/ip list can have up to one text hostname, which should be first, and then 0 or more IP addresses.
-		// The items are comma separated.
-		std::string host;
-		std::vector<NetworkAddress> addrs;
-		char *end;
-		uint16_t portNum = (uint16_t)strtoul(port.toString().c_str(), &end, 10);
-		if(*end) {
-			throw format("%s is not a valid port", port.toString().c_str());
-		}
+		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
+		tokenizer h(hostPort);
+		StringRef host = h.tok(":");
+		if(host.size() == 0)
+			throw std::string("host cannot be empty");
 
-		tokenizer h(hosts);
-		while(1) {
-			StringRef item = h.tok(",");
-			if(item.size() == 0)
-				break;
-			// Try to parse item as an IP with the given port, if it fails it will throw so then store it as host
-			try {
-				// Use an integer port number so the parse doesn't fail due to the port number being garbage
-				NetworkAddress na = NetworkAddress::parse(format("%s:%d", item.toString().c_str(), (int)portNum));
-				addrs.push_back(na);
-			} catch(Error &e) {
-				host = item.toString();
-			}
-		}
+		StringRef service = h.s;
 
 		BlobKnobs knobs;
 		while(1) {
@@ -193,57 +174,27 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 		if(resourceFromURL != nullptr)
 			*resourceFromURL = resource.toString();
 
-		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host, addrs, portNum, key.toString(), secret.toString(), knobs));
+		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host.toString(), service.toString(), key.toString(), secret.toString(), knobs));
 
 	} catch(std::string &err) {
 		if(error != nullptr)
 			*error = err;
 		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url);
-		throw file_not_found();
+		throw backup_invalid_url();
 	}
 }
 
 std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
-	std::string hosts = host;
-	for(auto &na : addresses) {
-		if(hosts.size() != 0)
-			hosts.append(",");
-		hosts.append(toIPString(na.ip));
+	std::string hostPort = host;
+	if(!service.empty()) {
+		hostPort.append(":");
+		hostPort.append(service);
 	}
-	std::string r = format("blobstore://%s:%s@%s:%d/%s", key.c_str(), secret.c_str(), hosts.c_str(), (int)port, resource.c_str());
+	std::string r = format("blobstore://%s:%s@%s/%s", key.c_str(), secret.c_str(), hostPort.c_str(), resource.c_str());
 	std::string p = knobs.getURLParameters();
 	if(!p.empty())
 		r.append("?").append(p);
 	return r;
-}
-
-ACTOR Future<Void> resolveHostname_impl(Reference<BlobStoreEndpoint> bstore) {
-	state std::vector<uint32_t> ip_addresses;
-
-	// TODO:  Resolve host to get list of IPs into ip_addresses.  Ideally this should be done using
-	// boost asio so that backup agents can re-resolve a blobstore endpoint if none of the IP addresses
-	// are reachable for some long amount of time that exceeds time-to-live for the hostname.
-	// However, if it is done using blocking calls instead then the command line tools that use
-	// blobstore URLs will have to resolve them at a safe time during input parsing / checking.
-	//
-
-	// Don't modify the existing IP address list if resolution did not work
-	if(ip_addresses.empty())
-		return Void();
-
-	// Resolve was successful so replace addresses with the new IPs found.
-	bstore->addresses.clear();
-	for(auto &ip : ip_addresses)
-		bstore->addresses.push_back(NetworkAddress(ip, bstore->port));
-
-	return Void();
-}
-
-Future<Void> BlobStoreEndpoint::resolveHostname(bool only_if_unresolved) {
-	if(only_if_unresolved && !addresses.empty())
-		return Void();
-
-	return resolveHostname_impl(Reference<BlobStoreEndpoint>::addRef(this));
 }
 
 ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
@@ -261,7 +212,7 @@ Future<bool> BlobStoreEndpoint::objectExists(std::string const &bucket, std::str
 ACTOR Future<Void> deleteObject_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
-	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 404}));
+	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 204, 404}));
 	// 200 means object deleted, 404 means it doesn't exist already, so either success code passed above is fine.
 	return Void();
 }
@@ -271,19 +222,23 @@ Future<Void> BlobStoreEndpoint::deleteObject(std::string const &bucket, std::str
 }
 
 ACTOR Future<Void> deleteBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket, int *pNumDeleted) {
-	state PromiseStream<BlobStoreEndpoint::ObjectInfo> resultStream;
-	state Future<Void> done = b->getBucketContentsStream(bucket, resultStream);
+	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
+	state Future<Void> done = b->listBucketStream(bucket, resultStream);
 	state std::vector<Future<Void>> deleteFutures;
 	loop {
 		choose {
 			when(Void _ = wait(done)) {
 				break;
 			}
-			when(BlobStoreEndpoint::ObjectInfo info = waitNext(resultStream.getFuture())) {
-				if(pNumDeleted == nullptr)
-					deleteFutures.push_back(b->deleteObject(bucket, info.name));
-				else
-					deleteFutures.push_back(map(b->deleteObject(bucket, info.name), [this](Void) -> Void { ++*pNumDeleted; return Void(); }));
+			when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
+				for(auto &object : list.objects) {
+					int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
+					deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [pNumDeletedCopy](Void) -> Void {
+						if(pNumDeletedCopy != nullptr)
+							++*pNumDeletedCopy;
+						return Void();
+					}));
+				}
 			}
 		}
 	}
@@ -294,6 +249,18 @@ ACTOR Future<Void> deleteBucket_impl(Reference<BlobStoreEndpoint> b, std::string
 
 Future<Void> BlobStoreEndpoint::deleteBucket(std::string const &bucket, int *pNumDeleted) {
 	return deleteBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, pNumDeleted);
+}
+
+ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
+	std::string resource = std::string("/") + bucket;
+	HTTP::Headers headers;
+
+	Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, NULL, 0, {200, 409}));
+	return Void();
+}
+
+Future<Void> BlobStoreEndpoint::createBucket(std::string const &bucket) {
+	return createBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket);
 }
 
 ACTOR Future<int64_t> objectSize_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
@@ -308,22 +275,36 @@ Future<int64_t> BlobStoreEndpoint::objectSize(std::string const &bucket, std::st
 	return objectSize_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-Future<Reference<IConnection>> BlobStoreEndpoint::connect( NetworkAddress address ) {
-	auto &pool = connectionPool[address];
+Future<BlobStoreEndpoint::ReusableConnection> BlobStoreEndpoint::connect() {
+	// First try to get a connection from the pool
+	while(!connectionPool.empty()) {
+		ReusableConnection rconn = connectionPool.front();
+		connectionPool.pop();
 
-	while(!pool.empty()) {
-		BlobStoreEndpoint::ConnPoolEntry c = pool.front();
-		pool.pop_front();
-
-		// If the connection was placed in the pool less than 10 seconds ago, reuse it.
-		if(c.second > now() - 10) {
-			//printf("Reusing blob store connection\n");
-			return c.first;
+		// If the connection expires in the future then return it
+		if(rconn.expirationTime > now()) {
+		TraceEvent("BlobStoreEndpointReusingConnected")
+			.detail("RemoteEndpoint", rconn.conn->getPeerAddress())
+			.detail("ExpiresIn", rconn.expirationTime - now())
+			.suppressFor(5, true);
+			return rconn;
 		}
 	}
 
-	TraceEvent(SevInfo, "BlobStoreHTTPConnect").detail("RemoteEndpoint", address).suppressFor(5.0, true);
-	return INetworkConnections::net()->connect(address);
+	return map(INetworkConnections::net()->connect(host, service.empty() ? "http" : service), [=] (Reference<IConnection> conn) {
+		TraceEvent("BlobStoreEndpointNewConnection")
+			.detail("RemoteEndpoint", conn->getPeerAddress())
+			.detail("ExpiresIn", knobs.max_connection_life)
+			.suppressFor(5, true);;
+		return ReusableConnection({conn, now() + knobs.max_connection_life});
+	});
+}
+
+void BlobStoreEndpoint::returnConnection(ReusableConnection &rconn) {
+	// If it expires in the future then add it to the pool in the front
+	if(rconn.expirationTime > now())
+		connectionPool.push(rconn);
+	rconn.conn = Reference<IConnection>();
 }
 
 // Do a request, get a Response.
@@ -336,25 +317,21 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	if(contentLen > 0)
 		headers["Content-Length"] = format("%d", contentLen);
 
-	Void _ = wait(bstore->concurrentRequests.take(1));
+	headers["Host"] = bstore->host;
+	Void _ = wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
 
 	state int maxTries = std::min(bstore->knobs.request_tries, bstore->knobs.connect_tries);
 	state int thisTry = 1;
 	state double nextRetryDelay = 2.0;
-	state NetworkAddress address;
 
 	loop {
 		state Optional<Error> err;
-		try {
-			// Pick an adress
-			address = bstore->addresses[g_random->randomInt(0, bstore->addresses.size())];
-			state FlowLock::Releaser perAddressReleaser;
-			Void _ = wait(bstore->concurrentRequestsPerAddress[address]->take(1));
-			perAddressReleaser = FlowLock::Releaser(*bstore->concurrentRequestsPerAddress[address], 1);
+		state Optional<NetworkAddress> remoteAddress;
 
+		try {
 			// Start connecting
-			Future<Reference<IConnection>> fconn = bstore->connect(address);
+			Future<BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect();
 
 			// Finish/update the request headers (which includes Date header)
 			bstore->setAuthHeaders(verb, resource, headers);
@@ -374,14 +351,17 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			}
 
 			// Finish connecting, do request
-			state Reference<IConnection> conn = wait(timeoutError(fconn, bstore->knobs.connect_timeout));
+			state BlobStoreEndpoint::ReusableConnection rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+			remoteAddress = rconn.conn->getPeerAddress();
 			Void _ = wait(bstore->requestRate->getAllowance(1));
-			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
+			r->convertToJSONifXML();
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we received the "Connection: close" header.
 			if(r->headers["Connection"] != "close")
-				bstore->connectionPool[address].push_back(BlobStoreEndpoint::ConnPoolEntry(conn, now()));
-			conn.clear();
+				bstore->returnConnection(rconn);
+			rconn.conn.clear();
+
 		} catch(Error &e) {
 			// For timeouts, conn failure, or bad reponse reported by HTTP:doRequest, save the error and handle it / possibly retry below.
 			// Any other error is rethrown.
@@ -409,8 +389,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 		TraceEvent event(SevWarn, retryable ? "BlobStoreEndpointRequestFailedRetryable" : "BlobStoreEndpointRequestFailed");
 
-		event.detail("RemoteEndpoint", address)
-			 .detail("Verb", verb)
+		if(remoteAddress.present())
+			event.detail("RemoteEndpoint", remoteAddress.get());
+		else
+			event.detail("RemoteHost", bstore->host);
+
+		event.detail("Verb", verb)
 			 .detail("Resource", resource)
 			 .detail("ThisTry", thisTry)
 			 .suppressFor(5, true);
@@ -459,9 +443,16 @@ Future<Reference<HTTP::Response>> BlobStoreEndpoint::doRequest(std::string const
 	return doRequest_impl(Reference<BlobStoreEndpoint>::addRef(this), verb, resource, headers, pContent, contentLen, successCodes);
 }
 
-ACTOR Future<Void> getBucketContentsStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ObjectInfo> results) {
+ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ListResult> results, Optional<std::string> prefix, Optional<char> delimiter) {
 	// Request 1000 keys at a time, the maximum allowed
-	state std::string resource = std::string("/") + bucket + "/?max-keys=1000&marker=";
+	state std::string resource = "/";
+	resource.append(bucket);
+	resource.append("/?max-keys=1000");
+	if(prefix.present())
+		resource.append("&prefix=").append(HTTP::urlEncode(prefix.get()));
+	if(delimiter.present())
+		resource.append("&delimiter=").append(HTTP::urlEncode(std::string(1, delimiter.get())));
+	resource.append("&marker=");
 	state std::string lastFile;
 	state bool more = true;
 
@@ -470,32 +461,58 @@ ACTOR Future<Void> getBucketContentsStream_impl(Reference<BlobStoreEndpoint> bst
 		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource + HTTP::urlEncode(lastFile), headers, NULL, 0, {200}));
 
 		try {
+			BlobStoreEndpoint::ListResult result;
 			// Parse the json assuming it is valid and contains the right stuff.  If any exceptions are thrown, throw http_bad_response
-			json_spirit::Value json;
+			json_spirit::mValue json;
 			json_spirit::read_string(r->content, json);
-			for(auto &i : json.get_obj()) {
-				if(i.name_ == "truncated") {
-					more = i.value_.get_bool();
-				}
-				else if(i.name_ == "results") {
-					BlobStoreEndpoint::ObjectInfo info;
-					info.bucket = bucket;
-					for(auto &o : i.value_.get_array()) {
-						info.size = -1;
-						info.name.clear();
-						for(auto &f : o.get_obj()) {
-							if(f.name_ == "size")
-								info.size = f.value_.get_int();
-							else if(f.name_ == "key")
-								info.name = f.value_.get_str();
-						}
-						if(info.size >= 0 && !info.name.empty()) {
-							lastFile = info.name;
-							results.send(std::move(info));
-						}
-					}
+			JSONDoc doc(json);
+			std::string isTruncated;
+			if (!doc.tryGet("truncated", more)) {
+				doc.get("ListBucketResult.IsTruncated", isTruncated);
+				more = isTruncated == "false" ? false : true;
+			}
+			if (doc.has("results")) {
+				for (auto &jsonObject : doc.at("results").get_array()) {
+					JSONDoc objectDoc(jsonObject);
+					BlobStoreEndpoint::ObjectInfo object;
+					objectDoc.get("size", object.size);
+					objectDoc.get("key", object.name);
+					result.objects.push_back(std::move(object));
 				}
 			}
+			if(doc.has("ListBucketResult.Contents")) {
+				if (doc.at("ListBucketResult.Contents").type() == json_spirit::array_type) {
+					for (auto &jsonObject : doc.at("ListBucketResult.Contents").get_array()) {
+						JSONDoc objectDoc(jsonObject);
+						BlobStoreEndpoint::ObjectInfo object;
+						std::string sizeVal;
+						objectDoc.get("Size", sizeVal);
+						object.size = strtoll(sizeVal.c_str(), NULL, 10);
+						objectDoc.get("Key", object.name);
+						result.objects.push_back(std::move(object));
+					}
+				}
+				else {
+					auto jsonObject = doc.at("ListBucketResult.Contents");
+					JSONDoc objectDoc(jsonObject);
+					BlobStoreEndpoint::ObjectInfo object;
+					std::string sizeVal;
+					objectDoc.get("Size", sizeVal);
+					object.size = strtoll(sizeVal.c_str(), NULL, 10);
+					objectDoc.get("Key", object.name);
+					result.objects.push_back(std::move(object));
+
+				}
+			}
+			if(doc.has("CommonPrefixes")) {
+				for(auto &jsonObject : doc.at("CommonPrefixes").get_array()) {
+					JSONDoc objectDoc(jsonObject);
+					std::string prefix;
+					objectDoc.get("Prefix", prefix);
+					result.commonPrefixes.push_back(std::move(prefix));
+				}
+			}
+			results.send(result);
 		} catch(Error &e) {
 			throw http_bad_response();
 		}
@@ -504,29 +521,30 @@ ACTOR Future<Void> getBucketContentsStream_impl(Reference<BlobStoreEndpoint> bst
 	return Void();
 }
 
-Future<Void> BlobStoreEndpoint::getBucketContentsStream(std::string const &bucket, PromiseStream<BlobStoreEndpoint::ObjectInfo> results) {
-	return getBucketContentsStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results);
+Future<Void> BlobStoreEndpoint::listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix, Optional<char> delimiter) {
+	return listBucketStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter);
 }
 
-ACTOR Future<BlobStoreEndpoint::BucketContentsT> getBucketContents_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket) {
-	state BlobStoreEndpoint::BucketContentsT results;
-	state PromiseStream<BlobStoreEndpoint::ObjectInfo> resultStream;
-	state Future<Void> done = bstore->getBucketContentsStream(bucket, resultStream);
+ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, Optional<std::string> prefix, Optional<char> delimiter) {
+	state BlobStoreEndpoint::ListResult results;
+	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
+	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter);
 	loop {
 		choose {
 			when(Void _ = wait(done)) {
 				break;
 			}
-			when(BlobStoreEndpoint::ObjectInfo info = waitNext(resultStream.getFuture())) {
-				results.push_back(info);
+			when(BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
+				results.commonPrefixes.insert(results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
+				results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
 			}
 		}
 	}
 	return results;
 }
 
-Future<BlobStoreEndpoint::BucketContentsT> BlobStoreEndpoint::getBucketContents(std::string const &bucket) {
-	return getBucketContents_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket);
+Future<BlobStoreEndpoint::ListResult> BlobStoreEndpoint::listBucket(std::string const &bucket, Optional<std::string> prefix, Optional<char> delimiter) {
+	return listBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter);
 }
 
 std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {
@@ -589,7 +607,8 @@ void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string cons
 	std::string sig = base64::encoder::from_string(hmac_sha1(msg));
 	// base64 encoded blocks end in \n so remove it.
 	sig.resize(sig.size() - 1);
-	std::string auth = key;
+	std::string auth = "AWS ";
+	auth.append(key);
 	auth.append(":");
 	auth.append(sig);
 	headers["Authorization"] = auth;
@@ -615,7 +634,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	if(contentLen > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
 
-	Void _ = wait(bstore->concurrentUploads.take(1));
+	Void _ = wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
 	std::string resource = std::string("/") + bucket + "/" + object;
@@ -625,7 +644,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	state Reference<HTTP::Response> r = wait(bstore->doRequest("PUT", resource, headers, pContent, contentLen, {200}));
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
-	if(r->headers["Content-MD5"] != contentMD5)
+	if (!r->verifyMD5(false, contentMD5))
 		throw checksum_failed();
 
 	return Void();
@@ -669,7 +688,9 @@ ACTOR Future<int> readObject_impl(Reference<BlobStoreEndpoint> bstore, std::stri
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
-	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, NULL, 0, {200, 206}));
+	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, NULL, 0, {200, 206, 404}));
+	if(r->code == 404)
+		throw file_not_found();
 	if(r->contentLen != r->content.size())  // Double check that this wasn't a header-only response, probably unnecessary
 		throw io_error();
 	// Copy the output bytes, server could have sent more or less bytes than requested so copy at most length bytes
@@ -700,7 +721,7 @@ Future<std::string> BlobStoreEndpoint::beginMultiPartUpload(std::string const &b
 }
 
 ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, unsigned int partNumber, UnsentPacketQueue *pContent, int contentLen, std::string contentMD5) {
-	Void _ = wait(bstore->concurrentUploads.take(1));
+	Void _ = wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
 	std::string resource = format("/%s/%s?partNumber=%d&uploadId=%s", bucket.c_str(), object.c_str(), partNumber, uploadID.c_str());
@@ -712,7 +733,7 @@ ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, s
 	// will see error 400.  That could be detected and handled gracefully by retrieving the etag for the successful request.
 
 	// For uploads, Blobstore returns an MD5 sum of uploaded content so check it.
-	if(r->headers["Content-MD5"] != contentMD5)
+	if (!r->verifyMD5(false, contentMD5))
 		throw checksum_failed();
 
 	// No etag -> bad response.

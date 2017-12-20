@@ -24,14 +24,469 @@
 #include "flow/Hash3.h"
 #include "fdbrpc/AsyncFileBlobStore.actor.h"
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
+#include "fdbrpc/Platform.h"
 #include "fdbclient/Status.h"
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
-const std::string BackupContainerBlobStore::META_BUCKET = "FDB_BACKUPS";
+namespace IBackupFile_impl {
 
-class BackupContainerLocalDirectory : public IBackupContainer, ReferenceCounted<BackupContainerLocalDirectory> {
+	ACTOR Future<Void> appendString(Reference<IBackupFile> file, Standalone<StringRef> s) {
+		state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
+		Void _ = wait(file->append(&lenBuf, sizeof(lenBuf)));
+		Void _ = wait(file->append(s.begin(), s.size()));
+		return Void();
+	}
+}
+
+Future<Void> IBackupFile::appendString(Standalone<StringRef> s) {
+	return IBackupFile_impl::appendString(Reference<IBackupFile>::addRef(this), s);
+}
+
+std::string BackupDescription::toString() const {
+	std::string info;
+
+	info.append(format("URL: %s\n", url.c_str()));
+	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
+
+	for(const KeyspaceSnapshotFile &m : snapshots)
+		info.append(format("Snapshot:  startVersion=%lld  endVersion=%lld  totalBytes=%lld\n", m.beginVersion, m.endVersion, m.totalSize));
+
+	if(minLogBegin.present())
+		info.append(format("MinLogBeginVersion: %lld\n", minLogBegin.get()));
+	if(contiguousLogEnd.present())
+		info.append(format("MaxContiguousLogVersion: %lld\n", contiguousLogEnd.get()));
+	if(maxLogEnd.present())
+		info.append(format("MaxLogEndVersion: %lld\n", maxLogEnd.get()));
+	if(minRestorableVersion.present())
+		info.append(format("MinRestorableVersion: %lld\n", minRestorableVersion.get()));
+	if(maxRestorableVersion.present())
+		info.append(format("MaxRestorableVersion: %lld\n", maxRestorableVersion.get()));
+
+	if(!extendedDetail.empty())
+		info.append("ExtendedDetail: ").append(extendedDetail);
+
+	return info;
+}
+
+/* BackupContainerFileSystem implements a backup container which stores files in a nested folder structure.
+ * Inheritors must only defined methods for writing, reading, deleting, sizing, and listing files.
+ *
+ *   BackupInfo is stored as a JSON document at
+ *     /info
+ *   Snapshots are stored as JSON at file paths like
+ *     /snapshots/snapshot,startVersion,endVersion,totalBytes
+ *   Log and Range data files at file paths like
+ *     /logs/.../log,startVersion,endVersion,blockSize
+ *     /ranges/.../range,version,uid,blockSize
+ *
+ *   Where ... is a multi level path which causes each level to not have more than 10,000 entries.
+ *     v - (v % 1e15) / v - (v % 1e11) / (v - (v ^ 1e7)
+ */
+class BackupContainerFileSystem : public IBackupContainer {
+public:
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+
+	BackupContainerFileSystem() {}
+	virtual ~BackupContainerFileSystem() {}
+
+	// Create the container
+	virtual Future<Void> create() = 0;
+
+	// Get a list of fileNames and their sizes in the container under the given path
+	typedef std::vector<std::pair<std::string, int64_t>> FilesAndSizesT;
+	virtual Future<FilesAndSizesT> listFiles(std::string path = "") = 0;
+
+	// Open a file for read by fileName
+	virtual Future<Reference<IAsyncFile>> readFile(std::string fileName) = 0;
+
+	// Open a file for write by fileName
+	virtual Future<Reference<IBackupFile>> writeFile(std::string fileName) = 0;
+
+	// Delete a file
+	virtual Future<Void> deleteFile(std::string fileName) = 0;
+
+	// Delete entire container.  During the process, if pNumDeleted is not null it will be
+	// updated with the count of deleted files so that progress can be seen.
+	virtual Future<Void> deleteContainer(int *pNumDeleted) = 0;
+
+
+	static std::string versionFolderString(Version v) {
+		return format("%lld/%lld/%lld", v - (v % (int64_t)1e16), v - (v % (int64_t)1e12), v - (v % (int64_t)1e8));
+	}
+
+	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) {
+		return writeFile(format("logs/%s/log,%lld,%lld,%d", versionFolderString(beginVersion).c_str(), beginVersion, endVersion, blockSize));
+	}
+
+	Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) {
+		return writeFile(format("ranges/%s/range,%lld,%s,%d", versionFolderString(version).c_str(), version, g_random->randomUniqueID().toString().c_str(), blockSize));
+	}
+
+	static RangeFile pathToRangeFile(std::string path, int64_t size) {
+		std::string name = basename(path);
+		RangeFile f;
+		f.fileName = path;
+		f.fileSize = size;
+		int len;
+		if(sscanf(name.c_str(), "range,%lld,%*[^,],%u%n", &f.version, &f.blockSize, &len) == 2 && len == name.size())
+			return f;
+		throw restore_unknown_file_type();
+	}
+
+	static LogFile pathToLogFile(std::string path, int64_t size) {
+		std::string name = basename(path);
+		LogFile f;
+		f.fileName = path;
+		f.fileSize = size;
+		int len;
+		if(sscanf(name.c_str(), "log,%lld,%lld,%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size())
+			return f;
+		throw restore_unknown_file_type();
+	}
+
+	static KeyspaceSnapshotFile pathToKeyspaceSnapshotFile(std::string path) {
+		std::string name = basename(path);
+		KeyspaceSnapshotFile f;
+		f.fileName = path;
+		int len;
+		if(sscanf(name.c_str(), "snapshot,%lld,%lld,%lld%n", &f.beginVersion, &f.endVersion, &f.totalSize, &len) == 3 && len == name.size())
+			return f;
+		throw restore_unknown_file_type();
+	}
+
+	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of megabytes.
+	ACTOR static Future<std::vector<RangeFile>> readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem> bc, KeyspaceSnapshotFile snapshot) {
+		// Read the range file list for the specified version range, and then index them by fileName.
+		std::vector<RangeFile> files = wait(bc->listRangeFiles(snapshot.beginVersion, snapshot.endVersion));
+		state std::map<std::string, RangeFile> rangeIndex;
+		for(auto &f : files)
+			rangeIndex[f.fileName] = std::move(f);
+
+		// Read the snapshot file, verify the version range, then find each of the range files by name in the index and return them.
+		state Reference<IAsyncFile> f = wait(bc->readFile(snapshot.fileName));
+		int64_t size = wait(f->size());
+		state Standalone<StringRef> buf = makeString(size);
+		int _ = wait(f->read(mutateString(buf), buf.size(), 0));
+		json_spirit::mValue json;
+		json_spirit::read_string(buf.toString(), json);
+		JSONDoc doc(json);
+
+		Version v;
+		if(!doc.tryGet("beginVersion", v) || v != snapshot.beginVersion)
+			throw restore_corrupted_data();
+		if(!doc.tryGet("endVersion", v) || v != snapshot.endVersion)
+			throw restore_corrupted_data();
+
+		json_spirit::mValue &filesArray = doc.create("files");
+		if(filesArray.type() != json_spirit::array_type)
+			throw restore_corrupted_data();
+
+		std::vector<RangeFile> results;
+		for(auto const &fileValue : filesArray.get_array()) {
+			if(fileValue.type() != json_spirit::str_type)
+				throw restore_corrupted_data();
+			auto i = rangeIndex.find(fileValue.get_str());
+			if(i == rangeIndex.end())
+				throw restore_corrupted_data();
+
+			results.push_back(i->second);
+		}
+
+		return results;
+	}
+
+	Future<std::vector<RangeFile>> readKeyspaceSnapshot(KeyspaceSnapshotFile snapshot) {
+		return readKeyspaceSnapshot_impl(Reference<BackupContainerFileSystem>::addRef(this), snapshot);
+	}
+
+	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc, std::vector<std::string> fileNames, int64_t totalBytes) {
+		ASSERT(!fileNames.empty());
+
+		json_spirit::mValue json;
+		JSONDoc doc(json);
+
+		json_spirit::mArray &array = (doc.create("files") = json_spirit::mArray()).get_array();
+
+		Version minVer = std::numeric_limits<Version>::max();
+		Version maxVer = std::numeric_limits<Version>::min();
+
+		for(auto &f : fileNames) {
+			array.push_back(f);
+			RangeFile rf = pathToRangeFile(f, 0);
+			if(rf.version < minVer)
+				minVer = rf.version;
+			if(rf.version > maxVer)
+				maxVer = rf.version;
+		}
+
+		doc.create("totalBytes") = totalBytes;
+		doc.create("beginVersion") = minVer;
+		doc.create("endVersion") = maxVer;
+
+		state std::string docString = json_spirit::write_string(json);
+
+		state Reference<IBackupFile> f = wait(bc->writeFile(format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes)));
+		Void _ = wait(f->append(docString.data(), docString.size()));
+		Void _ = wait(f->finish());
+
+		return Void();
+	}
+
+	Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) {
+		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
+	};
+
+	// List files in sorted order but without regard for overlaps in version ranges
+	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
+		return map(listFiles("logs/"), [=](const FilesAndSizesT &files) {
+			std::vector<LogFile> results;
+			for(auto &f : files) {
+				LogFile lf = pathToLogFile(f.first, f.second);
+				if(lf.endVersion > beginVersion && lf.beginVersion < endVersion)
+					results.push_back(lf);
+			}
+			std::sort(results.begin(), results.end());
+			return results;
+		});
+	}
+	Future<std::vector<RangeFile>> listRangeFiles(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
+		return map(listFiles("ranges/"), [=](const FilesAndSizesT &files) {
+			std::vector<RangeFile> results;
+			for(auto &f : files) {
+				RangeFile rf = pathToRangeFile(f.first, f.second);
+				if(rf.version >= beginVersion && rf.version <= endVersion)
+					results.push_back(rf);
+			}
+			std::sort(results.begin(), results.end());
+			return results;
+		});
+	}
+	Future<std::vector<KeyspaceSnapshotFile>> listKeyspaceSnapshots(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
+		return map(listFiles("snapshots/"), [=](const FilesAndSizesT &files) {
+			std::vector<KeyspaceSnapshotFile> results;
+			for(auto &f : files) {
+				KeyspaceSnapshotFile sf = pathToKeyspaceSnapshotFile(f.first);
+				if(sf.endVersion > beginVersion && sf.beginVersion < endVersion)
+					results.push_back(sf);
+			}
+			std::sort(results.begin(), results.end());
+			return results;
+		});
+	}
+
+	ACTOR static Future<FullBackupListing> listBackup_impl(Reference<BackupContainerFileSystem> bc) {
+		state Future<std::vector<RangeFile>> fRanges = bc->listRangeFiles(0, std::numeric_limits<Version>::max());
+		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots(0, std::numeric_limits<Version>::max());
+		state Future<std::vector<LogFile>> fLogs = bc->listLogFiles(0, std::numeric_limits<Version>::max());
+		Void _ = wait(success(fRanges) && success(fSnapshots) && success(fLogs));
+		return FullBackupListing({fRanges.get(), fLogs.get(), fSnapshots.get()});
+	}
+
+	Future<FullBackupListing> listBackup() {
+		return listBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
+	}
+
+	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc) {
+		state BackupDescription desc;
+		desc.url = bc->getURL();
+
+		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
+		desc.snapshots = snapshots;
+
+		std::vector<LogFile> logs = wait(bc->listLogFiles(0, std::numeric_limits<Version>::max()));
+
+		if(!logs.empty()) {
+			desc.maxLogEnd = logs.rbegin()->endVersion;
+
+			auto i = logs.begin();
+			desc.minLogBegin = i->beginVersion;
+			desc.contiguousLogEnd = i->endVersion;
+			auto &end = desc.contiguousLogEnd.get();  // For convenience to make loop cleaner
+
+			// Advance until continuity is broken
+			while(++i != logs.end()) {
+				if(i->beginVersion > end)
+					break;
+				// If the next link in the log chain is found, update the end
+				if(i->beginVersion == end)
+					end = i->endVersion;
+			}
+		}
+
+		for(auto &s : snapshots) {
+			// If the snapshot is at a single version then it requires no logs.  Update min and max restorable.
+			// TODO:  Somehow check / report if the restorable range is not or may not be contiguous.
+			if(s.beginVersion == s.endVersion) {
+				if(!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
+					desc.minRestorableVersion = s.endVersion;
+
+				if(!desc.maxRestorableVersion.present() || s.endVersion > desc.maxRestorableVersion.get())
+					desc.maxRestorableVersion = s.endVersion;
+			}
+
+			// If the snapshot is covered by the contiguous log chain then update min/max restorable.
+			if(desc.minLogBegin.present() && s.beginVersion >= desc.minLogBegin.get() && s.endVersion <= desc.contiguousLogEnd.get()) {
+				if(!desc.minRestorableVersion.present() || s.endVersion < desc.minRestorableVersion.get())
+					desc.minRestorableVersion = s.endVersion;
+
+				if(!desc.maxRestorableVersion.present() || desc.contiguousLogEnd.get() > desc.maxRestorableVersion.get())
+					desc.maxRestorableVersion = desc.contiguousLogEnd;
+			}
+		}
+
+		return desc;
+	}
+
+	// Uses the virtual methods to describe the backup contents
+	Future<BackupDescription> describeBackup() {
+		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
+	}
+
+	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version endVersion) {
+		state std::vector<Future<Void>> deletes;
+
+		std::vector<LogFile> logs = wait(bc->listLogFiles(0, endVersion));
+		for(auto const &f : logs)
+			deletes.push_back(bc->deleteFile(f.fileName));
+
+		std::vector<RangeFile> ranges = wait(bc->listRangeFiles(0, endVersion));
+		for(auto const &f : ranges)
+			deletes.push_back(bc->deleteFile(f.fileName));
+
+		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots(0, endVersion));
+		for(auto const &f : snapshots)
+			deletes.push_back(bc->deleteFile(f.fileName));
+
+		Void _ = wait(waitForAll(deletes));
+		return Void();
+	}
+
+	// Delete all data up to (but not including endVersion)
+	Future<Void> expireData(Version endVersion) {
+		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), endVersion);
+	}
+
+	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
+		// Find the most recent keyrange snapshot to end at or before targetVersion
+		state Optional<KeyspaceSnapshotFile> snapshot;
+		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
+		for(auto const &s : snapshots) {
+			if(s.endVersion <= targetVersion)
+				snapshot = s;
+		}
+
+		if(snapshot.present()) {
+			state RestorableFileSet restorable;
+			restorable.snapshot = snapshot.get();
+			restorable.targetVersion = targetVersion;
+
+			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));
+			restorable.ranges = ranges;
+
+			// No logs needed if there is a complete key space snapshot at a single version.
+			if(snapshot.get().beginVersion == snapshot.get().endVersion)
+				return restorable;
+
+			std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion));
+
+			// If there are logs and the first one starts before the snapshot begin version then proceed
+			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
+				auto i = logs.begin();
+				Version end = i->endVersion;
+				restorable.logs.push_back(*i);
+
+				// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
+				while(++i != logs.end()) {
+					if(i->beginVersion > end || i->beginVersion >= targetVersion)
+						break;
+					// If the next link in the log chain is found, update the end
+					if(i->beginVersion == end) {
+						restorable.logs.push_back(*i);
+						end = i->endVersion;
+					}
+				}
+
+				if(end >= targetVersion) {
+					return restorable;
+				}
+			}
+		}
+
+		return Optional<RestorableFileSet>();
+	}
+
+	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion){
+		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
+	}
+
+/*
+struct BackupMetadata {
+	BackupMetadata() : format_version(1) {}
+	int64_t format_version;
+
+	std::string toJSON() {
+		json_spirit::mObject json;
+		JSONDoc doc(json);
+
+		doc.create("format_version") = formatVersion;
+
+		return json_spirit::write_string(json_spirit::mValue(json));
+	}
+
+	static BackupInfo fromJSON(std::string docString) {
+		BackupInfo info;
+		json_spirit::mValue json;
+		json_spirit::read_string(docString, json);
+		JSONDoc doc(json);
+
+		doc.tryGet("format_version", info.formatVersion);
+
+		return info;
+	}
+};
+
+ACTOR Future<Optional<BackupMetadata>> readInfo_impl(Reference<BackupContainerFileSystem> bc) {
+	state Reference<IAsyncFile> f;
+	try {
+		Reference<IAsyncFile> _f = wait(bc->readFile(bc->backupInfoPath()));
+		f = _f;
+	} catch(Error &e) {
+		if(e.code() == error_code_file_not_found)
+			return Optional<BackupMetadata>();
+}
+
+	state int64_t size = wait(f->size());
+	state Standalone<StringRef> buf = makeString(size);
+	try {
+		int read = wait(f->read(mutateString(buf), size, 0));
+		if(read != size)
+			throw io_error();
+
+		return BackupMetadata::fromJSON(buf.toString());
+	} catch(Error &e) {
+		TraceEvent(SevWarn, "BackupContainerInvalidBackupInfo").error(e);
+		throw backup_invalid_info();
+	}
+}
+
+
+// Write backup metadata
+ACTOR Future<Void> writeInfo_impl(Reference<BackupContainerFileSystem> bc, BackupMetadata info) {
+	state Reference<IBackupFile> f = wait(bc->writeFile(bc->backupInfoPath()));
+	Void _ = wait(f->append(info.toJSON()));
+	Void _ = wait(f->finish());
+	return Void();
+}
+*/
+
+};
+
+
+
+class BackupContainerLocalDirectory : public BackupContainerFileSystem, ReferenceCounted<BackupContainerLocalDirectory> {
 public:
 	void addref() { return ReferenceCounted<BackupContainerLocalDirectory>::addref(); }
 	void delref() { return ReferenceCounted<BackupContainerLocalDirectory>::delref(); }
@@ -57,6 +512,32 @@ public:
 		m_path = path;
 	}
 
+	static Future<std::vector<std::string>> listURLs(std::string url) {
+		std::string path;
+		if(url.find("file://") != 0) {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Invalid URL for BackupContainerLocalDirectory").detail("URL", url);
+		}
+
+		path = url.substr(7);
+		// Remove trailing slashes on path
+		path.erase(path.find_last_not_of("\\/") + 1);
+
+		if(!g_network->isSimulated() && path != abspath(path)) {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Backup path must be absolute (e.g. file:///some/path)").detail("URL", url).detail("Path", path);
+			throw io_error();
+		}
+		std::vector<std::string> dirs = platform::listDirectories(path);
+		std::vector<std::string> results;
+
+		for(auto &r : dirs) {
+			if(r == "." || r == "..")
+				continue;
+			results.push_back(std::string("file://") + joinPath(path, r));
+		}
+
+		return results;
+	}
+
 	Future<Void> create() {
 		// Nothing should be done here because create() can be called by any process working with the container URL, such as fdbbackup.
 		// Since "local directory" containers are by definition local to the machine they are accessed from,
@@ -66,256 +547,243 @@ public:
 		return Void();
 	}
 
-	virtual Future<Reference<IAsyncFile>> openFile(std::string name, EMode mode) {
-		int flags = IAsyncFile::OPEN_NO_AIO;
-		if(mode == WRITEONLY) {
-			// Since each backup agent could be writing to a different, non-shared directory, every open for write
-			// must make sure the directory has been created because it may not have been created when the
-			// backup task was created (by the command line tool, on some single machine).
-			platform::createDirectory(m_path);
-			flags |= IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
+	Future<Reference<IAsyncFile>> readFile(std::string path) {
+		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED;
+		// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
+		// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
+		// but only if the source directory is writeable which shouldn't be required for a restore.
+		std::string fullPath = joinPath(m_path, path);
+		#ifndef _WIN32
+		if(g_network->isSimulated()) {
+			if(!fileExists(fullPath))
+				throw file_not_found();
+			std::string uniquePath = fullPath + "." + g_random->randomUniqueID().toString() + ".lnk";
+			unlink(uniquePath.c_str());
+			ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
+			fullPath = uniquePath = uniquePath;
 		}
-		else if(mode == READONLY) {
-			// Simulation does not properly handle opening the same file from multiple machines using a shared filesystem,
-			// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
-			// but only if the source directory is writeable which shouldn't be required for a restore.
-			#ifndef _WIN32
-			if(g_network->isSimulated()) {
-				std::string uniqueName = name + "." + g_random->randomUniqueID().toString() + ".lnk";
-				unlink((m_path + "/" + uniqueName).c_str());
-				ASSERT(symlink(name.c_str(), (m_path + "/" + uniqueName).c_str()) == 0);
-				name = uniqueName;
-			}
-			// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
-			// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
-			// by the same process that failed the first task execution anyway, which is a very rare case.
-			flags |= IAsyncFile::OPEN_UNCACHED;
-			#endif
-			flags |= IAsyncFile::OPEN_READONLY;
+		// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
+		// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
+		// by the same process that failed the first task execution anyway, which is a very rare case.
+		#endif
+		return IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
+	}
+
+	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
+	public:
+		BackupFile(std::string fileName, Reference<IAsyncFile> file, std::string finalFullPath) : IBackupFile(fileName), m_file(file), m_finalFullPath(finalFullPath) {}
+
+		Future<Void> append(const void *data, int len) {
+			Future<Void> r = m_file->write(data, len, m_offset);
+			m_offset += len;
+			return r;
 		}
-		else
-			throw io_error();
 
-		return IAsyncFileSystem::filesystem()->open(m_path + "/" + name, flags, 0644);
+		ACTOR static Future<Void> finish_impl(Reference<BackupFile> f) {
+			Void _ = wait(f->m_file->truncate(f->m_offset));
+			Void _ = wait(f->m_file->sync());
+			std::string name = f->m_file->getFilename();
+			f->m_file.clear();
+			renameFile(name, f->m_finalFullPath);
+			return Void();
+		}
+
+		Future<Void> finish() {
+			return finish_impl(Reference<BackupFile>::addRef(this));
+		}
+
+		void addref() { return ReferenceCounted<BackupFile>::addref(); }
+		void delref() { return ReferenceCounted<BackupFile>::delref(); }
+
+	private:
+		Reference<IAsyncFile> m_file;
+		std::string m_finalFullPath;
+	};
+
+	Future<Reference<IBackupFile>> writeFile(std::string path) {
+		int flags = IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_READWRITE;
+		std::string fullPath = joinPath(m_path, path);
+		platform::createDirectory(parentDirectory(fullPath));
+		std::string temp = fullPath  + "." + g_random->randomUniqueID().toString() + ".temp";
+		Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
+		return map(f, [=](Reference<IAsyncFile> f) {
+			return Reference<IBackupFile>(new BackupFile(path, f, fullPath));
+		});
 	}
 
-	virtual Future<bool> fileExists(std::string name) {
-		return ::fileExists(m_path + "/" + name);
-	}
-
-	virtual Future<std::vector<std::string>> listFiles() {
-		std::vector<std::string> files = platform::listFiles(m_path, "");
-		// Remove .lnk files, they are a side effect of a backup that was *read* during simulation.  See openFile() above for more info on why they are created.
-		files.erase(std::remove_if(files.begin(), files.end(), [](std::string const &f) { return StringRef(f).endsWith(LiteralStringRef(".lnk")); }), files.end());
-		return files;
-	}
-
-	virtual Future<Void> renameFile(std::string from, std::string to) {
-		::renameFile(m_path + "/" + from, m_path + "/" + to);
+	Future<Void> deleteFile(std::string path) {
+		::deleteFile(joinPath(m_path, path));
 		return Void();
+	}
+
+	Future<FilesAndSizesT> listFiles(std::string path) {
+		FilesAndSizesT results;
+
+		std::vector<std::string> files;
+		platform::findFilesRecursively(joinPath(m_path, path), files);
+
+		// Remove .lnk files from resultst, they are a side effect of a backup that was *read* during simulation.  See openFile() above for more info on why they are created.
+		if(g_network->isSimulated())
+			files.erase(std::remove_if(files.begin(), files.end(), [](std::string const &f) { return StringRef(f).endsWith(LiteralStringRef(".lnk")); }), files.end());
+
+		for(auto &f : files) {
+			// Hide .part or .temp files.
+			StringRef s(f);
+			if(!s.endsWith(LiteralStringRef(".part")) && !s.endsWith(LiteralStringRef(".temp")))
+				results.push_back({f.substr(m_path.size() + 1), ::fileSize(f)});
+		}
+
+		return results;
+	}
+
+	Future<Void> deleteContainer(int *pNumDeleted) {
+		// Destroying a directory seems pretty unsafe, as a badly formed file:// URL could point to a thing
+		// that should't be deleted.  Also, platform::eraseDirectoryRecursive() intentionally doesn't work outside
+		// of the pre-simulation phase.
+		// By just expiring ALL data, only parsable backup files in the correct locations will be deleted.
+		return expireData(std::numeric_limits<Version>::max());
 	}
 
 private:
 	std::string m_path;
 };
 
-// Read (or Create, if desired) the metadata entry for this backup container in a fixed-name metadata bucket.
-// Returns the number of buckets in this backup container, for now.  If more important properties
-// are added later then it should return something different like a JSON object or a struct.
-// If the record doesn't exist yet, then one will be created using bucketCount if bucketCount is 0 or more.
-// Otherwise, directory_does_not_exist() will be thrown.
-ACTOR Future<int> createOrGetMetaRecord(Reference<BlobStoreEndpoint> bstore, std::string bucketBase, int bucketCount = -1) {
-	bool exists = wait(bstore->objectExists(BackupContainerBlobStore::META_BUCKET, bucketBase));
-	if(exists) {
-		std::string data = wait(bstore->readEntireFile(BackupContainerBlobStore::META_BUCKET, bucketBase));
-		json_spirit::mValue json;
-		try {
-			json_spirit::read_string(data, json);
-			JSONDoc j(json);
-			bucketCount = -1;
-			j.tryGet("bucketCount", bucketCount);
-		} catch(Error &e) {
-			throw http_bad_response();
+class BackupContainerBlobStore : public BackupContainerFileSystem, ReferenceCounted<BackupContainerBlobStore> {
+private:
+	static const std::string BACKUP_BUCKET;
+
+	Reference<BlobStoreEndpoint> m_bstore;
+	std::string m_name;
+
+public:
+	BackupContainerBlobStore(Reference<BlobStoreEndpoint> bstore, std::string name)
+	  : m_bstore(bstore), m_name(name) {
+	}
+
+	void addref() { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
+	void delref() { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
+
+	static std::string getURLFormat() { return BlobStoreEndpoint::getURLFormat(true); }
+
+	virtual ~BackupContainerBlobStore() {}
+
+	Future<Reference<IAsyncFile>> readFile(std::string path) {
+			return Reference<IAsyncFile>(
+				new AsyncFileReadAheadCache(
+					Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, BACKUP_BUCKET, m_name + "/" + path)),
+					m_bstore->knobs.read_block_size,
+					m_bstore->knobs.read_ahead_blocks,
+					m_bstore->knobs.concurrent_reads_per_file,
+					m_bstore->knobs.read_cache_blocks_per_file
+				)
+			);
+	}
+
+	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore) {
+		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(BACKUP_BUCKET, {}, '/'));
+		std::vector<std::string> results;
+		for(auto &f : contents.commonPrefixes) {
+			results.push_back(bstore->getResourceURL(f));
+		}
+		return results;
+	}
+
+	class BackupFile : public IBackupFile, ReferenceCounted<BackupFile> {
+	public:
+		BackupFile(std::string fileName, Reference<IAsyncFile> file) : IBackupFile(fileName), m_file(file) {}
+
+		Future<Void> append(const void *data, int len) {
+			Future<Void> r = m_file->write(data, len, m_offset);
+			m_offset += len;
+			return r;
 		}
 
-		if(bucketCount < 0) {
-			TraceEvent(SevWarn, "BlobBackupContainerInvalid").detail("bucketCount", bucketCount).detail("URL", bstore->getResourceURL(bucketBase));
-			throw io_error();
-		}
-		return bucketCount;
-	}
-
-	if(bucketCount >= 0) {
-		json_spirit::mObject o;
-		o["bucketCount"] = bucketCount;
-		std::string json = json_spirit::write_string(json_spirit::mValue(o));
-		Void _ = wait(bstore->writeEntireFile(BackupContainerBlobStore::META_BUCKET, bucketBase, json));
-		return bucketCount;
-	}
-
-	throw directory_does_not_exist();
-}
-
-ACTOR Future<Reference<IAsyncFile>> openFile_impl(Reference<BackupContainerBlobStore> bc, std::string name, IBackupContainer::EMode mode) {
-	state std::string bucket = wait(bc->getBucketForFile(name));
-
-	if(mode == BackupContainerBlobStore::WRITEONLY)
-		return Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(bc->m_bstore, bucket, name));
-	else if(mode == BackupContainerBlobStore::READONLY) {
-		// This isn't great logic but if "temp" is not in the filename then treat the file as a symlink and redirect to the name in its content
-		if(name.find("temp") == name.npos) {
-			std::string realName = wait(bc->m_bstore->readEntireFile(bucket, name));
-			name = realName;
-			if(realName.empty())
-				throw io_error();
-			std::string realBucket = wait(bc->getBucketForFile(name));
-			bucket = realBucket;
+		Future<Void> finish() {
+			Reference<BackupFile> self = Reference<BackupFile>::addRef(this);
+			return map(m_file->sync(), [=](Void _) { self->m_file.clear(); return Void(); });
 		}
 
-		Reference<IAsyncFile> f(new AsyncFileBlobStoreRead(bc->m_bstore, bucket, name));
-		return Reference<IAsyncFile>(new AsyncFileReadAheadCache(f,
-					bc->m_bstore->knobs.read_block_size,
-					bc->m_bstore->knobs.read_ahead_blocks,
-					bc->m_bstore->knobs.concurrent_reads_per_file,
-					bc->m_bstore->knobs.read_cache_blocks_per_file
-				));
-	}
-	else
-		throw io_error();
-}
+		void addref() { return ReferenceCounted<BackupFile>::addref(); }
+		void delref() { return ReferenceCounted<BackupFile>::delref(); }
+	private:
+		Reference<IAsyncFile> m_file;
+	};
 
-Future<Reference<IAsyncFile>> BackupContainerBlobStore::openFile(std::string name, EMode mode) {
-	return openFile_impl(Reference<BackupContainerBlobStore>::addRef(this), name, mode);
-}
-
-ACTOR Future<bool> fileExists_impl(Reference<BackupContainerBlobStore> bc, std::string name) {
-	std::string bucket = wait(bc->getBucketForFile(name));
-	bool e = wait(bc->m_bstore->objectExists(bucket, name));
-	return e;
-}
-
-Future<bool> BackupContainerBlobStore::fileExists(std::string name) {
-	return fileExists_impl(Reference<BackupContainerBlobStore>::addRef(this), name);
-}
-
-// Since blob store cannot rename, this just writes a file called <to> that contains <from>. This unfornately
-// means that there has to be some more knowledge sharing between backup container and its users than is ideal.
-// Specfically, any file written to a backup container should be opened as a temp file and then renamed
-// to a valid backup file type upon closure.  The blob store backup container must know the naming conventions
-// of valid final backup file filenames so it can redirect openings of such to the temp file that it was
-// created from.
-ACTOR Future<Void> renameFile_impl(BackupContainerBlobStore *b, std::string from, std::string to) {
-	try {
-		// Checking for the existing of the source file isn't really necesary and depending on the blob store's
-		// causal consistency guarauntee it's possible that a file that just finished uploading is found not
-		// to exist yet.
-		//bool exists = wait(b->fileExists(from));
-		//if(!exists)
-			//throw file_not_found();
-		std::string bucket = wait(b->getBucketForFile(to));
-		Void _ = wait(b->m_bstore->writeEntireFile(bucket, to, from));
-	} catch(Error &e) {
-		TraceEvent(SevWarn, "BlobStoreRenameFailure").detail("From", from).detail("To", to).error(e);
-		throw;
+	Future<Reference<IBackupFile>> writeFile(std::string path) {
+		return Reference<IBackupFile>(new BackupFile(path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, BACKUP_BUCKET, m_name + "/" + path))));
 	}
 
-	return Void();
-}
+	Future<Void> deleteFile(std::string path) {
+		return m_bstore->deleteObject(BACKUP_BUCKET, m_name + "/" + path);
+	}
 
-Future<Void> BackupContainerBlobStore::renameFile(std::string from, std::string to) {
-	return renameFile_impl(this, from, to);
-}
+	ACTOR static Future<FilesAndSizesT> listFiles_impl(Reference<BackupContainerBlobStore> bc, std::string path) {
+		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BACKUP_BUCKET, bc->m_name + "/" + path));
+		FilesAndSizesT files;
+		for(auto &o : result.objects)
+			files.push_back({o.name.substr(bc->m_name.size() + 1), o.size});
+		return files;
+	}
 
-ACTOR Future<Void> listFilesStream_impl(Reference<BackupContainerBlobStore> bc, PromiseStream<BlobStoreEndpoint::ObjectInfo> results) {
-	state std::vector<std::string> buckets = wait(bc->getBucketList());
-	state std::vector<Future<Void>> bucketFutures;
+	Future<FilesAndSizesT> listFiles(std::string path) {
+		return listFiles_impl(Reference<BackupContainerBlobStore>::addRef(this), path);
+	}
 
-	// Start listing all of the buckets to the stream
-	for(auto &b : buckets)
-		bucketFutures.push_back(bc->m_bstore->getBucketContentsStream(b, results));
+	ACTOR static Future<Void> create_impl(Reference<BackupContainerBlobStore> bc) {
+		Void _ = wait(bc->m_bstore->createBucket(BACKUP_BUCKET));
 
-	Void _ = wait(waitForAll(bucketFutures));
+		/*
+		Optional<BackupInfo> info = wait(bc->readInfo());
 
-	return Void();
-}
+		if(info.present())
+			throw backup_duplicate();
 
-Future<Void> BackupContainerBlobStore::listFilesStream(PromiseStream<BlobStoreEndpoint::ObjectInfo> results) {
-	return listFilesStream_impl(Reference<BackupContainerBlobStore>::addRef(this), results);
-}
+		BackupInfo newInfo;
 
-ACTOR Future<std::vector<std::string>> listFiles_impl(Reference<BackupContainerBlobStore> bc) {
-	state PromiseStream<BlobStoreEndpoint::ObjectInfo> resultsStream;
-	state std::vector<std::string> results;
-	state Future<Void> done = bc->listFilesStream(resultsStream);
+		Void _ = wait(bc->writeInfo(newInfo));
+		*/
 
-	loop {
-		choose {
-			when(Void _ = wait(done)) {
-				break;
-			}
-			when(BlobStoreEndpoint::ObjectInfo info = waitNext(resultsStream.getFuture())) {
-				results.push_back(std::move(info.name));
+		return Void();
+	}
+
+	Future<Void> create() {
+		return create_impl(Reference<BackupContainerBlobStore>::addRef(this));
+	}
+
+	// TODO:  If there is a need, this can be made faster by discovering common prefixes and listing levels of the folder structure in parallel.
+	ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
+		state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
+		state Future<Void> done = bc->m_bstore->listBucketStream(BACKUP_BUCKET, resultStream, bc->m_name + "/");
+		state std::vector<Future<Void>> deleteFutures;
+		loop {
+			choose {
+				when(Void _ = wait(done)) {
+					break;
+				}
+				when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
+					for(auto &object : list.objects) {
+						int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
+						deleteFutures.push_back(map(bc->m_bstore->deleteObject(BACKUP_BUCKET, object.name), [pNumDeletedCopy](Void) {
+							if(pNumDeletedCopy != nullptr)
+								++*pNumDeletedCopy;
+							return Void();
+						}));
+					}
+				}
 			}
 		}
+
+		Void _ = wait(waitForAll(deleteFutures));
+		return Void();
 	}
 
-	return results;
-}
-
-Future<std::vector<std::string>> BackupContainerBlobStore::listFiles() {
-	return listFiles_impl(Reference<BackupContainerBlobStore>::addRef(this));
-}
-
-ACTOR Future<Void> create_impl(Reference<BackupContainerBlobStore> bc) {
-	// If bucketCount is known then container is already created.
-	if(bc->m_bucketCount.isValid()) {
-		try {
-			int _ = wait(bc->m_bucketCount);
-			return Void();
-		} catch(Error &e) {}
+	Future<Void> deleteContainer(int *pNumDeleted) {
+		return deleteContainer_impl(Reference<BackupContainerBlobStore>::addRef(this), pNumDeleted);
 	}
+};
 
-	// If future isn't valid or an error was thrown, then attempt to read/create the meta record
-	bc->m_bucketCount = createOrGetMetaRecord(bc->m_bstore, bc->m_bucketPrefix, bc->m_bstore->knobs.buckets_to_span);
-	// If we get a bucket count then the container now exists.
-	int _ = wait(bc->m_bucketCount);
-	return Void();
-}
-
-Future<Void> BackupContainerBlobStore::create() {
-	return create_impl(Reference<BackupContainerBlobStore>::addRef(this));
-}
-
-Future<int> BackupContainerBlobStore::getBucketCount() {
-	if(!m_bucketCount.isValid() || m_bucketCount.isError())
-		m_bucketCount = createOrGetMetaRecord(m_bstore, m_bucketPrefix);
-	return m_bucketCount;
-}
-
-ACTOR Future<std::string> getBucketForFile_impl(BackupContainerBlobStore *bc, std::string fname) {
-	int count = wait(bc->getBucketCount());
-	return bc->getBucketString(hashlittle(fname.data(), fname.size(), 0) % count);
-}
-
-Future<std::string> BackupContainerBlobStore::getBucketForFile(std::string const &name) { return getBucketForFile_impl(this, name); }
-
-ACTOR Future<std::vector<std::string>> getBucketList_impl(BackupContainerBlobStore *bc) {
-	int count = wait(bc->getBucketCount());
-	std::vector<std::string> buckets;
-	for(int i = 0; i < count; ++i)
-		buckets.push_back(bc->getBucketString(i));
-	return buckets;
-}
-
-Future<std::vector<std::string>> BackupContainerBlobStore::getBucketList() { return getBucketList_impl(this); }
-
-ACTOR Future<std::vector<std::string>> BackupContainerBlobStore::listBackupContainers(Reference<BlobStoreEndpoint> bs) {
-	state std::vector<std::string> results;
-	BlobStoreEndpoint::BucketContentsT contents = wait(bs->getBucketContents(BackupContainerBlobStore::META_BUCKET));
-	for(auto &o : contents)
-		results.push_back(std::move(o.name));
-	return results;
-}
+const std::string BackupContainerBlobStore::BACKUP_BUCKET = "FDB_BACKUPS_V2";
+std::string IBackupContainer::lastOpenError;
 
 std::vector<std::string> IBackupContainer::getURLFormats() {
 	std::vector<std::string> formats;
@@ -324,32 +792,8 @@ std::vector<std::string> IBackupContainer::getURLFormats() {
 	return formats;
 }
 
-ACTOR Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
-	state std::vector<std::string> buckets = wait(bc->getBucketList());
-	state std::vector<Future<Void>> bucketFutures;
-
-	// Start deleting all the buckets
-	for(auto &b : buckets)
-		bucketFutures.push_back(bc->m_bstore->deleteBucket(b, pNumDeleted));
-
-	// Wait for all object deletes to be finished
-	Void _ = wait(waitForAll(bucketFutures));
-
-	// Delete metadata entry last, if deleting all the other stuff worked.
-	Void _ = wait(bc->m_bstore->deleteObject(BackupContainerBlobStore::META_BUCKET, bc->m_bucketPrefix));
-	return Void();
-}
-
-Future<Void> BackupContainerBlobStore::deleteContainer(int *pNumDeleted) {
-	return deleteContainer_impl(Reference<BackupContainerBlobStore>::addRef(this), pNumDeleted);
-}
-
-Future<std::string> BackupContainerBlobStore::containerInfo() {
-	return std::string();
-}
-
 // Get an IBackupContainer based on a container URL string
-Reference<IBackupContainer> IBackupContainer::openContainer(std::string url, std::string *errors)
+Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 {
 	static std::map<std::string, Reference<IBackupContainer>> m_cache;
 
@@ -363,67 +807,196 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url, std
 			r = Reference<IBackupContainer>(new BackupContainerLocalDirectory(url));
 		else if(u.startsWith(LiteralStringRef("blobstore://"))) {
 			std::string resource;
-			Reference<BlobStoreEndpoint> bstore = BlobStoreEndpoint::fromString(url, &resource, errors);
+			Reference<BlobStoreEndpoint> bstore = BlobStoreEndpoint::fromString(url, &resource, &lastOpenError);
 			if(resource.empty())
-				throw file_not_found();
+				throw backup_invalid_url();
 			for(auto c : resource)
 				if(!isalnum(c) && c != '_' && c != '-' && c != '.')
-					throw invalid_option_value();
+					throw backup_invalid_url();
 			r = Reference<IBackupContainer>(new BackupContainerBlobStore(bstore, resource));
 		}
-		else
-			throw file_not_found();
+		else {
+			lastOpenError = "invalid URL prefix";
+			throw backup_invalid_url();
+		}
 
+		r->URL = url;
 		return r;
 	} catch(Error &e) {
-		TraceEvent(SevWarn, "BackupContainer").detail("Description", "Invalid container specification.  See help.").detail("URL", url);
+		if(e.code() == error_code_actor_cancelled)
+			throw;
+
+		TraceEvent m(SevWarn, "BackupContainer");
+		m.detail("Description", "Invalid container specification.  See help.").detail("URL", url);
+
+		if(e.code() == error_code_backup_invalid_url)
+			m.detail("lastOpenError", lastOpenError);
 		throw;
 	}
 }
 
+// Get a list of URLS to backup containers based on some a shorter URL.  This function knows about some set of supported
+// URL types which support this sort of backup discovery.
+ACTOR Future<std::vector<std::string>> IBackupContainer::listContainers(std::string baseURL) {
+	try {
+		StringRef u(baseURL);
+		if(u.startsWith(LiteralStringRef("file://"))) {
+			std::vector<std::string> results = wait(BackupContainerLocalDirectory::listURLs(baseURL));
+			return results;
+		}
+		else if(u.startsWith(LiteralStringRef("blobstore://"))) {
+			std::string resource;
+			Reference<BlobStoreEndpoint> bstore = BlobStoreEndpoint::fromString(baseURL, &resource, &IBackupContainer::lastOpenError);
+			if(!resource.empty()) {
+				TraceEvent(SevWarn, "BackupContainer").detail("Description", "Invalid backup container base URL, resource aka path should be blank.").detail("URL", baseURL);
+				throw backup_invalid_url();
+			}
+
+			std::vector<std::string> results = wait(BackupContainerBlobStore::listURLs(bstore));
+			return results;
+		}
+		else {
+			IBackupContainer::lastOpenError = "invalid URL prefix";
+			throw backup_invalid_url();
+		}
+
+	} catch(Error &e) {
+		if(e.code() == error_code_actor_cancelled)
+			throw;
+
+		TraceEvent m(SevWarn, "BackupContainer");
+		m.detail("Description", "Invalid backup container URL prefix.  See help.").detail("URL", baseURL);
+
+		if(e.code() == error_code_backup_invalid_url)
+			m.detail("lastOpenError", IBackupContainer::lastOpenError);
+		throw;
+	}
+}
+
+ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f) {
+	state Standalone<StringRef> content = makeString(g_random->randomInt(0, 10000000));
+	for(int i = 0; i < content.size(); ++i)
+		mutateString(content)[i] = (uint8_t)g_random->randomInt(0, 256);
+
+	Void _ = wait(f->append(content.begin(), content.size()));
+	Void _ = wait(f->finish());
+	state Reference<IAsyncFile> in = wait(c->readFile(f->getFileName()));
+	int64_t size = wait(in->size());
+	state Standalone<StringRef> buf = makeString(size);
+	int b = wait(in->read(mutateString(buf), buf.size(), 0));
+	ASSERT(b == buf.size());
+	ASSERT(buf == content);
+	return Void();
+}
+
+ACTOR Future<Void> testBackupContainer(std::string url) {
+	printf("BackupContainerTest URL %s\n", url.c_str());
+
+	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
+	// Make sure container doesn't exist, then create it.
+	Void _ = wait(c->deleteContainer());
+	Void _ = wait(c->create());
+
+	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100, 150, 10));
+	Void _ = wait(writeAndVerifyFile(c, log1));
+
+	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150, 300, 10));
+	Void _ = wait(writeAndVerifyFile(c, log2));
+
+	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160, 10));
+	Void _ = wait(writeAndVerifyFile(c, range1));
+
+	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300, 10));
+	Void _ = wait(writeAndVerifyFile(c, range2));
+
+	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310, 10));
+	Void _ = wait(writeAndVerifyFile(c, range3));
+
+	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size()));
+
+	Void _ = wait(c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size()));
+
+	FullBackupListing listing = wait(c->listBackup());
+	ASSERT(listing.logs.size() == 2);
+	ASSERT(listing.ranges.size() == 3);
+	ASSERT(listing.snapshots.size() == 2);
+
+	state BackupDescription desc = wait(c->describeBackup());
+	printf("Backup Description\n%s", desc.toString().c_str());
+
+	ASSERT(desc.maxRestorableVersion.present());
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
+	ASSERT(rest.present());
+	ASSERT(rest.get().logs.size() == 0);
+	ASSERT(rest.get().ranges.size() == 1);
+
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(150));
+	ASSERT(!rest.present());
+
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(300));
+	ASSERT(rest.present());
+	ASSERT(rest.get().logs.size() == 1);
+	ASSERT(rest.get().ranges.size() == 2);
+
+	Void _ = wait(c->expireData(100));
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(d.minLogBegin == 100);
+	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+
+	Void _ = wait(c->expireData(101));
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(d.minLogBegin == 150);
+	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+
+	Void _ = wait(c->expireData(155));
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(!d.minLogBegin.present());
+	ASSERT(d.snapshots.size() == desc.snapshots.size());
+	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
+
+	Void _ = wait(c->expireData(161));
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(d.snapshots.size() == 1);
+
+	Void _ = wait(c->deleteContainer());
+
+	BackupDescription d = wait(c->describeBackup());
+	printf("Backup Description\n%s", d.toString().c_str());
+	ASSERT(d.snapshots.size() == 0);
+
+	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
+
+	return Void();
+}
 
 TEST_CASE("backup/containers/localdir") {
-	state Reference<IBackupContainer> c = IBackupContainer::openContainer(format("file://simfdb/backups/%llx", timer_int()));
-	state Reference<IAsyncFile> f;
-
-	Reference<IAsyncFile> fh = wait(c->openFile("test", IBackupContainer::WRITEONLY));
-	f = fh;
-	Void _ = wait(f->write((const uint8_t *)"asdf", 4, 0));
-	Void _ = wait(f->truncate(4));
-	Void _ = wait(f->sync());
-
-	Reference<IAsyncFile> fh = wait(c->openFile("test2", IBackupContainer::WRITEONLY));
-	f = fh;
-	Void _ = wait(f->write((const uint8_t *)"1234", 4, 0));
-	Void _ = wait(f->truncate(4));
-	Void _ = wait(f->sync());
-
-	Reference<IAsyncFile> fh = wait(c->openFile("test", IBackupContainer::READONLY));
-	f = fh;
-	int64_t size = wait(f->size());
-	ASSERT(size == 4);
-	state std::string buf;
-	buf.resize(4);
-	int rs = wait(f->read((void *)buf.data(), 4, 0));
-	ASSERT(rs == 4);
-	ASSERT(buf == "asdf");
-
-	Reference<IAsyncFile> fh = wait(c->openFile("test2", IBackupContainer::READONLY));
-	f = fh;
-	int64_t size = wait(f->size());
-	ASSERT(size == 4);
-	int rs = wait(f->read((void *)buf.data(), 4, 0));
-	ASSERT(rs == 4);
-	ASSERT(buf == "1234");
-
-	std::vector<std::string> files = wait(c->listFiles());
-	ASSERT(files.size() == 2);
-
-	Void _ = wait(c->renameFile("test", "testrenamed"));
-
-	std::vector<std::string> files = wait(c->listFiles());
-	ASSERT(files.size() == 2);
-
+	if(g_network->isSimulated())
+		Void _ = wait(testBackupContainer(format("file://simfdb/backups/%llx", timer_int())));
+	else
+		Void _ = wait(testBackupContainer(format("file:///private/tmp/fdb_backups/%llx", timer_int())));
 	return Void();
 };
 
+TEST_CASE("backup/containers/url") {
+	if (!g_network->isSimulated()) {
+		const char *url = getenv("FDB_TEST_BACKUP_URL");
+		ASSERT(url != nullptr);
+		Void _ = wait(testBackupContainer(url));
+	}
+	return Void();
+};
+
+TEST_CASE("backup/containers/list") {
+	state const char *url = getenv("FDB_TEST_BACKUP_URL");
+	ASSERT(url != nullptr);
+	printf("Listing %s\n", url);
+	std::vector<std::string> urls = wait(IBackupContainer::listContainers(url));
+	for(auto &u : urls) {
+		printf("%s\n", u.c_str());
+	}
+	return Void();
+};

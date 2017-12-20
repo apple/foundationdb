@@ -45,7 +45,7 @@ public:
 
 	// Read from the underlying file to a CacheBlock
 	ACTOR static Future<Reference<CacheBlock>> readBlock(AsyncFileReadAheadCache *f, int length, int64_t offset) {
-		Void _ = wait(f->m_max_concurrent_reads.take(1));
+		Void _ = wait(f->m_max_concurrent_reads.take());
 
 		state Reference<CacheBlock> block(new CacheBlock(length));
 		try {

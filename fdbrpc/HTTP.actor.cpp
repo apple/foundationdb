@@ -22,6 +22,7 @@
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include <cctype>
+#include "xml2json.hpp"
 
 namespace HTTP {
 
@@ -57,6 +58,15 @@ namespace HTTP {
 			return i->second == content_sum.get();
 		}
 		return !fail_if_header_missing;
+	}
+
+	void Response::convertToJSONifXML() {
+		auto i = headers.find("Content-Type");
+		if (i != headers.end() && i->second == "application/xml") {
+			content = xml2json(content.c_str());
+			contentLen = content.length();
+			headers["Content-Type"] = "application/json";
+		}
 	}
 
 	std::string Response::toString() {
@@ -324,7 +334,7 @@ namespace HTTP {
 			}
 
 			state Reference<HTTP::Response> r(new HTTP::Response());
-			Void _ = wait(r->read(conn, verb == "HEAD"));
+			Void _ = wait(r->read(conn, verb == "HEAD" || verb == "DELETE"));
 			double elapsed = timer() - send_start;
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
 				printf("[%s] HTTP code=%d, time=%fs %s %s [%u out, response content len %d]\n", conn->getDebugID().toString().c_str(), r->code, elapsed, verb.c_str(), resource.c_str(), (int)total_sent, (int)r->contentLen);

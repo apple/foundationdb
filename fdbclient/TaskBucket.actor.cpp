@@ -21,6 +21,10 @@
 #include "TaskBucket.h"
 #include "ReadYourWrites.h"
 
+Reference<TaskFuture> Task::getDoneFuture(Reference<FutureBucket> fb) {
+	return fb->unpack(params[reservedTaskParamKeyDone]);
+}
+
 struct UnblockFutureTaskFunc : TaskFuncBase {
 	static StringRef name;
 
@@ -87,7 +91,7 @@ Key Task::reservedTaskParamValidValue = LiteralStringRef("_validvalue");
 // IMPORTANT:  Task() must result in an EMPTY parameter set, so params should only
 // be set for non-default constructor arguments.  To change this behavior look at all
 // Task() default constructions to see if they require params to be empty and call clear.
-Task::Task(Value type, uint32_t version, Value done, unsigned int priority) {
+Task::Task(Value type, uint32_t version, Value done, unsigned int priority) : extendMutex(1) {
 	if (type.size())
 		params[Task::reservedTaskParamKeyType] = type;
 
@@ -204,8 +208,9 @@ public:
 
 		state Standalone<RangeResultRef> values = wait(tr->getRange(taskAvailableSpace.range(), CLIENT_KNOBS->TOO_MANY));
 		Version version = wait(tr->getReadVersion());
-		task->timeout = (uint64_t)version + (uint64_t)(taskBucket->timeout * (CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_OFFSET + CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_RANGE * g_random->random01()));
-		Subspace timeoutSpace = taskBucket->timeouts.get(task->timeout).get(taskUID);
+		task->timeoutVersion = version + (uint64_t)(taskBucket->timeout * (CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_OFFSET + CLIENT_KNOBS->TASKBUCKET_TIMEOUT_JITTER_RANGE * g_random->random01()));
+
+		Subspace timeoutSpace = taskBucket->timeouts.get(task->timeoutVersion).get(taskUID);
 
 		for (auto & s : values) {
 			Key param = taskAvailableSpace.unpack(s.key).getString(0);
@@ -220,6 +225,7 @@ public:
 		return task;
 	}
 
+	// Verify that the user configured task verification key still has the user specificied value
 	ACTOR static Future<bool> taskVerify(Reference<TaskBucket> tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 
 		if (task->params.find(Task::reservedTaskParamValidKey) == task->params.end()) {
@@ -303,16 +309,53 @@ public:
 		return result;
 	}
 	
+	ACTOR static Future<Void> extendTimeoutRepeatedly(Database cx, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		state Version versionNow = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			taskBucket->setOptions(tr);
+			return map(tr->getReadVersion(), [=](Version v) {
+				return v;
+			});
+		}));
+
+		loop {
+			state FlowLock::Releaser releaser;
+
+			// Wait until we are half way to the timeout version of this task
+			Void _ = wait(delay(0.8 * (BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeoutVersion - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND));
+
+			// Take the extendMutex lock until we either succeed or stop trying to extend due to failure
+			Void _ = wait(task->extendMutex.take());
+			releaser = FlowLock::Releaser(task->extendMutex, 1);
+
+			loop {
+				try {
+					tr->reset();
+					taskBucket->setOptions(tr);
+
+					// Attempt to extend the task's timeout
+					state Version newTimeout = wait(taskBucket->extendTimeout(tr, task, false));
+					Void _ = wait(tr->commit());
+					task->timeoutVersion = newTimeout;
+					versionNow = tr->getCommittedVersion();
+					break;
+				} catch(Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
+		}
+	}
+
 	ACTOR static Future<bool> doTask(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 		if (!task || !TaskFuncBase::isValidTask(task))
 			return false;
 
+		state Reference<TaskFuncBase> taskFunc;
+
 		try {
-			state Reference<TaskFuncBase> taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
+			taskFunc = TaskFuncBase::create(task->params[Task::reservedTaskParamKeyType]);
 			if (taskFunc) {
 				state bool verifyTask = (task->params.find(Task::reservedTaskParamValidKey) != task->params.end());
-
-				state Version versionNow;
 
 				if (verifyTask) {
 					loop {
@@ -330,8 +373,6 @@ public:
 								Void _ = wait(tr->commit());
 								return true;
 							}
-							Version ver = wait(tr->getReadVersion());
-							versionNow = ver;
 							break;
 						}
 						catch (Error &e) {
@@ -339,35 +380,8 @@ public:
 						}
 					}
 				}
-				else {
-					state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
-					taskBucket->setOptions(tr2);
-					Version ver = wait(tr2->getReadVersion());
-					versionNow = ver;
-				}
 
-				state Future<Void> run = taskFunc->execute(cx, taskBucket, futureBucket, task);
-				// Convert timeout version of task to seconds using recent read version and versions_per_second
-				state Future<Void> timeout = delay((BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeout - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-
-				loop {
-					choose {
-						when(Void _ = wait(run)) {
-							break;
-						}
-
-						when(Void _ = wait(timeout)) {
-							// Get read version, if it is greater than task timeout then return true because a task was run but it timed out.
-							state Reference<ReadYourWritesTransaction> tr3(new ReadYourWritesTransaction(cx));
-							taskBucket->setOptions(tr3);
-							Version version = wait(tr3->getReadVersion());
-							if(version >= task->timeout)
-								throw timed_out();
-							// Otherwise reset the timeout
-							timeout = delay((BUGGIFY ? (2 * g_random->random01()) : 1.0) * (double)(task->timeout - (uint64_t)versionNow) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
-						}
-					}
-				}
+				Void _ = wait(taskFunc->execute(cx, taskBucket, futureBucket, task) || extendTimeoutRepeatedly(cx, taskBucket, task));
 
 				if (BUGGIFY) Void _ = wait(delay(10.0));
 				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
@@ -380,6 +394,16 @@ public:
 				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
 				.detail("Priority", task->getPriority())
 				.error(e);
+			try {
+				state Error e2 = e;
+				Void _ = wait(taskFunc->handleError(cx, task, e2));
+			} catch(Error &e) {
+				TraceEvent(SevWarn, "TB_ExecuteFailureLogErrorFailed")
+					.detail("TaskUID", task->key.printable())
+					.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
+					.detail("Priority", task->getPriority())
+					.error(e2);
+			}
 		}
 
 		// Return true to indicate that we did work.
@@ -449,16 +473,16 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> watchDisabled(Database cx, Reference<TaskBucket> taskBucket, Reference<AsyncVar<bool>> disabled) {
+	ACTOR static Future<Void> watchPaused(Database cx, Reference<TaskBucket> taskBucket, Reference<AsyncVar<bool>> paused) {
 		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			try {
 				taskBucket->setOptions(tr);
-				Optional<Value> disabledVal = wait(tr->get(taskBucket->disableKey));
-				disabled->set(disabledVal.present());
-				state Future<Void> watchDisabledFuture = tr->watch(taskBucket->disableKey);
+				Optional<Value> pausedVal = wait(tr->get(taskBucket->pauseKey));
+				paused->set(pausedVal.present());
+				state Future<Void> watchPausedFuture = tr->watch(taskBucket->pauseKey);
 				Void _ = wait(tr->commit());
-				Void _ = wait(watchDisabledFuture);
+				Void _ = wait(watchPausedFuture);
 			}
 			catch (Error &e) {
 				Void _ = wait(tr->onError(e));
@@ -467,15 +491,15 @@ public:
 	}
 
 	ACTOR static Future<Void> run(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks) {
-		state Reference<AsyncVar<bool>> disabled = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
-		state Future<Void> watchDisabledFuture = watchDisabled(cx, taskBucket, disabled);
+		state Reference<AsyncVar<bool>> paused = Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) );
+		state Future<Void> watchPausedFuture = watchPaused(cx, taskBucket, paused);
 
 		loop {
-			while(disabled->get()) {
-				Void _ = wait(disabled->onChange() || watchDisabledFuture);
+			while(paused->get()) {
+				Void _ = wait(paused->onChange() || watchPausedFuture);
 			}
 
-			Void _ = wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || disabled->onChange() || watchDisabledFuture);
+			Void _ = wait(dispatch(cx, taskBucket, futureBucket, pollDelay, maxConcurrentTasks) || paused->onChange() || watchPausedFuture);
 		}
 	}
 
@@ -533,11 +557,12 @@ public:
 		return false;
 	}
 
+	// Verify that the task's keys are still in the timeout space at the expected timeout prefix
 	ACTOR static Future<bool> isFinished(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task) {
 		taskBucket->setOptions(tr);
 
 		Tuple t;
-		t.append(task->timeout);
+		t.append(task->timeoutVersion);
 		t.append(task->key);
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(taskBucket->timeouts.range(t), 1));
@@ -658,7 +683,7 @@ public:
 			task.params[param] = iter.value;
 		}
 
-		// Move the final task to its new available keyspace. Safe if task == Task()
+		// Move the final task, if complete, to its new available keyspace. Safe if task == Task()
 		if(!values.more) {
 			Subspace space = taskBucket->getAvailableSpace(task.getPriority()).get(task.key);
 			for(auto &p : task.params)
@@ -693,27 +718,48 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<bool> saveAndExtend(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task) {
+	ACTOR static Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> task, bool updateParams, Version newTimeoutVersion) {
 		taskBucket->setOptions(tr);
 
 		// First make sure it's safe to keep running
-		bool keepRunning = wait(taskBucket->keepRunning(tr, task));
-		if(!keepRunning)
-			return false;
+		Void _ = wait(taskBucket->keepRunning(tr, task));
 
-		// Clear old timeout keys
-		KeyRange range = taskBucket->timeouts.range(Tuple().append(task->timeout).append(task->key));
-		tr->clear(range);
 
-		// Update timeout and write new timeout keys
+		// This is where the task definition currently exists
+		state Subspace oldTimeoutSpace = taskBucket->timeouts.get(task->timeoutVersion).get(task->key);
+		// Update the task's timeout
 		Version version = wait(tr->getReadVersion());
-		task->timeout = (uint64_t)version + taskBucket->timeout;
-		Subspace timeoutSpace = taskBucket->timeouts.get(task->timeout).get(task->key);
 
-		for(auto &p : task->params)
-			tr->set(timeoutSpace.pack(p.key), p.value);
+		if(newTimeoutVersion == invalidVersion)
+			newTimeoutVersion = version + taskBucket->timeout;
+		else if(newTimeoutVersion <= version)  // Ensure that the time extension is to the future
+			newTimeoutVersion = version + 1;
 
-		return true;
+		// This is where the task definition is being moved to
+		state Subspace newTimeoutSpace = taskBucket->timeouts.get(newTimeoutVersion).get(task->key);
+
+		tr->addReadConflictRange(oldTimeoutSpace.range());
+		tr->addWriteConflictRange(newTimeoutSpace.range());
+
+		// If we're updating the task params the clear the old space and write params to the new space
+		if(updateParams) {
+			TEST(true);  // Extended a task while updating parameters
+			for(auto &p : task->params) {
+				tr->set(newTimeoutSpace.pack(p.key), p.value);
+			}
+		} else {
+			TEST(true);  // Extended a task without updating parameters
+			// Otherwise, read and transplant the params from the old to new timeout spaces
+			Standalone<RangeResultRef> params = wait(tr->getRange(oldTimeoutSpace.range(), CLIENT_KNOBS->TOO_MANY));
+			for(auto &kv : params) {
+				Tuple paramKey = oldTimeoutSpace.unpack(kv.key);
+				tr->set(newTimeoutSpace.pack(paramKey), kv.value);
+			}
+		}
+
+		tr->clear(oldTimeoutSpace.range());
+
+		return newTimeoutVersion;
 	}
 };
 
@@ -723,7 +769,7 @@ TaskBucket::TaskBucket(const Subspace& subspace, bool sysAccess, bool priorityBa
 	, available(prefix.get(LiteralStringRef("av")))
 	, available_prioritized(prefix.get(LiteralStringRef("avp")))
 	, timeouts(prefix.get(LiteralStringRef("to")))
-	, disableKey(prefix.pack(LiteralStringRef("disable")))
+	, pauseKey(prefix.pack(LiteralStringRef("pause")))
 	, timeout(CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS)
 	, system_access(sysAccess)
 	, priority_batch(priorityBatch)
@@ -742,13 +788,13 @@ Future<Void> TaskBucket::clear(Reference<ReadYourWritesTransaction> tr){
 	return Void();
 }
 
-Future<Void> TaskBucket::changeDisable(Reference<ReadYourWritesTransaction> tr, bool disable){
+Future<Void> TaskBucket::changePause(Reference<ReadYourWritesTransaction> tr, bool pause){
 	setOptions(tr);
 
-	if(disable) {
-		tr->set(disableKey, StringRef());
+	if(pause) {
+		tr->set(pauseKey, StringRef());
 	} else {
-		tr->clear(disableKey);
+		tr->clear(pauseKey);
 	}
 
 	return Void();
@@ -759,7 +805,17 @@ Key TaskBucket::addTask(Reference<ReadYourWritesTransaction> tr, Reference<Task>
 
 	Key key(g_random->randomUniqueID().toString());
 
-	Subspace taskSpace = getAvailableSpace(task->getPriority()).get(key);
+	Subspace taskSpace;
+
+	// If scheduledVersion is valid then place the task directly into the timeout
+	// space for its scheduled time, otherwise place it in the available space by priority.
+	Version scheduledVersion = ReservedTaskParams.scheduledVersion().getOrDefault(task, invalidVersion);
+	if(scheduledVersion != invalidVersion) {
+		taskSpace = timeouts.get(scheduledVersion).get(key);
+	}
+	else {
+		taskSpace = getAvailableSpace(task->getPriority()).get(key);
+	}
 
 	for (auto & param : task->params)
 		tr->set(taskSpace.pack(param.key), param.value);
@@ -818,8 +874,8 @@ Future<Void> TaskBucket::run(Database cx, Reference<FutureBucket> futureBucket, 
 	return TaskBucketImpl::run(cx, Reference<TaskBucket>::addRef(this), futureBucket, pollDelay, maxConcurrentTasks);
 }
 
-Future<Void> TaskBucket::watchDisabled(Database cx, Reference<AsyncVar<bool>> disabled) {
-	return TaskBucketImpl::watchDisabled(cx, Reference<TaskBucket>::addRef(this), disabled);
+Future<Void> TaskBucket::watchPaused(Database cx, Reference<AsyncVar<bool>> paused) {
+	return TaskBucketImpl::watchPaused(cx, Reference<TaskBucket>::addRef(this), paused);
 }
 
 Future<bool> TaskBucket::isEmpty(Reference<ReadYourWritesTransaction> tr){
@@ -830,7 +886,7 @@ Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Referen
 	setOptions(tr);
 
 	Tuple t;
-	t.append(task->timeout);
+	t.append(task->timeoutVersion);
 	t.append(task->key);
 
 	tr->atomicOp(prefix.pack(LiteralStringRef("task_count")), LiteralStringRef("\xff\xff\xff\xff\xff\xff\xff\xff"), MutationRef::AddValue);
@@ -839,8 +895,8 @@ Future<Void> TaskBucket::finish(Reference<ReadYourWritesTransaction> tr, Referen
 	return Void();
 }
 
-Future<bool> TaskBucket::saveAndExtend(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
-	return TaskBucketImpl::saveAndExtend(tr, Reference<TaskBucket>::addRef(this), task);
+Future<Version> TaskBucket::extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams, Version newTimeoutVersion) {
+	return TaskBucketImpl::extendTimeout(tr, Reference<TaskBucket>::addRef(this), task, updateParams, newTimeoutVersion);
 }
 
 Future<bool> TaskBucket::isFinished(Reference<ReadYourWritesTransaction> tr, Reference<Task> task){
@@ -1006,13 +1062,28 @@ public:
 		Standalone<RangeResultRef> values = wait(tr->getRange(taskFuture->callbacks.range(), CLIENT_KNOBS->TOO_MANY));
 		tr->clear(taskFuture->callbacks.range());
 
-		state Reference<Task> task(new Task());
-		for (auto & s : values) {
-			Key key = taskFuture->callbacks.unpack(s.key).getString(1);
-			task->params[key] = s.value;
+		std::vector<Future<Void>> actions;
+
+		if(values.size() != 0) {
+			state Reference<Task> task(new Task());
+			Key lastTaskID;
+			for (auto & s : values) {
+				Tuple t = taskFuture->callbacks.unpack(s.key);
+				Key taskID = t.getString(0);
+				Key key = t.getString(1);
+				// If we see a new task ID and the old one isn't empty then process the task accumulated so far and make a new task
+				if(taskID.size() != 0 && taskID != lastTaskID) {
+					actions.push_back(performAction(tr, taskBucket, taskFuture, task));
+					task = Reference<Task>(new Task());
+				}
+				task->params[key] = s.value;
+				lastTaskID = taskID;
+			}
+			// Process the last task
+			actions.push_back(performAction(tr, taskBucket, taskFuture, task));
 		}
 
-		Void _ = wait(performAction(tr, taskBucket, taskFuture, task));
+		Void _ = wait(waitForAll(actions));
 
 		return Void();
 	}

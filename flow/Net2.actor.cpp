@@ -123,6 +123,7 @@ public:
 
 	// INetworkConnections interface
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr );
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
 	// INetwork interface
@@ -157,6 +158,7 @@ public:
 
 	ASIOReactor reactor;
 	INetworkConnections *network;  // initially this, but can be changed
+	tcp::resolver tcpResolver;
 
 	int64_t tsc_begin, tsc_end;
 	double taskBegin;
@@ -475,6 +477,7 @@ Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
+	  tcpResolver(reactor.ios),
 	  stopped(false),
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
@@ -826,6 +829,34 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 
 Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr ) {
 	return Connection::connect(&this->reactor.ios, toAddr);
+}
+
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
+	state Promise<std::vector<NetworkAddress>> result;
+
+	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
+		if(ec)
+			result.sendError(lookup_failed());
+		std::vector<NetworkAddress> addrs;
+		
+		tcp::resolver::iterator end;
+		while(iter != end) {
+			// The easiest way to get an ip:port formatted endpoint with this interface is with a string stream because
+			// endpoint::to_string doesn't exist but operator<< does.
+			std::stringstream s;
+			s << iter->endpoint();
+			addrs.push_back(NetworkAddress::parse(s.str()));
+			++iter;
+		}
+		result.send(addrs);
+	});
+
+	std::vector<NetworkAddress> addresses = wait(result.getFuture());
+	return addresses;
+}
+
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {
+	return resolveTCPEndpoint_impl(this, host, service);
 }
 
 bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {
