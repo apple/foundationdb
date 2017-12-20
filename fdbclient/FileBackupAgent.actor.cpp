@@ -2440,23 +2440,18 @@ namespace fileBackup {
 			state int64_t remainingInBatch = Params.remainingInBatch().get(task);
 			state bool addingToExistingBatch = remainingInBatch > 0;
 			state Version restoreVersion;
-			state int64_t applyLag;
 
-			Void _ = wait(store(restore.getApplyVersionLag(tr), applyLag)
-					&& store(restore.restoreVersion().getOrThrow(tr), restoreVersion)
-					&& checkTaskVersion(tr->getDatabase(), task, name, version));
+			Void _ = wait(store(restore.restoreVersion().getOrThrow(tr), restoreVersion)
+						&& checkTaskVersion(tr->getDatabase(), task, name, version));
 
 			// If not adding to an existing batch then update the apply mutations end version so the mutations from the
 			// previous batch can be applied.  Only do this once beginVersion is > 0 (it will be 0 for the initial dispatch).
 			if(!addingToExistingBatch && beginVersion > 0) {
 				restore.setApplyEndVersion(tr, std::min(beginVersion, restoreVersion));
-				TraceEvent("FileRestoreDispatchSetApplyEndVersion")
-					.detail("RestoreUID", restore.getUid())
-					.detail("BeginVersion", beginVersion)
-					.detail("ApplyLag", applyLag)
-					.detail("TaskInstance", (uint64_t)this);
 			}
 
+			// The applyLag must be retrieved AFTER potentially updating the apply end version.
+			state int64_t applyLag = wait(restore.getApplyVersionLag(tr));
 			state int64_t batchSize = Params.batchSize().get(task);
 
 			// If starting a new batch and the apply lag is too large then re-queue and wait
