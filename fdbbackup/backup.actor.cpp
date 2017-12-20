@@ -90,7 +90,7 @@ enum enumRestoreType {
 //
 enum {
 	// Backup constants
-	OPT_DESTCONTAINER, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE, OPT_EXPVERSION, OPT_BASEURL, OPT_DATETIME,
+	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE, OPT_EXPVERSION, OPT_BASEURL, OPT_DATETIME,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -148,6 +148,8 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_NOSTOPWHENDONE,   "--no-stop-when-done",SO_NONE },
 	{ OPT_DESTCONTAINER,    "-d",               SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,    "--destcontainer",  SO_REQ_SEP },
+	{ OPT_SNAPSHOTINTERVAL, "-s",                   SO_REQ_SEP },
+	{ OPT_SNAPSHOTINTERVAL, "--snapshot_interval",  SO_REQ_SEP },
 	{ OPT_TAGNAME,         "-t",               SO_REQ_SEP },
 	{ OPT_TAGNAME,         "--tagname",        SO_REQ_SEP },
 	{ OPT_BACKUPKEYS,      "-k",               SO_REQ_SEP },
@@ -686,10 +688,11 @@ static void printBackupUsage(bool devhelp) {
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
 	printf("  -D, --date DATETIME\n"
-		   "                 Delete all data from the beginning to the given date and time in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
+		   "                 For expire operations, delete all data prior to (approximately) the given timestamp in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
 	printf("  -d, --destcontainer URL\n"
-	       "                 The Backup URL for the destination of this backup.\n");
+	       "                 The Backup URL for the operation.\n");
 	printBackupContainerInfo();
+	printf("  -s DURATION    When starting a backup, use snapshot interval DURATION in seconds.  Defaults to %d.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
@@ -1361,7 +1364,7 @@ ACTOR Future<Void> submitDBBackup(Database src, Database dest, Standalone<Vector
 	return Void();
 }
 
-ACTOR Future<Void> submitBackup(Database db, std::string destinationDir, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun, bool waitForCompletion, bool stopWhenDone) {
+ACTOR Future<Void> submitBackup(Database db, std::string url, int snapshotIntervalSeconds, Standalone<VectorRef<KeyRangeRef>> backupRanges, std::string tagName, bool dryRun, bool waitForCompletion, bool stopWhenDone) {
 	try
 	{
 		state FileBackupAgent backupAgent;
@@ -1406,7 +1409,7 @@ ACTOR Future<Void> submitBackup(Database db, std::string destinationDir, Standal
 		}
 
 		else {
-			Void _ = wait(backupAgent.submitBackup(db, KeyRef(destinationDir), tagName, backupRanges, stopWhenDone));
+			Void _ = wait(backupAgent.submitBackup(db, KeyRef(url), snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -1796,7 +1799,7 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
 		Void _ = wait(c->expireData(endVersion));
-		printf("All data before version %lld are deleted\n", endVersion);
+		printf("All data before version %lld is deleted.\n", endVersion);
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
@@ -1821,7 +1824,7 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 				when ( Void _ = wait(delay(3)) ) {
 					int numDeleted = 0;
 					c->deleteContainer(&numDeleted);
-					printf("%d files have been deleted.\n", numDeleted);
+					printf("%d files have been deleted so far...\n", numDeleted);
 				}
 			}
 		}
@@ -2200,6 +2203,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		std::string destinationContainer;
+		int snapshotIntervalSeconds = CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC;
 		std::string clusterFile;
 		std::string sourceClusterFile;
 		std::string baseUrl;
@@ -2381,6 +2385,15 @@ int main(int argc, char* argv[]) {
 					if(StringRef(destinationContainer).startsWith(LiteralStringRef("/")))
 						destinationContainer = std::string("file://") + destinationContainer;
 					break;
+				case OPT_SNAPSHOTINTERVAL: {
+					const char* a = args->OptionArg();
+					if (!sscanf(a, "%d", &snapshotIntervalSeconds)) {
+						fprintf(stderr, "ERROR: Could not parse snapshot interval `%s'\n", a);
+						printHelpTeaser(argv[0]);
+						return FDB_EXIT_ERROR;
+					}
+					break;
+				}
 				case OPT_WAITFORDONE:
 					waitForDone = true;
 					break;
@@ -2665,7 +2678,7 @@ int main(int argc, char* argv[]) {
 			{
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
 				openBackupContainer(argv[0], destinationContainer);
-				f = stopAfter( submitBackup(db, destinationContainer, backupKeys, tagName, dryRun, waitForDone, stopWhenDone) );
+				f = stopAfter( submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName, dryRun, waitForDone, stopWhenDone) );
 				break;
 			}
 

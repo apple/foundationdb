@@ -37,11 +37,6 @@
 
 const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable");
 
-template<class T>
-Future<Void> store(Future<T> what, T &out) {
-	return map(what, [&out](T const &v) { out = v; return Void(); });
-}
-
 // For convenience
 typedef FileBackupAgent::ERestoreState ERestoreState;
 
@@ -3311,6 +3306,7 @@ public:
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
 					state Reference<IBackupContainer> bc = wait(config.backupContainer().getOrThrow(tr));
 					state Optional<Version> stopVersion = wait(config.getLatestRestorableVersion(tr));
+					bool snapshotProgress = false;
 
 					switch (backupState) {
 						case BackupAgentBase::STATE_SUBMITTED:
@@ -3318,9 +3314,11 @@ public:
 							break;
 						case BackupAgentBase::STATE_BACKUP:
 							statusText += "The backup on tag `" + tagName + "' is in progress to " + bc->getURL() + ".\n";
+							snapshotProgress = true;
 							break;
 						case BackupAgentBase::STATE_DIFFERENTIAL:
 							statusText += "The backup on tag `" + tagName + "' is restorable but continuing to " + bc->getURL() + ".\n";
+							snapshotProgress = true;
 							break;
 						case BackupAgentBase::STATE_COMPLETED:
 							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed at version " + format("%lld", stopVersion.orDefault(-1)) + ".\n";
@@ -3328,6 +3326,24 @@ public:
 						default:
 							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " + backupStatus + ".\n";
 							break;
+					}
+
+					if(snapshotProgress) {
+						state int64_t snapshotInterval;
+						state Version recentReadVersion;
+						state Version snapshotBeginVersion;
+						state Version snapshotTargetEndVersion;
+
+						Void _ = wait(store(config.snapshotBeginVersion().getOrThrow(tr), snapshotBeginVersion)
+									&& store(config.snapshotTargetEndVersion().getOrThrow(tr), snapshotTargetEndVersion)
+									&& store(config.snapshotIntervalSeconds().getOrThrow(tr), snapshotInterval)
+									&& store(tr->getReadVersion(), recentReadVersion));
+
+						statusText += format("Snapshot interval is %lld seconds.  ", snapshotInterval);
+						if(backupState == BackupAgentBase::STATE_DIFFERENTIAL)
+							statusText += format("Current snapshot progress target is %3.2f%%\n", 100.0 * (recentReadVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion)) ;
+						else
+							statusText += "The initial snapshot is still running.\n";
 					}
 				}
 

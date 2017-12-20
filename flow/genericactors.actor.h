@@ -279,6 +279,11 @@ Future<Void> holdWhileVoid(X object, Future<T> what)
 	return Void();
 }
 
+template<class T>
+Future<Void> store(Future<T> what, T &out) {
+	return map(what, [&out](T const &v) { out = v; return Void(); });
+}
+
 //Waits for a future to be ready, and then applies an asynchronous function to it.
 ACTOR template<class T, class F, class U = decltype( fake<F>()(fake<T>()).getValue() )>
 Future<U> mapAsync(Future<T> what, F actorFunc)
