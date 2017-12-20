@@ -2121,6 +2121,7 @@ namespace fileBackup {
 			state int end = data.size();
 			state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
+			tr->reset();
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -2309,6 +2310,7 @@ namespace fileBackup {
 			state int end = data.size();
 			state int dataSizeLimit = BUGGIFY ? g_random->randomInt(256 * 1024, 10e6) : CLIENT_KNOBS->RESTORE_WRITE_TX_SIZE;
 
+			tr->reset();
 			loop {
 				try {
 					if(start == end)
