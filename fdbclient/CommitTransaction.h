@@ -87,7 +87,7 @@ static inline bool isNonAssociativeOp(MutationRef::Type mutationType) {
 }
 
 struct CommitTransactionRef {
-	CommitTransactionRef() {}
+	CommitTransactionRef() : read_snapshot(0) {}
 	CommitTransactionRef(Arena &a, const CommitTransactionRef &from)
 	  : read_conflict_ranges(a, from.read_conflict_ranges),
 		write_conflict_ranges(a, from.write_conflict_ranges),

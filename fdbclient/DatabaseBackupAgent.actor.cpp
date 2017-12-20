@@ -1554,6 +1554,14 @@ public:
 		loop {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			// dumpData's commits are unstoppable, and we need to make sure that no dumpData commits
+			// happen after this transaction, as it would mean that the applyMutationsBeginRange read we
+			// do isn't the final value, and thus a greater version of commits could have been applied.
+			// Thus, we need to commit it against the same proxy that all dumpData transactions were
+			// submitted to. The transaction above will stop any further dumpData calls from adding
+			// transactions to the proxy's commit promise stream, so our commit will come after all
+			// dumpData transactions.
+			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			try {
 				// Ensure that we're at a version higher than the data that we've written.
 				Optional<Value> lastApplied = wait(tr->get(logUid.withPrefix(applyMutationsBeginRange.begin)));

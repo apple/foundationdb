@@ -2317,13 +2317,12 @@ void Transaction::setupWatches() {
 	}
 }
 
-ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, bool causalWriteRisky ) {
+ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> trLogInfo, CommitTransactionRequest req, Future<Version> readVersion, TransactionInfo info, Version* pCommittedVersion, Transaction* tr, TransactionOptions options) {
 	state TraceInterval interval( "TransactionCommit" );
 	state double startTime;
 	if (info.debugID.present())
 		TraceEvent(interval.begin()).detail( "Parent", info.debugID.get() );
 
-	req.transaction.read_snapshot = 0;
 	try {
 		Version v = wait( readVersion );
 		req.transaction.read_snapshot = v;
@@ -2337,7 +2336,13 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		}
 
 		req.debugID = commitID;
-		state Future<CommitID> reply = loadBalance( cx->getMasterProxies(), &MasterProxyInterface::commit, req, TaskDefaultPromiseEndpoint, true );
+		state Future<CommitID> reply;
+		if (options.commitOnFirstProxy) {
+			const std::vector<MasterProxyInterface>& proxies = cx->clientInfo->get().proxies;
+			reply = proxies.size() ? throwErrorOr ( brokenPromiseToMaybeDelivered ( proxies[0].commit.tryGetReply(req) ) ) : Never();
+		} else {
+			reply = loadBalance( cx->getMasterProxies(), &MasterProxyInterface::commit, req, TaskDefaultPromiseEndpoint, true );
+		}
 
 		choose {
 			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {
@@ -2382,7 +2387,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		if (e.code() == error_code_request_maybe_delivered || e.code() == error_code_commit_unknown_result) {
 			// We don't know if the commit happened, and it might even still be in flight.
 
-			if (!causalWriteRisky) {
+			if (!options.causalWriteRisky) {
 				// Make sure it's not still in flight, either by ensuring the master we submitted to is dead, or the version we submitted with is dead, or by committing a conflicting transaction successfully
 				//if ( cx->getMasterProxies()->masterGeneration <= originalMasterGeneration )
 
@@ -2470,7 +2475,7 @@ Future<Void> Transaction::commitMutations() {
 
 		tr.isLockAware = options.lockAware;
 
-		Future<Void> commitResult = tryCommit( cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options.causalWriteRisky );
+		Future<Void> commitResult = tryCommit( cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options );
 
 		if (isCheckingWrites) {
 			Promise<Void> committed;
@@ -2553,6 +2558,11 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 			options.causalWriteRisky = true;
 			break;
 
+		case FDBTransactionOptions::COMMIT_ON_FIRST_PROXY:
+			validateOptionValue(value, false);
+			options.commitOnFirstProxy = true;
+			break;
+
 		case FDBTransactionOptions::CHECK_WRITES_ENABLE:
 			validateOptionValue(value, false);
 			options.checkWritesEnabled = true;
@@ -2565,7 +2575,7 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 
 		case FDBTransactionOptions::TRANSACTION_LOGGING_ENABLE:
 			validateOptionValue(value, true);
-			
+
 			if(value.get().size() > 100) {
 				throw invalid_option_value();
 			}
