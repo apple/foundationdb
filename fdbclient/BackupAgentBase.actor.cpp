@@ -603,6 +603,9 @@ ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Referenc
 		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
 		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
 
+		// The commit request contains no read conflict ranges, so regardless of what read version we
+		// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
+		// for our transaction to be aborted due to conflicts.
 		req.transaction.read_snapshot = committedVersion->get();
 		req.isLockAware = true;
 

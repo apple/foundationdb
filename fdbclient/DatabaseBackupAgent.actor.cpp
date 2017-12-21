@@ -1552,6 +1552,8 @@ public:
 					if (current <= applied) {
 						TraceEvent("DBA_abort_version_upgrade").detail("src", applied).detail("dest", current);
 						TEST(true);  // Upgrading version of local database.
+						// The +1 is because we want to make sure that a versionstamped operation can't reuse
+						// the same version as an already-applied transaction.
 						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(applied+1, Unversioned()));
 					}
 				}
