@@ -89,8 +89,8 @@ public:
 		}
 	};
 
-	BlobStoreEndpoint(std::string const &host, std::string service, std::string const &key, std::string const &key_secret, BlobKnobs const &knobs = BlobKnobs())
-	  : host(host), service(service), key(key), secret(key_secret), knobs(knobs),
+	BlobStoreEndpoint(std::string const &host, std::string service, std::string const &key, std::string const &secret, BlobKnobs const &knobs = BlobKnobs())
+	  : host(host), service(service), key(key), secret(secret), lookupSecret(secret.empty()), knobs(knobs),
 		requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 		sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
 		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
@@ -124,6 +124,7 @@ public:
 	std::string service;
 	std::string key;
 	std::string secret;
+	bool lookupSecret;
 	BlobKnobs knobs;
 
 	// Speed and concurrency limits
@@ -132,6 +133,8 @@ public:
 	Reference<IRateControl> recvRate;
 	FlowLock concurrentRequests;
 	FlowLock concurrentUploads;
+
+	Future<Void> updateSecret();
 
 	// Calculates the authentication string from the secret key
 	std::string hmac_sha1(std::string const &msg);

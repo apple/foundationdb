@@ -26,8 +26,6 @@
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "fdbrpc/Platform.h"
 #include "fdbclient/Status.h"
-#include <boost/algorithm/string/split.hpp>
-#include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
 namespace IBackupFile_impl {
@@ -421,70 +419,7 @@ public:
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion){
 		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
 	}
-
-/*
-struct BackupMetadata {
-	BackupMetadata() : format_version(1) {}
-	int64_t format_version;
-
-	std::string toJSON() {
-		json_spirit::mObject json;
-		JSONDoc doc(json);
-
-		doc.create("format_version") = formatVersion;
-
-		return json_spirit::write_string(json_spirit::mValue(json));
-	}
-
-	static BackupInfo fromJSON(std::string docString) {
-		BackupInfo info;
-		json_spirit::mValue json;
-		json_spirit::read_string(docString, json);
-		JSONDoc doc(json);
-
-		doc.tryGet("format_version", info.formatVersion);
-
-		return info;
-	}
 };
-
-ACTOR Future<Optional<BackupMetadata>> readInfo_impl(Reference<BackupContainerFileSystem> bc) {
-	state Reference<IAsyncFile> f;
-	try {
-		Reference<IAsyncFile> _f = wait(bc->readFile(bc->backupInfoPath()));
-		f = _f;
-	} catch(Error &e) {
-		if(e.code() == error_code_file_not_found)
-			return Optional<BackupMetadata>();
-}
-
-	state int64_t size = wait(f->size());
-	state Standalone<StringRef> buf = makeString(size);
-	try {
-		int read = wait(f->read(mutateString(buf), size, 0));
-		if(read != size)
-			throw io_error();
-
-		return BackupMetadata::fromJSON(buf.toString());
-	} catch(Error &e) {
-		TraceEvent(SevWarn, "BackupContainerInvalidBackupInfo").error(e);
-		throw backup_invalid_info();
-	}
-}
-
-
-// Write backup metadata
-ACTOR Future<Void> writeInfo_impl(Reference<BackupContainerFileSystem> bc, BackupMetadata info) {
-	state Reference<IBackupFile> f = wait(bc->writeFile(bc->backupInfoPath()));
-	Void _ = wait(f->append(info.toJSON()));
-	Void _ = wait(f->finish());
-	return Void();
-}
-*/
-
-};
-
-
 
 class BackupContainerLocalDirectory : public BackupContainerFileSystem, ReferenceCounted<BackupContainerLocalDirectory> {
 public:

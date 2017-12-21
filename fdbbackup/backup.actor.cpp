@@ -90,7 +90,7 @@ enum enumRestoreType {
 //
 enum {
 	// Backup constants
-	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE, OPT_EXPVERSION, OPT_BASEURL, OPT_DATETIME,
+	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE, OPT_EXPVERSION, OPT_BASEURL, OPT_DATETIME, OPT_BLOB_CREDENTIALS,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -132,6 +132,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -172,6 +173,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -329,6 +331,8 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -337,8 +341,6 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
@@ -354,6 +356,8 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -362,8 +366,6 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
@@ -379,6 +381,8 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -389,8 +393,6 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 #endif
 	{ OPT_BASEURL,         "-b",               SO_REQ_SEP },
 	{ OPT_BASEURL,         "--base_url",       SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
-	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
@@ -404,6 +406,8 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
+	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -441,6 +445,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_HELP,            "-h",               SO_NONE },
 	{ OPT_HELP,            "--help",           SO_NONE },
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
+	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -681,23 +686,27 @@ void printBackupContainerInfo() {
 static void printBackupUsage(bool devhelp) {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 	printf("Usage: %s (start | status | abort | wait | discontinue | pause | resume | expire | delete | describe | list) [OPTIONS]\n\n", exeBackup.toString().c_str());
-	printf("  -b, --base_url BASEURL\n"
-		   "                 Base URL of the blob store.\n");
 	printf("  -C CONNFILE    The path of a file containing the connection string for the\n"
 		   "                 FoundationDB cluster. The default is first the value of the\n"
 		   "                 FDB_CLUSTER_FILE environment variable, then `./fdb.cluster',\n"
 		   "                 then `%s'.\n", platform::getDefaultClusterFilePath().c_str());
-	printf("  -D, --date DATETIME\n"
-		   "                 For expire operations, delete all data prior to (approximately) the given timestamp in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
 	printf("  -d, --destcontainer URL\n"
-	       "                 The Backup URL for the operation.\n");
+	       "                 The Backup container URL for start, describe, expire, and delete operations.\n");
 	printBackupContainerInfo();
-	printf("  -s DURATION    When starting a backup, use snapshot interval DURATION in seconds.  Defaults to %d.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
+	printf("  -b, --base_url BASEURL\n"
+		   "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup name.\n");
+	printf("  --blob_credentials FILE\n"
+		   "                 File containing blob credentials in JSON format.  Can be specified multiple times for multiple files.\n");
+	printf("  -D, --date DATETIME\n"
+		   "                 Datetime cutoff for expire operations.  Requires a cluster file and will use version/timestamp metadata\n"
+		   "                 in the database to obtain a cutoff version very close to the timestamp given in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
+	printf("  -u VERSION     Version cutoff for expire operations.  Deletes all backup files with data from < VERSION.\n");
+	printf("  -s, --snapshot_interval DURATION\n"
+	       "                 For start operations, specifies the backup's target snapshot interval as DURATION seconds.  Defaults to %d.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 		   "                 If not specified, the entire database will be backed up.\n");
-	printf("  -n, --dry-run  Perform a trial run with no changes made.\n");
-	printf("  -u EXPVERSION  Delete all data up to (but not including the given version).\n");
+	printf("  -n, --dry-run  For start or restore operations, performs a trial run with no actual changes made.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -2231,6 +2240,7 @@ int main(int argc, char* argv[]) {
 		LocalityData localities;
 		uint64_t memLimit = 8LL << 30;
 		Optional<uint64_t> ti;
+		std::vector<std::string> blobCredentials;
 
 		if( argc == 1 ) {
 			printUsage(programExe, false);
@@ -2462,6 +2472,9 @@ int main(int argc, char* argv[]) {
 					}
 					memLimit = ti.get();
 					break;
+				case OPT_BLOB_CREDENTIALS:
+					blobCredentials.push_back(args->OptionArg());
+					break;
 			}
 		}
 
@@ -2609,29 +2622,53 @@ int main(int argc, char* argv[]) {
 		}
 		catch (Error& e) {
 			fprintf(stderr, "ERROR: %s\n", e.what());
-			return 1;
+			return FDB_EXIT_ERROR;
 		}
 
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
 		TraceEvent::setNetworkThread(); 
 
-		auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
-		try {
-			ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
-		}
-		catch (Error& e) {
-			fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
-			return 1;
+		// Add blob credentials files from the environment to the list collected from the command line.
+		const char *blobCredsFromENV = getenv("FDB_BLOB_CREDENTIALS");
+		if(blobCredsFromENV != nullptr) {
+			StringRef t((uint8_t*)blobCredsFromENV, strlen(blobCredsFromENV));
+			do {
+				StringRef file = t.eat(":");
+				if(file.size() != 0)
+				blobCredentials.push_back(file.toString());
+			} while(t.size() != 0);
 		}
 
-		try {
-			cluster = Cluster::createCluster(ccf, -1);
+		// Update the global blob credential files list
+		std::vector<std::string> *pFiles = (std::vector<std::string> *)g_network->global(INetwork::enBlobCredentialFiles);
+		if(pFiles != nullptr) {
+			for(auto &f : blobCredentials) {
+				pFiles->push_back(f);
+			}
 		}
-		catch (Error& e) {
-			fprintf(stderr, "ERROR: %s\n", e.what());
-			fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
-			return 1;
-		}
+
+		auto initCluster = [&]() {
+			auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
+			try {
+				ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
+			}
+			catch (Error& e) {
+				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+				return false;
+			}
+
+			try {
+				cluster = Cluster::createCluster(ccf, -1);
+			}
+			catch (Error& e) {
+				fprintf(stderr, "ERROR: %s\n", e.what());
+				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", ccf->getFilename().c_str());
+				return false;
+			}
+
+			db = cluster->createDatabase(databaseKey, localities).get();
+			return true;
+		};
 
 		TraceEvent("ProgramStart")
 			.detail("SourceVersion", getHGVersion())
@@ -2641,8 +2678,6 @@ int main(int argc, char* argv[]) {
 			.detail("CommandLine", commandLine)
 			.detail("MemoryLimit", memLimit)
 			.trackLatest("ProgramStart");
-
-		db = cluster->createDatabase(databaseKey, localities).get();
 		
 		if(sourceClusterFile.size()) {
 			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
@@ -2651,7 +2686,7 @@ int main(int argc, char* argv[]) {
 			}
 			catch (Error& e) {
 				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedSourceClusterFile, e).c_str());
-				return 1;
+				return FDB_EXIT_ERROR;
 			}
 
 			try {
@@ -2660,7 +2695,7 @@ int main(int argc, char* argv[]) {
 			catch (Error& e) {
 				fprintf(stderr, "ERROR: %s\n", e.what());
 				fprintf(stderr, "ERROR: Unable to connect to cluster from `%s'\n", source_ccf->getFilename().c_str());
-				return 1;
+				return FDB_EXIT_ERROR;
 			}
 
 			source_db = source_cluster->createDatabase(databaseKey, localities).get();
@@ -2669,6 +2704,8 @@ int main(int argc, char* argv[]) {
 		switch (programExe)
 		{
 		case EXE_AGENT:
+			if(!initCluster())
+				return FDB_EXIT_ERROR;
 			f = stopAfter(runAgent(db));
 			break;
 		case EXE_BACKUP:
@@ -2676,6 +2713,8 @@ int main(int argc, char* argv[]) {
 			{
 			case BACKUP_START:
 			{
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
 				// Test out the backup url to make sure it parses.  Doesn't test to make sure it's actually writeable.
 				openBackupContainer(argv[0], destinationContainer);
 				f = stopAfter( submitBackup(db, destinationContainer, snapshotIntervalSeconds, backupKeys, tagName, dryRun, waitForDone, stopWhenDone) );
@@ -2683,30 +2722,45 @@ int main(int argc, char* argv[]) {
 			}
 
 			case BACKUP_STATUS:
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter( statusBackup(db, tagName, maxErrors) );
 				break;
 
 			case BACKUP_ABORT:
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter( abortBackup(db, tagName) );
 				break;
 
 			case BACKUP_WAIT:
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter( waitBackup(db, tagName, stopWhenDone) );
 				break;
 
 			case BACKUP_DISCONTINUE:
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter( discontinueBackup(db, tagName, waitForDone) );
 				break;
 
 			case BACKUP_PAUSE:
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter( changeBackupResumed(db, true) );
 				break;
 
 			case BACKUP_RESUME:
+				if(!initCluster())
+					return FDB_EXIT_ERROR;
 				f = stopAfter( changeBackupResumed(db, false) );
 				break;
 
 			case BACKUP_EXPIRE:
+				if(!datetime.empty())
+					if(!initCluster())
+						return FDB_EXIT_ERROR;
 				f = stopAfter( expireBackupData(argv[0], destinationContainer, expVersion, datetime, db) );
 				break;
 
@@ -2732,6 +2786,8 @@ int main(int argc, char* argv[]) {
 
 			break;
 		case EXE_RESTORE:
+			if(!initCluster())
+				return FDB_EXIT_ERROR;
 			switch(restoreType) {
 				case RESTORE_START:
 					f = stopAfter( runRestore(db, tagName, restoreContainer, backupKeys, dbVersion, !dryRun, !quietDisplay, waitForDone, addPrefix, removePrefix) );
@@ -2760,9 +2816,13 @@ int main(int argc, char* argv[]) {
 			}
 			break;
 		case EXE_DR_AGENT:
+			if(!initCluster())
+				return FDB_EXIT_ERROR;
 			f = stopAfter( runDBAgent(source_db, db) );
 			break;
 		case EXE_DB_BACKUP:
+			if(!initCluster())
+				return FDB_EXIT_ERROR;
 			switch (dbType)
 			{
 			case DB_START:

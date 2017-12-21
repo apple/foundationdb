@@ -26,6 +26,7 @@
 #include "time.h"
 #include <boost/algorithm/string/split.hpp>
 #include <boost/algorithm/string/classification.hpp>
+#include "IAsyncFile.h"
 
 json_spirit::mObject BlobStoreEndpoint::Stats::getJSON() {
 	json_spirit::mObject o;
@@ -116,53 +117,33 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	return r;
 }
 
-
-struct tokenizer {
-	tokenizer(StringRef s) : s(s) {}
-	StringRef tok(StringRef sep) {
-		for(int i = 0, iend = s.size() - sep.size(); i <= iend; ++i) {
-			if(s.substr(i, sep.size()) == sep) {
-				StringRef token = s.substr(0, i);
-				s = s.substr(i + sep.size());
-				return token;
-			}
-		}
-		StringRef token = s;
-		s = StringRef();
-		return token;
-	}
-	StringRef tok(const char *sep) { return tok(StringRef((const uint8_t *)sep, strlen(sep))); }
-	StringRef s;
-};
-
 Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &url, std::string *resourceFromURL, std::string *error) {
 	if(resourceFromURL)
 		resourceFromURL->clear();
 
 	try {
-		tokenizer t(url);
-		StringRef prefix = t.tok("://");
+		StringRef t(url);
+		StringRef prefix = t.eat("://");
 		if(prefix != LiteralStringRef("blobstore"))
 			throw std::string("Invalid blobstore URL.");
-		StringRef key =      t.tok(":");
-		StringRef secret =   t.tok("@");
-		StringRef hostPort = t.tok("/");
-		StringRef resource = t.tok("?");
+		StringRef cred   =   t.eat("@");
+		StringRef hostPort = t.eat("/");
+		StringRef resource = t.eat("?");
 
 		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
-		tokenizer h(hostPort);
-		StringRef host = h.tok(":");
+		StringRef h(hostPort);
+		StringRef host = h.eat(":");
 		if(host.size() == 0)
 			throw std::string("host cannot be empty");
 
-		StringRef service = h.s;
+		StringRef service = h.eat();
 
 		BlobKnobs knobs;
 		while(1) {
-			StringRef name = t.tok("=");
+			StringRef name = t.eat("=");
 			if(name.size() == 0)
 				break;
-			StringRef value = t.tok("&");
+			StringRef value = t.eat("&");
 			char *valueEnd;
 			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
 			if(*valueEnd || ivalue == 0)
@@ -173,6 +154,10 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 
 		if(resourceFromURL != nullptr)
 			*resourceFromURL = resource.toString();
+
+		StringRef c(cred);
+		StringRef key = c.eat(":");
+		StringRef secret = c.eat();
 
 		return Reference<BlobStoreEndpoint>(new BlobStoreEndpoint(host.toString(), service.toString(), key.toString(), secret.toString(), knobs));
 
@@ -190,7 +175,13 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
 		hostPort.append(":");
 		hostPort.append(service);
 	}
-	std::string r = format("blobstore://%s:%s@%s/%s", key.c_str(), secret.c_str(), hostPort.c_str(), resource.c_str());
+
+	// If secret isn't being looked up from credentials files then it was passed explicitly in th URL so show it here.
+	std::string s;
+	if(!lookupSecret)
+		s = std::string(":") + secret;
+
+	std::string r = format("blobstore://%s%s@%s/%s", key.c_str(), s.c_str(), hostPort.c_str(), resource.c_str());
 	std::string p = knobs.getURLParameters();
 	if(!p.empty())
 		r.append("?").append(p);
@@ -275,11 +266,78 @@ Future<int64_t> BlobStoreEndpoint::objectSize(std::string const &bucket, std::st
 	return objectSize_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-Future<BlobStoreEndpoint::ReusableConnection> BlobStoreEndpoint::connect() {
+// Try to read a file, parse it as JSON, and return the resulting document.
+// It will NOT throw if any errors are encountered, it will just return an empty
+// JSON object and will log trace events for the errors encountered.
+ACTOR Future<json_spirit::mObject> tryReadJSONFile(std::string path) {
+	state std::string content;
+
+	try {
+		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY, 0));
+		state int64_t size = wait(f->size());
+		state Standalone<StringRef> buf = makeString(size);
+		int r = wait(f->read(mutateString(buf), size, 0));
+		ASSERT(r == size);
+		content = buf.toString();
+	} catch(Error &e) {
+		TraceEvent(SevWarn, "BlobCredentialFileError").detail("File", path).error(e);
+		return json_spirit::mObject();
+	}
+	
+	try {
+		json_spirit::mValue json;
+		json_spirit::read_string(content, json);
+		if(json.type() == json_spirit::obj_type)
+			return json.get_obj();
+		else
+			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").detail("File", path);
+	} catch(Error &e) {
+		TraceEvent(SevWarn, "BlobCredentialFileParseFailed").detail("File", path).error(e);
+	}
+
+	return json_spirit::mObject();
+}
+
+ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
+	std::vector<std::string> *pFiles = (std::vector<std::string> *)g_network->global(INetwork::enBlobCredentialFiles);
+	if(pFiles == nullptr)
+		return Void();
+	
+	state std::vector<Future<json_spirit::mObject>> reads;
+	for(auto &f : *pFiles)
+		reads.push_back(tryReadJSONFile(f));
+
+	Void _ = wait(waitForAll(reads));
+
+	std::string key = b->key + "@" + b->host;
+
+	for(auto &f : reads) {
+		JSONDoc doc(f.get());
+		if(doc.has("accounts") && doc.last().type() == json_spirit::obj_type) {
+			JSONDoc accounts(doc.last().get_obj());
+			if(accounts.has(key, false) && accounts.last().type() == json_spirit::obj_type) {
+				JSONDoc account(accounts.last());
+		std::string secret;
+		if(account.tryGet("secret", secret)) {
+			b->secret = secret;
+			return Void();
+		}
+	}
+		}
+	}
+
+	return Void();
+}
+
+Future<Void> BlobStoreEndpoint::updateSecret() {
+	return updateSecret_impl(Reference<BlobStoreEndpoint>::addRef(this));
+}
+
+ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobStoreEndpoint> b) {
 	// First try to get a connection from the pool
-	while(!connectionPool.empty()) {
-		ReusableConnection rconn = connectionPool.front();
-		connectionPool.pop();
+	while(!b->connectionPool.empty()) {
+		BlobStoreEndpoint::ReusableConnection rconn = b->connectionPool.front();
+		b->connectionPool.pop();
 
 		// If the connection expires in the future then return it
 		if(rconn.expirationTime > now()) {
@@ -291,13 +349,21 @@ Future<BlobStoreEndpoint::ReusableConnection> BlobStoreEndpoint::connect() {
 		}
 	}
 
-	return map(INetworkConnections::net()->connect(host, service.empty() ? "http" : service), [=] (Reference<IConnection> conn) {
+	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, b->service.empty() ? "http" : b->service));
+
 		TraceEvent("BlobStoreEndpointNewConnection")
 			.detail("RemoteEndpoint", conn->getPeerAddress())
-			.detail("ExpiresIn", knobs.max_connection_life)
-			.suppressFor(5, true);;
-		return ReusableConnection({conn, now() + knobs.max_connection_life});
-	});
+		.detail("ExpiresIn", b->knobs.max_connection_life)
+		.suppressFor(5, true);
+
+	if(b->lookupSecret)
+		Void _ = wait(b->updateSecret());
+
+	return BlobStoreEndpoint::ReusableConnection({conn, now() + b->knobs.max_connection_life});
+}
+
+Future<BlobStoreEndpoint::ReusableConnection> BlobStoreEndpoint::connect() {
+	return connect_impl(Reference<BlobStoreEndpoint>::addRef(this));
 }
 
 void BlobStoreEndpoint::returnConnection(ReusableConnection &rconn) {
@@ -333,9 +399,6 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// Start connecting
 			Future<BlobStoreEndpoint::ReusableConnection> frconn = bstore->connect();
 
-			// Finish/update the request headers (which includes Date header)
-			bstore->setAuthHeaders(verb, resource, headers);
-
 			// Make a shallow copy of the queue by calling addref() on each buffer in the chain and then prepending that chain to contentCopy
 			if(pContent != nullptr) {
 				contentCopy.discardAll();
@@ -352,6 +415,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			// Finish connecting, do request
 			state BlobStoreEndpoint::ReusableConnection rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+
+			// Finish/update the request headers (which includes Date header)
+			// This must be done AFTER the connection is ready because if credentials are coming from disk they are refreshed
+			// when a new connection is established and setAuthHeaders() would need the updated secret.
+			bstore->setAuthHeaders(verb, resource, headers);
+
 			remoteAddress = rconn.conn->getPeerAddress();
 			Void _ = wait(bstore->requestRate->getAllowance(1));
 			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));

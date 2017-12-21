@@ -217,6 +217,8 @@ public:
 	BoolMetricHandle awakeMetric;
 
 	EventMetricHandle<SlowTask> slowTaskMetric;
+
+	std::vector<std::string> blobCredentialFiles;
 };
 
 static tcp::endpoint tcpEndpoint( NetworkAddress const& n ) {
@@ -493,6 +495,7 @@ Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
 	}
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType) network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType) &reactor.ios);
+	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);
 
 #ifdef __linux__
 	setGlobal(INetwork::enEventFD, (flowGlobalType) N2::ASIOReactor::newEventFD(reactor));
