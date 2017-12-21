@@ -224,6 +224,8 @@ public:
 	}
 
 	void clearApplyMutationsKeys(Reference<ReadYourWritesTransaction> tr) {
+		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
+		
 		// Clear add/remove prefix keys
 		tr->clear(uidPrefixKey(applyMutationsAddPrefixRange.begin, uid));
 		tr->clear(uidPrefixKey(applyMutationsRemovePrefixRange.begin, uid));
@@ -1004,11 +1006,11 @@ namespace fileBackup {
 
 		static struct {
 			// Set by Execute, used by Finish
-			TaskParam<bool> snapshotFinished() {
+			static TaskParam<bool> snapshotFinished() {
 				return LiteralStringRef(__FUNCTION__);
 			}
 			// Set by Execute, used by Finish
-			TaskParam<Version> nextDispatchVersion() {
+			static TaskParam<Version> nextDispatchVersion() {
 				return LiteralStringRef(__FUNCTION__);
 			}
 		} Params;
@@ -1709,6 +1711,7 @@ namespace fileBackup {
 			state Key configPath = uidPrefixKey(logRangesRange.begin, uid);
 			state Key logsPath = uidPrefixKey(backupLogKeys.begin, uid);
 
+			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
 			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
@@ -2749,6 +2752,7 @@ namespace fileBackup {
 	ACTOR Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
 		state KeyBackedTag tag = makeRestoreTag(tagName.toString());
 		state Optional<UidAndAbortedFlagT> current = wait(tag.get(tr));
@@ -2797,6 +2801,7 @@ namespace fileBackup {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 				tr->addReadConflictRange(singleKeyRange(KeyRef()));
 				tr->addWriteConflictRange(singleKeyRange(KeyRef()));
 				Void _ = wait(tr->commit());

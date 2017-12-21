@@ -42,6 +42,9 @@ struct applyMutationsData {
 	Reference<KeyRangeMap<Version>> keyVersion;
 };
 
+// It is incredibly important that any modifications to txnStateStore are done in such a way that
+// the same operations will be done on all proxies at the same time. Otherwise, the data stored in
+// txnStateStore will become corrupted.
 static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem = Reference<ILogSystem>(), Version popVersion = 0,
 	KeyRangeMap<std::set<Key> >* vecBackupKeys = NULL, KeyRangeMap<ServerCacheInfo>* keyInfo = NULL, std::map<Key, applyMutationsData>* uid_applyMutationsData = NULL,
 	RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(), Database cx = Database(), NotifiedVersion* commitVersion = NULL, std::map<UID, Reference<StorageInfo>>* storageCache = NULL, bool initialCommit = false ) {

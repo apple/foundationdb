@@ -216,6 +216,7 @@ ACTOR Future<Void> newProxies( Reference<MasterData> self, Future< RecruitFromCo
 	}
 
 	vector<MasterProxyInterface> newRecruits = wait( getAll( initializationReplies ) );
+	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->proxies[0] is the firstProxy.
 	self->proxies = newRecruits;
 
 	return Void();
@@ -526,7 +527,9 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false );
 
-	// Fetch minRequiredCommitVersion from txnStateStore
+	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
+	// that we may recover to, as they embed the version in user-readable data and require that no
+	// transactions will be committed at a lower version.
 	Optional<Standalone<StringRef>> requiredCommitVersion = wait(self->txnStateStore->readValue( minRequiredCommitVersionKey ));
 	Version minRequiredCommitVersion = -1;
 	if (requiredCommitVersion.present()) {

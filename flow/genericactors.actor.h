@@ -1082,9 +1082,21 @@ ACTOR template <class T> Future<T> brokenPromiseToNever( Future<T> in ) {
 		return t;
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise)
-			throw e;
+			throw;
 		Void _ = wait(Never());  // never return
 		throw internal_error();  // does not happen
+	}
+}
+
+ACTOR template <class T> Future<T> brokenPromiseToMaybeDelivered( Future<T> in ) {
+	try {
+		T t = wait(in);
+		return t;
+	} catch (Error& e) {
+		if (e.code() == error_code_broken_promise) {
+			throw request_maybe_delivered();
+		}
+		throw;
 	}
 }
 

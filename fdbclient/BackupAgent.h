@@ -215,7 +215,7 @@ public:
 	}
 
 	/** RESTORE **/
-	
+
 	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
 
@@ -242,7 +242,7 @@ public:
 	}
 
 	/** BACKUP METHODS **/
-	
+
 	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
 	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr){ return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone); });
@@ -253,6 +253,13 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
+	// Terminate an ongoing backup, without waiting for the backup to finish.
+	// Preconditions:
+	//   A backup is running with the tag of `tagName`.
+	//     Otherwise `backup_unneeded` will be thrown indicating that the backup never existed or already finished.
+	// Postconditions:
+	//   No more tasks will be spawned to backup ranges of the database.
+	//   logRangesRange and backupLogKeys will be cleared for this backup.
 	Future<Void> abortBackup(Reference<ReadYourWritesTransaction> tr, std::string tagName);
 	Future<Void> abortBackup(Database cx, std::string tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return abortBackup(tr, tagName); });

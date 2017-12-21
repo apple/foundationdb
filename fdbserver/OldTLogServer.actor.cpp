@@ -361,13 +361,6 @@ namespace oldTLog {
 		return Void();
 	}
 
-	KeyRange prefixRange( KeyRef prefix ) {
-		Key end = prefix;
-		UNSTOPPABLE_ASSERT( end.size() && end.end()[-1] != 0xFF );
-		++const_cast<uint8_t&>( end.end()[-1] );
-		return KeyRangeRef( prefix, end );
-	}
-
 	////// Persistence format (for self->persistentData)
 
 	// Immutable keys

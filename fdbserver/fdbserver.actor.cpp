@@ -1675,6 +1675,13 @@ int main(int argc, char* argv[]) {
 			for(auto i = processes.begin(); i != processes.end(); ++i)
 				printf("%s %s: %0.3f Mclocks\n", (*i)->name, (*i)->address.toString().c_str(), (*i)->cpuTicks / 1e6);
 		}
+		if (role == Simulation) {
+			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
+			if (sevErrorEventsLogged > 0) {
+				printf("%lu SevError events logged\n", sevErrorEventsLogged);
+				rc = FDB_EXIT_ERROR;
+			}
+		}
 
 		//g_simulator.run();
 
