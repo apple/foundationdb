@@ -384,13 +384,13 @@ public:
 			std::vector<RangeFile> ranges = wait(bc->readKeyspaceSnapshot(snapshot.get()));
 			restorable.ranges = ranges;
 
-			// No logs needed if there is a complete key space snapshot at a single version.
-			if(snapshot.get().beginVersion == snapshot.get().endVersion)
+			// No logs needed if there is a complete key space snapshot at the target version.
+			if(snapshot.get().beginVersion == snapshot.get().endVersion && snapshot.get().endVersion == targetVersion)
 				return Optional<RestorableFileSet>(restorable);
 
 			std::vector<LogFile> logs = wait(bc->listLogFiles(snapshot.get().beginVersion, targetVersion));
 
-			// If there are logs and the first one starts before the snapshot begin version then proceed
+			// If there are logs and the first one starts at or before the snapshot begin version then proceed
 			if(!logs.empty() && logs.front().beginVersion <= snapshot.get().beginVersion) {
 				auto i = logs.begin();
 				Version end = i->endVersion;
@@ -930,12 +930,14 @@ TEST_CASE("backup/containers/url") {
 };
 
 TEST_CASE("backup/containers/list") {
-	state const char *url = getenv("FDB_TEST_BACKUP_URL");
-	ASSERT(url != nullptr);
-	printf("Listing %s\n", url);
-	std::vector<std::string> urls = wait(IBackupContainer::listContainers(url));
-	for(auto &u : urls) {
-		printf("%s\n", u.c_str());
+	if (!g_network->isSimulated()) {
+		state const char *url = getenv("FDB_TEST_BACKUP_URL");
+		ASSERT(url != nullptr);
+		printf("Listing %s\n", url);
+		std::vector<std::string> urls = wait(IBackupContainer::listContainers(url));
+		for(auto &u : urls) {
+			printf("%s\n", u.c_str());
+		}
 	}
 	return Void();
 };
