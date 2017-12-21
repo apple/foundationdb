@@ -283,7 +283,7 @@ ACTOR Future<json_spirit::mObject> tryReadJSONFile(std::string path) {
 		TraceEvent(SevWarn, "BlobCredentialFileError").detail("File", path).error(e);
 		return json_spirit::mObject();
 	}
-	
+
 	try {
 		json_spirit::mValue json;
 		json_spirit::read_string(content, json);
@@ -302,7 +302,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 	std::vector<std::string> *pFiles = (std::vector<std::string> *)g_network->global(INetwork::enBlobCredentialFiles);
 	if(pFiles == nullptr)
 		return Void();
-	
+
 	state std::vector<Future<json_spirit::mObject>> reads;
 	for(auto &f : *pFiles)
 		reads.push_back(tryReadJSONFile(f));
@@ -317,12 +317,12 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 			JSONDoc accounts(doc.last().get_obj());
 			if(accounts.has(key, false) && accounts.last().type() == json_spirit::obj_type) {
 				JSONDoc account(accounts.last());
-		std::string secret;
-		if(account.tryGet("secret", secret)) {
-			b->secret = secret;
-			return Void();
-		}
-	}
+				std::string secret;
+				if(account.tryGet("secret", secret)) {
+					b->secret = secret;
+					return Void();
+				}
+			}
 		}
 	}
 
@@ -351,8 +351,8 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 
 	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, b->service.empty() ? "http" : b->service));
 
-		TraceEvent("BlobStoreEndpointNewConnection")
-			.detail("RemoteEndpoint", conn->getPeerAddress())
+	TraceEvent("BlobStoreEndpointNewConnection")
+		.detail("RemoteEndpoint", conn->getPeerAddress())
 		.detail("ExpiresIn", b->knobs.max_connection_life)
 		.suppressFor(5, true);
 
