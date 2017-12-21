@@ -696,7 +696,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -b, --base_url BASEURL\n"
 		   "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup name.\n");
 	printf("  --blob_credentials FILE\n"
-		   "                 File containing blob credentials in JSON format.  Can be specified multiple times for multiple files.\n");
+		   "                 File containing blob credentials in JSON format.  Can be specified multiple times for multiple files.  See below for more details.\n");
 	printf("  -D, --date DATETIME\n"
 		   "                 Datetime cutoff for expire operations.  Requires a cluster file and will use version/timestamp metadata\n"
 		   "                 in the database to obtain a cutoff version very close to the timestamp given in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
@@ -714,6 +714,17 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -h, --help     Display this help and exit.\n");
 	printf("\n"
 		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
+	printf("\n"
+		   "  BLOB CREDENTIALS\n"
+		   "     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
+		   "     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
+		   "     These files can be specified with the --blob_credentials argument described above or via the environment variable\n"
+		   "     FDB_BLOB_CREDENTIALS, whose value is a colon-separated list of files.  The command line takes priority over\n"
+		   "     over the environment but all files from both sources are used.\n\n"
+		   "     At connect time, the specified files are read in order and the first matching account specification (user@host)\n"
+		   "     will be used to obtain the secret key.\n\n"
+		   "     The JSON schema is:\n"
+		   "        { \"accounts\" : { \"user@host\" : { \"secret\" : \"SECRETKEY\" }, \"user2@host2\" : { \"secret\" : \"SECRET\" } } }\n");
 
 	if (devhelp) {
 #ifdef _WIN32
