@@ -1795,7 +1795,10 @@ ACTOR Future<Version> getVersionFromDateTime(std::string datetime, Database db) 
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, 0, Optional<int64_t>(time), 1, false, true) );
-			ASSERT(results.size() == 1);
+			if (results.size() != 1) {
+				fprintf(stderr, "ERROR: Unable to find a version with given date/time.\n");
+				throw backup_error();
+			}
 
 			return results[0].second;
 		} catch (Error& e) {
