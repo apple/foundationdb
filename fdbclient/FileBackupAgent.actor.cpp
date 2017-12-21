@@ -3472,9 +3472,26 @@ public:
 				Void _ = wait( lockDatabase(&tr, randomUid) );
 				Void _ = wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
+				TraceEvent("AS_locked").detail("commitVer", commitVersion);
 				break;
 			} catch( Error &e ) {
 				Void _ = wait(tr.onError(e));
+			}
+		}
+
+		ryw_tr->reset();
+		loop {
+			try {
+				Optional<Version> restoreVersion = wait( backupConfig.getLatestRestorableVersion(ryw_tr) );
+				if(restoreVersion.present() && restoreVersion.get() >= commitVersion) {
+					TraceEvent("AS_restoreVersion").detail("restoreVer", restoreVersion.get());
+					break;
+				} else {
+					ryw_tr->reset();
+					Void _ = wait(delay(0.2));
+				}
+			} catch( Error &e ) {
+				Void _ = wait( ryw_tr->onError(e) );
 			}
 		}
 
