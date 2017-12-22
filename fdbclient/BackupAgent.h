@@ -677,14 +677,20 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	// The end version of the first complete snapshot
+	KeyBackedProperty<Version> firstSnapshotEndVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		auto &copy = *this;
 		auto lastLog = latestLogEndVersion().get(tr);
-		auto lastSnapshot = latestSnapshotEndVersion().get(tr);
-		return map(success(lastLog) && success(lastSnapshot), [=](Void) -> Optional<Version> {
-			if(lastLog.get().present() && lastSnapshot.get().present()) {
+		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
+		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
+			// The latest log greater than the oldest snapshot is the restorable version
+			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() >= firstSnapshot.get().get()) {
 				return lastLog.get().get();
 			}
 			return {};
