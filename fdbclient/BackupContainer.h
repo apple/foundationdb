@@ -97,13 +97,16 @@ struct FullBackupListing {
 };
 
 struct BackupDescription {
+	BackupDescription() : totalSnapshotBytes(0), totalLogBytes(0) {}
 	std::string url;
 	std::vector<KeyspaceSnapshotFile> snapshots;
+	int64_t totalSnapshotBytes;
 	Optional<Version> minLogBegin;
 	Optional<Version> maxLogEnd;
 	Optional<Version> contiguousLogEnd;
 	Optional<Version> maxRestorableVersion;
 	Optional<Version> minRestorableVersion;
+	int64_t totalLogBytes;
 	std::string extendedDetail;  // Freeform container-specific info.
 	std::string toString() const;
 };

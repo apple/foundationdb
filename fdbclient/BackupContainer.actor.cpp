@@ -50,6 +50,7 @@ std::string BackupDescription::toString() const {
 
 	for(const KeyspaceSnapshotFile &m : snapshots)
 		info.append(format("Snapshot:  startVersion=%lld  endVersion=%lld  totalBytes=%lld\n", m.beginVersion, m.endVersion, m.totalSize));
+	info.append(format("TotalSnapshotBytes: %lld\n", totalSnapshotBytes));
 
 	if(minLogBegin.present())
 		info.append(format("MinLogBeginVersion: %lld\n", minLogBegin.get()));
@@ -61,6 +62,7 @@ std::string BackupDescription::toString() const {
 		info.append(format("MinRestorableVersion: %lld\n", minRestorableVersion.get()));
 	if(maxRestorableVersion.present())
 		info.append(format("MaxRestorableVersion: %lld\n", maxRestorableVersion.get()));
+	info.append(format("TotalLogBytes: %lld\n", totalLogBytes));
 
 	if(!extendedDetail.empty())
 		info.append("ExtendedDetail: ").append(extendedDetail);
@@ -300,21 +302,31 @@ public:
 			desc.maxLogEnd = logs.rbegin()->endVersion;
 
 			auto i = logs.begin();
+			desc.totalLogBytes = i->fileSize;
 			desc.minLogBegin = i->beginVersion;
 			desc.contiguousLogEnd = i->endVersion;
 			auto &end = desc.contiguousLogEnd.get();  // For convenience to make loop cleaner
 
 			// Advance until continuity is broken
 			while(++i != logs.end()) {
+				desc.totalLogBytes += i->fileSize;
 				if(i->beginVersion > end)
 					break;
 				// If the next link in the log chain is found, update the end
 				if(i->beginVersion == end)
 					end = i->endVersion;
 			}
+
+			// Scan the rest of the logs to update the total size
+			while(i != logs.end()) {
+				desc.totalLogBytes += i->fileSize;
+				++i;
+			}
 		}
 
 		for(auto &s : snapshots) {
+			desc.totalSnapshotBytes += s.totalSize;
+
 			// If the snapshot is at a single version then it requires no logs.  Update min and max restorable.
 			// TODO:  Somehow check / report if the restorable range is not or may not be contiguous.
 			if(s.beginVersion == s.endVersion) {
@@ -812,19 +824,25 @@ Future<std::vector<std::string>> IBackupContainer::listContainers(std::string ba
 	return listContainers_impl(baseURL);
 }
 
-ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f) {
-	state Standalone<StringRef> content = makeString(g_random->randomInt(0, 10000000));
-	for(int i = 0; i < content.size(); ++i)
-		mutateString(content)[i] = (uint8_t)g_random->randomInt(0, 256);
+ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size) {
+	state Standalone<StringRef> content;
+	if(size > 0) {
+		content = makeString(size);
+		for(int i = 0; i < content.size(); ++i)
+			mutateString(content)[i] = (uint8_t)g_random->randomInt(0, 256);
 
-	Void _ = wait(f->append(content.begin(), content.size()));
+		Void _ = wait(f->append(content.begin(), content.size()));
+	}
 	Void _ = wait(f->finish());
 	state Reference<IAsyncFile> inputFile = wait(c->readFile(f->getFileName()));
-	int64_t size = wait(inputFile->size());
-	state Standalone<StringRef> buf = makeString(size);
-	int b = wait(inputFile->read(mutateString(buf), buf.size(), 0));
-	ASSERT(b == buf.size());
-	ASSERT(buf == content);
+	int64_t fileSize = wait(inputFile->size());
+	ASSERT(size == fileSize);
+	if(size > 0) {
+		state Standalone<StringRef> buf = makeString(size);
+		int b = wait(inputFile->read(mutateString(buf), buf.size(), 0));
+		ASSERT(b == buf.size());
+		ASSERT(buf == content);
+	}
 	return Void();
 }
 
@@ -837,19 +855,19 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	Void _ = wait(c->create());
 
 	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100, 150, 10));
-	Void _ = wait(writeAndVerifyFile(c, log1));
+	Void _ = wait(writeAndVerifyFile(c, log1, 0));
 
 	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150, 300, 10));
-	Void _ = wait(writeAndVerifyFile(c, log2));
+	Void _ = wait(writeAndVerifyFile(c, log2, g_random->randomInt(0, 10000000)));
 
 	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160, 10));
-	Void _ = wait(writeAndVerifyFile(c, range1));
+	Void _ = wait(writeAndVerifyFile(c, range1, g_random->randomInt(0, 10000000)));
 
 	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300, 10));
-	Void _ = wait(writeAndVerifyFile(c, range2));
+	Void _ = wait(writeAndVerifyFile(c, range2, g_random->randomInt(0, 10000000)));
 
 	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310, 10));
-	Void _ = wait(writeAndVerifyFile(c, range3));
+	Void _ = wait(writeAndVerifyFile(c, range3, g_random->randomInt(0, 10000000)));
 
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size()));
 

@@ -379,10 +379,7 @@ void BlobStoreEndpoint::returnConnection(ReusableConnection &rconn) {
 ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoint> bstore, std::string verb, std::string resource, HTTP::Headers headers, UnsentPacketQueue *pContent, int contentLen, std::set<unsigned int> successCodes) {
 	state UnsentPacketQueue contentCopy;
 
-	// Set content length header if there is content
-	if(contentLen > 0)
-		headers["Content-Length"] = format("%d", contentLen);
-
+	headers["Content-Length"] = format("%d", contentLen);
 	headers["Host"] = bstore->host;
 	Void _ = wait(bstore->concurrentRequests.take());
 	state FlowLock::Releaser globalReleaser(bstore->concurrentRequests, 1);
@@ -697,9 +694,6 @@ Future<std::string> BlobStoreEndpoint::readEntireFile(std::string const &bucket,
 }
 
 ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, UnsentPacketQueue *pContent, int contentLen, std::string contentMD5) {
-	if(contentLen == 0)
-		throw file_not_writable();
-
 	if(contentLen > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
 

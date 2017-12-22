@@ -165,9 +165,6 @@ public:
 
 	// Ready once all data has been sent AND acknowledged from the remote side
 	virtual Future<Void> sync() {
-		if(m_cursor == 0)
-			throw file_not_writable();
-
 		// Only initiate the finish operation once, and also prevent further writing.
 		if(!m_finished.isValid()) {
 			m_finished = doFinishUpload(this);

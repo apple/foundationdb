@@ -70,13 +70,13 @@ namespace HTTP {
 	}
 
 	std::string Response::toString() {
-		std::string r = format("Response code: %d\n", code);
-		r += format("ContentLen: %lld\n", contentLen);
+		std::string r = format("Response Code: %d\n", code);
+		r += format("Response ContentLen: %lld\n", contentLen);
 		for(auto h : headers)
-			r += format("Header: %s: %s\n", h.first.c_str(), h.second.c_str());
-		r.append("--CONTENT--\n");
+			r += format("Reponse Header: %s: %s\n", h.first.c_str(), h.second.c_str());
+		r.append("-- RESPONSE CONTENT--\n");
 		r.append(content);
-		r.append("--------\n");
+		r.append("\n--------\n");
 		return r;
 	}
 
@@ -315,7 +315,12 @@ namespace HTTP {
 			pContent->prependWriteBuffer(pFirst, pLast);
 
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 1)
-				printf("[%s] HTTP starting %s %s\n", conn->getDebugID().toString().c_str(), verb.c_str(), resource.c_str());
+				printf("[%s] HTTP starting %s %s ContentLen:%d\n", conn->getDebugID().toString().c_str(), verb.c_str(), resource.c_str(), contentLen);
+			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
+				for(auto h : headers)
+					printf("Request Header: %s: %s\n", h.first.c_str(), h.second.c_str());
+			}
+
 			state double send_start = timer();
 			state double total_sent = 0;
 			loop {
