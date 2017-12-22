@@ -1845,10 +1845,16 @@ namespace fileBackup {
 			state bool stopWhenDone;
 			state EBackupState backupState;
 			state Optional<Version> restorableVersion;
+			state Optional<Version> firstSnapshotEndVersion;
 
 			Void _ = wait(store(config.stopWhenDone().getOrThrow(tr), stopWhenDone) 
 						&& store(config.stateEnum().getOrThrow(tr), backupState)
-						&& store(config.getLatestRestorableVersion(tr), restorableVersion));
+						&& store(config.getLatestRestorableVersion(tr), restorableVersion)
+						&& store(config.firstSnapshotEndVersion().get(tr), firstSnapshotEndVersion));
+
+			if(!firstSnapshotEndVersion.present()) {
+				config.firstSnapshotEndVersion().set(tr, Params.endVersion().get(task));
+			}
 
 			// If the backup is restorable and the state isn't differential the set state to differential
 			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_DIFFERENTIAL)
