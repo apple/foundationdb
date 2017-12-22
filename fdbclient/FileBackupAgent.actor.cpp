@@ -910,7 +910,6 @@ namespace fileBackup {
 						bool usedFile = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
 						TraceEvent("FileBackupWroteRangeFile")
 							.detail("BackupUID", backup.getUid())
-							.detail("BackupURL", bc->getURL())
 							.detail("Size", outFile->size())
 							.detail("Keys", nrKeys)
 							.detail("ReadVersion", outVersion)
@@ -1541,7 +1540,6 @@ namespace fileBackup {
 
 			TraceEvent("FileBackupWroteLogFile")
 				.detail("BackupUID", config.getUid())
-				.detail("BackupURL", bc->getURL())
 				.detail("Size", outFile->size())
 				.detail("BeginVersion", beginVersion)
 				.detail("EndVersion", endVersion);
@@ -1826,7 +1824,6 @@ namespace fileBackup {
 
 			TraceEvent(SevInfo, "FileBackupWroteSnapshotManifest")
 				.detail("BackupUID", config.getUid())
-				.detail("BackupURL", bc->getURL())
 				.detail("BeginVersion", minVer)
 				.detail("EndVersion", maxVer)
 				.detail("TotalBytes", totalBytes);
