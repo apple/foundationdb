@@ -851,6 +851,13 @@ namespace fileBackup {
 			state Key beginKey = Params.beginKey().get(task);
 			state Key endKey = Params.endKey().get(task);
 
+			TraceEvent("FileBackupRangeStart")
+				.detail("BackupUID", BackupConfig(task).getUid())
+				.detail("BeginKey", Params.beginKey().get(task).printable())
+				.detail("EndKey", Params.endKey().get(task).printable())
+				.detail("TaskKey", task->key.printable())
+				.suppressFor(60, true);
+
 			// When a key range task saves the last chunk of progress and then the executor dies, when the task continues
 			// its beginKey and endKey will be equal but there is no work to be done.
 			if(beginKey == endKey)
@@ -965,7 +972,8 @@ namespace fileBackup {
 						.detail("BeginKey", Params.beginKey().get(task).printable())
 						.detail("EndKey", Params.endKey().get(task).printable())
 						.detail("SliceBeginKey", nextKey.printable())
-						.detail("SliceEndKey", keys[idx].printable());
+						.detail("SliceEndKey", keys[idx].printable())
+						.suppressFor(60, true);
 				}
 				nextKey = keys[idx];
 			}
@@ -991,6 +999,14 @@ namespace fileBackup {
 			}
 
 			Void _ = wait(taskBucket->finish(tr, task));
+
+			TraceEvent("FileBackupRangeFinish")
+				.detail("BackupUID", BackupConfig(task).getUid())
+				.detail("BeginKey", Params.beginKey().get(task).printable())
+				.detail("EndKey", Params.endKey().get(task).printable())
+				.detail("TaskKey", task->key.printable())
+				.suppressFor(60, true);
+
 			return Void();
 		}
 
@@ -1202,7 +1218,7 @@ namespace fileBackup {
 			state int countAllShards = countShardsDone + countShardsNotDone;
 
 			if(countShardsNotDone == 0) {
-				TraceEvent("FileBackupSnapshotDispatchTaskFinished")
+				TraceEvent("FileBackupSnapshotDispatchFinished")
 					.detail("BackupUID", config.getUid())
 					.detail("AllShards", countAllShards)
 					.detail("ShardsDone", countShardsDone)
@@ -1228,7 +1244,7 @@ namespace fileBackup {
 			state int countExpectedShardsDone = std::min<int>(countAllShards, countAllShards * timeElapsed);
 			state int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
 
-			TraceEvent("FileBackupSnapshotDispatchTask1")
+			TraceEvent("FileBackupSnapshotDispatchStats")
 				.detail("BackupUID", config.getUid())
 				.detail("AllShards", countAllShards)
 				.detail("ShardsDone", countShardsDone)
@@ -1362,7 +1378,7 @@ namespace fileBackup {
 			}
 
 			if(countShardsNotDone == 0) {
-				TraceEvent("FileBackupSnapshotDispatchTaskFinished")
+				TraceEvent("FileBackupSnapshotDispatchFinished")
 					.detail("BackupUID", config.getUid())
 					.detail("AllShards", countAllShards)
 					.detail("ShardsDone", countShardsDone)
@@ -1542,7 +1558,8 @@ namespace fileBackup {
 				.detail("BackupUID", config.getUid())
 				.detail("Size", outFile->size())
 				.detail("BeginVersion", beginVersion)
-				.detail("EndVersion", endVersion);
+				.detail("EndVersion", endVersion)
+				.suppressFor(60, true);
 
 			Params.fileSize().set(task, outFile->size());
 
@@ -1654,6 +1671,12 @@ namespace fileBackup {
 			// If stopWhenDone is set and there is a restorable version, set the done future and do not create further tasks.
 			if(stopWhenDone && restorableVersion.present()) {
 				Void _ = wait(onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
+
+				TraceEvent("FileBackupLogsDispatchDone")
+					.detail("BackupUID", config.getUid())
+					.detail("BeginVersion", beginVersion)
+					.detail("RestorableVersion", restorableVersion.orDefault(-1));
+
 				return Void();
 			}
 
@@ -1670,6 +1693,12 @@ namespace fileBackup {
 			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture));
 
 			Void _ = wait(taskBucket->finish(tr, task));
+
+			TraceEvent("FileBackupLogsDispatchContinuing")
+				.detail("BackupUID", config.getUid())
+				.detail("BeginVersion", beginVersion)
+				.detail("EndVersion", endVersion).suppressFor(60, true);
+
 			return Void();
 		}
 
@@ -1715,6 +1744,9 @@ namespace fileBackup {
 			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
 			Void _ = wait(taskBucket->finish(tr, task));
+
+			TraceEvent("FileBackupFinished").detail("BackupUID", uid);
+
 			return Void();
 		}
 
@@ -2056,7 +2088,8 @@ namespace fileBackup {
 				.detail("FileSize", rangeFile.fileSize)
 				.detail("ReadOffset", readOffset)
 				.detail("ReadLen", readLen)
-				.detail("TaskInstance", (uint64_t)this);
+				.detail("TaskInstance", (uint64_t)this)
+				.suppressFor(60, true);
 
 			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
 			state Future<Reference<IBackupContainer>> bc;
@@ -2180,7 +2213,8 @@ namespace fileBackup {
 						.detail("DataSize", data.size())
 						.detail("Bytes", txBytes)
 						.detail("OriginalFileRange", printable(originalFileRange))
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", (uint64_t)this)
+						.suppressFor(60, true);
 
 					// Commit succeeded, so advance starting point
 					start = i;
@@ -2284,8 +2318,9 @@ namespace fileBackup {
 				.detail("FileSize", logFile.fileSize)
 				.detail("ReadOffset", readOffset)
 				.detail("ReadLen", readLen)
-				.detail("TaskInstance", (uint64_t)this);
-			
+				.detail("TaskInstance", (uint64_t)this)
+				.suppressFor(60, true);
+
 			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
 			state Reference<IBackupContainer> bc;
 
@@ -2356,7 +2391,8 @@ namespace fileBackup {
 						.detail("EndIndex", i)
 						.detail("DataSize", data.size())
 						.detail("Bytes", txBytes)
-						.detail("TaskInstance", (uint64_t)this);
+						.detail("TaskInstance", (uint64_t)this)
+						.suppressFor(60, true);
 
 					// Commit succeeded, so advance starting point
 					start = i;
@@ -2619,7 +2655,11 @@ namespace fileBackup {
 				beginFile = beginFile + '\x00';
 				beginBlock = 0;
 
-				//TraceEvent("FileRestoreDispatchedFile").detail("RestoreUID", restore.getUid()).detail("FileName", fi.filename).detail("TaskInstance", (uint64_t)this);
+				TraceEvent("FileRestoreDispatchedFile")
+					.detail("RestoreUID", restore.getUid())
+					.detail("FileName", f.fileName)
+					.detail("TaskInstance", (uint64_t)this)
+					.suppressFor(60, true);
 			}
 
 			// If no blocks were dispatched then the next dispatch task should run now and be joined with the allPartsDone future

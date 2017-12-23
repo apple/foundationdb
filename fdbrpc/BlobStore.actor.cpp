@@ -164,7 +164,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 	} catch(std::string &err) {
 		if(error != nullptr)
 			*error = err;
-		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url);
+		TraceEvent(SevWarnAlways, "BlobStoreEndpointBadURL").detail("Description", err).detail("Format", getURLFormat()).detail("URL", url).suppressFor(60, true);
 		throw backup_invalid_url();
 	}
 }
@@ -280,7 +280,7 @@ ACTOR Future<json_spirit::mObject> tryReadJSONFile(std::string path) {
 		ASSERT(r == size);
 		content = buf.toString();
 	} catch(Error &e) {
-		TraceEvent(SevWarn, "BlobCredentialFileError").detail("File", path).error(e);
+		TraceEvent(SevWarn, "BlobCredentialFileError").detail("File", path).error(e).suppressFor(60, true);
 		return json_spirit::mObject();
 	}
 
@@ -290,9 +290,9 @@ ACTOR Future<json_spirit::mObject> tryReadJSONFile(std::string path) {
 		if(json.type() == json_spirit::obj_type)
 			return json.get_obj();
 		else
-			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").detail("File", path);
+			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").detail("File", path).suppressFor(60, true);
 	} catch(Error &e) {
-		TraceEvent(SevWarn, "BlobCredentialFileParseFailed").detail("File", path).error(e);
+		TraceEvent(SevWarn, "BlobCredentialFileParseFailed").detail("File", path).error(e).suppressFor(60, true);
 	}
 
 	return json_spirit::mObject();
@@ -344,7 +344,7 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 		TraceEvent("BlobStoreEndpointReusingConnected")
 			.detail("RemoteEndpoint", rconn.conn->getPeerAddress())
 			.detail("ExpiresIn", rconn.expirationTime - now())
-			.suppressFor(5, true);
+			.suppressFor(60, true);
 			return rconn;
 		}
 	}
@@ -354,7 +354,7 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 	TraceEvent("BlobStoreEndpointNewConnection")
 		.detail("RemoteEndpoint", conn->getPeerAddress())
 		.detail("ExpiresIn", b->knobs.max_connection_life)
-		.suppressFor(5, true);
+		.suppressFor(60, true);
 
 	if(b->lookupSecret)
 		Void _ = wait(b->updateSecret());
@@ -463,7 +463,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		event.detail("Verb", verb)
 			 .detail("Resource", resource)
 			 .detail("ThisTry", thisTry)
-			 .suppressFor(5, true);
+			 .suppressFor(15, true);
 
 		// We will wait delay seconds before the next retry, start with nextRetryDelay.
 		double delay = nextRetryDelay;
@@ -567,7 +567,6 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					object.size = strtoll(sizeVal.c_str(), NULL, 10);
 					objectDoc.get("Key", object.name);
 					result.objects.push_back(std::move(object));
-
 				}
 			}
 			if(doc.has("CommonPrefixes")) {
@@ -578,8 +577,15 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					result.commonPrefixes.push_back(std::move(prefix));
 				}
 			}
+
+			if(!result.objects.empty())
+				lastFile = result.objects.back().name;
+			if(!result.commonPrefixes.empty() && lastFile < result.commonPrefixes.back())
+				lastFile = result.commonPrefixes.back();
+
 			results.send(result);
 		} catch(Error &e) {
+			TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").detail("Resource", resource + HTTP::urlEncode(lastFile)).suppressFor(60, true);
 			throw http_bad_response();
 		}
 	}
