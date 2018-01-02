@@ -115,7 +115,7 @@ public:
 		: basename(basename), onError(delayed(error.getFuture())), onStopped(stopped.getFuture()),
 		readingFile(-1), readingPage(-1), writingPos(-1), dbgid(dbgid),
 		dbg_file0BeginSeq(0), fileExtensionBytes(10<<20), readingBuffer( dbgid ),
-		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void())
+		readyToPush(Void()), fileSizeWarningLimit(fileSizeWarningLimit), lastCommit(Void()), isFirstCommit(true)
 	{
 		if(BUGGIFY)
 			fileExtensionBytes = 8<<10;
@@ -191,6 +191,7 @@ public:
 
 	Future<Void> readyToPush;
 	Future<Void> lastCommit;
+	bool isFirstCommit;
 
 	StringBuffer readingBuffer; // Pages that have been read and not yet returned
 	int readingFile;  // i if the next page after readingBuffer should be read from files[i], 2 if recovery is complete
@@ -280,6 +281,12 @@ public:
 			Future<Void> ready = self->readyToPush;
 			self->readyToPush = pushing.getFuture();
 			self->lastCommit = committed.getFuture();
+
+			// the first commit must complete before we can pipeline other commits so that we will always have a valid page to binary search to
+			if(self->isFirstCommit) {
+				self->isFirstCommit = false;
+				self->readyToPush = self->lastCommit;
+			}
 
 			Void _ = wait( ready );
 
