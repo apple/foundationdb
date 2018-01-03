@@ -448,7 +448,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		bstore->s_stats.requests_failed++;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
-		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503;
+		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
 
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);
@@ -475,8 +475,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			event.error(err.get());
 		else {
 			event.detail("ResponseCode", r->code);
+		}
 
-			// Check for the Retry-After header which is present with certain types of errors
+		if(retryable) {
+			// If retrying, obey the Retry-After response header if present.
 			auto iRetryAfter = r->headers.find("Retry-After");
 			if(iRetryAfter != r->headers.end()) {
 				event.detail("RetryAfterHeader", iRetryAfter->second);
@@ -484,12 +486,11 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 				double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);
 				if(*pEnd)  // If there were other characters then don't trust the parsed value, use a probably safe value of 5 minutes.
 					retryAfter = 300;
+				// Update delay
 				delay = std::max(delay, retryAfter);
 			}
-		}
 
-		// For retryable errors, log the delay then wait.
-		if(retryable) {
+			// Log the delay then wait.
 			event.detail("RetryDelay", delay);
 			Void _ = wait(::delay(delay));
 		}
