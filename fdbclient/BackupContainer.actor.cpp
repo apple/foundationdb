@@ -142,7 +142,7 @@ public:
 	}
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) {
-		return writeFile(format("logs/%s/log,%lld,%lld,%d", logVersionFolderString(beginVersion).c_str(), beginVersion, endVersion, blockSize));
+		return writeFile(format("logs/%s/log,%lld,%lld,%s,%d", logVersionFolderString(beginVersion).c_str(), beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) {
@@ -166,7 +166,7 @@ public:
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if(sscanf(name.c_str(), "log,%lld,%lld,%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size())
+		if(sscanf(name.c_str(), "log,%lld,%lld,%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size())
 			return f;
 		throw restore_unknown_file_type();
 	}
