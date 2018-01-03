@@ -96,17 +96,18 @@ struct FullBackupListing {
 	std::vector<KeyspaceSnapshotFile> snapshots;
 };
 
+// The byte counts here only include usable log files and byte counts from kvrange manifests
 struct BackupDescription {
-	BackupDescription() : totalSnapshotBytes(0), totalLogBytes(0) {}
+	BackupDescription() : snapshotBytes(0), logBytes(0) {}
 	std::string url;
 	std::vector<KeyspaceSnapshotFile> snapshots;
-	int64_t totalSnapshotBytes;
+	int64_t snapshotBytes;
 	Optional<Version> minLogBegin;
 	Optional<Version> maxLogEnd;
 	Optional<Version> contiguousLogEnd;
 	Optional<Version> maxRestorableVersion;
 	Optional<Version> minRestorableVersion;
-	int64_t totalLogBytes;
+	int64_t logBytes;
 	std::string extendedDetail;  // Freeform container-specific info.
 	std::string toString() const;
 };
