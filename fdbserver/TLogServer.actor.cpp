@@ -1284,6 +1284,13 @@ ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
 	}
 }
 
+ACTOR Future<Void> checkRecovered(TLogData* self) {
+	TraceEvent("TLogCheckRecoveredBegin", self->dbgid);
+	Optional<Value> v = wait( self->persistentData->readValue(StringRef()) );
+	TraceEvent("TLogCheckRecoveredEnd", self->dbgid);
+	return Void();
+}
+
 ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> oldLog, Promise<Void> recovered, PromiseStream<InitializeTLogRequest> tlogRequests ) {
 	state double startt = now();
 	state Reference<LogData> logData;
@@ -1740,7 +1747,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		if(restoreFromDisk) {
 			Void _ = wait( restorePersistentState( &self, locality, oldLog, recovered, tlogRequests ) );
 		} else {
-			Void _ = wait( checkEmptyQueue(&self) );
+			Void _ = wait( checkEmptyQueue(&self) && checkRecovered(&self) );
 		}
 
 		if(recovered.canBeSet()) recovered.send(Void());
