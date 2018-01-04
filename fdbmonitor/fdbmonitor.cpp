@@ -1293,7 +1293,6 @@ int main(int argc, char** argv) {
 
 		/* select() could have returned because received an exit signal */
 		if (exit_signal > 0) {
-			char *redone_confpath;
 			switch(exit_signal) {
 				case SIGHUP:
 					for(auto i : id_command) {
