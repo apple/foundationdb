@@ -889,6 +889,8 @@ int fdbmon_stat(const char *path, struct stat *path_stat, bool is_link) {
 	return is_link ? lstat(path, path_stat) : stat(path, path_stat);
 }
 
+/* Sets watches to track changes to all symlinks on a path.
+ * Also sets a watch on the last existing ancestor of a path if the full path doesn't exist. */
 std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string path, int ifd) {
 	std::unordered_map<int, std::unordered_set<std::string>> additional_watch_wds;
 	struct stat path_stat;
@@ -898,12 +900,17 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 
 	int idx = 1;
 	bool exists = true;
+
+	/* Check each level of the path, setting a watch on any symlinks.
+	 * Stop checking once we get to a part of the path that doesn't exist.
+	 * If we encounter a non-existing path, watch the closest existing ancestor. */
 	while(idx != std::string::npos && exists) {
 		idx = path.find_first_of('/', idx+1);
 		std::string subpath = path.substr(0, idx);
 
 		int level = 0;
 		while(true) {
+			/* Check path existence */
 			int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
 			if(result != 0) {
 				if(errno == ENOENT) {
@@ -916,6 +923,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 			}
 
 			if(exists) {
+				/* Don't do anything for existing non-links */
 				if(!S_ISLNK(path_stat.st_mode)) {
 					break;
 				}
@@ -927,6 +935,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 
 			std::string parent = parentDirectory(subpath);
 
+			/* Watch the parent directory of the current path for changes */
 			int wd = inotify_add_watch(ifd, parent.c_str(), IN_CREATE | IN_MOVED_TO);
 			if (wd < 0) {
 				log_err("inotify_add_watch", errno, "Unable to add watch to parent directory %s", parent.c_str());
@@ -938,7 +947,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
 			}
 			else {
-				/* If the subpath appeared since we last checked, we should resume traversing the path */
+				/* If the subpath has appeared since we set the watch, we should cancel it and resume traversing the path */
 				int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
 				if(result == 0 || errno != ENOENT) {
 					inotify_rm_watch(ifd, wd);
@@ -950,6 +959,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 				break;
 			}
 
+			/* Follow the symlink */
 			char buf[PATH_MAX+1];
 			ssize_t len = readlink(subpath.c_str(), buf, PATH_MAX);
 			if(len < 0) {
@@ -1198,12 +1208,15 @@ int main(int argc, char** argv) {
 		if (reload) {
 			reload = false;
 #ifdef __linux__
+			/* Remove existing watches on conf file and directory */
 			if(confdir_wd >= 0 && inotify_rm_watch(ifd, confdir_wd) < 0) {
 				log_msg(SevInfo, "Could not remove inotify conf dir watch, continuing...\n");
 			}
 			if(conffile_wd >= 0 && inotify_rm_watch(ifd, conffile_wd) < 0) {
 				log_msg(SevInfo, "Could not remove inotify conf file watch, continuing...\n");
 			}
+
+			/* Create new watches */
 			conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
 			if (conffile_wd < 0) {
 				if(errno != ENOENT) {
@@ -1231,6 +1244,7 @@ int main(int argc, char** argv) {
 				log_msg(SevInfo, "Watching conf dir %s (%d)\n", confdir.c_str(), confdir_wd);
 			}
 
+			/* Reload watches on symlinks and/or the oldest existing ancestor */
 			if(reload_additional_watches) {
 				additional_watch_wds = set_watches(_confpath, ifd);
 			}
