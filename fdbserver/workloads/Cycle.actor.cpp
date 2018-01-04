@@ -137,28 +137,28 @@ struct CycleWorkload : TestWorkload {
 	}
 	bool cycleCheckData( const VectorRef<KeyValueRef>& data, Version v ) {
 		if (data.size() != nodeCount) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v);
+			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v).detail("KeyPrefix", keyPrefix.printable());
 			return false;
 		}
 		int i=0;
 		for(int c=0; c<nodeCount; c++) {
 			if (c && !i) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got shorter");
+				TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got shorter").detail("Before", nodeCount).detail("After", c).detail("KeyPrefix", keyPrefix.printable());
 				return false;
 			}
 			if (data[i].key != key(i)) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Key changed");
+				TraceEvent(SevError, "TestFailure").detail("Reason", "Key changed").detail("KeyPrefix", keyPrefix.printable());
 				return false;
 			}
 			double d = testKeyToDouble(data[i].value, keyPrefix);
 			i = (int)d;
 			if ( i != d || i<0 || i>=nodeCount) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Invalid value");
+				TraceEvent(SevError, "TestFailure").detail("Reason", "Invalid value").detail("KeyPrefix", keyPrefix.printable());
 				return false;
 			}
 		}
 		if (i != 0) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer");
+			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer").detail("KeyPrefix", keyPrefix.printable());
 			return false;
 		}
 		return true;

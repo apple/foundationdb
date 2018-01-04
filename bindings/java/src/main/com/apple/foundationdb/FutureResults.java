@@ -22,18 +22,46 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.Executor;
 
-class FutureResults extends NativeFuture<RangeResult> {
-	FutureResults(long cPtr, Executor e) {
-		super(cPtr, e);
+class FutureResults extends NativeFuture<RangeResultInfo> {
+	FutureResults(long cPtr, Executor executor) {
+		super(cPtr);
+		registerMarshalCallback(executor);
 	}
 
 	@Override
-	public RangeResult getIfDone_internal() throws FDBException {
-		return FutureResults_get(cPtr);
+	protected void postMarshal() {
+		// We can't close because this class actually marshals on-demand
 	}
 
-	public RangeResultSummary getSummaryIfDone() throws FDBException {
-		return FutureResults_getSummary(cPtr);
+	@Override
+	protected RangeResultInfo getIfDone_internal(long cPtr) throws FDBException {
+		FDBException err = Future_getError(cPtr);
+
+		if(!err.isSuccess()) {
+			throw err;
+		}
+
+		return new RangeResultInfo(this);
+	}
+
+	public RangeResultSummary getSummary() {
+		try {
+			pointerReadLock.lock();
+			return FutureResults_getSummary(getPtr());
+		}
+		finally {
+			pointerReadLock.unlock();
+		}
+	}
+
+	public RangeResult getResults() {
+		try {
+			pointerReadLock.lock();
+			return FutureResults_get(getPtr());
+		}
+		finally {
+			pointerReadLock.unlock();
+		}
 	}
 
 	private native RangeResultSummary FutureResults_getSummary(long ptr) throws FDBException;

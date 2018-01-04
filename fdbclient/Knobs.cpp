@@ -38,6 +38,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( FAILURE_MAX_DELAY,                      10.0 ); if( randomize && BUGGIFY ) FAILURE_MAX_DELAY = 5.0;
 	init( FAILURE_MIN_DELAY,                       5.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 2.0;
 	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
+	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
@@ -95,6 +96,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_LOCK_BYTES,                       1e8 );
 	init( BACKUP_RANGE_TIMEOUT,   TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT,   std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
+	init( BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC,  60 * 60 );  // 1 hour
+	init( BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC,   3600 * 24 * 10); // 10 days
 	init( BACKUP_SHARD_TASK_LIMIT,                1000 ); if( randomize && BUGGIFY ) BACKUP_SHARD_TASK_LIMIT = 4;
 	init( BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL, 60);
 	init( BACKUP_AGGREGATE_POLL_RATE,              2.0 ); // polls per second target for all agents on the cluster
@@ -137,6 +140,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( HTTP_VERBOSE_LEVEL,                        0 );
 	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
+	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
 	init( BLOBSTORE_REQUEST_TIMEOUT,                30 );
 
@@ -149,7 +153,6 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
 	init( BLOBSTORE_MULTIPART_MAX_PART_SIZE,  20000000 );
 	init( BLOBSTORE_MULTIPART_MIN_PART_SIZE,   5242880 );
-	init( BLOBSTORE_BACKUP_BUCKETS,                100 );
 
 	// These are basically unlimited by default but can be used to reduce blob IO if needed
 	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );

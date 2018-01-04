@@ -22,72 +22,166 @@
 
 #include "flow/flow.h"
 #include "fdbrpc/IAsyncFile.h"
-#include "fdbrpc/BlobStore.h"
+#include "FDBTypes.h"
 #include <vector>
 
-// Class representing a container for backup files, such as a mounted directory or a remote filesystem.
+// Append-only file interface for writing backup data
+// Once finish() is called the file cannot be further written to.
+// Backup containers should not attempt to use files for which finish was not called or did not complete.
+// TODO: Move the log file and range file format encoding/decoding stuff to this file and behind interfaces.
+class IBackupFile {
+public:
+	IBackupFile(std::string fileName) : m_fileName(fileName), m_offset(0) {}
+	virtual ~IBackupFile() {}
+	// Backup files are append-only and cannot have more than 1 append outstanding at once.
+	virtual Future<Void> append(const void *data, int len) = 0;
+	virtual Future<Void> finish() = 0;
+	inline std::string getFileName() const {
+		return m_fileName;
+	}
+	inline int64_t size() const {
+		return m_offset;
+	}
+	virtual void addref() = 0;
+	virtual void delref() = 0;
+
+	Future<Void> appendString(Standalone<StringRef> s);
+protected:
+	std::string m_fileName;
+	int64_t m_offset;
+};
+
+// Structures for various backup components
+
+struct LogFile {
+	Version beginVersion;
+	Version endVersion;
+	uint32_t blockSize;
+	std::string fileName;
+	int64_t fileSize;
+
+	// Order by beginVersion, break ties with endVersion
+	bool operator< (const LogFile &rhs) const {
+		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
+	}
+};
+
+struct RangeFile {
+	Version version;
+	uint32_t blockSize;
+	std::string fileName;
+	int64_t fileSize;
+
+	// Order by version, break ties with name
+	bool operator< (const RangeFile &rhs) const {
+		return version == rhs.version ? fileName < rhs.fileName : version < rhs.version;
+	}
+};
+
+struct KeyspaceSnapshotFile {
+	Version beginVersion;
+	Version endVersion;
+	std::string fileName;
+	int64_t totalSize;
+
+	// Order by beginVersion, break ties with endVersion
+	bool operator< (const KeyspaceSnapshotFile &rhs) const {
+		return beginVersion == rhs.beginVersion ? endVersion < rhs.endVersion : beginVersion < rhs.beginVersion;
+	}
+};
+
+struct FullBackupListing {
+	std::vector<RangeFile> ranges;
+	std::vector<LogFile> logs;
+	std::vector<KeyspaceSnapshotFile> snapshots;
+};
+
+// The byte counts here only include usable log files and byte counts from kvrange manifests
+struct BackupDescription {
+	BackupDescription() : snapshotBytes(0), logBytes(0) {}
+	std::string url;
+	std::vector<KeyspaceSnapshotFile> snapshots;
+	int64_t snapshotBytes;
+	Optional<Version> minLogBegin;
+	Optional<Version> maxLogEnd;
+	Optional<Version> contiguousLogEnd;
+	Optional<Version> maxRestorableVersion;
+	Optional<Version> minRestorableVersion;
+	int64_t logBytes;
+	std::string extendedDetail;  // Freeform container-specific info.
+	std::string toString() const;
+};
+
+struct RestorableFileSet {
+	Version targetVersion;
+	std::vector<LogFile> logs;
+	std::vector<RangeFile> ranges;
+	KeyspaceSnapshotFile snapshot;
+};
+
+/* IBackupContainer is an interface to a set of backup data, which contains
+ *   - backup metadata
+ *   - log files
+ *   - range files
+ *   - keyspace snapshot files defining a complete non overlapping key space snapshot
+ *
+ * Files in a container are identified by a name.  This can be any string, whatever
+ * makes sense for the underlying storage system.
+ *
+ * Reading files is done by file name.  File names are discovered by getting a RestorableFileSet.
+ *
+ * For remote data stores that are filesystem-like, it's probably best to inherit BackupContainerFileSystem.
+ */
 class IBackupContainer {
 public:
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
-	enum EMode { READONLY, WRITEONLY };
-
-	static std::vector<std::string> getURLFormats();
-
 	IBackupContainer() {}
 	virtual ~IBackupContainer() {}
 
-	// Create the container (if necessary)
+	// Create the container
 	virtual Future<Void> create() = 0;
 
-	// Open a named file in the container for reading (restore mode) or writing (backup mode)
-	virtual Future<Reference<IAsyncFile>> openFile(std::string name, EMode mode) = 0;
+	// Open a log file or range file for writing
+	virtual Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) = 0;
+	virtual Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) = 0;
 
-	// Returns whether or not a file exists in the container
-	virtual Future<bool> fileExists(std::string name) = 0;
+	// Write a KeyspaceSnapshotFile of range file names representing a full non overlapping
+	// snapshot of the key ranges this backup is targeting.
+	virtual Future<Void> writeKeyspaceSnapshotFile(std::vector<std::string> fileNames, int64_t totalBytes) = 0;
 
-	// Get a list of backup files in the container
-	virtual Future<std::vector<std::string>> listFiles() = 0;
+	// Open a file for read by name
+	virtual Future<Reference<IAsyncFile>> readFile(std::string name) = 0;
 
-	// Rename a file
-	virtual Future<Void> renameFile(std::string from, std::string to) = 0;
+	// Delete all data up to (but not including endVersion)
+	virtual Future<Void> expireData(Version endVersion) = 0;
+
+	// Delete entire container.  During the process, if pNumDeleted is not null it will be
+	// updated with the count of deleted files so that progress can be seen.
+	virtual Future<Void> deleteContainer(int *pNumDeleted = nullptr) = 0;
+
+	// Uses the virtual methods to describe the backup contents
+	virtual Future<BackupDescription> describeBackup() = 0;
+
+	virtual Future<FullBackupListing> listBackup() = 0;
+
+	// Get exactly the files necessary to restore to targetVersion.  Returns non-present if
+	// restore to given version is not possible.
+	virtual Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion) = 0;
 
 	// Get an IBackupContainer based on a container spec string
-	static Reference<IBackupContainer> openContainer(std::string url, std::string *error = nullptr);
-};
+	static Reference<IBackupContainer> openContainer(std::string url);
+	static std::vector<std::string> getURLFormats();
+	static Future<std::vector<std::string>> listContainers(std::string baseURL);
 
-class BackupContainerBlobStore : public IBackupContainer, ReferenceCounted<BackupContainerBlobStore> {
-public:
-	void addref() { return ReferenceCounted<BackupContainerBlobStore>::addref(); }
-	void delref() { return ReferenceCounted<BackupContainerBlobStore>::delref(); }
-	static const std::string META_BUCKET;
+	std::string getURL() const {
+		return URL;
+	}
 
-	static std::string getURLFormat() { return BlobStoreEndpoint::getURLFormat(true); }
-	static Future<std::vector<std::string>> listBackupContainers(Reference<BlobStoreEndpoint> const &bs);
+	static std::string lastOpenError;
 
-    BackupContainerBlobStore(Reference<BlobStoreEndpoint> bstore, std::string name)
-	  : m_bstore(bstore), m_bucketPrefix(name) {}
-
-	virtual ~BackupContainerBlobStore() { m_bucketCount.cancel(); }
-
-	// IBackupContainer methods
-	Future<Void> create();
-	Future<Reference<IAsyncFile>> openFile(std::string name, EMode mode);
-	Future<bool> fileExists(std::string name);
-	Future<Void> renameFile(std::string from, std::string to);
-	Future<std::vector<std::string>> listFiles();
-	Future<Void> listFilesStream(PromiseStream<BlobStoreEndpoint::ObjectInfo> results);
-
-	Future<Void> deleteContainer(int *pNumDeleted = NULL);
-	Future<std::string> containerInfo();
-	Future<int> getBucketCount();
-	std::string getBucketString(int num) { return format("%s_%d", m_bucketPrefix.c_str(), num); }
-	Future<std::string> getBucketForFile(std::string const &name);
-	Future<std::vector<std::string>> getBucketList();
-
-	Reference<BlobStoreEndpoint> m_bstore;
-	std::string m_bucketPrefix;
-	Future<int> m_bucketCount;
+private:
+	std::string URL;
 };
 

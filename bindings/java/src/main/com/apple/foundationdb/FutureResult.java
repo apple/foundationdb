@@ -23,12 +23,13 @@ package com.apple.foundationdb;
 import java.util.concurrent.Executor;
 
 class FutureResult extends NativeFuture<byte[]> {
-	FutureResult(long cPtr, Executor e) {
-		super(cPtr, e);
+	FutureResult(long cPtr, Executor executor) {
+		super(cPtr);
+		registerMarshalCallback(executor);
 	}
 
 	@Override
-	public byte[] getIfDone_internal() throws FDBException {
+	protected byte[] getIfDone_internal(long cPtr) throws FDBException {
 		return FutureResult_get(cPtr);
 	}
 

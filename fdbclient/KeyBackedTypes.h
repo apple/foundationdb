@@ -144,6 +144,16 @@ public:
 		});
 	}
 
+	Future<T> getD(Database cx, bool snapshot = false, T defaultValue = T()) const {
+		auto &copy = *this;
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return copy.getD(tr, snapshot, defaultValue);
+		});
+	}
+
 	Future<T> getOrThrow(Database cx, bool snapshot = false, Error err = key_not_found()) const {
 		auto &copy = *this;
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
@@ -219,10 +229,10 @@ public:
 	typedef std::vector<PairType> PairsType;
 
 	// If end is not present one key past the end of the map is used.
-	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr, KeyType const &begin, Optional<KeyType> const &end, int limit, bool snapshot = false) const {
+	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr, KeyType const &begin, Optional<KeyType> const &end, int limit, bool snapshot = false, bool reverse = false) const {
 		Subspace s = space;  // 'this' could be invalid inside lambda
 		Key endKey = end.present() ? s.pack(Codec<KeyType>::pack(end.get())) : space.range().end;
-		return map(tr->getRange(KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot),
+		return map(tr->getRange(KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot, reverse),
 					[s] (Standalone<RangeResultRef> const &kvs) -> PairsType {
 						PairsType results;
 						for(int i = 0; i < kvs.size(); ++i) {
@@ -261,6 +271,56 @@ public:
 
 	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const &begin, KeyType const &end) {
 		return tr->clear(KeyRangeRef(space.pack(Codec<KeyType>::pack(begin)), space.pack(Codec<KeyType>::pack(end))));
+	}
+
+	void clear(Reference<ReadYourWritesTransaction> tr) {
+		return tr->clear(space.range());
+	}
+
+	Subspace space;
+};
+
+template <typename _ValueType>
+class KeyBackedSet {
+public:
+	KeyBackedSet(KeyRef key) : space(key) {}
+
+	typedef _ValueType ValueType;
+	typedef std::vector<ValueType> Values;
+
+	// If end is not present one key past the end of the map is used.
+	Future<Values> getRange(Reference<ReadYourWritesTransaction> tr, ValueType const &begin, Optional<ValueType> const &end, int limit, bool snapshot = false) const {
+		Subspace s = space;  // 'this' could be invalid inside lambda
+		Key endKey = end.present() ? s.pack(Codec<ValueType>::pack(end.get())) : space.range().end;
+		return map(tr->getRange(KeyRangeRef(s.pack(Codec<ValueType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot),
+					[s] (Standalone<RangeResultRef> const &kvs) -> Values {
+						Values results;
+						for(int i = 0; i < kvs.size(); ++i) {
+							results.push_back(Codec<ValueType>::unpack(s.unpack(kvs[i].key)));
+						}
+						return results;
+					});
+	}
+
+	Future<bool> exists(Reference<ReadYourWritesTransaction> tr, ValueType const &val, bool snapshot = false) const {
+		return map(tr->get(space.pack(Codec<ValueType>::pack(val)), snapshot), [](Optional<Value> const &val) -> bool {
+			return val.present();
+		});
+	}
+
+	// Returns the expectedSize of the set key
+	int insert(Reference<ReadYourWritesTransaction> tr, ValueType const &val) {
+		Key k = space.pack(Codec<ValueType>::pack(val));
+		tr->set(k, StringRef());
+		return k.expectedSize();
+	}
+
+	void erase(Reference<ReadYourWritesTransaction> tr, ValueType const &val) {
+		return tr->clear(space.pack(Codec<ValueType>::pack(val)));
+	}
+
+	void erase(Reference<ReadYourWritesTransaction> tr, ValueType const &begin, ValueType const &end) {
+		return tr->clear(KeyRangeRef(space.pack(Codec<ValueType>::pack(begin)), space.pack(Codec<ValueType>::pack(end))));
 	}
 
 	void clear(Reference<ReadYourWritesTransaction> tr) {

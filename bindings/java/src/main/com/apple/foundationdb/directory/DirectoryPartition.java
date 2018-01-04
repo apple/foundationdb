@@ -38,7 +38,7 @@ import com.apple.foundationdb.tuple.Tuple;
  * </p>
  *
  * For general guidance on partition usage, see 
- * <a href="/documentation/developer-guide.html#directory-partitions" target="_blank">The Developer Guide</a>.
+ * <a href="/foundationdb/developer-guide.html#directory-partitions" target="_blank">The Developer Guide</a>.
  */
 class DirectoryPartition extends DirectorySubspace {
 
@@ -54,21 +54,21 @@ class DirectoryPartition extends DirectorySubspace {
 		this.parentDirectoryLayer = parentDirectoryLayer;
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public Subspace get(Object o) {
 		throw new UnsupportedOperationException("Cannot open subspace in the root of a directory partition.");
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public Subspace get(Tuple name) {
 		throw new UnsupportedOperationException("Cannot open subspace in the root of a directory partition.");
@@ -84,61 +84,61 @@ class DirectoryPartition extends DirectorySubspace {
 		throw new UnsupportedOperationException("Cannot get key for the root of a directory partition.");
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public byte[] pack() {
 		throw new UnsupportedOperationException("Cannot pack keys using the root of a directory partition.");
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public byte[] pack(Object o) {
 		throw new UnsupportedOperationException("Cannot pack keys using the root of a directory partition.");
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public byte[] pack(Tuple tuple) {
 		throw new UnsupportedOperationException("Cannot pack keys using the root of a directory partition.");
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public Tuple unpack(byte[] key) {
 		throw new UnsupportedOperationException("Cannot unpack keys using the root of a directory partition.");
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public Range range() {
 		throw new UnsupportedOperationException("Cannot get range for the root of a directory partition.");
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public Range range(Tuple tuple) {
 		throw new UnsupportedOperationException("Cannot get range for the root of a directory partition.");
@@ -154,11 +154,11 @@ class DirectoryPartition extends DirectorySubspace {
 		throw new UnsupportedOperationException("Cannot check whether a key belongs to the root of a directory partition.");
 	}
 
-    /**
-    * Raises an exception because DirectoryPartition cannot be used as a Subspace.
-    *
-    * @throws UnsupportedOperationException
-    */
+	/**
+	 * Raises an exception because DirectoryPartition cannot be used as a Subspace.
+	 *
+	 * @throws UnsupportedOperationException
+	 */
 	@Override
 	public Subspace subspace(Tuple tuple) {
 		throw new UnsupportedOperationException("Cannot open subspace in the root of a directory partition.");
@@ -180,18 +180,33 @@ class DirectoryPartition extends DirectorySubspace {
 	 * @param rhs the {@code} Object to test for equality
 	 * @return true if this is equal to {@code rhs}
 	 */
-    @Override
-    public boolean equals(Object rhs) {
-        if(this == rhs) {
-            return true;
-        }
-        if(rhs == null || getClass() != rhs.getClass()) {
-            return false;
-        }
+	@Override
+	public boolean equals(Object rhs) {
+		if(this == rhs) {
+			return true;
+		}
+		if(rhs == null || getClass() != rhs.getClass()) {
+			return false;
+		}
 
-        DirectoryPartition other = (DirectoryPartition)rhs;
-        return (getPath() == other.getPath() || getPath() == other.getPath()) && 
+		DirectoryPartition other = (DirectoryPartition)rhs;
+		return (getPath() == other.getPath() || getPath().equals(other.getPath())) &&
 				parentDirectoryLayer.equals(other.parentDirectoryLayer) &&
 				super.equals(rhs);
-    }
+	}
+
+	/**
+	 * Computes a hash code compatible with this class's {@link #equals(Object) equals()}
+	 * method. In particular, it computes a hash that is based off of the
+	 * hash of the parent {@link DirectoryLayer} and this partition's
+	 * path, layer, and subspace prefix.
+	 *
+	 * @return a hash compatible with this class's {@code equals()} method
+	 */
+	@Override
+	public int hashCode() {
+		// The path, layer, and subspace prefix information comes from the super
+		// class's hash code method.
+		return parentDirectoryLayer.hashCode() ^ (super.hashCode() * 3209);
+	}
 }

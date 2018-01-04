@@ -22,11 +22,10 @@ package com.apple.foundationdb.test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
+import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.ReadyFuture;
 import com.apple.foundationdb.tuple.Tuple;
 
 class DirectoryUtil {
@@ -40,79 +39,47 @@ class DirectoryUtil {
 			this.num = num;
 		}
 
-		Future<List<Tuple>> pop() {
-			return AsyncUtil.whileTrue(new Function<Void, Future<Boolean>>() {
-				@Override
-				public Future<Boolean> apply(Void ignore) {
-					if(num-- == 0) {
-						return new ReadyFuture<Boolean>(false);
-					}
-					return inst.popParam()
-					.flatMap(new Function<Object, Future<List<Object>>>() {
-						@Override
-						public Future<List<Object>> apply(Object count) {
-							return inst.popParams(StackUtils.getInt(count));
-						}
-					})
-					.map(new Function<List<Object>, Boolean>() {
-						@Override
-						public Boolean apply(List<Object> elements) {
+		CompletableFuture<List<Tuple>> pop() {
+			return AsyncUtil.whileTrue(() -> {
+				if(num-- == 0) {
+					return AsyncUtil.READY_FALSE;
+				}
+				return inst.popParam()
+						.thenComposeAsync(count -> inst.popParams(StackUtils.getInt(count)), FDB.DEFAULT_EXECUTOR)
+						.thenApplyAsync(elements -> {
 							tuples.add(Tuple.fromItems(elements));
 							return num > 0;
-						}
-					});
-				}
+						}, FDB.DEFAULT_EXECUTOR);
 			})
-			.map(new Function<Void, List<Tuple>>() {
-				@Override
-				public List<Tuple> apply(Void ignore) {
-					return tuples;
-				}
-			});
+			.thenApply(ignore -> tuples);
 		}
 	}
 
-	static Future<List<Tuple>> popTuples(Instruction inst, int num) {
+	static CompletableFuture<List<Tuple>> popTuples(Instruction inst, int num) {
 		return new TuplePopper(inst, num).pop();
 	}
 
-	static Future<Tuple> popTuple(Instruction inst) {
-		return popTuples(inst, 1)
-		.map(new Function<List<Tuple>, Tuple>() {
-			@Override
-			public Tuple apply(List<Tuple> tuples) {
-				return tuples.get(0);
-			}
-		});
+	static CompletableFuture<Tuple> popTuple(Instruction inst) {
+		return popTuples(inst, 1).thenApply(tuples -> tuples.get(0));
 	}
 
-	static Future<List<List<String>>> popPaths(Instruction inst, int num) {
-		return popTuples(inst, num)
-		.map(new Function<List<Tuple>, List<List<String>>>() {
-			@Override
-			public List<List<String>> apply(List<Tuple> tuples) {
-				List<List<String>> paths = new ArrayList<List<String>>();
-				for(Tuple t : tuples) {
-					List<String> path = new ArrayList<String>();
-					for(int i = 0; i < t.size(); ++i)
-						path.add(t.getString(i));
+	static CompletableFuture<List<List<String>>> popPaths(Instruction inst, int num) {
+		return popTuples(inst, num).thenApplyAsync(tuples -> {
+			List<List<String>> paths = new ArrayList<>(tuples.size());
+			for(Tuple t : tuples) {
+				List<String> path = new ArrayList<>(t.size());
+				for(int i = 0; i < t.size(); ++i)
+					path.add(t.getString(i));
 
-					paths.add(path);
-				}
-
-				return paths;
+				paths.add(path);
 			}
-		});
+
+			return paths;
+		}, FDB.DEFAULT_EXECUTOR);
 	}
 
-	static Future<List<String>> popPath(Instruction inst) {
-		return popPaths(inst, 1)
-		.map(new Function<List<List<String>>, List<String>>() {
-			@Override
-			public List<String> apply(List<List<String>> paths) {
-				return paths.get(0);
-			}
-		});
+	static CompletableFuture<List<String>> popPath(Instruction inst) {
+		return popPaths(inst, 1).thenApply(paths -> paths.get(0));
 	}
 
 	static void pushError(Instruction inst, Throwable t, List<Object> dirList) {
@@ -123,4 +90,6 @@ class DirectoryUtil {
 		if(op.createsDirectory)
 			dirList.add(null);
 	}
+
+	private DirectoryUtil() {}
 }

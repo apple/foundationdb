@@ -25,6 +25,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The starting point for accessing FoundationDB.
@@ -63,14 +64,16 @@ public class FDB {
 
 	static class DaemonThreadFactory implements ThreadFactory {
 		private final ThreadFactory factory;
+		private static AtomicInteger threadCount = new AtomicInteger();
 
-		public DaemonThreadFactory(ThreadFactory factory) {
+		DaemonThreadFactory(ThreadFactory factory) {
 			this.factory = factory;
 		}
 
 		@Override
 		public Thread newThread(Runnable r) {
 			Thread t = factory.newThread(r);
+			t.setName("fdb-java-" + threadCount.incrementAndGet());
 			t.setDaemon(true);
 			return t;
 		}
@@ -81,7 +84,8 @@ public class FDB {
 	final int apiVersion;
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
-	final private Semaphore netRunning = new Semaphore(1);
+	volatile boolean warnOnUnclosed = true;
+	private final Semaphore netRunning = new Semaphore(1);
 	private final NetworkOptions options;
 
 	static {
@@ -102,21 +106,8 @@ public class FDB {
 	private FDB(int apiVersion) {
 		this.apiVersion = apiVersion;
 
-		options = new NetworkOptions(new OptionConsumer() {
-			@Override
-			public void setOption(int code, byte[] parameter) {
-				Network_setOption(code, parameter);
-			}
-		});
-
-		Runtime.getRuntime().addShutdownHook(new Thread(
-			new Runnable(){
-				@Override
-				public void run() {
-					FDB.this.stopNetwork();
-				}
-			}
-		));
+		options = new NetworkOptions(this::Network_setOption);
+		Runtime.getRuntime().addShutdownHook(new Thread(this::stopNetwork));
 	}
 
 	/**
@@ -128,7 +119,9 @@ public class FDB {
 	 *
 	 * @return a set of options affecting this instance of the FoundationDB API
 	 */
-	public NetworkOptions options() { return options; }
+	public NetworkOptions options() {
+		return options;
+	}
 
 	/**
 	 * Select the version for the client API. An exception will be thrown if the
@@ -142,12 +135,12 @@ public class FDB {
 	 *   being used to connect to the cluster. In particular, you should not advance
 	 *   the API version of your application after upgrading your client until the 
 	 *   cluster has also been upgraded.
-     *
+	 *
 	 * @param version the API version required
 	 *
 	 * @return the FoundationDB API object
 	 */
-	public synchronized static FDB selectAPIVersion(final int version) throws FDBException {
+	public static synchronized FDB selectAPIVersion(final int version) throws FDBException {
 		if(singleton != null) {
 			if(version != singleton.apiVersion) {
 				throw new IllegalArgumentException(
@@ -155,27 +148,49 @@ public class FDB {
 			}
 			return singleton;
 		}
-		if(version < 500)
-			throw new IllegalArgumentException("API version not supported (minimum 500)");
+		if(version < 510)
+			throw new IllegalArgumentException("API version not supported (minimum 510)");
 		if(version > 510)
 			throw new IllegalArgumentException("API version not supported (maximum 510)");
+
 		Select_API_version(version);
-		return singleton = new FDB(version);
+		FDB fdb = new FDB(version);
+
+		return singleton = fdb;
+	}
+
+	/**
+	 * Enables or disables the stderr warning that is printed whenever an object with FoundationDB
+	 *  native resources is garbage collected without being closed. By default, this feature is enabled.
+	 *
+	 * @param warnOnUnclosed Whether the warning should be printed for unclosed objects
+	 */
+	public void setUnclosedWarning(boolean warnOnUnclosed) {
+		this.warnOnUnclosed = warnOnUnclosed;
+	}
+
+	// Singleton is initialized to null and only set once by a call to selectAPIVersion
+	static FDB getInstance() {
+		if(singleton != null) {
+			return singleton;
+		}
+
+		throw new IllegalStateException("API version has not been selected");
 	}
 
 	/**
 	 * Connects to the cluster specified by the
-	 *  <a href="https://foundationdb.org/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
+	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
 	 *  If the FoundationDB network has not been started, it will be started in the course of this call
 	 *  as if {@link FDB#startNetwork()} had been called.
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@code Cluster}.
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
 	 *
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
 	 */
 	public Cluster createCluster() throws IllegalStateException, FDBException {
-		return createCluster(null, DEFAULT_EXECUTOR);
+		return createCluster(null);
 	}
 
 	/**
@@ -184,12 +199,12 @@ public class FDB {
 	 *  {@link #startNetwork()} had been called.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/documentation/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@code Cluster}.
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
 	 *
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
@@ -205,13 +220,13 @@ public class FDB {
 	 *  are produced from using the resulting {@link Cluster}.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/documentation/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
-	 * @param e used to execute all callbacks from the {@link Cluster}.
+	 * @param e used to run the FDB network thread
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@code Cluster}.
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
 	 *
 	 * @throws FDBException on errors encountered starting the FoundationDB networking engine
 	 * @throws IllegalStateException if the network had been previously stopped
@@ -221,19 +236,19 @@ public class FDB {
 		FutureCluster f;
 		synchronized (this) {
 			if (!isConnected()) {
-				startNetwork(e);
+				startNetwork();
 			}
 			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
-		return f.get();
+		return f.join();
 	}
 
 	/**
 	 * Initializes networking, connects with the
-	 *  <a href="https://foundationdb.org/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
+	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
 	 *  and opens the database.
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@link Database}
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
 	public Database open() throws FDBException {
 		return open(null);
@@ -244,12 +259,12 @@ public class FDB {
 	 *  and opens the database.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/documentation/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@link Database}
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
 	public Database open(String clusterFilePath) throws FDBException {
 		return open(clusterFilePath, DEFAULT_EXECUTOR);
@@ -260,15 +275,15 @@ public class FDB {
 	 *  and opens the database.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/documentation/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/documentation/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
-	 * @param e the {@link Executor} to use when executing asynchronous callbacks
+	 * @param e the {@link Executor} to use to execute asynchronous callbacks
 	 *
-	 * @return a {@code Future} that will be set to a FoundationDB {@link Database}
+	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
 	 */
-	public Database open(String clusterFilePath, Executor e)  throws FDBException {
+	public Database open(String clusterFilePath, Executor e) throws FDBException {
 		FutureCluster f;
 		synchronized (this) {
 			if (!isConnected()) {
@@ -276,31 +291,43 @@ public class FDB {
 			}
 			f = new FutureCluster(Cluster_create(clusterFilePath), e);
 		}
-		Cluster c = f.get();
-		return c.openDatabase(e);
+		Cluster c = f.join();
+		Database db = c.openDatabase(e);
+		c.close();
+
+		return db;
 	}
 
 	/**
 	 * Initializes networking. Can only be called once. This version of
-	 * {@code startNetwork()} will use the default thread pool to execute the
-	 * FoundationDB network.<br>
+	 * {@code startNetwork()} will create a new thread and execute the networking
+	 * event loop on that thread. This method is called upon {@link Database} or
+	 * {@link Cluster} creation by default if the network has not yet
+	 * been started. If one wishes to control what thread the network runs on,
+	 * one should use the version of {@link #startNetwork(Executor) startNetwork()}
+	 * that takes an {@link Executor}.<br>
 	 * <br>
 	 * Configuration of the networking engine can be achieved through calls to the methods
 	 *  in {@link NetworkOptions}.
 	 *
-	 * @throws IllegalStateException if the network has already been stopped
-	 *
 	 * @see NetworkOptions
+	 *
+	 * @throws IllegalStateException if the network has already been stopped
 	 */
 	public void startNetwork() throws FDBException, IllegalStateException {
-		startNetwork(DEFAULT_EXECUTOR);
+		startNetwork(Executors.newSingleThreadExecutor(r -> {
+			Thread t = new Thread(r);
+			t.setDaemon(true);
+			t.setName("fdb-network-thread");
+			return t;
+		}));
 	}
 
 	/**
 	 * Initializes networking. Can only be called once. The FoundationDB
 	 * networking event loop will be run in the specified {@code Executor}. This
 	 * event loop is a blocking operation that is not
-	 * expected to terminate until the program in complete. This will therefore consume an
+	 * expected to terminate until the program is complete. This will therefore consume an
 	 * entire thread from {@code e} if {@code e} is a thread pool or will completely block
 	 * operation of a single threaded {@code Executor}.<br>
 	 * <br>
@@ -321,37 +348,36 @@ public class FDB {
 		Network_setup();
 		netStarted = true;
 
-		e.execute(new Runnable() {
-			@Override
-			public void run() {
-				boolean acquired = false;
-				try {
-					while(!acquired) {
-						try {
-							// make attempt to avoid a needless deadlock
-							synchronized (FDB.this) {
-								if(netStopped) {
-									return;
-								}
-							}
-
-							netRunning.acquire();
-							acquired = true;
-						} catch(InterruptedException e) {}
-					}
+		e.execute(() -> {
+			boolean acquired = false;
+			try {
+				while(!acquired) {
 					try {
-						Network_run();
-					} catch (Throwable t) {
-						System.err.println("Unhandled error in FoundationDB network thread: " + t.getMessage());
-						// eat this error. we have nowhere to send it.
+						// make attempt to avoid a needless deadlock
+						synchronized (FDB.this) {
+							if(netStopped) {
+								return;
+							}
+						}
+
+						netRunning.acquire();
+						acquired = true;
+					} catch(InterruptedException err) {
+						// Swallow thread interruption
 					}
-				} finally {
-					if(acquired) {
-						netRunning.release();
-					}
-					synchronized (FDB.this) {
-						netStopped = true;
-					}
+				}
+				try {
+					Network_run();
+				} catch (Throwable t) {
+					System.err.println("Unhandled error in FoundationDB network thread: " + t.getMessage());
+					// eat this error. we have nowhere to send it.
+				}
+			} finally {
+				if(acquired) {
+					netRunning.release();
+				}
+				synchronized (FDB.this) {
+					netStopped = true;
 				}
 			}
 		});
@@ -388,7 +414,10 @@ public class FDB {
 				//  that we will never again be able to call runNetwork()
 				netRunning.acquire();
 				return;
-			} catch (InterruptedException e) {}
+			} catch (InterruptedException e) {
+				// If the thread is interrupted while trying to acquire
+				// the semaphore, we just want to try again.
+			}
 		}
 	}
 

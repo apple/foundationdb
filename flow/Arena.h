@@ -461,6 +461,26 @@ public:
 		return size() - other.size();
 	}
 
+	// Removes bytes from begin up to and including the sep string, returns StringRef of the part before sep
+	StringRef eat(StringRef sep) {
+		for(int i = 0, iend = size() - sep.size(); i <= iend; ++i) {
+			if(sep.compare(substr(i, sep.size())) == 0) {
+				StringRef token = substr(0, i);
+				*this = substr(i + sep.size());
+				return token;
+			}
+		}
+		return eat();
+	}
+	StringRef eat() {
+		StringRef r = *this;
+		*this = StringRef();
+		return r;
+	}
+	StringRef eat(const char *sep) {
+		return eat(StringRef((const uint8_t *)sep, strlen(sep)));
+	}
+
 private:
 	// Unimplemented; blocks conversion through std::string
 	StringRef( char* );

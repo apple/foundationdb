@@ -25,26 +25,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
-import com.apple.foundationdb.Transaction;
 import com.apple.foundationdb.TransactionContext;
-import com.apple.foundationdb.async.Function;
 
 public class SerialTest {
-
-	private static final String CLUSTER_FILE = "T:\\Ben\\cluster";
-
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			Cluster c = FDB.selectAPIVersion(510).createCluster(CLUSTER_FILE);
-			Database db = c.openDatabase();
-			runTests(reps, db);
-
-			/*Cluster fCluster = Cluster.create("C:\\Users\\Ben\\workspace\\fdb\\fdb.cluster").get();
-			System.out.println("I now have the cluster");
-			Database db = cluster.openDatabase().get();
-
-			runTests(reps, db);*/
+			FDB fdb = FDB.selectAPIVersion(510);
+			try(Database db = fdb.open()) {
+				runTests(reps, db);
+			}
 		} catch(Throwable t) {
 			t.printStackTrace();
 		}
@@ -56,16 +46,14 @@ public class SerialTest {
 		final AtomicInteger lastcount = new AtomicInteger(0);
 		for(int i = 0; i < reps; i++) {
 			try {
-				db.run(new Function<Transaction, Void>() {
-					@Override
-					public Void apply(Transaction tr) {
-						byte[] val = tr.get("count".getBytes()).get();
-						//System.out.println("Got value");
-						int count = Integer.parseInt(new String(val));
-						tr.set("count".getBytes(), Integer.toString(count + 1).getBytes());
-						lastcount.set(count);
-						return null;
-					}
+				db.run(tr -> {
+					byte[] val = tr.get("count".getBytes()).join();
+					//System.out.println("Got value");
+					int count = Integer.parseInt(new String(val));
+					tr.set("count".getBytes(), Integer.toString(count + 1).getBytes());
+					lastcount.set(count);
+
+					return null;
 				});
 			} catch (Throwable e) {
 				e.printStackTrace();
@@ -82,4 +70,5 @@ public class SerialTest {
 		System.exit(0);
 	}
 
+	private SerialTest() {}
 }

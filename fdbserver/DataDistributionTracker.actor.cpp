@@ -324,7 +324,7 @@ ACTOR Future<Void> shardSplitter(
 
 	StorageMetrics splitMetrics;
 	splitMetrics.bytes = shardBounds.max.bytes / 2;
-	splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+	splitMetrics.bytesPerKSecond = keys.begin >= keyServersKeys.begin ? splitMetrics.infinity : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
 
 	state Standalone<VectorRef<KeyRef>> splitKeys = wait( getSplitKeys(self, keys, splitMetrics, metrics ) );
@@ -482,7 +482,7 @@ ACTOR Future<Void> shardEvaluator(
 	StorageMetrics const& stats = shardSize->get().get();
 
 	bool shouldSplit = stats.bytes > shardBounds.max.bytes ||
-							getBandwidthStatus( stats ) == BandwidthStatusHigh;
+							( getBandwidthStatus( stats ) == BandwidthStatusHigh && keys.begin < keyServersKeys.begin );
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes &&
 							getBandwidthStatus( stats ) == BandwidthStatusLow;
 

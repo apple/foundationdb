@@ -25,54 +25,59 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
-public class ContinuousSample <T extends Number & Comparable<T>> {
-	public ContinuousSample( int sampleSize ) {
+public class ContinuousSample<T extends Number & Comparable<T>> {
+	public ContinuousSample(int sampleSize) {
 		this.sampleSize = sampleSize;
-		this.samples = new ArrayList<T>(sampleSize);
+		this.samples = new ArrayList<>(sampleSize);
 		this.populationSize = 0;
 		this.sorted = true;
 	}
 
 	public ContinuousSample<T> addSample(T sample) {
 		if(populationSize == 0)
-			_min = _max = sample;
+			min = max = sample;
 		populationSize++;
 		sorted = false;
 
-		if( populationSize <= sampleSize ) {
-			samples.add( sample );
-		} else if( random.nextDouble() < ( (double)sampleSize / populationSize ) ) {
+		if(populationSize <= sampleSize) {
+			samples.add(sample);
+		} else if(random.nextDouble() < ((double)sampleSize / populationSize)) {
 			samples.add(random.nextInt(sampleSize), sample);
 		}
 
-		_max = sample.compareTo(_max) > 0 ? sample : _max;
-		_min = sample.compareTo(_min) < 0 ? sample : _min;
+		max = sample.compareTo(max) > 0 ? sample : max;
+		min = sample.compareTo(min) < 0 ? sample : min;
 		return this;
 	}
 
 	public double mean() {
 		if (samples.size() == 0) return 0;
 		double sum = 0;
-		for( int c = 0; c < samples.size(); c++ ) {
+		for(int c = 0; c < samples.size(); c++) {
 			sum += samples.get(c).doubleValue();
 		}
 		return sum / samples.size();
 	}
 
 	public T median() {
-		return percentile( 0.5 );
+		return percentile(0.5);
 	}
 
-	public T percentile( double percentile ) {
-		if( samples.size() == 0 || percentile < 0.0 || percentile > 1.0 )
+	public T percentile(double percentile) {
+		if(samples.size() == 0 || percentile < 0.0 || percentile > 1.0)
 			return null;
 		sort();
-		int idx = (int)Math.floor( ( samples.size() - 1 ) * percentile );
+		int idx = (int)Math.floor((samples.size() - 1) * percentile);
 		return samples.get(idx);
 	}
 
-	public T min() { return _min; }
-	public T max() { return _max; }
+	public T min() {
+		return min;
+	}
+
+	public T max() {
+		return max;
+	}
 
 	@Override
 	public String toString() {
@@ -85,10 +90,10 @@ public class ContinuousSample <T extends Number & Comparable<T>> {
 	private long populationSize;
 	private boolean sorted;
 	private List<T> samples;
-	private T _min, _max;
+	private T min, max;
 
 	private void sort() {
-		if( !sorted && samples.size() > 1 )
+		if(!sorted && samples.size() > 1)
 			Collections.sort(samples);
 		sorted = true;
 	}

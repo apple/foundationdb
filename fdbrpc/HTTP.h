@@ -39,6 +39,7 @@ namespace HTTP {
 		int64_t contentLen;
 
 		bool verifyMD5(bool fail_if_header_missing, Optional<std::string> content_sum = Optional<std::string>());
+		void convertToJSONifXML();
 	};
 
 	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain

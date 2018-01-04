@@ -39,7 +39,9 @@ ACTOR Future<Void> waitForContinuousFailure( IFailureMonitor* monitor, Endpoint 
 
 		// X == sustainedFailureDuration + slope * (now()-startT+X)
 		double waitDelay = (sustainedFailureDuration + slope * (now()-startT)) / (1-slope);
-		if(waitDelay < FLOW_KNOBS->CLIENT_REQUEST_INTERVAL) //We will not get a failure monitoring update in this amount of time, so there is no point in waiting for changes
+
+		//SOMEDAY: if we know that this process is a server or client we can tune this optimization better
+		if(waitDelay < std::min(FLOW_KNOBS->CLIENT_REQUEST_INTERVAL, FLOW_KNOBS->SERVER_REQUEST_INTERVAL)) //We will not get a failure monitoring update in this amount of time, so there is no point in waiting for changes
 			waitDelay = 0;
 		choose {
 			when (Void _ = wait( monitor->onStateEqual( endpoint, FailureStatus(false) ) )) {}  // SOMEDAY: Use onStateChanged() for efficiency

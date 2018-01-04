@@ -82,6 +82,17 @@ struct StorageServerInterface {
 	}
 };
 
+struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
+	Tag tag;
+	StorageServerInterface interf;
+	StorageInfo() : tag(invalidTag) {}
+};
+
+struct ServerCacheInfo {
+	std::vector<Tag> tags;
+	std::vector<Reference<StorageInfo>> info;
+};
+
 struct GetValueReply : public LoadBalancedReply {
 	Optional<Value> value;
 

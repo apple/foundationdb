@@ -30,12 +30,6 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "RecoveryState.h"
 
-template <class Collection>
-void uniquify( Collection& c ) {
-	std::sort(c.begin(), c.end());
-	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
-}
-
 ACTOR static Future<Void> reportTLogCommitErrors( Future<Void> commitReply, UID debugID ) {
 	try {
 		Void _ = wait(commitReply);

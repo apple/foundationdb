@@ -30,5 +30,5 @@ public interface CloneableException {
 	 *
 	 * @return a newly created {@code Exception}.
 	 */
-	public Exception retargetClone();
+	Exception retargetClone();
 }

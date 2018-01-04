@@ -22,15 +22,16 @@ package com.apple.foundationdb;
 
 import java.nio.charset.Charset;
 import java.util.Arrays;
-import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
+import java.util.function.BiFunction;
 
-import com.apple.foundationdb.tuple.ByteArrayUtil;
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.async.AsyncIterator;
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.ReadyFuture;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
+import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 /**
  * The FoundationDB API comes with a set of functions for discovering the
@@ -41,7 +42,7 @@ import com.apple.foundationdb.async.ReadyFuture;
  */
 public class LocalityUtil {
 	/**
-	 * Returns a {@code AsyncIterable} of keys {@code k} such that
+	 * Returns a {@code CloseableAsyncIterator} of keys {@code k} such that
 	 * {@code begin <= k < end} and {@code k} is located at the start of a
 	 * contiguous range stored on a single server.<br>
 	 *<br>
@@ -54,12 +55,12 @@ public class LocalityUtil {
 	 *
 	 * @return an sequence of keys denoting the start of single-server ranges
 	 */
-	public static AsyncIterable<byte[]> getBoundaryKeys(Database db, byte[] begin, byte[] end) {
+	public static CloseableAsyncIterator<byte[]> getBoundaryKeys(Database db, byte[] begin, byte[] end) {
 		return getBoundaryKeys_internal(db.createTransaction(), begin, end);
 	}
 
 	/**
-	 * Returns a {@code AsyncIterable} of keys {@code k} such that
+	 * Returns a {@code CloseableAsyncIterator} of keys {@code k} such that
 	 * {@code begin <= k < end} and {@code k} is located at the start of a
 	 * contiguous range stored on a single server.<br>
 	 *<br>
@@ -80,13 +81,13 @@ public class LocalityUtil {
 	 *
 	 * @return an sequence of keys denoting the start of single-server ranges
 	 */
-	public static AsyncIterable<byte[]> getBoundaryKeys(Transaction tr, byte[] begin, byte[] end) {
-		Transaction local = tr.getDatabase().createTransaction();
-		Future<Long> readVersion = tr.getReadVersion();
-		if(readVersion.isDone() && !readVersion.isError()) {
-			local.setReadVersion(readVersion.get());
+	public static CloseableAsyncIterator<byte[]> getBoundaryKeys(Transaction tr, byte[] begin, byte[] end) {
+		Transaction local = tr.getDatabase().createTransaction(tr.getExecutor());
+		CompletableFuture<Long> readVersion = tr.getReadVersion();
+		if(readVersion.isDone() && !readVersion.isCompletedExceptionally()) {
+			local.setReadVersion(readVersion.getNow(null));
 		}
-		return new BoundaryIterable(local, begin, end);
+		return new BoundaryIterator(local, begin, end);
 	}
 
 	/**
@@ -102,131 +103,138 @@ public class LocalityUtil {
 	 *
 	 * @return a list of addresses in string form
 	 */
-	public static Future<String[]> getAddressesForKey(Transaction tr, byte[] key) {
-		if (!(tr instanceof FDBTransaction))
-			return new ReadyFuture<String[]>( new FDBException("locality_information_unavailable", 1033) );
+	public static CompletableFuture<String[]> getAddressesForKey(Transaction tr, byte[] key) {
+		if (!(tr instanceof FDBTransaction)) {
+			CompletableFuture<String[]> future = new CompletableFuture<>();
+			future.completeExceptionally(new FDBException("locality_information_unavailable", 1033));
+			return future;
+		}
 		return ((FDBTransaction)tr).getAddressesForKey(key);
 	}
 
-	private static AsyncIterable<byte[]> getBoundaryKeys_internal(Transaction tr, byte[] begin, byte[] end) {
-		return new BoundaryIterable(tr, begin, end);
+	private static CloseableAsyncIterator<byte[]> getBoundaryKeys_internal(Transaction tr, byte[] begin, byte[] end) {
+		return new BoundaryIterator(tr, begin, end);
 	}
 
-	static class BoundaryIterable implements AsyncIterable<byte[]> {
-		final Transaction tr;
-		final byte[] begin;
+	static class BoundaryIterator implements CloseableAsyncIterator<byte[]> {
+		Transaction tr;
+		byte[] begin;
+		byte[] lastBegin;
 		final byte[] end;
 		final AsyncIterable<KeyValue> firstGet;
 
-		public BoundaryIterable(Transaction tr, byte[] begin, byte[] end) {
+		AsyncIterator<KeyValue> block;
+		private CompletableFuture<Boolean> nextFuture;
+		private boolean closed;
+
+		BoundaryIterator(Transaction tr, byte[] begin, byte[] end) {
 			this.tr = tr;
 			this.begin = Arrays.copyOf(begin, begin.length);
 			this.end = Arrays.copyOf(end, end.length);
 
+			lastBegin = begin;
+
 			tr.options().setReadSystemKeys();
 			tr.options().setLockAware();
+
 			firstGet = tr.getRange(keyServersForKey(begin), keyServersForKey(end));
+			block = firstGet.iterator();
+			nextFuture = AsyncUtil.composeHandleAsync(block.onHasNext(), handler, tr.getExecutor());
+
+			closed = false;
 		}
 
 		@Override
-		public AsyncIterator<byte[]> iterator() {
-			return new BoundaryIterator();
+		public CompletableFuture<Boolean> onHasNext() {
+			return nextFuture;
 		}
 
-        @Override
-        public Future<List<byte[]>> asList() {
-            return AsyncUtil.collect(this);
-        }
+		@Override
+		public boolean hasNext() {
+			return nextFuture.join();
+		}
 
-    	class BoundaryIterator implements AsyncIterator<byte[]> {
-			AsyncIterator<KeyValue> block = BoundaryIterable.this.firstGet.iterator();
-			Transaction tr = BoundaryIterable.this.tr;
-			byte[] begin = BoundaryIterable.this.begin;
-			byte[] lastBegin = begin;
-			private Future<Boolean> nextFuture;
-
-			public BoundaryIterator() {
-				nextFuture = block.onHasNext().rescueRuntime(handler);
+		CompletableFuture<Boolean> restartGet() {
+			if(ByteArrayUtil.compareUnsigned(begin, end) >= 0) {
+				return AsyncUtil.READY_FALSE;
 			}
+			lastBegin = begin;
+			tr.options().setReadSystemKeys();
+			block = tr.getRange(
+					keyServersForKey(begin),
+					keyServersForKey(end)).iterator();
+			nextFuture = AsyncUtil.composeHandleAsync(block.onHasNext(), handler, tr.getExecutor());
+			return nextFuture;
+		}
 
+		BiFunction<Boolean, Throwable, CompletableFuture<Boolean>> handler = new BiFunction<Boolean, Throwable, CompletableFuture<Boolean>>() {
 			@Override
-			public Future<Boolean> onHasNext() {
-				return nextFuture;
-			}
-
-			@Override
-			public boolean hasNext() {
-				return nextFuture.get();
-			}
-
-			Future<Boolean> restartGet() {
-				if(ByteArrayUtil.compareUnsigned(begin, end) >= 0) {
-					return new ReadyFuture<Boolean>(Boolean.FALSE);
+			public CompletableFuture<Boolean> apply(Boolean b, Throwable o) {
+				if(b != null) {
+					return CompletableFuture.completedFuture(b);
 				}
-				lastBegin = begin;
-				tr.options().setReadSystemKeys();
-				block = tr.getRange(
-						keyServersForKey(begin),
-						keyServersForKey(end)).iterator();
-				nextFuture = block.onHasNext().rescueRuntime(handler);
-				return nextFuture;
-			}
-
-			Function<RuntimeException, Future<Boolean>> handler = new Function<RuntimeException, Future<Boolean>>() {
-				@Override
-				public Future<Boolean> apply(RuntimeException o) {
-					if(o instanceof FDBException) {
-						FDBException err = (FDBException) o;
-						if(err.getCode() == 1007 && !Arrays.equals(begin, lastBegin)) {
-							BoundaryIterator.this.tr.dispose();
-							BoundaryIterator.this.tr =
-									BoundaryIterator.this.tr.getDatabase().createTransaction();
-							return restartGet();
-						}
+				if(o instanceof FDBException) {
+					FDBException err = (FDBException) o;
+					if(err.getCode() == 1007 && !Arrays.equals(begin, lastBegin)) {
+						Executor executor = BoundaryIterator.this.tr.getExecutor();
+						BoundaryIterator.this.tr.close();
+						BoundaryIterator.this.tr = BoundaryIterator.this.tr.getDatabase().createTransaction(executor);
+						return restartGet();
 					}
-
-					Future<Transaction> onError = BoundaryIterator.this.tr.onError(o);
-					return onError.flatMap(new Function<Transaction, Future<Boolean>>() {
-						@Override
-						public Future<Boolean> apply(Transaction tr) {
-							BoundaryIterator.this.tr = tr;
-							return restartGet();
-						}
-					});
 				}
-			};
 
-			@Override
-			public byte[] next() {
-				if(!nextFuture.isDone()) {
-					throw new IllegalStateException("Call to next without hasNext()=true");
+				if(!(o instanceof RuntimeException))
+					throw new CompletionException(o);
+
+				CompletableFuture<Transaction> onError = BoundaryIterator.this.tr.onError(o);
+				return onError.thenComposeAsync(tr -> {
+					BoundaryIterator.this.tr = tr;
+					return restartGet();
+				}, tr.getExecutor());
+			}
+		};
+
+		@Override
+		public byte[] next() {
+			if(!nextFuture.isDone()) {
+				throw new IllegalStateException("Call to next without hasNext()=true");
+			}
+			KeyValue o = block.next();
+			byte[] key = o.getKey();
+			byte[] suffix = Arrays.copyOfRange(key, 13, key.length);
+			BoundaryIterator.this.begin = ByteArrayUtil.join(suffix, new byte[] { (byte)0 });
+			nextFuture = AsyncUtil.composeHandleAsync(block.onHasNext(), handler, tr.getExecutor());
+			return suffix;
+		}
+
+		@Override
+		public void remove() {
+			throw new UnsupportedOperationException("Boundary keys are read-only");
+		}
+
+		@Override
+		public void close() {
+			BoundaryIterator.this.tr.close();
+			closed = true;
+		}
+
+		@Override
+		protected void finalize() throws Throwable {
+			try {
+				if(FDB.getInstance().warnOnUnclosed && !closed) {
+					System.err.println("CloseableAsyncIterator not closed (getBoundaryKeys)");
 				}
-				KeyValue o = block.next();
-				byte[] key = o.getKey();
-				byte[] suffix = Arrays.copyOfRange(key, 13, key.length);
-				BoundaryIterator.this.begin = ByteArrayUtil.join(suffix, new byte[] { (byte)0 });
-				nextFuture = block.onHasNext().rescueRuntime(handler);
-				return suffix;
+				if(!closed) {
+					close();
+				}
 			}
-
-			@Override
-			public void remove() {
-				throw new UnsupportedOperationException("Boundary keys are read-only");
-			}
-
-			@Override
-			public void cancel() {
-				// TODO Auto-generated method stub
-			}
-
-			@Override
-			public void dispose() {
-				BoundaryIterator.this.tr.dispose();
+			finally {
+				super.finalize();
 			}
 		}
 	}
 
-	static Charset ASCII = Charset.forName("US-ASCII");
+	private static final Charset ASCII = Charset.forName("US-ASCII");
 	static byte[] keyServersForKey(byte[] key) {
 		return ByteArrayUtil.join(new byte[] { (byte)255 },
 							  "/keyServers/".getBytes(ASCII),

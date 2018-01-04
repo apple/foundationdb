@@ -23,7 +23,7 @@ package com.apple.foundationdb.test;
 class StackEntry {
 	int idx;
 	Object value;
-	public StackEntry(int idx, Object value) {
+	StackEntry(int idx, Object value) {
 		this.idx = idx;
 		this.value = value;
 	}

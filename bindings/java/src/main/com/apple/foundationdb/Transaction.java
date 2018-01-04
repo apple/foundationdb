@@ -20,11 +20,9 @@
 
 package com.apple.foundationdb;
 
-import com.apple.foundationdb.async.Cancellable;
-import com.apple.foundationdb.async.Function;
-import com.apple.foundationdb.async.Future;
-import com.apple.foundationdb.async.PartialFunction;
-import com.apple.foundationdb.async.PartialFuture;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
+
 import com.apple.foundationdb.tuple.Tuple;
 
 /**
@@ -36,12 +34,12 @@ import com.apple.foundationdb.tuple.Tuple;
  *  the underlying database if and when the transaction is committed. Read operations do see the
  *  effects of previous write operations on the same transaction. Committing a transaction usually
  *  succeeds in the absence of
- *  <a href="/documentation/developer-guide.html#transaction-conflicts" target="_blank">conflicts</a>.<br>
+ *  <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">conflicts</a>.<br>
  *  <br>
  * Transactions group operations into a unit with the properties of atomicity, isolation, and
  *  durability. Transactions also provide the ability to maintain an application's invariants or
  *  integrity constraints, supporting the property of consistency. Together these properties are
- *  known as <a href="/documentation/developer-guide.html#acid" target="_blank">ACID</a>.<br>
+ *  known as <a href="/foundationdb/developer-guide.html#acid" target="_blank">ACID</a>.<br>
  *  <br>
  * Transactions are also causally consistent: once a transaction has been successfully committed,
  *  all subsequently created transactions will see the modifications made by it.
@@ -51,40 +49,43 @@ import com.apple.foundationdb.tuple.Tuple;
  * <br>
  * Keys and values in FoundationDB are byte arrays. To encode other data types, see the
  *  {@link Tuple Tuple API} and
- *  <a href="/documentation/data-modeling.html#tuples" target="_blank">tuple layer documentation</a>.<br>
+ *  <a href="/foundationdb/data-modeling.html#tuples" target="_blank">tuple layer documentation</a>.<br>
  * <br>
  * When used as a {@link TransactionContext}, the methods {@code run()} and
  *  {@code runAsync()} on a {@code Transaction} will simply attempt the operations
  *  without any retry loop.<br>
  * <br>
- * Note: Client must call {@link #commit()} and wait on the result on all transactions, even
+ * <b>Note:</b> Client must call {@link #commit()} and wait on the result on all transactions, even
  *  ones that only read. This is done automatically when using the retry loops from
  *  {@link Database#run(Function)}. This is because outstanding reads originating from a
  *  {@code Transaction} will be cancelled when a {@code Transaction} is garbage collected.
  *  Since the garbage collector reserves the right to collect an in-scope object if it
  *  determines that there are no subsequent references it it, this can happen in seemingly
- *  innocuous situations. {@code Future}s returned from {@code commit()} will block until
+ *  innocuous situations. {@code CompletableFuture}s returned from {@code commit()} will block until
  *  all reads are complete, thereby saving the calling code from this potentially confusing
  *  situation.<br>
  * <br>
- * Note: All keys with a first byte of {@code 0xff} are reserved for internal use.<br>
+ * <b>Note:</b> All keys with a first byte of {@code 0xff} are reserved for internal use.<br>
  * <br>
- * Note: Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
+ * <b>Note:</b> Java transactions automatically set the {@link TransactionOptions#setUsedDuringCommitProtectionDisable}
  *  option. This is because the Java bindings disallow use of {@code Transaction} objects after {@link #onError}
- *  is called.
+ *  is called.<br>
+ * <br>
+ * <b>Note:</b> {@code Transaction} objects must be {@link #close closed} when no longer
+ *  in use in order to free any associated resources.
  */
-public interface Transaction extends Cancellable, Disposable, ReadTransaction, TransactionContext {
+public interface Transaction extends AutoCloseable, ReadTransaction, TransactionContext {
 
 	/**
 	 * Return special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
 	 * Snapshot reads selectively relax FoundationDB's isolation property, reducing
-	 * <a href="/documentation/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
+	 * <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
 	 * but making reasoning about concurrency harder.<br>
 	 * <br>
 	 * For more information about how to use snapshot reads correctly, see
-	 * <a href="/documentation/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
 	 */
-	public ReadTransaction snapshot();
+	ReadTransaction snapshot();
 
 	/**
 	 * Directly sets the version of the database at which to execute reads.  The
@@ -95,7 +96,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @param version the version at which to read from the database
 	 */
-	public void setReadVersion(long version);
+	void setReadVersion(long version);
 
 
 	/**
@@ -106,7 +107,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @param keyBegin the first key in the range (inclusive)
 	 * @param keyEnd the ending key for the range (exclusive)
 	 */
-	public void addReadConflictRange(byte[] keyBegin, byte[] keyEnd);
+	void addReadConflictRange(byte[] keyBegin, byte[] keyEnd);
 
 	/**
 	 * Adds a key to the transaction's read conflict ranges as if you had read
@@ -115,7 +116,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @param key the key to be added to the range
 	 */
-	public void addReadConflictKey(byte[] key);
+	void addReadConflictKey(byte[] key);
 
 	/**
 	 * Adds a range of keys to the transaction's write conflict ranges as if you
@@ -125,7 +126,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @param keyBegin the first key in the range (inclusive)
 	 * @param keyEnd the ending key for the range (exclusive)
 	 */
-	public void addWriteConflictRange(byte[] keyBegin, byte[] keyEnd);
+	void addWriteConflictRange(byte[] keyBegin, byte[] keyEnd);
 
 	/**
 	 * Adds a key to the transaction's write conflict ranges as if you had
@@ -134,7 +135,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @param key the key to be added to the range
 	 */
-	public void addWriteConflictKey(byte[] key);
+	void addWriteConflictKey(byte[] key);
 
 	/**
 	 * Sets the value for a given key. This will not affect the
@@ -145,7 +146,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws IllegalArgumentException
 	 * @throws FDBException
 	 */
-	public void set(byte[] key, byte[] value);
+	void set(byte[] key, byte[] value);
 
 	/**
 	 * Clears a given key from the database. This will not affect the
@@ -155,7 +156,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws IllegalArgumentException
 	 * @throws FDBException
 	 */
-	public void clear(byte[] key);
+	void clear(byte[] key);
 
 	/**
 	 * Clears a range of keys in the database.  The upper bound of the range is
@@ -169,7 +170,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws IllegalArgumentException
 	 * @throws FDBException
 	 */
-	public void clear(byte[] beginKey, byte[] endKey);
+	void clear(byte[] beginKey, byte[] endKey);
 
 	/**
 	 * Clears a range of keys in the database. The upper bound of the range is
@@ -182,7 +183,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @throws FDBException
 	 */
-	public void clear(Range range);
+	void clear(Range range);
 
 	/**
 	 * Replace with calls to {@link #clear(Range)} with a parameter from a call to
@@ -193,7 +194,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @throws FDBException
 	 */
 	@Deprecated
-	public void clearRangeStartsWith(byte[] prefix);
+	void clearRangeStartsWith(byte[] prefix);
 
 	/**
 	 * An atomic operation is a single database command that carries out several
@@ -214,7 +215,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
      * that are frequently modified. A common example is the use of a key-value
      * pair as a counter.<br>
      * <br>
-     * Note: If a transaction uses both an atomic operation and a serializable
+     * <b>Note:</b> If a transaction uses both an atomic operation and a serializable
      * read on the same key, the benefits of using the atomic operation (for both
      * conflict checking and performance) are lost.
 	 *
@@ -224,14 +225,14 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @param key the target of the operation
 	 * @param param the value with which to modify the key
 	 */
-	public void mutate(MutationType optype, byte[] key, byte[] param);
+	void mutate(MutationType optype, byte[] key, byte[] param);
 
 	/**
 	 * Commit this {@code Transaction}. See notes in class description. Consider using
 	 *  {@code Database}'s {@link Database#run(Function) run()} calls for managing
 	 *  transactional access to FoundationDB.
 	 *
-	 * @return a {@code Future} that, when set without error, guarantees the
+	 * @return a {@code CompletableFuture} that, when set without error, guarantees the
 	 *  {@code Transaction}'s modifications committed durably to the
 	 *  database. If the commit failed, it will throw an {@link FDBException}.
 	 * <br><br>
@@ -243,12 +244,12 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *  up executing a transaction twice. For more information, see the FoundationDB
 	 *  Developer Guide documentation.
 	 *
-	 *  If any operation is performed on a transaction after a commit has been 
-	 *  issued but before it has returned, both the commit and the operation will 
-	 *  throw an error code {@code used_during_commit}(2017). In this case, all 
+	 *  If any operation is performed on a transaction after a commit has been
+	 *  issued but before it has returned, both the commit and the operation will
+	 *  throw an error code {@code used_during_commit}(2017). In this case, all
 	 *  subsequent operations on this transaction will throw this error.
 	 */
-	public Future<Void> commit();
+	CompletableFuture<Void> commit();
 
 	/**
 	 * Gets the version number at which a successful commit modified the database.
@@ -260,7 +261,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @return the database version at which the commit succeeded
 	 */
-	public Long getCommittedVersion();
+	Long getCommittedVersion();
 
 	/**
 	 * Returns a future which will contain the versionstamp which was used by any versionstamp 
@@ -273,45 +274,30 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @return a future containing the versionstamp which was used for any versionstamp operations 
 	 * in this transaction
 	 */
-	public Future<byte[]> getVersionstamp();
+	CompletableFuture<byte[]> getVersionstamp();
 
 	/**
 	 * Resets a transaction and returns a delayed signal for error recovery.  If the error
 	 *  encountered by the {@code Transaction} could not be recovered from, the returned
-	 *  {@code Future} will be set to an error state.
-     *
+	 *  {@code CompletableFuture} will be set to an error state.
+	 *
 	 * The current {@code Transaction} object will be invalidated by this call and will throw errors
-	 *  when used. The newly reset {@code Transaction} will be returned through the {@code Future}
+	 *  when used. The newly reset {@code Transaction} will be returned through the {@code CompletableFuture}
 	 *  if the error was retryable.
 	 *
 	 * If the error is not retryable, then no reset {@code Transaction} is returned, leaving this
 	 *  {@code Transaction} permanently invalidated.
 	 *
 	 * @param e the error caught while executing get()s and set()s on this {@code Transaction}
-	 * @return a {@code Future} to be set with a reset {@code Transaction} object to retry the transaction
+	 * @return a {@code CompletableFuture} to be set with a reset {@code Transaction} object to retry the transaction
 	 */
-	public Future<Transaction> onError(RuntimeException e);
-
-	/**
-	 * Resets a transaction and returns a delayed signal for error recovery.  If the error
-	 *  encountered by the {@code Transaction} could not be recovered from, the returned
-	 *  {@code PartialFuture} will be set to an error state.
-	 *
-	 * The current {@code Transaction} object will be invalidated by this call and will throw errors
-	 *  when used. The newly reset {@code Transaction} will be returned through the {@code PartialFuture}
-	 *  if the error was retryable.
-	 *
-	 * @param e the error caught while executing get()s and set()s on this {@code Transaction}
-	 * @return a {@code PartialFuture} to be set with a reset {@code Transaction} object to retry the transaction
-	 */
-	public PartialFuture<Transaction> onError(Exception e);
+	CompletableFuture<Transaction> onError(Throwable e);
 
 	/**
 	 * Cancels the {@code Transaction}. All pending and any future uses of the
 	 *  {@code Transaction} will throw an {@link RuntimeException}.
 	 */
-	@Override
-	public void cancel();
+	void cancel();
 
 	/**
 	 * Creates a watch that will become ready when it reports a change to
@@ -326,17 +312,17 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * <br>
 	 * Until the transaction that created it has been committed, a watch will
 	 * not report changes made by other transactions. In contrast, a watch
-	 * will immediately report changes made by the transaction itself. Watches 
-	 * cannot be created if the transaction has set 
+	 * will immediately report changes made by the transaction itself. Watches
+	 * cannot be created if the transaction has set
 	 * {@link TransactionOptions#setReadYourWritesDisable()}, and an attempt to do
 	 * so will raise a {@code watches_disabled} exception.<br>
 	 * <br>
-	 * If the transaction used to create a watch encounters an exception during 
-	 * commit, then the watch will be set with that exception. A transaction whose 
+	 * If the transaction used to create a watch encounters an exception during
+	 * commit, then the watch will be set with that exception. A transaction whose
 	 * commit result is unknown will set all of its watches with the
-	 * {@code commit_unknown_result} exception. If an uncommitted transaction is 
-	 * reset via {@link #onError} or destroyed, then any watches it created will be set with the
-	 * {@code transaction_cancelled} exception.<br>
+	 * {@code commit_unknown_result} exception. If an uncommitted transaction is
+	 * reset via {@link #onError} or destroyed, then any watches it created will be set
+	 * with the {@code transaction_cancelled} exception.<br>
 	 * <br>
 	 * By default, each database connection can have no more than 10,000 watches
 	 * that have not yet reported a change. When this number is exceeded, an
@@ -349,13 +335,13 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @param key the key to watch for changes in value
 	 *
-	 * @return a {@code Future} that will become ready when the value changes
+	 * @return a {@code CompletableFuture} that will become ready when the value changes
 	 *
 	 * @throws FDBException if too many watches have been created on this database. The
 	 *  limit defaults to 10,000 and can be modified with a call to
 	 *  {@link DatabaseOptions#setMaxWatches(long)}.
 	 */
-	public Future<Void> watch(byte[] key) throws FDBException;
+	CompletableFuture<Void> watch(byte[] key) throws FDBException;
 
 	/**
 	 * Returns the {@link Database} that this {@code Transaction} is interacting
@@ -363,7 +349,7 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 *
 	 * @return the {@link Database} object
 	 */
-	public Database getDatabase();
+	Database getDatabase();
 
 	/**
 	 * Run a function once against this {@code Transaction}. This call blocks while
@@ -372,38 +358,23 @@ public interface Transaction extends Cancellable, Disposable, ReadTransaction, T
 	 * @return the return value of {@code retryable}
 	 */
 	@Override
-	public <T> T run(Function<? super Transaction, T> retryable);
-
-	/**
-	 * Run a function once against this {@code Transaction}. This call blocks while
-	 *  user code is executing, returning the result of that code on completion.
-	 *
-	 * @return the return value of {@code retryable}
-	 *
-	 * @throws Exception if an error is encountered during execution
-	 */
-	@Override
-	public <T> T run(PartialFunction<? super Transaction, T> retryable)
-			throws Exception;
+	<T> T run(Function<? super Transaction, T> retryable);
 
 	/**
 	 * Run a function once against this {@code Transaction}. This call returns
-	 *  immediately with a {@code Future} handle to the result.
+	 *  immediately with a {@code CompletableFuture} handle to the result.
 	 *
-	 * @return a {@code Future} that will be set to the return value of {@code retryable}
+	 * @return a {@code CompletableFuture} that will be set to the return value of {@code retryable}
 	 */
 	@Override
-	public <T> Future<T> runAsync(
-			Function<? super Transaction, Future<T>> retryable);
+	<T> CompletableFuture<T> runAsync(
+			Function<? super Transaction, ? extends CompletableFuture<T>> retryable);
 
 	/**
-	 * Run a function once against this {@code Transaction}. This call returns
-	 *  immediately with a {@code PartialFuture} handle to the result. Use this
-	 *  formulation of {@link #runAsync(Function)} if user code throws a checked exception.
-	 *
-	 * @return a {@code PartialFuture} that will be set to the return value of {@code retryable}
+	 * Close the {@code Transaction} object and release any associated resources. This must be called at
+	 *  least once after the {@code Transaction} object is no longer in use. This can be called multiple
+	 *  times, but care should be taken that it is not in use in another thread at the time of the call.
 	 */
 	@Override
-	public <T> PartialFuture<T> runAsync(
-			PartialFunction<? super Transaction, ? extends PartialFuture<T>> retryable);
+	void close();
 }

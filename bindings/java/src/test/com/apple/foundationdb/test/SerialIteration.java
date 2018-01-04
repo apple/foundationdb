@@ -40,16 +40,16 @@ public class SerialIteration {
 
 	public static void main(String[] args) throws InterruptedException {
 		FDB api = FDB.selectAPIVersion(510);
-		Database database = api.open(args[0]);
-
-		for(int i = 1; i <= THREAD_COUNT; i++) {
-			runThreadedTest(database, i);
-			Thread.sleep(1000);
+		try(Database database = api.open(args[0])) {
+			for(int i = 1; i <= THREAD_COUNT; i++) {
+				runThreadedTest(database, i);
+				Thread.sleep(1000);
+			}
 		}
 	}
 
 	private static double runThreadedTest(Database database, int threadCount) {
-		List<IterationThread> threads = new ArrayList<IterationThread>(threadCount);
+		List<IterationThread> threads = new ArrayList<>(threadCount);
 		for(int i = 0; i < threadCount; i++) {
 			IterationThread thread = new IterationThread(database);
 			thread.start();
@@ -115,22 +115,26 @@ public class SerialIteration {
 	}
 
 	private static int scanDatabase(Database database, int rows) {
-		Transaction tr = database.createTransaction();
-		tr.options().setReadYourWritesDisable();
+		try(Transaction tr = database.createTransaction()) {
+			tr.options().setReadYourWritesDisable();
 
-		ByteBuffer buf = ByteBuffer.allocate(4);
-		buf.putInt(0, Integer.MAX_VALUE);
-		AsyncIterable<KeyValue> range = tr.getRange(new byte[0], buf.array(),
-				ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL);
+			ByteBuffer buf = ByteBuffer.allocate(4);
+			buf.putInt(0, Integer.MAX_VALUE);
+			AsyncIterable<KeyValue> range = tr.getRange(new byte[0], buf.array(),
+					ReadTransaction.ROW_LIMIT_UNLIMITED, false, StreamingMode.WANT_ALL);
 
-		int counter = 0;
-		try {
-			for(@SuppressWarnings("unused") KeyValue keys : range) {
-				counter++;
+			int counter = 0;
+			try {
+				for(@SuppressWarnings("unused") KeyValue keys : range) {
+					counter++;
+				}
 			}
-		} catch(Exception e) {
-			e.printStackTrace();
+			catch(Exception e) {
+				e.printStackTrace();
+			}
+			return counter;
 		}
-		return counter;
 	}
+
+	private SerialIteration() {}
 }

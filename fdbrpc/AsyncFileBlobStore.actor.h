@@ -165,9 +165,6 @@ public:
 
 	// Ready once all data has been sent AND acknowledged from the remote side
 	virtual Future<Void> sync() {
-		if(m_cursor == 0)
-			throw file_not_writable();
-
 		// Only initiate the finish operation once, and also prevent further writing.
 		if(!m_finished.isValid()) {
 			m_finished = doFinishUpload(this);
@@ -223,7 +220,7 @@ private:
 			return Void();
 
 		// Wait for an upload slot to be available
-		Void _ = wait(f->m_concurrentUploads.take(1));
+		Void _ = wait(f->m_concurrentUploads.take());
 
 		// Do the upload, and if it fails forward errors to m_error and also stop if anything else sends an error to m_error
 		// Also, hold a releaser for the concurrent upload slot while all that is going on.

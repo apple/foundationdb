@@ -21,39 +21,44 @@
 package com.apple.foundationdb.test;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.LocalityUtil;
 import com.apple.foundationdb.Transaction;
-import com.apple.foundationdb.async.AsyncIterable;
+import com.apple.foundationdb.async.CloseableAsyncIterator;
 import com.apple.foundationdb.async.AsyncUtil;
-import com.apple.foundationdb.async.Future;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 public class LocalityTests {
 
 	public static void main(String[] args) {
 		FDB fdb = FDB.selectAPIVersion(510);
-		Database database = fdb.open(args[0]);
+		try(Database database = fdb.open(args[0])) {
+			try(Transaction tr = database.createTransaction()) {
+				String[] keyAddresses = LocalityUtil.getAddressesForKey(tr, "a".getBytes()).join();
+				for(String s : keyAddresses) {
+					System.out.println(" @ " + s);
+				}
+			}
 
-		{
-			Transaction tr = database.createTransaction();
-			String[] keyAddresses = LocalityUtil.getAddressesForKey(tr, "a".getBytes()).get();
-			for(String s : keyAddresses) {
-				System.out.println(" @ " + s);
+			long start = System.currentTimeMillis();
+
+			CloseableAsyncIterator<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[]{(byte) 255});
+			CompletableFuture<List<byte[]>> collection = AsyncUtil.collectRemaining(keys);
+			List<byte[]> list = collection.join();
+			System.out.println("Took " + (System.currentTimeMillis() - start) + "ms to get " +
+					list.size() + " items");
+
+			keys.close();
+
+			int i = 0;
+			for(byte[] key : collection.join()) {
+				System.out.println(i++ + ": " + ByteArrayUtil.printable(key));
 			}
 		}
-
-		long start = System.currentTimeMillis();
-		AsyncIterable<byte[]> keys = LocalityUtil.getBoundaryKeys(database, new byte[0], new byte[] { (byte)255 } );
-		Future<List<byte[]>> collection = AsyncUtil.collect(keys);
-		List<byte[]> list = collection.get();
-		System.out.println("Took " + (System.currentTimeMillis() - start) + "ms to get " +
-				list.size() + " items");
-		int i = 0;
-		for(byte[] key : collection.get()) {
-			System.out.println(i++ + ": " + ByteArrayUtil.printable(key));
-		}
 	}
+
+	private LocalityTests() {}
 }

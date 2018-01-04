@@ -142,17 +142,24 @@ struct StorageMetrics;
 
 struct TransactionOptions {
 	double maxBackoff;
-	uint32_t getReadVersionFlags : 32;
-	uint32_t customTransactionSizeLimit : 32;
+	uint32_t getReadVersionFlags;
+	uint32_t customTransactionSizeLimit;
 	bool checkWritesEnabled : 1;
 	bool causalWriteRisky : 1;
+	bool commitOnFirstProxy : 1;
 	bool debugDump : 1;
 	bool lockAware : 1;
 	bool readOnly : 1;
-	
-	TransactionOptions() { reset(); }
-	void reset() { 
-		memset(this, 0, sizeof(*this)); 
+
+	TransactionOptions() {
+		reset();
+		if (BUGGIFY) {
+			commitOnFirstProxy = true;
+		}
+	}
+
+	void reset() {
+		memset(this, 0, sizeof(*this));
 		maxBackoff = CLIENT_KNOBS->DEFAULT_MAX_BACKOFF;
 	}
 };

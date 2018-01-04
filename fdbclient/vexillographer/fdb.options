@@ -131,6 +131,8 @@ description is not currently required but encouraged.
     <Option name="causal_read_disable" code="21" />
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
+    <Option name="commit_on_first_proxy" code="40"
+            description="Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'." />
     <Option name="check_writes_enable" code="50" />
     <Option name="read_your_writes_disable" code="51"
             description="Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction."/>
