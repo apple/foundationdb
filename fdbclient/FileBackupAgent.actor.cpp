@@ -3515,6 +3515,9 @@ public:
 		state UID randomUid = g_random->randomUniqueID();
 		loop {
 			try {
+				// We must get a commit version so add a conflict range that won't likely cause conflicts
+				// but will ensure that the transaction is actually submitted.
+				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().space.range());
 				Void _ = wait( lockDatabase(&tr, randomUid) );
 				Void _ = wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
