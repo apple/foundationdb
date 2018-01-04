@@ -113,6 +113,15 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	virtual void getMetrics(vector<PerfMetric>& m) {
 	}
 
+	ACTOR static Future<Void> changePaused(Database cx, FileBackupAgent* backupAgent) {
+		loop {
+			Void _ = wait( backupAgent->taskBucket->changePause(cx, true) );
+			Void _ = wait( delay(30*g_random->random01()) );
+			Void _ = wait( backupAgent->taskBucket->changePause(cx, false) );
+			Void _ = wait( delay(120*g_random->random01()) );
+		}
+	}
+
 	ACTOR static Future<Void> doBackup(BackupAndRestoreCorrectnessWorkload* self, double startDelay, FileBackupAgent* backupAgent, Database cx,
 		Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges, double stopDifferentialDelay, Promise<Void> submittted) {
 
@@ -278,6 +287,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			.detail("abortAndRestartAfter", self->abortAndRestartAfter).detail("differentialAfter", self->stopDifferentialAfter);
 
 		state UID	randomID = g_nondeterministic_random->randomUniqueID();
+		if(BUGGIFY) {
+			state Future<Void> cp = changePaused(cx, &backupAgent);
+		}
 
 		// Increment the backup agent requets
 		if (self->agentRequest) {

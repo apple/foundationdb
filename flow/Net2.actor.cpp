@@ -838,8 +838,11 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 	state Promise<std::vector<NetworkAddress>> result;
 
 	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
-		if(ec)
+		if(ec) {
 			result.sendError(lookup_failed());
+			return;
+		}
+
 		std::vector<NetworkAddress> addrs;
 		
 		tcp::resolver::iterator end;

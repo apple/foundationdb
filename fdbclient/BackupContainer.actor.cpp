@@ -50,7 +50,7 @@ std::string BackupDescription::toString() const {
 
 	for(const KeyspaceSnapshotFile &m : snapshots)
 		info.append(format("Snapshot:  startVersion=%lld  endVersion=%lld  totalBytes=%lld\n", m.beginVersion, m.endVersion, m.totalSize));
-	info.append(format("TotalSnapshotBytes: %lld\n", totalSnapshotBytes));
+	info.append(format("SnapshotBytes: %lld\n", snapshotBytes));
 
 	if(minLogBegin.present())
 		info.append(format("MinLogBeginVersion: %lld\n", minLogBegin.get()));
@@ -62,7 +62,7 @@ std::string BackupDescription::toString() const {
 		info.append(format("MinRestorableVersion: %lld\n", minRestorableVersion.get()));
 	if(maxRestorableVersion.present())
 		info.append(format("MaxRestorableVersion: %lld\n", maxRestorableVersion.get()));
-	info.append(format("TotalLogBytes: %lld\n", totalLogBytes));
+	info.append(format("LogBytes: %lld\n", logBytes));
 
 	if(!extendedDetail.empty())
 		info.append("ExtendedDetail: ").append(extendedDetail);
@@ -81,8 +81,8 @@ std::string BackupDescription::toString() const {
  *     /logs/.../log,startVersion,endVersion,blockSize
  *     /ranges/.../range,version,uid,blockSize
  *
- *   Where ... is a multi level path which causes each level to not have more than 10,000 entries.
- *     v - (v % 1e15) / v - (v % 1e11) / (v - (v ^ 1e7)
+ *   Where ... is a multi level path which sorts lexically into version order and has less than 10,000
+ *   entries in each folder level.
  */
 class BackupContainerFileSystem : public IBackupContainer {
 public:
@@ -112,17 +112,41 @@ public:
 	// updated with the count of deleted files so that progress can be seen.
 	virtual Future<Void> deleteContainer(int *pNumDeleted) = 0;
 
+	static std::string folderPart(uint64_t n, unsigned int suffixLen, int maxLen) {
+		std::string s = format("%lld", n);
+		if(s.size() > suffixLen)
+			s = s.substr(0, s.size() - suffixLen);
+		else
+			s = "0";
+		if(s.size() > maxLen)
+			s = s.substr(s.size() - maxLen, maxLen);
+		return std::string(1, 'a' + s.size() - 1) + s;
+	}
 
-	static std::string versionFolderString(Version v) {
-		return format("%lld/%lld/%lld", v - (v % (int64_t)1e16), v - (v % (int64_t)1e12), v - (v % (int64_t)1e8));
+	// Creates a 2-level path where the innermost level will have files covering the 1e(smallestBucket) version range.
+	static std::string versionFolderString(Version v, int smallestBucket) {
+		return folderPart(v, smallestBucket + 4, 999) + "/"
+			 + folderPart(v, smallestBucket, 4);
+	}
+
+	// The innermost folder covers 100 seconds.  During a full speed backup it is possible though very unlikely write about 10,000 snapshot range files during that time.
+	// n,nnn/n,nnn/nn,nnn,nnn
+	static std::string rangeVersionFolderString(Version v) {
+		return versionFolderString(v, 8);
+	}
+
+	// The innermost folder covers 100,000 seconds which is 5,000 mutation log files at current settings.
+	// n,nnn/n,nnn/nn,nnn,nnn,nnn
+	static std::string logVersionFolderString(Version v) {
+		return versionFolderString(v, 11);
 	}
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) {
-		return writeFile(format("logs/%s/log,%lld,%lld,%d", versionFolderString(beginVersion).c_str(), beginVersion, endVersion, blockSize));
+		return writeFile(format("logs/%s/log,%lld,%lld,%s,%d", logVersionFolderString(beginVersion).c_str(), beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) {
-		return writeFile(format("ranges/%s/range,%lld,%s,%d", versionFolderString(version).c_str(), version, g_random->randomUniqueID().toString().c_str(), blockSize));
+		return writeFile(format("ranges/%s/range,%lld,%s,%d", rangeVersionFolderString(version).c_str(), version, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	static RangeFile pathToRangeFile(std::string path, int64_t size) {
@@ -142,7 +166,7 @@ public:
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if(sscanf(name.c_str(), "log,%lld,%lld,%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size())
+		if(sscanf(name.c_str(), "log,%lld,%lld,%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size())
 			return f;
 		throw restore_unknown_file_type();
 	}
@@ -302,14 +326,14 @@ public:
 			desc.maxLogEnd = logs.rbegin()->endVersion;
 
 			auto i = logs.begin();
-			desc.totalLogBytes = i->fileSize;
+			desc.logBytes = i->fileSize;
 			desc.minLogBegin = i->beginVersion;
 			desc.contiguousLogEnd = i->endVersion;
 			auto &end = desc.contiguousLogEnd.get();  // For convenience to make loop cleaner
 
 			// Advance until continuity is broken
 			while(++i != logs.end()) {
-				desc.totalLogBytes += i->fileSize;
+				desc.logBytes += i->fileSize;
 				if(i->beginVersion > end)
 					break;
 				// If the next link in the log chain is found, update the end
@@ -319,13 +343,13 @@ public:
 
 			// Scan the rest of the logs to update the total size
 			while(i != logs.end()) {
-				desc.totalLogBytes += i->fileSize;
+				desc.logBytes += i->fileSize;
 				++i;
 			}
 		}
 
 		for(auto &s : snapshots) {
-			desc.totalSnapshotBytes += s.totalSize;
+			desc.snapshotBytes += s.totalSize;
 
 			// If the snapshot is at a single version then it requires no logs.  Update min and max restorable.
 			// TODO:  Somehow check / report if the restorable range is not or may not be contiguous.
@@ -665,7 +689,7 @@ public:
 	}
 
 	ACTOR static Future<FilesAndSizesT> listFiles_impl(Reference<BackupContainerBlobStore> bc, std::string path) {
-		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BACKUP_BUCKET, bc->m_name + "/" + path));
+		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BACKUP_BUCKET, bc->m_name + "/" + path, '/', std::numeric_limits<int>::max()));
 		FilesAndSizesT files;
 		for(auto &o : result.objects)
 			files.push_back({o.name.substr(bc->m_name.size() + 1), o.size});
@@ -854,20 +878,22 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	Void _ = wait(c->deleteContainer());
 	Void _ = wait(c->create());
 
-	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100, 150, 10));
+	state int64_t versionMultiplier = g_random->randomInt64(0, std::numeric_limits<Version>::max() / 500);
+
+	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100 * versionMultiplier, 150 * versionMultiplier, 10));
 	Void _ = wait(writeAndVerifyFile(c, log1, 0));
 
-	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150, 300, 10));
+	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150 * versionMultiplier, 300 * versionMultiplier, 10));
 	Void _ = wait(writeAndVerifyFile(c, log2, g_random->randomInt(0, 10000000)));
 
-	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160, 10));
-	Void _ = wait(writeAndVerifyFile(c, range1, g_random->randomInt(0, 10000000)));
+	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160 * versionMultiplier, 10));
+	Void _ = wait(writeAndVerifyFile(c, range1, g_random->randomInt(0, 1000)));
 
-	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300, 10));
-	Void _ = wait(writeAndVerifyFile(c, range2, g_random->randomInt(0, 10000000)));
+	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300 * versionMultiplier, 10));
+	Void _ = wait(writeAndVerifyFile(c, range2, g_random->randomInt(0, 100000)));
 
-	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310, 10));
-	Void _ = wait(writeAndVerifyFile(c, range3, g_random->randomInt(0, 10000000)));
+	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310 * versionMultiplier, 10));
+	Void _ = wait(writeAndVerifyFile(c, range3, g_random->randomInt(0, 3000000)));
 
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size()));
 
@@ -887,34 +913,34 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	ASSERT(rest.get().logs.size() == 0);
 	ASSERT(rest.get().ranges.size() == 1);
 
-	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(150));
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(150 * versionMultiplier));
 	ASSERT(!rest.present());
 
-	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(300));
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(300 * versionMultiplier));
 	ASSERT(rest.present());
 	ASSERT(rest.get().logs.size() == 1);
 	ASSERT(rest.get().ranges.size() == 2);
 
-	Void _ = wait(c->expireData(100));
+	Void _ = wait(c->expireData(100 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
 	printf("Backup Description\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin == 100);
+	ASSERT(d.minLogBegin == 100 * versionMultiplier);
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
-	Void _ = wait(c->expireData(101));
+	Void _ = wait(c->expireData(101 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
 	printf("Backup Description\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin == 150);
+	ASSERT(d.minLogBegin == 150 * versionMultiplier);
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
-	Void _ = wait(c->expireData(155));
+	Void _ = wait(c->expireData(155 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
 	printf("Backup Description\n%s", d.toString().c_str());
 	ASSERT(!d.minLogBegin.present());
 	ASSERT(d.snapshots.size() == desc.snapshots.size());
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
-	Void _ = wait(c->expireData(161));
+	Void _ = wait(c->expireData(161 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
 	printf("Backup Description\n%s", d.toString().c_str());
 	ASSERT(d.snapshots.size() == 1);

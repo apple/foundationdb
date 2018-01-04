@@ -448,7 +448,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		bstore->s_stats.requests_failed++;
 
 		// All errors in err are potentially retryable as well as certain HTTP response codes...
-		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503;
+		bool retryable = err.present() || r->code == 500 || r->code == 502 || r->code == 503 || r->code == 429;
 
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);
@@ -475,8 +475,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			event.error(err.get());
 		else {
 			event.detail("ResponseCode", r->code);
+		}
 
-			// Check for the Retry-After header which is present with certain types of errors
+		if(retryable) {
+			// If retrying, obey the Retry-After response header if present.
 			auto iRetryAfter = r->headers.find("Retry-After");
 			if(iRetryAfter != r->headers.end()) {
 				event.detail("RetryAfterHeader", iRetryAfter->second);
@@ -484,12 +486,11 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 				double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);
 				if(*pEnd)  // If there were other characters then don't trust the parsed value, use a probably safe value of 5 minutes.
 					retryAfter = 300;
+				// Update delay
 				delay = std::max(delay, retryAfter);
 			}
-		}
 
-		// For retryable errors, log the delay then wait.
-		if(retryable) {
+			// Log the delay then wait.
 			event.detail("RetryDelay", delay);
 			Void _ = wait(::delay(delay));
 		}
@@ -509,7 +510,7 @@ Future<Reference<HTTP::Response>> BlobStoreEndpoint::doRequest(std::string const
 	return doRequest_impl(Reference<BlobStoreEndpoint>::addRef(this), verb, resource, headers, pContent, contentLen, successCodes);
 }
 
-ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ListResult> results, Optional<std::string> prefix, Optional<char> delimiter) {
+ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth) {
 	// Request 1000 keys at a time, the maximum allowed
 	state std::string resource = "/";
 	resource.append(bucket);
@@ -521,6 +522,8 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 	resource.append("&marker=");
 	state std::string lastFile;
 	state bool more = true;
+
+	state std::vector<Future<Void>> subLists;
 
 	while(more) {
 		HTTP::Headers headers;
@@ -572,9 +575,12 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 			if(doc.has("CommonPrefixes")) {
 				for(auto &jsonObject : doc.at("CommonPrefixes").get_array()) {
 					JSONDoc objectDoc(jsonObject);
-					std::string prefix;
-					objectDoc.get("Prefix", prefix);
-					result.commonPrefixes.push_back(std::move(prefix));
+					std::string p;
+					objectDoc.get("Prefix", p);
+					result.commonPrefixes.push_back(p);
+					if(maxDepth > 0) {
+						subLists.push_back(bstore->listBucketStream(bucket, results, p, delimiter, maxDepth - 1));
+					}
 				}
 			}
 
@@ -590,17 +596,19 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 		}
 	}
 
+	Void _ = wait(waitForAll(subLists));
+
 	return Void();
 }
 
-Future<Void> BlobStoreEndpoint::listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix, Optional<char> delimiter) {
-	return listBucketStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter);
+Future<Void> BlobStoreEndpoint::listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth) {
+	return listBucketStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter, maxDepth);
 }
 
-ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, Optional<std::string> prefix, Optional<char> delimiter) {
+ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth) {
 	state BlobStoreEndpoint::ListResult results;
 	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter);
+	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter, maxDepth);
 	loop {
 		choose {
 			when(Void _ = wait(done)) {
@@ -615,8 +623,8 @@ ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreE
 	return results;
 }
 
-Future<BlobStoreEndpoint::ListResult> BlobStoreEndpoint::listBucket(std::string const &bucket, Optional<std::string> prefix, Optional<char> delimiter) {
-	return listBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter);
+Future<BlobStoreEndpoint::ListResult> BlobStoreEndpoint::listBucket(std::string const &bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth) {
+	return listBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth);
 }
 
 std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {

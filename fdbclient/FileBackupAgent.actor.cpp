@@ -1527,6 +1527,7 @@ namespace fileBackup {
 				return Void();
 			});
 
+			state Version lastVersion;
 			try {
 				loop {
 					state RangeResultWithVersion r = waitNext(results.getFuture());
@@ -1536,6 +1537,7 @@ namespace fileBackup {
 					for (; i < r.first.size(); ++i) {
 						// Remove the backupLogPrefix + UID bytes from the key
 						Void _ = wait(logFile.writeKV(r.first[i].key.substr(backupLogPrefixBytes + 16), r.first[i].value));
+						lastVersion = r.second;
 					}
 				}
 			} catch (Error &e) {
@@ -1559,7 +1561,8 @@ namespace fileBackup {
 				.detail("Size", outFile->size())
 				.detail("BeginVersion", beginVersion)
 				.detail("EndVersion", endVersion)
-				.suppressFor(60, true);
+				.suppressFor(60, true)
+				.detail("LastReadVersion", latestVersion);
 
 			Params.fileSize().set(task, outFile->size());
 
@@ -3512,6 +3515,9 @@ public:
 		state UID randomUid = g_random->randomUniqueID();
 		loop {
 			try {
+				// We must get a commit version so add a conflict range that won't likely cause conflicts
+				// but will ensure that the transaction is actually submitted.
+				tr.addWriteConflictRange(backupConfig.snapshotRangeDispatchMap().space.range());
 				Void _ = wait( lockDatabase(&tr, randomUid) );
 				Void _ = wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
