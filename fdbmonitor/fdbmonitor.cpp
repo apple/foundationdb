@@ -941,6 +941,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 				/* If the subpath appeared since we last checked, we should resume traversing the path */
 				int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
 				if(result == 0 || errno != ENOENT) {
+					inotify_rm_watch(ifd, wd);
 					continue;
 				}
 
