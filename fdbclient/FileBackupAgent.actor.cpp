@@ -674,6 +674,86 @@ namespace fileBackup {
 		return Void();
 	}
 
+	ACTOR static Future<Void> abortOldBackup(FileBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, std::string tagName) {
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+		state Subspace tagNames = backupAgent->subspace.get(BackupAgentBase::keyTagName);
+		Optional<Value> uidStr = wait(tr->get(tagNames.pack(Key(tagName))));
+		if (!uidStr.present()) {
+			TraceEvent(SevError, "BackupTagMissing").detail("tagName", tagName.c_str());
+			throw backup_error();
+		}
+		state UID uid = BinaryReader::fromStringRef<UID>(uidStr.get(), Unversioned());
+
+		state Subspace statusSpace = backupAgent->subspace.get(BackupAgentBase::keyStates).get(uid.toString());
+		state Subspace globalConfig = backupAgent->subspace.get(BackupAgentBase::keyConfig).get(uid.toString());
+		state Subspace newConfigSpace = uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(fileBackupPrefixRange.begin), uid);
+
+		Optional<Value> statusStr = wait(tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus)));
+		state EBackupState status = !statusStr.present() ? FileBackupAgent::STATE_NEVERRAN : BackupAgentBase::getState(statusStr.get().toString());
+
+		if (!backupAgent->isRunnable(status)) {
+			throw backup_unneeded();
+		}
+
+		TraceEvent(SevInfo, "FileBackupAbortOld")
+				.detail("tagName", tagName.c_str())
+				.detail("status", BackupAgentBase::getStateText(status));
+
+		// Clear the folder id will prevent future tasks from executing
+		tr->clear(singleKeyRange(StringRef(globalConfig.pack(FileBackupAgent::keyFolderId))));
+
+		Key configPath = uidPrefixKey(logRangesRange.begin, uid);
+		Key logsPath = uidPrefixKey(backupLogKeys.begin, uid);
+
+		tr->clear(KeyRangeRef(configPath, strinc(configPath)));
+		tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+		tr->clear(newConfigSpace.range());
+
+		Key statusKey = StringRef(statusSpace.pack(FileBackupAgent::keyStateStatus));
+		tr->set(statusKey, StringRef(FileBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
+
+		return Void();
+	}
+
+	struct AbortOldBackupTask : TaskFuncBase {
+		static StringRef name;
+		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+			state FileBackupAgent backupAgent;
+			state std::string tagName = task->params[BackupAgentBase::keyConfigBackupTag].toString();
+
+			TEST(true);  // Canceling old backup task
+
+			TraceEvent(SevInfo, "FileBackupCancelOldTask")
+					.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
+					.detail("tagName", tagName);
+			Void _ = wait(abortOldBackup(&backupAgent, tr, tagName));
+
+			Void _ = wait(taskBucket->finish(tr, task));
+			return Void();
+		}
+
+		virtual StringRef getName() const {
+			TraceEvent(SevError, "FileBackupError").detail("cause", "AbortOldBackupTaskFunc::name() should never be called");
+			ASSERT(false);
+			return StringRef();
+		}
+
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Future<Void>(Void()); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+	};
+	StringRef AbortOldBackupTask::name = LiteralStringRef("abort_legacy_backup");
+	REGISTER_TASKFUNC(AbortOldBackupTask);
+	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_diff_logs);
+	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_log_range);
+	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_logs);
+	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_range);
+	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_backup_restorable);
+	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_finish_full_backup);
+	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_finished_full_backup);
+	REGISTER_TASKFUNC_ALIAS(AbortOldBackupTask, file_start_full_backup);
+
 	std::function<void(Reference<Task>)> NOP_SETUP_TASK_FN = [](Reference<Task> task) { /* NOP */ };
 	ACTOR static Future<Key> addBackupTask(StringRef name,
 										   uint32_t version,
@@ -1011,7 +1091,7 @@ namespace fileBackup {
 		}
 
 	};
-	StringRef BackupRangeTaskFunc::name = LiteralStringRef("file_backup_range");
+	StringRef BackupRangeTaskFunc::name = LiteralStringRef("file_backup_write_range");
 	const uint32_t BackupRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupRangeTaskFunc);
 
@@ -1435,7 +1515,7 @@ namespace fileBackup {
 		}
 
 	};
-	StringRef BackupSnapshotDispatchTask::name = LiteralStringRef("file_backup_snapshot_dispatch");
+	StringRef BackupSnapshotDispatchTask::name = LiteralStringRef("file_backup_dispatch_ranges");
 	const uint32_t BackupSnapshotDispatchTask::version = 1;
 	REGISTER_TASKFUNC(BackupSnapshotDispatchTask);
 
@@ -1634,7 +1714,7 @@ namespace fileBackup {
 		}
 	};
 
-	StringRef BackupLogRangeTaskFunc::name = LiteralStringRef("file_backup_log_range");
+	StringRef BackupLogRangeTaskFunc::name = LiteralStringRef("file_backup_write_logs");
 	const uint32_t BackupLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupLogRangeTaskFunc);
 
@@ -1722,18 +1802,18 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef BackupLogsDispatchTask::name = LiteralStringRef("file_backup_logs");
+	StringRef BackupLogsDispatchTask::name = LiteralStringRef("file_backup_dispatch_logs");
 	const uint32_t BackupLogsDispatchTask::version = 1;
 	REGISTER_TASKFUNC(BackupLogsDispatchTask);
 
-	struct FinishedFullBackupTaskFunc : BackupTaskFuncBase {
+	struct FileBackupFinishedTask : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
 
 		StringRef getName() const { return name; };
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version));
+			Void _ = wait(checkTaskVersion(tr->getDatabase(), task, FileBackupFinishedTask::name, FileBackupFinishedTask::version));
 
 			state BackupConfig backup(task);
 			state UID uid = backup.getUid();
@@ -1754,8 +1834,8 @@ namespace fileBackup {
 		}
 
 		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key key = wait(addBackupTask(FinishedFullBackupTaskFunc::name,
-										 FinishedFullBackupTaskFunc::version,
+			Key key = wait(addBackupTask(FileBackupFinishedTask::name,
+										 FileBackupFinishedTask::version,
 										 tr, taskBucket, completionKey,
 										 BackupConfig(parentTask), waitFor));
 			return key;
@@ -1764,13 +1844,9 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef FinishedFullBackupTaskFunc::name = LiteralStringRef("file_finished_full_backup");
-	const uint32_t FinishedFullBackupTaskFunc::version = 1;
-	REGISTER_TASKFUNC(FinishedFullBackupTaskFunc);
-
-	// TODO:  Register a task that will finish/delete any tasks of these types:
-	//LiteralStringRef("file_backup_diff_logs");
-	//LiteralStringRef("file_finish_full_backup");
+	StringRef FileBackupFinishedTask::name = LiteralStringRef("file_backup_finished");
+	const uint32_t FileBackupFinishedTask::version = 1;
+	REGISTER_TASKFUNC(FileBackupFinishedTask);
 
 	struct BackupSnapshotManifest : BackupTaskFuncBase {
 		static StringRef name;
@@ -1918,7 +1994,7 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef BackupSnapshotManifest::name = LiteralStringRef("file_backup_snapshot_manifest");
+	StringRef BackupSnapshotManifest::name = LiteralStringRef("file_backup_write_snapshot_manifest");
 	const uint32_t BackupSnapshotManifest::version = 1;
 	REGISTER_TASKFUNC(BackupSnapshotManifest);
 
@@ -1978,7 +2054,7 @@ namespace fileBackup {
 
 			// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the following
 			// task will clean up and set the completed state.
-			Key _ = wait(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished));
+			Key _ = wait(FileBackupFinishedTask::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), backupFinished));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
@@ -1998,7 +2074,7 @@ namespace fileBackup {
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
 		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
 	};
-	StringRef StartFullBackupTaskFunc::name = LiteralStringRef("file_start_full_backup");
+	StringRef StartFullBackupTaskFunc::name = LiteralStringRef("file_backup_start");
 	const uint32_t StartFullBackupTaskFunc::version = 1;
 	REGISTER_TASKFUNC(StartFullBackupTaskFunc);
 
