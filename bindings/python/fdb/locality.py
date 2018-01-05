@@ -48,7 +48,7 @@ def _get_boundary_keys(db_or_tr, begin, end):
                 begin = kv.key[13:]+b'\x00'
             begin = end
         except _impl.FDBError as e:
-            if e.code == 1007 and begin != lastbegin: # if we get a past_version and *something* has happened, then we are no longer transactional
+            if e.code == 1007 and begin != lastbegin: # if we get a transaction_too_old and *something* has happened, then we are no longer transactional
                 tr = tr.db.create_transaction()
             else:
                 tr.on_error(e).wait()

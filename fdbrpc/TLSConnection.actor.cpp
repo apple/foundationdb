@@ -173,6 +173,10 @@ Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress to
 	return network->connect( toAddr );
 }
 
+Future<std::vector<NetworkAddress>> TLSNetworkConnections::resolveTCPEndpoint( std::string host, std::string service) {
+	return network->resolveTCPEndpoint( host, service );
+}
+
 Reference<IListener> TLSNetworkConnections::listen( NetworkAddress localAddr ) {
 	if ( localAddr.isTLS() ) {
 		NetworkAddress clearAddr( localAddr.ip, localAddr.port, localAddr.isPublic(), false );
@@ -273,7 +277,7 @@ Reference<ITLSPolicy> TLSOptions::get_policy() {
 	return policy;
 }
 
-static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_error, ... ) {
+static void TLSConnectionLogFunc( const char* event, void* uid_ptr, int is_error, ... ) {
 	UID uid;
 
 	if ( uid_ptr )

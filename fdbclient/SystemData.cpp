@@ -33,7 +33,8 @@ const KeyRef afterAllKeys = LiteralStringRef("\xff\xff\x00");
 const KeyRangeRef keyServersKeys( LiteralStringRef("\xff/keyServers/"), LiteralStringRef("\xff/keyServers0") );
 const KeyRef keyServersPrefix = keyServersKeys.begin;
 const KeyRef keyServersEnd = keyServersKeys.end;
-const KeyRef keyServersKeyServersKey = LiteralStringRef("\xff/keyServers/\xff/keyServers/");
+const KeyRangeRef keyServersKeyServersKeys ( LiteralStringRef("\xff/keyServers/\xff/keyServers/"), LiteralStringRef("\xff/keyServers/\xff/keyServers0"));
+const KeyRef keyServersKeyServersKey = keyServersKeyServersKeys.begin;
 
 const Key keyServersKey( const KeyRef& k ) {
 	return k.withPrefix( keyServersPrefix );
@@ -289,6 +290,7 @@ ProcessData decodeWorkerListValue( ValueRef const& value ) {
 
 const KeyRef coordinatorsKey = LiteralStringRef("\xff/coordinators");
 const KeyRef logsKey = LiteralStringRef("\xff/logs");
+const KeyRef minRequiredCommitVersionKey = LiteralStringRef("\xff/minRequiredCommitVersion");
 
 const KeyRef globalKeysPrefix = LiteralStringRef("\xff/globals");
 const KeyRef lastEpochEndKey = LiteralStringRef("\xff/globals/lastEpochEnd");
@@ -304,6 +306,13 @@ const UID dataDistributionModeLock = UID(6345,3425);
 
 // Client status info prefix
 const KeyRangeRef fdbClientInfoPrefixRange(LiteralStringRef("\xff\x02/fdbClientInfo/"), LiteralStringRef("\xff\x02/fdbClientInfo0"));
+const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_sample_rate/");
+const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("\xff\x02/fdbClientInfo/client_txn_size_limit/");
+
+// Keyspace to maintain wall clock to version map
+const KeyRangeRef timeKeeperPrefixRange(LiteralStringRef("\xff\x02/timeKeeper/map/"), LiteralStringRef("\xff\x02/timeKeeper/map0"));
+const KeyRef timeKeeperVersionKey = LiteralStringRef("\xff\x02/timeKeeper/version");
+const KeyRef timeKeeperDisableKey = LiteralStringRef("\xff\x02/timeKeeper/disable");
 
 // Backup Log Mutation constant variables
 const KeyRef backupEnabledKey = LiteralStringRef("\xff/backupEnabled");

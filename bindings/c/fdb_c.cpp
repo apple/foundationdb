@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 500
+#define FDB_API_VERSION 510
 
 #include "fdbclient/MultiVersionTransaction.h"
 #include "foundationdb/fdb_c.h"
@@ -70,7 +70,7 @@ fdb_bool_t fdb_error_predicate( int predicate_test, fdb_error_t code ) {
 	}
 	if(predicate_test == FDBErrorPredicates::RETRYABLE_NOT_COMMITTED) {
 		return code == error_code_not_committed ||
-				code == error_code_past_version ||
+				code == error_code_transaction_too_old ||
 				code == error_code_future_version ||
 				code == error_code_database_locked;
 	}
@@ -123,6 +123,12 @@ extern "C" DLLEXPORT
 fdb_error_t fdb_stop_network() {
 	CATCH_AND_RETURN( API->stopNetwork(); );
 }
+
+extern "C" DLLEXPORT
+fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter) {
+    CATCH_AND_RETURN( API->addNetworkThreadCompletionHook(hook, hook_parameter); );
+}
+
 
 extern "C" DLLEXPORT
 FDBFuture* fdb_cluster_configure_database( FDBCluster* c, int config_type,

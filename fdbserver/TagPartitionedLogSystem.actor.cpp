@@ -28,12 +28,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
-
-template <class Collection>
-void uniquify( Collection& c ) {
-	std::sort(c.begin(), c.end());
-	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
-}
+#include "RecoveryState.h"
 
 ACTOR static Future<Void> reportTLogCommitErrors( Future<Void> commitReply, UID debugID ) {
 	try {
@@ -140,6 +135,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogLocalities = lsConf.tLogLocalities;
 		logSystem->logSystemType = lsConf.logSystemType;
 		logSystem->UpdateLocalitySet(lsConf.tLogs);
+		filterLocalityDataForPolicy(logSystem->tLogPolicy, &logSystem->tLogLocalities);
 
 		return logSystem;
 	}
@@ -158,6 +154,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogReplicationFactor = lsConf.oldTLogs[0].tLogReplicationFactor;
 			logSystem->tLogPolicy = lsConf.oldTLogs[0].tLogPolicy;
 			logSystem->tLogLocalities = lsConf.oldTLogs[0].tLogLocalities;
+			filterLocalityDataForPolicy(logSystem->tLogPolicy, &logSystem->tLogLocalities);
 
 			logSystem->oldLogData.resize(lsConf.oldTLogs.size()-1);
 			for( int i = 1; i < lsConf.oldTLogs.size(); i++ ) {
@@ -329,15 +326,63 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Future<Void> confirmEpochLive(Optional<UID> debugID) {
-		// Returns success after confirming that pushes in the current epoch are still possible
-		// FIXME: This is way too conservative?
-		vector<Future<Void>> alive;
-		for(auto& t : logServers) {
-			if( t->get().present() ) alive.push_back( brokenPromiseToNever( t->get().interf().confirmRunning.getReply(TLogConfirmRunningRequest(debugID), TaskTLogConfirmRunningReply ) ) );
-			else alive.push_back( Never() );
+	ACTOR static Future<Void> confirmEpochLive_internal(TagPartitionedLogSystem* self, Optional<UID> debugID) {
+		state vector<Future<Void>> alive;
+		int numPresent = 0;
+		for(auto& t : self->logServers) {
+			if( t->get().present() ) {
+				alive.push_back( brokenPromiseToNever(
+				    t->get().interf().confirmRunning.getReply( TLogConfirmRunningRequest(debugID),
+				                                               TaskTLogConfirmRunningReply ) ) );
+				numPresent++;
+			} else {
+				alive.push_back( Never() );
+			}
 		}
-		return quorum( alive, alive.size() - tLogWriteAntiQuorum );
+
+		Void _ = wait( quorum( alive, std::min(self->tLogReplicationFactor, numPresent - self->tLogWriteAntiQuorum) ) );
+
+		state Reference<LocalityGroup> locked(new LocalityGroup());
+		state std::vector<bool> responded(alive.size());
+		for (int i = 0; i < alive.size(); i++) {
+			responded[i] = false;
+		}
+		loop {
+			for (int i = 0; i < alive.size(); i++) {
+				if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
+					locked->add(self->tLogLocalities[i]);
+					responded[i] = true;
+				}
+			}
+			bool quorum_obtained = locked->validate(self->tLogPolicy);
+			// We intentionally skip considering antiquorums, as the CPU cost of doing so is prohibitive.
+			if (self->tLogReplicationFactor == 1 && locked->size() > 0) {
+				ASSERT(quorum_obtained);
+			}
+			if (quorum_obtained) {
+				return Void();
+			}
+
+			// The current set of responders that we have weren't enough to form a quorum, so we must
+			// wait for more responses and try again.
+			std::vector<Future<Void>> changes;
+			for (int i = 0; i < alive.size(); i++) {
+				if (!alive[i].isReady()) {
+					changes.push_back( ready(alive[i]) );
+				} else if (alive[i].isReady() && alive[i].isError() &&
+				           alive[i].getError().code() == error_code_tlog_stopped) {
+					// All commits must go to all TLogs.  If any TLog is stopped, then our epoch has ended.
+					return Never();
+				}
+			}
+			ASSERT(changes.size() != 0);
+			Void _ = wait( waitForAny(changes) );
+		}
+	}
+
+	// Returns success after confirming that pushes in the current epoch are still possible.
+	virtual Future<Void> confirmEpochLive(Optional<UID> debugID) {
+		return confirmEpochLive_internal(this, debugID);
 	}
 
 	virtual Future<Reference<ILogSystem>> newEpoch( vector<WorkerInterface> availableLogServers, DatabaseConfiguration const& config, LogEpoch recoveryCount ) {
@@ -522,7 +567,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		// Creates a new logSystem representing the (now frozen) epoch
 		// No other important side effects.
 		// The writeQuorum in the master info is from the previous configuration
-		state vector<Future<TLogLockResult>> tLogReply;
+		state vector<Future<TLogLockResult>> tLogReply(prevState.tLogs.size());
 
 		if (!prevState.tLogs.size()) {
 			// This is a brand new database
@@ -532,6 +577,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogPolicy = prevState.tLogPolicy;
 			logSystem->tLogLocalities = prevState.tLogLocalities;
 			logSystem->logSystemType = prevState.logSystemType;
+			filterLocalityDataForPolicy(logSystem->tLogPolicy, &logSystem->tLogLocalities);
 
 			logSystem->epochEndVersion = 0;
 			logSystem->knownCommittedVersion = 0;
@@ -545,7 +591,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		// To ensure consistent recovery, the number of servers NOT in the write quorum plus the number of servers NOT in the read quorum
 		// have to be strictly less than the replication factor.  Otherwise there could be a replica set consistent entirely of servers that
 		// are out of date due to not being in the write quorum or unavailable due to not being in the read quorum.
-		// So (N - W) + (N - R) < F, and optimally (N-W)+(N-R)=F-1.  Thus R=2N+1-F-W.
+		// So with N = # of tlogs, W = antiquorum, R = required count, F = replication factor,
+		// W + (N - R) < F, and optimally (N-W)+(N-R)=F-1.  Thus R=N+1-F+W.
 		state int requiredCount = (int)prevState.tLogs.size()+1 - prevState.tLogReplicationFactor + prevState.tLogWriteAntiQuorum;
 		ASSERT( requiredCount > 0 && requiredCount <= prevState.tLogs.size() );
 		ASSERT( prevState.tLogReplicationFactor >= 1 && prevState.tLogReplicationFactor <= prevState.tLogs.size() );
@@ -579,8 +626,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		state Future<Void> rejoins = trackRejoins( dbgid, allLogServers, rejoinRequests );
 
-		for(int t=0; t<logServers.size(); t++)
-			tLogReply.push_back( lockTLog( dbgid, logServers[t]) );
+		state bool buggify_lock_minimal_tlogs = BUGGIFY;
+		if (!buggify_lock_minimal_tlogs) {
+			for(int t=0; t<logServers.size(); t++) {
+				tLogReply[t] = lockTLog( dbgid, logServers[t]);
+			}
+		}
 
 		state Optional<Version> last_end;
 
@@ -588,15 +639,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state int	cycles = 0;
 
 		loop {
+			if (buggify_lock_minimal_tlogs) {
+				lockMinimalTLogSet( dbgid, prevState, logServers, logFailed, &tLogReply );
+			}
 			std::vector<LocalityData>	availableItems, badCombo;
 			std::vector<TLogLockResult> results;
 			std::string	sServerState;
 			LocalityGroup	unResponsiveSet;
+			std::string missingServerIds;
+
 			double	t = timer();
 			cycles ++;
 
 			for(int t=0; t<logServers.size(); t++) {
-				if (tLogReply[t].isReady() && !tLogReply[t].isError() && !logFailed[t]->get()) {
+				if (tLogReply[t].isValid() && tLogReply[t].isReady() && !tLogReply[t].isError() && !logFailed[t]->get()) {
 					results.push_back(tLogReply[t].get());
 					availableItems.push_back(prevState.tLogLocalities[t]);
 					sServerState += 'a';
@@ -604,6 +660,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				else {
 					unResponsiveSet.add(prevState.tLogLocalities[t]);
 					sServerState += 'f';
+					if(missingServerIds.size()) {
+						missingServerIds += ", ";
+					}
+					missingServerIds += logServers[t]->get().toString();
 				}
 			}
 
@@ -621,7 +681,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					(!validateAllCombinations(badCombo, unResponsiveSet, prevState.tLogPolicy, availableItems, prevState.tLogWriteAntiQuorum, false)))
 			{
 				TraceEvent("EpochEndBadCombo", dbgid).detail("Cycles", cycles)
-					.detail("Required", requiredCount)
 					.detail("Present", results.size())
 					.detail("Available", availableItems.size())
 					.detail("Absent", logServers.size() - results.size())
@@ -659,7 +718,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 					TraceEvent("LogSystemRecovery", dbgid).detail("Cycles", cycles)
 						.detail("TotalServers", logServers.size())
-						.detail("Required", requiredCount)
 						.detail("Present", results.size())
 						.detail("Available", availableItems.size())
 						.detail("Absent", logServers.size() - results.size())
@@ -702,7 +760,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				else {
 					TraceEvent("LogSystemUnchangedRecovery", dbgid).detail("Cycles", cycles)
 						.detail("TotalServers", logServers.size())
-						.detail("Required", requiredCount)
 						.detail("Present", results.size())
 						.detail("Available", availableItems.size())
 						.detail("Absent", logServers.size() - results.size())
@@ -720,34 +777,25 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						.detail("LogZones", ::describeZones(prevState.tLogLocalities))
 						.detail("LogDataHalls", ::describeDataHalls(prevState.tLogLocalities));
 				}
-			}
-			// Too many failures
-			else {
-				TraceEvent("LogSystemWaitingForRecovery", dbgid).detail("Cycles", cycles)
-					.detail("AvailableServers", results.size())
-					.detail("RequiredServers", requiredCount)
-					.detail("TotalServers", logServers.size())
-					.detail("Required", requiredCount)
-					.detail("Present", results.size())
-					.detail("Available", availableItems.size())
-					.detail("Absent", logServers.size() - results.size())
-					.detail("ServerState", sServerState)
-					.detail("ReplicationFactor", prevState.tLogReplicationFactor)
-					.detail("AntiQuorum", prevState.tLogWriteAntiQuorum)
-					.detail("Policy", prevState.tLogPolicy->info())
-					.detail("TooManyFailures", bTooManyFailures)
-					.detail("LogZones", ::describeZones(prevState.tLogLocalities))
-					.detail("LogDataHalls", ::describeDataHalls(prevState.tLogLocalities));
+			} else {
+				TraceEvent("MasterRecoveryState", dbgid)
+					.detail("StatusCode", RecoveryStatus::locking_old_transaction_servers)
+					.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_old_transaction_servers])
+					.detail("MissingIDs", missingServerIds)
+					.trackLatest("MasterRecoveryState");
 			}
 
 			// Wait for anything relevant to change
 			std::vector<Future<Void>> changes;
 			for(int i=0; i<logServers.size(); i++) {
-				if (!tLogReply[i].isReady())
+				if (tLogReply[i].isValid() && !tLogReply[i].isReady()) {
 					changes.push_back( ready(tLogReply[i]) );
-				else {
-					changes.push_back( logServers[i]->onChange() );
+					if(buggify_lock_minimal_tlogs) {
+						changes.push_back( logFailed[i]->onChange() );
+					}
+				} else {
 					changes.push_back( logFailed[i]->onChange() );
+					changes.push_back( logServers[i]->onChange() );
 				}
 			}
 			ASSERT(changes.size());
@@ -792,6 +840,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.recoverAt = oldLogSystem->epochEndVersion.get();
 			req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
 			req.epoch = recoveryCount;
+			TraceEvent("TLogInitializeRequest").detail("address", workers[i].tLog.getEndpoint().address);
 		}
 
 		logSystem->tLogLocalities.resize( workers.size() );
@@ -817,6 +866,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(initializationReplies[i].get()) ) );
 			logSystem->tLogLocalities[i] = workers[i].locality;
 		}
+		filterLocalityDataForPolicy(logSystem->tLogPolicy, &logSystem->tLogLocalities);
 
 		//Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running recoveries causing tests to timeout
 		if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator.speedUpSimulation) throw master_recovery_failed();
@@ -873,6 +923,173 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 	}
+
+	static void lockMinimalTLogSet(const UID& dbgid, const DBCoreState& prevState,
+	                               const std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>>& logServers,
+	                               const std::vector<Reference<AsyncVar<bool>>>& logFailed,
+	                               vector<Future<TLogLockResult>>* tLogReply ) {
+		// Invariant: tLogReply[i] must correspond to the tlog stored as logServers[i].
+		ASSERT(tLogReply->size() == prevState.tLogLocalities.size());
+		ASSERT(logFailed.size() == tLogReply->size());
+
+		// For any given index, only one of the following will be true.
+		auto locking_completed = [&logFailed, tLogReply](int index) {
+			const auto& entry = tLogReply->at(index);
+			return !logFailed[index]->get() && entry.isValid() && entry.isReady() && !entry.isError();
+		};
+		auto locking_failed = [&logFailed, tLogReply](int index) {
+			const auto& entry = tLogReply->at(index);
+			return logFailed[index]->get() || (entry.isValid() && entry.isReady() && entry.isError());
+		};
+		auto locking_pending = [&logFailed, tLogReply](int index) {
+			const auto& entry = tLogReply->at(index);
+			return !logFailed[index]->get() && (entry.isValid() && !entry.isReady());
+		};
+		auto locking_skipped = [&logFailed, tLogReply](int index) {
+			const auto& entry = tLogReply->at(index);
+			return !logFailed[index]->get() && !entry.isValid();
+		};
+
+		auto can_obtain_quorum = [&prevState](std::function<bool(int)> filter) {
+			LocalityGroup filter_true;
+			std::vector<LocalityData> filter_false, unused;
+			for (int i = 0; i < prevState.tLogLocalities.size() ; i++) {
+				if (filter(i)) {
+					filter_true.add(prevState.tLogLocalities[i]);
+				} else {
+					filter_false.push_back(prevState.tLogLocalities[i]);
+				}
+			}
+			bool valid = filter_true.validate(prevState.tLogPolicy);
+			if (!valid && prevState.tLogWriteAntiQuorum > 0 ) {
+				valid = !validateAllCombinations(unused, filter_true, prevState.tLogPolicy, filter_false, prevState.tLogWriteAntiQuorum, false);
+			}
+			return valid;
+		};
+
+		// Step 1: Verify that if all the failed TLogs come back, they can't form a quorum.
+		if (can_obtain_quorum(locking_failed)) {
+			TraceEvent(SevInfo, "MasterRecoveryTLogLockingImpossible", dbgid);
+			return;
+		}
+
+		// Step 2: It's possible for us to succeed, but we need to lock additional logs.
+		//
+		// First, we need an accurate picture of what TLogs we're capable of locking. We can't tell the
+		// difference between a temporarily failed TLog and a permanently failed TLog. Thus, we assume
+		// all failures are permanent, and manually re-issue lock requests if they rejoin.
+		for (int i = 0; i < logFailed.size(); i++) {
+			const auto& r = tLogReply->at(i);
+			TEST(locking_failed(i) && (r.isValid() && !r.isReady()));  // A TLog failed with a pending request.
+			// The reboot_a_tlog BUGGIFY below should cause the above case to be hit.
+			if (locking_failed(i)) {
+				tLogReply->at(i) = Future<TLogLockResult>();
+			}
+		}
+
+		// We're trying to paritition the set of old tlogs into two sets, L and R, such that:
+		// (1). R does not validate the policy
+		// (2). |R| is as large as possible
+		// (3). L contains all the already-locked TLogs
+		// and then we only issue lock requests to TLogs in L. This is safe, as R does not have quorum,
+		// so no commits may occur.  It does not matter if L forms a quorum or not.
+		//
+		// We form these sets by starting with L as all machines and R as the empty set, and moving a
+		// random machine from L to R until (1) or (2) no longer holds as true. Code-wise, L is
+		// [0..end-can_omit), and R is [end-can_omit..end), and we move a random machine via randomizing
+		// the order of the tlogs. Choosing a random machine was verified to generate a good-enough
+		// result to be interesting intests sufficiently frequently that we don't need to try to
+		// calculate the exact optimal solution.
+		std::vector<std::pair<LocalityData, int>> tlogs;
+		for (int i = 0; i < prevState.tLogLocalities.size(); i++) {
+			tlogs.emplace_back(prevState.tLogLocalities[i], i);
+		}
+		g_random->randomShuffle(tlogs);
+		// Rearrange the array such that things that the left is logs closer to being locked, and
+		// the right is logs that can't be locked.  This makes us prefer locking already-locked TLogs,
+		// which is how we respect the decisions made in the previous execution.
+		auto idx_to_order = [&locking_completed, &locking_failed, &locking_pending, &locking_skipped](int index) {
+			bool complete = locking_completed(index);
+			bool pending = locking_pending(index);
+			bool skipped = locking_skipped(index);
+			bool failed = locking_failed(index);
+
+			ASSERT( complete + pending + skipped + failed == 1 );
+
+			if (complete) return 0;
+			if (pending) return 1;
+			if (skipped) return 2;
+			if (failed) return 3;
+
+			ASSERT(false);  // Programmer error.
+			return -1;
+		};
+		std::sort(tlogs.begin(), tlogs.end(),
+		    // TODO: Change long type to `auto` once toolchain supports C++17.
+		    [&idx_to_order](const std::pair<LocalityData, int>& lhs, const std::pair<LocalityData, int>& rhs) {
+		    	return idx_to_order(lhs.second) < idx_to_order(rhs.second);
+		    });
+
+		// Indexes that aren't in the vector are the ones we're considering omitting. Remove indexes until
+		// the removed set forms a quorum.
+		int can_omit = 0;
+		std::vector<int> to_lock_indexes;
+		for (auto it = tlogs.cbegin() ; it != tlogs.cend() - 1 ; it++ ) {
+			to_lock_indexes.push_back(it->second);
+		}
+		auto filter = [&to_lock_indexes](int index) {
+			return std::find(to_lock_indexes.cbegin(), to_lock_indexes.cend(), index) == to_lock_indexes.cend();
+		};
+		while(true) {
+			if (can_obtain_quorum(filter)) {
+				break;
+			} else {
+				can_omit++;
+				ASSERT(can_omit < tlogs.size());
+				to_lock_indexes.pop_back();
+			}
+		}
+
+		if (prevState.tLogReplicationFactor - prevState.tLogWriteAntiQuorum == 1) {
+			ASSERT(can_omit == 0);
+		}
+		// Our previous check of making sure there aren't too many failed logs should have prevented this.
+		ASSERT(!locking_failed(tlogs[tlogs.size()-can_omit-1].second));
+
+		// If we've managed to leave more tlogs unlocked than (RF-AQ), it means we've hit the case
+		// where the policy engine has allowed us to have multiple logs in the same failure domain
+		// with independant sets of data. This case will validated that no code is relying on the old
+		// quorum=(RF-AQ) logic, and now goes through the policy engine instead.
+		TEST(can_omit >= prevState.tLogReplicationFactor - prevState.tLogWriteAntiQuorum);  // Locking a subset of the TLogs while ending an epoch.
+		const bool reboot_a_tlog = g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY && g_random->random01() < 0.25;
+		TraceEvent(SevInfo, "MasterRecoveryTLogLocking", dbgid)
+		    .detail("locks", tlogs.size() - can_omit)
+		    .detail("skipped", can_omit)
+		    .detail("replication", prevState.tLogReplicationFactor)
+		    .detail("antiquorum", prevState.tLogWriteAntiQuorum)
+		    .detail("reboot_buggify", reboot_a_tlog);
+		for (int i = 0; i < tlogs.size() - can_omit; i++) {
+			const int index = tlogs[i].second;
+			Future<TLogLockResult>& entry = tLogReply->at(index);
+			if (!entry.isValid()) {
+				entry = lockTLog( dbgid, logServers[index] );
+			}
+		}
+		if (reboot_a_tlog) {
+			g_simulator.lastConnectionFailure = g_network->now();
+			for (int i = 0; i < tlogs.size() - can_omit; i++) {
+				const int index = tlogs[i].second;
+				if (logServers[index]->get().present()) {
+					g_simulator.rebootProcess(
+					    g_simulator.getProcessByAddress(
+					        logServers[index]->get().interf().address()),
+					    ISimulator::RebootProcess);
+					break;
+				}
+			}
+		}
+		// Intentionally leave `tlogs.size() - can_omit` .. `tlogs.size()` as !isValid() Futures.
+  }
 
 	template <class T>
 	static vector<T> getReadyNonError( vector<Future<T>> const& futures ) {

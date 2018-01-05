@@ -118,29 +118,30 @@ struct LeaderElectionRegInterface : ClientLeaderRegInterface {
 struct CandidacyRequest {
 	Key key;
 	LeaderInfo myInfo;
-	UID knownLeader;
+	UID knownLeader, prevChangeID;
 	ReplyPromise<Optional<LeaderInfo>> reply;
 
 	CandidacyRequest() {}
-	CandidacyRequest(Key key, LeaderInfo const& myInfo, UID const& knownLeader) : key(key), myInfo(myInfo), knownLeader(knownLeader) {}
+	CandidacyRequest(Key key, LeaderInfo const& myInfo, UID const& knownLeader, UID const& prevChangeID) : key(key), myInfo(myInfo), knownLeader(knownLeader), prevChangeID(prevChangeID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & key & myInfo & knownLeader & reply;
+		ar & key & myInfo & knownLeader & prevChangeID & reply;
 	}
 };
 
 struct LeaderHeartbeatRequest {
 	Key key;
 	LeaderInfo myInfo;
+	UID prevChangeID;
 	ReplyPromise<bool> reply;
 
 	LeaderHeartbeatRequest() {}
-	explicit LeaderHeartbeatRequest( Key key, LeaderInfo const& myInfo ) : key(key), myInfo(myInfo) {}
+	explicit LeaderHeartbeatRequest( Key key, LeaderInfo const& myInfo, UID prevChangeID ) : key(key), myInfo(myInfo), prevChangeID(prevChangeID) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & key & myInfo & reply;
+		ar & key & myInfo & prevChangeID & reply;
 	}
 };
 

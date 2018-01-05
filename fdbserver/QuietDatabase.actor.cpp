@@ -30,10 +30,10 @@
 #include "Status.h"
 #include "fdbclient/ManagementAPI.h"
 
-ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo ) {
+ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
 	loop {
 		choose {
-			when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest() ) ) ) ) {
+			when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( flags ) ) ) ) ) {
 				return w;
 			}
 			when( Void _ = wait( dbInfo->onChange() ) ) {}
@@ -88,27 +88,38 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, Reference<AsyncVar<ServerDBI
 	return dataInFlight;
 }
 
-//Computes the queue size for storage servers and tlogs using the BytesInput and BytesDurable attributes
-//For now, we must ignore invalid keys on storage servers because of a bug that can cause them to be orphaned
+//Computes the queue size for storage servers and tlogs using the bytesInput and bytesDurable attributes
 int64_t getQueueSize( Standalone<StringRef> md ) {
-	int64_t bytesInput, bytesDurable;
+	double inputRate, durableRate;
+	double inputRoughness, durableRoughness;
+	int64_t inputBytes, durableBytes;
 
-	sscanf(extractAttribute(md.toString(), "BytesInput").c_str(), "%lld", &bytesInput);
-	sscanf(extractAttribute(md.toString(), "BytesDurable").c_str(), "%lld", &bytesDurable);
+	sscanf(extractAttribute(md.toString(), "bytesInput").c_str(), "%f %f %lld", &inputRate, &inputRoughness, &inputBytes);
+	sscanf(extractAttribute(md.toString(), "bytesDurable").c_str(), "%f %f %lld", &durableRate, &durableRoughness, &durableBytes);
 
-	return bytesInput - bytesDurable;
+	return inputBytes - durableBytes;
 }
 
 // This is not robust in the face of a TLog failure
 ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, WorkerInterface masterWorker ) {
-	TraceEvent("MaxTLogQueueSize").detail("Database", printable(cx->dbName))
-		.detail("Stage", "ContactingMaster");
+	TraceEvent("MaxTLogQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingLogs");
+
+	state std::vector<std::pair<WorkerInterface, ProcessClass>> workers = wait(getWorkers(dbInfo));
+	std::map<NetworkAddress, WorkerInterface> workersMap;
+	for(auto worker : workers) {
+		workersMap[worker.first.address()] = worker.first;
+	}
 
 	state std::vector<Future<Standalone<StringRef>>> messages;
 	state std::vector<TLogInterface> tlogs = dbInfo->get().logSystemConfig.allPresentLogs();
 	for(int i = 0; i < tlogs.size(); i++) {
-		messages.push_back( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( StringRef( "TLogQueueSize/" + tlogs[i].id().toString() ) ) ), 1.0 ) );
+		auto itr = workersMap.find(tlogs[i].address());
+		if(itr == workersMap.end()) {
+			TraceEvent("QuietDatabaseFailure").detail("Reason", "Could not find worker for log server").detail("Tlog", tlogs[i].id());
+			throw attribute_not_found();
+		}
+		messages.push_back( timeoutError(itr->second.eventLogRequest.getReply(
+			EventLogRequest( StringRef(tlogs[i].id().toString() + "/TLogMetrics") ) ), 1.0 ) );
 	}
 	Void _ = wait( waitForAll( messages ) );
 
@@ -121,7 +132,7 @@ ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<Serve
 		try {
 			maxQueueSize = std::max( maxQueueSize, getQueueSize( messages[i].get() ) );
 		} catch( Error &e ) {
-			TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract MaxTLogQueue").detail("Tlog", tlogs[i].id());
+			TraceEvent("QuietDatabaseFailure").detail("Reason", "Failed to extract MaxTLogQueue").detail("Tlog", tlogs[i].id());
 			throw;
 		}
 	}
@@ -139,6 +150,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 	state Transaction tr( cx );
 	if (use_system_priority)
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
 		try {
 			Standalone<RangeResultRef> serverList = wait( tr.getRange( serverListKeys, CLIENT_KNOBS->TOO_MANY ) );
@@ -157,13 +169,28 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 
 //Gets the maximum size of all the storage server queues
 ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, WorkerInterface masterWorker ) {
-	TraceEvent("MaxStorageServerQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
+	TraceEvent("MaxStorageServerQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingStorageServers");
 
-	state vector<StorageServerInterface> servers = wait( getStorageServers( cx ) );
+	Future<std::vector<StorageServerInterface>> serversFuture = getStorageServers(cx);
+	state Future<std::vector<std::pair<WorkerInterface, ProcessClass>>> workersFuture = getWorkers(dbInfo);
+
+	state std::vector<StorageServerInterface> servers = wait(serversFuture);
+	state std::vector<std::pair<WorkerInterface, ProcessClass>> workers = wait(workersFuture);
+
+	std::map<NetworkAddress, WorkerInterface> workersMap;
+	for(auto worker : workers) {
+		workersMap[worker.first.address()] = worker.first;
+	}
+
 	state std::vector<Future<Standalone<StringRef>>> messages;
 	for(int i = 0; i < servers.size(); i++) {
-		messages.push_back( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( StringRef( "StorageServerQueueSize/" + servers[i].id().toString() ) ) ), 1.0 ) );
+		auto itr = workersMap.find(servers[i].address());
+		if(itr == workersMap.end()) {
+			TraceEvent("QuietDatabaseFailure").detail("Reason", "Could not find worker for storage server").detail("SS", servers[i].id());
+			throw attribute_not_found();
+		}
+		messages.push_back( timeoutError(itr->second.eventLogRequest.getReply(
+			EventLogRequest( StringRef(servers[i].id().toString() + "/StorageMetrics") ) ), 1.0 ) );
 	}
 
 	Void _ = wait( waitForAll(messages) );
@@ -332,7 +359,7 @@ ACTOR Future<Void> disableConnectionFailuresAfter( Future<Void> f, double disabl
 		}
 		when(Void _ = wait(delay(disableTime))) {
 			g_simulator.speedUpSimulation = true;
-			g_simulator.enableConnectionFailures = false;
+			g_simulator.connectionFailuresDisableDuration = 1e6;
 			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
 		}
 	}

@@ -23,13 +23,6 @@
 #include "fdbrpc/IAsyncFile.h"
 #include "fdbclient/FDBTypes.h"
 
-static KeyRange prefixRange( KeyRef prefix ) {
-	Key end = prefix;
-	UNSTOPPABLE_ASSERT( end.size() && end.end()[-1] != 0xFF );
-	++const_cast<uint8_t&>( end.end()[-1] );
-	return KeyRangeRef( prefix, end );
-}
-
 struct DiskDurabilityTest : TestWorkload {
 	bool enabled;
 	std::string filename;

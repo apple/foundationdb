@@ -142,6 +142,8 @@ Future<Void> waitForExcludedServers( Database const& cx, vector<AddressExclusion
 Future<vector<ProcessData>> getWorkers( Database const& cx );
 Future<vector<ProcessData>> getWorkers( Transaction* const& tr );
 
+Future<Void> timeKeeperSetDisable(Database const& cx);
+
 Future<Void> lockDatabase( Transaction* const& tr, UID const& id );
 Future<Void> lockDatabase( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
 Future<Void> lockDatabase( Database const& cx, UID const& id );
@@ -152,6 +154,8 @@ Future<Void> unlockDatabase( Database const& cx, UID const& id );
 
 Future<Void> checkDatabaseLock( Transaction* const& tr, UID const& id );
 Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
+
+Future<int> setDDMode( Database const& cx, int const& mode );
 
 // Gets the cluster connection string
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );

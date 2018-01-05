@@ -21,6 +21,7 @@
 #include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbclient/ManagementAPI.h"
 #include "fdbserver/MoveKeys.h"
 #include "fdbclient/NativeAPI.h"
 #include "workloads.h"
@@ -65,15 +66,13 @@ struct MoveKeysWorkload : TestWorkload {
 				}
 			}
 
-			state int oldMode = wait( self->setDDMode( cx, 0 ) );
+			state int oldMode = wait( setDDMode( cx, 0 ) );
 			TraceEvent("RMKStartModeSetting");
 			Void _ = wait( timeout( reportErrors( self->worker( cx, self ), "moveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving");
-			int _ = wait( self->setDDMode( cx, oldMode ) );
+			int _ = wait( setDDMode( cx, oldMode ) );
 			TraceEvent("RMKDoneModeSetting");
-			Void _ = wait( self->forceMasterFailure(cx, self) );
-			TraceEvent("RMKDoneKillingMaster");
 		}
 		return Void();
 	}
@@ -114,33 +113,6 @@ struct MoveKeysWorkload : TestWorkload {
 		}
 
 		return vector<StorageServerInterface>(t.begin(), t.end());
-	}
-
-	ACTOR Future<int> setDDMode( Database cx, int mode ) {
-		state Transaction tr(cx);
-		state int oldMode = -1;
-		state BinaryWriter wr(Unversioned());
-		wr << mode;
-
-		loop {
-			try {
-				Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
-				if (oldMode < 0) {
-					oldMode = 1;
-					if (old.present()) {
-						BinaryReader rd(old.get(), Unversioned());
-						rd >> oldMode;
-					}
-				}
-				tr.set( dataDistributionModeKey, wr.toStringRef() );
-
-				Void _ = wait( tr.commit() );
-				return oldMode;
-			} catch (Error& e) {
-				TraceEvent("setDDModeRetrying").error(e);
-				Void _ = wait (tr.onError(e));
-			}
-		}
 	}
 
 	ACTOR Future<Void> doMoveKeys(Database cx, MoveKeysWorkload *self, KeyRange keys, vector<StorageServerInterface> destinationTeam, 

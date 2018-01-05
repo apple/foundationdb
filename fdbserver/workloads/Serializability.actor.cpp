@@ -171,7 +171,7 @@ struct SerializabilityWorkload : TestWorkload {
 				Key key = getRandomKey();
 				Value value = getRandomValue();
 				MutationRef::Type opType;
-				switch( g_random->randomInt(0,6) ) {
+				switch( g_random->randomInt(0,8) ) {
 					case 0:
 						opType = MutationRef::AddValue;
 						break;
@@ -189,6 +189,12 @@ struct SerializabilityWorkload : TestWorkload {
 						break;
 					case 5:
 						opType = MutationRef::Min;
+						break;
+					case 6:
+						opType = MutationRef::ByteMin;
+						break;
+					case 7:
+						opType = MutationRef::ByteMax;
 						break;
 				}
 				op.mutationOp = MutationRef(opType, key, value);

@@ -20,16 +20,17 @@
 
 #include "flow/actorcompiler.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/Locality.h"
 #include "ClusterRecruitmentInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
 
 extern Optional<LeaderInfo> getLeader( vector<Optional<LeaderInfo>> nominees );
 
-ACTOR Future<Void> submitCandidacy( Key key, LeaderElectionRegInterface coord, LeaderInfo myInfo, Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees, int index ) {
+ACTOR Future<Void> submitCandidacy( Key key, LeaderElectionRegInterface coord, LeaderInfo myInfo, UID prevChangeID, Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees, int index ) {
 	loop {
 		auto const& nom = nominees->get()[index];
-		Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.candidacy, CandidacyRequest( key, myInfo, nom.present() ? nom.get().changeID : UID() ), TaskCoordinationReply ) );
+		Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.candidacy, CandidacyRequest( key, myInfo, nom.present() ? nom.get().changeID : UID(), prevChangeID ), TaskCoordinationReply ) );
 
 		if (li != nominees->get()[index]) {
 			vector<Optional<LeaderInfo>> v = nominees->get();
@@ -74,11 +75,12 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected ) {
+ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass, Reference<AsyncVar<bool>> asyncIsExcluded ) {
 	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees( new AsyncVar<vector<Optional<LeaderInfo>>>() );
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
 	state bool iAmLeader = false;
+	state UID prevChangeID;
 
 	nominees->set( vector<Optional<LeaderInfo>>( coordinators.clientLeaderServers.size() ) );
 
@@ -91,10 +93,12 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 		state Future<Void> badCandidateTimeout;
 
 		myInfo.changeID = g_random->randomUniqueID();
+		prevChangeID = myInfo.changeID;
+		myInfo.updateChangeID( asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController), asyncIsExcluded->get() );
 
 		vector<Future<Void>> cand;
 		for(int i=0; i<coordinators.leaderElectionServers.size(); i++)
-			cand.push_back( submitCandidacy( coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo, nominees, i ) );
+			cand.push_back( submitCandidacy( coordinators.clusterKey, coordinators.leaderElectionServers[i], myInfo, prevChangeID, nominees, i ) );
 		candidacies = waitForAll(cand);
 
 		loop {
@@ -149,6 +153,9 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 					break;
 				}
 				when (Void _ = wait(candidacies)) { ASSERT(false); }
+				when (Void _ = wait( asyncProcessClass->onChange() || asyncIsExcluded->onChange() )) {
+					break;
+				}
 			}
 		}
 
@@ -158,10 +165,16 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 	ASSERT( iAmLeader && outSerializedLeader->get() == proposedSerializedInterface );
 
 	loop {
+		prevChangeID = myInfo.changeID;
+		myInfo.updateChangeID( asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController), asyncIsExcluded->get() );
+		if (myInfo.changeID != prevChangeID) {
+			TraceEvent("ChangeLeaderChangeID").detail("PrevChangeID", prevChangeID).detail("NewChangeID", myInfo.changeID);
+		}
+
 		state vector<Future<Void>> true_heartbeats;
 		state vector<Future<Void>> false_heartbeats;
 		for(int i=0; i<coordinators.leaderElectionServers.size(); i++) {
-			Future<bool> hb = retryBrokenPromise( coordinators.leaderElectionServers[i].leaderHeartbeat, LeaderHeartbeatRequest( coordinators.clusterKey, myInfo ), TaskCoordinationReply );
+			Future<bool> hb = retryBrokenPromise( coordinators.leaderElectionServers[i].leaderHeartbeat, LeaderHeartbeatRequest( coordinators.clusterKey, myInfo, prevChangeID ), TaskCoordinationReply );
 			true_heartbeats.push_back( onEqual(hb, true) );
 			false_heartbeats.push_back( onEqual(hb, false) );
 		}

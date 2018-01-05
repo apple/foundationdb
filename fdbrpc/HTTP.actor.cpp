@@ -22,6 +22,7 @@
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include <cctype>
+#include "xml2json.hpp"
 
 namespace HTTP {
 
@@ -59,14 +60,23 @@ namespace HTTP {
 		return !fail_if_header_missing;
 	}
 
+	void Response::convertToJSONifXML() {
+		auto i = headers.find("Content-Type");
+		if (i != headers.end() && i->second == "application/xml") {
+			content = xml2json(content.c_str());
+			contentLen = content.length();
+			headers["Content-Type"] = "application/json";
+		}
+	}
+
 	std::string Response::toString() {
-		std::string r = format("Response code: %d\n", code);
-		r += format("ContentLen: %lld\n", contentLen);
+		std::string r = format("Response Code: %d\n", code);
+		r += format("Response ContentLen: %lld\n", contentLen);
 		for(auto h : headers)
-			r += format("Header: %s: %s\n", h.first.c_str(), h.second.c_str());
-		r.append("--CONTENT--\n");
+			r += format("Reponse Header: %s: %s\n", h.first.c_str(), h.second.c_str());
+		r.append("-- RESPONSE CONTENT--\n");
 		r.append(content);
-		r.append("--------\n");
+		r.append("\n--------\n");
 		return r;
 	}
 
@@ -305,7 +315,12 @@ namespace HTTP {
 			pContent->prependWriteBuffer(pFirst, pLast);
 
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 1)
-				printf("[%s] HTTP starting %s %s\n", conn->getDebugID().toString().c_str(), verb.c_str(), resource.c_str());
+				printf("[%s] HTTP starting %s %s ContentLen:%d\n", conn->getDebugID().toString().c_str(), verb.c_str(), resource.c_str(), contentLen);
+			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
+				for(auto h : headers)
+					printf("Request Header: %s: %s\n", h.first.c_str(), h.second.c_str());
+			}
+
 			state double send_start = timer();
 			state double total_sent = 0;
 			loop {
@@ -324,7 +339,7 @@ namespace HTTP {
 			}
 
 			state Reference<HTTP::Response> r(new HTTP::Response());
-			Void _ = wait(r->read(conn, verb == "HEAD"));
+			Void _ = wait(r->read(conn, verb == "HEAD" || verb == "DELETE"));
 			double elapsed = timer() - send_start;
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
 				printf("[%s] HTTP code=%d, time=%fs %s %s [%u out, response content len %d]\n", conn->getDebugID().toString().c_str(), r->code, elapsed, verb.c_str(), resource.c_str(), (int)total_sent, (int)r->contentLen);
@@ -334,7 +349,7 @@ namespace HTTP {
 		} catch(Error &e) {
 			double elapsed = timer() - send_start;
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
-				printf("[%s] HTTP *ERROR*=%s, time=%fs %s %s [%u out]\n", conn->getDebugID().toString().c_str(), e.what(), elapsed, verb.c_str(), resource.c_str(), (int)total_sent);
+				printf("[%s] HTTP *ERROR*=%s, time=%fs %s %s [%u out]\n", conn->getDebugID().toString().c_str(), e.name(), elapsed, verb.c_str(), resource.c_str(), (int)total_sent);
 			throw;
 		}
 	}

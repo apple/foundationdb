@@ -54,7 +54,7 @@ struct StorageMetricSample {
 				bck_split.decrementNonEnd();
 
 				KeyRef split = keyBetween(KeyRangeRef(bck_split != sample.begin() ? std::max<KeyRef>(*bck_split,range.begin) : range.begin, *it));
-				if( split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT )
+				if(!front || (getEstimate(KeyRangeRef(range.begin, split)) > 0 && split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT))
 					return split;
 			}
 
@@ -63,7 +63,7 @@ struct StorageMetricSample {
 				++it;
 
 				KeyRef split = keyBetween(KeyRangeRef(*fwd_split, it != sample.end() ? std::min<KeyRef>(*it, range.end) : range.end));
-				if( split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT )
+				if(front || (getEstimate(KeyRangeRef(split, range.end)) > 0 && split.size() <= CLIENT_KNOBS->SPLIT_KEY_SIZE_LIMIT))
 					return split;
 
 				fwd_split = it;
@@ -132,7 +132,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			int64_t delta = queue.front().second.second;
 			ASSERT( delta != 0 );
 
-			if( sample.addMetric( Key(key), delta ) == 0 )
+			if( sample.addMetric( key, delta ) == 0 )
 				sample.erase( key );
 
 			StorageMetrics deltaM = m * delta;
@@ -155,7 +155,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			int64_t delta = queue.front().second.second;
 			ASSERT( delta != 0 );
 
-			if( sample.addMetric( Key(key), delta ) == 0 )
+			if( sample.addMetric( key, delta ) == 0 )
 				sample.erase( key );
 
 			queue.pop_front();
@@ -173,7 +173,7 @@ private:
 			metric = metric<0 ? -metricUnitsPerSample : metricUnitsPerSample;
 		}
 		
-		if( sample.addMetric( Key(key), metric ) == 0 )
+		if( sample.addMetric( key, metric ) == 0 )
 			sample.erase( key );
 
 		return metric;
@@ -267,14 +267,24 @@ struct StorageServerMetrics {
 
 	//static void waitMetrics( StorageServerMetrics* const& self, WaitMetricsRequest const& req );
 
+	// This function can run on untrusted user data.  We must validate all divisions carefully.
 	KeyRef getSplitKey( int64_t remaining, int64_t estimated, int64_t limits, int64_t used, int64_t infinity,
-		bool isLastShard, StorageMetricSample& sample, double divisor, KeyRef const& lastKey, KeyRef const& key ) {
+		bool isLastShard, StorageMetricSample& sample, double divisor, KeyRef const& lastKey, KeyRef const& key ) 
+	{	
+		ASSERT(remaining >= 0);
+		ASSERT(limits > 0);
+		ASSERT(divisor > 0);
+
 		if( limits < infinity / 2 ) {
 			int64_t expectedSize;
-			if( isLastShard || remaining > estimated )
-				expectedSize = remaining / ( ( double( remaining ) / limits ) + 0.5 );
-			else
-				expectedSize = estimated / ( ( double( estimated ) / limits ) + 0.5 );
+			if( isLastShard || remaining > estimated ) {
+				double remaining_divisor = ( double( remaining ) / limits ) + 0.5;
+				expectedSize = remaining / remaining_divisor;
+			} else {
+				// If we are here, then estimated >= remaining >= 0
+				double estimated_divisor = ( double( estimated ) / limits ) + 0.5;
+				expectedSize = remaining / estimated_divisor;
+			}
 
 			if( remaining > expectedSize ) {
 				// This does the conversion from native units to bytes using the divisor.

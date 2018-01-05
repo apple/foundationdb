@@ -30,6 +30,7 @@
 #include "KeyBackedTypes.h"
 #include <ctime>
 #include <climits>
+#include "BackupContainer.h"
 
 class BackupAgentBase : NonCopyable {
 public:
@@ -66,28 +67,6 @@ public:
 	static const Key keySourceTagName;
 
 	static const int logHeaderSize;
-
-	// The following function will return the textual name of the
-	// start status
-	static const char* getResultText(enumActionResult enResult)
-	{
-		switch (enResult)
-		{
-		case RESULT_SUCCESSFUL:
-			return "action was successful";
-			break;
-		case RESULT_ERRORED:
-			return "error received during action process";
-			break;
-		case RESULT_DUPLICATE:
-			return "requested action has already been performed";
-			break;
-		case RESULT_UNNEEDED:
-			return "requested action is not needed";
-			break;
-		}
-		return "<undefined>";
-	}
 
 	// Convert the status text to an enumerated value
 	static enumState getState(std::string stateText)
@@ -184,12 +163,12 @@ public:
 		return isRunnable;
 	}
 
-	static bool isRunnable(std::string stateText) {	
-		return isRunnable(getState(stateText));	
+	static const KeyRef getDefaultTag() {
+		return StringRef(defaultTagName);
 	}
 
-	static const KeyRef getDefaultTag() {	
-		return defaultTag;	
+	static const std::string getDefaultTagName() {
+		return defaultTagName;
 	}
 
 	static Standalone<StringRef> getCurrentTime() {
@@ -205,7 +184,7 @@ public:
 	}
 
 protected:
-	static const KeyRef defaultTag;
+	static const std::string defaultTagName;
 };
 
 class FileBackupAgent : public BackupAgentBase {
@@ -214,27 +193,21 @@ public:
 
 	FileBackupAgent( FileBackupAgent&& r ) noexcept(true) :
 		subspace( std::move(r.subspace) ),
-		states( std::move(r.states) ),
 		config( std::move(r.config) ),
-		errors( std::move(r.errors) ),
-		ranges( std::move(r.ranges) ),
-		tagNames( std::move(r.tagNames) ),
 		lastRestorable( std::move(r.lastRestorable) ),
 		taskBucket( std::move(r.taskBucket) ),
-		futureBucket( std::move(r.futureBucket) ),
-		sourceStates( std::move(r.sourceStates) ) {}
+		futureBucket( std::move(r.futureBucket) ) {}
 
 	void operator=( FileBackupAgent&& r ) noexcept(true) {
 		subspace = std::move(r.subspace);
-		states = std::move(r.states);
 		config = std::move(r.config);
-		errors = std::move(r.errors);
-		ranges = std::move(r.ranges);
-		tagNames = std::move(r.tagNames);
 		lastRestorable = std::move(r.lastRestorable),
 		taskBucket = std::move(r.taskBucket);
 		futureBucket = std::move(r.futureBucket);
-		sourceStates = std::move(r.sourceStates);
+	}
+
+	KeyBackedProperty<Key> lastBackupTimestamp() {
+		return config.pack(LiteralStringRef(__FUNCTION__));
 	}
 
 	Future<Void> run(Database cx, double *pollDelay, int maxConcurrentTasks) {
@@ -242,7 +215,7 @@ public:
 	}
 
 	/** RESTORE **/
-	
+
 	enum ERestoreState { UNITIALIZED = 0, QUEUED = 1, STARTING = 2, RUNNING = 3, COMPLETED = 4, ABORTED = 5 };
 	static StringRef restoreStateText(ERestoreState id);
 
@@ -257,9 +230,7 @@ public:
 
 	// Tries to abort the restore for a tag.  Returns the final (stable) state of the tag.
 	Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr, Key tagName);
-	Future<ERestoreState> abortRestore(Database cx, Key tagName) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return abortRestore(tr, tagName); });
-	}
+	Future<ERestoreState> abortRestore(Database cx, Key tagName);
 
 	// Waits for a restore tag to reach a final (stable) state.
 	Future<ERestoreState> waitRestore(Database cx, Key tagName, bool verbose);
@@ -271,10 +242,10 @@ public:
 	}
 
 	/** BACKUP METHODS **/
-	
-	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
-	Future<Void> submitBackup(Database cx, Key outContainer, Key tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
-		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr){ return submitBackup(tr, outContainer, tagName, backupRanges, stopWhenDone); });
+
+	Future<Void> submitBackup(Reference<ReadYourWritesTransaction> tr, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true);
+	Future<Void> submitBackup(Database cx, Key outContainer, int snapshotIntervalSeconds, std::string tagName, Standalone<VectorRef<KeyRangeRef>> backupRanges, bool stopWhenDone = true) {
+		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr){ return submitBackup(tr, outContainer, snapshotIntervalSeconds, tagName, backupRanges, stopWhenDone); });
 	}
 
 	Future<Void> discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -282,55 +253,29 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Reference<ReadYourWritesTransaction> tr, Key tagName);
-	Future<Void> abortBackup(Database cx, Key tagName) {
+	// Terminate an ongoing backup, without waiting for the backup to finish.
+	// Preconditions:
+	//   A backup is running with the tag of `tagName`.
+	//     Otherwise `backup_unneeded` will be thrown indicating that the backup never existed or already finished.
+	// Postconditions:
+	//   No more tasks will be spawned to backup ranges of the database.
+	//   logRangesRange and backupLogKeys will be cleared for this backup.
+	Future<Void> abortBackup(Reference<ReadYourWritesTransaction> tr, std::string tagName);
+	Future<Void> abortBackup(Database cx, std::string tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return abortBackup(tr, tagName); });
 	}
 
-	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
-
-	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<int> getStateValue(Database cx, UID logUid) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateValue(tr, logUid); });
-	}
-
-	Future<Version> getStateStopVersion(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<Version> getStateStopVersion(Database cx, UID logUid) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateStopVersion(tr, logUid); });
-	}
-
-	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName);
-	Future<UID> getLogUid(Database cx, Key tagName) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLogUid(tr, tagName); });
-	}
+	Future<std::string> getStatus(Database cx, int errorLimit, std::string tagName);
 
 	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
-	Future<Version> getLastRestorable(Database cx, Key tagName) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLastRestorable(tr, tagName); });
-	}
-
-	Future<int64_t> getRangeBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<int64_t> getLogBytesWritten(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
 
 	// stopWhenDone will return when the backup is stopped, if enabled. Otherwise, it
 	// will return when the backup directory is restorable.
-	Future<int> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
+	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
 
-	Future<std::string> getLastBackupContainer(Reference<ReadYourWritesTransaction> tr, UID logUid);
-	Future<std::string> getLastBackupContainer(Database cx, UID logUid) {
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLastBackupContainer(tr, logUid); });
-	}
 	static Future<std::string> getBackupInfo(std::string backupContainer, Version* defaultVersion = NULL);
 
-	static std::string getTempFilename();
-	// Data(key ranges) and Log files will have their file size in the name because it is not at all convenient
-	// to fetch filesizes from either of the current BackupContainer implementations. LocalDirectory requires
-	// querying each file separately, and Blob Store doesn't support renames so the apparent log and data files
-	// are actually a kind of symbolic link so to get the size of the final file it would have to be read.
-	static std::string getDataFilename(Version version, int64_t size, int blockSize);
-	static std::string getLogFilename(Version beginVer, Version endVer, int64_t size, int blockSize);
-
-	static const Key keyBackupContainer;
 	static const Key keyLastRestorable;
 
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
@@ -343,13 +288,8 @@ public:
 	static const int dataFooterSize;
 
 	Subspace subspace;
-	Subspace states;
 	Subspace config;
-	Subspace errors;
-	Subspace ranges;
-	Subspace tagNames;
 	Subspace lastRestorable;
-	Subspace sourceStates;
 
 	Reference<TaskBucket> taskBucket;
 	Reference<FutureBucket> futureBucket;
@@ -482,29 +422,302 @@ Future<Void> logErrorWorker(Reference<ReadYourWritesTransaction> const& tr, Key 
 Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
-Future<Void> readCommitted(Database const& cx, PromiseStream<RangeResultWithVersion> const& results, Reference<FlowLock> const& lock, KeyRangeRef const& range, bool const& terminator = false, bool const& systemAccess = false, bool const& lockAware = false);
-Future<Void> readCommitted(Database const& cx, PromiseStream<RCGroup> const& results, Future<Void> const& active, Reference<FlowLock> const& lock, KeyRangeRef const& range, std::function< std::pair<uint64_t, uint32_t>(Key key) > const& groupBy, bool const& terminator = false, bool const& systemAccess = false, bool const& lockAware = false, std::function< Future<Void>(Reference<ReadYourWritesTransaction> tr) > const& withEachFunction = nullptr);
+Future<Void> readCommitted(Database const& cx, PromiseStream<RangeResultWithVersion> const& results, Reference<FlowLock> const& lock, KeyRangeRef const& range, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false);
+Future<Void> readCommitted(Database const& cx, PromiseStream<RCGroup> const& results, Future<Void> const& active, Reference<FlowLock> const& lock, KeyRangeRef const& range, std::function< std::pair<uint64_t, uint32_t>(Key key) > const& groupBy, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false, std::function< Future<Void>(Reference<ReadYourWritesTransaction> tr) > const& withEachFunction = nullptr);
 Future<Void> applyMutations(Database const& cx, Key const& uid, Key const& addPrefix, Key const& removePrefix, Version const& beginVersion, Version* const& endVersion, RequestStream<CommitTransactionRequest> const& commit, NotifiedVersion* const& committedVersion, Reference<KeyRangeMap<Version>> const& keyVersion);
 
-template <typename T>
-class TaskParam {
+typedef BackupAgentBase::enumState EBackupState;
+template<> inline Tuple Codec<EBackupState>::pack(EBackupState const &val) { return Tuple().append(val); }
+template<> inline EBackupState Codec<EBackupState>::unpack(Tuple const &val) { return (EBackupState)val.getInt(0); }
+
+// Key backed tags are a single-key slice of the TagUidMap, defined below.
+// The Value type of the key is a UidAndAbortedFlagT which is a pair of {UID, aborted_flag}
+// All tasks on the UID will have a validation key/value that requires aborted_flag to be
+// false, so changing that value, such as changing the UID or setting aborted_flag to true,
+// will kill all of the active tasks on that backup/restore UID.
+typedef std::pair<UID, bool> UidAndAbortedFlagT;
+class KeyBackedTag : public KeyBackedProperty<UidAndAbortedFlagT> {
 public:
-	TaskParam(StringRef key) : key(key) {}
-	T get(Reference<Task> task) const {
-		return Codec<T>::unpack(Tuple::unpack(task->params[key]));
+	KeyBackedTag() : KeyBackedProperty(StringRef()) {}
+	KeyBackedTag(std::string tagName, StringRef tagMapPrefix);
+
+	Future<Void> cancel(Reference<ReadYourWritesTransaction> tr) {
+		std::string tag = tagName;
+		Key _tagMapPrefix = tagMapPrefix;
+		return map(get(tr), [tag, _tagMapPrefix, tr](Optional<UidAndAbortedFlagT> up) -> Void {
+			if (up.present()) {
+				// Set aborted flag to true
+				up.get().second = true;
+				KeyBackedTag(tag, _tagMapPrefix).set(tr, up.get());
+			}
+			return Void();
+		});
 	}
-	void set(Reference<Task> task, T const &val) const {
-		task->params[key] = Codec<T>::pack(val).pack();
-	}
-	bool exists(Reference<Task> task) const {
-		return task->params.find(key) != task->params.end();
-	}
-	T getOrDefault(Reference<Task> task, const T defaultValue = T()) const {
-		if(!exists(task))
-			return defaultValue;
-		return get(task);
-	}
-	StringRef key;
+
+	std::string tagName;
+	Key tagMapPrefix;
 };
 
+typedef KeyBackedMap<std::string, UidAndAbortedFlagT> TagMap;
+// Map of tagName to {UID, aborted_flag} located in the fileRestorePrefixRange keyspace.
+class TagUidMap : public KeyBackedMap<std::string, UidAndAbortedFlagT> {
+public:
+	TagUidMap(const StringRef & prefix) : TagMap(LiteralStringRef("tag->uid/").withPrefix(prefix)), prefix(prefix) {}
+
+	static Future<std::vector<KeyBackedTag>> getAll_impl(TagUidMap * const & tagsMap, Reference<ReadYourWritesTransaction> const & tr);
+
+	Future<std::vector<KeyBackedTag>> getAll(Reference<ReadYourWritesTransaction> tr) {
+		return getAll_impl(this, tr);
+	}
+
+	Key prefix;
+};
+
+static inline KeyBackedTag makeRestoreTag(std::string tagName) {
+	return KeyBackedTag(tagName, fileRestorePrefixRange.begin);
+}
+
+static inline KeyBackedTag makeBackupTag(std::string tagName) {
+	return KeyBackedTag(tagName, fileBackupPrefixRange.begin);
+}
+
+static inline Future<std::vector<KeyBackedTag>> getAllRestoreTags(Reference<ReadYourWritesTransaction> tr) {
+	return TagUidMap(fileRestorePrefixRange.begin).getAll(tr);
+}
+
+static inline Future<std::vector<KeyBackedTag>> getAllBackupTags(Reference<ReadYourWritesTransaction> tr) {
+	return TagUidMap(fileBackupPrefixRange.begin).getAll(tr);
+}
+
+class KeyBackedConfig {
+public:
+	static struct {
+		static TaskParam<UID> uid() {return LiteralStringRef(__FUNCTION__); }
+	} TaskParams;
+
+	KeyBackedConfig(StringRef prefix, UID uid = UID()) :
+			uid(uid),
+			prefix(prefix),
+			configSpace(uidPrefixKey(LiteralStringRef("uid->config/").withPrefix(prefix), uid)) {}
+
+	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
+
+	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
+		// Set the uid task parameter
+		TaskParams.uid().set(task, uid);
+		// Set the validation condition for the task which is that the restore uid's tag's uid is the same as the restore uid.
+		// Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the validation key
+		// which TaskBucket will check, and its value must be this restore config's uid.
+		UID u = uid;  // 'this' could be invalid in lambda
+		Key p = prefix;
+		return map(tag().get(tr), [u,p,task](Optional<std::string> const &tag) -> Void {
+			if(!tag.present())
+				throw restore_error();
+			// Validation contition is that the uidPair key must be exactly {u, false}
+			TaskBucket::setValidationCondition(task, KeyBackedTag(tag.get(), p).key, Codec<UidAndAbortedFlagT>::pack({u, false}).pack());
+			return Void();
+		});
+	}
+
+	KeyBackedProperty<std::string> tag() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	UID getUid() { return uid; }
+
+	Key getUidAsKey() { return BinaryWriter::toValue(uid, Unversioned()); }
+
+	void clear(Reference<ReadYourWritesTransaction> tr) {
+		tr->clear(configSpace.range());
+	}
+
+	// lastError is a pair of error message and timestamp expressed as an int64_t
+	KeyBackedProperty<std::pair<std::string, int64_t>> lastError() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+protected:
+	UID uid;
+	Key prefix;
+	Subspace configSpace;
+};
+
+template<> inline Tuple Codec<Reference<IBackupContainer>>::pack(Reference<IBackupContainer> const &bc) { 
+	return Tuple().append(StringRef(bc->getURL()));
+}
+template<> inline Reference<IBackupContainer> Codec<Reference<IBackupContainer>>::unpack(Tuple const &val) {
+	return IBackupContainer::openContainer(val.getString(0).toString());
+}
+
+class BackupConfig : public KeyBackedConfig {
+public:
+	BackupConfig(UID uid = UID()) : KeyBackedConfig(fileBackupPrefixRange.begin, uid) {}
+	BackupConfig(Reference<Task> task) : KeyBackedConfig(fileBackupPrefixRange.begin, task) {}
+
+	// rangeFileMap maps a keyrange file's End to its Begin and Filename
+	struct RangeSlice {
+		Key begin;
+		Version version;
+		std::string fileName;
+		int64_t fileSize;
+		Tuple pack() const {
+			return Tuple().append(begin).append(version).append(StringRef(fileName)).append(fileSize);
+		}
+		static RangeSlice unpack(Tuple const &t) {
+			RangeSlice r;
+			int i = 0;
+			r.begin = t.getString(i++);
+			r.version = t.getInt(i++);
+			r.fileName = t.getString(i++).toString();
+			r.fileSize = t.getInt(i++);
+			return r;
+		}
+	};
+
+	// Map of range end boundaries to info about the backup file written for that range.
+	typedef KeyBackedMap<Key, RangeSlice> RangeFileMapT;
+	RangeFileMapT snapshotRangeFileMap() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Coalesced set of ranges already dispatched for writing.
+	typedef KeyBackedMap<Key, bool> RangeDispatchMapT;
+	RangeDispatchMapT snapshotRangeDispatchMap() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Interval to use for determining the target end version for new snapshots
+	KeyBackedProperty<int64_t> snapshotIntervalSeconds() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// When the current snapshot began
+	KeyBackedProperty<Version> snapshotBeginVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// When the current snapshot is desired to end.  
+	// This can be changed at runtime to speed up or slow down a snapshot 
+	KeyBackedProperty<Version> snapshotTargetEndVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<int64_t> snapshotBatchSize() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<Key> snapshotBatchFuture() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<Key> snapshotBatchDispatchDoneKey() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	Future<Void> initNewSnapshot(Reference<ReadYourWritesTransaction> tr, int64_t intervalSeconds = -1) {
+		BackupConfig &copy = *this;  // Capture this by value instead of this ptr
+
+		Future<Version> beginVersion = tr->getReadVersion();
+		Future<int64_t> defaultInterval = 0;
+		if(intervalSeconds < 0)
+			defaultInterval = copy.snapshotIntervalSeconds().getOrThrow(tr);
+
+		// Make sure read version and possibly the snapshot interval value are ready, then clear/init the snapshot config members
+		return map(success(beginVersion) && success(defaultInterval), [=](Void) mutable {
+			copy.snapshotRangeFileMap().clear(tr);
+			copy.snapshotRangeDispatchMap().clear(tr);
+			copy.snapshotBatchSize().clear(tr);
+			copy.snapshotBatchFuture().clear(tr);
+			copy.snapshotBatchDispatchDoneKey().clear(tr);
+
+			if(intervalSeconds < 0)
+				intervalSeconds = defaultInterval.get();
+			Version endVersion = beginVersion.get() + intervalSeconds * CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+			
+			copy.snapshotBeginVersion().set(tr, beginVersion.get());
+			copy.snapshotTargetEndVersion().set(tr, endVersion);
+
+			return Void();
+		});
+	}
+
+	KeyBackedBinaryValue<int64_t> rangeBytesWritten() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedBinaryValue<int64_t> logBytesWritten() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<EBackupState> stateEnum() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedProperty<Reference<IBackupContainer>> backupContainer() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Get the backup container URL only without creating a backup container instance.
+	KeyBackedProperty<Reference<IBackupContainer>> backupContainerURL() {
+		return configSpace.pack(LiteralStringRef("backupContainer"));
+	}
+
+	// Stop differntial logging if already started or don't start after completing KV ranges
+	KeyBackedProperty<bool> stopWhenDone() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Latest version for which all prior versions have had their log copy tasks completed
+	KeyBackedProperty<Version> latestLogEndVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// The end version of the last complete snapshot
+	KeyBackedProperty<Version> latestSnapshotEndVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// The end version of the first complete snapshot
+	KeyBackedProperty<Version> firstSnapshotEndVersion() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+		auto &copy = *this;
+		auto lastLog = latestLogEndVersion().get(tr);
+		auto firstSnapshot = firstSnapshotEndVersion().get(tr);
+		return map(success(lastLog) && success(firstSnapshot), [=](Void) -> Optional<Version> {
+			// The latest log greater than the oldest snapshot is the restorable version
+			if(lastLog.get().present() && firstSnapshot.get().present() && lastLog.get().get() >= firstSnapshot.get().get()) {
+				return lastLog.get().get();
+			}
+			return {};
+		});
+	}
+
+	KeyBackedProperty<std::vector<KeyRange>> backupRanges() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange) {
+		Key mutationLogsDestKey = uidPrefixKey(backupLogKeys.begin, getUid());
+		tr->set(logRangesEncodeKey(backupRange.begin, getUid()), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
+	}
+
+	Future<Void> logError(Database cx, Error e, std::string details, void *taskInstance = nullptr) {
+		if(!uid.isValid()) {
+			TraceEvent(SevError, "FileBackupErrorNoUID").error(e).detail("Description", details);
+			return Void();
+		}
+		TraceEvent t(SevWarn, "FileBackupError");
+		t.error(e).detail("BackupUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		// These should not happen
+		if(e.code() == error_code_key_not_found)
+			t.backtrace();
+		std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
+		return lastError().set(cx, {msg, (int64_t)now()});
+	}
+};
 #endif

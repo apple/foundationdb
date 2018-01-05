@@ -65,7 +65,7 @@ class DirectoryTest(Test):
 
     def setup(self, args):
         self.dir_index = 0
-        self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version)
+        self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version, args.types)
 
     def generate(self, args, thread_number):
         instructions = InstructionSet()

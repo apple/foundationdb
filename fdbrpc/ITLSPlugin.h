@@ -120,7 +120,7 @@ struct ITLSPolicy {
 // remaining arguments must be pairs of (const char*); the first of
 // each pair must be a valid XML attribute name, and the second a
 // valid XML attribute value. The final parameter must be NULL.
-typedef void (*ITLSLogFunc)(const char* event, void* uid, bool is_error, ...);
+typedef void (*ITLSLogFunc)(const char* event, void* uid, int is_error, ...);
 
 struct ITLSPlugin {
 	virtual void addref() = 0;

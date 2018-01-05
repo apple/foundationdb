@@ -87,7 +87,7 @@ public:
 	// Data distribution
 	double RETRY_RELOCATESHARD_DELAY;
 	double DATA_DISTRIBUTION_FAILURE_REACTION_TIME;
-	int MIN_SHARD_BYTES, SHARD_BYTES_RATIO, SHARD_BYTES_PER_SQRT_BYTES, MAX_SHARD_BYTES;
+	int MIN_SHARD_BYTES, SHARD_BYTES_RATIO, SHARD_BYTES_PER_SQRT_BYTES, MAX_SHARD_BYTES, KEY_SERVER_SHARD_BYTES;
 	int64_t SHARD_MAX_BYTES_PER_KSEC, // Shards with more than this bandwidth will be split immediately
 		SHARD_MIN_BYTES_PER_KSEC,     // Shards with more than this bandwidth will not be merged
 		SHARD_SPLIT_BYTES_PER_KSEC;   // When splitting a shard, it is split into pieces with less than this bandwidth
@@ -230,11 +230,11 @@ public:
 	//FdbServer
 	double MIN_REBOOT_TIME;
 	double MAX_REBOOT_TIME;
+	std::string LOG_DIRECTORY;
 
 	//Ratekeeper
 	double SMOOTHING_AMOUNT;
 	double SLOW_SMOOTHING_AMOUNT;
-	double RATEKEEPER_LOGGING_INTERVAL;
 	double METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
 
@@ -301,6 +301,10 @@ public:
 	// Status
 	double STATUS_MIN_TIME_BETWEEN_REQUESTS;
 	int CONFIGURATION_ROWS_TO_FETCH;
+
+	// Timekeeper
+	int64_t TIME_KEEPER_DELAY;
+	int64_t TIME_KEEPER_MAX_ENTRIES;
 
 	ServerKnobs(bool randomize = false, ClientKnobs* clientKnobs = NULL);
 };

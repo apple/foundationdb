@@ -27,7 +27,7 @@ const StringRef LocalityData::keyDcId = LiteralStringRef("dcid");
 const StringRef LocalityData::keyMachineId = LiteralStringRef("machineid");
 const StringRef LocalityData::keyDataHallId = LiteralStringRef("data_hall");
 
-ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) {
+ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) const {
 	switch( role ) {
 	case ProcessClass::Storage:
 		switch( _class ) {
@@ -100,6 +100,25 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) {
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::TransactionClass:
+			return ProcessClass::BestOtherFit;
+		case ProcessClass::UnsetClass:
+			return ProcessClass::UnsetFit;
+		case ProcessClass::TesterClass:
+			return ProcessClass::NeverAssign;
+		default:
+			return ProcessClass::WorstFit;
+		}
+	case ProcessClass::ClusterController:
+		switch( _class ) {
+		case ProcessClass::ClusterControllerClass:
+			return ProcessClass::BestFit;	
+		case ProcessClass::StatelessClass:
+			return ProcessClass::GoodFit;
+		case ProcessClass::MasterClass:
+			return ProcessClass::BestOtherFit;
+		case ProcessClass::ResolutionClass:
+			return ProcessClass::BestOtherFit;
+		case ProcessClass::ProxyClass:
 			return ProcessClass::BestOtherFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;

@@ -46,23 +46,45 @@ struct SayHelloTaskFunc : TaskFuncBase {
 			TraceEvent("TaskBucketCorrectnessSayHello").detail("CheckTaskVersion", "taskVersion is larger than the funcVersion").detail("taskVersion", taskVersion).detail("funcVersion", SayHelloTaskFunc::version);
 		}
 
-		Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-
-		Void _ = wait(done->set(tr, taskBucket));
+		state Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 		Void _ = wait(taskBucket->finish(tr, task));
 
 		if (BUGGIFY) Void _ = wait(delay(10));
 
-		Key key = StringRef("Hello_" + g_random->randomUniqueID().toString());
-		Key value;
+		state Key key = StringRef("Hello_" + g_random->randomUniqueID().toString());
+		state Key value;
 		auto itor = task->params.find(LiteralStringRef("name"));
 		if (itor != task->params.end()) {
 			value = itor->value;
 			TraceEvent("TaskBucketCorrectnessSayHello").detail("SayHelloTaskFunc", printable(itor->value));
 		}
 		else {
-			TraceEvent("TaskBucketCorrectnessSayHello").detail("SayHelloTaskFunc", "...");
+			ASSERT(false);
 		}
+
+		if (!task->params[LiteralStringRef("chained")].compare(LiteralStringRef("false"))) {
+			Void _ = wait(done->set(tr, taskBucket));
+		} else {
+			int subtaskCount = atoi(task->params[LiteralStringRef("subtaskCount")].toString().c_str());
+			int currTaskNumber = atoi(value.removePrefix(LiteralStringRef("task_")).toString().c_str());
+			TraceEvent("TaskBucketCorrectnessSayHello").detail("subtaskCount", subtaskCount).detail("currTaskNumber", currTaskNumber);
+
+			if( currTaskNumber < subtaskCount - 1 ) {
+				state std::vector<Reference<TaskFuture>> vectorFuture;
+				Reference<Task> new_task(new Task(SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(), g_random->randomInt(0, 2)));
+				new_task->params[LiteralStringRef("name")] = StringRef(format("task_%d", currTaskNumber + 1));
+				new_task->params[LiteralStringRef("chained")] = task->params[LiteralStringRef("chained")];
+				new_task->params[LiteralStringRef("subtaskCount")] = task->params[LiteralStringRef("subtaskCount")];
+				Reference<TaskFuture> taskDone = futureBucket->future(tr);
+				new_task->params[Task::reservedTaskParamKeyDone] = taskDone->key;
+				taskBucket->addTask(tr, new_task);
+				vectorFuture.push_back(taskDone);
+				Void _ = wait(done->join(tr, taskBucket, vectorFuture));
+			} else {
+				Void _ = wait(done->set(tr, taskBucket));
+			}
+		}
+
 		tr->set(key, value);
 
 		return Void();
@@ -82,9 +104,16 @@ struct SayHelloToEveryoneTaskFunc : TaskFuncBase {
 	ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 		Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 		state std::vector<Reference<TaskFuture>> vectorFuture;
-		for (int i = 0; i < 20; ++i) {
+
+		int subtaskCount = 1;
+		if (!task->params[LiteralStringRef("chained")].compare(LiteralStringRef("false"))) {
+			subtaskCount = atoi(task->params[LiteralStringRef("subtaskCount")].toString().c_str());
+		}
+		for (int i = 0; i < subtaskCount; ++i) {
 			Reference<Task> new_task(new Task(SayHelloTaskFunc::name, SayHelloTaskFunc::version, StringRef(), g_random->randomInt(0, 2)));
 			new_task->params[LiteralStringRef("name")] = StringRef(format("task_%d", i));
+			new_task->params[LiteralStringRef("chained")] = task->params[LiteralStringRef("chained")];
+			new_task->params[LiteralStringRef("subtaskCount")] = task->params[LiteralStringRef("subtaskCount")];
 			Reference<TaskFuture> taskDone = futureBucket->future(tr);
 			new_task->params[Task::reservedTaskParamKeyDone] = taskDone->key;
 			taskBucket->addTask(tr, new_task);
@@ -129,9 +158,13 @@ REGISTER_TASKFUNC(SaidHelloTaskFunc);
 
 //A workload which test the correctness of TaskBucket
 struct TaskBucketCorrectnessWorkload : TestWorkload {
+	bool chained;
+	int subtaskCount;
 
 	TaskBucketCorrectnessWorkload(WorkloadContext const& wcx)
 	: TestWorkload(wcx) {
+		chained = getOption( options, LiteralStringRef("chained"), false );
+		subtaskCount = getOption( options, LiteralStringRef("subtaskCount"), 20 );
 	}
 
 	virtual std::string description() {
@@ -149,7 +182,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	virtual void getMetrics(vector<PerfMetric>& m) {
 	}
 
-	ACTOR Future<Void> addInitTasks(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket) {
+	ACTOR Future<Void> addInitTasks(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, bool chained, int subtaskCount) {
 		state Key addedInitKey(LiteralStringRef("addedInitTasks"));
 		Optional<Standalone<StringRef>> res = wait(tr->get(addedInitKey));
 		if (res.present())
@@ -157,7 +190,10 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		tr->set(addedInitKey, LiteralStringRef("true"));
 
 		Reference<TaskFuture> allDone = futureBucket->future(tr);
-		Reference<Task> task(new Task(SayHelloToEveryoneTaskFunc::name, SayHelloToEveryoneTaskFunc::version, allDone->key, g_random->randomInt(0, 2)));		
+		Reference<Task> task(new Task(SayHelloToEveryoneTaskFunc::name, SayHelloToEveryoneTaskFunc::version, allDone->key, g_random->randomInt(0, 2)));
+
+		task->params[LiteralStringRef("chained")] = chained ? LiteralStringRef("true") : LiteralStringRef("false");
+		task->params[LiteralStringRef("subtaskCount")] = StringRef(format("%d", subtaskCount));
 		taskBucket->addTask(tr, task);
 		Reference<Task> taskDone(new Task(SaidHelloTaskFunc::name, SaidHelloTaskFunc::version, StringRef(), g_random->randomInt(0, 2)));
 		Void _ = wait(allDone->onSetAddTask(tr, taskBucket, taskDone));
@@ -177,7 +213,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 				Void _ = wait(taskBucket->clear(cx));
 
 				TraceEvent("TaskBucketCorrectness").detail("adding_tasks", "...");
-				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {return self->addInitTasks(tr, taskBucket, futureBucket); }));
+				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {return self->addInitTasks(tr, taskBucket, futureBucket, self->chained, self->subtaskCount); }));
 
 				TraceEvent("TaskBucketCorrectness").detail("running_tasks", "...");
 			}
@@ -204,7 +240,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 				}
 				catch (Error &e) {
 					if (e.code() == error_code_timed_out)
-						TraceEvent(SevWarn, "TaskBucketCorrectness").detail("error_code_timed_out", e.what());
+						TraceEvent(SevWarn, "TaskBucketCorrectness").error(e);
 					else
 						Void _ = wait(tr->onError(e));
 				}
@@ -216,7 +252,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			}
 		}
 		catch (Error &e) {
-			TraceEvent(SevError, "TaskBucketCorrectness").detail("error_code", e.code()).detail("error", e.what());
+			TraceEvent(SevError, "TaskBucketCorrectness").error(e);
 			Void _ = wait(tr->onError(e));
 		}
 
@@ -224,14 +260,15 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(Database cx, TaskBucketCorrectnessWorkload *self) {
-		bool ret = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {return self->checkSayHello(tr); }));
+		bool ret = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {return self->checkSayHello(tr, self->subtaskCount); }));
 		return ret;
 	}
 
-	ACTOR Future<bool> checkSayHello(Reference<ReadYourWritesTransaction> tr) {
-		state std::set<std::string> data = { "Hello, Everyone!", "Said hello to everyone!",
-			"task_0", "task_1", "task_2", "task_3", "task_4", "task_5", "task_6", "task_7", "task_8", "task_9",
-			"task_10", "task_11", "task_12", "task_13", "task_14", "task_15", "task_16", "task_17", "task_18", "task_19", };
+	ACTOR Future<bool> checkSayHello(Reference<ReadYourWritesTransaction> tr, int subTaskCount) {
+		state std::set<std::string> data = { "Hello, Everyone!", "Said hello to everyone!"};
+		for (int i = 0; i < subTaskCount; i++) {
+			data.insert(format("task_%d", i));
+		}
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(KeyRangeRef(LiteralStringRef("Hello_\x00"), LiteralStringRef("Hello_\xff")), CLIENT_KNOBS->TOO_MANY));
 		if (values.size() != data.size()){

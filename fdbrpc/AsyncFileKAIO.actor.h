@@ -227,10 +227,27 @@ public:
 
 		return success(result);
 	}
+// TODO(alexmiller): Remove when we upgrade the dev docker image to >14.10
+#ifndef FALLOC_FL_ZERO_RANGE
+#define FALLOC_FL_ZERO_RANGE 0x10
+#endif
+	virtual Future<Void> zeroRange( int64_t offset, int64_t length ) override {
+		bool success = false;
+		if (ctx.fallocateZeroSupported) {
+			int rc = fallocate( fd, FALLOC_FL_ZERO_RANGE, offset, length );
+			if (rc == EOPNOTSUPP) {
+				ctx.fallocateZeroSupported = false;
+			}
+			if (rc == 0) {
+				success = true;
+			}
+		}
+		return success ? Void() : IAsyncFile::zeroRange(offset, length);
+	}
 	virtual Future<Void> truncate( int64_t size ) {
 		++countFileLogicalWrites;
 		++countLogicalWrites;
-		
+
 		if(failed) {
 			return io_timeout();
 		}
@@ -484,6 +501,7 @@ private:
 		int outstanding;
 		double ioStallBegin;
 		bool fallocateSupported;
+		bool fallocateZeroSupported;
 		std::priority_queue<IOBlock*, std::vector<IOBlock*>, IOBlock::indirect_order_by_priority> queue;
 		Int64MetricHandle countAIOSubmit;
 		Int64MetricHandle countAIOCollect;
@@ -499,7 +517,7 @@ private:
 		EventMetricHandle<SlowAioSubmit> slowAioSubmitMetric;
 
 		uint32_t opsIssued;
-		Context() : iocx(0), evfd(-1), outstanding(0), opsIssued(0), ioStallBegin(0), fallocateSupported(true), submittedRequestList(nullptr) {
+		Context() : iocx(0), evfd(-1), outstanding(0), opsIssued(0), ioStallBegin(0), fallocateSupported(true), fallocateZeroSupported(true), submittedRequestList(nullptr) {
 			setIOTimeout(0);
 		}
 

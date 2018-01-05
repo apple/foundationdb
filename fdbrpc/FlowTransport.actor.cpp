@@ -28,6 +28,10 @@
 #include "crc32c.h"
 #include "simulator.h"
 
+#if VALGRIND
+#include <memcheck.h>
+#endif
+
 static NetworkAddress g_currentDeliveryPeerAddress;
 
 const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
@@ -137,7 +141,7 @@ class TransportData {
 public:
 	TransportData(uint64_t transportId) 
 	  : endpointNotFoundReceiver(endpoints),
-	    pingReceiver(endpoints),
+		pingReceiver(endpoints),
 		warnAlwaysForLargePacket(true),
 		lastIncompatibleMessage(0),
 		transportId(transportId)
@@ -173,6 +177,7 @@ public:
 	Int64MetricHandle countConnClosedWithoutError;
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
+	uint32_t numIncompatibleConnections;
 	std::map<uint64_t, double> multiVersionConnections;
 	double lastIncompatibleMessage;
 	uint64_t transportId;
@@ -204,7 +209,9 @@ struct ConnectPacket {
 static_assert( sizeof(ConnectPacket) == CONNECT_PACKET_V2_SIZE, "ConnectPacket packed incorrectly" );
 #pragma pack( pop )
 
-static Future<Void> connectionReader( TransportData* const& transport, Reference<IConnection> const& conn, bool const& isOutgoing, Promise<NetworkAddress> const& onPeerAddress );
+static Future<Void> connectionReader( TransportData* const& transport, Reference<IConnection> const& conn, Peer* const& peer, Promise<Peer*> const& onConnected );
+
+static PacketID sendPacket( TransportData* self, ISerializeSource const& what, const Endpoint& destination, bool reliable );
 
 struct Peer : NonCopyable {
 	// FIXME: Peers don't die!
@@ -215,12 +222,14 @@ struct Peer : NonCopyable {
 	ReliablePacketList reliable;
 	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
+	AsyncVar<bool> incompatibleDataRead;
+	bool compatible;
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;
 	double reconnectionDelay;
 
 	explicit Peer( TransportData* transport, NetworkAddress const& destination, bool doConnect = true ) 
-		: transport(transport), destination(destination), outgoingConnectionIdle(!doConnect), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME)
+		: transport(transport), destination(destination), outgoingConnectionIdle(!doConnect), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true)
 	{
 		if(doConnect) {
 			connect = connectionKeeper(this);
@@ -293,8 +302,7 @@ struct Peer : NonCopyable {
 		}
 	}
 
-	ACTOR static Future<Void> connectionMonitor( Peer* peer ) {
-
+	ACTOR static Future<Void> connectionMonitor( Peer *peer ) {
 		state RequestStream< ReplyPromise<Void> > remotePing( Endpoint( peer->destination, WLTOKEN_PING_PACKET ) );
 
 		loop {
@@ -305,9 +313,11 @@ struct Peer : NonCopyable {
 			state ReplyPromise<Void> reply;
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
 
+			peer->incompatibleDataRead.set(false);
 			choose {
 				when (Void _ = wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").detail("WithAddr", peer->destination); throw connection_failed(); }
 				when (Void _ = wait( reply.getFuture() )) {}
+				when (Void _ = wait( peer->incompatibleDataRead.onChange())) {}
 			}
 		}
 	}
@@ -364,20 +374,28 @@ struct Peer : NonCopyable {
 					Reference<IConnection> _conn = wait( timeout( INetworkConnections::net()->connect(self->destination), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) );
 					if (_conn) {
 						conn = _conn;
-						TraceEvent("ConnEstablishedTo", conn->getDebugID()).detail("PeerAddr", self->destination);
+						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID()).detail("PeerAddr", self->destination);
 						self->prependConnectPacket();
 					} else {
-						TraceEvent("ConnTimedOut", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination);
+						TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination);
 						throw connection_failed();
 					}
 
-					reader = connectionReader( self->transport, conn, true, Promise<NetworkAddress>() );
+					reader = connectionReader( self->transport, conn, self, Promise<Peer*>());
 				} else {
 					self->outgoingConnectionIdle = false;
 				}
-				self->transport->countConnEstablished++;
 
-				Void _ = wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
+				try {
+					self->transport->countConnEstablished++;
+					Void _ = wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
+				} catch (Error& e) {
+					 if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed ))
+						self->transport->countConnClosedWithoutError++;
+					else
+						self->transport->countConnClosedWithError++;
+					throw e;
+				}
 
 				ASSERT( false );
 			} catch (Error& e) {
@@ -389,12 +407,13 @@ struct Peer : NonCopyable {
 				self->discardUnreliablePackets();
 				reader = Future<Void>();
 				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed );
-				TraceEvent(ok ? SevInfo : SevError, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 
-				if (ok)
-					self->transport->countConnClosedWithoutError++;
-				else
-					self->transport->countConnClosedWithError++;
+				if(self->compatible) {
+					TraceEvent(ok ? SevInfo : SevError, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
+				}
+				else {
+					TraceEvent(ok ? SevInfo : SevError, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
+				}
 
 				if (conn) {
 					conn->close();
@@ -407,8 +426,6 @@ struct Peer : NonCopyable {
 		}
 	}
 };
-
-static PacketID sendPacket( TransportData* self, ISerializeSource const& what, const Endpoint& destination, bool reliable );
 
 ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket ) {
 	int priority = self->endpoints.getPriority(destination.token);
@@ -447,12 +464,25 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 	// Remove the complete packets from the range by increasing unprocessed_begin.
 	// There won't be more than 64K of data plus one packet, so this shouldn't take a long time.
 	uint8_t* p = unprocessed_begin;
+
+	bool checksumEnabled = true;
+	if (transport->localAddress.isTLS() || peerAddress.isTLS()) {
+		checksumEnabled = false;
+	}
+
 	loop {
-		if (e-p < sizeof(uint32_t) * 2) break;
+		uint32_t packetLen, packetChecksum;
 
 		//Retrieve packet length and checksum
-		uint32_t packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
-		uint32_t packetChecksum = *(uint32_t*)p; p += sizeof(uint32_t);
+		if (checksumEnabled) {
+			if (e-p < sizeof(uint32_t) * 2) break;
+			packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
+			packetChecksum = *(uint32_t*)p; p += sizeof(uint32_t);
+		} else {
+			if (e-p < sizeof(uint32_t)) break;
+			packetLen = *(uint32_t*)p; p += sizeof(uint32_t);
+		}
+
 		if (packetLen > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 			throw platform_error();
@@ -470,40 +500,46 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 		if (e-p<packetLen) break;
 		ASSERT( packetLen >= sizeof(UID) );
 
-		bool isBuggifyEnabled = false;
-		if(g_network->isSimulated() && g_simulator.enableConnectionFailures && BUGGIFY_WITH_PROB(0.001)) {
-			isBuggifyEnabled = true;
-			TraceEvent(SevInfo, "BitsFlip");
-			int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
+		if (checksumEnabled) {
+			bool isBuggifyEnabled = false;
+			if(g_network->isSimulated() && g_network->now() - g_simulator.lastConnectionFailure > g_simulator.connectionFailuresDisableDuration && BUGGIFY_WITH_PROB(0.0001)) {
+				g_simulator.lastConnectionFailure = g_network->now();
+				isBuggifyEnabled = true;
+				TraceEvent(SevInfo, "BitsFlip");
+				int flipBits = 32 - (int) floor(log2(g_random->randomUInt32()));
 
-			uint32_t firstFlipByteLocation = g_random->randomUInt32() % packetLen;
-			int firstFlipBitLocation = g_random->randomInt(0, 8);
-			*(p + firstFlipByteLocation) ^= 1 << firstFlipBitLocation;
-			flipBits--;
+				uint32_t firstFlipByteLocation = g_random->randomUInt32() % packetLen;
+				int firstFlipBitLocation = g_random->randomInt(0, 8);
+				*(p + firstFlipByteLocation) ^= 1 << firstFlipBitLocation;
+				flipBits--;
 
-			for (int i = 0; i < flipBits; i++) {
-				uint32_t byteLocation = g_random->randomUInt32() % packetLen;
-				int bitLocation = g_random->randomInt(0, 8);
-				if (byteLocation != firstFlipByteLocation || bitLocation != firstFlipBitLocation) {
-					*(p + byteLocation) ^= 1 << bitLocation;
+				for (int i = 0; i < flipBits; i++) {
+					uint32_t byteLocation = g_random->randomUInt32() % packetLen;
+					int bitLocation = g_random->randomInt(0, 8);
+					if (byteLocation != firstFlipByteLocation || bitLocation != firstFlipBitLocation) {
+						*(p + byteLocation) ^= 1 << bitLocation;
+					}
+				}
+			}
+
+			uint32_t calculatedChecksum = crc32c_append(0, p, packetLen);
+			if (calculatedChecksum != packetChecksum) {
+				if (isBuggifyEnabled) {
+					TraceEvent(SevInfo, "ChecksumMismatchExp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+				} else {
+					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+				}
+				throw checksum_failed();
+			} else {
+				if (isBuggifyEnabled) {
+					TraceEvent(SevError, "ChecksumMatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
 				}
 			}
 		}
 
-		uint32_t calculatedChecksum = crc32c_append(0, p, packetLen);
-		if (calculatedChecksum != packetChecksum) {
-			if (isBuggifyEnabled) {
-				TraceEvent(SevInfo, "ChecksumMismatchExp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
-			} else {
-				TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
-			}
-			throw checksum_failed();
-		} else {
-			if (isBuggifyEnabled) {
-				TraceEvent(SevError, "ChecksumMatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
-			}
-		}
-
+#if VALGRIND
+		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
+#endif
 		ArenaReader reader( arena, StringRef(p, packetLen), AssumeVersion(peerProtocolVersion) );
 		UID token; reader >> token;
 
@@ -518,7 +554,9 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 ACTOR static Future<Void> connectionReader(
 		TransportData* transport,
 		Reference<IConnection> conn, 
-		bool isOutgoing, Promise<NetworkAddress> onPeerAddress ) {
+		Peer *peer,
+		Promise<Peer*> onConnected) 
+{
 	// This actor exists whenever there is an open or opening connection, whether incoming or outgoing
 	// For incoming connections conn is set and peer is initially NULL; for outgoing connections it is the reverse
 
@@ -527,110 +565,143 @@ ACTOR static Future<Void> connectionReader(
 	state uint8_t* unprocessed_end = NULL;
 	state uint8_t* buffer_end = NULL;
 	state bool expectConnectPacket = true;
+	state bool compatible = false;
 	state NetworkAddress peerAddress;
 	state uint64_t peerProtocolVersion = 0;
 
 	peerAddress = conn->getPeerAddress();
-	if (!isOutgoing)
+	if (peer == nullptr) { 
 		ASSERT( !peerAddress.isPublic() );
-
-	loop {
+	}
+	try {
 		loop {
-			int readAllBytes = buffer_end - unprocessed_end;
-			if (readAllBytes < 4096) {
-				Arena newArena;
-				int unproc_len = unprocessed_end - unprocessed_begin;
-				int len = std::max( 65536, unproc_len*2 );
-				uint8_t* newBuffer = new (newArena) uint8_t[ len ];
-				memcpy( newBuffer, unprocessed_begin, unproc_len );
-				arena = newArena;
-				unprocessed_begin = newBuffer;
-				unprocessed_end = newBuffer + unproc_len;
-				buffer_end = newBuffer + len;
-				readAllBytes = buffer_end - unprocessed_end;
-			}
+			loop {
+				int readAllBytes = buffer_end - unprocessed_end;
+				if (readAllBytes < 4096) {
+					Arena newArena;
+					int unproc_len = unprocessed_end - unprocessed_begin;
+					int len = std::max( 65536, unproc_len*2 );
+					uint8_t* newBuffer = new (newArena) uint8_t[ len ];
+					memcpy( newBuffer, unprocessed_begin, unproc_len );
+					arena = newArena;
+					unprocessed_begin = newBuffer;
+					unprocessed_end = newBuffer + unproc_len;
+					buffer_end = newBuffer + len;
+					readAllBytes = buffer_end - unprocessed_end;
+				}
 
-			int readBytes = conn->read( unprocessed_end, buffer_end );
-			if (!readBytes) break;
-			state bool readWillBlock = readBytes != readAllBytes;
-			unprocessed_end += readBytes;
+				int readBytes = conn->read( unprocessed_end, buffer_end );
+				if (!readBytes) break;
+				state bool readWillBlock = readBytes != readAllBytes;
+				unprocessed_end += readBytes;
 			
-			if (expectConnectPacket && unprocessed_end-unprocessed_begin>=CONNECT_PACKET_V0_SIZE) {
-				// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
-				ConnectPacket* p = (ConnectPacket*)unprocessed_begin;
+				if (expectConnectPacket && unprocessed_end-unprocessed_begin>=CONNECT_PACKET_V0_SIZE) {
+					// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
+					ConnectPacket* p = (ConnectPacket*)unprocessed_begin;
 				
-				uint64_t connectionId = 0;
-				int32_t connectPacketSize = p->minimumSize();
-				if ( unprocessed_end-unprocessed_begin >= connectPacketSize ) {
-					if(p->protocolVersion >= 0x0FDB00A444020001) {
-						connectionId = p->connectionId;
-					}
+					uint64_t connectionId = 0;
+					int32_t connectPacketSize = p->minimumSize();
+					if ( unprocessed_end-unprocessed_begin >= connectPacketSize ) {
+						if(p->protocolVersion >= 0x0FDB00A444020001) {
+							connectionId = p->connectionId;
+						}
 						
-					if( (p->protocolVersion&compatibleProtocolVersionMask) != (currentProtocolVersion&compatibleProtocolVersionMask) ) {
-						NetworkAddress addr = p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress();
-						if(connectionId != 1) addr.port = 0;
+						if( (p->protocolVersion&compatibleProtocolVersionMask) != (currentProtocolVersion&compatibleProtocolVersionMask) ) {
+							NetworkAddress addr = p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress();
+							if(connectionId != 1) addr.port = 0;
 						
-						if(!transport->multiVersionConnections.count(connectionId)) {
-							if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
-								TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
-									.detail("Reason", "IncompatibleProtocolVersion")
-									.detail("LocalVersion", currentProtocolVersion)
-									.detail("RejectedVersion", p->protocolVersion)
-									.detail("VersionMask", compatibleProtocolVersionMask)
-									.detail("Peer", p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress());
-								transport->lastIncompatibleMessage = now();
+							if(!transport->multiVersionConnections.count(connectionId)) {
+								if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
+									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
+										.detail("Reason", "IncompatibleProtocolVersion")
+										.detail("LocalVersion", currentProtocolVersion)
+										.detail("RejectedVersion", p->protocolVersion)
+										.detail("VersionMask", compatibleProtocolVersionMask)
+										.detail("Peer", p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress())
+										.detail("ConnectionId", connectionId);
+									transport->lastIncompatibleMessage = now();
+								}
+								if(!transport->incompatiblePeers.count(addr)) {
+									transport->incompatiblePeers[ addr ] = std::make_pair(connectionId, now());
+								}
+							} else if(connectionId > 1) {
+								transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
-							if(!transport->incompatiblePeers.count(addr)) {
-								transport->incompatiblePeers[ addr ] = std::make_pair(connectionId, now());
+
+							compatible = false;
+							if(p->protocolVersion < 0x0FDB00A551000000LL) {
+								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
+								throw incompatible_protocol_version();
 							}
-						} else if(connectionId > 1) {
+						}
+						else {
+							compatible = true;
+							TraceEvent("ConnectionEstablished", conn->getDebugID())
+								.detail("Peer", conn->getPeerAddress())
+								.detail("ConnectionId", connectionId);
+						}
+
+						if(connectionId > 1) {
 							transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 						}
-						throw incompatible_protocol_version();
-					}
+						unprocessed_begin += connectPacketSize;
+						expectConnectPacket = false;
 
-					if(connectionId > 1) {
-						transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
-					}
-					unprocessed_begin += connectPacketSize;
-					expectConnectPacket = false;
-
-					peerProtocolVersion = p->protocolVersion;
-					if (isOutgoing) {
-						// Outgoing connection; port information should be what we expect
-						TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
-						ASSERT( p->canonicalRemotePort == peerAddress.port );
-					} else {
-						if (p->canonicalRemotePort) {
-							peerAddress = NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort, true, peerAddress.isTLS() );
+						peerProtocolVersion = p->protocolVersion;
+						if (peer != nullptr) {
+							// Outgoing connection; port information should be what we expect
+							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
+							peer->compatible = compatible;
+							if (!compatible)
+								peer->transport->numIncompatibleConnections++;
+							ASSERT( p->canonicalRemotePort == peerAddress.port );
+						} else {
+							if (p->canonicalRemotePort) {
+								peerAddress = NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort, true, peerAddress.isTLS() );
+							}
+							peer = transport->getPeer(peerAddress);
+							peer->compatible = compatible;
+							if (!compatible)
+								peer->transport->numIncompatibleConnections++;
+							onConnected.send( peer );
+							Void _ = wait( delay(0) );  // Check for cancellation
 						}
-						onPeerAddress.send( peerAddress );
-						Void _ = wait( delay(0) );  // Check for cancellation
 					}
 				}
+				if (compatible) {
+					scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
+				}
+				else if(!expectConnectPacket) {
+					unprocessed_begin = unprocessed_end;
+					peer->incompatibleDataRead.set(true);
+				}
+
+				if (readWillBlock)
+					break;
+
+				Void _ = wait(yield(TaskReadSocket));
 			}
-			if (!expectConnectPacket)
-				scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
 
-			if (readWillBlock)
-				break;
-
-			Void _ = wait(yield(TaskReadSocket));
+			Void _ = wait( conn->onReadable() );
+			Void _ = wait(delay(0, TaskReadSocket));  // We don't want to call conn->read directly from the reactor - we could get stuck in the reactor reading 1 packet at a time
 		}
-
-		Void _ = wait( conn->onReadable() );
-		Void _ = wait(delay(0, TaskReadSocket));  // We don't want to call conn->read directly from the reactor - we could get stuck in the reactor reading 1 packet at a time
+	}
+	catch (Error& e) {
+		if (peer && !peer->compatible) {
+			ASSERT(peer->transport->numIncompatibleConnections > 0);
+			peer->transport->numIncompatibleConnections--;
+		}
+		throw;
 	}
 }
 
 ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<IConnection> conn ) {
 	try {
-		state Promise<NetworkAddress> onPeerAddress;
-		state Future<Void> reader = connectionReader( self, conn, false, onPeerAddress );
+		state Promise<Peer*> onConnected;
+		state Future<Void> reader = connectionReader( self, conn, nullptr, onConnected );
 		choose {
 			when( Void _ = wait( reader ) ) { ASSERT(false); return Void(); }
-			when( NetworkAddress pa = wait( onPeerAddress.getFuture() ) ) {
-				Peer* p = self->getPeer( pa, false );
+			when( Peer *p = wait( onConnected.getFuture() ) ) {
 				p->onIncomingConnection( conn, reader );
 			}
 			when( Void _ = wait( delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT) ) ) {
@@ -756,18 +827,26 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
 		what.serializeBinaryWriter(wr);
 		Standalone<StringRef> copy = wr.toStringRef();
+#if VALGRIND
+		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
+#endif
 
 		deliver( self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false );
 
 		return (PacketID)NULL;
 	} else {
+		bool checksumEnabled = true;
+		if (self->localAddress.isTLS() || destination.address.isTLS()) {
+			checksumEnabled = false;
+		}
+
 		++self->countPacketsGenerated;
 
 		Peer* peer = self->getPeer(destination.address);
 
-		// If there isn't an open connection or public address, we can't send
-		if (peer->outgoingConnectionIdle && !destination.address.isPublic()) {
-			TEST(true);  // Can't send to private address without an open connection
+		// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
+		if ((peer->outgoingConnectionIdle && !destination.address.isPublic()) || (!peer->compatible && destination.token != WLTOKEN_PING_PACKET)) {
+			TEST(true);  // Can't send to private address without a compatible open connection
 			return (PacketID)NULL;
 		}
 
@@ -785,34 +864,41 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		// Reserve some space for packet length and checksum, write them after serializing data
 		SplitBuffer packetInfoBuffer;
 		uint32_t len, checksum = 0;
-		int packetInfoSize = sizeof(len) + sizeof(checksum);
+		int packetInfoSize = sizeof(len);
+		if (checksumEnabled) {
+			packetInfoSize += sizeof(checksum);
+		}
+
 		wr.writeAhead(packetInfoSize , &packetInfoBuffer);
 		wr << destination.token;
 		what.serializePacketWriter(wr);
 		pb = wr.finish();
-
 		len = wr.size() - packetInfoSize;
 
-		// Find the correct place to start calculating checksum
-		uint32_t checksumUnprocessedLength = len;
-		prevBytesWritten += packetInfoSize;
-		if (prevBytesWritten >= PacketBuffer::DATA_SIZE) {
-			prevBytesWritten -= PacketBuffer::DATA_SIZE;
-			checksumPb = checksumPb->nextPacketBuffer();
-		}
+		if (checksumEnabled) {
+			// Find the correct place to start calculating checksum
+			uint32_t checksumUnprocessedLength = len;
+			prevBytesWritten += packetInfoSize;
+			if (prevBytesWritten >= PacketBuffer::DATA_SIZE) {
+				prevBytesWritten -= PacketBuffer::DATA_SIZE;
+				checksumPb = checksumPb->nextPacketBuffer();
+			}
 
-		// Checksum calculation
-		while (checksumUnprocessedLength > 0) {
-			uint32_t processLength = std::min(checksumUnprocessedLength, (uint32_t)(PacketBuffer::DATA_SIZE - prevBytesWritten));
-			checksum = crc32c_append(checksum, checksumPb->data + prevBytesWritten, processLength);
-			checksumUnprocessedLength -= processLength;
-			checksumPb = checksumPb->nextPacketBuffer();
-			prevBytesWritten = 0;
+			// Checksum calculation
+			while (checksumUnprocessedLength > 0) {
+				uint32_t processLength = std::min(checksumUnprocessedLength, (uint32_t)(PacketBuffer::DATA_SIZE - prevBytesWritten));
+				checksum = crc32c_append(checksum, checksumPb->data + prevBytesWritten, processLength);
+				checksumUnprocessedLength -= processLength;
+				checksumPb = checksumPb->nextPacketBuffer();
+				prevBytesWritten = 0;
+			}
 		}
 
 		// Write packet length and checksum into packet buffer
 		packetInfoBuffer.write(&len, sizeof(len));
-		packetInfoBuffer.write(&checksum, sizeof(checksum), sizeof(len));
+		if (checksumEnabled) {
+			packetInfoBuffer.write(&checksum, sizeof(checksum), sizeof(len));
+		}
 
 		if (len > FLOW_KNOBS->PACKET_LIMIT) {
 			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("ToPeer", destination.address).detail("Length", (int)len);
@@ -827,6 +913,16 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 			if(g_network->isSimulated())
 				self->warnAlwaysForLargePacket = false;
 		}
+
+#if VALGRIND
+		SendBuffer *checkbuf = pb;
+		while (checkbuf) {
+			int size = checkbuf->bytes_written;
+			const uint8_t* data = checkbuf->data;
+			VALGRIND_CHECK_MEM_IS_DEFINED(data, size);
+			checkbuf = checkbuf -> next;
+		}
+#endif
 
 		peer->send(pb, rp, firstUnsent);
 
@@ -850,6 +946,10 @@ void FlowTransport::sendUnreliable( ISerializeSource const& what, const Endpoint
 
 int FlowTransport::getEndpointCount() { 
 	return -1; 
+}
+
+bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
+	return self->numIncompatibleConnections;
 }
 
 void FlowTransport::createInstance( uint64_t transportId )

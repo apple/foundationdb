@@ -186,15 +186,15 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 			for( auto i = traceCounts.begin(); i != traceCounts.end(); ++i ) {
 				char buf[1024];
 				std::vector<void *> *frames = i->second.backTrace;
-				std::string backTraceStr = "addr2line -e fdbserver.debug -p -C -f -i ";
-				for (int j = 1; j < frames->size(); j++) {
+				std::string backTraceStr;
 #if defined(_WIN32)
+				for (int j = 1; j < frames->size(); j++) {
 					_snprintf(buf, 1024, "%p ", frames->at(j));
-#else
-					snprintf(buf, 1024, "%p ", frames->at(j));
-#endif
 					backTraceStr += buf;
 				}
+#else
+				backTraceStr = platform::format_backtrace(&(*frames)[0], frames->size());
+#endif
 
 				TraceEvent("MemSample")
 					.detail("Count", (int64_t)i->second.count)

@@ -31,7 +31,7 @@ ACTOR Future<Void> disableConnectionFailuresAfter( double time, std::string cont
 	Void _ = wait( delay(time) );
 
 	if(g_network->isSimulated()) {
-		g_simulator.enableConnectionFailures = false;
+		g_simulator.connectionFailuresDisableDuration = 1e6;
 		g_simulator.speedUpSimulation = true;
 		TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
 	}

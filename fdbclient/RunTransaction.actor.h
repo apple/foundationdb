@@ -64,4 +64,12 @@ runRYWTransactionFailIfLocked(Database cx, Function func) {
 	}
 }
 
+ACTOR template < class Function >
+Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
+runRYWTransactionNoRetry(Database cx, Function func) {
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue()) result = wait(func(tr));
+	Void _ = wait(tr->commit());
+	return result;
+}
 #endif

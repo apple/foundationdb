@@ -344,10 +344,10 @@ TEST_CASE("flow/flow/quorum")
 	vector<Future<int>> fs;
 	vector<Future<Void>> qs;
 	for (auto& p : ps) fs.push_back(p.getFuture());
-			
+
 	for (int i = 0; i <= ps.size(); i++)
 		qs.push_back( quorum(fs, i) );
-			
+
 	for (int i = 0; i < ps.size(); i++) {
 		ASSERT(qs[i].isReady());
 		ASSERT(!qs[i + 1].isReady());
@@ -357,7 +357,7 @@ TEST_CASE("flow/flow/quorum")
 	return Void();
 }
 
-TEST_CASE("flow/flow/trivial futures") 
+TEST_CASE("flow/flow/trivial futures")
 {
 	Future<int> invalid;
 	ASSERT(!invalid.isValid());
@@ -499,7 +499,7 @@ TEST_CASE("flow/flow/promisestream callbacks")
 	onReady(p.getFuture(), [&result](int x) { result = x; }, [&result](Error e){ result = -1; });
 
 	ASSERT(result == 0);
-			
+
 	p = PromiseStream<int>();
 
 	ASSERT(result == -1);
@@ -989,7 +989,7 @@ TEST_CASE("flow/flow/perf/actor patterns")
 			ASSERT(out2[i].isReady());
 		}
 		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-		printf("sizeof(CheeseWaitActorActor) == %d\n", sizeof(CheeseWaitActorActor));
+		printf("sizeof(CheeseWaitActorActor) == %lu\n", sizeof(CheeseWaitActorActor));
 	}
 
 	{
@@ -1140,11 +1140,11 @@ TEST_CASE("flow/flow/YieldedAsyncMap/cancel2")
 	state Future<Void> y2 = yam.onChange(2);
 
 	auto* pyam = &yam;
-	uncancellable(trigger( 
+	uncancellable(trigger(
 		[pyam](){
 			printf("Triggered\n");
-			pyam->triggerAll(); 
-		}, 
+			pyam->triggerAll();
+		},
 		delay(1)));
 
 	Void _ = wait(y1);

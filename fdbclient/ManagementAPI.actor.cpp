@@ -87,7 +87,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		return out;
 	}
 
-	std::string redundancy, log_replicas, dc="1", minDC="1";
+	std::string redundancy, log_replicas;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
 
@@ -106,10 +106,12 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		log_replicas="3";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "two_datacenter") {
-		redundancy="3"; log_replicas="3"; dc="2"; minDC="1";
+		redundancy="3";
+		log_replicas="3";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "three_datacenter") {
-		redundancy="3"; log_replicas="3"; dc="3"; minDC="2";
+		redundancy="3";
+		log_replicas="3";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAnd({
 			IRepPolicyRef(new PolicyAcross(3, "dcid", IRepPolicyRef(new PolicyOne()))),
 			IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())))
@@ -121,6 +123,15 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
+	} else if(mode == "multi_dc") {
+		redundancy="6";
+		log_replicas="4";
+		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
 	} else
 		redundancySpecified = false;
 	if (redundancySpecified) {
@@ -128,8 +139,6 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 			out[p+"storage_quorum"] = redundancy;
 		out[p+"log_replicas"] = log_replicas;
 		out[p+"log_anti_quorum"] = "0";
-		out[p+"replica_datacenters"] = dc;
-		out[p+"min_replica_datacenters"] = minDC;
 
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, storagePolicy);
@@ -197,9 +206,7 @@ ConfigurationResult::Type buildConfiguration( std::string const& configMode, std
 bool isCompleteConfiguration( std::map<std::string, std::string> const& options ) {
 	std::string p = configKeysPrefix.toString();
 
-	return options.count( p+"min_replica_datacenters" ) == 1 &&
-			options.count( p+"replica_datacenters" ) == 1 &&
-			options.count( p+"log_replicas" ) == 1 &&
+	return 	options.count( p+"log_replicas" ) == 1 &&
 			options.count( p+"log_anti_quorum" ) == 1 &&
 			options.count( p+"storage_quorum" ) == 1 &&
 			options.count( p+"storage_replicas" ) == 1 &&
@@ -243,7 +250,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
-			if ( (e.code() == error_code_not_committed || e.code() == error_code_past_version ) && creating) {
+			if ( (e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old ) && creating) {
 				// The database now exists.  Determine whether we created it or it was already existing/created by someone else.  The latter is an error.
 				tr.reset();
 				loop {
@@ -1046,6 +1053,39 @@ ACTOR Future<vector<AddressExclusion>> getExcludedServers( Database cx ) {
 	}
 }
 
+ACTOR Future<int> setDDMode( Database cx, int mode ) {
+	state Transaction tr(cx);
+	state int oldMode = -1;
+	state BinaryWriter wr(Unversioned());
+	wr << mode;
+
+	loop {
+		try {
+			Optional<Value> old = wait( tr.get( dataDistributionModeKey ) );
+			if (oldMode < 0) {
+				oldMode = 1;
+				if (old.present()) {
+					BinaryReader rd(old.get(), Unversioned());
+					rd >> oldMode;
+				}
+			}
+			if (!mode) {
+				BinaryWriter wrMyOwner(Unversioned());
+				wrMyOwner << dataDistributionModeLock;
+				tr.set( moveKeysLockOwnerKey, wrMyOwner.toStringRef() );
+			}
+
+			tr.set( dataDistributionModeKey, wr.toStringRef() );
+
+			Void _ = wait( tr.commit() );
+			return oldMode;
+		} catch (Error& e) {
+			TraceEvent("setDDModeRetrying").error(e);
+			Void _ = wait (tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion> excl ) {
 	state std::set<AddressExclusion> exclusions( excl.begin(), excl.end() );
 
@@ -1096,6 +1136,21 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 			Void _ = wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
 			Void _ = wait( tr.onError(e) );
+		}
+	}
+}
+
+ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
+	loop {
+		state Transaction tr(cx);
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.set(timeKeeperDisableKey, StringRef());
+			Void _ = wait(tr.commit());
+			return Void();
+		} catch (Error &e) {
+			Void _ = wait(tr.onError(e));
 		}
 	}
 }

@@ -23,14 +23,18 @@
 fdb_c_CFLAGS := $(fdbclient_CFLAGS)
 fdb_c_LDFLAGS := $(fdbrpc_LDFLAGS)
 fdb_c_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
+fdb_c_tests_LIBS := -Llib -lfdb_c
+fdb_c_tests_HEADERS := -Ibindings/c
 
 ifeq ($(PLATFORM),linux)
   fdb_c_LIBS += lib/libstdc++.a -lm -lpthread -lrt -ldl
   fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -static-libgcc -Wl,-z,nodelete
+  fdb_c_tests_LIBS += -lpthread
 endif
 
 ifeq ($(PLATFORM),osx)
   fdb_c_LDFLAGS += -lc++ -Xlinker -exported_symbols_list -Xlinker bindings/c/fdb_c.symbols
+  fdb_c_tests_LIBS += -lpthread
 
   lib/libfdb_c.dylib: bindings/c/fdb_c.symbols
 
@@ -74,3 +78,24 @@ fdb_c_BUILD_SOURCES += bindings/c/fdb_c.g.S
 bindings/c/foundationdb/fdb_c_options.g.h: bin/vexillographer.exe fdbclient/vexillographer/fdb.options $(ALL_MAKEFILES)
 	@echo "Building       $@"
 	@$(MONO) bin/vexillographer.exe fdbclient/vexillographer/fdb.options c $@
+
+bin/fdb_c_performance_test: bindings/c/test/performance_test.c bindings/c/test/test.h fdb_c
+	@echo "Compiling      fdb_c_performance_test"
+	@$(CC) $(CFLAGS) $(fdb_c_tests_LIBS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/performance_test.c
+
+bin/fdb_c_ryw_benchmark: bindings/c/test/ryw_benchmark.c bindings/c/test/test.h fdb_c
+	@echo "Compiling      fdb_c_ryw_benchmark"
+	@$(CC) $(CFLAGS) $(fdb_c_tests_LIBS) $(fdb_c_tests_HEADERS) -o $@ bindings/c/test/ryw_benchmark.c
+
+packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz: bin/fdb_c_performance_test bin/fdb_c_ryw_benchmark
+	@echo "Packaging      $@"
+	@rm -rf packages/fdb-c-tests-$(VERSION)-$(PLATFORM)
+	@mkdir -p packages/fdb-c-tests-$(VERSION)-$(PLATFORM)/bin
+	@cp bin/fdb_c_performance_test packages/fdb-c-tests-$(VERSION)-$(PLATFORM)/bin
+	@cp bin/fdb_c_ryw_benchmark packages/fdb-c-tests-$(VERSION)-$(PLATFORM)/bin
+	@tar -C packages -czvf $@ fdb-c-tests-$(VERSION)-$(PLATFORM) > /dev/null
+	@rm -rf packages/fdb-c-tests-$(VERSION)-$(PLATFORM)
+
+fdb_c_tests: packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz
+
+packages: fdb_c_tests

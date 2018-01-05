@@ -361,13 +361,6 @@ namespace oldTLog {
 		return Void();
 	}
 
-	KeyRange prefixRange( KeyRef prefix ) {
-		Key end = prefix;
-		UNSTOPPABLE_ASSERT( end.size() && end.end()[-1] != 0xFF );
-		++const_cast<uint8_t&>( end.end()[-1] );
-		return KeyRangeRef( prefix, end );
-	}
-
 	////// Persistence format (for self->persistentData)
 
 	// Immutable keys
@@ -567,7 +560,7 @@ namespace oldTLog {
 
 			nextVersion = std::max<Version>(nextVersion, self->persistentDataVersion);
 
-			TraceEvent("UpdateStorageVer", self->dbgid).detail("nextVersion", nextVersion).detail("persistentDataVersion", self->persistentDataVersion).detail("totalSize", totalSize);
+			//TraceEvent("UpdateStorageVer", self->dbgid).detail("nextVersion", nextVersion).detail("persistentDataVersion", self->persistentDataVersion).detail("totalSize", totalSize);
 
 			Void _ = wait( self->queueCommittedVersion.whenAtLeast( nextVersion ) );
 			Void _ = wait( delay(0, TaskUpdateStorage) );

@@ -135,7 +135,7 @@ namespace vexillographer
         private static void writeOptionsClass(TextWriter outFile, Scope scope, IEnumerable<Option> options)
         {
             string className = scope.ToString() + "s";
-            outFile.WriteLine( "package com.apple.cie.foundationdb;" );
+            outFile.WriteLine( "package com.apple.foundationdb;" );
             outFile.WriteLine();
 
             outFile.WriteLine(formatComment(0, scopeDocOptions[scope].comment +
@@ -169,9 +169,9 @@ namespace vexillographer
         private static void writePredicateClass(TextWriter outFile, Scope scope, IEnumerable<Option> options)
         {
             outFile.WriteLine(
-@"package com.apple.cie.foundationdb;
+@"package com.apple.foundationdb;
 
-import com.apple.cie.foundationdb.async.CloneableException;
+import com.apple.foundationdb.async.CloneableException;
 
 /**
  * An Error from the native layers of FoundationDB.  Each {@code FDBException} sets
@@ -239,7 +239,7 @@ public class FDBException extends RuntimeException implements CloneableException
         {
             string scopeName = scope.ToString();
 
-            outFile.WriteLine( "package com.apple.cie.foundationdb;" );
+            outFile.WriteLine( "package com.apple.foundationdb;" );
             outFile.WriteLine();
             outFile.WriteLine(formatComment(0, scopeDocOptions[scope].comment + 
                 (options.Count() == 0 ? "\n\nThere are currently no options available." : "")));

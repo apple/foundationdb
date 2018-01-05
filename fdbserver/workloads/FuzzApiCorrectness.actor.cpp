@@ -54,7 +54,7 @@ struct ExceptionContract {
 	void handleException(const Error &e) const {
 		// We should always ignore these.
 		if (e.code() == error_code_used_during_commit ||
-			e.code() == error_code_past_version ||
+			e.code() == error_code_transaction_too_old ||
 			e.code() == error_code_future_version ||
 			e.code() == error_code_transaction_cancelled ||
 			e.code() == error_code_key_too_large ||

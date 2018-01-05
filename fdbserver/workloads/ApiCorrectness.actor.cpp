@@ -90,7 +90,7 @@ public:
 	//The amount of time to run the random tests
 	double randomTestDuration;
 
-	//The maximum number of keys operated on in a transaction; used to prevent past_version errors
+	//The maximum number of keys operated on in a transaction; used to prevent transaction_too_old errors
 	int maxKeysPerTransaction;
 
 	//The number of API calls made by the random test
@@ -132,11 +132,12 @@ public:
 	}
 
 	ACTOR Future<Void> performSetup(Database cx, ApiCorrectnessWorkload *self) {
-		//Choose a random transaction type (NativeAPI, ReadYourWrites, ThreadSafe)
+		//Choose a random transaction type (NativeAPI, ReadYourWrites, ThreadSafe, MultiVersion)
 		std::vector<TransactionType> types;
 		types.push_back(NATIVE);
 		types.push_back(READ_YOUR_WRITES);
 		types.push_back(THREAD_SAFE);
+		types.push_back(MULTI_VERSION);
 
 		Void _ = wait(self->chooseTransactionFactory(cx, types));
 

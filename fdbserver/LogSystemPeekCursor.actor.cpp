@@ -21,6 +21,7 @@
 #include "LogSystem.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "Knobs.h"
+#include "fdbrpc/ReplicationUtils.h"
 
 ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore )
 			: interf(interf), tag(tag), messageVersion(begin), end(end), hasMsg(false), rd(results.arena, results.messages, Unversioned()), randomID(g_random->randomUniqueID()), poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), parallelGetMore(parallelGetMore) {
@@ -119,6 +120,10 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 		throw internal_error();
 	}
 
+	if(!self->interfaceChanged.isValid()) {
+		self->interfaceChanged = self->interf->onChange();
+	}
+
 	loop {
 		try {
 			while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
@@ -139,7 +144,9 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 					//TraceEvent("SPC_getMoreB", self->randomID).detail("has", self->hasMessage()).detail("end", res.end).detail("popped", res.popped.present() ? res.popped.get() : 0);
 					return Void();
 				}
-				when( Void _ = wait( self->interf->onChange() ) ) {
+				when( Void _ = wait( self->interfaceChanged ) ) {
+					self->interfaceChanged = self->interf->onChange();
+					self->randomID = g_random->randomUniqueID();
 					self->sequence = 0;
 					self->futureResults.clear();
 				}
@@ -150,6 +157,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 				return Void();
 			} else if(e.code() == error_code_timed_out) {
 				TraceEvent("PeekCursorTimedOut", self->randomID);
+				self->interfaceChanged = self->interf->onChange();
 				self->randomID = g_random->randomUniqueID();
 				self->sequence = 0;
 				self->futureResults.clear();
@@ -236,12 +244,14 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<O
 		serverCursors.push_back( cursor );
 	}
 	sortedVersions.resize(serverCursors.size());
+	filterLocalityDataForPolicy(this->tLogPolicy, &this->tLogLocalities);
 }
 
 ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, std::vector< LocalityData > const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor )
 	: serverCursors(serverCursors), bestServer(bestServer), readQuorum(readQuorum), currentCursor(0), hasNextMessage(false), messageVersion(messageVersion), nextVersion(nextVersion), randomID(g_random->randomUniqueID()), tLogLocalities(tLogLocalities), tLogPolicy(tLogPolicy), tLogReplicationFactor(tLogReplicationFactor) {
 	sortedVersions.resize(serverCursors.size());
 	calcHasMessage();
+	filterLocalityDataForPolicy(this->tLogPolicy, &this->tLogLocalities);
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::MergedPeekCursor::cloneNoMore() {

@@ -20,7 +20,7 @@ ifeq ($(MCS),)
   MCS := /usr/bin/dmcs
 endif
 
-CFLAGS := -Werror -Wno-error=format -fPIC -DNO_INTELLISENSE -fvisibility=hidden -DNDEBUG=1 -Wreturn-type
+CFLAGS := -Werror -Wno-error=format -fPIC -DNO_INTELLISENSE -fvisibility=hidden -DNDEBUG=1 -Wreturn-type -fno-omit-frame-pointer
 ifeq ($(RELEASE),true)
 	CFLAGS += -DFDB_CLEAN_BUILD
 endif
@@ -47,7 +47,7 @@ else ifeq ($(PLATFORM),Darwin)
   CXX := /usr/bin/clang
 
   CFLAGS += -mmacosx-version-min=10.7 -stdlib=libc++
-  CXXFLAGS += -std=c++11 -stdlib=libc++ -msse4.2 -Wno-undefined-var-template -Wno-unknown-warning-option
+  CXXFLAGS += -mmacosx-version-min=10.7 -std=c++11 -stdlib=libc++ -msse4.2 -Wno-undefined-var-template -Wno-unknown-warning-option
 
   .LIBPATTERNS := lib%.dylib lib%.a
 
@@ -127,7 +127,7 @@ else
 endif
 	@echo "#define FDB_VT_PACKAGE_NAME \"$(PACKAGE_NAME)\"" >> $@
 
-bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_java-completable fdb_node fdb_flow fdb_flow_tester fdb_go fdb_go_tester
+bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_node fdb_flow fdb_flow_tester fdb_go fdb_go_tester
 
 Makefiles: $(MK_GENERATED)
 
