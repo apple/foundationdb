@@ -1530,11 +1530,11 @@ static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configurat
 }
 
 static std::string getIssueDescription(std::string name) {
-	if(name == "unable_to_write_cluster_file") {
-		return "Unable to update cluster file.";
+	if(name == "incorrect_cluster_file_contents") {
+		return "Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.";
 	}
 
-	// FIXME: name and description will be the same unless the message is 'unable_to_write_cluster_file', which is currently the only possible message
+	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which is currently the only possible message
 	return name;
 }
 

@@ -490,7 +490,7 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 
 			ClusterConnectionString fileConnectionString;
 			if (ccf && !ccf->fileContentsUpToDate(fileConnectionString)) {
-				req.issues = LiteralStringRef("unable_to_write_cluster_file");
+				req.issues = LiteralStringRef("incorrect_cluster_file_contents");
 				if(ccf->canGetFilename()) {
 					TraceEvent(SevWarnAlways, "IncorrectClusterFileContents").detail("Filename", ccf->getFilename())
 						.detail("ConnectionStringFromFile", fileConnectionString.toString())
