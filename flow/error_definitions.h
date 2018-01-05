@@ -59,7 +59,7 @@ ERROR( default_error_or, 1035, "Default error for an ErrorOr object" )
 ERROR( accessed_unreadable, 1036, "Read or wrote an unreadable key" )
 ERROR( process_behind, 1037, "Storage process does not have recent mutations" )
 ERROR( database_locked, 1038, "Database is locked" )
-ERROR( cluster_version_changed, 1039, "Cluster has been upgraded to a new protocol version" )
+ERROR( cluster_version_changed, 1039, "The protocol version of the cluster has changed" )
 ERROR( external_client_already_loaded, 1040, "External client has already been loaded" )
 ERROR( lookup_failed, 1041, "DNS lookup failed" )
 

@@ -734,7 +734,7 @@ public:
 
 		if ( oldMasterFit < newMasterFit )
 			return false;
-		if ( oldMasterFit > newMasterFit && oldMasterFit == ProcessClass::ExcludeFit )
+		if ( oldMasterFit > newMasterFit )
 			return true;
 
 		// Check tLog fitness
@@ -769,7 +769,7 @@ public:
 
 		if(oldInFit.betterInDatacenterFitness(newInFit)) return false;
 
-		if(oldMasterFit > newMasterFit || oldTLogFit > newTLotFit || oldInFit > newInFit) {
+		if(oldTLogFit > newTLotFit || oldInFit > newInFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", newMasterFit)
 				.detail("oldTLogFitC", oldTLogFit.tlogCount).detail("newTLotFitC", newTLotFit.tlogCount)
 				.detail("oldTLogWorstFitT", oldTLogFit.worstFit).detail("newTLotWorstFitT", newTLotFit.worstFit)

@@ -168,7 +168,6 @@ namespace vexillographer
 
         private static void writePredicateClass(TextWriter outFile, Scope scope, IEnumerable<Option> options)
         {
-            string className = scope.ToString() + "s";
             outFile.WriteLine(
 @"package com.apple.foundationdb;
 

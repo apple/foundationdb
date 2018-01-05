@@ -1237,11 +1237,11 @@ namespace fileBackup {
 			// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
 			double timeElapsed;
 			if(snapshotTargetEndVersion > snapshotBeginVersion)
-				timeElapsed = std::max(1.0, (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion));
+				timeElapsed = std::min(1.0, (double)(nextDispatchVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion));
 			else
 				timeElapsed = 1.0;
 
-			state int countExpectedShardsDone = std::min<int>(countAllShards, countAllShards * timeElapsed);
+			state int countExpectedShardsDone = countAllShards * timeElapsed;
 			state int countShardsToDispatch = std::max<int>(0, countExpectedShardsDone - countShardsDone);
 
 			TraceEvent("FileBackupSnapshotDispatchStats")
