@@ -69,6 +69,7 @@ struct WorkerInterface {
 
 struct InitializeTLogRequest {
 	UID recruitmentID;
+	Optional<UID> syncLogId;
 	LogSystemConfig recoverFrom;
 	Version recoverAt;
 	Version knownCommittedVersion;
@@ -82,7 +83,7 @@ struct InitializeTLogRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & remoteTag & reply;
+		ar & recruitmentID & syncLogId & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & remoteTag & reply;
 	}
 };
 

@@ -1187,7 +1187,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 }
 
 ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, TransactionInfo info ) {
-	state Version ver = wait(version);
+	Version ver = wait(version);
 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.AfterVersion");

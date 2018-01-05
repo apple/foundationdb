@@ -957,6 +957,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, uint16_t minTag, int8_t remoteLocality ) 
 	{
+		TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
 		state RecruitRemoteFromConfigurationReply remoteWorkers = wait( fRemoteWorkers );
 		
 		state Reference<LogSet> logSet = Reference<LogSet>( new LogSet() );
@@ -977,6 +978,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logRouterInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.logRouters[i%remoteWorkers.logRouters.size()].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		}
 
+		TraceEvent("RemoteLogRecruitment_RecruitingLogRouters");
 		Void _ = wait( waitForAll(logRouterInitializationReplies) );
 
 		for( int i = 0; i < logRouterInitializationReplies.size(); i++ ) {
@@ -993,6 +995,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = remoteRecruitmentID;
+			req.syncLogId = self->tLogs[0]->logServers[0]->get().id();
 			req.storeType = configuration.tLogDataStoreType;
 			req.recoverFrom = oldLogSystem->getLogSystemConfig();
 			req.recoverAt = oldLogSystem->epochEndVersion.get();
@@ -1017,6 +1020,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ )
 			remoteTLogInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor( remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
+		TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs");
 		Void _ = wait( waitForAll(remoteTLogInitializationReplies) );
 
 		for( int i = 0; i < remoteTLogInitializationReplies.size(); i++ ) {
@@ -1031,7 +1035,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		self->remoteRecoveryComplete = waitForAll(recoveryComplete);
 		logSet->logRouters.resize(remoteWorkers.remoteTLogs.size());
 		self->tLogs.push_back( logSet );
-
+		TraceEvent("RemoteLogRecruitment_CompletingRecovery");
 		return Void();
 	}
 
