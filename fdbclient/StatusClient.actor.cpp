@@ -305,12 +305,13 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<ClusterConnectionFile> 
 	statusObj["cluster_file"] = statusObjClusterFile;
 
 	if (!contentsUpToDate){
-		std::string description = "Cluster file is not up to date.\nIt contains the connection string: ";
+		std::string description = "Cluster file contents do not match current cluster connection string.";
+		description += "\nThe file contains the connection string: ";
 		description += ClusterConnectionFile(f->getFilename()).getConnectionString().toString().c_str();
-		description += "\nThe original connection string is: ";
+		description += "\nThe current connection string is: ";
 		description += f->getConnectionString().toString().c_str();
-		description += "\nThis must mean that file permissions or other platform issues have prevented the file from being updated. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
-		messages->push_back(makeMessage("inconsistent_cluster_file", description.c_str()));
+		description += "\nVerify cluster file is writable and has not been overwritten externally. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
+		messages->push_back(makeMessage("incorrect_cluster_file_contents", description.c_str()));
 	}
 
 	return statusObj;
