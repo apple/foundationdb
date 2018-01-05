@@ -446,7 +446,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 
 		ClusterConnectionString fileConnectionString;
 		if (connFile && !connFile->fileContentsUpToDate(fileConnectionString)) {
-			req.issues = LiteralStringRef("unable_to_write_cluster_file");
+			req.issues = LiteralStringRef("incorrect_cluster_file_contents");
 			if(connFile->canGetFilename()) {
 				TraceEvent(SevWarnAlways, "IncorrectClusterFileContents").detail("Filename", connFile->getFilename())
 					.detail("ConnectionStringFromFile", fileConnectionString.toString())
