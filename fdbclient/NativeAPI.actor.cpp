@@ -1107,7 +1107,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	loop {
 		ssi = cx->getCachedLocation( key );
 		if (!ssi.second) {
-			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info, ver ) );
+			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
 			ssi = std::move(ssi2);
 		} else {
 			bool onlyEndpointFailed = false;
@@ -1260,7 +1260,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 	loop {
 		state pair<KeyRange, Reference<LocationInfo>> ssi = cx->getCachedLocation( key );
 		if (!ssi.second) {
-			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info, ver ) );
+			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
 			ssi = std::move(ssi2);
 		} else {
 			bool onlyEndpointFailed = false;
@@ -1273,7 +1273,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 
 			if( onlyEndpointFailed ) {
 				cx->invalidateCache( key );
-				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info, ver ) );
+				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
 				ssi = std::move(ssi2);
 			}
 		}
