@@ -92,8 +92,7 @@ public abstract class AbstractTester {
             if (!args.useExternalClient()) {
                 throw new IllegalArgumentException("Cannot enable callbacks on external thread without using external client");
             }
-            throw new IllegalArgumentException("Cannot enable callbacks on external thread in Java");
-            //fdb.options().setCallbacksOnExternalThreads();
+            fdb.options().setCallbacksOnExternalThreads();
         }
         if (args.useExternalClient()) {
             fdb.options().setDisableLocalClient();

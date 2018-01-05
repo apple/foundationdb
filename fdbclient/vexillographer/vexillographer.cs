@@ -132,28 +132,28 @@ namespace vexillographer
                     {
                         var paramTypeStr = oDoc.AttributeOrNull("paramType");
                         ParamType p = paramTypeStr == null ? ParamType.None : (ParamType)Enum.Parse(typeof(ParamType), paramTypeStr);
-						bool hidden = oDoc.AttributeOrNull("hidden") == "true";
-						string disableOn = oDoc.AttributeOrNull("disableOn");
-						bool disabled = false;
-						if(disableOn != null)
-						{
-							string[] disabledBindings = disableOn.Split(',');
-							disabled = disabledBindings.Contains(binding);
-						}
+                        bool hidden = oDoc.AttributeOrNull("hidden") == "true";
+                        string disableOn = oDoc.AttributeOrNull("disableOn");
+                        bool disabled = false;
+                        if(disableOn != null)
+                        {
+                            string[] disabledBindings = disableOn.Split(',');
+                            disabled = disabledBindings.Contains(binding);
+                        }
 
-						if (!disabled)
-						{
-							list.Add(new Option
-							{
-								scope = s,
-								name = oDoc.AttributeNonNull("name"),
-								code = int.Parse(oDoc.AttributeNonNull("code")),
-								paramType = p,
-								paramDesc = oDoc.AttributeOrNull("paramDescription"),
-								comment = oDoc.AttributeOrNull("description"),
-								hidden = hidden
-							});
-						}
+                        if (!disabled)
+                        {
+                            list.Add(new Option
+                            {
+                                scope = s,
+                                name = oDoc.AttributeNonNull("name"),
+                                code = int.Parse(oDoc.AttributeNonNull("code")),
+                                paramType = p,
+                                paramDesc = oDoc.AttributeOrNull("paramDescription"),
+                                comment = oDoc.AttributeOrNull("description"),
+                                hidden = hidden
+                            });
+                        }
                     }
                 }
                 options = list;
