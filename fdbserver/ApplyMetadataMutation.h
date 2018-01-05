@@ -42,54 +42,58 @@ struct applyMutationsData {
 	Reference<KeyRangeMap<Version>> keyVersion;
 };
 
+// It is incredibly important that any modifications to txnStateStore are done in such a way that
+// the same operations will be done on all proxies at the same time. Otherwise, the data stored in
+// txnStateStore will become corrupted.
 static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem = Reference<ILogSystem>(), Version popVersion = 0,
-	KeyRangeMap<std::set<Key> >* vecBackupKeys = NULL, KeyRangeMap<std::vector<Tag>>* keyTags = NULL, std::map<Key, applyMutationsData>* uid_applyMutationsData = NULL,
-	RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(), Database cx = Database(), NotifiedVersion* commitVersion = NULL, std::map<UID, Tag> *tagCache = NULL, bool initialCommit = false) {
+	KeyRangeMap<std::set<Key> >* vecBackupKeys = NULL, KeyRangeMap<ServerCacheInfo>* keyInfo = NULL, std::map<Key, applyMutationsData>* uid_applyMutationsData = NULL,
+	RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(), Database cx = Database(), NotifiedVersion* commitVersion = NULL, std::map<UID, Reference<StorageInfo>>* storageCache = NULL, bool initialCommit = false ) {
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
 
 		if (m.param1.size() && m.param1[0] == systemKeys.begin[0] && m.type == MutationRef::SetValue) {
 			if(m.param1.startsWith(keyServersPrefix)) {
-				if(keyTags) {
+				if(keyInfo) {
 					KeyRef k = m.param1.removePrefix(keyServersPrefix);
 					if(k != allKeys.end) {
-						KeyRef end = keyTags->rangeContaining(k).end();
+						KeyRef end = keyInfo->rangeContaining(k).end();
 						KeyRangeRef insertRange(k,end);
 						vector<UID> src, dest;
 						decodeKeyServersValue(m.param2, src, dest);
-						std::set<Tag> tags;
 
-						if(!tagCache) {
-							for(auto id : src)
-								tags.insert(decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(id)).get().get()));
-							for(auto id : dest)
-								tags.insert(decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(id)).get().get()));
-						}
-						else {
-							Tag tag;
-							for(auto id : src) {
-								auto tagItr = tagCache->find(id);
-								if(tagItr == tagCache->end()) {
-									tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-									(*tagCache)[id] = tag;
-								} else {
-									tag = tagItr->second;
-								}
-								tags.insert( tag );
+						ASSERT(storageCache);
+						Reference<StorageInfo> storageInfo;
+						ServerCacheInfo info;
+						
+						for(auto id : src) {
+							auto cacheItr = storageCache->find(id);
+							if(cacheItr == storageCache->end()) {
+								storageInfo = Reference<StorageInfo>( new StorageInfo() );
+								storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
+								storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
+								(*storageCache)[id] = storageInfo;
+							} else {
+								storageInfo = cacheItr->second;
 							}
-							for(auto id : dest) {
-								auto tagItr = tagCache->find(id);
-								if(tagItr == tagCache->end()) {
-									tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
-									(*tagCache)[id] = tag;
-								} else {
-									tag = tagItr->second;
-								}
-								tags.insert( tag );
-							}
+							ASSERT(storageInfo->tag != invalidTag);
+							info.tags.push_back( storageInfo->tag );
+							info.info.push_back( storageInfo );
 						}
-
-						keyTags->insert(insertRange,std::vector<Tag>(tags.begin(), tags.end()));
+						for(auto id : dest) {
+							auto cacheItr = storageCache->find(id);
+							if(cacheItr == storageCache->end()) {
+								storageInfo = Reference<StorageInfo>( new StorageInfo() );
+								storageInfo->tag = decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor(id) ).get().get() );
+								storageInfo->interf = decodeServerListValue( txnStateStore->readValue( serverListKeyFor(id) ).get().get() );
+								(*storageCache)[id] = storageInfo;
+							} else {
+								storageInfo = cacheItr->second;
+							}
+							ASSERT(storageInfo->tag != invalidTag);
+							info.tags.push_back( storageInfo->tag );
+						}
+						uniquify(info.tags);
+						keyInfo->insert(insertRange,info);
 					}
 				}
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
@@ -119,33 +123,54 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				}
 				if(!initialCommit) {
 					txnStateStore->set(KeyValueRef(m.param1, m.param2));
-					if(tagCache) {
-						(*tagCache)[id] = tag;
+					if(storageCache) {
+						auto cacheItr = storageCache->find(id);
+						if(cacheItr == storageCache->end()) {
+							Reference<StorageInfo> storageInfo = Reference<StorageInfo>( new StorageInfo() );
+							storageInfo->tag = tag;
+							Optional<Key> interfKey = txnStateStore->readValue( serverListKeyFor(id) ).get();
+							if(interfKey.present()) {
+								storageInfo->interf = decodeServerListValue( interfKey.get() );
+							}
+							(*storageCache)[id] = storageInfo;
+						} else {
+							cacheItr->second->tag = tag;
+						}
 					}
 				}
 			}
 			else if (m.param1.startsWith(configKeysPrefix) || m.param1 == coordinatorsKey) {
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().cast_to<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
-					auto t = txnStateStore->readValue(m.param1).get();
-					if (logSystem && m.param1.startsWith( excludedServersPrefix )) {
-						// If one of our existing tLogs is now excluded, we have to die and recover
-						auto addr = decodeExcludedServersKey(m.param1);
-						for( auto& logs : logSystem->getLogSystemConfig().tLogs ) {
-							for( auto& tl : logs.tLogs ) {
-								if(!tl.present() || addr.excludes(tl.interf().commit.getEndpoint().address)) {
-									TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL).detail("addr", addr.toString());
-									if(confChange) *confChange = true;
-								}
-							}
-						}
-					} else if(m.param1 != excludedServersVersionKey) {
+					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
+						auto t = txnStateStore->readValue(m.param1).get();
 						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL);
 						if(confChange) *confChange = true;
 					}
 				}
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
-			else if (m.param1.startsWith(serverListPrefix) || m.param1 == databaseLockedKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
+			else if (m.param1.startsWith(serverListPrefix)) {
+				if(!initialCommit) {
+					txnStateStore->set(KeyValueRef(m.param1, m.param2));
+					if(storageCache) {
+						UID id = decodeServerListKey(m.param1);
+						StorageServerInterface interf = decodeServerListValue(m.param2);
+
+						auto cacheItr = storageCache->find(id);
+						if(cacheItr == storageCache->end()) {
+							Reference<StorageInfo> storageInfo = Reference<StorageInfo>( new StorageInfo() );
+							storageInfo->interf = interf;
+							Optional<Key> tagKey = txnStateStore->readValue( serverTagKeyFor(id) ).get();
+							if(tagKey.present()) {
+								storageInfo->tag = decodeServerTagValue( tagKey.get() );
+							}
+							(*storageCache)[id] = storageInfo;
+						} else {
+							cacheItr->second->interf = interf;
+						}
+					}
+				}
+			} else if( m.param1 == databaseLockedKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
 				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
@@ -232,9 +257,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 
 			if (keyServersKeys.intersects(range)) {
 				KeyRangeRef r = range & keyServersKeys;
-				if(keyTags) {
+				if(keyInfo) {
 					KeyRangeRef clearRange(r.begin.removePrefix(keyServersPrefix), r.end.removePrefix(keyServersPrefix));
-					keyTags->insert(clearRange, clearRange.begin == StringRef() ? vector<Tag>() : keyTags->rangeContainingKeyBefore(clearRange.begin).value());
+					keyInfo->insert(clearRange, clearRange.begin == StringRef() ? ServerCacheInfo() : keyInfo->rangeContainingKeyBefore(clearRange.begin).value());
 				}
 
 				if(!initialCommit) txnStateStore->clear(r);
@@ -271,7 +296,13 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						}
 					}
 				}
-				if(!initialCommit) txnStateStore->clear( range & serverTagKeys );
+				if(!initialCommit) {
+					KeyRangeRef clearRange = range & serverTagKeys;
+					txnStateStore->clear(clearRange);
+					if(storageCache && clearRange.singleKeyRange()) {
+						storageCache->erase(decodeServerTagKey(clearRange.begin));
+					}
+				}
 			}
 			if (range.contains(coordinatorsKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(coordinatorsKey));

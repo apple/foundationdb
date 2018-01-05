@@ -256,6 +256,7 @@ namespace dbBackup {
 				state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>( new ReadYourWritesTransaction(cx) );
 				loop{
 					try {
+						tr->reset();
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 						state Key prefix = task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsKeyVersionMapRange.begin);
@@ -265,14 +266,10 @@ namespace dbBackup {
 						state Future<Optional<Value>> rangeCountValue = tr->get(rangeCountKey, true);
 						state Future<Standalone<RangeResultRef>> prevRange = tr->getRange(firstGreaterOrEqual(prefix), lastLessOrEqual(rangeBegin.withPrefix(prefix)), 1, true, true);
 						state Future<Standalone<RangeResultRef>> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)), firstGreaterOrEqual(strinc(prefix)), 1, true, false);
-						state Future<bool> verified = taskBucket->keepRunning(tr, task);
+						state Future<Void> verified = taskBucket->keepRunning(tr, task);
 
 						Void _ = wait( checkDatabaseLock(tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())) );
 						Void _ = wait( success(backupVersions) && success(logVersionValue) && success(rangeCountValue) && success(prevRange) && success(nextRange) && success(verified) );
-
-						if(!verified.get()) {
-							return Void();
-						}
 
 						int64_t rangeCount = 0;
 						if(rangeCountValue.get().present()) {
@@ -654,30 +651,11 @@ namespace dbBackup {
 
 			for (int i = 0; i < ranges.size(); ++i) {
 				results.push_back(PromiseStream<RCGroup>());
-				rc.push_back(readCommitted(taskBucket->src, results[i], Future<Void>(Void()), lock, ranges[i], decodeBKMutationLogKey, false, true, true, nullptr));
+				rc.push_back(readCommitted(taskBucket->src, results[i], Future<Void>(Void()), lock, ranges[i], decodeBKMutationLogKey, true, true, true, nullptr));
 				dump.push_back(dumpData(cx, task, results[i], lock.getPtr(), taskBucket));
 			}
 
-			state Future<Void> dumpComplete = waitForAll(dump);
-
-			try {
-				loop {
-					choose {
-						when( Void _ = wait(dumpComplete) ) { break; }
-						when( Void _ = wait(delay((CLIENT_KNOBS->TASKBUCKET_TIMEOUT_VERSIONS/2)/CLIENT_KNOBS->CORE_VERSIONSPERSECOND)) ) {
-							bool saveResult = wait( taskBucket->saveAndExtend(cx, task) );
-							if(!saveResult) {
-								return Void();
-							}
-						}
-					}
-				}
-			}
-			catch (Error &e) {
-				if (e.code() == error_code_backup_error)
-					return Void();
-				throw;
-			}
+			Void _ = wait(waitForAll(dump));
 
 			if (newEndVersion < endVersion) {
 				task->params[CopyLogRangeTaskFunc::keyNextBeginVersion] = BinaryWriter::toValue(newEndVersion, Unversioned());
@@ -912,6 +890,7 @@ namespace dbBackup {
 				return Void();
 			}
 
+			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			UID logUid = BinaryReader::fromStringRef<UID>(task->params[DatabaseBackupAgent::keyConfigLogUid], Unversioned());
 			Key logsPath = uidPrefixKey(applyLogKeys.begin, logUid);
 			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
@@ -1513,53 +1492,74 @@ public:
 
 	ACTOR static Future<Void> abortBackup(DatabaseBackupAgent* backupAgent, Database cx, Key tagName, bool partial) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state UID logUid;
+		state Key logUid;
 		state Value backupUid;
 
 		loop {
 			try {
-				UID _logUid = wait(backupAgent->getLogUid(tr, tagName));
-				logUid = _logUid;
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 
-				int status = wait(backupAgent->getStateValue(tr, logUid));
+				UID _logUid = wait(backupAgent->getLogUid(tr, tagName));
+				logUid = BinaryWriter::toValue(_logUid, Unversioned());
+
+				int status = wait(backupAgent->getStateValue(tr, _logUid));
 				if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
 					throw backup_unneeded();
 				}
 
-				state Version current = wait(tr->getReadVersion());
-				Optional<Value> _backupUid = wait(tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId)));
+				Optional<Value> _backupUid = wait(tr->get(backupAgent->states.get(logUid).pack(DatabaseBackupAgent::keyFolderId)));
 				backupUid = _backupUid.get();
 
 				// Clearing the folder id will prevent future tasks from executing
-				tr->clear(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).range());
+				tr->clear(backupAgent->config.get(logUid).range());
 
 				// Clearing the end version of apply mutation cancels ongoing apply work
-				const auto& log_uid = BinaryWriter::toValue(logUid, Unversioned());
-				tr->clear(log_uid.withPrefix(applyMutationsEndRange.begin));
+				tr->clear(logUid.withPrefix(applyMutationsEndRange.begin));
 
-				// Ensure that we're at a version higher than the data that we've written.
-				Optional<Value> lastApplied = wait(tr->get(log_uid.withPrefix(applyMutationsBeginRange.begin)));
-				if (lastApplied.present()) {
-					Version applied = BinaryReader::fromStringRef<Version>(lastApplied.get(), Unversioned());
-					if (current <= applied) {
-						TraceEvent("DBA_abort_version_upgrade").detail("src", applied).detail("dest", current);
-						TEST(true);  // Upgrading version of local database.
-						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(applied+1, Unversioned()));
-					}
-				}
+				tr->clear(prefixRange(logUid.withPrefix(applyLogKeys.begin)));
 
-				Key logsPath = uidPrefixKey(applyLogKeys.begin, logUid);
-				tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
-
-				tr->set(StringRef(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyStateStatus)), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_PARTIALLY_ABORTED)));
+				tr->set(StringRef(backupAgent->states.get(logUid).pack(DatabaseBackupAgent::keyStateStatus)), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_PARTIALLY_ABORTED)));
 
 				Void _ = wait(tr->commit());
 				TraceEvent("DBA_Abort").detail("commitVersion", tr->getCommittedVersion());
 				break;
 			}
 			catch (Error &e) {
+				Void _ = wait(tr->onError(e));
+			}
+		}
+
+		tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+		loop {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			// dumpData's commits are unstoppable, and we need to make sure that no dumpData commits
+			// happen after this transaction, as it would mean that the applyMutationsBeginRange read we
+			// do isn't the final value, and thus a greater version of commits could have been applied.
+			// Thus, we need to commit it against the same proxy that all dumpData transactions were
+			// submitted to. The transaction above will stop any further dumpData calls from adding
+			// transactions to the proxy's commit promise stream, so our commit will come after all
+			// dumpData transactions.
+			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
+			try {
+				// Ensure that we're at a version higher than the data that we've written.
+				Optional<Value> lastApplied = wait(tr->get(logUid.withPrefix(applyMutationsBeginRange.begin)));
+				if (lastApplied.present()) {
+					Version current = tr->getReadVersion().get();
+					Version applied = BinaryReader::fromStringRef<Version>(lastApplied.get(), Unversioned());
+					if (current <= applied) {
+						TraceEvent("DBA_abort_version_upgrade").detail("src", applied).detail("dest", current);
+						TEST(true);  // Upgrading version of local database.
+						// The +1 is because we want to make sure that a versionstamped operation can't reuse
+						// the same version as an already-applied transaction.
+						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(applied+1, Unversioned()));
+					}
+				}
+				Void _ = wait(tr->commit());
+				break;
+			} catch (Error &e) {
 				Void _ = wait(tr->onError(e));
 			}
 		}
@@ -1573,19 +1573,16 @@ public:
 			try {
 				srcTr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> v = wait( srcTr->get( backupAgent->sourceStates.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId) ) );
+				Optional<Value> v = wait( srcTr->get( backupAgent->sourceStates.get(logUid).pack(DatabaseBackupAgent::keyFolderId) ) );
 
 				if(v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) > BinaryReader::fromStringRef<Version>(backupUid, Unversioned()))
 					break;
 
 				srcTr->set( backupAgent->sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_ABORTED) ));
-				srcTr->set( backupAgent->sourceStates.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId), backupUid );
+				srcTr->set( backupAgent->sourceStates.get(logUid).pack(DatabaseBackupAgent::keyFolderId), backupUid );
 
-				Key logsPath = uidPrefixKey(backupLogKeys.begin, logUid);
-				Key configPath = uidPrefixKey(logRangesRange.begin, logUid);
-
-				srcTr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
-				srcTr->clear(KeyRangeRef(configPath, strinc(configPath)));
+				srcTr->clear(prefixRange(logUid.withPrefix(backupLogKeys.begin)));
+				srcTr->clear(prefixRange(logUid.withPrefix(logRangesRange.begin)));
 
 				Void _ = wait(srcTr->commit());
 				break;
@@ -1601,12 +1598,12 @@ public:
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Optional<Value> v = wait(tr->get(StringRef(backupAgent->config.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyFolderId))));
+				Optional<Value> v = wait(tr->get(StringRef(backupAgent->config.get(logUid).pack(DatabaseBackupAgent::keyFolderId))));
 				if(v.present()) {
 					return Void();
 				}
 
-				tr->set(StringRef(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned())).pack(DatabaseBackupAgent::keyStateStatus)), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
+				tr->set(StringRef(backupAgent->states.get(logUid).pack(DatabaseBackupAgent::keyStateStatus)), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
 
 				Void _ = wait(tr->commit());
 
@@ -1637,6 +1634,8 @@ public:
 
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				int backupStateInt = wait(backupAgent->getStateValue(tr, logUid));
 				state BackupAgentBase::enumState backupState = (BackupAgentBase::enumState)backupStateInt;
 
@@ -1720,6 +1719,11 @@ public:
 						double secondsBehind = ((double)(sourceVersion - destApplyBegin))/CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 						statusText += format("\nThe DR is %.6f seconds behind.\n", secondsBehind);
 					}
+				}
+
+				Optional<Value> paused = wait(fPaused);
+				if(paused.present()) {
+					statusText += format("\nAll DR agents have been paused.\n");
 				}
 
 				break;

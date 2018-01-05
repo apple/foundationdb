@@ -28,6 +28,10 @@
 #include "crc32c.h"
 #include "simulator.h"
 
+#if VALGRIND
+#include <memcheck.h>
+#endif
+
 static NetworkAddress g_currentDeliveryPeerAddress;
 
 const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);
@@ -173,6 +177,7 @@ public:
 	Int64MetricHandle countConnClosedWithoutError;
 
 	std::map<NetworkAddress, std::pair<uint64_t, double>> incompatiblePeers;
+	uint32_t numIncompatibleConnections;
 	std::map<uint64_t, double> multiVersionConnections;
 	double lastIncompatibleMessage;
 	uint64_t transportId;
@@ -532,6 +537,9 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 			}
 		}
 
+#if VALGRIND
+		VALGRIND_CHECK_MEM_IS_DEFINED(p, packetLen);
+#endif
 		ArenaReader reader( arena, StringRef(p, packetLen), AssumeVersion(peerProtocolVersion) );
 		UID token; reader >> token;
 
@@ -565,113 +573,125 @@ ACTOR static Future<Void> connectionReader(
 	if (peer == nullptr) { 
 		ASSERT( !peerAddress.isPublic() );
 	}
-
-	loop {
+	try {
 		loop {
-			int readAllBytes = buffer_end - unprocessed_end;
-			if (readAllBytes < 4096) {
-				Arena newArena;
-				int unproc_len = unprocessed_end - unprocessed_begin;
-				int len = std::max( 65536, unproc_len*2 );
-				uint8_t* newBuffer = new (newArena) uint8_t[ len ];
-				memcpy( newBuffer, unprocessed_begin, unproc_len );
-				arena = newArena;
-				unprocessed_begin = newBuffer;
-				unprocessed_end = newBuffer + unproc_len;
-				buffer_end = newBuffer + len;
-				readAllBytes = buffer_end - unprocessed_end;
-			}
+			loop {
+				int readAllBytes = buffer_end - unprocessed_end;
+				if (readAllBytes < 4096) {
+					Arena newArena;
+					int unproc_len = unprocessed_end - unprocessed_begin;
+					int len = std::max( 65536, unproc_len*2 );
+					uint8_t* newBuffer = new (newArena) uint8_t[ len ];
+					memcpy( newBuffer, unprocessed_begin, unproc_len );
+					arena = newArena;
+					unprocessed_begin = newBuffer;
+					unprocessed_end = newBuffer + unproc_len;
+					buffer_end = newBuffer + len;
+					readAllBytes = buffer_end - unprocessed_end;
+				}
 
-			int readBytes = conn->read( unprocessed_end, buffer_end );
-			if (!readBytes) break;
-			state bool readWillBlock = readBytes != readAllBytes;
-			unprocessed_end += readBytes;
+				int readBytes = conn->read( unprocessed_end, buffer_end );
+				if (!readBytes) break;
+				state bool readWillBlock = readBytes != readAllBytes;
+				unprocessed_end += readBytes;
 			
-			if (expectConnectPacket && unprocessed_end-unprocessed_begin>=CONNECT_PACKET_V0_SIZE) {
-				// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
-				ConnectPacket* p = (ConnectPacket*)unprocessed_begin;
+				if (expectConnectPacket && unprocessed_end-unprocessed_begin>=CONNECT_PACKET_V0_SIZE) {
+					// At the beginning of a connection, we expect to receive a packet containing the protocol version and the listening port of the remote process
+					ConnectPacket* p = (ConnectPacket*)unprocessed_begin;
 				
-				uint64_t connectionId = 0;
-				int32_t connectPacketSize = p->minimumSize();
-				if ( unprocessed_end-unprocessed_begin >= connectPacketSize ) {
-					if(p->protocolVersion >= 0x0FDB00A444020001) {
-						connectionId = p->connectionId;
-					}
+					uint64_t connectionId = 0;
+					int32_t connectPacketSize = p->minimumSize();
+					if ( unprocessed_end-unprocessed_begin >= connectPacketSize ) {
+						if(p->protocolVersion >= 0x0FDB00A444020001) {
+							connectionId = p->connectionId;
+						}
 						
-					if( (p->protocolVersion&compatibleProtocolVersionMask) != (currentProtocolVersion&compatibleProtocolVersionMask) ) {
-						NetworkAddress addr = p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress();
-						if(connectionId != 1) addr.port = 0;
+						if( (p->protocolVersion&compatibleProtocolVersionMask) != (currentProtocolVersion&compatibleProtocolVersionMask) ) {
+							NetworkAddress addr = p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress();
+							if(connectionId != 1) addr.port = 0;
 						
-						if(!transport->multiVersionConnections.count(connectionId)) {
-							if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
-								TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
-									.detail("Reason", "IncompatibleProtocolVersion")
-									.detail("LocalVersion", currentProtocolVersion)
-									.detail("RejectedVersion", p->protocolVersion)
-									.detail("VersionMask", compatibleProtocolVersionMask)
-									.detail("Peer", p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress())
-									.detail("ConnectionId", connectionId);
-								transport->lastIncompatibleMessage = now();
+							if(!transport->multiVersionConnections.count(connectionId)) {
+								if(now() - transport->lastIncompatibleMessage > FLOW_KNOBS->CONNECTION_REJECTED_MESSAGE_DELAY) {
+									TraceEvent(SevWarn, "ConnectionRejected", conn->getDebugID())
+										.detail("Reason", "IncompatibleProtocolVersion")
+										.detail("LocalVersion", currentProtocolVersion)
+										.detail("RejectedVersion", p->protocolVersion)
+										.detail("VersionMask", compatibleProtocolVersionMask)
+										.detail("Peer", p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress())
+										.detail("ConnectionId", connectionId);
+									transport->lastIncompatibleMessage = now();
+								}
+								if(!transport->incompatiblePeers.count(addr)) {
+									transport->incompatiblePeers[ addr ] = std::make_pair(connectionId, now());
+								}
+							} else if(connectionId > 1) {
+								transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 							}
-							if(!transport->incompatiblePeers.count(addr)) {
-								transport->incompatiblePeers[ addr ] = std::make_pair(connectionId, now());
+
+							compatible = false;
+							if(p->protocolVersion < 0x0FDB00A551000000LL) {
+								// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
+								throw incompatible_protocol_version();
 							}
-						} else if(connectionId > 1) {
+						}
+						else {
+							compatible = true;
+							TraceEvent("ConnectionEstablished", conn->getDebugID())
+								.detail("Peer", conn->getPeerAddress())
+								.detail("ConnectionId", connectionId);
+						}
+
+						if(connectionId > 1) {
 							transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
 						}
+						unprocessed_begin += connectPacketSize;
+						expectConnectPacket = false;
 
-						compatible = false;
-						if(p->protocolVersion < 0x0FDB00A551000000LL) {
-							// Older versions expected us to hang up. It may work even if we don't hang up here, but it's safer to keep the old behavior.
-							throw incompatible_protocol_version();
+						peerProtocolVersion = p->protocolVersion;
+						if (peer != nullptr) {
+							// Outgoing connection; port information should be what we expect
+							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
+							peer->compatible = compatible;
+							if (!compatible)
+								peer->transport->numIncompatibleConnections++;
+							ASSERT( p->canonicalRemotePort == peerAddress.port );
+						} else {
+							if (p->canonicalRemotePort) {
+								peerAddress = NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort, true, peerAddress.isTLS() );
+							}
+							peer = transport->getPeer(peerAddress);
+							peer->compatible = compatible;
+							if (!compatible)
+								peer->transport->numIncompatibleConnections++;
+							onConnected.send( peer );
+							Void _ = wait( delay(0) );  // Check for cancellation
 						}
-					}
-					else {
-						compatible = true;
-						TraceEvent("ConnectionEstablished", conn->getDebugID())
-							.detail("Peer", conn->getPeerAddress())
-							.detail("ConnectionId", connectionId);
-					}
-
-					if(connectionId > 1) {
-						transport->multiVersionConnections[connectionId] = now() + FLOW_KNOBS->CONNECTION_ID_TIMEOUT;
-					}
-					unprocessed_begin += connectPacketSize;
-					expectConnectPacket = false;
-
-					peerProtocolVersion = p->protocolVersion;
-					if (peer != nullptr) {
-						// Outgoing connection; port information should be what we expect
-						TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
-						peer->compatible = compatible;
-						ASSERT( p->canonicalRemotePort == peerAddress.port );
-					} else {
-						if (p->canonicalRemotePort) {
-							peerAddress = NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort, true, peerAddress.isTLS() );
-						}
-						peer = transport->getPeer(peerAddress);
-						peer->compatible = compatible;
-						onConnected.send( peer );
-						Void _ = wait( delay(0) );  // Check for cancellation
 					}
 				}
-			}
-			if (compatible) {
-				scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
-			}
-			else if(!expectConnectPacket) {
-				unprocessed_begin = unprocessed_end;
-				peer->incompatibleDataRead.set(true);
+				if (compatible) {
+					scanPackets( transport, unprocessed_begin, unprocessed_end, arena, peerAddress, peerProtocolVersion );
+				}
+				else if(!expectConnectPacket) {
+					unprocessed_begin = unprocessed_end;
+					peer->incompatibleDataRead.set(true);
+				}
+
+				if (readWillBlock)
+					break;
+
+				Void _ = wait(yield(TaskReadSocket));
 			}
 
-			if (readWillBlock)
-				break;
-
-			Void _ = wait(yield(TaskReadSocket));
+			Void _ = wait( conn->onReadable() );
+			Void _ = wait(delay(0, TaskReadSocket));  // We don't want to call conn->read directly from the reactor - we could get stuck in the reactor reading 1 packet at a time
 		}
-
-		Void _ = wait( conn->onReadable() );
-		Void _ = wait(delay(0, TaskReadSocket));  // We don't want to call conn->read directly from the reactor - we could get stuck in the reactor reading 1 packet at a time
+	}
+	catch (Error& e) {
+		if (peer && !peer->compatible) {
+			ASSERT(peer->transport->numIncompatibleConnections > 0);
+			peer->transport->numIncompatibleConnections--;
+		}
+		throw;
 	}
 }
 
@@ -807,6 +827,9 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		BinaryWriter wr( AssumeVersion(currentProtocolVersion) );
 		what.serializeBinaryWriter(wr);
 		Standalone<StringRef> copy = wr.toStringRef();
+#if VALGRIND
+		VALGRIND_CHECK_MEM_IS_DEFINED(copy.begin(), copy.size());
+#endif
 
 		deliver( self, destination, ArenaReader(copy.arena(), copy, AssumeVersion(currentProtocolVersion)), false );
 
@@ -891,6 +914,16 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 				self->warnAlwaysForLargePacket = false;
 		}
 
+#if VALGRIND
+		SendBuffer *checkbuf = pb;
+		while (checkbuf) {
+			int size = checkbuf->bytes_written;
+			const uint8_t* data = checkbuf->data;
+			VALGRIND_CHECK_MEM_IS_DEFINED(data, size);
+			checkbuf = checkbuf -> next;
+		}
+#endif
+
 		peer->send(pb, rp, firstUnsent);
 
 		return (PacketID)rp;
@@ -913,6 +946,10 @@ void FlowTransport::sendUnreliable( ISerializeSource const& what, const Endpoint
 
 int FlowTransport::getEndpointCount() { 
 	return -1; 
+}
+
+bool FlowTransport::incompatibleOutgoingConnectionsPresent() {
+	return self->numIncompatibleConnections;
 }
 
 void FlowTransport::createInstance( uint64_t transportId )

@@ -85,6 +85,8 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 
+#include "stacktrace.h"
+
 #ifdef __linux__
 /* Needed for memory allocation */
 #include <linux/mman.h>
@@ -327,10 +329,39 @@ void getMemoryInfo(std::map<StringRef, int64_t>& request, std::stringstream& mem
 		memInfoStream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 	}
 }
+
+int64_t getLowWatermark(std::stringstream& zoneInfoStream) {
+	int64_t lowWatermark = 0;
+	while(!zoneInfoStream.eof()) {
+		std::string key;
+		zoneInfoStream >> key;
+
+		if(key == "low") {
+			int64_t value;
+			zoneInfoStream >> value;
+			lowWatermark += value;
+		}
+
+		zoneInfoStream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+	}
+
+	return lowWatermark;
+}
 #endif
 
 void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 #if defined(__linux__)
+	std::ifstream zoneInfoFileStream("/proc/zoneinfo", std::ifstream::in);
+	int64_t lowWatermark = 0;
+	if(!zoneInfoFileStream.good()) {
+		TraceEvent(SevWarnAlways, "GetMachineZoneInfo").GetLastError();
+	}
+	else {
+		std::stringstream zoneInfoStream;
+		zoneInfoStream << zoneInfoFileStream.rdbuf();
+		lowWatermark = getLowWatermark(zoneInfoStream) * 4; // Convert from 4K pages to KB
+	}
+
 	std::ifstream fileStream("/proc/meminfo", std::ifstream::in);
 	if (!fileStream.good()) {
 		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
@@ -340,27 +371,32 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	std::map<StringRef, int64_t> request = {
 		{ LiteralStringRef("MemTotal:"), 0 },
 		{ LiteralStringRef("MemFree:"), 0 },
-		{ LiteralStringRef("MemAvailable:"), 0 },
-		{ LiteralStringRef("Buffers:"), 0 },
-		{ LiteralStringRef("Cached:"), 0 },
+		{ LiteralStringRef("MemAvailable:"), -1 },
+		{ LiteralStringRef("Active(file):"), 0 },
+		{ LiteralStringRef("Inactive(file):"), 0 },
 		{ LiteralStringRef("SwapTotal:"), 0 },
 		{ LiteralStringRef("SwapFree:"), 0 },
+		{ LiteralStringRef("SReclaimable:"), 0 },
 	};
 
 	std::stringstream memInfoStream;
 	memInfoStream << fileStream.rdbuf();
 	getMemoryInfo( request, memInfoStream );
 
+	int64_t memFree = request[LiteralStringRef("MemFree:")];
+	int64_t pageCache = request[LiteralStringRef("Active(file):")] + request[LiteralStringRef("Inactive(file):")];
+	int64_t slabReclaimable = request[LiteralStringRef("SReclaimable:")];
+	int64_t usedSwap = request[LiteralStringRef("SwapTotal:")] - request[LiteralStringRef("SwapFree:")];
+
 	memInfo.total = 1024 * request[LiteralStringRef("MemTotal:")];
-	int64_t available = 1024 * (request[LiteralStringRef("MemFree:")] + request[LiteralStringRef("Buffers:")] + request[LiteralStringRef("Cached:")] - request[LiteralStringRef("SwapTotal:")] + request[LiteralStringRef("SwapFree:")]);
-	memInfo.committed = memInfo.total - available;
-	if(request[LiteralStringRef("MemAvailable:")] != 0) {
-		memInfo.available = 1024 * (request[LiteralStringRef("MemAvailable:")] - request[LiteralStringRef("SwapTotal:")] + request[LiteralStringRef("SwapFree:")]);
+	if(request[LiteralStringRef("MemAvailable:")] != -1) {
+		memInfo.available = 1024 * (request[LiteralStringRef("MemAvailable:")] - usedSwap);
 	}
-	else
-	{
-		memInfo.available = available;
+	else {
+		memInfo.available = 1024 * (std::max<int64_t>(0, (memFree-lowWatermark) + std::max(pageCache-lowWatermark, pageCache/2) + std::max(slabReclaimable-lowWatermark, slabReclaimable/2)) - usedSwap);
 	}
+
+	memInfo.committed = memInfo.total - memInfo.available;
 #elif defined(_WIN32)
 	MEMORYSTATUSEX mem_status;
 	mem_status.dwLength = sizeof(mem_status);
@@ -1885,6 +1921,21 @@ std::vector<std::string> listFiles( std::string const& directory, std::string co
 std::vector<std::string> listDirectories( std::string const& directory ) {
 	return findFiles( directory, "", &acceptDirectory );
 }
+
+void findFilesRecursively(std::string path, std::vector<std::string> &out) {
+	// Add files to output, prefixing path
+	std::vector<std::string> files = platform::listFiles(path);
+	for(auto const &f : files)
+		out.push_back(joinPath(path, f));
+
+	// Recurse for directories
+	std::vector<std::string> directories = platform::listDirectories(path);
+	for(auto const &dir : directories) {
+		if(dir != "." && dir != "..")
+			findFilesRecursively(joinPath(path, dir), out);
+	}
+};
+
 }; // namespace platform
 
 
@@ -2183,15 +2234,15 @@ void outOfMemory() {
 	for( auto i = traceCounts.begin(); i != traceCounts.end(); ++i ) {
 		char buf[1024];
 		std::vector<void *> *frames = i->second.backTrace;
-		std::string backTraceStr = "addr2line -e fdbserver.debug -p -C -f -i ";
-		for (int j = 1; j < frames->size(); j++) {
+		std::string backTraceStr;
 #if defined(_WIN32)
+		for (int j = 1; j < frames->size(); j++) {
 			_snprintf(buf, 1024, "%p ", frames->at(j));
-#else
-			snprintf(buf, 1024, "%p ", frames->at(j));
-#endif
 			backTraceStr += buf;
 		}
+#else
+		backTraceStr = format_backtrace(&(*frames)[0], frames->size());
+#endif
 		TraceEvent("MemSample")
 			.detail("Count", (int64_t)i->second.count)
 			.detail("TotalSize", i->second.totalSize)
@@ -2322,6 +2373,15 @@ void* getImageOffset() {
 	return getCachedImageInfo().offset;
 }
 
+size_t raw_backtrace(void** addresses, int maxStackDepth) {
+#if !defined(__APPLE__)
+	// absl::GetStackTrace doesn't have an implementation for MacOS.
+	return absl::GetStackTrace(addresses, maxStackDepth, 0);
+#else
+	return backtrace(addresses, maxStackDepth);
+#endif
+}
+
 std::string format_backtrace(void **addresses, int numAddresses) {
 	ImageInfo const& imageInfo = getCachedImageInfo();
 #ifdef __APPLE__
@@ -2340,7 +2400,7 @@ std::string format_backtrace(void **addresses, int numAddresses) {
 
 std::string get_backtrace() {
 	void *addresses[50];
-	size_t size = backtrace(addresses, 50);
+	size_t size = raw_backtrace(addresses, 50);
 	return format_backtrace(addresses, size);
 }
 }; // namespace platform

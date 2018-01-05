@@ -24,11 +24,16 @@
 
 #include "flow/flow.h"
 #include "flow/IDispatched.h"
+#include "flow/genericactors.actor.h"
 
 #include "FDBTypes.h"
 #include "NativeAPI.h"
 #include "RunTransaction.actor.h"
 #include "Subspace.h"
+#include "KeyBackedTypes.h"
+
+class FutureBucket;
+class TaskFuture;
 
 class Task : public ReferenceCounted<Task> {
 public:
@@ -40,10 +45,14 @@ public:
 	unsigned int getPriority() const;
 
 	Key key;
-	uint64_t timeout;
+	Version timeoutVersion;
+
+	// Take this lock while you don't want Taskbucket to try to extend your task's timeout
+	FlowLock extendMutex;
 
 	Map<Key, Value> params; // SOMEDAY: use one arena?
 
+	// New reserved task parameter keys should be added in ReservedTaskParams below instead of here.
 	static Key reservedTaskParamKeyPriority;
 	static Key reservedTaskParamKeyType;
 	static Key reservedTaskParamKeyAddTask;
@@ -53,6 +62,43 @@ public:
 	static Key reservedTaskParamKeyVersion;
 	static Key reservedTaskParamValidKey;
 	static Key reservedTaskParamValidValue;
+
+	Reference<TaskFuture> getDoneFuture(Reference<FutureBucket> fb);
+
+	std::string toString() const {
+		std::string s = format("TASK [key=%s timeoutVersion=%lld ", key.printable().c_str(), timeoutVersion);
+		for(auto &param : params)
+			s.append(format("%s=%s ", param.key.printable().c_str(), param.value.printable().c_str()));
+		s.append("]");
+		return s;
+	}
+};
+
+template <typename T>
+class TaskParam {
+public:
+	TaskParam(StringRef key) : key(key) {}
+	T get(Reference<Task> task) const {
+		return Codec<T>::unpack(Tuple::unpack(task->params[key]));
+	}
+	void set(Reference<Task> task, T const &val) const {
+		task->params[key] = Codec<T>::pack(val).pack();
+	}
+	bool exists(Reference<Task> task) const {
+		return task->params.find(key) != task->params.end();
+	}
+	T getOrDefault(Reference<Task> task, const T defaultValue = T()) const {
+		if(!exists(task))
+			return defaultValue;
+		return get(task);
+	}
+	StringRef key;
+};
+
+struct ReservedTaskParams {
+	static TaskParam<Version> scheduledVersion() {
+		return LiteralStringRef(__FUNCTION__);
+	}
 };
 
 class FutureBucket;
@@ -69,16 +115,29 @@ public:
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	}
 
+	Future<Void> changePause(Reference<ReadYourWritesTransaction> tr, bool pause);
+	Future<Void> changePause(Database cx, bool pause) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return changePause(tr, pause); });
+	}
+
 	Future<Void> clear(Reference<ReadYourWritesTransaction> tr);
 	Future<Void> clear(Database cx) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return clear(tr); });
 	}
 
 	// Transactions inside an execute() function should call this and stop without committing if it returns false.
-	Future<bool> keepRunning(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
+	Future<Void> keepRunning(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 		Future<bool> finished = isFinished(tr, task);
 		Future<bool> valid = isVerified(tr, task);
-		return map(success(finished) && success(valid), [=](Void) -> bool { return !finished.get() && valid.get(); } );
+		return map(success(finished) && success(valid), [=](Void) {
+			if(finished.get() || !valid.get()) {
+				throw task_interrupted();
+			}
+			return Void();
+		});
+	}
+	Future<Void> keepRunning(Database cx, Reference<Task> task) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return keepRunning(tr, task); });
 	}
 
 	static void setValidationCondition(Reference<Task> task, KeyRef vKey, KeyRef vValue);
@@ -99,6 +158,7 @@ public:
 	Future<bool> doOne(Database cx, Reference<FutureBucket> futureBucket);
 
 	Future<Void> run(Database cx, Reference<FutureBucket> futureBucket, double *pollDelay, int maxConcurrentTasks);
+	Future<Void> watchPaused(Database cx, Reference<AsyncVar<bool>> paused);
 
 	Future<bool> isEmpty(Reference<ReadYourWritesTransaction> tr);
 	Future<bool> isEmpty(Database cx){
@@ -111,9 +171,16 @@ public:
 	}
 
 	// Extend the task's timeout as if it just started and also save any parameter changes made to the task
-	Future<bool> saveAndExtend(Reference<ReadYourWritesTransaction> tr, Reference<Task> task);
-	Future<bool> saveAndExtend(Database cx, Reference<Task> task){
-		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return saveAndExtend(tr, task); });
+	Future<Version> extendTimeout(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool updateParams, Version newTimeoutVersion = invalidVersion);
+	Future<Void> extendTimeout(Database cx, Reference<Task> task, bool updateParams, Version newTimeoutVersion = invalidVersion){
+		return map(
+			runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+				return extendTimeout(tr, task, updateParams, newTimeoutVersion);
+			}),
+			[=](Version v) {
+				task->timeoutVersion = v; 
+				return Void();
+		});
 	}
 
 	Future<bool> isFinished(Reference<ReadYourWritesTransaction> tr, Reference<Task> task);
@@ -148,6 +215,10 @@ public:
 		return lock_aware;	
 	}
 
+	Key getPauseKey() const {
+		return pauseKey;	
+	}
+
 	Subspace getAvailableSpace(int priority = 0) {
 		if(priority == 0)
 			return available;
@@ -165,6 +236,7 @@ private:
 
 	Subspace prefix;
 	Subspace active;
+	Key pauseKey;
 	
 	// Available task subspaces.  Priority 0, the default, will be under available which is backward
 	// compatible with pre-priority TaskBucket processes.  Priority 1 and higher will be in
@@ -307,6 +379,10 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 	// *Database* operations here are exactly once; side effects are at least once; excessive time here may prevent task from finishing!
 	virtual Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) = 0;
 
+	virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
+		return Void();
+	}
+
 	template <class TaskFuncBaseType>
 	struct Factory {
 		static TaskFuncBase* create() {
@@ -337,7 +413,7 @@ struct TaskCompletionKey {
 	static TaskCompletionKey noSignal() {
 		return TaskCompletionKey(StringRef());
 	}
-
+	TaskCompletionKey() {}
 private:
 	TaskCompletionKey(Reference<TaskFuture> f) : joinFuture(f) { }
 	TaskCompletionKey(Key k) : key(k) { }

@@ -330,6 +330,8 @@ std::vector<std::string> listFiles( std::string const& directory, std::string co
 // returns directory names relative to directory
 std::vector<std::string> listDirectories( std::string const& directory );
 
+void findFilesRecursively(std::string path, std::vector<std::string> &out);
+
 // Tag the given file as "temporary", i.e. not really needing commits to disk
 void makeTemporary( const char* filename );
 
@@ -348,7 +350,8 @@ std::string getDefaultPluginPath( const char* plugin_name );
 
 void *getImageOffset();
 
-// Implemented only on *NIX. Places the frame pointers in a string formatted as parameters for addr2line.
+// Places the frame pointers in a string formatted as parameters for addr2line.
+size_t raw_backtrace(void** addresses, int maxStackDepth);
 std::string get_backtrace();
 std::string format_backtrace(void **addresses, int numAddresses);
 
@@ -488,7 +491,12 @@ inline static void aligned_free(void* ptr) { free(ptr); }
 inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif
 #elif defined(__APPLE__)
-inline static void* aligned_alloc(size_t alignment, size_t size) { return malloc(size); }  // FIXME: OSX doesn't have memalign(). All allocations are 16-byte aligned
+#include <cstdlib>
+inline static void* aligned_alloc(size_t alignment, size_t size) {
+	void* ptr = nullptr;
+	posix_memalign(&ptr, alignment, size);
+	return ptr;
+}
 inline static void aligned_free(void* ptr) { free(ptr); }
 #endif
 

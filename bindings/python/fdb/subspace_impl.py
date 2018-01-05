@@ -25,7 +25,7 @@ import fdb.tuple
 class Subspace (object):
 
     def __init__(self, prefixTuple=tuple(), rawPrefix=b''):
-        self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
+        self.rawPrefix = fdb.tuple.pack(prefixTuple, prefix=rawPrefix)
 
     def __repr__(self):
         return 'Subspace(rawPrefix=' + repr(self.rawPrefix) + ')'
@@ -37,13 +37,16 @@ class Subspace (object):
         return self.rawPrefix
 
     def pack(self, t=tuple()):
-        return self.rawPrefix + fdb.tuple.pack(t)
+        return fdb.tuple.pack(t, prefix=self.rawPrefix)
+
+    def pack_with_versionstamp(self, t=tuple()):
+        return fdb.tuple.pack_with_versionstamp(t, prefix=self.rawPrefix)
 
     def unpack(self, key):
         if not self.contains(key):
             raise ValueError('Cannot unpack key that is not in subspace.')
 
-        return fdb.tuple.unpack(key[len(self.rawPrefix):])
+        return fdb.tuple.unpack(key, prefix_len=len(self.rawPrefix))
 
     def range(self, t=tuple()):
         p = fdb.tuple.range(t)

@@ -196,7 +196,7 @@ struct UpdateEagerReadInfo {
 		// SOMEDAY: Theoretically we can avoid a read if there is an earlier overlapping ClearRange
 		if (m.type == MutationRef::ClearRange && !m.param2.startsWith(systemKeys.end))
 			keyBegin.push_back( m.param2 );
-		else if (m.type == MutationRef::AppendIfFits)
+		else if ((m.type == MutationRef::AppendIfFits) || (m.type == MutationRef::ByteMin) || (m.type == MutationRef::ByteMax))
 			keys.push_back(pair<KeyRef, int>(m.param1, CLIENT_KNOBS->VALUE_SIZE_LIMIT));
 		else if (isAtomicOp((MutationRef::Type) m.type))
 			keys.push_back(pair<KeyRef, int>(m.param1, m.param2.size()));
@@ -313,7 +313,7 @@ public:
 	CoalescedKeyRangeMap< Version > newestDirtyVersion; // Similar to newestAvailableVersion, but includes (only) keys that were only partly available (due to cancelled fetchKeys)
 
 	// The following are in rough order from newest to oldest
-	Version lastTLogVersion, lastVersionWithData;
+	Version lastTLogVersion, lastVersionWithData, restoredVersion;
 	NotifiedVersion version;
 	NotifiedVersion desiredOldestVersion;    // We can increase oldestVersion (and then durableVersion) to this version when the disk permits
 	NotifiedVersion oldestVersion;           // See also storageVersion()
@@ -418,7 +418,7 @@ public:
 	StorageServer(IKeyValueStore* storage, Reference<AsyncVar<ServerDBInfo>> const& db, StorageServerInterface const& ssi)
 		:	instanceID(g_random->randomUniqueID().first()),
 			storage(this, storage), db(db),
-			lastTLogVersion(0), lastVersionWithData(0),
+			lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
 			updateEagerReads(0),
 			shardChangeCounter(0),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
@@ -460,6 +460,7 @@ public:
 		oldestVersion = ver;
 		durableVersion = ver;
 		lastVersionWithData = ver;
+		restoredVersion = ver;
 
 		mutableData().createNewVersion(ver);
 		mutableData().forgetVersionsBefore(ver);
@@ -1477,17 +1478,17 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 	}
 	else if (m.type != MutationRef::SetValue && (m.type)) {
 
-		StringRef oldVal;
+		Optional<StringRef> oldVal;
 		auto it = data.atLatest().lastLessOrEqual(m.param1);
 		if (it != data.atLatest().end() && it->isValue() && it.key() == m.param1)
 			oldVal = it->getValue();
 		else if (it != data.atLatest().end() && it->isClearTo() && it->getEndKey() > m.param1) {
 			TEST(true); // Atomic op right after a clear.
-			oldVal = StringRef();
 		}
 		else {
 			Optional<Value>& oldThing = eager->getValue(m.param1);
-			oldVal = oldThing.present() ? oldThing.get() : StringRef();
+			if (oldThing.present())
+				oldVal = oldThing.get();
 		}
 
 		switch(m.type) {
@@ -1511,6 +1512,18 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 				break;
 			case MutationRef::Min:
 				m.param2 = doMin(oldVal, m.param2, ar);
+				break;
+			case MutationRef::ByteMin:
+				m.param2 = doByteMin(oldVal, m.param2, ar);
+				break;
+			case MutationRef::ByteMax:
+				m.param2 = doByteMax(oldVal, m.param2, ar);
+				break;
+			case MutationRef::MinV2:
+				m.param2 = doMinV2(oldVal, m.param2, ar);
+				break;
+			case MutationRef::AndV2:
+				m.param2 = doAndV2(oldVal, m.param2, ar);
 				break;
 		}
 		m.type = MutationRef::SetValue;
@@ -2190,7 +2203,7 @@ bool containsRollback( VersionUpdateRef const& changes, Version& rollbackVersion
 
 class StorageUpdater {
 public:
-	StorageUpdater(Version fromVersion, Version newOldestVersion) : fromVersion(fromVersion), newOldestVersion(newOldestVersion), currentVersion(fromVersion), processedStartKey(false) {}
+	StorageUpdater(Version fromVersion, Version newOldestVersion, Version restoredVersion) : fromVersion(fromVersion), newOldestVersion(newOldestVersion), currentVersion(fromVersion), restoredVersion(restoredVersion), processedStartKey(false) {}
 
 	void applyMutation(StorageServer* data, MutationRef const& m, Version ver) {
 		//TraceEvent("SSNewVersion", data->thisServerID).detail("VerWas", data->mutableData().latestVersion).detail("ChVer", ver);
@@ -2220,6 +2233,7 @@ public:
 	Version currentVersion;
 private:
 	Version fromVersion;
+	Version restoredVersion;
 
 	KeyRef startKey;
 	bool nowAssigned;
@@ -2256,7 +2270,7 @@ private:
 			BinaryReader br(m.param2, Unversioned());
 			br >> rollbackVersion;
 
-			if ( rollbackVersion < fromVersion ) {
+			if ( rollbackVersion < fromVersion && rollbackVersion > restoredVersion) {
 				TEST( true );  // ShardApplyPrivateData shard rollback
 				TraceEvent(SevWarn, "Rollback", data->thisServerID)
 					.detail("FromVersion", fromVersion)
@@ -2393,7 +2407,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		data->updateEagerReads = &eager;
 		data->debug_inApplyUpdate = true;
 
-		StorageUpdater updater(data->lastVersionWithData, std::max( std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), minNewOldestVersion ));
+		StorageUpdater updater(data->lastVersionWithData, std::max( std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), minNewOldestVersion ), data->restoredVersion);
 
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);

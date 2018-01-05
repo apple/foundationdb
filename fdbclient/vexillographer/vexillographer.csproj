@@ -70,7 +70,7 @@
     -->
   <Target Name="AfterBuild" Inputs="fdb.options;$(SolutionDir)bin\$(Configuration)\vexillographer.exe" Outputs="$(SolutionDir)bindings\c\foundationdb\fdb_c_options.g.h;$(SolutionDir)fdbclient\FDBOptions.g.h;$(SolutionDir)bindings\python\fdb\fdboptions.py">
     <Message Text="Running vexillographer." Importance="high" />
-    <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; java &quot;$(ProjectDir)..\..\bindings\java\src\main\com\apple\cie\foundationdb&quot;" />
+    <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; java &quot;$(ProjectDir)..\..\bindings\java\src\main\com\apple\foundationdb&quot;" />
     <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; c &quot;$(ProjectDir)..\..\bindings\c\foundationdb\fdb_c_options.g.h&quot;" />
     <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; cpp &quot;$(ProjectDir)..\..\fdbclient\FDBOptions.g&quot;" />
     <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; python &quot;$(ProjectDir)..\..\bindings\python\fdb\fdboptions.py&quot;" />

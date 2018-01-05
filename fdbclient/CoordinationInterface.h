@@ -24,6 +24,7 @@
 
 #include "FDBTypes.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/Locality.h"
 
 const int MAX_CLUSTER_FILE_BYTES = 60000;
 
@@ -92,13 +93,40 @@ private:
 
 struct LeaderInfo {
 	UID changeID;
+	uint64_t mask = ~(15ll << 60);
 	Value serializedInfo;
 	bool forward;  // If true, serializedInfo is a connection string instead!
 
 	LeaderInfo() : forward(false) {}
+	LeaderInfo(UID changeID) : changeID(changeID), forward(false) {}
 
 	bool operator < (LeaderInfo const& r) const { return changeID < r.changeID; }
 	bool operator == (LeaderInfo const& r) const { return changeID == r.changeID; }
+
+	// The first 4 bits of ChangeID represent cluster controller process class fitness, the lower the better
+	void updateChangeID(uint64_t processClassFitness, bool isExcluded) {
+		changeID = UID( ( (uint64_t)isExcluded << 63) | (processClassFitness << 60) | (changeID.first() & mask ), changeID.second() );
+	}
+
+	// All but the first 4 bits are used to represent process id
+	bool equalInternalId(LeaderInfo const& leaderInfo) const {
+		if ( (changeID.first() & mask) == (leaderInfo.changeID.first() & mask) && changeID.second() == leaderInfo.changeID.second() ) {
+			return true;
+		} else {
+			return false;
+		}
+	}
+
+	// Change leader only if 
+	// 1. the candidate has better process class fitness and the candidate is not the leader
+	// 2. the leader process class fitness become worse
+	bool leaderChangeRequired(LeaderInfo const& candidate) const {
+		if ( ((changeID.first() & ~mask) > (candidate.changeID.first() & ~mask) && !equalInternalId(candidate)) || ((changeID.first() & ~mask) < (candidate.changeID.first() & ~mask) && equalInternalId(candidate)) ) {
+			return true;
+		} else {
+			return false;
+		}
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

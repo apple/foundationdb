@@ -84,8 +84,8 @@ CONCAT
 LOG_STACK
 
     Pops the top item off the stack as PREFIX. Using a new transaction with normal
-	retry logic, inserts a key-value pair into the database for each item in the 
-	stack of the form:
+    retry logic, inserts a key-value pair into the database for each item in the 
+    stack of the form:
 
         PREFIX + tuple.pack((stackIndex, instructionNumber)) = tuple.pack((item,))
 
@@ -97,8 +97,8 @@ LOG_STACK
     tuple.
 
     When finished, the stack should be empty. Note that because the stack may be 
-	large, it may be necessary to commit the transaction every so often (e.g. 
-	after every 100 sets) to avoid past_version errors.
+    large, it may be necessary to commit the transaction every so often (e.g. 
+    after every 100 sets) to avoid past_version errors.
 
 FoundationDB Operations
 -----------------------
@@ -169,9 +169,9 @@ GET_KEY (_SNAPSHOT, _DATABASE)
     Pops the top four items off of the stack as KEY, OR_EQUAL, OFFSET, PREFIX
     and then constructs a key selector. This key selector is then resolved 
     using the get_key() method to yield RESULT. If RESULT starts with PREFIX, 
-	then RESULT is pushed onto the stack. Otherwise, if RESULT < PREFIX, PREFIX 
-	is pushed onto the stack. If RESULT > PREFIX, then strinc(PREFIX) is pushed
-	onto the stack. May optionally push a future onto the stack.
+    then RESULT is pushed onto the stack. Otherwise, if RESULT < PREFIX, PREFIX 
+    is pushed onto the stack. If RESULT > PREFIX, then strinc(PREFIX) is pushed
+    onto the stack. May optionally push a future onto the stack.
 
 GET_RANGE (_SNAPSHOT, _DATABASE)
 
@@ -292,6 +292,20 @@ TUPLE_PACK
     Pops the top item off of the stack as N. Pops the next N items off of the
     stack and packs them as the tuple [item0,item1,...,itemN], and then pushes
     this single packed value onto the stack.
+
+TUPLE_PACK_WITH_VERSIONSTAMP
+
+    Pops the top item off of the stack as a byte string prefix. Pops the next item
+    off of the stack as N. Pops the next N items off of the stack and packs them
+    as the tuple [item0,item1,...,itemN], with the provided prefix and tries to
+    append the position of the first incomplete versionstamp as if the byte
+    string were to be used as a key in a SET_VERSIONSTAMP_KEY atomic op. If there
+    are no incomplete versionstamp instances, then this pushes the literal byte
+    string 'ERROR: NONE' to the stack. If there is more than one, then this pushes
+    the literal byte string 'ERROR: MULTIPLE'. If there is exactly one, then it pushes
+    the literal byte string 'OK' and then pushes the packed tuple. (Languages that
+    do not contain a 'Versionstamp' tuple-type do not have to implement this
+    operation.)
 
 TUPLE_UNPACK
 

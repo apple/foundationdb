@@ -141,24 +141,39 @@ struct RecruitStorageRequest {
 	}
 };
 
-struct RegisterWorkerRequest {
-	WorkerInterface wi;
+struct RegisterWorkerReply {
 	ProcessClass processClass;
-	Generation generation;
-	ReplyPromise<Void> reply;
+	bool isExcluded;
 
-	RegisterWorkerRequest() {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass processClass,  Generation generation) : 
-	wi(wi), processClass(processClass), generation(generation) {}
+	RegisterWorkerReply() {}
+	RegisterWorkerReply(ProcessClass processClass, bool isExcluded) : processClass(processClass), isExcluded(isExcluded) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & wi & processClass & generation & reply;
+		ar & processClass & isExcluded;
+	}
+};
+
+struct RegisterWorkerRequest {
+	WorkerInterface wi;
+	ProcessClass processClass;
+	ProcessClass initialClass;
+	bool isExcluded;
+	Generation generation;
+	ReplyPromise<RegisterWorkerReply> reply;
+
+	RegisterWorkerRequest() {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, bool isExcluded, Generation generation) : 
+	wi(wi), initialClass(initialClass), processClass(processClass), isExcluded(isExcluded), generation(generation) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		ar & wi & initialClass & processClass & isExcluded & generation & reply;
 	}
 };
 
 struct GetWorkersRequest {
-	enum { FLAG_TESTER_CLASS = 1 };
+	enum { TESTER_CLASS_ONLY = 0x1, NON_EXCLUDED_PROCESSES_ONLY = 0x2 };
 
 	int flags;
 	ReplyPromise<vector<std::pair<WorkerInterface, ProcessClass>>> reply;

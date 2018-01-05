@@ -33,7 +33,7 @@ struct MasterProxyInterface {
 	RequestStream< struct CommitTransactionRequest > commit;
 	RequestStream< struct GetReadVersionRequest > getConsistentReadVersion;  // Returns a version which (1) is committed, and (2) is >= the latest version reported committed (by a commit response) when this request was sent
 															     //   (at some point between when this request is sent and when its response is received, the latest version reported committed)
-	RequestStream< ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> > getKeyServersLocations;
+	RequestStream< struct GetKeyServerLocationsRequest > getKeyServersLocations;
 	RequestStream< struct GetStorageServerRejoinInfoRequest > getStorageServerRejoinInfo;
 
 	RequestStream<ReplyPromise<Void>> waitFailure;
@@ -133,6 +133,33 @@ struct GetReadVersionRequest {
 	template <class Ar> 
 	void serialize(Ar& ar) { 
 		ar & transactionCount & flags & debugID & reply;
+	}
+};
+
+struct GetKeyServerLocationsReply {
+	Arena arena;
+	vector<pair<KeyRangeRef, vector<StorageServerInterface>>> results;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & results & arena;
+	}
+};
+
+struct GetKeyServerLocationsRequest {
+	Arena arena;
+	KeyRef begin;
+	Optional<KeyRef> end;
+	int limit;
+	bool reverse;
+	ReplyPromise<GetKeyServerLocationsReply> reply;
+
+	GetKeyServerLocationsRequest() : limit(0), reverse(false) {}
+	GetKeyServerLocationsRequest( KeyRef const& begin, Optional<KeyRef> const& end, int limit, bool reverse, Arena const& arena ) : begin( begin ), end( end ), limit( limit ), reverse( reverse ), arena( arena ) {}
+	
+	template <class Ar> 
+	void serialize(Ar& ar) { 
+		ar & begin & end & limit & reverse & reply & arena;
 	}
 };
 

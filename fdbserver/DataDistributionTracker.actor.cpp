@@ -100,15 +100,21 @@ void restartShardTrackers(
 ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 	ShardSizeBounds bounds;
 
-	bounds.max.bytes = maxShardSize;
+	if(shard.begin >= keyServersKeys.begin) {
+		bounds.max.bytes = SERVER_KNOBS->KEY_SERVER_SHARD_BYTES;
+	} else {
+		bounds.max.bytes = maxShardSize;
+	}
+
 	bounds.max.bytesPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
 
 	//The first shard can have arbitrarily small size
-	if(shard.begin != allKeys.begin)
-		bounds.min.bytes = bounds.max.bytes / SERVER_KNOBS->SHARD_BYTES_RATIO;
-	else
+	if(shard.begin == allKeys.begin) {
 		bounds.min.bytes = 0;
+	} else {
+		bounds.min.bytes = maxShardSize / SERVER_KNOBS->SHARD_BYTES_RATIO;
+	}
 
 	bounds.min.bytesPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
@@ -318,7 +324,7 @@ ACTOR Future<Void> shardSplitter(
 
 	StorageMetrics splitMetrics;
 	splitMetrics.bytes = shardBounds.max.bytes / 2;
-	splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+	splitMetrics.bytesPerKSecond = keys.begin >= keyServersKeys.begin ? splitMetrics.infinity : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
 	splitMetrics.iosPerKSecond = splitMetrics.infinity;
 
 	state Standalone<VectorRef<KeyRef>> splitKeys = wait( getSplitKeys(self, keys, splitMetrics, metrics ) );
@@ -476,7 +482,7 @@ ACTOR Future<Void> shardEvaluator(
 	StorageMetrics const& stats = shardSize->get().get();
 
 	bool shouldSplit = stats.bytes > shardBounds.max.bytes ||
-							getBandwidthStatus( stats ) == BandwidthStatusHigh;
+							( getBandwidthStatus( stats ) == BandwidthStatusHigh && keys.begin < keyServersKeys.begin );
 	bool shouldMerge = stats.bytes < shardBounds.min.bytes &&
 							getBandwidthStatus( stats ) == BandwidthStatusLow;
 

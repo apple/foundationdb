@@ -70,7 +70,7 @@ Future<Optional<T>> stopAfter( Future<T> what ) {
 		T _ = wait(what);
 		ret = Optional<T>(_);
 	} catch (Error& e) {
-		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete;
+		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete || e.code() == error_code_actor_cancelled;
 		TraceEvent(ok ? SevInfo : SevError, "StopAfterError").error(e);
 		if(!ok) {
 			fprintf(stderr, "Fatal Error: %s\n", e.what());
@@ -277,6 +277,11 @@ Future<Void> holdWhileVoid(X object, Future<T> what)
 {
 	T val = wait(what);
 	return Void();
+}
+
+template<class T>
+Future<Void> store(Future<T> what, T &out) {
+	return map(what, [&out](T const &v) { out = v; return Void(); });
 }
 
 //Waits for a future to be ready, and then applies an asynchronous function to it.
@@ -1077,9 +1082,21 @@ ACTOR template <class T> Future<T> brokenPromiseToNever( Future<T> in ) {
 		return t;
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise)
-			throw e;
+			throw;
 		Void _ = wait(Never());  // never return
 		throw internal_error();  // does not happen
+	}
+}
+
+ACTOR template <class T> Future<T> brokenPromiseToMaybeDelivered( Future<T> in ) {
+	try {
+		T t = wait(in);
+		return t;
+	} catch (Error& e) {
+		if (e.code() == error_code_broken_promise) {
+			throw request_maybe_delivered();
+		}
+		throw;
 	}
 }
 
@@ -1189,7 +1206,7 @@ private:
 	}
 
 	ACTOR static Future<Void> takeMoreActor(FlowLock* lock, int* amount) {
-		Void _ = wait(lock->take(1));
+		Void _ = wait(lock->take());
 		int extra = std::min( lock->available(), *amount-1 );
 		lock->active += extra;
 		*amount = 1 + extra;

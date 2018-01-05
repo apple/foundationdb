@@ -59,6 +59,10 @@ template<> inline Standalone<StringRef> Codec<Standalone<StringRef>>::unpack(Tup
 template<> inline Tuple Codec<UID>::pack(UID const &val) { return Codec<Standalone<StringRef>>::pack(BinaryWriter::toValue<UID>(val, Unversioned())); }
 template<> inline UID Codec<UID>::unpack(Tuple const &val) { return BinaryReader::fromStringRef<UID>(Codec<Standalone<StringRef>>::unpack(val), Unversioned()); }
 
+// This is backward compatible with Codec<Standalone<StringRef>>
+template<> inline Tuple Codec<std::string>::pack(std::string const &val) { return Tuple().append(StringRef(val)); }
+template<> inline std::string Codec<std::string>::unpack(Tuple const &val) { return val.getString(0).toString(); }
+
 // Partial specialization to cover all std::pairs as long as the component types are Codec compatible
 template<typename First, typename Second>
 struct Codec<std::pair<First, Second>> {
@@ -66,6 +70,30 @@ struct Codec<std::pair<First, Second>> {
 	static std::pair<First, Second> unpack(Tuple const &t) {
 		ASSERT(t.size() == 2);
 		return {Codec<First>::unpack(t.subTuple(0, 1)), Codec<Second>::unpack(t.subTuple(1, 2))};
+	}
+};
+
+template<typename T>
+struct Codec<std::vector<T>> {
+	static Tuple pack(typename std::vector<T> const &val) {
+		Tuple t;
+		for (T item : val) {
+			Tuple itemTuple = Codec<T>::pack(item);
+			// fdbclient doesn't support nested tuples yet. For now, flatten the tuple into StringRef
+			t.append(itemTuple.pack());
+		}
+		return t;
+	}
+
+	static std::vector<T> unpack(Tuple const &t) {
+		std::vector<T> v;
+
+		for (int i = 0; i < t.size(); i++) {
+			Tuple itemTuple = Tuple::unpack(t.getString(i));
+			v.push_back(Codec<T>::unpack(itemTuple));
+		}
+
+		return v;
 	}
 };
 
@@ -87,11 +115,71 @@ public:
 	}
 	// Get property's value or defaultValue if it doesn't exist
 	Future<T> getD(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, T defaultValue = T()) const {
-		return map(get(tr, false), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
+		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
 	}
+	// Get property's value or throw error if it doesn't exist
+	Future<T> getOrThrow(Reference<ReadYourWritesTransaction> tr, bool snapshot = false, Error err = key_not_found()) const {
+		auto keyCopy = key;
+		auto backtrace = platform::get_backtrace();
+		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
+			if (!val.present()) {
+				TraceEvent(SevInfo, "KeyBackedProperty_keyNotFound")
+						.detail("key", printable(keyCopy))
+						.detail("err", err.code())
+						.detail("parentTrace", backtrace.c_str());
+				throw err;
+			}
+
+			return val.get();
+		});
+	}
+
+	Future<Optional<T>> get(Database cx, bool snapshot = false) const {
+		auto &copy = *this;
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return copy.get(tr, snapshot);
+		});
+	}
+
+	Future<T> getD(Database cx, bool snapshot = false, T defaultValue = T()) const {
+		auto &copy = *this;
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return copy.getD(tr, snapshot, defaultValue);
+		});
+	}
+
+	Future<T> getOrThrow(Database cx, bool snapshot = false, Error err = key_not_found()) const {
+		auto &copy = *this;
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return copy.getOrThrow(tr, snapshot, err);
+		});
+	}
+
 	void set(Reference<ReadYourWritesTransaction> tr, T const &val) {
 		return tr->set(key, Codec<T>::pack(val).pack());
 	}
+
+	Future<Void> set(Database cx, T const &val) {
+		auto _key = key;
+		Value _val = Codec<T>::pack(val).pack();
+		return runRYWTransaction(cx, [_key, _val](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->set(_key, _val);
+
+			return Future<Void>(Void());
+		});
+	}
+
 	void clear(Reference<ReadYourWritesTransaction> tr) {
 		return tr->clear(key);
 	}
@@ -141,10 +229,10 @@ public:
 	typedef std::vector<PairType> PairsType;
 
 	// If end is not present one key past the end of the map is used.
-	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr, KeyType const &begin, Optional<KeyType> const &end, int limit, bool snapshot = false) const {
+	Future<PairsType> getRange(Reference<ReadYourWritesTransaction> tr, KeyType const &begin, Optional<KeyType> const &end, int limit, bool snapshot = false, bool reverse = false) const {
 		Subspace s = space;  // 'this' could be invalid inside lambda
 		Key endKey = end.present() ? s.pack(Codec<KeyType>::pack(end.get())) : space.range().end;
-		return map(tr->getRange(KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot),
+		return map(tr->getRange(KeyRangeRef(s.pack(Codec<KeyType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot, reverse),
 					[s] (Standalone<RangeResultRef> const &kvs) -> PairsType {
 						PairsType results;
 						for(int i = 0; i < kvs.size(); ++i) {
@@ -183,6 +271,56 @@ public:
 
 	void erase(Reference<ReadYourWritesTransaction> tr, KeyType const &begin, KeyType const &end) {
 		return tr->clear(KeyRangeRef(space.pack(Codec<KeyType>::pack(begin)), space.pack(Codec<KeyType>::pack(end))));
+	}
+
+	void clear(Reference<ReadYourWritesTransaction> tr) {
+		return tr->clear(space.range());
+	}
+
+	Subspace space;
+};
+
+template <typename _ValueType>
+class KeyBackedSet {
+public:
+	KeyBackedSet(KeyRef key) : space(key) {}
+
+	typedef _ValueType ValueType;
+	typedef std::vector<ValueType> Values;
+
+	// If end is not present one key past the end of the map is used.
+	Future<Values> getRange(Reference<ReadYourWritesTransaction> tr, ValueType const &begin, Optional<ValueType> const &end, int limit, bool snapshot = false) const {
+		Subspace s = space;  // 'this' could be invalid inside lambda
+		Key endKey = end.present() ? s.pack(Codec<ValueType>::pack(end.get())) : space.range().end;
+		return map(tr->getRange(KeyRangeRef(s.pack(Codec<ValueType>::pack(begin)), endKey), GetRangeLimits(limit), snapshot),
+					[s] (Standalone<RangeResultRef> const &kvs) -> Values {
+						Values results;
+						for(int i = 0; i < kvs.size(); ++i) {
+							results.push_back(Codec<ValueType>::unpack(s.unpack(kvs[i].key)));
+						}
+						return results;
+					});
+	}
+
+	Future<bool> exists(Reference<ReadYourWritesTransaction> tr, ValueType const &val, bool snapshot = false) const {
+		return map(tr->get(space.pack(Codec<ValueType>::pack(val)), snapshot), [](Optional<Value> const &val) -> bool {
+			return val.present();
+		});
+	}
+
+	// Returns the expectedSize of the set key
+	int insert(Reference<ReadYourWritesTransaction> tr, ValueType const &val) {
+		Key k = space.pack(Codec<ValueType>::pack(val));
+		tr->set(k, StringRef());
+		return k.expectedSize();
+	}
+
+	void erase(Reference<ReadYourWritesTransaction> tr, ValueType const &val) {
+		return tr->clear(space.pack(Codec<ValueType>::pack(val)));
+	}
+
+	void erase(Reference<ReadYourWritesTransaction> tr, ValueType const &begin, ValueType const &end) {
+		return tr->clear(KeyRangeRef(space.pack(Codec<ValueType>::pack(begin)), space.pack(Codec<ValueType>::pack(end))));
 	}
 
 	void clear(Reference<ReadYourWritesTransaction> tr) {

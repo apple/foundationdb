@@ -624,7 +624,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Data center identifier key (up to 16 hex characters).\n");
 	printf("  -c CLASS, --class CLASS\n"
 		   "                 Machine class (valid options are storage, transaction,\n");
-	printf("                 resolution, proxy, master, test, unset, stateless, log).\n");
+	printf("                 resolution, proxy, master, test, unset, stateless, log, cluster_controller).\n");
 	printf(TLS_HELP);
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, -?, --help Display this help and exit.\n");
@@ -1369,6 +1369,8 @@ int main(int argc, char* argv[]) {
 		SERVER_KNOBS = serverKnobs;
 		CLIENT_KNOBS = clientKnobs;
 
+		if (!serverKnobs->setKnob( "log_directory", logFolder )) ASSERT(false);
+
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
@@ -1680,6 +1682,13 @@ int main(int argc, char* argv[]) {
 			auto processes = g_simulator.getAllProcesses();
 			for(auto i = processes.begin(); i != processes.end(); ++i)
 				printf("%s %s: %0.3f Mclocks\n", (*i)->name, (*i)->address.toString().c_str(), (*i)->cpuTicks / 1e6);
+		}
+		if (role == Simulation) {
+			unsigned long sevErrorEventsLogged = TraceEvent::CountEventsLoggedAt(SevError);
+			if (sevErrorEventsLogged > 0) {
+				printf("%lu SevError events logged\n", sevErrorEventsLogged);
+				rc = FDB_EXIT_ERROR;
+			}
 		}
 
 		//g_simulator.run();

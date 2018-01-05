@@ -1506,10 +1506,37 @@ REGISTER_INSTRUCTION_FUNC(AtomicOPFunc);
 struct UnitTestsFunc : InstructionFunc {
 	static const char* name;
 
-	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
+	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		ASSERT(data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(1020)));
 		ASSERT(!data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(10)));
+
+		state Reference<Transaction> tr(new Transaction(data->db));
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_BATCH);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_CAUSAL_READ_RISKY);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_CAUSAL_WRITE_RISKY);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_AHEAD_DISABLE);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_DURABILITY_DEV_NULL_IS_WEB_SCALE);
+		const uint64_t timeout = 60*1000;
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
+		const uint64_t retryLimit = 50;
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_RETRY_LIMIT, Optional<StringRef>(StringRef((const uint8_t*)&retryLimit, 8)));
+		const uint64_t maxRetryDelay = 100;
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_MAX_RETRY_DELAY, Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_USED_DURING_COMMIT_PROTECTION_DISABLE);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TRANSACTION_LOGGING_ENABLE, Optional<StringRef>(LiteralStringRef("my_transaction")));
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_LOCK_AWARE);
+		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
+
+		Optional<FDBStandalone<ValueRef> > _ = wait(tr->get(LiteralStringRef("\xff")));
+		tr->cancel();
+
 		return Void();
+
 	}
 };
 const char* UnitTestsFunc::name = "UNIT_TESTS";
@@ -1631,6 +1658,8 @@ void populateAtomicOpMap() {
 	optionInfo["MIN"] = FDBMutationType::FDB_MUTATION_TYPE_MIN;
 	optionInfo["SET_VERSIONSTAMPED_KEY"] = FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY;
 	optionInfo["SET_VERSIONSTAMPED_VALUE"] = FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE;
+	optionInfo["BYTE_MIN"] = FDBMutationType::FDB_MUTATION_TYPE_BYTE_MIN;
+	optionInfo["BYTE_MAX"] = FDBMutationType::FDB_MUTATION_TYPE_BYTE_MAX;
 }
 
 void populateOpsThatCreateDirectories() {
@@ -1685,7 +1714,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(500);
+		API *fdb = FDB::API::selectAPIVersion(510);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);

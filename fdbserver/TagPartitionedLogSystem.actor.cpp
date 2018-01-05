@@ -28,6 +28,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
+#include "RecoveryState.h"
 
 ACTOR static Future<Void> reportTLogCommitErrors( Future<Void> commitReply, UID debugID ) {
 	try {
@@ -131,6 +132,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSet->hasBest = tLogSet.hasBest;
 			logSet->locality = tLogSet.locality;
 			logSet->updateLocalitySet();
+			filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
 		}
 
 		logSystem->oldLogData.resize(lsConf.oldTLogs.size());
@@ -464,21 +466,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		Void _ = wait( quorum( alive, std::min(logSet->tLogReplicationFactor, numPresent - logSet->tLogWriteAntiQuorum) ) );
 
+		state Reference<LocalityGroup> locked(new LocalityGroup());
+		state std::vector<bool> responded(alive.size());
+		for (int i = 0; i < alive.size(); i++) {
+			responded[i] = false;
+		}
 		loop {
-			LocalityGroup locked;
-			std::vector<LocalityData> unlocked, unused;
 			for (int i = 0; i < alive.size(); i++) {
-				if (alive[i].isReady() && !alive[i].isError()) {
-					locked.add(logSet->tLogLocalities[i]);
-				} else {
-					unlocked.push_back(logSet->tLogLocalities[i]);
+				if (!responded[i] && alive[i].isReady() && !alive[i].isError()) {
+					locked->add(logSet->tLogLocalities[i]);
+					responded[i] = true;
 				}
 			}
-			bool quorum_obtained = locked.validate(logSet->tLogPolicy);
-			if (!quorum_obtained && logSet->tLogWriteAntiQuorum != 0) {
-				quorum_obtained = !validateAllCombinations(unused, locked, logSet->tLogPolicy, unlocked, logSet->tLogWriteAntiQuorum, false);
-			}
-			if (logSet->tLogReplicationFactor - logSet->tLogWriteAntiQuorum == 1 && locked.size() > 0) {
+			bool quorum_obtained = locked->validate(logSet->tLogPolicy);
+			// We intentionally skip considering antiquorums, as the CPU cost of doing so is prohibitive.
+			if (logSet->tLogReplicationFactor == 1 && locked->size() > 0) {
 				ASSERT(quorum_obtained);
 			}
 			if (quorum_obtained) {
@@ -1002,6 +1004,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSet->tLogLocalities.resize( remoteWorkers.remoteTLogs.size() );
 		logSet->logServers.resize( remoteWorkers.remoteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 		logSet->updateLocalitySet(remoteWorkers.remoteTLogs);
+		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
 
 		vector<int> locations;
 		for( Tag tag : oldLogSystem->epochEndTags ) {
@@ -1090,6 +1093,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogs[0]->tLogLocalities.resize( recr.tLogs.size() );
 		logSystem->tLogs[0]->logServers.resize( recr.tLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 		logSystem->tLogs[0]->updateLocalitySet(recr.tLogs);
+		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
 
 		std::vector<int> locations;
 		state uint16_t minTag = 0;
@@ -1123,6 +1127,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogs[1]->tLogLocalities.resize( recr.satelliteTLogs.size() );
 			logSystem->tLogs[1]->logServers.resize( recr.satelliteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 			logSystem->tLogs[1]->updateLocalitySet(recr.satelliteTLogs);
+			filterLocalityDataForPolicy(logSystem->tLogs[1]->tLogPolicy, &logSystem->tLogs[1]->tLogLocalities);
 
 			for( Tag tag : oldLogSystem->getEpochEndTags() ) {
 				minTag = std::min(minTag, tag.id);
@@ -1152,6 +1157,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogs[0]->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(initializationReplies[i].get()) ) );
 			logSystem->tLogs[0]->tLogLocalities[i] = recr.tLogs[i].locality;
 		}
+		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
 
 		//Don't force failure of recovery if it took us a long time to recover. This avoids multiple long running recoveries causing tests to timeout
 		if (BUGGIFY && now() - startTime < 300 && g_network->isSimulated() && g_simulator.speedUpSimulation) throw master_recovery_failed();

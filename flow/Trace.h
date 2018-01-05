@@ -48,6 +48,7 @@ enum Severity {
 	SevWarn=20,
 	SevWarnAlways=30,
 	SevError=40,
+	SevMaxUsed=SevError,
 	SevMax=1000000
 };
 
@@ -142,6 +143,9 @@ public:
 
 	~TraceEvent();  // Actually logs the event
 
+	// Return the number of invocations of TraceEvent() at the specified logging level.
+	static unsigned long CountEventsLoggedAt(Severity);
+
 	DynamicEventMetric *tmpEventMetric;  // This just just a place to store fields
 
 private:
@@ -153,6 +157,7 @@ private:
 	const char *type;
 	UID id;
 
+	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
 
 	bool init( Severity, const char* type );

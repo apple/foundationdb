@@ -179,11 +179,6 @@ private:
 	}
 };
 
-KeyRange prefixRange( KeyRef prefix ) {
-	Key end = strinc(prefix);
-	return KeyRangeRef( prefix, end );
-}
-
 ////// Persistence format (for self->persistentData)
 
 // Immutable keys
@@ -646,7 +641,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 
 		nextVersion = std::max<Version>(nextVersion, logData->persistentDataVersion);
 
-		TraceEvent("UpdateStorageVer", logData->logId).detail("nextVersion", nextVersion).detail("persistentDataVersion", logData->persistentDataVersion).detail("totalSize", totalSize);
+		//TraceEvent("UpdateStorageVer", logData->logId).detail("nextVersion", nextVersion).detail("persistentDataVersion", logData->persistentDataVersion).detail("totalSize", totalSize);
 
 		Void _ = wait( logData->queueCommittedVersion.whenAtLeast( nextVersion ) );
 		Void _ = wait( delay(0, TaskUpdateStorage) );
@@ -1505,6 +1500,13 @@ ACTOR Future<Void> checkEmptyQueue(TLogData* self) {
 	}
 }
 
+ACTOR Future<Void> checkRecovered(TLogData* self) {
+	TraceEvent("TLogCheckRecoveredBegin", self->dbgid);
+	Optional<Value> v = wait( self->persistentData->readValue(StringRef()) );
+	TraceEvent("TLogCheckRecoveredEnd", self->dbgid);
+	return Void();
+}
+
 ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> recovered, PromiseStream<InitializeTLogRequest> tlogRequests ) {
 	state double startt = now();
 	state Reference<LogData> logData;
@@ -1610,6 +1612,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state UID lastId = UID(1,1); //initialized so it will not compare equal to a default UID
 	state double recoverMemoryLimit = SERVER_KNOBS->TARGET_BYTES_PER_TLOG + SERVER_KNOBS->SPRING_BYTES_TLOG;
 	if (BUGGIFY) recoverMemoryLimit = std::max<double>(SERVER_KNOBS->BUGGIFY_RECOVER_MEMORY_LIMIT, SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
+
 	try {
 		loop {
 			if(allRemoved.isReady()) {
@@ -1978,7 +1981,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		if(restoreFromDisk) {
 			Void _ = wait( restorePersistentState( &self, locality, recovered, tlogRequests ) );
 		} else {
-			Void _ = wait( checkEmptyQueue(&self) );
+			Void _ = wait( checkEmptyQueue(&self) && checkRecovered(&self) );
 		}
 
 		if(recovered.canBeSet()) recovered.send(Void());

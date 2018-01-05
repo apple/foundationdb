@@ -55,6 +55,6 @@ public:
 	virtual StorageBytes getStorageBytes() = 0;
 };
 
-IDiskQueue* openDiskQueue( std::string basename, UID dbgid );  // opens basename+"0.fdq" and basename+"1.fdq"
+IDiskQueue* openDiskQueue( std::string basename, UID dbgid, int64_t fileSizeWarningLimit = -1 );  // opens basename+"0.fdq" and basename+"1.fdq"
 
 #endif

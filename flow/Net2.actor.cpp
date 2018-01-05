@@ -31,13 +31,12 @@
 #include "IThreadPool.h"
 #include "boost/range.hpp"
 
-extern void startProfiling(INetwork* network);
- 
 #include "ActorCollection.h"
 #include "ThreadSafeQueue.h"
 #include "ThreadHelper.actor.h"
 #include "TDMetric.actor.h"
 #include "AsioReactor.h"
+#include "flow/Profiler.h"
 
 #ifdef WIN32
 #include <mmsystem.h>
@@ -49,7 +48,7 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain zookeeper, database and IKeyValueStore keys
+// These impact both communications and the deserialization of certain database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
 uint64_t currentProtocolVersion        = 0x0FDB00A560010001LL;
@@ -124,6 +123,7 @@ public:
 
 	// INetworkConnections interface
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr );
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
 	// INetwork interface
@@ -158,6 +158,7 @@ public:
 
 	ASIOReactor reactor;
 	INetworkConnections *network;  // initially this, but can be changed
+	tcp::resolver tcpResolver;
 
 	int64_t tsc_begin, tsc_end;
 	double taskBegin;
@@ -216,6 +217,8 @@ public:
 	BoolMetricHandle awakeMetric;
 
 	EventMetricHandle<SlowTask> slowTaskMetric;
+
+	std::vector<std::string> blobCredentialFiles;
 };
 
 static tcp::endpoint tcpEndpoint( NetworkAddress const& n ) {
@@ -476,6 +479,7 @@ Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
 	: useThreadPool(useThreadPool),
 	  network(this),
 	  reactor(this),
+	  tcpResolver(reactor.ios),
 	  stopped(false),
 	  tasksIssued(0),
 	  // Until run() is called, yield() will always yield
@@ -491,6 +495,7 @@ Net2::Net2(NetworkAddress localAddress, bool useThreadPool, bool useMetrics)
 	}
 	setGlobal(INetwork::enNetworkConnections, (flowGlobalType) network);
 	setGlobal(INetwork::enASIOService, (flowGlobalType) &reactor.ios);
+	setGlobal(INetwork::enBlobCredentialFiles, &blobCredentialFiles);
 
 #ifdef __linux__
 	setGlobal(INetwork::enEventFD, (flowGlobalType) N2::ASIOReactor::newEventFD(reactor));
@@ -549,7 +554,11 @@ void Net2::run() {
 #endif
 
 	timeOffsetLogger = logTimeOffset();
-	startProfiling(this);
+	const char *flow_profiler_enabled = getenv("FLOW_PROFILER_ENABLED");
+	if (flow_profiler_enabled != nullptr && *flow_profiler_enabled != '\0') {
+		// The empty string check is to allow running `FLOW_PROFILER_ENABLED= ./fdbserver` to force disabling flow profiling at startup.
+		startProfiling(this);
+	}
 
 	// Get the address to the launch function
 	typedef void (*runCycleFuncPtr)();
@@ -823,6 +832,37 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 
 Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr ) {
 	return Connection::connect(&this->reactor.ios, toAddr);
+}
+
+ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
+	state Promise<std::vector<NetworkAddress>> result;
+
+	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
+		if(ec) {
+			result.sendError(lookup_failed());
+			return;
+		}
+
+		std::vector<NetworkAddress> addrs;
+		
+		tcp::resolver::iterator end;
+		while(iter != end) {
+			// The easiest way to get an ip:port formatted endpoint with this interface is with a string stream because
+			// endpoint::to_string doesn't exist but operator<< does.
+			std::stringstream s;
+			s << iter->endpoint();
+			addrs.push_back(NetworkAddress::parse(s.str()));
+			++iter;
+		}
+		result.send(addrs);
+	});
+
+	std::vector<NetworkAddress> addresses = wait(result.getFuture());
+	return addresses;
+}
+
+Future<std::vector<NetworkAddress>> Net2::resolveTCPEndpoint( std::string host, std::string service) {
+	return resolveTCPEndpoint_impl(this, host, service);
 }
 
 bool Net2::isAddressOnThisHost( NetworkAddress const& addr ) {

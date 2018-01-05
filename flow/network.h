@@ -196,7 +196,7 @@ public:
 
 	enum enumGlobal {
 		enFailureMonitor = 0, enFlowTransport = 1, enTDMetrics = 2, enNetworkConnections = 3,
-		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8, enASIOTimedOut = 9
+		enNetworkAddressFunc = 4, enFileSystem = 5, enASIOService = 6, enEventFD = 7, enRunCycleFunc = 8, enASIOTimedOut = 9, enBlobCredentialFiles = 10
 	};
 
 	virtual void longTaskCheck( const char* name ) {}
@@ -269,6 +269,13 @@ public:
 
 	// Make an outgoing connection to the given address.  May return an error or block indefinitely in case of connection problems!
 	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr ) = 0;
+
+	// Resolve host name and service name (such as "http" or can be a plain number like "80") to a list of 1 or more NetworkAddresses
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service ) = 0;
+
+	// Convenience function to resolve host/service and connect to one of its NetworkAddresses randomly
+	// useTLS has to be a parameter here because it is passed to connect() as part of the toAddr object.
+	virtual Future<Reference<IConnection>> connect( std::string host, std::string service, bool useTLS = false);
 
 	// Listen for connections on the given local address
 	virtual Reference<IListener> listen( NetworkAddress localAddr ) = 0;

@@ -385,7 +385,6 @@ protected:
 	LocalityEntry const& add(LocalityEntry const& entry, LocalityData const& data) {
 		_entryArray.push_back(entry);
 		_mutableEntryArray.push_back(entry);
-		ASSERT(data._data.size() > 0);
 
 		// Ensure that the key value array is large enough to hold the values
 		if (_keyValueArray.capacity() < _keyValueArray.size() + data._data.size()) {
@@ -419,7 +418,6 @@ protected:
 		if (_keyValueArray.capacity() < _keyValueArray.size() + record->_dataMap->size()) {
 			_keyValueArray.reserve(_keyValueArray.size() + record->_dataMap->size());
 		}
-		ASSERT(record->_dataMap->_keyvaluearray.size() > 0);
 
 		for (auto& keyValuePair : record->_dataMap->_keyvaluearray) {
 			auto keyString = _localitygroup->keyText(keyValuePair.first);

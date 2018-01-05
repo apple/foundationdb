@@ -766,6 +766,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	}
 
 	machine_count = 8;//g_random->randomInt( std::max( 2+datacenters, db.minMachinesRequired() ), extraDB ? 6 : 10 );
+	if(minimumReplication > 1 && datacenters == 3) {
+		//low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for logs to recover.
+		machine_count = std::max( machine_count, 6);
+	}
 	processes_per_machine = 1;//g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
 	coordinators = 3;//BUGGIFY ? g_random->randomInt(1, machine_count+1) : std::min( machine_count, db.maxMachineFailuresTolerated()*2 + 1 );
 }
@@ -829,7 +833,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	// half the time, when we have more than 4 machines that are not the first in their dataCenter, assign classes
 	bool assignClasses = false;//machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
-	// Use SSL half the time
+	// Use SSL 5% of the time
 	bool sslEnabled = g_random->random01() < 0.05;
 	TEST( sslEnabled ); // SSL enabled
 	TEST( !sslEnabled ); // SSL disabled

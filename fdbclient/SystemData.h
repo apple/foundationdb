@@ -164,10 +164,16 @@ Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destKeyPrefix);
 // the given uid encoded at the end
 Key uidPrefixKey(KeyRef keyPrefix, UID logUid);
 
-// Apply mutations constant variables
+/// Apply mutations constant variables
+
+// applyMutationsEndRange.end defines the highest version for which we have mutations that we can
+// apply to our database as part of a DR/restore operation.
 // \xff/applyMutationsEnd/[16-byte UID] := serialize( endVersion, Unversioned() )
 extern const KeyRangeRef applyMutationsEndRange;
 
+// applyMutationsBeginRange.begin defines the highest version of what has already been applied by a
+// DR/restore to the database, and thus also what version is of the next mutation that needs to be
+// applied to the database.
 // \xff/applyMutationsBegin/[16-byte UID] := serialize( beginVersion, Unversioned() )
 extern const KeyRangeRef applyMutationsBeginRange;
 

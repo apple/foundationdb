@@ -26,7 +26,7 @@
 #include "fdbclient/Knobs.h"
 #include "IRateControl.h"
 #include "HTTP.h"
-#include "fdbclient/json_spirit/json_spirit_writer_template.h"
+#include "JSONDoc.h"
 
 // Representation of all the things you need to connect to a blob store instance with some credentials.
 // Reference counted because a very large number of them could be needed.
@@ -49,6 +49,7 @@ public:
 		BlobKnobs();
 		int connect_tries,
 			connect_timeout,
+			max_connection_life,
 			request_tries,
 			request_timeout,
 			requests_per_second,
@@ -57,18 +58,19 @@ public:
 			multipart_min_part_size,
 			concurrent_uploads,
 			concurrent_reads_per_file,
+			concurrent_writes_per_file,
 			read_block_size,
 			read_ahead_blocks,
 			read_cache_blocks_per_file,
 			max_send_bytes_per_second,
-			max_recv_bytes_per_second,
-			buckets_to_span;
+			max_recv_bytes_per_second;
 		bool set(StringRef name, int value);
 		std::string getURLParameters() const;
 		static std::vector<std::string> getKnobDescriptions() {
 			return {
 				"connect_tries (or ct)                 Number of times to try to connect for each request.",
 				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
+				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
 				"request_tries (or rt)                 Number of times to try each request until a parseable HTTP response other than 429 is received.",
 				"request_timeout (or rto)              Number of seconds to wait for a request to succeed after a connection is established.",
 				"requests_per_second (or rps)          Max number of requests to start per second.",
@@ -77,66 +79,62 @@ public:
 				"multipart_min_part_size (or minps)    Min part size for multipart uploads.",
 				"concurrent_uploads (or cu)            Max concurrent uploads (part or whole) that can be in progress at once.",
 				"concurrent_reads_per_file (or crps)   Max concurrent reads in progress for any one file.",
+				"concurrent_writes_per_file (or cwps)  Max concurrent uploads in progress for any one file.",
 				"read_block_size (or rbs)              Block size in bytes to be used for reads.",
 				"read_ahead_blocks (or rab)            Number of blocks to read ahead of requested offset.",
 				"read_cache_blocks_per_file (or rcb)   Size of the read cache for a file in blocks.",
 				"max_send_bytes_per_second (or sbps)   Max send bytes per second for all requests combined.",
-				"max_recv_bytes_per_second (or rbps)   Max receive bytes per second for all requests combined (NOT YET USED).",
-				"buckets_to_span (or bts)              Number of buckets that a new backup should distribute over."
+				"max_recv_bytes_per_second (or rbps)   Max receive bytes per second for all requests combined (NOT YET USED)."
 			};
 		}
 	};
 
-	BlobStoreEndpoint(std::string const &host, std::vector<NetworkAddress> const &addrs, uint16_t port, std::string const &key, std::string const &key_secret, BlobKnobs const &knobs = BlobKnobs())
-	  : host(host), port(port), addresses(addrs), key(key), secret(key_secret), knobs(knobs),
+	BlobStoreEndpoint(std::string const &host, std::string service, std::string const &key, std::string const &secret, BlobKnobs const &knobs = BlobKnobs())
+	  : host(host), service(service), key(key), secret(secret), lookupSecret(secret.empty()), knobs(knobs),
 		requestRate(new SpeedLimit(knobs.requests_per_second, 1)),
 		sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
 		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
 		concurrentRequests(knobs.concurrent_requests),
 		concurrentUploads(knobs.concurrent_uploads) {
 
-		if(addresses.size() == 0)
+		if(host.empty())
 			throw connection_string_invalid();
-
-		int perAddressLimit = std::max<int>( 1, knobs.concurrent_requests/addrs.size() );
-		for(auto &addr : addrs) {
-			concurrentRequestsPerAddress[addr] = Reference<FlowLock>( new FlowLock(perAddressLimit) );
-		}
 	}
 
 	static std::string getURLFormat(bool withResource = false) {
 		const char *resource = "";
 		if(withResource)
 			resource = "<name>";
-		return format("blobstore://<api_key>:<secret>@<[host,]<ip>[,<ip>]...>:<port>/%s[?<param>=<value>[&<param>=<value>]...]", resource);
+		return format("blobstore://<api_key>:<secret>@<host>[:<port>]/%s[?<param>=<value>[&<param>=<value>]...]", resource);
 	}
 	static Reference<BlobStoreEndpoint> fromString(std::string const &url, std::string *resourceFromURL = nullptr, std::string *error = nullptr);
 
-	// Resolve host, and if successful replace addrs with a list of NetworkAddresses created from the resolve results.
-	Future<Void> resolveHostname(bool only_if_unresolved = true);
-
-	// Get a normalized version of this URL with the given resource, the host and any IP addresses (possibly from DNS
-	// if resolve was done) and any non-default BlobKnob values as URL parameters.
+	// Get a normalized version of this URL with the given resource and any non-default BlobKnob values as URL parameters.
 	std::string getResourceURL(std::string resource);
-	Future<Reference<IConnection>> connect(NetworkAddress address);
 
-	typedef std::pair<Reference<IConnection>, double> ConnPoolEntry;
-	std::map<NetworkAddress,std::list<ConnPoolEntry>> connectionPool;
+	struct ReusableConnection {
+		Reference<IConnection> conn;
+		double expirationTime;
+	};
+	std::queue<ReusableConnection> connectionPool;
+	Future<ReusableConnection> connect();
+	void returnConnection(ReusableConnection &conn);
 
 	std::string host;
-	uint16_t port;
-	std::vector<NetworkAddress> addresses;
+	std::string service;
 	std::string key;
 	std::string secret;
+	bool lookupSecret;
 	BlobKnobs knobs;
 
 	// Speed and concurrency limits
 	Reference<IRateControl> requestRate;
 	Reference<IRateControl> sendRate;
 	Reference<IRateControl> recvRate;
-	std::map<NetworkAddress,Reference<FlowLock>> concurrentRequestsPerAddress;
 	FlowLock concurrentRequests;
 	FlowLock concurrentUploads;
+
+	Future<Void> updateSecret();
 
 	// Calculates the authentication string from the secret key
 	std::string hmac_sha1(std::string const &msg);
@@ -149,20 +147,24 @@ public:
 
 	// Do an HTTP request to the Blob Store, read the response.  Handles authentication.
 	// Every blob store interaction should ultimately go through this function
-	Future<Reference<HTTP::Response>> doRequest(std::string const &verb, std::string const &resource, const HTTP::Headers &headers, UnsentPacketQueue *pContent, int contentLen);
+
+	Future<Reference<HTTP::Response>> doRequest(std::string const &verb, std::string const &resource, const HTTP::Headers &headers, UnsentPacketQueue *pContent, int contentLen, std::set<unsigned int> successCodes);
 
 	struct ObjectInfo {
-		std::string bucket;
 		std::string name;
 		int64_t size;
 	};
 
+	struct ListResult {
+		std::vector<std::string> commonPrefixes;
+		std::vector<ObjectInfo> objects;
+	};
+
 	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests
-	Future<Void> getBucketContentsStream(std::string const &bucket, PromiseStream<ObjectInfo> results);
+	Future<Void> listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0);
 
 	// Get a list of the files in a bucket
-	typedef std::vector<ObjectInfo> BucketContentsT;
-	Future<BucketContentsT> getBucketContents(std::string const &bucket);
+	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0);
 
 	// Check if an object exists in a bucket
 	Future<bool> objectExists(std::string const &bucket, std::string const &object);
@@ -181,6 +183,9 @@ public:
 	// Since it can take a while, if a pNumDeleted is provided then it will be incremented every time
 	// a deletion of an object completes.
 	Future<Void> deleteBucket(std::string const &bucket, int *pNumDeleted = NULL);
+
+	// Create a bucket if it does not already exists.
+	Future<Void> createBucket(std::string const &bucket);
 
 	// Useful methods for working with tiny files
 	Future<std::string> readEntireFile(std::string const &bucket, std::string const &object);

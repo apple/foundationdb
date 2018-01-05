@@ -786,6 +786,9 @@ public:
 		((Sim2Listener*)peerp->listener.getPtr())->incomingConnection( 0.5*g_random->random01(), Reference<IConnection>(peerc) );
 		return onConnect( ::delay(0.5*g_random->random01()), myc );
 	}
+	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service) {
+		throw lookup_failed();
+	}
 	ACTOR static Future<Reference<IConnection>> onConnect( Future<Void> ready, Reference<Sim2Conn> conn ) {
 		Void _ = wait(ready);
 		if (conn->isPeerGone() && g_random->random01()<0.5) {

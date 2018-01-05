@@ -32,12 +32,6 @@
 
 struct DBCoreState;
 
-template <class Collection>
-void uniquify( Collection& c ) {
-	std::sort(c.begin(), c.end());
-	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
-}
-
 class LogSet : NonCopyable, public ReferenceCounted<LogSet> {
 public:
 	std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> logServers;

@@ -93,6 +93,7 @@ public:
 				case ProcessClass::StatelessClass: return false;
 				case ProcessClass::LogClass: return true;
 				case ProcessClass::LogRouterClass: return false;
+				case ProcessClass::ClusterControllerClass: return false;
 				default: return false;
 			}
 		}

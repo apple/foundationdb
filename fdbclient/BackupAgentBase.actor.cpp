@@ -328,12 +328,13 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 	KeyRangeRef range, bool terminator, bool systemAccess, bool lockAware) {
 	state KeySelector begin = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
-	state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 	state FlowLock::Releaser releaser;
 
 	loop{
 		try {
+			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+
 			if (systemAccess)
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware)
@@ -364,7 +365,8 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 				begin = firstGreaterThan(values.end()[-1].key);
 
 			if (!values.more && !limits.isReached()) {
-				results.sendError(end_of_stream());
+				if(terminator)
+					results.sendError(end_of_stream());
 				return Void();
 			}
 		}
@@ -382,7 +384,6 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 {
 	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
-	state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 	state RCGroup rcGroup = RCGroup();
 	state uint64_t skipGroup(ULLONG_MAX);
@@ -391,6 +392,8 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 
 	loop{
 		try {
+			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+
 			if (systemAccess)
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware)
@@ -456,7 +459,8 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 					results.send(rcGroup);
 				}
 
-				results.sendError(end_of_stream());
+				if(terminator)
+					results.sendError(end_of_stream());
 				return Void();
 			}
 
@@ -475,7 +479,6 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Re
 {
 	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
-	state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 	state RCGroup rcGroup = RCGroup();
 	state uint64_t skipGroup(ULLONG_MAX);
@@ -484,6 +487,8 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Re
 
 	loop{
 		try {
+			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
+
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -601,6 +606,9 @@ ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Referenc
 		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
 		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
 
+		// The commit request contains no read conflict ranges, so regardless of what read version we
+		// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
+		// for our transaction to be aborted due to conflicts.
 		req.transaction.read_snapshot = committedVersion->get();
 		req.isLockAware = true;
 
