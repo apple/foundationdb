@@ -1445,8 +1445,8 @@ public:
 				tr3.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr3.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Version destVersion = wait(tr3.getReadVersion());
+				TraceEvent("DBA_switchover_version_upgrade").detail("src", commitVersion).detail("dest", destVersion);
 				if (destVersion <= commitVersion) {
-					TraceEvent("DBA_switchover_version_upgrade").detail("src", commitVersion).detail("dest", destVersion);
 					TEST(true);  // Forcing dest backup cluster to higher version
 					tr3.set(minRequiredCommitVersionKey, BinaryWriter::toValue(commitVersion+1, Unversioned()));
 					Void _ = wait(tr3.commit());
@@ -1549,12 +1549,20 @@ public:
 				if (lastApplied.present()) {
 					Version current = tr->getReadVersion().get();
 					Version applied = BinaryReader::fromStringRef<Version>(lastApplied.get(), Unversioned());
+					TraceEvent("DBA_abort_version_upgrade").detail("src", applied).detail("dest", current);
 					if (current <= applied) {
-						TraceEvent("DBA_abort_version_upgrade").detail("src", applied).detail("dest", current);
 						TEST(true);  // Upgrading version of local database.
 						// The +1 is because we want to make sure that a versionstamped operation can't reuse
 						// the same version as an already-applied transaction.
 						tr->set(minRequiredCommitVersionKey, BinaryWriter::toValue(applied+1, Unversioned()));
+					} else {
+						// We need to enforce that the read we did of the applyMutationsBeginKey is the most
+						// recent and up to date value, as the proxy might have accepted a commit previously
+						// queued by dumpData after our read. Transactions that don't have write conflict ranges
+						// have a no-op commit(), as they become snapshot transactions to which we don't promise
+						// strict serializability.  Therefore, we add an arbitrary write conflict range to
+						// request the strict serializability guarantee that is required.
+						tr->addWriteConflictRange(singleKeyRange(minRequiredCommitVersionKey));
 					}
 				}
 				Void _ = wait(tr->commit());
