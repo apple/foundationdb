@@ -1013,6 +1013,24 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInt
 	return serverInterfaces;
 }
 
+template <class F>
+pair<KeyRange, Reference<LocationInfo>> getCachedKeyLocation( Database cx, Key key, F StorageServerInterface::*member, bool isBackward = false ) {
+	auto ssi = cx->getCachedLocation( key, isBackward );
+	if (!ssi.second) {
+		return ssi;
+	}
+
+	for(int i = 0; i < ssi.second->size(); i++) {
+		if( IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, member).getEndpoint()) ) {
+			cx->invalidateCache( key );
+			ssi.second.clear();
+			return ssi;
+		}
+	}
+
+	return ssi;
+}
+
 //If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key). Otherwise returns the shard containing key
 ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database cx, Key key, TransactionInfo info, bool isBackward = false ) {
 	if (isBackward) {
@@ -1020,10 +1038,6 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 	} else {
 		ASSERT( key < allKeys.end );
 	}
-
-	auto loc = cx->getCachedLocation( key, isBackward );
-	if (loc.second)
-		return loc;
 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Before");
@@ -1103,26 +1117,11 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	state Version ver = wait( version );
 	validateVersion(ver);
 
-	state pair<KeyRange, Reference<LocationInfo>> ssi;
 	loop {
-		ssi = cx->getCachedLocation( key );
+		state pair<KeyRange, Reference<LocationInfo>> ssi = getCachedKeyLocation(cx, key, &StorageServerInterface::getValue);
 		if (!ssi.second) {
 			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
 			ssi = std::move(ssi2);
-		} else {
-			bool onlyEndpointFailed = false;
-			for(int i = 0; i < ssi.second->size(); i++) {
-				if( IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, &StorageServerInterface::getValue).getEndpoint()) ) {
-					onlyEndpointFailed = true;
-					break;
-				}
-			}
-
-			if( onlyEndpointFailed ) {
-				cx->invalidateCache( key );
-				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
-				ssi = std::move(ssi2);
-			}
 		}
 		
 		state Optional<UID> getValueID = Optional<UID>();
@@ -1201,7 +1200,13 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			return Key();
 		}
 
-		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, Key(k.getKey(), k.arena()), info, k.isBackward()) );
+		Key locationKey(k.getKey(), k.arena());
+		state pair<KeyRange, Reference<LocationInfo>> ssi = getCachedKeyLocation(cx, locationKey, &StorageServerInterface::getKey, k.isBackward());
+		if(!ssi.second) {
+			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation(cx, locationKey, info, k.isBackward()) );
+			ssi = std::move(ssi2);
+		}
+		
 		try {
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("offset",k.offset).detail("orEqual",k.orEqual);
@@ -1258,24 +1263,10 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 	ASSERT(ver != latestVersion);
 
 	loop {
-		state pair<KeyRange, Reference<LocationInfo>> ssi = cx->getCachedLocation( key );
+		state pair<KeyRange, Reference<LocationInfo>> ssi = getCachedKeyLocation(cx, key, &StorageServerInterface::watchValue );
 		if (!ssi.second) {
 			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
 			ssi = std::move(ssi2);
-		} else {
-			bool onlyEndpointFailed = false;
-			for(int i = 0; i < ssi.second->size(); i++) {
-				if( IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, &StorageServerInterface::watchValue).getEndpoint()) ) {
-					onlyEndpointFailed = true;
-					break;
-				}
-			}
-
-			if( onlyEndpointFailed ) {
-				cx->invalidateCache( key );
-				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
-				ssi = std::move(ssi2);
-			}
 		}
 
 		try {
@@ -1623,7 +1614,14 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				return output;
 			}
 
-			state pair<KeyRange, Reference<LocationInfo>> beginServer = wait( getKeyLocation( cx, reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena()), info, reverse ? (end-1).isBackward() : begin.isBackward() ) );
+			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
+			bool locationBackward = reverse ? (end-1).isBackward() : begin.isBackward();
+			state pair<KeyRange, Reference<LocationInfo>> beginServer = getCachedKeyLocation( cx, locationKey, &StorageServerInterface::getKeyValues, locationBackward );
+			if (!beginServer.second) {
+				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, locationKey, info, locationBackward ) );
+				beginServer = std::move(ssi2);
+			}
+
 			state KeyRange shard = beginServer.first;
 			state bool modifiedSelectors = false;
 			state GetKeyValuesRequest req;
