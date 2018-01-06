@@ -188,6 +188,7 @@ static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRe
 
 // Updated on updatePersistentData()
 static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef( LiteralStringRef( "version/" ), LiteralStringRef( "version0" ) );
+static const KeyRangeRef persistUnrecoveredBeforeVersionKeys = KeyRangeRef( LiteralStringRef( "UnrecoveredBefore/" ), LiteralStringRef( "UnrecoveredBefore0" ) );
 static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
 static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
 
@@ -369,7 +370,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	TLogData* tLogData;
 	Future<Void> recovery;
 	Promise<Void> recoveryComplete;
-	Version recoveringBefore;
+	Version unrecoveredBefore;
 
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	Optional<Tag> remoteTag;
@@ -378,7 +379,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	explicit LogData(TLogData* tLogData, TLogInterface interf, Optional<Tag> remoteTag, int persistentDataFormat = 1) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), persistentDataFormat(persistentDataFormat), logSystem(new AsyncVar<Reference<ILogSystem>>()),
 			// These are initialized differently on init() or recovery
-			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void()), recoveringBefore(0)
+			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void()), unrecoveredBefore(0)
 	{
 		startRole(interf.id(), UID(), "TLog");
 
@@ -410,6 +411,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		if(!tLogData->terminated) {
 			Key logIdKey = BinaryWriter::toValue(logId,Unversioned());
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)) );
+			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistUnrecoveredBeforeVersionKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)) );
 			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
 			tLogData->persistentData->clear( KeyRangeRef( msgKey, strinc(msgKey) ) );
@@ -867,7 +869,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		}
 	}
 
-	if( req.begin < logData->recoveringBefore ) {
+	if( req.begin < logData->unrecoveredBefore ) {
 		try {
 			Void _ = wait( logData->recoveryComplete.getFuture() );
 		} catch( Error &e ) {
@@ -1131,11 +1133,12 @@ ACTOR Future<Void> tLogCommit(
 	return Void();
 }
 
-ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logData ) {
+ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logData, Version unrecoveredBefore ) {
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	IKeyValueStore *storage = self->persistentData;
 	storage->set( persistFormat );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(logData->version.get(), Unversioned()) ) );
+	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistUnrecoveredBeforeVersionKeys.begin), BinaryWriter::toValue(unrecoveredBefore, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistRecoveryCountKeys.begin), BinaryWriter::toValue(logData->recoveryCount, Unversioned()) ) );
 
 	TraceEvent("TLogInitCommit", logData->logId);
@@ -1518,12 +1521,13 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	IKeyValueStore *storage = self->persistentData;
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fVers = storage->readRange(persistCurrentVersionKeys);
+	state Future<Standalone<VectorRef<KeyValueRef>>> fUnrecoveredBefore = storage->readRange(persistUnrecoveredBeforeVersionKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 
 	// FIXME: metadata in queue?
 
 	Void _ = wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat ) ) );
-	Void _ = wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fRecoverCounts) ) );
+	Void _ = wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fUnrecoveredBefore, fRecoverCounts) ) );
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 		TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid).detail("Format", printable(fFormat.get().get())).detail("Expected", persistFormat.value.toString());
@@ -1550,6 +1554,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	}
 
 	ASSERT(fVers.get().size() == fRecoverCounts.get().size());
+
+	state std::map<UID, Version> id_unrecoveredBefore;
+	for(auto it : fUnrecoveredBefore.get()) {
+		id_unrecoveredBefore[ BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistUnrecoveredBeforeVersionKeys.begin), Unversioned())] = BinaryReader::fromStringRef<Version>( it.value, Unversioned() );
+	}
 
 	state int idx = 0;
 	state Promise<Void> registerWithMaster;
@@ -1578,6 +1587,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		self->id_data[id1] = logData;
 		id_interf[id1] = recruited;
 
+		logData->unrecoveredBefore = id_unrecoveredBefore[id1];
 		Version ver = BinaryReader::fromStringRef<Version>( fVers.get()[idx].value, Unversioned() );
 		logData->persistentDataVersion = ver;
 		logData->persistentDataDurableVersion = ver;
@@ -1672,7 +1682,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 			TraceEvent("TLogZeroVersion", self->dbgid).detail("logId", it.first);
 			it.second->queueCommittedVersion.set(it.second->version.get());
 		}
-		it.second->recoveryComplete.send(Void());
+		it.second->recoveryComplete.sendError(end_of_stream());
 		self->sharedActors.send( tLogCore( self, it.second, id_interf[it.first] ) );
 	}
 
@@ -1838,6 +1848,7 @@ ACTOR Future<Void> recoverFromLogSystem( TLogData* self, Reference<LogData> logD
 
 					Void __ = wait( committing );
 					Void __ = wait( self->updatePersist );
+					self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistUnrecoveredBeforeVersionKeys.begin), BinaryWriter::toValue(knownCommittedVersion, Unversioned()) ) );
 					committing = self->persistentData->commit();
 					commitTimeout = delay(SERVER_KNOBS->LONG_TLOG_COMMIT_TIME);
 					uncommittedBytes->set(0);
@@ -1867,6 +1878,7 @@ ACTOR Future<Void> recoverFromLogSystem( TLogData* self, Reference<LogData> logD
 
 		Void _ = wait( committing );
 		Void _ = wait( self->updatePersist );
+		self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistUnrecoveredBeforeVersionKeys.begin), BinaryWriter::toValue(Version(0), Unversioned()) ) );
 		Void _ = wait( self->persistentData->commit() );
 
 		logData->recoveryComplete.send(Void());
@@ -1925,12 +1937,13 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		if (req.recoverFrom.logSystemType == 1) {
 			ASSERT(false);
 		} else if (req.recoverFrom.logSystemType == 2) {
+			logData->unrecoveredBefore = req.knownCommittedVersion;
 			logData->persistentDataVersion = req.recoverAt;
 			logData->persistentDataDurableVersion = req.recoverAt; // durable is a white lie until initPersistentState() commits the store
 			logData->queueCommittedVersion.set( req.recoverAt );
 			logData->version.set( req.recoverAt );
 
-			Void _ = wait( initPersistentState( self, logData ) || logData->removed );
+			Void _ = wait( initPersistentState( self, logData, std::numeric_limits<Version>::max() ) || logData->removed );
 
 			state Promise<Void> copyComplete;
 			TraceEvent("TLogRecover", self->dbgid).detail("logId", logData->logId).detail("at", req.recoverAt).detail("known", req.knownCommittedVersion).detail("tags", describe(req.recoverTags));
@@ -1939,12 +1952,11 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 				throw worker_removed();
 			}
 
-			logData->recoveringBefore = req.knownCommittedVersion;
 			logData->recovery = recoverFromLogSystem( self, logData, req.syncLogId, req.recoverFrom, req.recoverAt, req.knownCommittedVersion, req.recoverTags, copyComplete );
 			Void _ = wait(copyComplete.getFuture() || logData->removed );
 		} else {
 			// Brand new tlog, initialization has already been done by caller
-			Void _ = wait( initPersistentState( self, logData ) || logData->removed );
+			Void _ = wait( initPersistentState( self, logData, 0 ) || logData->removed );
 			logData->recoveryComplete.send(Void());
 		}
 	} catch( Error &e ) {
