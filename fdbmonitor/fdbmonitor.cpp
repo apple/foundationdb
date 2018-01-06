@@ -655,62 +655,64 @@ void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb
 	ini.SetUnicode();
 
 	SI_Error err = ini.LoadFile(confpath);
-	if (err<0) {
+	bool loadedConf = err >= 0;
+	if (!loadedConf) {
 		log_msg(SevError, "Unable to load configuration file %s (SI_Error: %d, errno: %d)\n", confpath, err, errno);
-		return;
 	}
 
-	uid_t _uid;
-	gid_t _gid;
+	if(loadedConf) {
+		uid_t _uid;
+		gid_t _gid;
 
-	const char* user = ini.GetValue("fdbmonitor", "user", NULL);
-	const char* group = ini.GetValue("fdbmonitor", "group", NULL);
+		const char* user = ini.GetValue("fdbmonitor", "user", NULL);
+		const char* group = ini.GetValue("fdbmonitor", "group", NULL);
 
-	if (user) {
-		errno = 0;
-		struct passwd* pw = getpwnam(user);
-		if (!pw) {
-			log_err( "getpwnam", errno, "Unable to lookup user %s", user );
-			return;
-		}
-		_uid = pw->pw_uid;
-	} else
-		_uid = geteuid();
+		if (user) {
+			errno = 0;
+			struct passwd* pw = getpwnam(user);
+			if (!pw) {
+				log_err( "getpwnam", errno, "Unable to lookup user %s", user );
+				return;
+			}
+			_uid = pw->pw_uid;
+		} else
+			_uid = geteuid();
 
-	if (group) {
-		errno = 0;
-		struct group* gr = getgrnam(group);
-		if (!gr) {
-			log_err( "getgrnam", errno, "Unable to lookup group %s", group );
-			return;
-		}
-		_gid = gr->gr_gid;
-	} else
-		_gid = getegid();
+		if (group) {
+			errno = 0;
+			struct group* gr = getgrnam(group);
+			if (!gr) {
+				log_err( "getgrnam", errno, "Unable to lookup group %s", group );
+				return;
+			}
+			_gid = gr->gr_gid;
+		} else
+			_gid = getegid();
 
-	/* Any change to uid or gid requires the process to be restarted to take effect */
-	if (uid != _uid || gid != _gid) {
-		std::vector<uint64_t> kill_ids;
-		for (auto i : id_pid) {
-			if(id_command[i.first]->kill_on_configuration_change) {
-				kill_ids.push_back(i.first);
+		/* Any change to uid or gid requires the process to be restarted to take effect */
+		if (uid != _uid || gid != _gid) {
+			std::vector<uint64_t> kill_ids;
+			for (auto i : id_pid) {
+				if(id_command[i.first]->kill_on_configuration_change) {
+					kill_ids.push_back(i.first);
+				}
+			}
+			for (auto i : kill_ids) {
+				kill_process(i);
+				delete id_command[i];
+				id_command.erase(i);
 			}
 		}
-		for (auto i : kill_ids) {
-			kill_process(i);
-			delete id_command[i];
-			id_command.erase(i);
-		}
-	}
 
-	uid = _uid;
-	gid = _gid;
+		uid = _uid;
+		gid = _gid;
+	}
 
 	std::list<uint64_t> kill_ids;
 	std::list<std::pair<uint64_t, Command*>> start_ids;
 
 	for (auto i : id_pid) {
-		if (ini.GetSectionSize(id_command[i.first]->ssection.c_str()) == -1) {
+		if (!loadedConf || ini.GetSectionSize(id_command[i.first]->ssection.c_str()) == -1) {
 			/* Server on this port no longer configured; deconfigure it and kill it if required */
 			log_msg(SevInfo, "Deconfigured %s\n", id_command[i.first]->ssection.c_str());
 
@@ -751,34 +753,36 @@ void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb
 
 	/* We've handled deconfigured sections, now look for newly
 	   configured sections */
-	CSimpleIniA::TNamesDepend sections;
-	ini.GetAllSections(sections);
-	for (auto i : sections) {
-		if (auto dot = strrchr(i.pItem, '.')) {
-			char* strtol_end;
+	if(loadedConf) {
+		CSimpleIniA::TNamesDepend sections;
+		ini.GetAllSections(sections);
+		for (auto i : sections) {
+			if (auto dot = strrchr(i.pItem, '.')) {
+				char* strtol_end;
 
-			uint64_t id = strtoull(dot + 1, &strtol_end, 10);
+				uint64_t id = strtoull(dot + 1, &strtol_end, 10);
 
-			if (*strtol_end != '\0' || !(id > 0)) {
-				log_msg(SevError, "Found bogus id in %s\n", i.pItem);
-			} else {
-				if (!id_pid.count(id)) {
-					/* Found something we haven't yet started */
-					Command *cmd;
+				if (*strtol_end != '\0' || !(id > 0)) {
+					log_msg(SevError, "Found bogus id in %s\n", i.pItem);
+				} else {
+					if (!id_pid.count(id)) {
+						/* Found something we haven't yet started */
+						Command *cmd;
 
-					auto itr = id_command.find(id);
-					if(itr != id_command.end()) {
-						cmd = itr->second;
-					}
-					else {
-						std::string section(i.pItem, dot - i.pItem);
-						cmd = new Command(ini, section, id, rfds, maxfd);
-						id_command[id] = cmd;
-					}
+						auto itr = id_command.find(id);
+						if(itr != id_command.end()) {
+							cmd = itr->second;
+						}
+						else {
+							std::string section(i.pItem, dot - i.pItem);
+							cmd = new Command(ini, section, id, rfds, maxfd);
+							id_command[id] = cmd;
+						}
 
-					if(cmd->fork_retry_time <= timer()) {
-						log_msg(SevInfo, "Starting %s\n", i.pItem);
-						start_process(cmd, id, uid, gid, 0, mask);
+						if(cmd->fork_retry_time <= timer()) {
+							log_msg(SevInfo, "Starting %s\n", i.pItem);
+							start_process(cmd, id, uid, gid, 0, mask);
+						}
 					}
 				}
 			}
@@ -819,6 +823,48 @@ void read_child_output( Command* cmd, int pipe_idx, fdb_fd_set fds ) {
 }
 
 #ifdef __APPLE__
+void watch_conf_dir( int kq, int* confd_fd, std::string confdir ) {
+	struct kevent ev;
+	std::string original = confdir;
+
+	while(true) {
+		/* If already watching, drop it and close */
+		if ( *confd_fd >= 0 ) {
+			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE, 0, NULL );
+			kevent( kq, &ev, 1, NULL, 0, NULL );
+			close( *confd_fd );
+		}
+
+		confdir = original;
+		std::string child = confdir;
+
+		/* Find the nearest existing ancestor */
+		while( (*confd_fd = open( confdir.c_str(), O_EVTONLY )) < 0 && errno == ENOENT ) {
+			child = confdir;
+			confdir = parentDirectory(confdir);
+		}
+
+		if ( *confd_fd >= 0 ) {
+			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL );
+			kevent( kq, &ev, 1, NULL, 0, NULL );
+
+			/* If our child appeared since we last tested it, start over from the beginning */
+			if ( confdir != child && (access(child.c_str(), F_OK) == 0 || errno != ENOENT) ) {
+				continue;
+			}
+
+			if(confdir != original) {
+				log_msg(SevInfo, "Watching parent directory of missing directory %s\n", child.c_str());
+			}
+			else {
+				log_msg(SevInfo, "Watching conf dir %s\n", confdir.c_str());
+			}
+		}
+
+		return;
+	}
+}
+
 void watch_conf_file( int kq, int* conff_fd, const char* confpath ) {
 	struct kevent ev;
 
@@ -839,14 +885,12 @@ void watch_conf_file( int kq, int* conff_fd, const char* confpath ) {
 #endif
 
 #ifdef __linux__
-void fdbmon_stat(const char *path, struct stat *path_stat, bool is_link) {
-	int result = is_link ? lstat(path, path_stat) : stat(path, path_stat);
-	if(result) {
-		log_err(is_link ? "lstat" : "stat", errno, "Unable to stat %s", path);
-		exit(1);
-	}
+int fdbmon_stat(const char *path, struct stat *path_stat, bool is_link) {
+	return is_link ? lstat(path, path_stat) : stat(path, path_stat);
 }
 
+/* Sets watches to track changes to all symlinks on a path.
+ * Also sets a watch on the last existing ancestor of a path if the full path doesn't exist. */
 std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string path, int ifd) {
 	std::unordered_map<int, std::unordered_set<std::string>> additional_watch_wds;
 	struct stat path_stat;
@@ -855,33 +899,67 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 		return additional_watch_wds;
 
 	int idx = 1;
-	while(idx != std::string::npos) {
+	bool exists = true;
+
+	/* Check each level of the path, setting a watch on any symlinks.
+	 * Stop checking once we get to a part of the path that doesn't exist.
+	 * If we encounter a non-existing path, watch the closest existing ancestor. */
+	while(idx != std::string::npos && exists) {
 		idx = path.find_first_of('/', idx+1);
 		std::string subpath = path.substr(0, idx);
 
 		int level = 0;
 		while(true) {
-			if(level++ == 100) {
-				log_msg(SevError, "Too many nested symlinks in path %s\n", path.c_str());
-				exit(1);
+			/* Check path existence */
+			int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
+			if(result != 0) {
+				if(errno == ENOENT) {
+					exists = false;
+				}
+				else {
+					log_err("lstat", errno, "Unable to stat %s", path.c_str());
+					exit(1);
+				}
 			}
 
-			fdbmon_stat(subpath.c_str(), &path_stat, true);
-			if(!S_ISLNK(path_stat.st_mode)) {
-				break;
+			if(exists) {
+				/* Don't do anything for existing non-links */
+				if(!S_ISLNK(path_stat.st_mode)) {
+					break;
+				}
+				else if(level++ == 100) {
+					log_msg(SevError, "Too many nested symlinks in path %s\n", path.c_str());
+					exit(1);
+				}
 			}
 
 			std::string parent = parentDirectory(subpath);
 
+			/* Watch the parent directory of the current path for changes */
 			int wd = inotify_add_watch(ifd, parent.c_str(), IN_CREATE | IN_MOVED_TO);
 			if (wd < 0) {
 				log_err("inotify_add_watch", errno, "Unable to add watch to parent directory %s", parent.c_str());
 				exit(1);
 			}
 
-			log_msg(SevInfo, "Watching parent directory of symlink %s (%d)\n", subpath.c_str(), wd);
-			additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+			if(exists) {
+				log_msg(SevInfo, "Watching parent directory of symlink %s (%d)\n", subpath.c_str(), wd);
+				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+			}
+			else {
+				/* If the subpath has appeared since we set the watch, we should cancel it and resume traversing the path */
+				int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
+				if(result == 0 || errno != ENOENT) {
+					inotify_rm_watch(ifd, wd);
+					continue;
+				}
 
+				log_msg(SevInfo, "Watching parent directory of missing directory %s (%d)\n", subpath.c_str(), wd);
+				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+				break;
+			}
+
+			/* Follow the symlink */
 			char buf[PATH_MAX+1];
 			ssize_t len = readlink(subpath.c_str(), buf, PATH_MAX);
 			if(len < 0) {
@@ -1088,13 +1166,12 @@ int main(int argc, char** argv) {
 	EV_SET( &ev, SIGCHLD, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
 	kevent( kq, &ev, 1, NULL, 0, NULL );
 
-	int confd_fd = open(confdir.c_str(), O_EVTONLY);
+	int confd_fd = -1;
+	int conff_fd = -1;
 
 	// Watch the directory holding the configuration file
-	EV_SET( &ev, confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL );
-	kevent( kq, &ev, 1, NULL, 0, NULL );
+	watch_conf_dir( kq, &confd_fd, confdir );
 
-	int conff_fd = -1;
 #endif
 
 #ifdef __linux__
@@ -1131,28 +1208,43 @@ int main(int argc, char** argv) {
 		if (reload) {
 			reload = false;
 #ifdef __linux__
+			/* Remove existing watches on conf file and directory */
 			if(confdir_wd >= 0 && inotify_rm_watch(ifd, confdir_wd) < 0) {
 				log_msg(SevInfo, "Could not remove inotify conf dir watch, continuing...\n");
 			}
 			if(conffile_wd >= 0 && inotify_rm_watch(ifd, conffile_wd) < 0) {
 				log_msg(SevInfo, "Could not remove inotify conf file watch, continuing...\n");
 			}
+
+			/* Create new watches */
 			conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
 			if (conffile_wd < 0) {
-				log_err("inotify_add_watch", errno, "Unable to set watch on configuration file %s", confpath.c_str());
-				exit(1); // Deleting the conf file causes fdbmonitor to terminate
+				if(errno != ENOENT) {
+					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file %s", confpath.c_str());
+					exit(1);
+				}
+				else {
+					log_msg(SevInfo, "Conf file has been deleted %s\n", confpath.c_str());
+				}
 			} else {
-				log_msg(SevInfo, "Watching config file %s\n", confpath.c_str());
+				log_msg(SevInfo, "Watching conf file %s\n", confpath.c_str());
 			}
 
 			confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
 			if (confdir_wd < 0) {
-				log_err("inotify_add_watch", errno, "Unable to set watch on configuration file parent directory %s", confdir.c_str());
-				exit(1);
+				if(errno != ENOENT) {
+					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file parent directory %s", confdir.c_str());
+					exit(1);
+				}
+				else {
+					reload_additional_watches = true;
+					log_msg(SevInfo, "Conf dir has been deleted %s\n", confdir.c_str());
+				}
 			} else {
-				log_msg(SevInfo, "Watching config dir %s (%d)\n", confdir.c_str(), confdir_wd);
+				log_msg(SevInfo, "Watching conf dir %s (%d)\n", confdir.c_str(), confdir_wd);
 			}
 
+			/* Reload watches on symlinks and/or the oldest existing ancestor */
 			if(reload_additional_watches) {
 				additional_watch_wds = set_watches(_confpath, ifd);
 			}
@@ -1162,6 +1254,7 @@ int main(int argc, char** argv) {
 #elif defined(__APPLE__)
 			load_conf( confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd );
 			watch_conf_file( kq, &conff_fd, confpath.c_str() );
+			watch_conf_dir( kq, &confd_fd, confdir );
 #endif
 		}
 

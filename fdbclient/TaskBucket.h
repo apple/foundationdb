@@ -391,6 +391,7 @@ struct TaskFuncBase : IDispatched<TaskFuncBase, Standalone<StringRef>, std::func
 	};
 };
 #define REGISTER_TASKFUNC(TaskFunc) REGISTER_FACTORY(TaskFuncBase, TaskFunc, name)
+#define REGISTER_TASKFUNC_ALIAS(TaskFunc, Alias) REGISTER_DISPATCHED_ALIAS(TaskFunc, Alias, TaskFunc::name, LiteralStringRef(#Alias))
 
 struct TaskCompletionKey {
 	Future<Key> get(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket);

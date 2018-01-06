@@ -1837,16 +1837,16 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinationContainer) {
 	try {
 		state Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
+		state int numDeleted = 0;
+		state Future<Void> done = c->deleteContainer(&numDeleted);
 
 		loop {
 			choose {
-				when ( Void _  = wait(c->deleteContainer()) ) {
+				when ( Void _ = wait(done) ) {
 					printf("The entire container has been deleted.\n");
 					break;
 				}
 				when ( Void _ = wait(delay(3)) ) {
-					int numDeleted = 0;
-					c->deleteContainer(&numDeleted);
 					printf("%d files have been deleted so far...\n", numDeleted);
 				}
 			}

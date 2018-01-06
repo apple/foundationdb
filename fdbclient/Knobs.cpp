@@ -145,9 +145,11 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
 	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
-	init( BLOBSTORE_REQUEST_TIMEOUT,                30 );
+	init( BLOBSTORE_REQUEST_TIMEOUT,                60 );
 
 	init( BLOBSTORE_CONCURRENT_UPLOADS, BACKUP_TASKS_PER_AGENT*2 );
+	init( BLOBSTORE_CONCURRENT_LISTS,               20 );
+	init( BLOBSTORE_CONCURRENT_REQUESTS, BLOBSTORE_CONCURRENT_UPLOADS + BLOBSTORE_CONCURRENT_LISTS + 5);
 
 	init( BLOBSTORE_CONCURRENT_WRITES_PER_FILE,      5 );
 	init( BLOBSTORE_CONCURRENT_READS_PER_FILE,       3 );
@@ -159,7 +161,6 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	// These are basically unlimited by default but can be used to reduce blob IO if needed
 	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );
-	init( BLOBSTORE_CONCURRENT_REQUESTS, (BACKUP_TASKS_PER_AGENT*2)+5 );
 	init( BLOBSTORE_MAX_SEND_BYTES_PER_SECOND,      1e9 );
 	init( BLOBSTORE_MAX_RECV_BYTES_PER_SECOND,      1e9 );
 

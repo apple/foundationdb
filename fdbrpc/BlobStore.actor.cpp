@@ -59,6 +59,7 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	multipart_max_part_size = CLIENT_KNOBS->BLOBSTORE_MULTIPART_MAX_PART_SIZE;
 	multipart_min_part_size = CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE;
 	concurrent_uploads = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_UPLOADS;
+	concurrent_lists = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_LISTS;
 	concurrent_reads_per_file = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_READS_PER_FILE;
 	concurrent_writes_per_file = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_WRITES_PER_FILE;
 	read_block_size = CLIENT_KNOBS->BLOBSTORE_READ_BLOCK_SIZE;
@@ -80,6 +81,7 @@ bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(multipart_max_part_size, maxps);
 	TRY_PARAM(multipart_min_part_size, minps);
 	TRY_PARAM(concurrent_uploads, cu);
+	TRY_PARAM(concurrent_lists, cl);
 	TRY_PARAM(concurrent_reads_per_file, crpf);
 	TRY_PARAM(concurrent_writes_per_file, cwpf);
 	TRY_PARAM(read_block_size, rbs);
@@ -106,6 +108,7 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(multipart_max_part_size, maxps);
 	_CHECK_PARAM(multipart_min_part_size, minps);
 	_CHECK_PARAM(concurrent_uploads, cu);
+	_CHECK_PARAM(concurrent_lists, cl);
 	_CHECK_PARAM(concurrent_reads_per_file, crpf);
 	_CHECK_PARAM(concurrent_writes_per_file, cwpf);
 	_CHECK_PARAM(read_block_size, rbs);
@@ -417,7 +420,6 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are refreshed
 			// when a new connection is established and setAuthHeaders() would need the updated secret.
 			bstore->setAuthHeaders(verb, resource, headers);
-
 			remoteAddress = rconn.conn->getPeerAddress();
 			Void _ = wait(bstore->requestRate->getAllowance(1));
 			state Reference<HTTP::Response> r = wait(timeoutError(HTTP::doRequest(rconn.conn, verb, resource, headers, &contentCopy, contentLen, bstore->sendRate, &bstore->s_stats.bytes_sent, bstore->recvRate), bstore->knobs.request_timeout));
@@ -478,16 +480,18 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		}
 
 		if(retryable) {
-			// If retrying, obey the Retry-After response header if present.
-			auto iRetryAfter = r->headers.find("Retry-After");
-			if(iRetryAfter != r->headers.end()) {
-				event.detail("RetryAfterHeader", iRetryAfter->second);
-				char *pEnd;
-				double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);
-				if(*pEnd)  // If there were other characters then don't trust the parsed value, use a probably safe value of 5 minutes.
-					retryAfter = 300;
-				// Update delay
-				delay = std::max(delay, retryAfter);
+			// If r is valid then obey the Retry-After response header if present.
+			if(r) {
+				auto iRetryAfter = r->headers.find("Retry-After");
+				if(iRetryAfter != r->headers.end()) {
+					event.detail("RetryAfterHeader", iRetryAfter->second);
+					char *pEnd;
+					double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);
+					if(*pEnd)  // If there were other characters then don't trust the parsed value, use a probably safe value of 5 minutes.
+						retryAfter = 300;
+					// Update delay
+					delay = std::max(delay, retryAfter);
+				}
 			}
 
 			// Log the delay then wait.
@@ -498,7 +502,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// We can't retry, so throw something.
 
 			// This error code means the authentication header was not accepted, likely the account or key is wrong.
-			if(r->code == 406)
+			if(r && r->code == 406)
 				throw http_not_accepted();
 
 			throw http_request_failed();
@@ -526,8 +530,12 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 	state std::vector<Future<Void>> subLists;
 
 	while(more) {
+		Void _ = wait(bstore->concurrentLists.take());
+		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
+
 		HTTP::Headers headers;
 		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource + HTTP::urlEncode(lastFile), headers, NULL, 0, {200}));
+		listReleaser.release();
 
 		try {
 			BlobStoreEndpoint::ListResult result;
@@ -535,11 +543,13 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 			json_spirit::mValue json;
 			json_spirit::read_string(r->content, json);
 			JSONDoc doc(json);
+
 			std::string isTruncated;
 			if (!doc.tryGet("truncated", more)) {
 				doc.get("ListBucketResult.IsTruncated", isTruncated);
 				more = isTruncated == "false" ? false : true;
 			}
+
 			if (doc.has("results")) {
 				for (auto &jsonObject : doc.at("results").get_array()) {
 					JSONDoc objectDoc(jsonObject);
@@ -549,6 +559,7 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					result.objects.push_back(std::move(object));
 				}
 			}
+
 			if(doc.has("ListBucketResult.Contents")) {
 				if (doc.at("ListBucketResult.Contents").type() == json_spirit::array_type) {
 					for (auto &jsonObject : doc.at("ListBucketResult.Contents").get_array()) {
@@ -572,22 +583,26 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					result.objects.push_back(std::move(object));
 				}
 			}
+
 			if(doc.has("CommonPrefixes")) {
 				for(auto &jsonObject : doc.at("CommonPrefixes").get_array()) {
 					JSONDoc objectDoc(jsonObject);
 					std::string p;
 					objectDoc.get("Prefix", p);
-					result.commonPrefixes.push_back(p);
-					if(maxDepth > 0) {
+					// If recursing, queue a sub-request, otherwise add the common prefix to the result.
+					if(maxDepth > 0)
 						subLists.push_back(bstore->listBucketStream(bucket, results, p, delimiter, maxDepth - 1));
-					}
+					else
+						result.commonPrefixes.push_back(p);
 				}
 			}
 
-			if(!result.objects.empty())
-				lastFile = result.objects.back().name;
-			if(!result.commonPrefixes.empty() && lastFile < result.commonPrefixes.back())
-				lastFile = result.commonPrefixes.back();
+			if(more) {
+				if(!result.objects.empty())
+					lastFile = result.objects.back().name;
+				if(!result.commonPrefixes.empty() && lastFile < result.commonPrefixes.back())
+					lastFile = result.commonPrefixes.back();
+			}
 
 			results.send(result);
 		} catch(Error &e) {
