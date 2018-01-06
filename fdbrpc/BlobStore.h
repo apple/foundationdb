@@ -53,10 +53,11 @@ public:
 			request_tries,
 			request_timeout,
 			requests_per_second,
-			concurrent_requests,
 			multipart_max_part_size,
 			multipart_min_part_size,
+			concurrent_requests,
 			concurrent_uploads,
+			concurrent_lists,
 			concurrent_reads_per_file,
 			concurrent_writes_per_file,
 			read_block_size,
@@ -74,10 +75,11 @@ public:
 				"request_tries (or rt)                 Number of times to try each request until a parseable HTTP response other than 429 is received.",
 				"request_timeout (or rto)              Number of seconds to wait for a request to succeed after a connection is established.",
 				"requests_per_second (or rps)          Max number of requests to start per second.",
-				"concurrent_requests (or cr)           Max number of requests in progress at once.",
 				"multipart_max_part_size (or maxps)    Max part size for multipart uploads.",
 				"multipart_min_part_size (or minps)    Min part size for multipart uploads.",
+				"concurrent_requests (or cr)           Max number of total requests in progress at once, regardless of operation-specific concurrency limits.",
 				"concurrent_uploads (or cu)            Max concurrent uploads (part or whole) that can be in progress at once.",
+				"concurrent_lists (or cl)              Max concurrent list operations that can be in progress at once.",
 				"concurrent_reads_per_file (or crps)   Max concurrent reads in progress for any one file.",
 				"concurrent_writes_per_file (or cwps)  Max concurrent uploads in progress for any one file.",
 				"read_block_size (or rbs)              Block size in bytes to be used for reads.",
@@ -95,7 +97,8 @@ public:
 		sendRate(new SpeedLimit(knobs.max_send_bytes_per_second, 1)),
 		recvRate(new SpeedLimit(knobs.max_recv_bytes_per_second, 1)),
 		concurrentRequests(knobs.concurrent_requests),
-		concurrentUploads(knobs.concurrent_uploads) {
+		concurrentUploads(knobs.concurrent_uploads),
+		concurrentLists(knobs.concurrent_lists) {
 
 		if(host.empty())
 			throw connection_string_invalid();
@@ -133,6 +136,7 @@ public:
 	Reference<IRateControl> recvRate;
 	FlowLock concurrentRequests;
 	FlowLock concurrentUploads;
+	FlowLock concurrentLists;
 
 	Future<Void> updateSecret();
 
