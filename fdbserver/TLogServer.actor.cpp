@@ -1794,7 +1794,7 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 	return Void();
 }
 
-ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, Optional<UID> syncLogId, LogSystemConfig recoverFrom, Reference<AsyncVar<Reference<ILogSystem>>> logSystem) {
+ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom, Reference<AsyncVar<Reference<ILogSystem>>> logSystem) {
 	loop {
 		TraceEvent("TLogUpdate", self->dbgid).detail("logId", logData->logId).detail("recoverFrom", recoverFrom.toString()).detail("dbInfo", self->dbInfo->get().logSystemConfig.toString());
 		for(auto it : self->dbInfo->get().logSystemConfig.oldTLogs) {
@@ -1806,13 +1806,8 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, O
 			logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
 			found = true;
 		} else if( self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom) ) {
-			for( auto& it : self->dbInfo->get().logSystemConfig.tLogs ) {
-				if( std::count(it.tLogs.begin(), it.tLogs.end(), syncLogId.present() ? syncLogId.get() : logData->logId ) ) {
-					logSystem->set(ILogSystem::fromOldLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
-					found = true;
-					break;
-				}
-			}
+			logSystem->set(ILogSystem::fromOldLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
+			found = true;
 		}
 		if( !found ) {
 			logSystem->set(Reference<ILogSystem>());
@@ -1821,13 +1816,13 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, O
 	}
 }
 
-ACTOR Future<Void> recoverFromLogSystem( TLogData* self, Reference<LogData> logData, Optional<UID> syncLogId, LogSystemConfig recoverFrom, Version recoverAt, Version knownCommittedVersion, std::vector<Tag> recoverTags, Promise<Void> copyComplete ) {
+ACTOR Future<Void> recoverFromLogSystem( TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom, Version recoverAt, Version knownCommittedVersion, std::vector<Tag> recoverTags, Promise<Void> copyComplete ) {
 	state Future<Void> committing = Void();
 	state double lastCommitT = now();
 	state Reference<AsyncVar<int>> uncommittedBytes = Reference<AsyncVar<int>>(new AsyncVar<int>());
 	state std::vector<Future<Void>> recoverFutures;
 	state Reference<AsyncVar<Reference<ILogSystem>>> logSystem = Reference<AsyncVar<Reference<ILogSystem>>>(new AsyncVar<Reference<ILogSystem>>());
-	state Future<Void> updater = updateLogSystem(self, logData, syncLogId, recoverFrom, logSystem);
+	state Future<Void> updater = updateLogSystem(self, logData, recoverFrom, logSystem);
 
 	for(auto tag : recoverTags )
 		recoverFutures.push_back(recoverTagFromLogSystem(self, logData, knownCommittedVersion, recoverAt, tag, uncommittedBytes, logSystem));
@@ -1952,7 +1947,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 				throw worker_removed();
 			}
 
-			logData->recovery = recoverFromLogSystem( self, logData, req.syncLogId, req.recoverFrom, req.recoverAt, req.knownCommittedVersion, req.recoverTags, copyComplete );
+			logData->recovery = recoverFromLogSystem( self, logData, req.recoverFrom, req.recoverAt, req.knownCommittedVersion, req.recoverTags, copyComplete );
 			Void _ = wait(copyComplete.getFuture() || logData->removed );
 		} else {
 			// Brand new tlog, initialization has already been done by caller

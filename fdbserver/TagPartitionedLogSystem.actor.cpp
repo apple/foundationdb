@@ -995,7 +995,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = remoteRecruitmentID;
-			req.syncLogId = self->tLogs[0]->logServers[0]->get().id();
 			req.storeType = configuration.tLogDataStoreType;
 			req.recoverFrom = oldLogSystem->getLogSystemConfig();
 			req.recoverAt = oldLogSystem->epochEndVersion.get();
