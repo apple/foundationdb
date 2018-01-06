@@ -149,36 +149,42 @@ public:
 		return writeFile(format("ranges/%s/range,%lld,%s,%d", rangeVersionFolderString(version).c_str(), version, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
-	static RangeFile pathToRangeFile(std::string path, int64_t size) {
+	static bool pathToRangeFile(RangeFile &out, std::string path, int64_t size) {
 		std::string name = basename(path);
 		RangeFile f;
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if(sscanf(name.c_str(), "range,%lld,%*[^,],%u%n", &f.version, &f.blockSize, &len) == 2 && len == name.size())
-			return f;
-		throw restore_unknown_file_type();
+		if(sscanf(name.c_str(), "range,%lld,%*[^,],%u%n", &f.version, &f.blockSize, &len) == 2 && len == name.size()) {
+			out = f;
+			return true;
+		}
+		return false;
 	}
 
-	static LogFile pathToLogFile(std::string path, int64_t size) {
+	static bool pathToLogFile(LogFile &out, std::string path, int64_t size) {
 		std::string name = basename(path);
 		LogFile f;
 		f.fileName = path;
 		f.fileSize = size;
 		int len;
-		if(sscanf(name.c_str(), "log,%lld,%lld,%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size())
-			return f;
-		throw restore_unknown_file_type();
+		if(sscanf(name.c_str(), "log,%lld,%lld,%*[^,],%u%n", &f.beginVersion, &f.endVersion, &f.blockSize, &len) == 3 && len == name.size()) {
+			out = f;
+			return true;
+		}
+		return false;
 	}
 
-	static KeyspaceSnapshotFile pathToKeyspaceSnapshotFile(std::string path) {
+	static bool pathToKeyspaceSnapshotFile(KeyspaceSnapshotFile &out, std::string path) {
 		std::string name = basename(path);
 		KeyspaceSnapshotFile f;
 		f.fileName = path;
 		int len;
-		if(sscanf(name.c_str(), "snapshot,%lld,%lld,%lld%n", &f.beginVersion, &f.endVersion, &f.totalSize, &len) == 3 && len == name.size())
-			return f;
-		throw restore_unknown_file_type();
+		if(sscanf(name.c_str(), "snapshot,%lld,%lld,%lld%n", &f.beginVersion, &f.endVersion, &f.totalSize, &len) == 3 && len == name.size()) {
+			out = f;
+			return true;
+		}
+		return false;
 	}
 
 	// TODO:  Do this more efficiently, as the range file list for a snapshot could potentially be hundreds of megabytes.
@@ -236,14 +242,18 @@ public:
 
 		Version minVer = std::numeric_limits<Version>::max();
 		Version maxVer = std::numeric_limits<Version>::min();
+		RangeFile rf;
 
 		for(auto &f : fileNames) {
-			array.push_back(f);
-			RangeFile rf = pathToRangeFile(f, 0);
-			if(rf.version < minVer)
-				minVer = rf.version;
-			if(rf.version > maxVer)
-				maxVer = rf.version;
+			if(pathToRangeFile(rf, f, 0)) {
+				array.push_back(f);
+				if(rf.version < minVer)
+					minVer = rf.version;
+				if(rf.version > maxVer)
+					maxVer = rf.version;
+			}
+			else
+				throw restore_unknown_file_type();
 		}
 
 		doc.create("totalBytes") = totalBytes;
@@ -267,9 +277,9 @@ public:
 	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
 		return map(listFiles("logs/"), [=](const FilesAndSizesT &files) {
 			std::vector<LogFile> results;
+			LogFile lf;
 			for(auto &f : files) {
-				LogFile lf = pathToLogFile(f.first, f.second);
-				if(lf.endVersion > beginVersion && lf.beginVersion < endVersion)
+				if(pathToLogFile(lf, f.first, f.second) && lf.endVersion > beginVersion && lf.beginVersion < endVersion)
 					results.push_back(lf);
 			}
 			std::sort(results.begin(), results.end());
@@ -279,9 +289,9 @@ public:
 	Future<std::vector<RangeFile>> listRangeFiles(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
 		return map(listFiles("ranges/"), [=](const FilesAndSizesT &files) {
 			std::vector<RangeFile> results;
+			RangeFile rf;
 			for(auto &f : files) {
-				RangeFile rf = pathToRangeFile(f.first, f.second);
-				if(rf.version >= beginVersion && rf.version <= endVersion)
+				if(pathToRangeFile(rf, f.first, f.second) && rf.version >= beginVersion && rf.version <= endVersion)
 					results.push_back(rf);
 			}
 			std::sort(results.begin(), results.end());
@@ -291,9 +301,9 @@ public:
 	Future<std::vector<KeyspaceSnapshotFile>> listKeyspaceSnapshots(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
 		return map(listFiles("snapshots/"), [=](const FilesAndSizesT &files) {
 			std::vector<KeyspaceSnapshotFile> results;
+			KeyspaceSnapshotFile sf;
 			for(auto &f : files) {
-				KeyspaceSnapshotFile sf = pathToKeyspaceSnapshotFile(f.first);
-				if(sf.endVersion > beginVersion && sf.beginVersion < endVersion)
+				if(pathToKeyspaceSnapshotFile(sf, f.first) && sf.endVersion > beginVersion && sf.beginVersion < endVersion)
 					results.push_back(sf);
 			}
 			std::sort(results.begin(), results.end());
@@ -724,8 +734,8 @@ public:
 	// TODO:  If there is a need, this can be made faster by discovering common prefixes and listing levels of the folder structure in parallel.
 	ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
 		state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-		state Future<Void> done = bc->m_bstore->listBucketStream(BACKUP_BUCKET, resultStream, bc->m_name + "/");
-		state std::vector<Future<Void>> deleteFutures;
+		state Future<Void> done = bc->m_bstore->listBucketStream(BACKUP_BUCKET, resultStream, bc->m_name + "/", '/', std::numeric_limits<int>::max());
+		state std::list<Future<Void>> deleteFutures;
 		loop {
 			choose {
 				when(Void _ = wait(done)) {
@@ -740,11 +750,20 @@ public:
 							return Void();
 						}));
 					}
+
+					while(deleteFutures.size() > CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS) {
+						Void _ = wait(deleteFutures.front());
+						deleteFutures.pop_front();
+					}
 				}
 			}
 		}
 
-		Void _ = wait(waitForAll(deleteFutures));
+		while(deleteFutures.size() > 0) {
+			Void _ = wait(deleteFutures.front());
+			deleteFutures.pop_front();
+		}
+
 		return Void();
 	}
 
