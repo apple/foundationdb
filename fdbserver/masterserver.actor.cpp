@@ -1215,7 +1215,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->recoveryState = RecoveryState::FULLY_RECOVERED;
 	double recoveryDuration = now() - recoverStartTime;
 
-	TraceEvent(recoveryDuration > 4 ? SevWarnAlways : SevInfo, "MasterRecoveryDuration", self->dbgid)
+	TraceEvent((recoveryDuration > 4 && !g_network->isSimulated()) ? SevWarnAlways : SevInfo, "MasterRecoveryDuration", self->dbgid)
 		.detail("recoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryDuration");
 
