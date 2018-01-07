@@ -504,9 +504,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
+	// Returns success after confirming that pushes in the current epoch are still possible
 	virtual Future<Void> confirmEpochLive(Optional<UID> debugID) {
-		// Returns success after confirming that pushes in the current epoch are still possible
-		// FIXME: This is way too conservative?
 		vector<Future<Void>> quorumResults;
 		for(auto& it : tLogs) {
 			if(it->isLocal) {

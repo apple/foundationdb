@@ -306,7 +306,6 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, Future< RecruitFr
 
 ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfigurationReply recruits, vector<StorageServerInterface>* servers ) {
 	// This is only necessary if the database is at version 0
-	// FIXME: the seed servers do not respect the storage policy
 	servers->clear();
 	if (self->lastEpochEnd) return Void();
 
@@ -444,7 +443,6 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("logs", describe(logSystem->getLogSystemConfig().tLogs));
 
 		if (!self->cstateUpdated.get()) {
-			//FIXME: prior committed tlogs should include
 			Void _ = wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->provisionalProxies, self->resolvers, self->cstate.myDBState.recoveryCount, self->cstate.prevDBState.getPriorCommittedLogServers() ));
 		} else {
 			updateLogsKey = updateLogsValue(self, cx);

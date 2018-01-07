@@ -699,6 +699,7 @@ public:
 			RecruitFromConfigurationReply result;
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[masterProcessId]++;
+			id_used[clusterControllerProcessId]++;
 			
 			auto tlogs = getWorkersForTlogs( req.configuration, req.configuration.tLogReplicationFactor, req.configuration.getDesiredLogs(), req.configuration.tLogPolicy, id_used );
 			for(int i = 0; i < tlogs.size(); i++) {
@@ -829,8 +830,8 @@ public:
 
 		// Check tLog fitness
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
-		id_used[clusterControllerProcessId]++;
 		id_used[masterProcessId]++;
+		id_used[clusterControllerProcessId]++;
 
 		TLogFitness oldTLogFit(tlogs);
 		TLogFitness newTLotFit(getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true));

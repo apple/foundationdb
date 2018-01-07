@@ -1031,6 +1031,37 @@ pair<KeyRange, Reference<LocationInfo>> getCachedKeyLocation( Database cx, Key k
 	return ssi;
 }
 
+template <class F>
+vector< pair<KeyRange,Reference<LocationInfo>> > getCachedKeyRangeLocations( Database cx, KeyRange keys, int limit, bool reverse, F StorageServerInterface::*member ) {
+	ASSERT (!keys.empty());
+
+	vector< pair<KeyRange,Reference<LocationInfo>> > locations;
+	if (!cx->getCachedLocations(keys, locations, limit, reverse))
+		return vector< pair<KeyRange,Reference<LocationInfo>> >();
+
+	bool foundFailed = false;
+	for(auto& it : locations) {
+		bool onlyEndpointFailed = false;
+		for(int i = 0; i < it.second->size(); i++) {
+			if( IFailureMonitor::failureMonitor().onlyEndpointFailed(it.second->get(i, member).getEndpoint()) ) {
+				onlyEndpointFailed = true;
+				break;
+			}
+		}
+
+		if( onlyEndpointFailed ) {
+			cx->invalidateCache( it.first.begin );
+			foundFailed = true;
+		}
+	}
+
+	if(foundFailed) {
+		return vector< pair<KeyRange,Reference<LocationInfo>> >();
+	}
+
+	return locations;
+}
+
 //If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key). Otherwise returns the shard containing key
 ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database cx, Key key, TransactionInfo info, bool isBackward = false ) {
 	if (isBackward) {
@@ -1057,7 +1088,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 	}
 }
 
-ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
+ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
@@ -1084,20 +1115,10 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 	}
 }
 
-Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
-	ASSERT (!keys.empty());
-
-	vector< pair<KeyRange,Reference<LocationInfo>> > result;
-	if (cx->getCachedLocations(keys, result, limit, reverse))
-		return result;
-
-	return getKeyRangeLocations_internal( cx, keys, limit, reverse, info );
-}
-
 ACTOR Future<Void> warmRange_impl( Transaction *self, Database cx, KeyRange keys ) {
 	state int totalRanges = 0;
 	loop {
-		vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations_internal(cx, keys, CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT, false, self->info));
+		vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations(cx, keys, CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT, false, self->info));
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
 		if(locations.size() == 0 || totalRanges >= cx->locationCacheSize || locations[locations.size()-1].first.end >= keys.end)
 			break;
@@ -1338,25 +1359,8 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 
 	//printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
-		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, info ) );
-
-		bool foundFailed = false;
-		for(auto& it : locations) {
-			bool onlyEndpointFailed = false;
-			for(int i = 0; i < it.second->size(); i++) {
-				if( IFailureMonitor::failureMonitor().onlyEndpointFailed(it.second->get(i, &StorageServerInterface::getKeyValues).getEndpoint()) ) {
-					onlyEndpointFailed = true;
-					break;
-				}
-			}
-
-			if( onlyEndpointFailed ) {
-				cx->invalidateCache( it.first.begin );
-				foundFailed = true;
-			}
-		}
-
-		if(foundFailed) {
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = getCachedKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues);
+		if (!locations.size()) {
 			vector< pair<KeyRange, Reference<LocationInfo>> > _locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, info ) );
 			locations = std::move(_locations);
 		}
@@ -2865,8 +2869,12 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 	int shardLimit )
 {
 	loop {
-		state vector< pair<KeyRange,Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, TransactionInfo(TaskDataDistribution) ) );
-
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = getCachedKeyRangeLocations( cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics);
+		if (!locations.size()) {
+			vector< pair<KeyRange, Reference<LocationInfo>> > _locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, TransactionInfo(TaskDataDistribution) ) );
+			locations = std::move(_locations);
+		}
+		
 		if( locations.size() == shardLimit ) {
 			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "WaitStorageMetricsPenalty")
 				.detail("Keys", printable(keys))
@@ -2918,7 +2926,11 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )
 {
 	loop {
-		state vector< pair<KeyRange,Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, false, TransactionInfo(TaskDataDistribution) ) );
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = getCachedKeyRangeLocations( cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, false, &StorageServerInterface::splitMetrics);
+		if (!locations.size()) {
+			vector< pair<KeyRange, Reference<LocationInfo>> > _locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, false, TransactionInfo(TaskDataDistribution) ) );
+			locations = std::move(_locations);
+		}
 		state StorageMetrics used;
 		state Standalone<VectorRef<KeyRef>> results;
 
