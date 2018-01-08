@@ -510,6 +510,8 @@ struct ILogSystem {
 
 	virtual void getPushLocations( std::vector<Tag> const& tags, vector<int>& locations ) = 0;
 
+	virtual bool hasRemoteLogs() = 0;
+
 	virtual void addRemoteTags( int logSet, std::vector<Tag> const& originalTags, std::vector<int>& tags ) = 0;
 
 	virtual Tag getRandomRouterTag() = 0;
@@ -564,7 +566,9 @@ struct LogPushData : NonCopyable {
 	void addMessage( StringRef rawMessageWithoutLength, bool usePreviousLocations = false ) {
 		if( !usePreviousLocations ) {
 			prev_tags.clear();
-			prev_tags.push_back( logSystem->getRandomRouterTag() );
+			if(logSystem->hasRemoteLogs()) {
+				prev_tags.push_back( logSystem->getRandomRouterTag() );
+			}
 			for(auto& tag : next_message_tags) {
 				prev_tags.push_back(tag);
 			}
@@ -587,7 +591,9 @@ struct LogPushData : NonCopyable {
 	template <class T>
 	void addTypedMessage( T const& item ) {
 		prev_tags.clear();
-		prev_tags.push_back( logSystem->getRandomRouterTag() );
+		if(logSystem->hasRemoteLogs()) {
+			prev_tags.push_back( logSystem->getRandomRouterTag() );
+		}
 		for(auto& tag : next_message_tags) {
 			prev_tags.push_back(tag);
 		}

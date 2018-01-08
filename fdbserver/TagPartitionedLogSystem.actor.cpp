@@ -644,10 +644,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			return std::numeric_limits<Version>::max();
 	}
 
-	virtual void addRemoteTags( int logSet, std::vector<Tag> const& originalTags, std::vector<int>& tags ) {
-		tLogs[logSet]->getPushLocations(originalTags, tags, 0);
-	}
-
 	virtual void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations ) {
 		int locationOffset = 0;
 		for(auto& log : tLogs) {
@@ -656,6 +652,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				locationOffset += log->logServers.size();
 			}
 		}
+	}
+
+	virtual bool hasRemoteLogs() {
+		return minRouters > 0;
+	}
+
+	virtual void addRemoteTags( int logSet, std::vector<Tag> const& originalTags, std::vector<int>& tags ) {
+		tLogs[logSet]->getPushLocations(originalTags, tags, 0);
 	}
 
 	virtual Tag getRandomRouterTag() {

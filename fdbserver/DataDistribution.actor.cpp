@@ -2013,6 +2013,8 @@ ACTOR Future<Void> dataDistribution(
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
 		Reference<ILogSystem> logSystem,
 		Version recoveryCommitVersion,
+		std::vector<Optional<Key>> primaryDcId,
+		std::vector<Optional<Key>> remoteDcId,
 		double* lastLimited)
 {
 	state Database cx = openDBOnServer(db, TaskDataDistributionLaunch, true, true);
@@ -2110,17 +2112,12 @@ ACTOR Future<Void> dataDistribution(
 			Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure( new ShardsAffectedByTeamFailure );
 			vector<Future<Void>> actors;
 
-			std::vector<Optional<Key>> primaryDcId;
-			primaryDcId.push_back(configuration.primaryDcId);
-
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( popOldTags( cx, logSystem, recoveryCommitVersion) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, shardsAffectedByTeamFailure, output, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, getShardMetrics, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, configuration.storageTeamSize, configuration.durableStorageQuorum, lastLimited ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[0], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, primaryDcId, serverChanges, readyToStart.getFuture() ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
 			if (configuration.remoteTLogReplicationFactor > 0) {
-				std::vector<Optional<Key>> remoteDcId;
-				remoteDcId.push_back(configuration.remoteDcId);
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[1], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, remoteDcId, serverChanges, readyToStart.getFuture() ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
 			}
 
