@@ -131,6 +131,7 @@
     <ClInclude Include="Smoother.h" />
     <ClInclude Include="TLSConnection.h" />
     <ClInclude Include="TraceFileIO.h" />
+    <ClInclude Include="xml2json.hpp" />
     <ClInclude Include="zlib\zlib.h" />
     <ClInclude Include="zlib\deflate.h" />
     <ClInclude Include="zlib\gzguts.h" />
