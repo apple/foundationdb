@@ -168,7 +168,6 @@
     <ClInclude Include="ReplicationPolicy.h" />
     <ClInclude Include="crc32c.h" />
     <ClInclude Include="ReplicationUtils.h" />
-    <ClInclude Include="xml2json.hpp" />
     <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="JSONDoc.h" />
     <ClInclude Include="linux_kaio.h" />
