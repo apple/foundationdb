@@ -222,7 +222,7 @@ struct Peer : NonCopyable {
 	ReliablePacketList reliable;
 	AsyncTrigger dataToSend;  // Triggered when unsent.empty() becomes false
 	Future<Void> connect;
-	AsyncVar<bool> incompatibleDataRead;
+	AsyncTrigger incompatibleDataRead;
 	bool compatible;
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;
@@ -313,11 +313,10 @@ struct Peer : NonCopyable {
 			state ReplyPromise<Void> reply;
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
 
-			peer->incompatibleDataRead.set(false);
 			choose {
 				when (Void _ = wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").detail("WithAddr", peer->destination); throw connection_failed(); }
 				when (Void _ = wait( reply.getFuture() )) {}
-				when (Void _ = wait( peer->incompatibleDataRead.onChange())) {}
+				when (Void _ = wait( peer->incompatibleDataRead.onTrigger())) {}
 			}
 		}
 	}
@@ -673,7 +672,7 @@ ACTOR static Future<Void> connectionReader(
 				}
 				else if(!expectConnectPacket) {
 					unprocessed_begin = unprocessed_end;
-					peer->incompatibleDataRead.set(true);
+					peer->incompatibleDataRead.trigger();
 				}
 
 				if (readWillBlock)
