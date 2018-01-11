@@ -64,9 +64,7 @@ struct DBCoreState {
 
 	std::vector<OldTLogCoreData> oldTLogData;
 
-	DBCoreState() : recoveryCount(0), tLogWriteAntiQuorum(0), tLogReplicationFactor(0),
-		logSystemType(0) {}
-
+	DBCoreState() : recoveryCount(0), tLogWriteAntiQuorum(0), tLogReplicationFactor(0), logSystemType(0) {}
 
 	vector<UID> getPriorCommittedLogServers() {
 		vector<UID> priorCommittedLogServers;
@@ -91,10 +89,9 @@ struct DBCoreState {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		UID functionId = g_nondeterministic_random->randomUniqueID();
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A320050001LL );
 		ar & tLogs & tLogWriteAntiQuorum & recoveryCount & tLogReplicationFactor & logSystemType;
-		if( ar.protocolVersion() >= 0x0FDB00A460010001LL) {
+		if(ar.protocolVersion() >= 0x0FDB00A460010001LL) {
 			uint64_t tLocalitySize = (uint64_t)tLogLocalities.size();
 			ar & oldTLogData & tLogPolicy & tLocalitySize;
 			if (ar.isDeserializing) {
@@ -111,32 +108,34 @@ struct DBCoreState {
 				}
 			}
 		}
-		else if(ar.isDeserializing) {
+		else if(ar.isDeserializing) {	
 			oldTLogData.clear();
-			oldTLogData.push_back(OldTLogCoreData());
-			ar & oldTLogData[0].tLogs & oldTLogData[0].epochEnd & oldTLogData[0].tLogWriteAntiQuorum & oldTLogData[0].tLogReplicationFactor;
 			tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
-			if(!oldTLogData[0].tLogs.size()) {
-				oldTLogData.pop_back();
-			}
-			else {
-				for(int i = 0; i < oldTLogData.size(); i++ ) {
-					oldTLogData[i].tLogPolicy = IRepPolicyRef(new PolicyAcross(oldTLogData[i].tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
-					if (oldTLogData[i].tLogs.size())
-					{
-						oldTLogData[i].tLogLocalities.reserve(oldTLogData[i].tLogs.size());
-						for (auto& tLog : oldTLogData[i].tLogs) {
-							LocalityData	locality;
-							locality.set(LocalityData::keyZoneId, g_random->randomUniqueID().toString());
-							locality.set(LocalityData::keyDataHallId, LiteralStringRef("0"));
-							oldTLogData[i].tLogLocalities.push_back(locality);
+
+			if(ar.protocolVersion() >= 0x0FDB00A400000001LL) {
+				oldTLogData.push_back(OldTLogCoreData());
+				ar & oldTLogData[0].tLogs & oldTLogData[0].epochEnd & oldTLogData[0].tLogWriteAntiQuorum & oldTLogData[0].tLogReplicationFactor;
+				if(!oldTLogData[0].tLogs.size()) {
+					oldTLogData.pop_back();
+				} else {
+					for(int i = 0; i < oldTLogData.size(); i++ ) {
+						oldTLogData[i].tLogPolicy = IRepPolicyRef(new PolicyAcross(oldTLogData[i].tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+						if (oldTLogData[i].tLogs.size()) {
+							oldTLogData[i].tLogLocalities.reserve(oldTLogData[i].tLogs.size());
+							for (auto& tLog : oldTLogData[i].tLogs) {
+								LocalityData locality;
+								locality.set(LocalityData::keyZoneId, g_random->randomUniqueID().toString());
+								locality.set(LocalityData::keyDataHallId, LiteralStringRef("0"));
+								oldTLogData[i].tLogLocalities.push_back(locality);
+							}
 						}
 					}
-				}
+				}	
 			}
+
 			tLogLocalities.reserve(tLogs.size());
 			for (auto& tLog : tLogs) {
-				LocalityData	locality;
+				LocalityData locality;
 				locality.set(LocalityData::keyZoneId, g_random->randomUniqueID().toString());
 				locality.set(LocalityData::keyDataHallId, LiteralStringRef("0"));
 				tLogLocalities.push_back(locality);
