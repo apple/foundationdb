@@ -97,7 +97,7 @@ struct DBCoreState {
 			if (ar.isDeserializing) {
 				tLogLocalities.reserve(tLocalitySize);
 				for (size_t i = 0; i < tLocalitySize; i++) {
-					LocalityData	locality;
+					LocalityData locality;
 					ar & locality;
 					tLogLocalities.push_back(locality);
 				}
@@ -130,7 +130,7 @@ struct DBCoreState {
 							}
 						}
 					}
-				}	
+				}
 			}
 
 			tLogLocalities.reserve(tLogs.size());
