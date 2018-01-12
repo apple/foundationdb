@@ -87,6 +87,8 @@
     <ClCompile Include="ReplicationPolicy.cpp" />
     <ClCompile Include="crc32c.cpp" />
     <ClCompile Include="generated-constants.cpp" />
+    <ClCompile Include="AsyncFileWriteChecker.cpp" />
+    <ClCompile Include="ReplicationUtils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="LoadBalance.h" />
@@ -165,6 +167,11 @@
     <ClInclude Include="ReplicationTypes.h" />
     <ClInclude Include="ReplicationPolicy.h" />
     <ClInclude Include="crc32c.h" />
+    <ClInclude Include="ReplicationUtils.h" />
+    <ClInclude Include="AsyncFileWriteChecker.h" />
+    <ClInclude Include="JSONDoc.h" />
+    <ClInclude Include="linux_kaio.h" />
+    <ClInclude Include="LoadPlugin.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="libcoroutine">

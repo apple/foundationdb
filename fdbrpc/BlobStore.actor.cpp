@@ -534,7 +534,9 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 		state FlowLock::Releaser listReleaser(bstore->concurrentLists, 1);
 
 		HTTP::Headers headers;
-		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource + HTTP::urlEncode(lastFile), headers, NULL, 0, {200}));
+		state std::string fullResource = resource + HTTP::urlEncode(lastFile);
+		lastFile.clear();
+		Reference<HTTP::Response> r = wait(bstore->doRequest("GET", fullResource, headers, NULL, 0, {200}));
 		listReleaser.release();
 
 		try {
@@ -590,23 +592,32 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					std::string p;
 					objectDoc.get("Prefix", p);
 					// If recursing, queue a sub-request, otherwise add the common prefix to the result.
-					if(maxDepth > 0)
+					if(maxDepth > 0) {
 						subLists.push_back(bstore->listBucketStream(bucket, results, p, delimiter, maxDepth - 1));
+						if(more)
+							lastFile = std::move(p);
+					}
 					else
-						result.commonPrefixes.push_back(p);
+						result.commonPrefixes.push_back(std::move(p));
 				}
 			}
 
+			results.send(result);
+
 			if(more) {
-				if(!result.objects.empty())
+				// lastFile will be the last commonprefix for which a sublist was started, if any
+				if(!result.objects.empty() && lastFile < result.objects.back().name)
 					lastFile = result.objects.back().name;
 				if(!result.commonPrefixes.empty() && lastFile < result.commonPrefixes.back())
 					lastFile = result.commonPrefixes.back();
-			}
 
-			results.send(result);
+				if(lastFile.empty()) {
+					TraceEvent(SevWarn, "BlobStoreEndpointListNoNextMarker").detail("Resource", fullResource).suppressFor(60, true);
+					throw backup_error();
+				}
+			}
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").detail("Resource", resource + HTTP::urlEncode(lastFile)).suppressFor(60, true);
+			TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").detail("Resource", fullResource).error(e).suppressFor(60, true);
 			throw http_bad_response();
 		}
 	}

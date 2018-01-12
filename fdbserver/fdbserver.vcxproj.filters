@@ -154,7 +154,6 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="networktest.actor.cpp" />
-    <ActorCompiler Include="MetricLogger.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -202,7 +201,6 @@
     <ActorCompiler Include="workloads\UnitTests.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
-    <ActorCompiler Include="workloads\WorkerErrors.actor.cpp" />
     <ActorCompiler Include="workloads\FuzzApiCorrectness.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -257,6 +255,15 @@
     </ActorCompiler>
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ActorCompiler Include="workloads\LowLatency.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\WorkerErrors.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
   </ItemGroup>
@@ -342,6 +349,7 @@
     <ClInclude Include="ApplyMetadataMutation.h" />
     <ClInclude Include="RecoveryState.h" />
     <ClInclude Include="LogProtocolMessage.h" />
+    <ClInclude Include="template_fdb.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="workloads">

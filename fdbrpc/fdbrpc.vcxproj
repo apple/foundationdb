@@ -37,10 +37,10 @@
     <ActorCompiler Include="sim2.actor.cpp" />
     <ClCompile Include="Net2FileSystem.cpp" />
     <ClCompile Include="QueueModel.cpp" />
-		<ClCompile Include="Replication.cpp" />
-		<ClCompile Include="ReplicationUtils.cpp" />
-		<ClCompile Include="ReplicationTypes.cpp" />
-		<ClCompile Include="ReplicationPolicy.cpp" />
+    <ClCompile Include="Replication.cpp" />
+    <ClCompile Include="ReplicationUtils.cpp" />
+    <ClCompile Include="ReplicationTypes.cpp" />
+    <ClCompile Include="ReplicationPolicy.cpp" />
     <ClCompile Include="sim_validation.cpp" />
     <ActorCompiler Include="TLSConnection.actor.cpp" />
     <ClCompile Include="TraceFileIO.cpp" />
@@ -84,6 +84,7 @@
     <ActorCompiler Include="batcher.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
+    <ClInclude Include="AsyncFileWriteChecker.h" />
     <ClInclude Include="ContinuousSample.h" />
     <ClInclude Include="crc32c.h" />
     <ClInclude Include="EndpointGroup.h" />
@@ -94,6 +95,9 @@
     <ActorCompiler Include="genericactors.actor.h">
       <EnableCompile>false</EnableCompile>
     </ActorCompiler>
+    <ClInclude Include="JSONDoc.h" />
+    <ClInclude Include="linux_kaio.h" />
+    <ClInclude Include="LoadPlugin.h" />
     <ClInclude Include="sha1\SHA1.h" />
     <ClInclude Include="libb64\encode.h" />
     <ClInclude Include="libb64\cencode.h" />
@@ -116,11 +120,11 @@
     <ClInclude Include="MultiInterface.h" />
     <ClInclude Include="Net2FileSystem.h" />
     <ClInclude Include="PerfMetric.h" />
-		<ClInclude Include="QueueModel.h" />
-		<ClInclude Include="Replication.h" />
-		<ClInclude Include="ReplicationUtils.h" />
-		<ClInclude Include="ReplicationTypes.h" />
-		<ClInclude Include="ReplicationPolicy.h" />
+    <ClInclude Include="QueueModel.h" />
+    <ClInclude Include="Replication.h" />
+    <ClInclude Include="ReplicationUtils.h" />
+    <ClInclude Include="ReplicationTypes.h" />
+    <ClInclude Include="ReplicationPolicy.h" />
     <ClInclude Include="RangeMap.h" />
     <ClInclude Include="simulator.h" />
     <ClInclude Include="sim_validation.h" />
