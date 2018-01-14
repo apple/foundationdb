@@ -1082,13 +1082,30 @@ Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations(
 
 ACTOR Future<Void> warmRange_impl( Transaction *self, Database cx, KeyRange keys ) {
 	state int totalRanges = 0;
+	state int totalRequests = 0;
 	loop {
 		vector<pair<KeyRange, Reference<LocationInfo>>> locations = wait(getKeyRangeLocations_internal(cx, keys, CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT, false, self->info));
 		totalRanges += CLIENT_KNOBS->WARM_RANGE_SHARD_LIMIT;
+		totalRequests++;
 		if(locations.size() == 0 || totalRanges >= cx->locationCacheSize || locations[locations.size()-1].first.end >= keys.end)
 			break;
 
 		keys = KeyRangeRef(locations[locations.size()-1].first.end, keys.end);
+
+		if(totalRequests%20 == 0) {
+			//To avoid blocking the proxies from starting other transactions, occasionally get a read version.
+			state Transaction tr(cx);
+			loop {
+				try {
+					tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+					tr.setOption( FDBTransactionOptions::CAUSAL_READ_RISKY );
+					Version _ = wait( tr.getReadVersion() );
+					break;
+				} catch( Error &e ) {
+					Void _ = wait( tr.onError(e) );
+				}
+			}
+		}
 	}
 
 	return Void();

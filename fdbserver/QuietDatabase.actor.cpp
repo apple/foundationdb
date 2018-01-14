@@ -292,7 +292,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 	if(g_network->isSimulated())
 		Void _ = wait(delay(5.0));
 
-	//Require 2 consecutive successful quiet database checks spaced 1 second apart
+	//Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
 
 	loop {
@@ -322,7 +322,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				Void _ = wait( delay( 1.0 ) );
 				numSuccesses = 0;
 			} else {
-				if(++numSuccesses == 2) {
+				if(++numSuccesses == 3) {
 					TraceEvent(("QuietDatabase" + phase + "Done").c_str());
 					break;
 				}
