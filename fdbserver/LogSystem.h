@@ -175,7 +175,7 @@ struct ILogSystem {
 
 		//returns immediately if hasMessage() returns true.
 		//returns when either the result of hasMessage() or version() has changed.
-		virtual Future<Void> getMore() = 0;
+		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply) = 0;
 
 		//returns when the failure monitor detects that the servers associated with the cursor are failed
 		virtual Future<Void> onFailed() = 0;
@@ -247,7 +247,7 @@ struct ILogSystem {
 
 		virtual void advanceTo(LogMessageVersion n);
 
-		virtual Future<Void> getMore();
+		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
 
 		virtual Future<Void> onFailed();
 
@@ -310,7 +310,7 @@ struct ILogSystem {
 
 		virtual void advanceTo(LogMessageVersion n);
 
-		virtual Future<Void> getMore();
+		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
 
 		virtual Future<Void> onFailed();
 
@@ -414,7 +414,7 @@ struct ILogSystem {
 
 		virtual void advanceTo(LogMessageVersion n);
 
-		virtual Future<Void> getMore();
+		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
 
 		virtual Future<Void> onFailed();
 

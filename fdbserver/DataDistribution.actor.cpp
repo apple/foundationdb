@@ -1402,7 +1402,7 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 }
 
 ACTOR Future<Void> waitServerListChange( DDTeamCollection *self, Database cx, FutureStream<Void> serverRemoved ) {
-	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskDataDistribution);
+	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
 	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses = Never();
 	state bool isFetchingResults = false;
 	state Transaction tr(cx);
@@ -1440,7 +1440,7 @@ ACTOR Future<Void> waitServerListChange( DDTeamCollection *self, Database cx, Fu
 					}
 
 					tr = Transaction(cx);
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskDataDistribution);
+					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
 				}
 				when( Void _ = waitNext( serverRemoved ) ) {
 					if( isFetchingResults ) {

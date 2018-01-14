@@ -183,6 +183,7 @@
     <ClInclude Include="sqlite\sqliteLimit.h" />
     <ClInclude Include="Status.h" />
     <ClInclude Include="StorageMetrics.h" />
+    <ClInclude Include="template_fdb.h" />
     <ClInclude Include="TLogInterface.h" />
     <ClInclude Include="WaitFailure.h" />
     <ClInclude Include="TesterInterface.h" />

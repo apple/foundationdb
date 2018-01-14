@@ -53,6 +53,7 @@ enum {
 	TaskProxyCommit = 8540,
 	TaskTLogConfirmRunningReply = 8530,
 	TaskTLogConfirmRunning = 8520,
+	TaskProxyGetKeyServersLocations = 8515,
 	TaskProxyGRVTimer = 8510,
 	TaskProxyGetConsistentReadVersion = 8500,
 	TaskDefaultPromiseEndpoint = 8000,
@@ -67,6 +68,7 @@ enum {
 	TaskDataDistribution = 3500,
 	TaskDiskWrite = 3010,
 	TaskUpdateStorage = 3000,
+	TaskBatchCopy = 2900,
 	TaskLowPriority = 2000,
 
 	TaskMinPriority = 1000

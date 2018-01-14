@@ -2302,22 +2302,6 @@ namespace fileBackup {
 						return Void();
 					tr->reset();
 				} catch(Error &e) {
-					TraceEvent(SevWarn, "FileRestoreErrorRangeWrite")
-						.detail("RestoreUID", restore.getUid())
-						.detail("FileName", rangeFile.fileName)
-						.detail("FileVersion", rangeFile.version)
-						.detail("FileSize", rangeFile.fileSize)
-						.detail("ReadOffset", readOffset)
-						.detail("ReadLen", readLen)
-						.detail("BeginRange", printable(trRange.begin))
-						.detail("EndRange", printable(trRange.end))
-						.detail("StartIndex", start)
-						.detail("EndIndex", i)
-						.detail("DataSize", data.size())
-						.detail("Bytes", txBytes)
-						.error(e)
-						.detail("TaskInstance", (uint64_t)this);
-
 					if(e.code() == error_code_transaction_too_large)
 						dataSizeLimit /= 2;
 					else
@@ -2477,21 +2461,6 @@ namespace fileBackup {
 					start = i;
 					tr->reset();
 				} catch(Error &e) {
-					TraceEvent(SevWarn, "FileRestoreErrorLogWrite")
-						.detail("RestoreUID", restore.getUid())
-						.detail("FileName", logFile.fileName)
-						.detail("FileBeginVersion", logFile.version)
-						.detail("FileEndVersion", logFile.endVersion)
-						.detail("FileSize", logFile.fileSize)
-						.detail("ReadOffset", readOffset)
-						.detail("ReadLen", readLen)
-						.detail("StartIndex", start)
-						.detail("EndIndex", i)
-						.detail("DataSize", data.size())
-						.detail("Bytes", txBytes)
-						.error(e)
-						.detail("TaskInstance", (uint64_t)this);
-
 					if(e.code() == error_code_transaction_too_large)
 						dataSizeLimit /= 2;
 					else
@@ -2593,7 +2562,8 @@ namespace fileBackup {
 
 			state std::string beginFile = Params.beginFile().getOrDefault(task);
 			// Get a batch of files.  We're targeting batchSize blocks being dispatched so query for batchSize files (each of which is 0 or more blocks).
-			state RestoreConfig::FileSetT::Values files = wait(restore.fileSet().getRange(tr, {beginVersion, beginFile}, {}, CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE));
+			state int taskBatchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+			state RestoreConfig::FileSetT::Values files = wait(restore.fileSet().getRange(tr, {beginVersion, beginFile}, {}, taskBatchSize));
 
 			// allPartsDone will be set once all block tasks in the current batch are finished.
 			state Reference<TaskFuture> allPartsDone;
@@ -2705,7 +2675,7 @@ namespace fileBackup {
 				// For each block of the file
 				for(; j < f.fileSize; j += f.blockSize) {
 					// Stop if we've reached the addtask limit
-					if(blocksDispatched == CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE)
+					if(blocksDispatched == taskBatchSize)
 						break;
 
 					if(f.isRange) {
@@ -2726,7 +2696,7 @@ namespace fileBackup {
 				}
 				
 				// Stop if we've reached the addtask limit
-				if(blocksDispatched == CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE)
+				if(blocksDispatched == taskBatchSize)
 					break;
 
 				// We just completed an entire file so the next task should start at the file after this one within endVersion (or later) 

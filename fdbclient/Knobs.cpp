@@ -62,8 +62,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
-	init( WARM_RANGE_SHARD_LIMIT,                10000 );
-	init( STORAGE_METRICS_SHARD_LIMIT,           10000 ); if( randomize && BUGGIFY ) STORAGE_METRICS_SHARD_LIMIT = 3;
+	init( WARM_RANGE_SHARD_LIMIT,                  100 );
+	init( STORAGE_METRICS_SHARD_LIMIT,             100 ); if( randomize && BUGGIFY ) STORAGE_METRICS_SHARD_LIMIT = 3;
 	init( STORAGE_METRICS_UNFAIR_SPLIT_LIMIT,  2.0/3.0 );
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 
@@ -119,7 +119,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
-	init( RESTORE_DISPATCH_ADDTASK_SIZE,          1000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_ADDTASK_SIZE = 1;
+	init( RESTORE_DISPATCH_ADDTASK_SIZE,          1000 );
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 1;
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );

@@ -12,12 +12,13 @@
   </ItemGroup>
   <ItemGroup>
     <ActorCompiler Include="ActorCollection.actor.cpp" />
-    <ActorCompiler Include="CompressedInt.actor.cpp" /> 
+    <ActorCompiler Include="CompressedInt.actor.cpp" />
     <ClCompile Include="boost.cpp" />
     <ClCompile Include="Deque.cpp" />
     <ClCompile Include="Error.cpp" />
     <ClCompile Include="FastAlloc.cpp" />
     <ClCompile Include="FaultInjection.cpp" />
+    <ClInclude Include="MetricSample.h" />
     <ClInclude Include="Profiler.h" />
     <ActorCompiler Include="Profiler.actor.cpp" />
     <ActorCompiler Include="Net2.actor.cpp" />
@@ -75,6 +76,7 @@
     <ClInclude Include="Net2Packet.h" />
     <ClInclude Include="serialize.h" />
     <ClInclude Include="SimpleOpt.h" />
+    <ClInclude Include="stacktrace.h" />
     <ClInclude Include="Stats.h" />
     <ClInclude Include="SystemMonitor.h" />
     <ClInclude Include="ThreadPrimitives.h" />

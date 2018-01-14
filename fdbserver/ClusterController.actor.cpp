@@ -1568,6 +1568,7 @@ ACTOR Future<Void> timeKeeperSetVersion(ClusterControllerData *self) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->set(timeKeeperVersionKey, TIME_KEEPER_VERSION);
 			Void _ = wait(tr->commit());
 			break;
@@ -1595,6 +1596,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData *self) {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 				Optional<Value> disableValue = wait( tr->get(timeKeeperDisableKey) );
 				if(disableValue.present()) {

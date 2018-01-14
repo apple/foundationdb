@@ -1063,7 +1063,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	if(tests.empty() || useDB && false ) { //FIXME: re-enable quiescence
 		if(waitForQuiescenceEnd) {
 			try {
-				Void _ = wait( quietDatabase( cx, dbInfo, "End", 1e6, 2e6, 2e6 ) || 
+				Void _ = wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) || 
 					( databasePingDelay == 0.0 ? Never() : testDatabaseLiveness( cx, databasePingDelay, "QuietDatabaseEnd" ) ) );
 			} catch( Error& e ) {
 				if( e.code() != error_code_actor_cancelled )

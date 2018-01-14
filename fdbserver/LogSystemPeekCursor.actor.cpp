@@ -123,7 +123,7 @@ void ILogSystem::ServerPeekCursor::advanceTo(LogMessageVersion n) {
 	}
 }
 
-ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self ) {
+ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self, int taskID ) {
 	if( !self->interf || self->messageVersion >= self->end ) {
 		Void _ = wait( Future<Void>(Never()));
 		throw internal_error();
@@ -136,7 +136,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 	loop {
 		try {
 			while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
-				self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, std::make_pair(self->randomID, self->sequence++)), TaskTLogPeekReply) ) );
+				self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
 			}
 
 			choose {
@@ -177,7 +177,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 	}
 }
 
-ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self ) {
+ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self, int taskID ) {
 	if( !self->interf || self->messageVersion >= self->end ) {
 		Void _ = wait( Future<Void>(Never()));
 		throw internal_error();
@@ -186,7 +186,7 @@ ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self ) {
 		loop {
 			choose {
 				when( TLogPeekReply res = wait( self->interf->get().present() ?
-					brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked), TaskTLogPeekReply) ) : Never() ) ) {
+					brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked), taskID) ) : Never() ) ) {
 					self->results = res;
 					if(res.popped.present())
 						self->poppedVersion = std::min( std::max(self->poppedVersion, res.popped.get()), self->end.version );
@@ -210,12 +210,12 @@ ACTOR Future<Void> serverPeekGetMore( ILogSystem::ServerPeekCursor* self ) {
 	}
 }
 
-Future<Void> ILogSystem::ServerPeekCursor::getMore() {
+Future<Void> ILogSystem::ServerPeekCursor::getMore(int taskID) {
 	//TraceEvent("SPC_getMore", randomID).detail("hasMessage", hasMessage()).detail("more", !more.isValid() || more.isReady()).detail("messageVersion", messageVersion.toString()).detail("end", end.toString());
 	if( hasMessage() )
 		return Void();
 	if( !more.isValid() || more.isReady() ) {
-		more = parallelGetMore ? serverPeekParallelGetMore(this) : serverPeekGetMore(this);
+		more = parallelGetMore ? serverPeekParallelGetMore(this, taskID) : serverPeekGetMore(this, taskID);
 	}
 	return more;
 }
@@ -368,17 +368,17 @@ void ILogSystem::MergedPeekCursor::advanceTo(LogMessageVersion n) {
 	calcHasMessage();
 }
 
-ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMessageVersion startVersion) {
+ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMessageVersion startVersion, int taskID) {
 	loop {
 		//TraceEvent("MPC_getMoreA", self->randomID).detail("start", startVersion.toString());
 		if(self->bestServer >= 0 && self->serverCursors[self->bestServer]->isActive()) {
 			ASSERT(!self->serverCursors[self->bestServer]->hasMessage());
-			Void _ = wait( self->serverCursors[self->bestServer]->getMore() || self->serverCursors[self->bestServer]->onFailed() );
+			Void _ = wait( self->serverCursors[self->bestServer]->getMore(taskID) || self->serverCursors[self->bestServer]->onFailed() );
 		} else {
 			vector<Future<Void>> q;
 			for (auto& c : self->serverCursors)
 				if (!c->hasMessage())
-					q.push_back(c->getMore());
+					q.push_back(c->getMore(taskID));
 			Void _ = wait(quorum(q, 1));
 		}
 		self->calcHasMessage();
@@ -388,7 +388,7 @@ ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMess
 	}
 }
 
-Future<Void> ILogSystem::MergedPeekCursor::getMore() {
+Future<Void> ILogSystem::MergedPeekCursor::getMore(int taskID) {
 	if(!serverCursors.size())
 		return Never();
 	
@@ -402,7 +402,7 @@ Future<Void> ILogSystem::MergedPeekCursor::getMore() {
 	if (version() > startVersion)
 		return Void();
 
-	return mergedPeekGetMore(this, startVersion);
+	return mergedPeekGetMore(this, startVersion, taskID);
 }
 
 Future<Void> ILogSystem::MergedPeekCursor::onFailed() {
@@ -748,13 +748,13 @@ void ILogSystem::MultiCursor::advanceTo(LogMessageVersion n) {
 	cursors.back()->advanceTo(n);
 }
 
-Future<Void> ILogSystem::MultiCursor::getMore() {
+Future<Void> ILogSystem::MultiCursor::getMore(int taskID) {
 	while( cursors.size() > 1 && cursors.back()->version() >= epochEnds.back() ) {
 		poppedVersion = std::max(poppedVersion, cursors.back()->popped());
 		cursors.pop_back();
 		epochEnds.pop_back();
 	}
-	return cursors.back()->getMore();
+	return cursors.back()->getMore(taskID);
 }
 
 Future<Void> ILogSystem::MultiCursor::onFailed() {
