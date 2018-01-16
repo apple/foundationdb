@@ -1373,7 +1373,7 @@ namespace fileBackup {
 				state std::vector<KeyRange> rangesToAdd;
 
 				// Limit number of tasks added per transaction
-				int taskBatchSize = BUGGIFY ? g_random->randomInt(1, countShardsToDispatch + 1) : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+				int taskBatchSize = BUGGIFY ? g_random->randomInt(1, countShardsToDispatch + 1) : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
 				int added = 0;
 
 				while(countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {
