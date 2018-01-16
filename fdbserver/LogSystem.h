@@ -368,7 +368,7 @@ struct ILogSystem {
 
 		virtual void advanceTo(LogMessageVersion n);
 
-		virtual Future<Void> getMore();
+		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
 
 		virtual Future<Void> onFailed();
 

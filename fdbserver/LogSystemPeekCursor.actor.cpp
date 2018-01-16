@@ -603,13 +603,13 @@ void ILogSystem::SetPeekCursor::advanceTo(LogMessageVersion n) {
 	calcHasMessage();
 }
 
-ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVersion startVersion) {
+ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVersion startVersion, int taskID) {
 	loop {
 		//TraceEvent("LPC_getMore1", self->randomID).detail("start", startVersion.toString()).detail("t", self->tag);
 		if(self->bestServer >= 0 && self->bestSet >= 0 && self->serverCursors[self->bestSet][self->bestServer]->isActive()) {
 			ASSERT(!self->serverCursors[self->bestSet][self->bestServer]->hasMessage());
 			//TraceEvent("LPC_getMore2", self->randomID).detail("start", startVersion.toString()).detail("t", self->tag);
-			Void _ = wait( self->serverCursors[self->bestSet][self->bestServer]->getMore() || self->serverCursors[self->bestSet][self->bestServer]->onFailed() );
+			Void _ = wait( self->serverCursors[self->bestSet][self->bestServer]->getMore(taskID) || self->serverCursors[self->bestSet][self->bestServer]->onFailed() );
 			self->useBestSet = true;
 		} else {
 			//FIXME: if best set is exhausted, do not peek remote servers
@@ -635,7 +635,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 				vector<Future<Void>> q;
 				for (auto& c : self->serverCursors[self->bestSet]) {
 					if (!c->hasMessage()) {
-						q.push_back(c->getMore());
+						q.push_back(c->getMore(taskID));
 						if(c->isActive()) {
 							q.push_back(c->onFailed());
 						}
@@ -649,7 +649,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 				for(auto& cursors : self->serverCursors) {
 					for (auto& c :cursors) {
 						if (!c->hasMessage()) {
-							q.push_back(c->getMore());
+							q.push_back(c->getMore(taskID));
 						}
 					}
 				}
@@ -664,7 +664,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 	}
 }
 
-Future<Void> ILogSystem::SetPeekCursor::getMore() {
+Future<Void> ILogSystem::SetPeekCursor::getMore(int taskID) {
 	auto startVersion = version();
 	calcHasMessage();
 	if( hasMessage() )
@@ -675,7 +675,7 @@ Future<Void> ILogSystem::SetPeekCursor::getMore() {
 	if (version() > startVersion)
 		return Void();
 
-	return setPeekGetMore(this, startVersion);
+	return setPeekGetMore(this, startVersion, taskID);
 }
 
 Future<Void> ILogSystem::SetPeekCursor::onFailed() {
