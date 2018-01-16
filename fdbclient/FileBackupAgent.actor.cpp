@@ -1273,7 +1273,7 @@ namespace fileBackup {
 						// Ensure that the dispatched boundaries exist AND set all shard ranges in the dispatched range to DONE.
 						RangeMap<Key, int, KeyRangeRef>::Ranges shardRanges = shardMap.modify(KeyRangeRef(lastKey, boundary.first));
 						iShard = shardRanges.begin();
-						iShardEnd = shardRanges.begin();
+						iShardEnd = shardRanges.end();
 						for(; iShard != iShardEnd; ++iShard) {
 							iShard->value() = DONE;
 							Void _ = wait(yield());
@@ -1293,7 +1293,7 @@ namespace fileBackup {
 				shardMap.insert(KeyRangeRef(normalKeys.begin, backupRanges.front().begin), SKIP);
 				Void _ = wait(yield());
 
-				for(int i = 0; i < backupRanges.size() - 1; ++i) {
+				for(i = 0; i < backupRanges.size() - 1; ++i) {
 					shardMap.insert(KeyRangeRef(backupRanges[i].end, backupRanges[i + 1].begin), SKIP);
 					Void _ = wait(yield());
 				}
@@ -1308,7 +1308,7 @@ namespace fileBackup {
 			// Scan through the shard map, counting the DONE and NOT_DONE shards.
 			RangeMap<Key, int, KeyRangeRef>::Ranges shardRanges = shardMap.ranges();
 			iShard = shardRanges.begin();
-			iShardEnd = shardRanges.begin();
+			iShardEnd = shardRanges.end();
 			for(; iShard != iShardEnd; ++iShard) {
 				if(iShard->value() == DONE) {
 					++countShardsDone;
@@ -1431,7 +1431,7 @@ namespace fileBackup {
 
 						state std::vector<Future<Void>> addTaskFutures;
 
-						for(int i = 0; i < beginReads.size(); ++i) {
+						for(i = 0; i < beginReads.size(); ++i) {
 							KeyRange &range = rangesToAdd[i];
 
 							// This loop might have made changes to begin or end boundaries in a prior
