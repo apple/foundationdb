@@ -1249,23 +1249,40 @@ namespace fileBackup {
 				}
 			}
 
+			// The next few sections involve combining the results above.  Yields are used after operations
+			// that could have operated on many thousands of things and in loops which could have many
+			// thousands of iterations.
+			// Declare some common iterators which must be state vars and will be used multiple times.
+			state int i;
+			state RangeMap<Key, int, KeyRangeRef>::Iterator iShard;
+			state RangeMap<Key, int, KeyRangeRef>::Iterator iShardEnd;
+
 			// Set anything inside a dispatched range to DONE.
 			// Also ensure that the boundary value are true, false, [true, false]...
 			if(dispatchBoundaries.size() > 0) {
-				bool lastValue = false;
-				Key lastKey;
-				for(auto &boundary : dispatchBoundaries) {
+				state bool lastValue = false;
+				state Key lastKey;
+				for(i = 0; i < dispatchBoundaries.size(); ++i) {
+					const std::pair<Key, bool> &boundary = dispatchBoundaries[i];
+
 					// Values must alternate
 					ASSERT(boundary.second == !lastValue);
+
 					// If this was the end of a dispatched range
 					if(!boundary.second) {
-						// Ensure that the dispatched boundaries exist AND set all ranges in the dispatched boundary to DONE.
-						for(auto &range : shardMap.modify(KeyRangeRef(lastKey, boundary.first))) {
-							range.value() = DONE;
+						// Ensure that the dispatched boundaries exist AND set all shard ranges in the dispatched range to DONE.
+						RangeMap<Key, int, KeyRangeRef>::Ranges shardRanges = shardMap.modify(KeyRangeRef(lastKey, boundary.first));
+						iShard = shardRanges.begin();
+						iShardEnd = shardRanges.begin();
+						for(; iShard != iShardEnd; ++iShard) {
+							iShard->value() = DONE;
+							Void _ = wait(yield());
 						}
 					}
-					lastValue = boundary.second;
-					lastKey = boundary.first;
+					lastValue = dispatchBoundaries[i].second;
+					lastKey = dispatchBoundaries[i].first;
+
+					Void _ = wait(yield());
 				}
 				ASSERT(lastValue == false);
 			}
@@ -1274,25 +1291,37 @@ namespace fileBackup {
 			// because it's OK to delete shard boundaries in the skipped ranges.
 			if(backupRanges.size() > 0) {
 				shardMap.insert(KeyRangeRef(normalKeys.begin, backupRanges.front().begin), SKIP);
+				Void _ = wait(yield());
+
 				for(int i = 0; i < backupRanges.size() - 1; ++i) {
 					shardMap.insert(KeyRangeRef(backupRanges[i].end, backupRanges[i + 1].begin), SKIP);
+					Void _ = wait(yield());
 				}
+
 				shardMap.insert(KeyRangeRef(backupRanges.back().end, normalKeys.end), SKIP);
+				Void _ = wait(yield());
 			}
 
 			state int countShardsDone = 0;
 			state int countShardsNotDone = 0;
 
 			// Scan through the shard map, counting the DONE and NOT_DONE shards.
-			for(auto &range : shardMap.ranges()) {
-				if(range.value() == DONE) {
+			RangeMap<Key, int, KeyRangeRef>::Ranges shardRanges = shardMap.ranges();
+			iShard = shardRanges.begin();
+			iShardEnd = shardRanges.begin();
+			for(; iShard != iShardEnd; ++iShard) {
+				if(iShard->value() == DONE) {
 					++countShardsDone;
 				}
-				else if(range.value() >= NOT_DONE_MIN)
+				else if(iShard->value() >= NOT_DONE_MIN)
 					++countShardsNotDone;
+
+				Void _ = wait(yield());
 			}
 
+			// Coalesce the shard map to make random selection below more efficient.
 			shardMap.coalesce(normalKeys);
+			Void _ = wait(yield());
 
 			// In this context "all" refers to all of the shards relevant for this particular backup
 			state int countAllShards = countShardsDone + countShardsNotDone;
