@@ -336,18 +336,18 @@ public:
 	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc, std::vector<std::string> fileNames, int64_t totalBytes) {
 		ASSERT(!fileNames.empty());
 
-		json_spirit::mValue json;
-		JSONDoc doc(json);
 
-		json_spirit::mArray &array = (doc.create("files") = json_spirit::mArray()).get_array();
+		state Version minVer = std::numeric_limits<Version>::max();
+		state Version maxVer = 0;
+		state RangeFile rf;
+		state json_spirit::mArray fileArray;
+		state int i;
 
-		Version minVer = std::numeric_limits<Version>::max();
-		Version maxVer = 0;
-		RangeFile rf;
-
-		for(auto &f : fileNames) {
+		// Validate each filename, update version range
+		for(i = 0; i < fileNames.size(); ++i) {
+			auto const &f = fileNames[i];
 			if(pathToRangeFile(rf, f, 0)) {
-				array.push_back(f);
+				fileArray.push_back(f);
 				if(rf.version < minVer)
 					minVer = rf.version;
 				if(rf.version > maxVer)
@@ -355,12 +355,18 @@ public:
 			}
 			else
 				throw restore_unknown_file_type();
+			Void _ = wait(yield());
 		}
 
+		state json_spirit::mValue json;
+		state JSONDoc doc(json);
+
+		doc.create("files") = std::move(fileArray);
 		doc.create("totalBytes") = totalBytes;
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
+		Void _ = wait(yield());
 		state std::string docString = json_spirit::write_string(json);
 
 		state Reference<IBackupFile> f = wait(bc->writeFile(format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes)));
