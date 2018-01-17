@@ -476,13 +476,14 @@ public:
 
 		// Use the known log range if present
 		if(begin.present() && end.present()) {
-			// Move scanBegin to the end since there's no reason to scan [begin, end) as it is assumed present and contiguous.
-			scanBegin = end.get();
-
-			// Set the known minimum log begin for the contiguous log timeline
+			// Logs are assumed to be contiguious between begin and max(begin, end), so initalize desc accordingly
+			// The use of max() is to allow for a stale end version that has been exceeded by begin version
 			desc.minLogBegin = begin.get();
-			desc.maxLogEnd = end.get();
-			desc.contiguousLogEnd = end.get();
+			desc.maxLogEnd = std::max(begin.get(), end.get());
+			desc.contiguousLogEnd = desc.maxLogEnd;
+
+			// Begin file scan at the contiguous log end version
+			scanBegin = desc.contiguousLogEnd.get();
 		}
 
 		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
