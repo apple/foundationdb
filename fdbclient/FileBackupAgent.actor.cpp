@@ -415,9 +415,9 @@ namespace fileBackup {
 
 			// If this is NOT the first block then write duplicate stuff needed from last block
 			if(self->blockEnd > self->blockSize) {
-				Void _ = wait(self->file->appendString(self->lastKey));
-				Void _ = wait(self->file->appendString(self->lastKey));
-				Void _ = wait(self->file->appendString(self->lastValue));
+				Void _ = wait(self->file->appendStringRefWithLen(self->lastKey));
+				Void _ = wait(self->file->appendStringRefWithLen(self->lastKey));
+				Void _ = wait(self->file->appendStringRefWithLen(self->lastValue));
 			}
 
 			// There must now be room in the current block for bytesNeeded or the block size is too small
@@ -438,8 +438,8 @@ namespace fileBackup {
 		ACTOR static Future<Void> writeKV_impl(RangeFileWriter *self, Key k, Value v) {
 			int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 			Void _ = wait(self->newBlockIfNeeded(toWrite));
-			Void _ = wait(self->file->appendString(k));
-			Void _ = wait(self->file->appendString(v));
+			Void _ = wait(self->file->appendStringRefWithLen(k));
+			Void _ = wait(self->file->appendStringRefWithLen(v));
 			self->lastKey = k;
 			self->lastValue = v;
 			return Void();
@@ -451,7 +451,7 @@ namespace fileBackup {
 		ACTOR static Future<Void> writeKey_impl(RangeFileWriter *self, Key k) {
 			int toWrite = sizeof(uint32_t) + k.size();
 			Void _ = wait(self->newBlockIfNeeded(toWrite));
-			Void _ = wait(self->file->appendString(k));
+			Void _ = wait(self->file->appendStringRefWithLen(k));
 			return Void();
 		}
 
@@ -589,8 +589,8 @@ namespace fileBackup {
 				Void _ = wait(self->file->append((uint8_t *)&self->fileVersion, sizeof(self->fileVersion)));
 			}
 
-			Void _ = wait(self->file->appendString(k));
-			Void _ = wait(self->file->appendString(v));
+			Void _ = wait(self->file->appendStringRefWithLen(k));
+			Void _ = wait(self->file->appendStringRefWithLen(v));
 
 			// At this point we should be in whatever the current block is or the block size is too small
 			if(self->file->size() > self->blockEnd)
@@ -3517,7 +3517,9 @@ public:
 
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Key tagName, Key url, bool waitForComplete, Version targetVersion, bool verbose, KeyRange range, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
-		BackupDescription desc = wait(bc->describeBackup());
+		state BackupDescription desc = wait(bc->describeBackup());
+		Void _ = wait(desc.resolveVersionTimes(cx));
+
 		printf("Backup Description\n%s", desc.toString().c_str());
 		if(targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 			targetVersion = desc.maxRestorableVersion.get();
@@ -3714,10 +3716,3 @@ Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool s
 	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone);
 }
 
-Future<std::string> FileBackupAgent::getBackupInfo(std::string container, Version* defaultVersion) {
-	return map(IBackupContainer::openContainer(container)->describeBackup(), [=] (BackupDescription const &d) {
-		if(defaultVersion != nullptr && d.maxRestorableVersion.present())
-			*defaultVersion = d.maxRestorableVersion.get();
-		return d.toString();
-	});
-}

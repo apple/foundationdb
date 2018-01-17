@@ -175,7 +175,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 					state bool restorable = false;
 					if(lastBackupContainer) {
-						BackupDescription desc = wait(lastBackupContainer->describeBackup());
+						state BackupDescription desc = wait(lastBackupContainer->describeBackup());
+						Void _ = wait(desc.resolveVersionTimes(cx));
+						printf("BackupDescription:\n%s\n", desc.toString().c_str());
 						restorable = desc.maxRestorableVersion.present();
 					}
 

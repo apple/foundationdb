@@ -261,7 +261,9 @@ ACTOR Future<int64_t> objectSize_impl(Reference<BlobStoreEndpoint> b, std::strin
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 
-	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, NULL, 0, {200}));
+	Reference<HTTP::Response> r = wait(b->doRequest("HEAD", resource, headers, NULL, 0, {200, 404}));
+	if(r->code == 404)
+		throw file_not_found();
 	return r->contentLen;
 }
 
@@ -283,7 +285,8 @@ ACTOR Future<json_spirit::mObject> tryReadJSONFile(std::string path) {
 		ASSERT(r == size);
 		content = buf.toString();
 	} catch(Error &e) {
-		TraceEvent(SevWarn, "BlobCredentialFileError").detail("File", path).error(e).suppressFor(60, true);
+		if(e.code() != error_code_actor_cancelled)
+			TraceEvent(SevWarn, "BlobCredentialFileError").detail("File", path).error(e).suppressFor(60, true);
 		return json_spirit::mObject();
 	}
 
@@ -295,7 +298,8 @@ ACTOR Future<json_spirit::mObject> tryReadJSONFile(std::string path) {
 		else
 			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").detail("File", path).suppressFor(60, true);
 	} catch(Error &e) {
-		TraceEvent(SevWarn, "BlobCredentialFileParseFailed").detail("File", path).error(e).suppressFor(60, true);
+		if(e.code() != error_code_actor_cancelled)
+			TraceEvent(SevWarn, "BlobCredentialFileParseFailed").detail("File", path).error(e).suppressFor(60, true);
 	}
 
 	return json_spirit::mObject();
@@ -514,7 +518,7 @@ Future<Reference<HTTP::Response>> BlobStoreEndpoint::doRequest(std::string const
 	return doRequest_impl(Reference<BlobStoreEndpoint>::addRef(this), verb, resource, headers, pContent, contentLen, successCodes);
 }
 
-ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth) {
+ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, PromiseStream<BlobStoreEndpoint::ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
 	// Request 1000 keys at a time, the maximum allowed
 	state std::string resource = "/";
 	resource.append(bucket);
@@ -593,7 +597,9 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 					objectDoc.get("Prefix", p);
 					// If recursing, queue a sub-request, otherwise add the common prefix to the result.
 					if(maxDepth > 0) {
-						subLists.push_back(bstore->listBucketStream(bucket, results, p, delimiter, maxDepth - 1));
+						// If there is no recurse filter or the filter returns true then start listing the subfolder
+						if(!recurseFilter || recurseFilter(p))
+							subLists.push_back(bstore->listBucketStream(bucket, results, p, delimiter, maxDepth - 1, recurseFilter));
 						if(more)
 							lastFile = std::move(p);
 					}
@@ -617,7 +623,8 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 				}
 			}
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").detail("Resource", fullResource).error(e).suppressFor(60, true);
+			if(e.code() != error_code_actor_cancelled)
+				TraceEvent(SevWarn, "BlobStoreEndpointListResultParseError").detail("Resource", fullResource).error(e).suppressFor(60, true);
 			throw http_bad_response();
 		}
 	}
@@ -627,14 +634,14 @@ ACTOR Future<Void> listBucketStream_impl(Reference<BlobStoreEndpoint> bstore, st
 	return Void();
 }
 
-Future<Void> BlobStoreEndpoint::listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth) {
-	return listBucketStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter, maxDepth);
+Future<Void> BlobStoreEndpoint::listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
+	return listBucketStream_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, results, prefix, delimiter, maxDepth, recurseFilter);
 }
 
-ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth) {
+ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
 	state BlobStoreEndpoint::ListResult results;
 	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter, maxDepth);
+	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
 	loop {
 		choose {
 			when(Void _ = wait(done)) {
@@ -649,8 +656,8 @@ ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreE
 	return results;
 }
 
-Future<BlobStoreEndpoint::ListResult> BlobStoreEndpoint::listBucket(std::string const &bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth) {
-	return listBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth);
+Future<BlobStoreEndpoint::ListResult> BlobStoreEndpoint::listBucket(std::string const &bucket, Optional<std::string> prefix, Optional<char> delimiter, int maxDepth, std::function<bool(std::string const &)> recurseFilter) {
+	return listBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, delimiter, maxDepth, recurseFilter);
 }
 
 std::string BlobStoreEndpoint::hmac_sha1(std::string const &msg) {

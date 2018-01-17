@@ -274,8 +274,6 @@ public:
 	// will return when the backup directory is restorable.
 	Future<int> waitBackup(Database cx, std::string tagName, bool stopWhenDone = true);
 
-	static Future<std::string> getBackupInfo(std::string backupContainer, Version* defaultVersion = NULL);
-
 	static const Key keyLastRestorable;
 
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
