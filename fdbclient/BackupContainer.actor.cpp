@@ -33,6 +33,12 @@
 #include <algorithm>
 #include <time.h>
 
+#ifdef _WIN32
+	#define localtime_safe(t, out) if(localtime_s(out, t) != 0) throw platform_error;
+#else
+	#define localtime_safe(t, out) localtime_r(t, out)
+#endif
+
 namespace IBackupFile_impl {
 
 	ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
@@ -79,7 +85,7 @@ std::string formatTime(int64_t t) {
 	time_t curTime = (time_t)t;
 	char buffer[128];
 	struct tm timeinfo;
-	localtime_r(&curTime, &timeinfo);
+	localtime_safe(&curTime, &timeinfo);
 	strftime(buffer, 128, "%Y-%m-%d %H:%M:%S", &timeinfo);
 	return buffer;
 }
