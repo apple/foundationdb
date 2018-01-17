@@ -3626,6 +3626,7 @@ public:
 			try {
 				Void _ = wait( discontinueBackup(backupAgent, ryw_tr, tagName) );
 				Void _ = wait( ryw_tr->commit() );
+				TraceEvent("AS_discontinuedBackup");
 				break;
 			} catch( Error &e ) {
 				if(e.code() == error_code_backup_unneeded || e.code() == error_code_backup_duplicate){
@@ -3636,6 +3637,7 @@ public:
 		}
 
 		int _ = wait( waitBackup(backupAgent, cx, tagName.toString(), true) );
+		TraceEvent("AS_backupStopped");
 
 		ryw_tr->reset();
 		loop {
@@ -3645,6 +3647,7 @@ public:
 				ryw_tr->addReadConflictRange(range);
 				ryw_tr->clear(range);
 				Void _ = wait( ryw_tr->commit() );
+				TraceEvent("AS_clearedRange");
 				break;
 			} catch( Error &e ) {
 				Void _ = wait( ryw_tr->onError(e) );
@@ -3653,6 +3656,7 @@ public:
 
 		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
 
+		TraceEvent("AS_startRestore");
 		Version ver = wait( restore(backupAgent, cx, tagName, KeyRef(bc->getURL()), true, -1, true, range, addPrefix, removePrefix, true, randomUid) );
 		return ver;
 	}

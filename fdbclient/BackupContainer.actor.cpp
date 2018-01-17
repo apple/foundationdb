@@ -62,6 +62,7 @@ ACTOR Future<Optional<int64_t>> timeKeeperDateFromVersion(Version v, Reference<R
 	state int64_t mid;
 
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	loop {
 		mid = (min + max) / 2;
