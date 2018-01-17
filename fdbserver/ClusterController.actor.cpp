@@ -684,7 +684,7 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration( RecruitFromConfigurationRequest const& req ) {
-		if(req.configuration.remoteTLogReplicationFactor > 0) {
+		if(req.configuration.primaryDcId.present()) {
 			try {
 				return findWorkersForConfiguration(req, req.configuration.primaryDcId);
 			} catch( Error& e ) {

@@ -623,7 +623,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 				}
 				bestSetValid = self->localityGroup.size() < self->logSets[self->bestSet]->tLogReplicationFactor || !self->localityGroup.validate(self->logSets[self->bestSet]->tLogPolicy);
 			}
-			if(bestSetValid) {
+			if(bestSetValid || self->logSets.size() == 1) {
 				if(!self->useBestSet) {
 					self->useBestSet = true;
 					self->calcHasMessage();

@@ -1174,6 +1174,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		
 		if(configuration.remoteTLogReplicationFactor > 0) {
 			logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), oldLogSystem, fRemoteWorkers, configuration, recoveryCount, minTag, remoteLocality);
+		} else {
+			logSystem->remoteRecovery = Void();
+			logSystem->remoteRecoveryComplete = Void();
 		}
 
 		return logSystem;

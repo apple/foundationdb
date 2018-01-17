@@ -90,16 +90,15 @@ bool DatabaseConfiguration::isValid() const {
 		tLogPolicy &&
 		remoteDesiredTLogCount >= 0 &&
 		remoteTLogReplicationFactor >= 0 &&
-		remoteTLogPolicy &&
-		( remoteTLogReplicationFactor == 0 || ( primaryDcId.present() && remoteDcId.present() && remoteDurableStorageQuorum >= 1 && logRouterCount >= 1 ) ) &&
-		remoteStoragePolicy &&
+		( remoteTLogReplicationFactor == 0 || ( remoteStoragePolicy && remoteTLogPolicy && primaryDcId.present() && remoteDcId.present() && remoteDurableStorageQuorum >= 1 && logRouterCount >= 1 ) ) &&
+		primaryDcId.present() == remoteDcId.present() &&
 		remoteDurableStorageQuorum <= remoteStorageTeamSize &&
 		satelliteDesiredTLogCount >= 0 &&
 		satelliteTLogReplicationFactor >= 0 &&
 		satelliteTLogWriteAntiQuorum >= 0 &&
 		satelliteTLogUsableDcs >= 0 &&
-		( satelliteTLogReplicationFactor == 0 || ( primarySatelliteDcIds.size() && remoteSatelliteDcIds.size() && remoteTLogReplicationFactor > 0 ) ) &&
-		satelliteTLogPolicy &&
+		( satelliteTLogReplicationFactor == 0 || ( satelliteTLogPolicy && primarySatelliteDcIds.size() && remoteSatelliteDcIds.size() && remoteTLogReplicationFactor > 0 ) ) &&
+		primarySatelliteDcIds.size() == remoteSatelliteDcIds.size() &&
 		logRouterCount >= 0;
 }
 
