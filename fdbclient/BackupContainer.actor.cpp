@@ -61,10 +61,17 @@ ACTOR Future<Optional<int64_t>> timeKeeperDateFromVersion(Version v, Reference<R
 	loop {
 		mid = (min + max) / 2;
 		state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, min, mid, 1, false, true) );
-		if (results.size() != 1)
-			return Optional<int64_t>();
+
+		if (results.size() == 0) {
+			if(mid == min)
+				return Optional<int64_t>();
+			min = mid;
+			continue;
+		}
+
 		Version foundVersion = results[0].second;
 		int64_t foundTime = results[0].first;
+
 		if(v < foundVersion)
 			max = foundTime;
 		else {
