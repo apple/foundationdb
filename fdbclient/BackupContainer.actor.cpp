@@ -955,11 +955,19 @@ public:
 	}
 
 	Future<Void> deleteContainer(int *pNumDeleted) {
-		// Destroying a directory seems pretty unsafe, as a badly formed file:// URL could point to a thing
-		// that should't be deleted.  Also, platform::eraseDirectoryRecursive() intentionally doesn't work outside
-		// of the pre-simulation phase.
-		// By just expiring ALL data, only parsable backup files in the correct locations will be deleted.
-		return expireData(std::numeric_limits<Version>::max(), true, std::numeric_limits<Version>::max());
+		// In order to avoid deleting some random directory due to user error, first describe the backup
+		// and make sure it has something in it.
+		return map(describeBackup(), [=](BackupDescription const &desc) {
+			// If the backup has no snapshots and no logs then it's probably not a valid backup
+			if(desc.snapshots.size() == 0 && !desc.minLogBegin.present())
+				throw backup_invalid_url();
+
+			int count = platform::eraseDirectoryRecursive(m_path);
+			if(pNumDeleted != nullptr)
+				*pNumDeleted = count;
+
+			return Void();
+		});
 	}
 
 private:
@@ -1225,8 +1233,15 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
+
 	// Make sure container doesn't exist, then create it.
-	Void _ = wait(c->deleteContainer());
+	try {
+		Void _ = wait(c->deleteContainer());
+	} catch(Error &e) {
+		if(e.code() != error_code_backup_invalid_url)
+			throw;
+	}
+
 	Void _ = wait(c->create());
 
 	state int64_t versionMultiplier = g_random->randomInt64(0, std::numeric_limits<Version>::max() / 500);
@@ -1250,13 +1265,14 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size()));
 
+	printf("Checking full file listing\n");
 	FullBackupListing listing = wait(c->dumpFileList());
 	ASSERT(listing.logs.size() == 2);
 	ASSERT(listing.ranges.size() == 3);
 	ASSERT(listing.snapshots.size() == 2);
 
 	state BackupDescription desc = wait(c->describeBackup());
-	printf("Backup Description\n%s", desc.toString().c_str());
+	printf("Backup Description 1\n%s", desc.toString().c_str());
 
 	ASSERT(desc.maxRestorableVersion.present());
 	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
@@ -1272,35 +1288,41 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	ASSERT(rest.get().logs.size() == 1);
 	ASSERT(rest.get().ranges.size() == 2);
 
+	printf("Expire 1\n");
 	Void _ = wait(c->expireData(100 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
+	printf("Backup Description 2\n%s", d.toString().c_str());
 	ASSERT(d.minLogBegin == 100 * versionMultiplier);
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
+	printf("Expire 2\n");
 	Void _ = wait(c->expireData(101 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin == 150 * versionMultiplier);
+	printf("Backup Description 3\n%s", d.toString().c_str());
+	ASSERT(d.minLogBegin == 100 * versionMultiplier);
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
-	Void _ = wait(c->expireData(155 * versionMultiplier));
+	printf("Expire 3\n");
+	Void _ = wait(c->expireData(300 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
-	ASSERT(!d.minLogBegin.present());
+	printf("Backup Description 4\n%s", d.toString().c_str());
+	ASSERT(d.minLogBegin.present());
 	ASSERT(d.snapshots.size() == desc.snapshots.size());
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
-	Void _ = wait(c->expireData(161 * versionMultiplier, true));
+	printf("Expire 4\n");
+	Void _ = wait(c->expireData(301 * versionMultiplier, true));
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
+	printf("Backup Description 4\n%s", d.toString().c_str());
 	ASSERT(d.snapshots.size() == 1);
+	ASSERT(!d.minLogBegin.present());
 
 	Void _ = wait(c->deleteContainer());
 
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
+	printf("Backup Description 5\n%s", d.toString().c_str());
 	ASSERT(d.snapshots.size() == 0);
+	ASSERT(!d.minLogBegin.present());
 
 	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
 
