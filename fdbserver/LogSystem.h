@@ -95,7 +95,7 @@ public:
 
 		if(hasBest) {
 			for(auto& t : tags) {
-				if(t.locality == locality || t.locality == tagLocalitySpecial) {
+				if(t.locality == locality || t.locality == tagLocalitySpecial || locality == tagLocalitySpecial) {
 					newLocations.push_back(bestLocationFor(t));
 				}
 			}

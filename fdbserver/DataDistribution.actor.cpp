@@ -468,6 +468,7 @@ struct DDTeamCollection {
 	Promise<Void> serverTrackerErrorOut;
 	AsyncVar<int> recruitingStream;
 	Debouncer restartRecruiting;
+	Promise<Void> hasTeams;
 
 	int healthyTeamCount;
 	PromiseStream<Void> zeroHealthyTeams;
@@ -561,6 +562,7 @@ struct DDTeamCollection {
 	//		    use keys, src, dest, metrics, priority, system load, etc.. to decide...
 	ACTOR Future<Void> getTeam( DDTeamCollection* self, GetTeamRequest req ) {
 		try {
+			Void _ = wait( self->hasTeams.getFuture() );
 			Void _ = wait( self->checkBuildTeams( self ) );
 
 			// Select the best team
@@ -726,6 +728,10 @@ struct DDTeamCollection {
 
 		for(auto t = initTeams.teams.begin(); t != initTeams.teams.end(); ++t) {
 			addTeam(t->begin(), t->end() );
+		}
+
+		if( teams.size() && hasTeams.canBeSet() ) {
+			hasTeams.send(Void());
 		}
 
 		addSubsetOfEmergencyTeams();
@@ -1033,6 +1039,10 @@ struct DDTeamCollection {
 		//Building teams can cause servers to become undesired, which can make teams unhealthy.
 		//Let all of these changes get worked out before responding to the get team request
 		Void _ = wait( delay(0, TaskDataDistributionLaunch) );
+
+		if( self->teams.size() && self->hasTeams.canBeSet() ) {
+			self->hasTeams.send(Void());
+		}
 
 		return Void();
 	}

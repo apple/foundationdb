@@ -289,30 +289,34 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, RecruitFromConfigur
 }
 
 ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfigurationReply recr, Reference<ILogSystem> oldLogSystem, vector<Standalone<CommitTransactionRef>>* initialConfChanges ) {
-	state Optional<Key> primaryDcId = recr.remoteDcId == self->configuration.remoteDcId ? self->configuration.primaryDcId : self->configuration.remoteDcId;
-	if( !self->dcId_locality.count(primaryDcId) ) {
-		TraceEvent("UnknownPrimaryDCID", self->dbgid).detail("found", self->dcId_locality.count(primaryDcId)).detail("primaryId", printable(primaryDcId));
-		int8_t loc = self->getNextLocality();
-		Standalone<CommitTransactionRef> tr;
-		tr.set(tr.arena(), tagLocalityListKeyFor(primaryDcId), tagLocalityListValue(loc));
-		initialConfChanges->push_back(tr);
-		self->dcId_locality[primaryDcId] = loc;
+	if(self->configuration.remoteTLogReplicationFactor > 0) {
+		state Optional<Key> primaryDcId = recr.remoteDcId == self->configuration.remoteDcId ? self->configuration.primaryDcId : self->configuration.remoteDcId;
+		if( !self->dcId_locality.count(primaryDcId) ) {
+			TraceEvent(SevWarnAlways, "UnknownPrimaryDCID", self->dbgid).detail("found", self->dcId_locality.count(primaryDcId)).detail("primaryId", printable(primaryDcId));
+			int8_t loc = self->getNextLocality();
+			Standalone<CommitTransactionRef> tr;
+			tr.set(tr.arena(), tagLocalityListKeyFor(primaryDcId), tagLocalityListValue(loc));
+			initialConfChanges->push_back(tr);
+			self->dcId_locality[primaryDcId] = loc;
+		}
+
+		if( !self->dcId_locality.count(recr.remoteDcId) ) {
+			TraceEvent(SevWarnAlways, "UnknownRemoteDCID", self->dbgid).detail("remoteFound", self->dcId_locality.count(recr.remoteDcId)).detail("remoteId", printable(recr.remoteDcId));
+			int8_t loc = self->getNextLocality();
+			Standalone<CommitTransactionRef> tr;
+			tr.set(tr.arena(), tagLocalityListKeyFor(recr.remoteDcId), tagLocalityListValue(loc));
+			initialConfChanges->push_back(tr);
+			self->dcId_locality[recr.remoteDcId] = loc;
+		}
+
+		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, recr.remoteDcId ) ) );
+
+		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[primaryDcId], self->dcId_locality[recr.remoteDcId] ) );
+		self->logSystem = newLogSystem;
+	} else {
+		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, tagLocalitySpecial, tagLocalitySpecial ) );
+		self->logSystem = newLogSystem;
 	}
-
-	if( self->configuration.remoteTLogReplicationFactor > 0 && !self->dcId_locality.count(recr.remoteDcId) ) {
-		TraceEvent("UnknownRemoteDCID", self->dbgid).detail("remoteFound", self->dcId_locality.count(recr.remoteDcId)).detail("remoteId", printable(recr.remoteDcId));
-		int8_t loc = self->getNextLocality();
-		Standalone<CommitTransactionRef> tr;
-		tr.set(tr.arena(), tagLocalityListKeyFor(recr.remoteDcId), tagLocalityListValue(loc));
-		initialConfChanges->push_back(tr);
-		self->dcId_locality[recr.remoteDcId] = loc;
-	}
-
-	Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = self->configuration.remoteTLogReplicationFactor > 0 ? brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, recr.remoteDcId ) ) ) : Never();
-
-	Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[primaryDcId], self->dcId_locality[recr.remoteDcId] ) );
-	self->logSystem = newLogSystem;
-
 	return Void();
 }
 
@@ -547,9 +551,11 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 			RecruitFromConfigurationRequest( self->configuration, self->lastEpochEnd==0 ) ) ) );
 
 	self->primaryDcId.clear();
-	self->primaryDcId.push_back(recruits.remoteDcId == self->configuration.remoteDcId ? self->configuration.primaryDcId : self->configuration.remoteDcId);
 	self->remoteDcId.clear();
-	self->remoteDcId.push_back(recruits.remoteDcId);
+	if(recruits.remoteDcId.present()) {
+		self->primaryDcId.push_back(recruits.remoteDcId == self->configuration.remoteDcId ? self->configuration.primaryDcId : self->configuration.remoteDcId);
+		self->remoteDcId.push_back(recruits.remoteDcId);
+	}
 	
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::initializing_transaction_servers)

@@ -352,7 +352,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			int bestSet = -1;
 			for(int t = 0; t < tLogs.size(); t++) {
-				if(tLogs[t]->hasBest && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial)) {
+				if(tLogs[t]->hasBest && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
 					bestSet = t;
 					break;
 				}
@@ -368,7 +368,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for(int i = 0; i < oldLogData.size() && begin < oldLogData[i].epochEnd; i++) {
 					int bestOldSet = -1;
 					for(int t = 0; t < oldLogData[i].tLogs.size(); t++) {
-						if(oldLogData[i].tLogs[t]->hasBest && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial)) {
+						if(oldLogData[i].tLogs[t]->hasBest && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial)) {
 							bestOldSet = t;
 							break;
 						}
@@ -394,7 +394,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		} else {
 			int bestSet = -1;
 			for(int t = 0; t < tLogs.size(); t++) {
-				if(tLogs[t]->hasBest && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial)) {
+				if(tLogs[t]->hasBest && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
 					bestSet = t;
 					break;
 				}
@@ -1175,8 +1175,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(configuration.remoteTLogReplicationFactor > 0) {
 			logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), oldLogSystem, fRemoteWorkers, configuration, recoveryCount, minTag, remoteLocality);
 		} else {
-			logSystem->remoteRecovery = Void();
-			logSystem->remoteRecoveryComplete = Void();
+			logSystem->remoteRecovery = logSystem->recoveryComplete;
+			logSystem->remoteRecoveryComplete = logSystem->recoveryComplete;
 		}
 
 		return logSystem;
