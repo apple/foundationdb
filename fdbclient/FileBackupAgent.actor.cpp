@@ -3359,9 +3359,30 @@ public:
 			throw backup_unneeded();
 		}
 
+		// If the backup is already restorable then 'mostly' abort it - cancel all tasks via the tag 
+		// and clear the mutation logging config and data - but set its state as COMPLETED instead of ABORTED.
+		state Optional<Version> latestRestorableVersion = wait(config.getLatestRestorableVersion(tr));
+
 		TraceEvent(SevInfo, "FBA_discontinueBackup")
+				.detail("AlreadyRestorable", latestRestorableVersion.present() ? "Yes" : "No")
 				.detail("tagName", tag.tagName.c_str())
 				.detail("status", BackupAgentBase::getStateText(status));
+
+		if(latestRestorableVersion.present()) {
+			// Cancel all backup tasks through tag
+			Void _ = wait(tag.cancel(tr));
+
+			Key configPath = uidPrefixKey(logRangesRange.begin, config.getUid());
+			Key logsPath = uidPrefixKey(backupLogKeys.begin, config.getUid());
+
+			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
+			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
+			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+
+			config.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
+
+			return Void();
+		}
 
 		state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 
