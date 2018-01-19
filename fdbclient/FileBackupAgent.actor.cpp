@@ -1341,7 +1341,7 @@ namespace fileBackup {
 			}
 
 			// Calculate number of shards that should be done before the next interval end
-			state Version nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (g_network->isSimulated() ? (snapshotIntervalSeconds / 5.0) : CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC);
+			state Version nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * std::min<int>((snapshotIntervalSeconds / 5.0), CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC);
 			Params.nextDispatchVersion().set(task, nextDispatchVersion);
 			// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
 			double timeElapsed;
