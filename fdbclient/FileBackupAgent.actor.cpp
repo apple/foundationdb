@@ -681,8 +681,8 @@ namespace fileBackup {
 		state Subspace tagNames = backupAgent->subspace.get(BackupAgentBase::keyTagName);
 		Optional<Value> uidStr = wait(tr->get(tagNames.pack(Key(tagName))));
 		if (!uidStr.present()) {
-			TraceEvent(SevError, "BackupTagMissing").detail("tagName", tagName.c_str());
-			throw backup_error();
+			TraceEvent(SevWarn, "FileBackupAbortIncompatibleBackup_TagNotFound").detail("tagName", tagName.c_str());
+			return Void();
 		}
 		state UID uid = BinaryReader::fromStringRef<UID>(uidStr.get(), Unversioned());
 
@@ -693,26 +693,27 @@ namespace fileBackup {
 		Optional<Value> statusStr = wait(tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus)));
 		state EBackupState status = !statusStr.present() ? FileBackupAgent::STATE_NEVERRAN : BackupAgentBase::getState(statusStr.get().toString());
 
-		if (!backupAgent->isRunnable(status)) {
-			throw backup_unneeded();
-		}
-
-		TraceEvent(SevInfo, "FileBackupAbortOld")
+		TraceEvent(SevInfo, "FileBackupAbortIncompatibleBackup")
 				.detail("tagName", tagName.c_str())
 				.detail("status", BackupAgentBase::getStateText(status));
 
-		// Clear the folder id will prevent future tasks from executing
+		// Clear the folder id to prevent future tasks from executing at all
 		tr->clear(singleKeyRange(StringRef(globalConfig.pack(FileBackupAgent::keyFolderId))));
 
+		// Clear the mutations logging config and data
 		Key configPath = uidPrefixKey(logRangesRange.begin, uid);
 		Key logsPath = uidPrefixKey(backupLogKeys.begin, uid);
-
 		tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 		tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+
+		// Clear the new-style config space
 		tr->clear(newConfigSpace.range());
 
 		Key statusKey = StringRef(statusSpace.pack(FileBackupAgent::keyStateStatus));
-		tr->set(statusKey, StringRef(FileBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
+
+		// Set old style state key to Aborted if it was Runnable
+		if(backupAgent->isRunnable(status))
+			tr->set(statusKey, StringRef(FileBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
 
 		return Void();
 	}
