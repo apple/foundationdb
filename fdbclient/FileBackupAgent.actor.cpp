@@ -1340,9 +1340,26 @@ namespace fileBackup {
 				return Void();
 			}
 
-			// Calculate number of shards that should be done before the next interval end
-			state Version nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * std::min<int>((snapshotIntervalSeconds / 5.0), CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC);
+			// Decide when the next snapshot dispatch should run.
+			state Version nextDispatchVersion;
+
+			// In simulation, use snapshot interval / 5 to ensure multiple dispatches run
+			// Otherwise, use the knob for the number of seconds between snapshot dispatch tasks.
+			if(g_network->isSimulated())
+				nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (snapshotIntervalSeconds / 5.0);
+			else
+				nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC;
+
+			// If nextDispatchVersion is greater than snapshotTargetEndVersion (which could be in the past) then just use
+			// the greater of recentReadVersion or snapshotTargetEndVersion.  Any range tasks created in this dispatch will
+			// be scheduled at a random time between recentReadVersion and nextDispatchVersion,
+			// so nextDispatchVersion shouldn't be less than recentReadVersion.
+			if(nextDispatchVersion > snapshotTargetEndVersion)
+				nextDispatchVersion = std::max(recentReadVersion, snapshotTargetEndVersion);
+
 			Params.nextDispatchVersion().set(task, nextDispatchVersion);
+
+			// Calculate number of shards that should be done before the next interval end
 			// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
 			double timeElapsed;
 			if(snapshotTargetEndVersion > snapshotBeginVersion)
