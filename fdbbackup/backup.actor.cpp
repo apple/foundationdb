@@ -1724,9 +1724,18 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 			throw restore_error();
 		}
 
-		KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
+		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
 
 		if (performRestore) {
+			if(dbVersion == invalidVersion) {
+				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
+				if(!desc.maxRestorableVersion.present()) {
+					fprintf(stderr, "The specified backup is not restorable to any version.\n");
+					throw restore_error();
+				}
+
+				dbVersion = desc.maxRestorableVersion.get();
+			}
 			Version _restoreVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), waitForDone, dbVersion, verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
 			restoreVersion = _restoreVersion;
 		}
@@ -2279,7 +2288,7 @@ int main(int argc, char* argv[]) {
 		std::string removePrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
 		int maxErrors = 20;
-		Version dbVersion = 0;
+		Version dbVersion = invalidVersion;
 		bool waitForDone = false;
 		bool stopWhenDone = true;
 		bool forceAction = false;
@@ -2824,7 +2833,8 @@ int main(int argc, char* argv[]) {
 				break;
 
 			case BACKUP_EXPIRE:
-				if(!expireDatetime.empty())
+				// Must have a usable cluster if either expire DateTime options were used
+				if(!expireDatetime.empty() || !expireRestorableAfterDatetime.empty())
 					if(!initCluster())
 						return FDB_EXIT_ERROR;
 				f = stopAfter( expireBackupData(argv[0], destinationContainer, expireVersion, expireDatetime, db, forceAction, expireRestorableAfterVersion, expireRestorableAfterDatetime) );
@@ -2835,6 +2845,7 @@ int main(int argc, char* argv[]) {
 				break;
 
 			case BACKUP_DESCRIBE:
+				// Describe will lookup version timestamps if a cluster file was given, but quietly skip them if not.
 				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, initCluster(true) ? db : Optional<Database>()) );
 				break;
 
