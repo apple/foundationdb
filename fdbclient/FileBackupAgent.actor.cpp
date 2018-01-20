@@ -2794,9 +2794,6 @@ namespace fileBackup {
 				return Void();
 			}
 
-			// If adding to existing batch then task is joined with a batch future so set done future.
-			Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
-
 			// Increment the number of blocks dispatched in the restore config
 			restore.filesBlocksDispatched().atomicOp(tr, blocksDispatched, MutationRef::Type::AddValue);
 
@@ -2813,7 +2810,12 @@ namespace fileBackup {
 			else // Otherwise, add a follow-on task to continue after all previously dispatched blocks are done
 				addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, endVersion, beginFile, beginBlock, batchSize, 0, TaskCompletionKey::noSignal(), allPartsDone));
 
-			Void _ = wait(setDone && waitForAll(addTaskFutures) && taskBucket->finish(tr, task));
+			Void _ = wait(waitForAll(addTaskFutures));
+
+			// If adding to existing batch then task is joined with a batch future so set done future.
+			Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
+
+			Void _ = wait(setDone && taskBucket->finish(tr, task));
 
 			TraceEvent("FileRestoreDispatch")
 				.detail("RestoreUID", restore.getUid())
