@@ -2741,19 +2741,19 @@ int main(int argc, char* argv[]) {
 				return false;
 			}
 
+			TraceEvent("ProgramStart")
+				.detail("SourceVersion", getHGVersion())
+				.detail("Version", FDB_VT_VERSION )
+				.detail("PackageName", FDB_VT_PACKAGE_NAME)
+				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+				.detail("CommandLine", commandLine)
+				.detail("MemoryLimit", memLimit)
+				.trackLatest("ProgramStart");
+
 			db = cluster->createDatabase(databaseKey, localities).get();
 			return true;
 		};
 
-		TraceEvent("ProgramStart")
-			.detail("SourceVersion", getHGVersion())
-			.detail("Version", FDB_VT_VERSION )
-			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-			.detail("CommandLine", commandLine)
-			.detail("MemoryLimit", memLimit)
-			.trackLatest("ProgramStart");
-		
 		if(sourceClusterFile.size()) {
 			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
 			try {
