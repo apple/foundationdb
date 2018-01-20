@@ -27,6 +27,7 @@ testTitle=BackupAndRestore
     performRestore=false
     clearAfterTest=false
     simBackupAgents=BackupToFile
+    allowPauses=false
 
     testName=BackupAndRestoreCorrectness
 	backupTag=backup2
@@ -35,6 +36,7 @@ testTitle=BackupAndRestore
     performRestore=true
     clearAfterTest=false
     simBackupAgents=BackupToFile
+    allowPauses=false
 
     testName=BackupAndRestoreCorrectness
 	backupTag=backup3
@@ -43,3 +45,4 @@ testTitle=BackupAndRestore
     performRestore=false
     clearAfterTest=false
     simBackupAgents=BackupToFile
+    allowPauses=false

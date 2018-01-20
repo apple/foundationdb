@@ -90,7 +90,9 @@ enum enumRestoreType {
 //
 enum {
 	// Backup constants
-	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE, OPT_EXPVERSION, OPT_BASEURL, OPT_DATETIME, OPT_BLOB_CREDENTIALS,
+	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE,
+	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,
+	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -157,8 +159,6 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BACKUPKEYS,      "--keys",           SO_REQ_SEP },
 	{ OPT_DRYRUN,          "-n",               SO_NONE },
 	{ OPT_DRYRUN,          "--dryrun",         SO_NONE },
-	{ OPT_FORCE,           "-f",               SO_NONE },
-	{ OPT_FORCE,           "--force",          SO_NONE },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
@@ -315,13 +315,10 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
-	{ OPT_DATETIME,        "-D",               SO_REQ_SEP },
-	{ OPT_DATETIME,        "--date",           SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
 	{ OPT_TRACE_DIR,       "--logdir",         SO_REQ_SEP },
 	{ OPT_QUIET,           "-q",               SO_NONE },
 	{ OPT_QUIET,           "--quiet",          SO_NONE },
-	{ OPT_EXPVERSION,      "-u",               SO_REQ_SEP },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
@@ -333,6 +330,12 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_FORCE,           "-f",               SO_NONE },
+	{ OPT_FORCE,           "--force",          SO_NONE },
+	{ OPT_EXPIRE_RESTORABLE_AFTER_VERSION,       "--restorable_after_version",               SO_REQ_SEP },
+	{ OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,      "--restorable_after_timestamp",             SO_REQ_SEP },
+	{ OPT_EXPIRE_BEFORE_VERSION,                 "--expire_before_version",                  SO_REQ_SEP },
+	{ OPT_EXPIRE_BEFORE_DATETIME,                "--expire_before_timestamp",                SO_REQ_SEP },
 
 	SO_END_OF_OPTIONS
 };
@@ -366,6 +369,8 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
 #endif
+	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
+	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
 	{ OPT_TRACE,           "--log",            SO_NONE },
@@ -383,6 +388,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_DEVHELP,         "--dev-help",       SO_NONE },
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
+	{ OPT_DESCRIBE_DEEP,   "--deep",           SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
@@ -437,7 +443,6 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_DRYRUN,          "-n",               SO_NONE },
 	{ OPT_DRYRUN,          "--dryrun",         SO_NONE },
 	{ OPT_FORCE,           "-f",               SO_NONE },
-	{ OPT_FORCE,           "--force",          SO_NONE },
 	{ OPT_CRASHONERROR,    "--crash",          SO_NONE },
 	{ OPT_MEMLIMIT,        "-m",               SO_REQ_SEP },
 	{ OPT_MEMLIMIT,        "--memory",         SO_REQ_SEP },
@@ -697,10 +702,16 @@ static void printBackupUsage(bool devhelp) {
 		   "                 Base backup URL for list operations.  This looks like a Backup URL but without a backup name.\n");
 	printf("  --blob_credentials FILE\n"
 		   "                 File containing blob credentials in JSON format.  Can be specified multiple times for multiple files.  See below for more details.\n");
-	printf("  -D, --date DATETIME\n"
+	printf("  --expire_before_timestamp DATETIME\n"
 		   "                 Datetime cutoff for expire operations.  Requires a cluster file and will use version/timestamp metadata\n"
 		   "                 in the database to obtain a cutoff version very close to the timestamp given in YYYY-MM-DD.HH:MI:SS format (UTC).\n");
-	printf("  -u VERSION     Version cutoff for expire operations.  Deletes all backup files with data from < VERSION.\n");
+	printf("  --expire_before_version VERSION\n"
+	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after VERSION.\n");
+	printf("  --restorable_after_timestamp DATETIME\n"
+		   "                 For expire operations, set minimum acceptable restorability to the version equivalent of DATETIME and later.\n");
+	printf("  --restorable_after_timestamp VERSION\n"
+		   "                 For expire operations, set minimum acceptable restorability to the VERSION and later.\n");
+	printf("  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
 	printf("  -s, --snapshot_interval DURATION\n"
 	       "                 For start operations, specifies the backup's target snapshot interval as DURATION seconds.  Defaults to %d.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
@@ -712,6 +723,16 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -z, --no-stop-when-done\n"
 		   "                 Do not stop backup when restorable.\n");
 	printf("  -h, --help     Display this help and exit.\n");
+
+	if (devhelp) {
+#ifdef _WIN32
+		printf("  -n             Create a new console.\n");
+		printf("  -q             Disable error dialog on crash.\n");
+		printf("  --parentpid PID\n");
+		printf("                 Specify a process after whose termination to exit.\n");
+#endif
+		printf("  --deep         For describe operations, do not use cached metadata.  Warning: Very slow\n");
+	}
 	printf("\n"
 		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 	printf("\n"
@@ -725,15 +746,6 @@ static void printBackupUsage(bool devhelp) {
 		   "     will be used to obtain the secret key.\n\n"
 		   "     The JSON schema is:\n"
 		   "        { \"accounts\" : { \"user@host\" : { \"secret\" : \"SECRETKEY\" }, \"user2@host2\" : { \"secret\" : \"SECRET\" } } }\n");
-
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
 
 	return;
 }
@@ -1712,24 +1724,47 @@ ACTOR Future<Void> runRestore(Database db, std::string tagName, std::string cont
 			throw restore_error();
 		}
 
-		KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
+		state KeyRange range = (ranges.size() == 0) ? normalKeys : ranges.front();
 
 		if (performRestore) {
+			if(dbVersion == invalidVersion) {
+				BackupDescription desc = wait(IBackupContainer::openContainer(container)->describeBackup());
+				if(!desc.maxRestorableVersion.present()) {
+					fprintf(stderr, "The specified backup is not restorable to any version.\n");
+					throw restore_error();
+				}
+
+				dbVersion = desc.maxRestorableVersion.get();
+			}
 			Version _restoreVersion = wait(backupAgent.restore(db, KeyRef(tagName), KeyRef(container), waitForDone, dbVersion, verbose, range, KeyRef(addPrefix), KeyRef(removePrefix)));
 			restoreVersion = _restoreVersion;
 		}
 		else {
-			state Version defaultRestoreVersion = -1;
+			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(container);
+			state BackupDescription description = wait(bc->describeBackup());
 
-			// Get the folder information
-			std::string info = wait(FileBackupAgent::getBackupInfo(container, &defaultRestoreVersion));
+			if(dbVersion <= 0) {
+				Void _ = wait(description.resolveVersionTimes(db));
+				if(description.maxRestorableVersion.present())
+					restoreVersion = description.maxRestorableVersion.get();
+				else {
+					fprintf(stderr, "Backup is not restorable\n");
+					throw restore_invalid_version();
+				}
+			}
+			else
+				restoreVersion = dbVersion;
 
-			restoreVersion = (int64_t) (dbVersion > 0) ? dbVersion : defaultRestoreVersion;
+			state Optional<RestorableFileSet> rset = wait(bc->getRestoreSet(restoreVersion));
+			if(!rset.present()) {
+				fprintf(stderr, "Insufficient data to restore to version %lld\n", restoreVersion);
+				throw restore_invalid_version();
+			}
 
 			// Display the restore information, if requested
 			if (verbose) {
 				printf("[DRY RUN] Restoring backup to version: %lld\n", (long long) restoreVersion);
-				printf("%s\n", info.c_str());
+				printf("%s\n", description.toString().c_str());
 			}
 		}
 
@@ -1807,10 +1842,15 @@ ACTOR Future<Version> getVersionFromDateTime(std::string datetime, Database db) 
 	}
 }
 
-ACTOR Future<Void> expireBackupData(const char *name, std::string destinationContainer, Version endVersion, std::string datetime, Database db) {
-	if (!endVersion && datetime.length()) {
-		Version v = wait( getVersionFromDateTime(datetime, db) );
+ACTOR Future<Void> expireBackupData(const char *name, std::string destinationContainer, Version endVersion, std::string endDatetime, Database db, bool force, Version restorableAfterVersion, std::string restorableAfterDatetime) {
+	if (!endDatetime.empty()) {
+		Version v = wait( getVersionFromDateTime(endDatetime, db) );
 		endVersion = v;
+	}
+
+	if (!restorableAfterDatetime.empty()) {
+		Version v = wait( getVersionFromDateTime(restorableAfterDatetime, db) );
+		restorableAfterVersion = v;
 	}
 
 	if (!endVersion) {
@@ -1821,13 +1861,16 @@ ACTOR Future<Void> expireBackupData(const char *name, std::string destinationCon
 
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
-		Void _ = wait(c->expireData(endVersion));
+		Void _ = wait(c->expireData(endVersion, force, restorableAfterVersion));
 		printf("All data before version %lld is deleted.\n", endVersion);
 	}
 	catch (Error& e) {
 		if(e.code() == error_code_actor_cancelled)
 			throw;
-		fprintf(stderr, "ERROR: %s\n", e.what());
+		if(e.code() == error_code_backup_cannot_expire)
+			fprintf(stderr, "ERROR: Requested expiration would be unsafe.  Backup would not meet minimum restorability.  Use --force to delete data anyway.\n");
+		else
+			fprintf(stderr, "ERROR: %s\n", e.what());
 		throw;
 	}
 
@@ -1862,10 +1905,12 @@ ACTOR Future<Void> deleteBackupContainer(const char *name, std::string destinati
 	return Void();
 }
 
-ACTOR Future<Void> describeBackup(const char *name, std::string destinationContainer) {
+ACTOR Future<Void> describeBackup(const char *name, std::string destinationContainer, bool deep, Optional<Database> cx) {
 	try {
 		Reference<IBackupContainer> c = openBackupContainer(name, destinationContainer);
-		BackupDescription desc = wait(c->describeBackup());
+		state BackupDescription desc = wait(c->describeBackup(deep));
+		if(cx.present())
+			Void _ = wait(desc.resolveVersionTimes(cx.get()));
 		printf("%s\n", desc.toString().c_str());
 	}
 	catch (Error& e) {
@@ -2226,12 +2271,15 @@ int main(int argc, char* argv[]) {
 		}
 
 		std::string destinationContainer;
+		bool describeDeep = false;
 		int snapshotIntervalSeconds = CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC;
 		std::string clusterFile;
 		std::string sourceClusterFile;
 		std::string baseUrl;
-		std::string datetime;
-		Version expVersion = 0;
+		std::string expireDatetime;
+		Version expireVersion = 0;
+		std::string expireRestorableAfterDatetime;
+		Version expireRestorableAfterVersion = std::numeric_limits<Version>::max();
 		std::vector<std::pair<std::string, std::string>> knobs;
 		std::string tagName = BackupAgentBase::getDefaultTag().toString();
 		bool tagProvided = false;
@@ -2240,7 +2288,7 @@ int main(int argc, char* argv[]) {
 		std::string removePrefix;
 		Standalone<VectorRef<KeyRangeRef>> backupKeys;
 		int maxErrors = 20;
-		Version dbVersion = 0;
+		Version dbVersion = invalidVersion;
 		bool waitForDone = false;
 		bool stopWhenDone = true;
 		bool forceAction = false;
@@ -2304,7 +2352,8 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 
-			switch (args->OptionId()) {
+			int optId = args->OptionId();
+			switch (optId) {
 				case OPT_HELP:
 					printUsage(programExe, false);
 					return FDB_EXIT_SUCCESS;
@@ -2355,18 +2404,26 @@ int main(int argc, char* argv[]) {
 					localities.set(Standalone<StringRef>(syn), Standalone<StringRef>(std::string(args->OptionArg())));
 					break;
 					}
-				case OPT_DATETIME:
-					datetime = args->OptionArg();
+				case OPT_EXPIRE_BEFORE_DATETIME:
+					expireDatetime = args->OptionArg();
 					break;
-				case OPT_EXPVERSION: {
+				case OPT_EXPIRE_RESTORABLE_AFTER_DATETIME:
+					expireRestorableAfterDatetime = args->OptionArg();
+					break;
+				case OPT_EXPIRE_BEFORE_VERSION:
+				case OPT_EXPIRE_RESTORABLE_AFTER_VERSION:
+				{
 					const char* a = args->OptionArg();
-					long long expVersionValue = 0;
-					if (!sscanf(a, "%lld", &expVersionValue)) {
+					long long ver = 0;
+					if (!sscanf(a, "%lld", &ver)) {
 						fprintf(stderr, "ERROR: Could not parse expiration version `%s'\n", a);
 						printHelpTeaser(argv[0]);
 						return FDB_EXIT_ERROR;
 					}
-					expVersion = expVersionValue;
+					if(optId == OPT_EXPIRE_BEFORE_VERSION)
+						expireVersion = ver;
+					else
+						expireRestorableAfterVersion = ver;
 					break;
 				}
 				case OPT_BASEURL:
@@ -2429,6 +2486,9 @@ int main(int argc, char* argv[]) {
 					// If the url starts with '/' then prepend "file://" for backwards compatibility
 					if(StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
 						restoreContainer = std::string("file://") + restoreContainer;
+					break;
+				case OPT_DESCRIBE_DEEP:
+					describeDeep = true;
 					break;
 				case OPT_PREFIX_ADD:
 					addPrefix = args->OptionArg();
@@ -2661,13 +2721,14 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
-		auto initCluster = [&]() {
+		auto initCluster = [&](bool quiet = false) {
 			auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
 			try {
 				ccf = Reference<ClusterConnectionFile>(new ClusterConnectionFile(resolvedClusterFile.first));
 			}
 			catch (Error& e) {
-				fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
+				if(!quiet)
+					fprintf(stderr, "%s\n", ClusterConnectionFile::getErrorString(resolvedClusterFile, e).c_str());
 				return false;
 			}
 
@@ -2680,19 +2741,19 @@ int main(int argc, char* argv[]) {
 				return false;
 			}
 
+			TraceEvent("ProgramStart")
+				.detail("SourceVersion", getHGVersion())
+				.detail("Version", FDB_VT_VERSION )
+				.detail("PackageName", FDB_VT_PACKAGE_NAME)
+				.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
+				.detail("CommandLine", commandLine)
+				.detail("MemoryLimit", memLimit)
+				.trackLatest("ProgramStart");
+
 			db = cluster->createDatabase(databaseKey, localities).get();
 			return true;
 		};
 
-		TraceEvent("ProgramStart")
-			.detail("SourceVersion", getHGVersion())
-			.detail("Version", FDB_VT_VERSION )
-			.detail("PackageName", FDB_VT_PACKAGE_NAME)
-			.detailf("ActualTime", "%lld", DEBUG_DETERMINISM ? 0 : time(NULL))
-			.detail("CommandLine", commandLine)
-			.detail("MemoryLimit", memLimit)
-			.trackLatest("ProgramStart");
-		
 		if(sourceClusterFile.size()) {
 			auto resolvedSourceClusterFile = ClusterConnectionFile::lookupClusterFileName(sourceClusterFile);
 			try {
@@ -2772,10 +2833,11 @@ int main(int argc, char* argv[]) {
 				break;
 
 			case BACKUP_EXPIRE:
-				if(!datetime.empty())
+				// Must have a usable cluster if either expire DateTime options were used
+				if(!expireDatetime.empty() || !expireRestorableAfterDatetime.empty())
 					if(!initCluster())
 						return FDB_EXIT_ERROR;
-				f = stopAfter( expireBackupData(argv[0], destinationContainer, expVersion, datetime, db) );
+				f = stopAfter( expireBackupData(argv[0], destinationContainer, expireVersion, expireDatetime, db, forceAction, expireRestorableAfterVersion, expireRestorableAfterDatetime) );
 				break;
 
 			case BACKUP_DELETE:
@@ -2783,7 +2845,8 @@ int main(int argc, char* argv[]) {
 				break;
 
 			case BACKUP_DESCRIBE:
-				f = stopAfter( describeBackup(argv[0], destinationContainer) );
+				// Describe will lookup version timestamps if a cluster file was given, but quietly skip them if not.
+				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, initCluster(true) ? db : Optional<Database>()) );
 				break;
 
 			case BACKUP_LIST:

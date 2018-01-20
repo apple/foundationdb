@@ -26,11 +26,16 @@
 #include "fdbrpc/AsyncFileReadAhead.actor.h"
 #include "fdbrpc/Platform.h"
 #include "fdbclient/Status.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include <algorithm>
+#include <time.h>
 
 namespace IBackupFile_impl {
 
-	ACTOR Future<Void> appendString(Reference<IBackupFile> file, Standalone<StringRef> s) {
+	ACTOR Future<Void> appendStringRefWithLen(Reference<IBackupFile> file, Standalone<StringRef> s) {
 		state uint32_t lenBuf = bigEndian32((uint32_t)s.size());
 		Void _ = wait(file->append(&lenBuf, sizeof(lenBuf)));
 		Void _ = wait(file->append(s.begin(), s.size()));
@@ -38,9 +43,93 @@ namespace IBackupFile_impl {
 	}
 }
 
-Future<Void> IBackupFile::appendString(Standalone<StringRef> s) {
-	return IBackupFile_impl::appendString(Reference<IBackupFile>::addRef(this), s);
+Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
+	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
 }
+
+ACTOR Future<Optional<int64_t>> timeKeeperDateFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+	// Binary search to find the closest date with a version <= v
+	state int64_t min = 0;
+	state int64_t max = (int64_t)now();
+	state int64_t mid;
+
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+	loop {
+		mid = (min + max) / 2;
+		state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, min, mid, 1, false, true) );
+
+		if (results.size() == 0) {
+			if(mid == min)
+				return Optional<int64_t>();
+			min = mid;
+			continue;
+		}
+
+		Version foundVersion = results[0].second;
+		int64_t foundTime = results[0].first;
+
+		if(v < foundVersion)
+			max = foundTime;
+		else {
+			if(foundTime == min) {
+				return foundTime + (v - foundVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+			}
+			min = foundTime;
+		}
+	}
+}
+
+std::string formatTime(int64_t t) {
+	time_t curTime = (time_t)t;
+	char buffer[128];
+	struct tm timeinfo;
+	getLocalTime(&curTime, &timeinfo);
+	strftime(buffer, 128, "%Y-%m-%d %H:%M:%S", &timeinfo);
+	return buffer;
+}
+
+Future<Void> fetchTimes(Reference<ReadYourWritesTransaction> tr,  std::map<Version, int64_t> *pVersionTimeMap) {
+	std::vector<Future<Void>> futures;
+
+	// Resolve each version in the map,
+	for(auto &p : *pVersionTimeMap) {
+		futures.push_back(map(timeKeeperDateFromVersion(p.first, tr), [=](Optional<int64_t> t) {
+			if(t.present())
+				pVersionTimeMap->at(p.first) = t.get();
+			else
+				pVersionTimeMap->erase(p.first);
+			return Void();
+		}));
+	}
+
+	return waitForAll(futures);
+}
+
+Future<Void> BackupDescription::resolveVersionTimes(Database cx) {
+	// Populate map with versions needed
+	versionTimeMap.clear();
+
+	for(const KeyspaceSnapshotFile &m : snapshots) {
+		versionTimeMap[m.beginVersion];
+		versionTimeMap[m.endVersion];
+	}
+	if(minLogBegin.present())
+		versionTimeMap[minLogBegin.get()];
+	if(maxLogEnd.present())
+		versionTimeMap[maxLogEnd.get()];
+	if(contiguousLogEnd.present())
+		versionTimeMap[contiguousLogEnd.get()];
+	if(minRestorableVersion.present())
+		versionTimeMap[minRestorableVersion.get()];
+	if(maxRestorableVersion.present())
+		versionTimeMap[maxRestorableVersion.get()];
+
+	return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) { return fetchTimes(tr, &versionTimeMap); });
+};
 
 std::string BackupDescription::toString() const {
 	std::string info;
@@ -48,21 +137,38 @@ std::string BackupDescription::toString() const {
 	info.append(format("URL: %s\n", url.c_str()));
 	info.append(format("Restorable: %s\n", maxRestorableVersion.present() ? "true" : "false"));
 
-	for(const KeyspaceSnapshotFile &m : snapshots)
-		info.append(format("Snapshot:  startVersion=%lld  endVersion=%lld  totalBytes=%lld\n", m.beginVersion, m.endVersion, m.totalSize));
+	auto formatVersion = [&](Version v) {
+		std::string s;
+		if(!versionTimeMap.empty()) {
+			auto i = versionTimeMap.find(v);
+			if(i != versionTimeMap.end())
+				s = format("%lld (%s)", v, formatTime(i->second).c_str());
+			else
+				s = format("%lld (unknown)", v);
+		}
+		else {
+			s = format("%lld", v);
+		}
+		return s;
+	};
+
+	for(const KeyspaceSnapshotFile &m : snapshots) {
+		info.append(format("Snapshot:  startVersion=%s  endVersion=%s  totalBytes=%lld  restorable=%s\n",
+			formatVersion(m.beginVersion).c_str(), formatVersion(m.endVersion).c_str(), m.totalSize, m.restorable.orDefault(false) ? "true" : "false"));
+	}
+
 	info.append(format("SnapshotBytes: %lld\n", snapshotBytes));
 
 	if(minLogBegin.present())
-		info.append(format("MinLogBeginVersion: %lld\n", minLogBegin.get()));
+		info.append(format("MinLogBeginVersion:      %s\n", formatVersion(minLogBegin.get()).c_str()));
 	if(contiguousLogEnd.present())
-		info.append(format("MaxContiguousLogVersion: %lld\n", contiguousLogEnd.get()));
+		info.append(format("ContiguousLogEndVersion: %s\n", formatVersion(contiguousLogEnd.get()).c_str()));
 	if(maxLogEnd.present())
-		info.append(format("MaxLogEndVersion: %lld\n", maxLogEnd.get()));
+		info.append(format("MaxLogEndVersion:        %s\n", formatVersion(maxLogEnd.get()).c_str()));
 	if(minRestorableVersion.present())
-		info.append(format("MinRestorableVersion: %lld\n", minRestorableVersion.get()));
+		info.append(format("MinRestorableVersion:    %s\n", formatVersion(minRestorableVersion.get()).c_str()));
 	if(maxRestorableVersion.present())
-		info.append(format("MaxRestorableVersion: %lld\n", maxRestorableVersion.get()));
-	info.append(format("LogBytes: %lld\n", logBytes));
+		info.append(format("MaxRestorableVersion:    %s\n", formatVersion(maxRestorableVersion.get()).c_str()));
 
 	if(!extendedDetail.empty())
 		info.append("ExtendedDetail: ").append(extendedDetail);
@@ -96,8 +202,10 @@ public:
 	virtual Future<Void> create() = 0;
 
 	// Get a list of fileNames and their sizes in the container under the given path
+	// The implementation can (but does not have to) use the folder path filter to avoid traversing
+	// specific subpaths.
 	typedef std::vector<std::pair<std::string, int64_t>> FilesAndSizesT;
-	virtual Future<FilesAndSizesT> listFiles(std::string path = "") = 0;
+	virtual Future<FilesAndSizesT> listFiles(std::string path = "", std::function<bool(std::string const &)> folderPathFilter = nullptr) = 0;
 
 	// Open a file for read by fileName
 	virtual Future<Reference<IAsyncFile>> readFile(std::string fileName) = 0;
@@ -235,18 +343,18 @@ public:
 	ACTOR static Future<Void> writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem> bc, std::vector<std::string> fileNames, int64_t totalBytes) {
 		ASSERT(!fileNames.empty());
 
-		json_spirit::mValue json;
-		JSONDoc doc(json);
 
-		json_spirit::mArray &array = (doc.create("files") = json_spirit::mArray()).get_array();
+		state Version minVer = std::numeric_limits<Version>::max();
+		state Version maxVer = 0;
+		state RangeFile rf;
+		state json_spirit::mArray fileArray;
+		state int i;
 
-		Version minVer = std::numeric_limits<Version>::max();
-		Version maxVer = std::numeric_limits<Version>::min();
-		RangeFile rf;
-
-		for(auto &f : fileNames) {
+		// Validate each filename, update version range
+		for(i = 0; i < fileNames.size(); ++i) {
+			auto const &f = fileNames[i];
 			if(pathToRangeFile(rf, f, 0)) {
-				array.push_back(f);
+				fileArray.push_back(f);
 				if(rf.version < minVer)
 					minVer = rf.version;
 				if(rf.version > maxVer)
@@ -254,12 +362,18 @@ public:
 			}
 			else
 				throw restore_unknown_file_type();
+			Void _ = wait(yield());
 		}
 
+		state json_spirit::mValue json;
+		state JSONDoc doc(json);
+
+		doc.create("files") = std::move(fileArray);
 		doc.create("totalBytes") = totalBytes;
 		doc.create("beginVersion") = minVer;
 		doc.create("endVersion") = maxVer;
 
+		Void _ = wait(yield());
 		state std::string docString = json_spirit::write_string(json);
 
 		state Reference<IBackupFile> f = wait(bc->writeFile(format("snapshots/snapshot,%lld,%lld,%lld", minVer, maxVer, totalBytes)));
@@ -273,9 +387,23 @@ public:
 		return writeKeyspaceSnapshotFile_impl(Reference<BackupContainerFileSystem>::addRef(this), fileNames, totalBytes);
 	};
 
-	// List files in sorted order but without regard for overlaps in version ranges
-	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
-		return map(listFiles("logs/"), [=](const FilesAndSizesT &files) {
+	// List log files which contain data at any version >= beginVersion and < endVersion
+	// Lists files in sorted order by begin version. Does not check that results are non overlapping or contiguous.
+	Future<std::vector<LogFile>> listLogFiles(Version beginVersion = 0, Version endVersion = std::numeric_limits<Version>::max()) {
+		// The first relevant log file could have a begin version less than beginVersion based on the knobs which determine log file range size,
+		// so start at an earlier version adjusted by how many versions a file could contain.
+		//
+		// This path would be the first that could contain relevant results for this operation.
+		Standalone<StringRef> firstPath(format("logs/%s/", logVersionFolderString(beginVersion - (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)).c_str()));
+		// This path would be the last that could contain relevant results for this operation.
+		Standalone<StringRef> lastPath(format("logs/%s/", logVersionFolderString(endVersion).c_str()));
+
+		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
+			return firstPath.startsWith(folderPath) || lastPath.startsWith(folderPath)
+				|| (folderPath > firstPath && folderPath < lastPath);
+		};
+
+		return map(listFiles("logs/", pathFilter), [=](const FilesAndSizesT &files) {
 			std::vector<LogFile> results;
 			LogFile lf;
 			for(auto &f : files) {
@@ -286,8 +414,20 @@ public:
 			return results;
 		});
 	}
-	Future<std::vector<RangeFile>> listRangeFiles(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
-		return map(listFiles("ranges/"), [=](const FilesAndSizesT &files) {
+
+	// List range files, in sorted version order, which contain data at or between beginVersion and endVersion
+	Future<std::vector<RangeFile>> listRangeFiles(Version beginVersion = 0, Version endVersion = std::numeric_limits<Version>::max()) {
+		// This path would be the first that could contain relevant results for this operation.
+		Standalone<StringRef> firstPath(format("ranges/%s/", rangeVersionFolderString(beginVersion).c_str()));
+		// This path would be the last that could contain relevant results for this operation.
+		Standalone<StringRef> lastPath(format("ranges/%s/", rangeVersionFolderString(endVersion).c_str()));
+
+		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
+			return firstPath.startsWith(folderPath) || lastPath.startsWith(folderPath)
+				|| (folderPath > firstPath && folderPath < lastPath);
+		};
+
+		return map(listFiles("ranges/", pathFilter), [=](const FilesAndSizesT &files) {
 			std::vector<RangeFile> results;
 			RangeFile rf;
 			for(auto &f : files) {
@@ -298,12 +438,14 @@ public:
 			return results;
 		});
 	}
-	Future<std::vector<KeyspaceSnapshotFile>> listKeyspaceSnapshots(Version beginVersion = std::numeric_limits<Version>::min(), Version endVersion = std::numeric_limits<Version>::max()) {
+
+	// List snapshots which have been fully written, in sorted beginVersion order.
+	Future<std::vector<KeyspaceSnapshotFile>> listKeyspaceSnapshots() {
 		return map(listFiles("snapshots/"), [=](const FilesAndSizesT &files) {
 			std::vector<KeyspaceSnapshotFile> results;
 			KeyspaceSnapshotFile sf;
 			for(auto &f : files) {
-				if(pathToKeyspaceSnapshotFile(sf, f.first) && sf.endVersion > beginVersion && sf.beginVersion < endVersion)
+				if(pathToKeyspaceSnapshotFile(sf, f.first))
 					results.push_back(sf);
 			}
 			std::sort(results.begin(), results.end());
@@ -311,54 +453,101 @@ public:
 		});
 	}
 
-	ACTOR static Future<FullBackupListing> listBackup_impl(Reference<BackupContainerFileSystem> bc) {
+	ACTOR static Future<FullBackupListing> dumpFileList_impl(Reference<BackupContainerFileSystem> bc) {
 		state Future<std::vector<RangeFile>> fRanges = bc->listRangeFiles(0, std::numeric_limits<Version>::max());
-		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots(0, std::numeric_limits<Version>::max());
+		state Future<std::vector<KeyspaceSnapshotFile>> fSnapshots = bc->listKeyspaceSnapshots();
 		state Future<std::vector<LogFile>> fLogs = bc->listLogFiles(0, std::numeric_limits<Version>::max());
 		Void _ = wait(success(fRanges) && success(fSnapshots) && success(fLogs));
 		return FullBackupListing({fRanges.get(), fLogs.get(), fSnapshots.get()});
 	}
 
-	Future<FullBackupListing> listBackup() {
-		return listBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
+	Future<FullBackupListing> dumpFileList() {
+		return dumpFileList_impl(Reference<BackupContainerFileSystem>::addRef(this));
 	}
 
-	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc) {
+	ACTOR static Future<BackupDescription> describeBackup_impl(Reference<BackupContainerFileSystem> bc, bool deepScan) {
 		state BackupDescription desc;
 		desc.url = bc->getURL();
 
-		state std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
+		// This is the range of logs we'll have to list to determine log continuity
+		state Version scanBegin = 0;
+		state Version scanEnd = std::numeric_limits<Version>::max();
+
+		// Get range for which we know there are logs, if available
+		state Optional<Version> begin;
+		state Optional<Version> end;
+
+		if(!deepScan) {
+			Void _ = wait(store(bc->logBeginVersion().get(), begin) && store(bc->logEndVersion().get(), end));
+		}
+
+		// Use the known log range if present
+		if(begin.present() && end.present()) {
+			// Logs are assumed to be contiguious between begin and max(begin, end), so initalize desc accordingly
+			// The use of max() is to allow for a stale end version that has been exceeded by begin version
+			desc.minLogBegin = begin.get();
+			desc.maxLogEnd = std::max(begin.get(), end.get());
+			desc.contiguousLogEnd = desc.maxLogEnd;
+
+			// Begin file scan at the contiguous log end version
+			scanBegin = desc.contiguousLogEnd.get();
+		}
+
+		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots());
 		desc.snapshots = snapshots;
 
-		std::vector<LogFile> logs = wait(bc->listLogFiles(0, std::numeric_limits<Version>::max()));
+		std::vector<LogFile> logs = wait(bc->listLogFiles(scanBegin, scanEnd));
 
 		if(!logs.empty()) {
 			desc.maxLogEnd = logs.rbegin()->endVersion;
 
 			auto i = logs.begin();
-			desc.logBytes = i->fileSize;
-			desc.minLogBegin = i->beginVersion;
-			desc.contiguousLogEnd = i->endVersion;
+			// If we didn't get log versions above then seed them using the first log file
+			if(!desc.contiguousLogEnd.present()) {
+				desc.minLogBegin = i->beginVersion;
+				desc.contiguousLogEnd = i->endVersion;
+				++i;
+			}
 			auto &end = desc.contiguousLogEnd.get();  // For convenience to make loop cleaner
 
 			// Advance until continuity is broken
-			while(++i != logs.end()) {
-				desc.logBytes += i->fileSize;
+			while(i != logs.end()) {
 				if(i->beginVersion > end)
 					break;
 				// If the next link in the log chain is found, update the end
 				if(i->beginVersion == end)
 					end = i->endVersion;
-			}
-
-			// Scan the rest of the logs to update the total size
-			while(i != logs.end()) {
-				desc.logBytes += i->fileSize;
 				++i;
 			}
 		}
 
-		for(auto &s : snapshots) {
+		// Try to update the saved log versions if they are not set and we have values for them,
+		// but ignore errors in the update attempt in case the container is not writeable
+		// Also update logEndVersion if it has a value but it is less than contiguousLogEnd
+		try {
+			state Future<Void> updates = Void();
+			if(desc.minLogBegin.present() && !begin.present())
+				updates = updates && bc->logBeginVersion().set(desc.minLogBegin.get());
+			if(desc.contiguousLogEnd.present() && (!end.present() || end.get() < desc.contiguousLogEnd.get()) )
+				updates = updates && bc->logEndVersion().set(desc.contiguousLogEnd.get());
+			Void _ = wait(updates);
+		} catch(Error &e) {
+			if(e.code() == error_code_actor_cancelled)
+				throw;
+			TraceEvent(SevWarn, "BackupContainerSafeVersionUpdateFailure").detail("URL", bc->getURL());
+		}
+
+		for(auto &s : desc.snapshots) {
+			// Calculate restorability of each snapshot.  Assume true, then try to prove false
+			s.restorable = true;
+			// If this is not a single-version snapshot then see if the available contiguous logs cover its range
+			if(s.beginVersion != s.endVersion) {
+				if(!desc.minLogBegin.present() || desc.minLogBegin.get() > s.beginVersion)
+					s.restorable = false;
+				if(!desc.contiguousLogEnd.present() || desc.contiguousLogEnd.get() < s.endVersion)
+					s.restorable = false;
+			}
+
 			desc.snapshotBytes += s.totalSize;
 
 			// If the snapshot is at a single version then it requires no logs.  Update min and max restorable.
@@ -385,32 +574,119 @@ public:
 	}
 
 	// Uses the virtual methods to describe the backup contents
-	Future<BackupDescription> describeBackup() {
-		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this));
+	Future<BackupDescription> describeBackup(bool deepScan = false) {
+		return describeBackup_impl(Reference<BackupContainerFileSystem>::addRef(this), deepScan);
 	}
 
-	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version endVersion) {
+	ACTOR static Future<Void> expireData_impl(Reference<BackupContainerFileSystem> bc, Version expireEndVersion, bool force, Version restorableBeginVersion) {
+		if(restorableBeginVersion < expireEndVersion)
+			throw backup_cannot_expire();
+
+		state Version scanBegin = 0;
+
+		// Get the backup description.
+		state BackupDescription desc = wait(bc->describeBackup());
+
+		// Assume force is needed, then try to prove otherwise.
+		// Force is required if there is not a restorable snapshot which both
+		//   - begins at or after expireEndVersion
+		//   - ends at or before restorableBeginVersion
+		bool forceNeeded = true;
+		for(KeyspaceSnapshotFile &s : desc.snapshots) {
+			if(s.restorable.orDefault(false) && s.beginVersion >= expireEndVersion && s.endVersion <= restorableBeginVersion) {
+				forceNeeded = false;
+				break;
+			}
+		}
+
+		if(forceNeeded && !force)
+			throw backup_cannot_expire();
+
+		// Get metadata
+		state Optional<Version> expiredEnd;
+		state Optional<Version> logBegin;
+		state Optional<Version> logEnd;
+		Void _ = wait(store(bc->expiredEndVersion().get(), expiredEnd) && store(bc->logBeginVersion().get(), logBegin) && store(bc->logEndVersion().get(), logEnd));
+
+		// Update scan range if expiredEnd is present
+		if(expiredEnd.present()) {
+			if(expireEndVersion <= expiredEnd.get()) {
+				// If the expire request is to the version already expired to then there is no work to do so return true
+				return Void();
+			}
+			scanBegin = expiredEnd.get();
+		}
+
+		// Get log files that contain any data at or before expireEndVersion
+		state std::vector<LogFile> logs = wait(bc->listLogFiles(scanBegin, expireEndVersion));
+		// Get range files up to and including expireEndVersion
+		state std::vector<RangeFile> ranges = wait(bc->listRangeFiles(scanBegin, expireEndVersion));
+
+		// The new logBeginVersion will be taken from the last log file, if there is one
+		state Optional<Version> newLogBeginVersion;
+		if(!logs.empty()) {
+			LogFile &last = logs.back();
+			// If the last log ends at expireEndVersion then that will be the next log begin
+			if(last.endVersion == expireEndVersion) {
+				newLogBeginVersion = expireEndVersion;
+			}
+			else {
+				// If the last log overlaps the expiredEnd then use the log's begin version
+				if(last.endVersion > expireEndVersion) {
+					newLogBeginVersion = last.beginVersion;
+					logs.pop_back();
+				}
+			}
+		}
+
+		// If we have a new log begin version then potentially update the property but definitely set
+		// expireEndVersion to the new log begin because we will only be deleting files up to but not
+		// including that version.
+		if(newLogBeginVersion.present()) {
+			expireEndVersion = newLogBeginVersion.get();
+			// If the new version is greater than the existing one or the
+			// existing one is not present then write the new value
+			if(logBegin.orDefault(0) < newLogBeginVersion.get()) {
+				Void _ = wait(bc->logBeginVersion().set(newLogBeginVersion.get()));
+			}
+		}
+		else {
+			// Otherwise, if the old logBeginVersion is present and older than expireEndVersion then clear it because
+			// it refers to a version in a range we're about to delete and apparently continuity through
+			// expireEndVersion is broken.
+			if(logBegin.present() && logBegin.get() < expireEndVersion)
+				Void _ = wait(bc->logBeginVersion().clear());
+		}
+
+		// Delete files
 		state std::vector<Future<Void>> deletes;
 
-		std::vector<LogFile> logs = wait(bc->listLogFiles(0, endVersion));
-		for(auto const &f : logs)
+		for(auto const &f : logs) {
 			deletes.push_back(bc->deleteFile(f.fileName));
+		}
 
-		std::vector<RangeFile> ranges = wait(bc->listRangeFiles(0, endVersion));
-		for(auto const &f : ranges)
-			deletes.push_back(bc->deleteFile(f.fileName));
+		for(auto const &f : ranges) {
+			// Must recheck version because list returns data up to and including the given endVersion
+			if(f.version < expireEndVersion)
+				deletes.push_back(bc->deleteFile(f.fileName));
+		}
 
-		std::vector<KeyspaceSnapshotFile> snapshots = wait(bc->listKeyspaceSnapshots(0, endVersion));
-		for(auto const &f : snapshots)
-			deletes.push_back(bc->deleteFile(f.fileName));
+		for(auto const &f : desc.snapshots) {
+			if(f.endVersion < expireEndVersion)
+				deletes.push_back(bc->deleteFile(f.fileName));
+		}
 
 		Void _ = wait(waitForAll(deletes));
+
+		// Update the expiredEndVersion property.
+		Void _ = wait(bc->expiredEndVersion().set(expireEndVersion));
+
 		return Void();
 	}
 
 	// Delete all data up to (but not including endVersion)
-	Future<Void> expireData(Version endVersion) {
-		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), endVersion);
+	Future<Void> expireData(Version expireEndVersion, bool force, Version restorableBeginVersion) {
+		return expireData_impl(Reference<BackupContainerFileSystem>::addRef(this), expireEndVersion, force, restorableBeginVersion);
 	}
 
 	ACTOR static Future<Optional<RestorableFileSet>> getRestoreSet_impl(Reference<BackupContainerFileSystem> bc, Version targetVersion) {
@@ -465,6 +741,74 @@ public:
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion){
 		return getRestoreSet_impl(Reference<BackupContainerFileSystem>::addRef(this), targetVersion);
 	}
+
+private:
+	struct VersionProperty {
+		VersionProperty(Reference<BackupContainerFileSystem> bc, std::string name) : bc(bc), path("properties/" + name) {}
+		Reference<BackupContainerFileSystem> bc;
+		std::string path;
+		Future<Optional<Version>> get() {
+			return readVersionProperty(bc, path);
+		}
+		Future<Void> set(Version v) {
+			return writeVersionProperty(bc, path, v);
+		}
+		Future<Void> clear() {
+			return bc->deleteFile(path);
+		}
+	};
+
+public:
+	// To avoid the need to scan the underyling filesystem in many cases, some important version boundaries are stored in named files.
+	// These files can be deleted from the filesystem if they appear to be wrong or corrupt, and full scans will done
+	// when needed.
+	//
+	// The three versions below, when present, describe 4 version ranges which collectively cover the entire version timeline.
+	//                   0 -   expiredEndVersion:  All files in this range have been deleted
+	//   expiredEndVersion - presentBeginVersion:  Files in this range *may* have been deleted so their presence must not be assumed.
+	// presentBeginVersion -   presentEndVersion:  Files in this range have NOT been deleted by any FDB backup operations.
+	//   presentEndVersion -            infinity:  Files in this range may or may not exist yet.  Scan to find what is there.
+	//
+	VersionProperty logBeginVersion() { return {Reference<BackupContainerFileSystem>::addRef(this), "log_begin_version"}; }
+	VersionProperty logEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "log_end_version"}; }
+	VersionProperty expiredEndVersion() {   return {Reference<BackupContainerFileSystem>::addRef(this), "expired_end_version"}; }
+
+	ACTOR static Future<Void> writeVersionProperty(Reference<BackupContainerFileSystem> bc, std::string path, Version v) {
+		try {
+			state Reference<IBackupFile> f = wait(bc->writeFile(path));
+			std::string s = format("%lld", v);
+			Void _ = wait(f->append(s.data(), s.size()));
+			Void _ = wait(f->finish());
+			return Void();
+		} catch(Error &e) {
+			if(e.code() != error_code_actor_cancelled)
+				TraceEvent(SevWarn, "BackupContainerWritePropertyFailed").detail("Path", path).error(e);
+			throw;
+		}
+	}
+
+	ACTOR static Future<Optional<Version>> readVersionProperty(Reference<BackupContainerFileSystem> bc, std::string path) {
+		try {
+			state Reference<IAsyncFile> f = wait(bc->readFile(path));
+			state int64_t size = wait(f->size());
+			state std::string s;
+			s.resize(size);
+			int rs = wait(f->read((uint8_t *)s.data(), size, 0));
+			Version v;
+			int len;
+			if(rs == size && sscanf(s.c_str(), "%lld%n", &v, &len) == 1 && len == size)
+				return v;
+
+			TraceEvent(SevWarn, "BackupContainerInvalidProperty");
+			throw backup_invalid_info();
+		} catch(Error &e) {
+			if(e.code() == error_code_file_not_found)
+				return Optional<Version>();
+			if(e.code() != error_code_actor_cancelled)
+				TraceEvent(SevWarn, "BackupContainerReadPropertyFailed").detail("Path", path).error(e);
+			throw;
+		}
+	}
 };
 
 class BackupContainerLocalDirectory : public BackupContainerFileSystem, ReferenceCounted<BackupContainerLocalDirectory> {
@@ -474,7 +818,7 @@ public:
 
 	static std::string getURLFormat() { return "file://</path/to/base/dir/>"; }
 
-    BackupContainerLocalDirectory(std::string url) {
+	BackupContainerLocalDirectory(std::string url) {
 		std::string path;
 		if(url.find("file://") != 0) {
 			TraceEvent(SevWarn, "BackupContainerLocalDirectory").detail("Description", "Invalid URL for BackupContainerLocalDirectory").detail("URL", url);
@@ -597,13 +941,13 @@ public:
 		return Void();
 	}
 
-	Future<FilesAndSizesT> listFiles(std::string path) {
+	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const &)>) {
 		FilesAndSizesT results;
 
 		std::vector<std::string> files;
 		platform::findFilesRecursively(joinPath(m_path, path), files);
 
-		// Remove .lnk files from resultst, they are a side effect of a backup that was *read* during simulation.  See openFile() above for more info on why they are created.
+		// Remove .lnk files from results, they are a side effect of a backup that was *read* during simulation.  See openFile() above for more info on why they are created.
 		if(g_network->isSimulated())
 			files.erase(std::remove_if(files.begin(), files.end(), [](std::string const &f) { return StringRef(f).endsWith(LiteralStringRef(".lnk")); }), files.end());
 
@@ -618,11 +962,19 @@ public:
 	}
 
 	Future<Void> deleteContainer(int *pNumDeleted) {
-		// Destroying a directory seems pretty unsafe, as a badly formed file:// URL could point to a thing
-		// that should't be deleted.  Also, platform::eraseDirectoryRecursive() intentionally doesn't work outside
-		// of the pre-simulation phase.
-		// By just expiring ALL data, only parsable backup files in the correct locations will be deleted.
-		return expireData(std::numeric_limits<Version>::max());
+		// In order to avoid deleting some random directory due to user error, first describe the backup
+		// and make sure it has something in it.
+		return map(describeBackup(), [=](BackupDescription const &desc) {
+			// If the backup has no snapshots and no logs then it's probably not a valid backup
+			if(desc.snapshots.size() == 0 && !desc.minLogBegin.present())
+				throw backup_invalid_url();
+
+			int count = platform::eraseDirectoryRecursive(m_path);
+			if(pNumDeleted != nullptr)
+				*pNumDeleted = count;
+
+			return Void();
+		});
 	}
 
 private:
@@ -698,31 +1050,27 @@ public:
 		return m_bstore->deleteObject(BACKUP_BUCKET, m_name + "/" + path);
 	}
 
-	ACTOR static Future<FilesAndSizesT> listFiles_impl(Reference<BackupContainerBlobStore> bc, std::string path) {
-		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BACKUP_BUCKET, bc->m_name + "/" + path, '/', std::numeric_limits<int>::max()));
+	ACTOR static Future<FilesAndSizesT> listFiles_impl(Reference<BackupContainerBlobStore> bc, std::string path, std::function<bool(std::string const &)> pathFilter) {
+		// pathFilter expects container based paths, so create a wrapper which converts a raw path
+		// to a container path by removing the known backup name prefix.
+		int prefixTrim = bc->m_name.size() + 1;
+		std::function<bool(std::string const &)> rawPathFilter = [=](const std::string &folderPath) {
+			return pathFilter(folderPath.substr(prefixTrim));
+		};
+
+		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BACKUP_BUCKET, bc->m_name + "/" + path, '/', std::numeric_limits<int>::max(), rawPathFilter));
 		FilesAndSizesT files;
 		for(auto &o : result.objects)
 			files.push_back({o.name.substr(bc->m_name.size() + 1), o.size});
 		return files;
 	}
 
-	Future<FilesAndSizesT> listFiles(std::string path) {
-		return listFiles_impl(Reference<BackupContainerBlobStore>::addRef(this), path);
+	Future<FilesAndSizesT> listFiles(std::string path, std::function<bool(std::string const &)> pathFilter) {
+		return listFiles_impl(Reference<BackupContainerBlobStore>::addRef(this), path, pathFilter);
 	}
 
 	ACTOR static Future<Void> create_impl(Reference<BackupContainerBlobStore> bc) {
 		Void _ = wait(bc->m_bstore->createBucket(BACKUP_BUCKET));
-
-		/*
-		Optional<BackupInfo> info = wait(bc->readInfo());
-
-		if(info.present())
-			throw backup_duplicate();
-
-		BackupInfo newInfo;
-
-		Void _ = wait(bc->writeInfo(newInfo));
-		*/
 
 		return Void();
 	}
@@ -731,7 +1079,6 @@ public:
 		return create_impl(Reference<BackupContainerBlobStore>::addRef(this));
 	}
 
-	// TODO:  If there is a need, this can be made faster by discovering common prefixes and listing levels of the folder structure in parallel.
 	ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
 		state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
 		state Future<Void> done = bc->m_bstore->listBucketStream(BACKUP_BUCKET, resultStream, bc->m_name + "/", '/', std::numeric_limits<int>::max());
@@ -893,8 +1240,15 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	printf("BackupContainerTest URL %s\n", url.c_str());
 
 	state Reference<IBackupContainer> c = IBackupContainer::openContainer(url);
+
 	// Make sure container doesn't exist, then create it.
-	Void _ = wait(c->deleteContainer());
+	try {
+		Void _ = wait(c->deleteContainer());
+	} catch(Error &e) {
+		if(e.code() != error_code_backup_invalid_url)
+			throw;
+	}
+
 	Void _ = wait(c->create());
 
 	state int64_t versionMultiplier = g_random->randomInt64(0, std::numeric_limits<Version>::max() / 500);
@@ -918,13 +1272,14 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size()));
 
-	FullBackupListing listing = wait(c->listBackup());
+	printf("Checking full file listing\n");
+	FullBackupListing listing = wait(c->dumpFileList());
 	ASSERT(listing.logs.size() == 2);
 	ASSERT(listing.ranges.size() == 3);
 	ASSERT(listing.snapshots.size() == 2);
 
 	state BackupDescription desc = wait(c->describeBackup());
-	printf("Backup Description\n%s", desc.toString().c_str());
+	printf("Backup Description 1\n%s", desc.toString().c_str());
 
 	ASSERT(desc.maxRestorableVersion.present());
 	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(desc.maxRestorableVersion.get()));
@@ -940,35 +1295,41 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	ASSERT(rest.get().logs.size() == 1);
 	ASSERT(rest.get().ranges.size() == 2);
 
+	printf("Expire 1\n");
 	Void _ = wait(c->expireData(100 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
+	printf("Backup Description 2\n%s", d.toString().c_str());
 	ASSERT(d.minLogBegin == 100 * versionMultiplier);
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
+	printf("Expire 2\n");
 	Void _ = wait(c->expireData(101 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin == 150 * versionMultiplier);
+	printf("Backup Description 3\n%s", d.toString().c_str());
+	ASSERT(d.minLogBegin == 100 * versionMultiplier);
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
-	Void _ = wait(c->expireData(155 * versionMultiplier));
+	printf("Expire 3\n");
+	Void _ = wait(c->expireData(300 * versionMultiplier));
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
-	ASSERT(!d.minLogBegin.present());
+	printf("Backup Description 4\n%s", d.toString().c_str());
+	ASSERT(d.minLogBegin.present());
 	ASSERT(d.snapshots.size() == desc.snapshots.size());
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
-	Void _ = wait(c->expireData(161 * versionMultiplier));
+	printf("Expire 4\n");
+	Void _ = wait(c->expireData(301 * versionMultiplier, true));
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
+	printf("Backup Description 4\n%s", d.toString().c_str());
 	ASSERT(d.snapshots.size() == 1);
+	ASSERT(!d.minLogBegin.present());
 
 	Void _ = wait(c->deleteContainer());
 
 	BackupDescription d = wait(c->describeBackup());
-	printf("Backup Description\n%s", d.toString().c_str());
+	printf("Backup Description 5\n%s", d.toString().c_str());
 	ASSERT(d.snapshots.size() == 0);
+	ASSERT(!d.minLogBegin.present());
 
 	printf("BackupContainerTest URL=%s PASSED.\n", url.c_str());
 
