@@ -145,7 +145,21 @@ UID decodeServerTagKey( KeyRef const& key ) {
 Tag decodeServerTagValue( ValueRef const& value ) {
 	Tag s;
 	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
+	if( reader.protocolVersion() < 0x0FDB00A560010001LL ) {
+		int16_t id;
+		reader >> id;
+		if(id == invalidTagOld) {
+			s = invalidTag;
+		} else if(id == txsTagOld) {
+			s = txsTag;
+		} else {
+			ASSERT(id >= 0);
+			s.id = id;
+			s.locality = tagLocalityUpgraded;
+		}
+	} else {
+		reader >> s;
+	}
 	return s;
 }
 

@@ -33,7 +33,7 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 
-enum { tagLocalitySpecial = -100, tagLocalityLogRouter = -1, tagLocalityRemoteLog = -2};
+enum { tagLocalitySpecial = -100, tagLocalityLogRouter = -1, tagLocalityRemoteLog = -2, tagLocalityUpgraded = -3};
 
 #pragma pack(push, 1)
 struct Tag {
@@ -63,6 +63,8 @@ template <class Ar> void save( Ar& ar, Tag const& tag ) { const_cast<Tag&>(tag).
 
 static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
+
+enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct KeyRangeRef;
 struct KeyValueRef;
