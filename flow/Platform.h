@@ -270,6 +270,8 @@ double timer();  // Returns the system real time clock with high precision.  May
 double timer_monotonic();  // Returns a high precision monotonic clock which is adjusted to be kind of similar to timer() at startup, but might not be a globally accurate time.
 uint64_t timer_int(); // Return timer as uint64_t
 
+void getLocalTime(const time_t *timep, struct tm *result);
+
 void setMemoryQuota(size_t limit);
 
 void *allocate(size_t length, bool allowLargePages);

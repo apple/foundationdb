@@ -76,24 +76,27 @@
 
 #endif
 
-
-
 extern bool onlyBeforeSimulatorInit();
 
 namespace platform {
 
-void eraseDirectoryRecursive( std::string const& dir ) {
-	// Fault injection is disabled for this function because it is ONLY used by the simulator
-	// and only before the actual simulation!
-	ASSERT( onlyBeforeSimulatorInit() );
-	INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
+// Because the lambda used with nftw below cannot capture
+int __eraseDirectoryRecurseiveCount;
+
+int eraseDirectoryRecursive(std::string const& dir) {
+	__eraseDirectoryRecurseiveCount = 0;
 #ifdef _WIN32
 	system( ("rd /s /q \"" + dir + "\"").c_str() );
 #elif defined(__linux__) || defined(__APPLE__)
 	int error =
 		nftw(dir.c_str(),
-			[](const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) -> int { return remove(fpath); }
-			, 64, FTW_DEPTH | FTW_PHYS);
+			[](const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) -> int {
+				int r = remove(fpath);
+				if(r == 0)
+					++__eraseDirectoryRecurseiveCount;
+				return r;
+			},
+			64, FTW_DEPTH | FTW_PHYS);
 	/* Looks like calling code expects this to continue silently if
 	   the directory we're deleting doesn't exist in the first
 	   place */
@@ -105,6 +108,7 @@ void eraseDirectoryRecursive( std::string const& dir ) {
 #error Port me!
 #endif
 	//INJECT_FAULT( platform_error, "eraseDirectoryRecursive" );
+	return __eraseDirectoryRecurseiveCount;
 }
 
 std::string getDefaultConfigPath() {

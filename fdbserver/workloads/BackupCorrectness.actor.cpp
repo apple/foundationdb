@@ -36,6 +36,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	static int backupAgentRequests;
 	bool locked;
+	bool allowPauses;
 
 	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx) {
@@ -51,6 +52,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		stopDifferentialAfter = getOption(options, LiteralStringRef("stopDifferentialAfter"),
 			differentialBackup ? g_random->random01() * (restoreAfter - std::max(abortAndRestartAfter,backupAfter)) + std::max(abortAndRestartAfter,backupAfter) : 0.0);
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
+		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
 
 		KeyRef beginRange;
 		KeyRef endRange;
@@ -175,7 +177,9 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 
 					state bool restorable = false;
 					if(lastBackupContainer) {
-						BackupDescription desc = wait(lastBackupContainer->describeBackup());
+						state BackupDescription desc = wait(lastBackupContainer->describeBackup());
+						Void _ = wait(desc.resolveVersionTimes(cx));
+						printf("BackupDescription:\n%s\n", desc.toString().c_str());
 						restorable = desc.maxRestorableVersion.present();
 					}
 
@@ -287,7 +291,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			.detail("abortAndRestartAfter", self->abortAndRestartAfter).detail("differentialAfter", self->stopDifferentialAfter);
 
 		state UID	randomID = g_nondeterministic_random->randomUniqueID();
-		if(BUGGIFY) {
+		if(self->allowPauses && BUGGIFY) {
 			state Future<Void> cp = changePaused(cx, &backupAgent);
 		}
 

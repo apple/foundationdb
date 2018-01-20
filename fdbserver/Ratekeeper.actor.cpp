@@ -163,6 +163,9 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 					myQueueInfo->value.smoothTotalSpace.setTotal( reply.get().storageBytes.total );
 				}
 			} else {
+				if(myQueueInfo->value.valid) {
+					TraceEvent("RkStorageServerDidNotRespond", ssi.id());
+				}
 				myQueueInfo->value.valid = false;
 			}
 
@@ -201,6 +204,9 @@ ACTOR Future<Void> trackTLogQueueInfo( Ratekeeper* self, TLogInterface tli ) {
 					myQueueInfo->value.smoothTotalSpace.setTotal(reply.get().storageBytes.total);
 				}
 			} else {
+				if(myQueueInfo->value.valid) {
+					TraceEvent("RkTLogDidNotRespond", tli.id());
+				}
 				myQueueInfo->value.valid = false;
 			}
 
@@ -489,6 +495,7 @@ void updateRate( Ratekeeper* self ) {
 			.detail("Reason", limitReason)
 			.detail("ReasonServerID", reasonID)
 			.detail("ReleasedTPS", self->smoothReleasedTransactions.smoothRate())
+			.detail("TPSBasis", actualTPS)
 			.detail("StorageServers", sscount)
 			.detail("Proxies", self->proxy_transactionCountAndTime.size())
 			.detail("TLogs", tlcount)

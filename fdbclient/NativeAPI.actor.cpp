@@ -2885,6 +2885,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 	StorageMetrics permittedError,
 	int shardLimit )
 {
+	state int tooManyShardsCount = 0;
 	loop {
 		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = getCachedKeyRangeLocations( cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics);
 		if (!locations.size()) {
@@ -2893,7 +2894,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 		}
 		
 		if( locations.size() == shardLimit ) {
-			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "WaitStorageMetricsPenalty")
+			TraceEvent(!g_network->isSimulated() && ++tooManyShardsCount >= 15 ? SevWarnAlways : SevWarn, "WaitStorageMetricsPenalty")
 				.detail("Keys", printable(keys))
 				.detail("Locations", locations.size())
 				.detail("Limit", CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT)
@@ -2902,6 +2903,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
 			cx->invalidateCache( keys );
 		} else {
+			tooManyShardsCount = 0;
 			//SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better solution to this.
 			try {
 				if (locations.size() > 1) {

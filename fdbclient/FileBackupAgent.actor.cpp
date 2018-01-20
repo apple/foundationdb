@@ -415,9 +415,9 @@ namespace fileBackup {
 
 			// If this is NOT the first block then write duplicate stuff needed from last block
 			if(self->blockEnd > self->blockSize) {
-				Void _ = wait(self->file->appendString(self->lastKey));
-				Void _ = wait(self->file->appendString(self->lastKey));
-				Void _ = wait(self->file->appendString(self->lastValue));
+				Void _ = wait(self->file->appendStringRefWithLen(self->lastKey));
+				Void _ = wait(self->file->appendStringRefWithLen(self->lastKey));
+				Void _ = wait(self->file->appendStringRefWithLen(self->lastValue));
 			}
 
 			// There must now be room in the current block for bytesNeeded or the block size is too small
@@ -438,8 +438,8 @@ namespace fileBackup {
 		ACTOR static Future<Void> writeKV_impl(RangeFileWriter *self, Key k, Value v) {
 			int toWrite = sizeof(int32_t) + k.size() + sizeof(int32_t) + v.size();
 			Void _ = wait(self->newBlockIfNeeded(toWrite));
-			Void _ = wait(self->file->appendString(k));
-			Void _ = wait(self->file->appendString(v));
+			Void _ = wait(self->file->appendStringRefWithLen(k));
+			Void _ = wait(self->file->appendStringRefWithLen(v));
 			self->lastKey = k;
 			self->lastValue = v;
 			return Void();
@@ -451,7 +451,7 @@ namespace fileBackup {
 		ACTOR static Future<Void> writeKey_impl(RangeFileWriter *self, Key k) {
 			int toWrite = sizeof(uint32_t) + k.size();
 			Void _ = wait(self->newBlockIfNeeded(toWrite));
-			Void _ = wait(self->file->appendString(k));
+			Void _ = wait(self->file->appendStringRefWithLen(k));
 			return Void();
 		}
 
@@ -589,8 +589,8 @@ namespace fileBackup {
 				Void _ = wait(self->file->append((uint8_t *)&self->fileVersion, sizeof(self->fileVersion)));
 			}
 
-			Void _ = wait(self->file->appendString(k));
-			Void _ = wait(self->file->appendString(v));
+			Void _ = wait(self->file->appendStringRefWithLen(k));
+			Void _ = wait(self->file->appendStringRefWithLen(v));
 
 			// At this point we should be in whatever the current block is or the block size is too small
 			if(self->file->size() > self->blockEnd)
@@ -681,8 +681,8 @@ namespace fileBackup {
 		state Subspace tagNames = backupAgent->subspace.get(BackupAgentBase::keyTagName);
 		Optional<Value> uidStr = wait(tr->get(tagNames.pack(Key(tagName))));
 		if (!uidStr.present()) {
-			TraceEvent(SevError, "BackupTagMissing").detail("tagName", tagName.c_str());
-			throw backup_error();
+			TraceEvent(SevWarn, "FileBackupAbortIncompatibleBackup_TagNotFound").detail("tagName", tagName.c_str());
+			return Void();
 		}
 		state UID uid = BinaryReader::fromStringRef<UID>(uidStr.get(), Unversioned());
 
@@ -693,26 +693,27 @@ namespace fileBackup {
 		Optional<Value> statusStr = wait(tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus)));
 		state EBackupState status = !statusStr.present() ? FileBackupAgent::STATE_NEVERRAN : BackupAgentBase::getState(statusStr.get().toString());
 
-		if (!backupAgent->isRunnable(status)) {
-			throw backup_unneeded();
-		}
-
-		TraceEvent(SevInfo, "FileBackupAbortOld")
+		TraceEvent(SevInfo, "FileBackupAbortIncompatibleBackup")
 				.detail("tagName", tagName.c_str())
 				.detail("status", BackupAgentBase::getStateText(status));
 
-		// Clear the folder id will prevent future tasks from executing
+		// Clear the folder id to prevent future tasks from executing at all
 		tr->clear(singleKeyRange(StringRef(globalConfig.pack(FileBackupAgent::keyFolderId))));
 
+		// Clear the mutations logging config and data
 		Key configPath = uidPrefixKey(logRangesRange.begin, uid);
 		Key logsPath = uidPrefixKey(backupLogKeys.begin, uid);
-
 		tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 		tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+
+		// Clear the new-style config space
 		tr->clear(newConfigSpace.range());
 
 		Key statusKey = StringRef(statusSpace.pack(FileBackupAgent::keyStateStatus));
-		tr->set(statusKey, StringRef(FileBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
+
+		// Set old style state key to Aborted if it was Runnable
+		if(backupAgent->isRunnable(status))
+			tr->set(statusKey, StringRef(FileBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
 
 		return Void();
 	}
@@ -1249,23 +1250,40 @@ namespace fileBackup {
 				}
 			}
 
+			// The next few sections involve combining the results above.  Yields are used after operations
+			// that could have operated on many thousands of things and in loops which could have many
+			// thousands of iterations.
+			// Declare some common iterators which must be state vars and will be used multiple times.
+			state int i;
+			state RangeMap<Key, int, KeyRangeRef>::Iterator iShard;
+			state RangeMap<Key, int, KeyRangeRef>::Iterator iShardEnd;
+
 			// Set anything inside a dispatched range to DONE.
 			// Also ensure that the boundary value are true, false, [true, false]...
 			if(dispatchBoundaries.size() > 0) {
-				bool lastValue = false;
-				Key lastKey;
-				for(auto &boundary : dispatchBoundaries) {
+				state bool lastValue = false;
+				state Key lastKey;
+				for(i = 0; i < dispatchBoundaries.size(); ++i) {
+					const std::pair<Key, bool> &boundary = dispatchBoundaries[i];
+
 					// Values must alternate
 					ASSERT(boundary.second == !lastValue);
+
 					// If this was the end of a dispatched range
 					if(!boundary.second) {
-						// Ensure that the dispatched boundaries exist AND set all ranges in the dispatched boundary to DONE.
-						for(auto &range : shardMap.modify(KeyRangeRef(lastKey, boundary.first))) {
-							range.value() = DONE;
+						// Ensure that the dispatched boundaries exist AND set all shard ranges in the dispatched range to DONE.
+						RangeMap<Key, int, KeyRangeRef>::Ranges shardRanges = shardMap.modify(KeyRangeRef(lastKey, boundary.first));
+						iShard = shardRanges.begin();
+						iShardEnd = shardRanges.end();
+						for(; iShard != iShardEnd; ++iShard) {
+							iShard->value() = DONE;
+							Void _ = wait(yield());
 						}
 					}
-					lastValue = boundary.second;
-					lastKey = boundary.first;
+					lastValue = dispatchBoundaries[i].second;
+					lastKey = dispatchBoundaries[i].first;
+
+					Void _ = wait(yield());
 				}
 				ASSERT(lastValue == false);
 			}
@@ -1274,25 +1292,37 @@ namespace fileBackup {
 			// because it's OK to delete shard boundaries in the skipped ranges.
 			if(backupRanges.size() > 0) {
 				shardMap.insert(KeyRangeRef(normalKeys.begin, backupRanges.front().begin), SKIP);
-				for(int i = 0; i < backupRanges.size() - 1; ++i) {
+				Void _ = wait(yield());
+
+				for(i = 0; i < backupRanges.size() - 1; ++i) {
 					shardMap.insert(KeyRangeRef(backupRanges[i].end, backupRanges[i + 1].begin), SKIP);
+					Void _ = wait(yield());
 				}
+
 				shardMap.insert(KeyRangeRef(backupRanges.back().end, normalKeys.end), SKIP);
+				Void _ = wait(yield());
 			}
 
 			state int countShardsDone = 0;
 			state int countShardsNotDone = 0;
 
 			// Scan through the shard map, counting the DONE and NOT_DONE shards.
-			for(auto &range : shardMap.ranges()) {
-				if(range.value() == DONE) {
+			RangeMap<Key, int, KeyRangeRef>::Ranges shardRanges = shardMap.ranges();
+			iShard = shardRanges.begin();
+			iShardEnd = shardRanges.end();
+			for(; iShard != iShardEnd; ++iShard) {
+				if(iShard->value() == DONE) {
 					++countShardsDone;
 				}
-				else if(range.value() >= NOT_DONE_MIN)
+				else if(iShard->value() >= NOT_DONE_MIN)
 					++countShardsNotDone;
+
+				Void _ = wait(yield());
 			}
 
+			// Coalesce the shard map to make random selection below more efficient.
 			shardMap.coalesce(normalKeys);
+			Void _ = wait(yield());
 
 			// In this context "all" refers to all of the shards relevant for this particular backup
 			state int countAllShards = countShardsDone + countShardsNotDone;
@@ -1311,9 +1341,26 @@ namespace fileBackup {
 				return Void();
 			}
 
-			// Calculate number of shards that should be done before the next interval end
-			state Version nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (g_network->isSimulated() ? (snapshotIntervalSeconds / 5.0) : CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC);
+			// Decide when the next snapshot dispatch should run.
+			state Version nextDispatchVersion;
+
+			// In simulation, use snapshot interval / 5 to ensure multiple dispatches run
+			// Otherwise, use the knob for the number of seconds between snapshot dispatch tasks.
+			if(g_network->isSimulated())
+				nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * (snapshotIntervalSeconds / 5.0);
+			else
+				nextDispatchVersion = recentReadVersion + CLIENT_KNOBS->CORE_VERSIONSPERSECOND * CLIENT_KNOBS->BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC;
+
+			// If nextDispatchVersion is greater than snapshotTargetEndVersion (which could be in the past) then just use
+			// the greater of recentReadVersion or snapshotTargetEndVersion.  Any range tasks created in this dispatch will
+			// be scheduled at a random time between recentReadVersion and nextDispatchVersion,
+			// so nextDispatchVersion shouldn't be less than recentReadVersion.
+			if(nextDispatchVersion > snapshotTargetEndVersion)
+				nextDispatchVersion = std::max(recentReadVersion, snapshotTargetEndVersion);
+
 			Params.nextDispatchVersion().set(task, nextDispatchVersion);
+
+			// Calculate number of shards that should be done before the next interval end
 			// timeElapsed is between 0 and 1 and represents what portion of the shards we should have completed by now
 			double timeElapsed;
 			if(snapshotTargetEndVersion > snapshotBeginVersion)
@@ -1344,7 +1391,7 @@ namespace fileBackup {
 				state std::vector<KeyRange> rangesToAdd;
 
 				// Limit number of tasks added per transaction
-				int taskBatchSize = BUGGIFY ? g_random->randomInt(1, countShardsToDispatch + 1) : CLIENT_KNOBS->RESTORE_DISPATCH_ADDTASK_SIZE;
+				int taskBatchSize = BUGGIFY ? g_random->randomInt(1, countShardsToDispatch + 1) : CLIENT_KNOBS->BACKUP_DISPATCH_ADDTASK_SIZE;
 				int added = 0;
 
 				while(countShardsToDispatch > 0 && added < taskBatchSize && shardMap.size() > 0) {
@@ -1402,7 +1449,7 @@ namespace fileBackup {
 
 						state std::vector<Future<Void>> addTaskFutures;
 
-						for(int i = 0; i < beginReads.size(); ++i) {
+						for(i = 0; i < beginReads.size(); ++i) {
 							KeyRange &range = rangesToAdd[i];
 
 							// This loop might have made changes to begin or end boundaries in a prior
@@ -2747,9 +2794,6 @@ namespace fileBackup {
 				return Void();
 			}
 
-			// If adding to existing batch then task is joined with a batch future so set done future.
-			Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
-
 			// Increment the number of blocks dispatched in the restore config
 			restore.filesBlocksDispatched().atomicOp(tr, blocksDispatched, MutationRef::Type::AddValue);
 
@@ -2766,7 +2810,12 @@ namespace fileBackup {
 			else // Otherwise, add a follow-on task to continue after all previously dispatched blocks are done
 				addTaskFutures.push_back(RestoreDispatchTaskFunc::addTask(tr, taskBucket, task, endVersion, beginFile, beginBlock, batchSize, 0, TaskCompletionKey::noSignal(), allPartsDone));
 
-			Void _ = wait(setDone && waitForAll(addTaskFutures) && taskBucket->finish(tr, task));
+			Void _ = wait(waitForAll(addTaskFutures));
+
+			// If adding to existing batch then task is joined with a batch future so set done future.
+			Future<Void> setDone = addingToExistingBatch ? onDone->set(tr, taskBucket) : Void();
+
+			Void _ = wait(setDone && taskBucket->finish(tr, task));
 
 			TraceEvent("FileRestoreDispatch")
 				.detail("RestoreUID", restore.getUid())
@@ -3330,9 +3379,30 @@ public:
 			throw backup_unneeded();
 		}
 
+		// If the backup is already restorable then 'mostly' abort it - cancel all tasks via the tag 
+		// and clear the mutation logging config and data - but set its state as COMPLETED instead of ABORTED.
+		state Optional<Version> latestRestorableVersion = wait(config.getLatestRestorableVersion(tr));
+
 		TraceEvent(SevInfo, "FBA_discontinueBackup")
+				.detail("AlreadyRestorable", latestRestorableVersion.present() ? "Yes" : "No")
 				.detail("tagName", tag.tagName.c_str())
 				.detail("status", BackupAgentBase::getStateText(status));
+
+		if(latestRestorableVersion.present()) {
+			// Cancel all backup tasks through tag
+			Void _ = wait(tag.cancel(tr));
+
+			Key configPath = uidPrefixKey(logRangesRange.begin, config.getUid());
+			Key logsPath = uidPrefixKey(backupLogKeys.begin, config.getUid());
+
+			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
+			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
+			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+
+			config.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
+
+			return Void();
+		}
 
 		state bool stopWhenDone = wait(config.stopWhenDone().getOrThrow(tr));
 
@@ -3488,7 +3558,9 @@ public:
 
 	ACTOR static Future<Version> restore(FileBackupAgent* backupAgent, Database cx, Key tagName, Key url, bool waitForComplete, Version targetVersion, bool verbose, KeyRange range, Key addPrefix, Key removePrefix, bool lockDB, UID randomUid) {
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(url.toString());
-		BackupDescription desc = wait(bc->describeBackup());
+		state BackupDescription desc = wait(bc->describeBackup());
+		Void _ = wait(desc.resolveVersionTimes(cx));
+
 		printf("Backup Description\n%s", desc.toString().c_str());
 		if(targetVersion == invalidVersion && desc.maxRestorableVersion.present())
 			targetVersion = desc.maxRestorableVersion.get();
@@ -3595,6 +3667,7 @@ public:
 			try {
 				Void _ = wait( discontinueBackup(backupAgent, ryw_tr, tagName) );
 				Void _ = wait( ryw_tr->commit() );
+				TraceEvent("AS_discontinuedBackup");
 				break;
 			} catch( Error &e ) {
 				if(e.code() == error_code_backup_unneeded || e.code() == error_code_backup_duplicate){
@@ -3605,6 +3678,7 @@ public:
 		}
 
 		int _ = wait( waitBackup(backupAgent, cx, tagName.toString(), true) );
+		TraceEvent("AS_backupStopped");
 
 		ryw_tr->reset();
 		loop {
@@ -3614,6 +3688,7 @@ public:
 				ryw_tr->addReadConflictRange(range);
 				ryw_tr->clear(range);
 				Void _ = wait( ryw_tr->commit() );
+				TraceEvent("AS_clearedRange");
 				break;
 			} catch( Error &e ) {
 				Void _ = wait( ryw_tr->onError(e) );
@@ -3622,6 +3697,7 @@ public:
 
 		Reference<IBackupContainer> bc = wait(backupConfig.backupContainer().getOrThrow(cx));
 
+		TraceEvent("AS_startRestore");
 		Version ver = wait( restore(backupAgent, cx, tagName, KeyRef(bc->getURL()), true, -1, true, range, addPrefix, removePrefix, true, randomUid) );
 		return ver;
 	}
@@ -3685,10 +3761,3 @@ Future<int> FileBackupAgent::waitBackup(Database cx, std::string tagName, bool s
 	return FileBackupAgentImpl::waitBackup(this, cx, tagName, stopWhenDone);
 }
 
-Future<std::string> FileBackupAgent::getBackupInfo(std::string container, Version* defaultVersion) {
-	return map(IBackupContainer::openContainer(container)->describeBackup(), [=] (BackupDescription const &d) {
-		if(defaultVersion != nullptr && d.maxRestorableVersion.present())
-			*defaultVersion = d.maxRestorableVersion.get();
-		return d.toString();
-	});
-}

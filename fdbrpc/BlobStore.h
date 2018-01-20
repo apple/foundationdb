@@ -21,6 +21,7 @@
 #pragma once
 
 #include <map>
+#include <functional>
 #include "flow/flow.h"
 #include "flow/Net2Packet.h"
 #include "fdbclient/Knobs.h"
@@ -165,10 +166,12 @@ public:
 	};
 
 	// Get bucket contents via a stream, since listing large buckets will take many serial blob requests
-	Future<Void> listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0);
+	// If a delimiter is passed then common prefixes will be read in parallel, recursively, depending on recurseFilter.
+	// Recursefilter is a must be a function that takes a string and returns true if it passes.  The default behavior is to assume true.
+	Future<Void> listBucketStream(std::string const &bucket, PromiseStream<ListResult> results, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
 
-	// Get a list of the files in a bucket
-	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0);
+	// Get a list of the files in a bucket, see listBucketStream for more argument detail.
+	Future<ListResult> listBucket(std::string const &bucket, Optional<std::string> prefix = {}, Optional<char> delimiter = {}, int maxDepth = 0, std::function<bool(std::string const &)> recurseFilter = nullptr);
 
 	// Check if an object exists in a bucket
 	Future<bool> objectExists(std::string const &bucket, std::string const &object);
