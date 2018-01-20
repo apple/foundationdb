@@ -1473,7 +1473,7 @@ ACTOR Future<Void> serverMetricsPolling( TCServerInfo *server) {
 //Returns the KeyValueStoreType of server if it is different from self->storeType
 ACTOR Future<KeyValueStoreType> keyValueStoreTypeTracker(DDTeamCollection *self, TCServerInfo *server) {
 	state KeyValueStoreType type = wait(brokenPromiseToNever(server->lastKnownInterface.getKeyValueStoreType.getReplyWithTaskID<KeyValueStoreType>(TaskDataDistribution)));
-	if(type == self->configuration.storageServerStoreType && ( server->lastKnownInterface.locality.dcId() == self->configuration.primaryDcId || server->lastKnownInterface.locality.dcId() == self->configuration.remoteDcId ) )
+	if(type == self->configuration.storageServerStoreType && ( !self->configuration.primaryDcId.present() || server->lastKnownInterface.locality.dcId() == self->configuration.primaryDcId || server->lastKnownInterface.locality.dcId() == self->configuration.remoteDcId ) )
 		Void _ = wait(Future<Void>(Never()));
 
 	return type;
