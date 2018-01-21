@@ -375,9 +375,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	Optional<Tag> remoteTag;
 
-	int persistentDataFormat;
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Optional<Tag> remoteTag, int persistentDataFormat = 1) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
-			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), persistentDataFormat(persistentDataFormat), logSystem(new AsyncVar<Reference<ILogSystem>>()),
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Optional<Tag> remoteTag) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
+			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), logSystem(new AsyncVar<Reference<ILogSystem>>()),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void()), unrecoveredBefore(0)
 	{
@@ -824,20 +823,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 			messages << int32_t(-1) << currentVersion;
 		}
 
-		if(self->persistentDataFormat == 0) {
-			BinaryReader rd( it->second.getLengthPtr(), it->second.expectedSize()+4, Unversioned() );
-			while(!rd.empty()) {
-				int32_t messageLength;
-				uint32_t subVersion;
-				rd >> messageLength >> subVersion;
-				messageLength += sizeof(uint16_t);
-				messages << messageLength << subVersion << uint16_t(0);
-				messageLength -= (sizeof(subVersion) + sizeof(uint16_t));
-				messages.serializeBytes(rd.readBytes(messageLength), messageLength);
-			}
-		} else {
-			messages << it->second.toStringRef();
-		}
+		messages << it->second.toStringRef();
 	}
 }
 
@@ -945,21 +931,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		for (auto &kv : kvs) {
 			auto ver = decodeTagMessagesKey(kv.key);
 			messages << int32_t(-1) << ver;
-
-			if(logData->persistentDataFormat == 0) {
-				BinaryReader rd( kv.value, Unversioned() );
-				while(!rd.empty()) {
-					int32_t messageLength;
-					uint32_t subVersion;
-					rd >> messageLength >> subVersion;
-					messageLength += sizeof(uint16_t);
-					messages << messageLength << subVersion << uint16_t(0);
-					messageLength -= (sizeof(subVersion) + sizeof(uint16_t));
-					messages.serializeBytes(rd.readBytes(messageLength), messageLength);
-				}
-			} else {
-				messages.serializeBytes(kv.value);
-			}
+			messages.serializeBytes(kv.value);
 		}
 
 		if (kvs.expectedSize() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES)
@@ -1518,7 +1490,7 @@ ACTOR Future<Void> checkRecovered(TLogData* self) {
 	return Void();
 }
 
-ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> recovered, PromiseStream<InitializeTLogRequest> tlogRequests ) {
+ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality, Promise<Void> oldLog, Promise<Void> recovered, PromiseStream<InitializeTLogRequest> tlogRequests ) {
 	state double startt = now();
 	state Reference<LogData> logData;
 	state KeyRange tagKeys;
@@ -1556,9 +1528,17 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	}
 
 	state std::vector<Future<ErrorOr<Void>>> removed;
-	state int persistentDataFormat = 0;
-	if(fFormat.get().get() >= LiteralStringRef("FoundationDB/LogServer/2/4")) {
-		persistentDataFormat = 1;
+
+	if(fFormat.get().get() == LiteralStringRef("FoundationDB/LogServer/2/3")) {
+		//FIXME: need for upgrades from 5.X to 6.0, remove once this upgrade path is no longer needed
+		if(recovered.canBeSet()) recovered.send(Void());
+		oldLog.send(Void());
+		while(!tlogRequests.isEmpty()) {
+			tlogRequests.getFuture().pop().reply.sendError(recruitment_failed());
+		}
+
+		Void _ = wait( oldTLog::tLog(self->persistentData, self->rawPersistentQueue, self->dbInfo, locality, self->dbgid) );
+		throw internal_error();
 	}
 
 	ASSERT(fVers.get().size() == fRecoverCounts.get().size());
@@ -1590,7 +1570,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.confirmRunning );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
-		logData = Reference<LogData>( new LogData(self, recruited, Optional<Tag>(), persistentDataFormat) );
+		logData = Reference<LogData>( new LogData(self, recruited, Optional<Tag>()) );
 		logData->stopped = true;
 		self->id_data[id1] = logData;
 		id_interf[id1] = recruited;
@@ -1986,7 +1966,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 }
 
 // New tLog (if !recoverFrom.size()) or restore from network
-ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk, Promise<Void> recovered ) {
+ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, PromiseStream<InitializeTLogRequest> tlogRequests, UID tlogId, bool restoreFromDisk, Promise<Void> oldLog, Promise<Void> recovered ) {
 	state TLogData self( tlogId, persistentData, persistentQueue, db );
 	state Future<Void> error = actorCollection( self.sharedActors.getFuture() );
 
@@ -1994,7 +1974,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 
 	try {
 		if(restoreFromDisk) {
-			Void _ = wait( restorePersistentState( &self, locality, recovered, tlogRequests ) );
+			Void _ = wait( restorePersistentState( &self, locality, oldLog, recovered, tlogRequests ) );
 		} else {
 			Void _ = wait( checkEmptyQueue(&self) && checkRecovered(&self) );
 		}

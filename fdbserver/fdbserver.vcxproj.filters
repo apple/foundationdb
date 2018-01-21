@@ -272,6 +272,7 @@
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="OldTLogServer.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SkipList.cpp" />
