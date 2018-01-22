@@ -509,6 +509,9 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			if(r && r->code == 406)
 				throw http_not_accepted();
 
+			if(r && r->code == 401)
+				throw http_auth_failed();
+
 			throw http_request_failed();
 		}
 	}
