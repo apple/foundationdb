@@ -1075,9 +1075,7 @@ ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database 
 						status_incomplete_reasons->insert("Too many configuration parameters set.");
 					}
 					else {
-						for (int i = 0; i < res.size(); i++) {
-							configuration.set(res[i].key, res[i].value);
-						}
+						configuration.fromKeyValues((VectorRef<KeyValueRef>)res);
 					}
 
 					result = configuration;
