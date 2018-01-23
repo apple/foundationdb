@@ -726,7 +726,7 @@ static void printBackupUsage(bool devhelp) {
 	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after VERSION.\n");
 	printf("  --restorable_after_timestamp DATETIME\n"
 		   "                 For expire operations, set minimum acceptable restorability to the version equivalent of DATETIME and later.\n");
-	printf("  --restorable_after_timestamp VERSION\n"
+	printf("  --restorable_after_version VERSION\n"
 		   "                 For expire operations, set minimum acceptable restorability to the VERSION and later.\n");
 	printf("  --version_timestamps\n");
 	printf("                 For describe operations, lookup versions in the database to obtain timestamps.  A cluster file is required.\n");
@@ -1823,49 +1823,14 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	return c;
 }
 
-ACTOR Future<Version> getVersionFromDateTime(std::string datetime, Database db) {
-	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
-	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
-
-	int year, month, day, hour, minute, second;
-	if (sscanf(datetime.c_str(), "%d-%d-%d.%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
-		fprintf(stderr, "ERROR: Incorrect date/time format.\n");
-		throw backup_error();
-	}
-	struct tm expDateTime = {0};
-	expDateTime.tm_year = year - 1900;
-	expDateTime.tm_mon = month - 1;
-	expDateTime.tm_mday = day;
-	expDateTime.tm_hour = hour;
-	expDateTime.tm_min = minute;
-	expDateTime.tm_sec = second;
-	expDateTime.tm_isdst = -1;
-	state int64_t time = (int64_t) mktime(&expDateTime);
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, 0, Optional<int64_t>(time), 1, false, true) );
-			if (results.size() != 1) {
-				fprintf(stderr, "ERROR: Unable to find a version with given date/time.\n");
-				throw backup_error();
-			}
-
-			return results[0].second;
-		} catch (Error& e) {
-			Void _ = wait(tr->onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> expireBackupData(const char *name, std::string destinationContainer, Version endVersion, std::string endDatetime, Database db, bool force, Version restorableAfterVersion, std::string restorableAfterDatetime) {
 	if (!endDatetime.empty()) {
-		Version v = wait( getVersionFromDateTime(endDatetime, db) );
+		Version v = wait( timeKeeperVersionFromEpochs(endDatetime, db) );
 		endVersion = v;
 	}
 
 	if (!restorableAfterDatetime.empty()) {
-		Version v = wait( getVersionFromDateTime(restorableAfterDatetime, db) );
+		Version v = wait( timeKeeperVersionFromEpochs(restorableAfterDatetime, db) );
 		restorableAfterVersion = v;
 	}
 

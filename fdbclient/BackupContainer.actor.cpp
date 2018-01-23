@@ -47,59 +47,6 @@ Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
 }
 
-ACTOR Future<Optional<int64_t>> timeKeeperDateFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
-	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
-
-	// Binary search to find the closest date with a version <= v
-	state int64_t min = 0;
-	state int64_t max = (int64_t)now();
-	state int64_t mid;
-	state std::pair<int64_t, Version> found;
-
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-	loop {
-		mid = (min + max + 1) / 2;  // ceiling
-
-		// Find the highest time < mid
-		state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, min, mid, 1, false, true) );
-
-		if (results.size() != 1) {
-			if(mid == min) {
-				// There aren't any records having a version < v, so just look for any record having a time < now
-				// and base a result on it
-				Void _ = wait(store(versionMap.getRange(tr, 0, (int64_t)now(), 1), results));
-
-				if (results.size() != 1) {
-					// There aren't any timekeeper records to base a result on so return nothing
-					return Optional<int64_t>();
-				}
-
-				found = results[0];
-				break;
-			}
-
-			min = mid;
-			continue;
-		}
-
-		found = results[0];
-
-		if(v < found.second) {
-			max = found.first;
-		}
-		else {
-			if(found.first == min) {
-				break;
-			}
-			min = found.first;
-		}
-	}
-
-	return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
-}
-
 std::string formatTime(int64_t t) {
 	time_t curTime = (time_t)t;
 	char buffer[128];
@@ -114,7 +61,7 @@ Future<Void> fetchTimes(Reference<ReadYourWritesTransaction> tr,  std::map<Versi
 
 	// Resolve each version in the map,
 	for(auto &p : *pVersionTimeMap) {
-		futures.push_back(map(timeKeeperDateFromVersion(p.first, tr), [=](Optional<int64_t> t) {
+		futures.push_back(map(timeKeeperEpochsFromVersion(p.first, tr), [=](Optional<int64_t> t) {
 			if(t.present())
 				pVersionTimeMap->at(p.first) = t.get();
 			else
@@ -1229,6 +1176,103 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 
 Future<std::vector<std::string>> IBackupContainer::listContainers(std::string baseURL) {
 	return listContainers_impl(baseURL);
+}
+
+ACTOR Future<Version> timeKeeperVersionFromEpochs(std::string datetime, Database db) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
+
+	int year, month, day, hour, minute, second;
+	if (sscanf(datetime.c_str(), "%d-%d-%d.%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
+		fprintf(stderr, "ERROR: Incorrect date/time format.\n");
+		throw backup_error();
+	}
+	struct tm expDateTime = {0};
+	expDateTime.tm_year = year - 1900;
+	expDateTime.tm_mon = month - 1;
+	expDateTime.tm_mday = day;
+	expDateTime.tm_hour = hour;
+	expDateTime.tm_min = minute;
+	expDateTime.tm_sec = second;
+	expDateTime.tm_isdst = -1;
+	state int64_t time = (int64_t) mktime(&expDateTime);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, 0, time, 1, false, true) );
+			if (results.size() != 1) {
+				// No key less than time was found in the database
+				// Look for a key >= time.
+				Void _ = wait( store( versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1), results) );
+
+				if(results.size() != 1) {
+					fprintf(stderr, "ERROR: Unable to calculate a version for given date/time.\n");
+					throw backup_error();
+				}
+			}
+
+			// Adjust version found by the delta between time and the time found and min with 0.
+			auto &result = results[0];
+			return std::max<Version>(0, result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+
+		} catch (Error& e) {
+			Void _ = wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+	// Binary search to find the closest date with a version <= v
+	state int64_t min = 0;
+	state int64_t max = (int64_t)now();
+	state int64_t mid;
+	state std::pair<int64_t, Version> found;
+
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+	loop {
+		mid = (min + max + 1) / 2;  // ceiling
+
+		// Find the highest time < mid
+		state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, min, mid, 1, false, true) );
+
+		if (results.size() != 1) {
+			if(mid == min) {
+				// There aren't any records having a version < v, so just look for any record having a time < now
+				// and base a result on it
+				Void _ = wait(store(versionMap.getRange(tr, 0, (int64_t)now(), 1), results));
+
+				if (results.size() != 1) {
+					// There aren't any timekeeper records to base a result on so return nothing
+					return Optional<int64_t>();
+				}
+
+				found = results[0];
+				break;
+			}
+
+			min = mid;
+			continue;
+		}
+
+		found = results[0];
+
+		if(v < found.second) {
+			max = found.first;
+		}
+		else {
+			if(found.first == min) {
+				break;
+			}
+			min = found.first;
+		}
+	}
+
+	return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 }
 
 ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size) {
