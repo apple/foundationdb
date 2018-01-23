@@ -3048,7 +3048,7 @@ namespace fileBackup {
 						.detail("RestoreUID", restore.getUid())
 						.detail("FileCount", nFiles)
 						.detail("FileBlockCount", nFileBlocks)
-						.detail("Bytes", txBytes)
+						.detail("TransactionBytes", txBytes)
 						.detail("TaskInstance", (uint64_t)this);
 
 					start = i;

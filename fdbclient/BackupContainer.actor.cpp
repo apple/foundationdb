@@ -151,8 +151,8 @@ std::string BackupDescription::toString() const {
  *     /logs/.../log,startVersion,endVersion,blockSize
  *     /ranges/.../range,version,uid,blockSize
  *
- *   Where ... is a multi level path which sorts lexically into version order and has less than 10,000
- *   entries in each folder level.
+ *   Where ... is a multi level path which sorts lexically into version order and targets 10,000 or less
+ *   entries in each folder (though a full speed snapshot could exceed this count at the innermost folder level)
  */
 class BackupContainerFileSystem : public IBackupContainer {
 public:
@@ -184,41 +184,45 @@ public:
 	// updated with the count of deleted files so that progress can be seen.
 	virtual Future<Void> deleteContainer(int *pNumDeleted) = 0;
 
-	static std::string folderPart(uint64_t n, unsigned int suffixLen, int maxLen) {
-		std::string s = format("%lld", n);
-		if(s.size() > suffixLen)
-			s = s.substr(0, s.size() - suffixLen);
-		else
-			s = "0";
-		if(s.size() > maxLen)
-			s = s.substr(s.size() - maxLen, maxLen);
-		return std::string(1, 'a' + s.size() - 1) + s;
-	}
-
 	// Creates a 2-level path where the innermost level will have files covering the 1e(smallestBucket) version range.
 	static std::string versionFolderString(Version v, int smallestBucket) {
-		return folderPart(v, smallestBucket + 4, 999) + "/"
-			 + folderPart(v, smallestBucket, 4);
+		ASSERT(smallestBucket < 15);
+		// Get a 0-padded fixed size representation of v
+		std::string vFixedPrecision = format("%019lld", v);
+		ASSERT(vFixedPrecision.size() == 19);
+
+		// Insert two '/' characters into v at positions based on smallestBucket
+		size_t pos = vFixedPrecision.size() - smallestBucket;
+		vFixedPrecision.insert(pos, 1, '/');
+		pos -= 4;
+		vFixedPrecision.insert(pos, 1, '/');
+
+		return vFixedPrecision;
 	}
 
-	// The innermost folder covers 100 seconds.  During a full speed backup it is possible though very unlikely write about 10,000 snapshot range files during that time.
-	// n,nnn/n,nnn/nn,nnn,nnn
+	// This useful for comparing version folder strings regardless of where their "/" dividers are, as it is possible
+	// that division points would change in the future.
+	static std::string cleanFolderString(std::string f) {
+		f.erase(std::remove(f.begin(), f.end(), '/'), f.end());
+		return f;
+	}
+
+	// The innermost folder covers 100 seconds (1e8 versions) During a full speed backup it is possible though very unlikely write about 10,000 snapshot range files during that time.
 	static std::string rangeVersionFolderString(Version v) {
-		return versionFolderString(v, 8);
+		return format("ranges/%s/", versionFolderString(v, 8).c_str());
 	}
 
-	// The innermost folder covers 100,000 seconds which is 5,000 mutation log files at current settings.
-	// n,nnn/n,nnn/nn,nnn,nnn,nnn
+	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current settings.
 	static std::string logVersionFolderString(Version v) {
-		return versionFolderString(v, 11);
+		return format("logs/%s/", versionFolderString(v, 11).c_str());
 	}
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) {
-		return writeFile(format("logs/%s/log,%lld,%lld,%s,%d", logVersionFolderString(beginVersion).c_str(), beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
+		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) {
-		return writeFile(format("ranges/%s/range,%lld,%s,%d", rangeVersionFolderString(version).c_str(), version, g_random->randomUniqueID().toString().c_str(), blockSize));
+		return writeFile(rangeVersionFolderString(version) + format("range,%lld,%s,%d", version, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	static bool pathToRangeFile(RangeFile &out, std::string path, int64_t size) {
@@ -357,14 +361,18 @@ public:
 		// The first relevant log file could have a begin version less than beginVersion based on the knobs which determine log file range size,
 		// so start at an earlier version adjusted by how many versions a file could contain.
 		//
-		// This path would be the first that could contain relevant results for this operation.
-		Standalone<StringRef> firstPath(format("logs/%s/", logVersionFolderString(beginVersion - (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)).c_str()));
-		// This path would be the last that could contain relevant results for this operation.
-		Standalone<StringRef> lastPath(format("logs/%s/", logVersionFolderString(endVersion).c_str()));
+		// Get the cleaned (without slashes) first and last folders that could contain relevant results.
+		std::string firstPath = cleanFolderString(logVersionFolderString(
+			std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)
+		));
+		std::string lastPath =  cleanFolderString(logVersionFolderString(endVersion));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
-			return firstPath.startsWith(folderPath) || lastPath.startsWith(folderPath)
-				|| (folderPath > firstPath && folderPath < lastPath);
+			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter
+
+			std::string cleaned = cleanFolderString(folderPath);
+			return StringRef(firstPath).startsWith(cleaned) || StringRef(lastPath).startsWith(cleaned)
+				|| (cleaned > firstPath && cleaned < lastPath);
 		};
 
 		return map(listFiles("logs/", pathFilter), [=](const FilesAndSizesT &files) {
@@ -381,14 +389,16 @@ public:
 
 	// List range files, in sorted version order, which contain data at or between beginVersion and endVersion
 	Future<std::vector<RangeFile>> listRangeFiles(Version beginVersion = 0, Version endVersion = std::numeric_limits<Version>::max()) {
-		// This path would be the first that could contain relevant results for this operation.
-		Standalone<StringRef> firstPath(format("ranges/%s/", rangeVersionFolderString(beginVersion).c_str()));
-		// This path would be the last that could contain relevant results for this operation.
-		Standalone<StringRef> lastPath(format("ranges/%s/", rangeVersionFolderString(endVersion).c_str()));
+		// Get the cleaned (without slashes) first and last folders that could contain relevant results.
+		std::string firstPath = cleanFolderString(rangeVersionFolderString(beginVersion));
+		std::string lastPath =  cleanFolderString(rangeVersionFolderString(endVersion));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
-			return firstPath.startsWith(folderPath) || lastPath.startsWith(folderPath)
-				|| (folderPath > firstPath && folderPath < lastPath);
+			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter
+			std::string cleaned = cleanFolderString(folderPath);
+
+			return StringRef(firstPath).startsWith(cleaned) || StringRef(lastPath).startsWith(cleaned)
+				|| (cleaned > firstPath && cleaned < lastPath);
 		};
 
 		return map(listFiles("ranges/", pathFilter), [=](const FilesAndSizesT &files) {
