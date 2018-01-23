@@ -28,7 +28,7 @@
 #include <vector>
 
 Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version const &v, Reference<ReadYourWritesTransaction> const &tr);
-Future<Version> timeKeeperVersionFromEpochs(std::string const &datetime, Database const &db);
+Future<Version> timeKeeperVersionFromDatetime(std::string const &datetime, Database const &db);
 
 // Append-only file interface for writing backup data
 // Once finish() is called the file cannot be further written to.

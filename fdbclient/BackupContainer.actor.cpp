@@ -1178,7 +1178,7 @@ Future<std::vector<std::string>> IBackupContainer::listContainers(std::string ba
 	return listContainers_impl(baseURL);
 }
 
-ACTOR Future<Version> timeKeeperVersionFromEpochs(std::string datetime, Database db) {
+ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db) {
 	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
 	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
 

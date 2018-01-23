@@ -1825,16 +1825,16 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 
 ACTOR Future<Void> expireBackupData(const char *name, std::string destinationContainer, Version endVersion, std::string endDatetime, Database db, bool force, Version restorableAfterVersion, std::string restorableAfterDatetime) {
 	if (!endDatetime.empty()) {
-		Version v = wait( timeKeeperVersionFromEpochs(endDatetime, db) );
+		Version v = wait( timeKeeperVersionFromDatetime(endDatetime, db) );
 		endVersion = v;
 	}
 
 	if (!restorableAfterDatetime.empty()) {
-		Version v = wait( timeKeeperVersionFromEpochs(restorableAfterDatetime, db) );
+		Version v = wait( timeKeeperVersionFromDatetime(restorableAfterDatetime, db) );
 		restorableAfterVersion = v;
 	}
 
-	if (!endVersion) {
+	if (endVersion == invalidVersion) {
 		fprintf(stderr, "ERROR: No version or date/time is specified.\n");
 		printHelpTeaser(name);
 		throw backup_error();;
@@ -2259,7 +2259,7 @@ int main(int argc, char* argv[]) {
 		std::string sourceClusterFile;
 		std::string baseUrl;
 		std::string expireDatetime;
-		Version expireVersion = 0;
+		Version expireVersion = invalidVersion;
 		std::string expireRestorableAfterDatetime;
 		Version expireRestorableAfterVersion = std::numeric_limits<Version>::max();
 		std::vector<std::pair<std::string, std::string>> knobs;
