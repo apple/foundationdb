@@ -54,33 +54,50 @@ ACTOR Future<Optional<int64_t>> timeKeeperDateFromVersion(Version v, Reference<R
 	state int64_t min = 0;
 	state int64_t max = (int64_t)now();
 	state int64_t mid;
+	state std::pair<int64_t, Version> found;
 
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	loop {
-		mid = (min + max) / 2;
+		mid = (min + max + 1) / 2;  // ceiling
+
+		// Find the highest time < mid
 		state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, min, mid, 1, false, true) );
 
-		if (results.size() == 0) {
-			if(mid == min)
-				return Optional<int64_t>();
+		if (results.size() != 1) {
+			if(mid == min) {
+				// There aren't any records having a version < v, so just look for any record having a time < now
+				// and base a result on it
+				Void _ = wait(store(versionMap.getRange(tr, 0, (int64_t)now(), 1), results));
+
+				if (results.size() != 1) {
+					// There aren't any timekeeper records to base a result on so return nothing
+					return Optional<int64_t>();
+				}
+
+				found = results[0];
+				break;
+			}
+
 			min = mid;
 			continue;
 		}
 
-		Version foundVersion = results[0].second;
-		int64_t foundTime = results[0].first;
+		found = results[0];
 
-		if(v < foundVersion)
-			max = foundTime;
+		if(v < found.second) {
+			max = found.first;
+		}
 		else {
-			if(foundTime == min) {
-				return foundTime + (v - foundVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+			if(found.first == min) {
+				break;
 			}
-			min = foundTime;
+			min = found.first;
 		}
 	}
+
+	return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 }
 
 std::string formatTime(int64_t t) {
