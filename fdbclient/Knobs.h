@@ -78,7 +78,7 @@ public:
 
 
 	// Core
-	int CORE_VERSIONSPERSECOND;	// This is defined within the server but used for knobs based on server value
+	int64_t CORE_VERSIONSPERSECOND;  // This is defined within the server but used for knobs based on server value
 	int LOG_RANGE_BLOCK_SIZE;
 	int MUTATION_BLOCK_SIZE;
 
