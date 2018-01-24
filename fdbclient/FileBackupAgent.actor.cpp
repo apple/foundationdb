@@ -1423,6 +1423,11 @@ namespace fileBackup {
 				tr->reset();
 				loop {
 					try {
+						TraceEvent("FileBackupSnapshotDispatchAddingTasks")
+							.detail("TasksToAdd", rangesToAdd.size())
+							.detail("NewBatchSize", newBatchSize)
+							.suppressFor(60, true);
+
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
