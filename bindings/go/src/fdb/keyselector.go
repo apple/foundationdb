@@ -36,9 +36,9 @@ type Selectable interface {
 // below. For details of how KeySelectors are specified and resolved, see
 // https://foundationdb.org/documentation/developer-guide.html#key-selectors.
 type KeySelector struct {
-	Key KeyConvertible
+	Key     KeyConvertible
 	OrEqual bool
-	Offset int
+	Offset  int
 }
 
 func (ks KeySelector) FDBKeySelector() KeySelector {

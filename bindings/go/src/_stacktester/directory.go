@@ -21,12 +21,12 @@
 package main
 
 import (
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
-	"strings"
 	"bytes"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+	"strings"
 )
 
 func (sm *StackMachine) popTuples(count int) []tuple.Tuple {
@@ -60,8 +60,8 @@ func tuplePackStrings(s []string) []byte {
 }
 
 type DirectoryExtension struct {
-	list []interface{}
-	index int64
+	list       []interface{}
+	index      int64
 	errorIndex int64
 }
 
@@ -93,15 +93,15 @@ func (sm *StackMachine) maybePath() []string {
 	return path
 }
 
-var createOps = map[string]bool {
+var createOps = map[string]bool{
 	"CREATE_SUBSPACE": true,
-	"CREATE_LAYER": true,
-	"CREATE_OR_OPEN": true,
-	"CREATE": true,
-	"OPEN": true,
-	"MOVE": true,
-	"MOVE_TO": true,
-	"OPEN_SUBSPACE": true,
+	"CREATE_LAYER":    true,
+	"CREATE_OR_OPEN":  true,
+	"CREATE":          true,
+	"OPEN":            true,
+	"MOVE":            true,
+	"MOVE_TO":         true,
+	"OPEN_SUBSPACE":   true,
 }
 
 func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, idx int, t fdb.Transactor, rt fdb.ReadTransactor) {
@@ -142,7 +142,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 			layer = l.([]byte)
 		}
 		d, e := de.cwd().CreateOrOpen(t, tupleToPath(tuples[0]), layer)
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 		de.store(d)
 	case op == "CREATE":
 		tuples := sm.popTuples(1)
@@ -159,7 +161,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 			// p.([]byte) itself may be nil, but CreatePrefix handles that appropriately
 			d, e = de.cwd().CreatePrefix(t, tupleToPath(tuples[0]), layer, p.([]byte))
 		}
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 		de.store(d)
 	case op == "OPEN":
 		tuples := sm.popTuples(1)
@@ -169,7 +173,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 			layer = l.([]byte)
 		}
 		d, e := de.cwd().Open(rt, tupleToPath(tuples[0]), layer)
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 		de.store(d)
 	case op == "CHANGE":
 		i := sm.waitAndPop().item.(int64)
@@ -182,12 +188,16 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 	case op == "MOVE":
 		tuples := sm.popTuples(2)
 		d, e := de.cwd().Move(t, tupleToPath(tuples[0]), tupleToPath(tuples[1]))
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 		de.store(d)
 	case op == "MOVE_TO":
 		tuples := sm.popTuples(1)
 		d, e := de.cwd().MoveTo(t, tupleToPath(tuples[0]))
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 		de.store(d)
 	case strings.HasPrefix(op, "REMOVE"):
 		path := sm.maybePath()
@@ -197,9 +207,11 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		// doesn't end up committing the version key. (Other languages have
 		// separate remove() and remove_if_exists() so don't have this tricky
 		// issue).
-		_, e := t.Transact(func (tr fdb.Transaction) (interface{}, error) {
+		_, e := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
 			ok, e := de.cwd().Remove(tr, path)
-			if e != nil { panic(e) }
+			if e != nil {
+				panic(e)
+			}
 			switch op[6:] {
 			case "":
 				if !ok {
@@ -209,16 +221,24 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 			}
 			return nil, nil
 		})
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 	case op == "LIST":
 		subs, e := de.cwd().List(rt, sm.maybePath())
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 		t := make(tuple.Tuple, len(subs))
-		for i, s := range subs { t[i] = s }
+		for i, s := range subs {
+			t[i] = s
+		}
 		sm.store(idx, t.Pack())
 	case op == "EXISTS":
 		b, e := de.cwd().Exists(rt, sm.maybePath())
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 		if b {
 			sm.store(idx, int64(1))
 		} else {
@@ -229,8 +249,10 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		sm.store(idx, de.css().Pack(tuples[0]))
 	case op == "UNPACK_KEY":
 		t, e := de.css().Unpack(fdb.Key(sm.waitAndPop().item.([]byte)))
-		if e != nil { panic(e) }
-		for _, el := range(t) {
+		if e != nil {
+			panic(e)
+		}
+		for _, el := range t {
 			sm.store(idx, el)
 		}
 	case op == "RANGE":
@@ -252,7 +274,7 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		k := sm.waitAndPop().item.([]byte)
 		k = append(k, tuple.Tuple{de.index}.Pack()...)
 		v := de.css().Bytes()
-		t.Transact(func (tr fdb.Transaction) (interface{}, error) {
+		t.Transact(func(tr fdb.Transaction) (interface{}, error) {
 			tr.Set(fdb.Key(k), v)
 			return nil, nil
 		})
@@ -266,7 +288,9 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		k3 := ss.Pack(tuple.Tuple{"exists"})
 		var v3 []byte
 		exists, e := de.cwd().Exists(rt, nil)
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 		if exists {
 			v3 = tuple.Tuple{1}.Pack()
 		} else {
@@ -276,10 +300,12 @@ func (de *DirectoryExtension) processOp(sm *StackMachine, op string, isDB bool, 
 		var subs []string
 		if exists {
 			subs, e = de.cwd().List(rt, nil)
-			if e != nil { panic(e) }
+			if e != nil {
+				panic(e)
+			}
 		}
 		v4 := tuplePackStrings(subs)
-		t.Transact(func (tr fdb.Transaction) (interface{}, error) {
+		t.Transact(func(tr fdb.Transaction) (interface{}, error) {
 			tr.Set(k1, v1)
 			tr.Set(k2, v2)
 			tr.Set(k3, v3)
