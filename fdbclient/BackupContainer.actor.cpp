@@ -184,18 +184,17 @@ public:
 	// updated with the count of deleted files so that progress can be seen.
 	virtual Future<Void> deleteContainer(int *pNumDeleted) = 0;
 
-	// Creates a 2-level path where the innermost level will have files covering the 1e(smallestBucket) version range.
+	// Creates a 2-level path (x/y) where v should go such that x/y/* contains (10^smallestBucket) possible versions
 	static std::string versionFolderString(Version v, int smallestBucket) {
-		ASSERT(smallestBucket < 15);
+		ASSERT(smallestBucket < 14);
 		// Get a 0-padded fixed size representation of v
 		std::string vFixedPrecision = format("%019lld", v);
 		ASSERT(vFixedPrecision.size() == 19);
+		// Truncate smallestBucket from the fixed length representation
+		vFixedPrecision.resize(vFixedPrecision.size() - smallestBucket);
 
-		// Insert two '/' characters into v at positions based on smallestBucket
-		size_t pos = vFixedPrecision.size() - smallestBucket;
-		vFixedPrecision.insert(pos, 1, '/');
-		pos -= 4;
-		vFixedPrecision.insert(pos, 1, '/');
+		// Split the remaining digits with a '/' 4 places from the right
+		vFixedPrecision.insert(vFixedPrecision.size() - 4, 1, '/');
 
 		return vFixedPrecision;
 	}
