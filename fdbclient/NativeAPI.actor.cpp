@@ -2444,6 +2444,7 @@ Future<Void> Transaction::commitMutations() {
 				.detail("NumMutations", tr.transaction.mutations.size())
 				.detail("readConflictSize", tr.transaction.read_conflict_ranges.expectedSize())
 				.detail("writeConflictSize", tr.transaction.write_conflict_ranges.expectedSize())
+				.backtrace()
 				.suppressFor(1.0);
 		}
 

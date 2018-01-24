@@ -471,6 +471,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			 .detail("ThisTry", thisTry)
 			 .suppressFor(15, true);
 
+		// If r is not valid or not code 429 then increment the try count.  429's will not count against the attempt limit.
+		if(!r || r->code != 429)
+			++thisTry;
+
 		// We will wait delay seconds before the next retry, start with nextRetryDelay.
 		double delay = nextRetryDelay;
 		// Double but limit the *next* nextRetryDelay.
@@ -508,6 +512,9 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			// This error code means the authentication header was not accepted, likely the account or key is wrong.
 			if(r && r->code == 406)
 				throw http_not_accepted();
+
+			if(r && r->code == 401)
+				throw http_auth_failed();
 
 			throw http_request_failed();
 		}

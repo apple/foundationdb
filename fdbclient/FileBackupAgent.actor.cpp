@@ -1003,7 +1003,8 @@ namespace fileBackup {
 							.detail("ReadVersion", outVersion)
 							.detail("BeginKey", beginKey.printable())
 							.detail("EndKey", nextKey.printable())
-							.detail("AddedFileToMap", usedFile);
+							.detail("AddedFileToMap", usedFile)
+							.suppressFor(60, true);
 
 						nrKeys = 0;
 						beginKey = nextKey;
@@ -1422,6 +1423,11 @@ namespace fileBackup {
 				tr->reset();
 				loop {
 					try {
+						TraceEvent("FileBackupSnapshotDispatchAddingTasks")
+							.detail("TasksToAdd", rangesToAdd.size())
+							.detail("NewBatchSize", newBatchSize)
+							.suppressFor(60, true);
+
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -1486,7 +1492,8 @@ namespace fileBackup {
 									.detail("CurrentVersion", recentReadVersion)
 									.detail("ScheduledVersion", randomVersion)
 									.detail("BeginKey", range.begin.printable())
-									.detail("EndKey", range.end.printable());
+									.detail("EndKey", range.end.printable())
+									.suppressFor(60, true);
 							}
 							else {
 								// This shouldn't happen because if the transaction was already done or if another execution
@@ -1688,8 +1695,8 @@ namespace fileBackup {
 				.detail("Size", outFile->size())
 				.detail("BeginVersion", beginVersion)
 				.detail("EndVersion", endVersion)
-				.suppressFor(60, true)
-				.detail("LastReadVersion", latestVersion);
+				.detail("LastReadVersion", latestVersion)
+				.suppressFor(60, true);
 
 			Params.fileSize().set(task, outFile->size());
 
@@ -1812,9 +1819,11 @@ namespace fileBackup {
 
 			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
 
-			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
-				TraceEvent("FileBackupLogDispatch").detail("BeginVersion", beginVersion).detail("EndVersion", endVersion).detail("RestorableVersion", restorableVersion.orDefault(-1));
-			}
+			TraceEvent("FileBackupLogDispatch")
+				.detail("BeginVersion", beginVersion)
+				.detail("EndVersion", endVersion)
+				.detail("RestorableVersion", restorableVersion.orDefault(-1))
+				.suppressFor(60, true);
 
 			state Reference<TaskFuture> logDispatchBatchFuture = futureBucket->future(tr);
 
@@ -1827,7 +1836,8 @@ namespace fileBackup {
 			TraceEvent("FileBackupLogsDispatchContinuing")
 				.detail("BackupUID", config.getUid())
 				.detail("BeginVersion", beginVersion)
-				.detail("EndVersion", endVersion).suppressFor(60, true);
+				.detail("EndVersion", endVersion)
+				.suppressFor(60, true);
 
 			return Void();
 		}
@@ -3048,7 +3058,7 @@ namespace fileBackup {
 						.detail("RestoreUID", restore.getUid())
 						.detail("FileCount", nFiles)
 						.detail("FileBlockCount", nFileBlocks)
-						.detail("Bytes", txBytes)
+						.detail("TransactionBytes", txBytes)
 						.detail("TaskInstance", (uint64_t)this);
 
 					start = i;
