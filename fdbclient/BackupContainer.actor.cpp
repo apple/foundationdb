@@ -47,42 +47,6 @@ Future<Void> IBackupFile::appendStringRefWithLen(Standalone<StringRef> s) {
 	return IBackupFile_impl::appendStringRefWithLen(Reference<IBackupFile>::addRef(this), s);
 }
 
-ACTOR Future<Optional<int64_t>> timeKeeperDateFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
-	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
-
-	// Binary search to find the closest date with a version <= v
-	state int64_t min = 0;
-	state int64_t max = (int64_t)now();
-	state int64_t mid;
-
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-	loop {
-		mid = (min + max) / 2;
-		state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, min, mid, 1, false, true) );
-
-		if (results.size() == 0) {
-			if(mid == min)
-				return Optional<int64_t>();
-			min = mid;
-			continue;
-		}
-
-		Version foundVersion = results[0].second;
-		int64_t foundTime = results[0].first;
-
-		if(v < foundVersion)
-			max = foundTime;
-		else {
-			if(foundTime == min) {
-				return foundTime + (v - foundVersion) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
-			}
-			min = foundTime;
-		}
-	}
-}
-
 std::string formatTime(int64_t t) {
 	time_t curTime = (time_t)t;
 	char buffer[128];
@@ -97,7 +61,7 @@ Future<Void> fetchTimes(Reference<ReadYourWritesTransaction> tr,  std::map<Versi
 
 	// Resolve each version in the map,
 	for(auto &p : *pVersionTimeMap) {
-		futures.push_back(map(timeKeeperDateFromVersion(p.first, tr), [=](Optional<int64_t> t) {
+		futures.push_back(map(timeKeeperEpochsFromVersion(p.first, tr), [=](Optional<int64_t> t) {
 			if(t.present())
 				pVersionTimeMap->at(p.first) = t.get();
 			else
@@ -187,8 +151,8 @@ std::string BackupDescription::toString() const {
  *     /logs/.../log,startVersion,endVersion,blockSize
  *     /ranges/.../range,version,uid,blockSize
  *
- *   Where ... is a multi level path which sorts lexically into version order and has less than 10,000
- *   entries in each folder level.
+ *   Where ... is a multi level path which sorts lexically into version order and targets 10,000 or less
+ *   entries in each folder (though a full speed snapshot could exceed this count at the innermost folder level)
  */
 class BackupContainerFileSystem : public IBackupContainer {
 public:
@@ -220,41 +184,44 @@ public:
 	// updated with the count of deleted files so that progress can be seen.
 	virtual Future<Void> deleteContainer(int *pNumDeleted) = 0;
 
-	static std::string folderPart(uint64_t n, unsigned int suffixLen, int maxLen) {
-		std::string s = format("%lld", n);
-		if(s.size() > suffixLen)
-			s = s.substr(0, s.size() - suffixLen);
-		else
-			s = "0";
-		if(s.size() > maxLen)
-			s = s.substr(s.size() - maxLen, maxLen);
-		return std::string(1, 'a' + s.size() - 1) + s;
-	}
-
-	// Creates a 2-level path where the innermost level will have files covering the 1e(smallestBucket) version range.
+	// Creates a 2-level path (x/y) where v should go such that x/y/* contains (10^smallestBucket) possible versions
 	static std::string versionFolderString(Version v, int smallestBucket) {
-		return folderPart(v, smallestBucket + 4, 999) + "/"
-			 + folderPart(v, smallestBucket, 4);
+		ASSERT(smallestBucket < 14);
+		// Get a 0-padded fixed size representation of v
+		std::string vFixedPrecision = format("%019lld", v);
+		ASSERT(vFixedPrecision.size() == 19);
+		// Truncate smallestBucket from the fixed length representation
+		vFixedPrecision.resize(vFixedPrecision.size() - smallestBucket);
+
+		// Split the remaining digits with a '/' 4 places from the right
+		vFixedPrecision.insert(vFixedPrecision.size() - 4, 1, '/');
+
+		return vFixedPrecision;
 	}
 
-	// The innermost folder covers 100 seconds.  During a full speed backup it is possible though very unlikely write about 10,000 snapshot range files during that time.
-	// n,nnn/n,nnn/nn,nnn,nnn
+	// This useful for comparing version folder strings regardless of where their "/" dividers are, as it is possible
+	// that division points would change in the future.
+	static std::string cleanFolderString(std::string f) {
+		f.erase(std::remove(f.begin(), f.end(), '/'), f.end());
+		return f;
+	}
+
+	// The innermost folder covers 100 seconds (1e8 versions) During a full speed backup it is possible though very unlikely write about 10,000 snapshot range files during that time.
 	static std::string rangeVersionFolderString(Version v) {
-		return versionFolderString(v, 8);
+		return format("ranges/%s/", versionFolderString(v, 8).c_str());
 	}
 
-	// The innermost folder covers 100,000 seconds which is 5,000 mutation log files at current settings.
-	// n,nnn/n,nnn/nn,nnn,nnn,nnn
+	// The innermost folder covers 100,000 seconds (1e11 versions) which is 5,000 mutation log files at current settings.
 	static std::string logVersionFolderString(Version v) {
-		return versionFolderString(v, 11);
+		return format("logs/%s/", versionFolderString(v, 11).c_str());
 	}
 
 	Future<Reference<IBackupFile>> writeLogFile(Version beginVersion, Version endVersion, int blockSize) {
-		return writeFile(format("logs/%s/log,%lld,%lld,%s,%d", logVersionFolderString(beginVersion).c_str(), beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
+		return writeFile(logVersionFolderString(beginVersion) + format("log,%lld,%lld,%s,%d", beginVersion, endVersion, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	Future<Reference<IBackupFile>> writeRangeFile(Version version, int blockSize) {
-		return writeFile(format("ranges/%s/range,%lld,%s,%d", rangeVersionFolderString(version).c_str(), version, g_random->randomUniqueID().toString().c_str(), blockSize));
+		return writeFile(rangeVersionFolderString(version) + format("range,%lld,%s,%d", version, g_random->randomUniqueID().toString().c_str(), blockSize));
 	}
 
 	static bool pathToRangeFile(RangeFile &out, std::string path, int64_t size) {
@@ -393,14 +360,18 @@ public:
 		// The first relevant log file could have a begin version less than beginVersion based on the knobs which determine log file range size,
 		// so start at an earlier version adjusted by how many versions a file could contain.
 		//
-		// This path would be the first that could contain relevant results for this operation.
-		Standalone<StringRef> firstPath(format("logs/%s/", logVersionFolderString(beginVersion - (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)).c_str()));
-		// This path would be the last that could contain relevant results for this operation.
-		Standalone<StringRef> lastPath(format("logs/%s/", logVersionFolderString(endVersion).c_str()));
+		// Get the cleaned (without slashes) first and last folders that could contain relevant results.
+		std::string firstPath = cleanFolderString(logVersionFolderString(
+			std::max<Version>(0, beginVersion - CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE)
+		));
+		std::string lastPath =  cleanFolderString(logVersionFolderString(endVersion));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
-			return firstPath.startsWith(folderPath) || lastPath.startsWith(folderPath)
-				|| (folderPath > firstPath && folderPath < lastPath);
+			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter
+
+			std::string cleaned = cleanFolderString(folderPath);
+			return StringRef(firstPath).startsWith(cleaned) || StringRef(lastPath).startsWith(cleaned)
+				|| (cleaned > firstPath && cleaned < lastPath);
 		};
 
 		return map(listFiles("logs/", pathFilter), [=](const FilesAndSizesT &files) {
@@ -417,14 +388,16 @@ public:
 
 	// List range files, in sorted version order, which contain data at or between beginVersion and endVersion
 	Future<std::vector<RangeFile>> listRangeFiles(Version beginVersion = 0, Version endVersion = std::numeric_limits<Version>::max()) {
-		// This path would be the first that could contain relevant results for this operation.
-		Standalone<StringRef> firstPath(format("ranges/%s/", rangeVersionFolderString(beginVersion).c_str()));
-		// This path would be the last that could contain relevant results for this operation.
-		Standalone<StringRef> lastPath(format("ranges/%s/", rangeVersionFolderString(endVersion).c_str()));
+		// Get the cleaned (without slashes) first and last folders that could contain relevant results.
+		std::string firstPath = cleanFolderString(rangeVersionFolderString(beginVersion));
+		std::string lastPath =  cleanFolderString(rangeVersionFolderString(endVersion));
 
 		std::function<bool(std::string const &)> pathFilter = [=](const std::string &folderPath) {
-			return firstPath.startsWith(folderPath) || lastPath.startsWith(folderPath)
-				|| (folderPath > firstPath && folderPath < lastPath);
+			// Remove slashes in the given folder path so that the '/' positions in the version folder string do not matter
+			std::string cleaned = cleanFolderString(folderPath);
+
+			return StringRef(firstPath).startsWith(cleaned) || StringRef(lastPath).startsWith(cleaned)
+				|| (cleaned > firstPath && cleaned < lastPath);
 		};
 
 		return map(listFiles("ranges/", pathFilter), [=](const FilesAndSizesT &files) {
@@ -983,10 +956,27 @@ private:
 
 class BackupContainerBlobStore : public BackupContainerFileSystem, ReferenceCounted<BackupContainerBlobStore> {
 private:
-	static const std::string BACKUP_BUCKET;
+	// All backup data goes into a single bucket
+	static const std::string BUCKET;
+
+	// Backup files to under a single folder prefix with subfolders for each named backup
+	static const std::string DATAFOLDER;
+
+	// The metafolder contains keys for which user-named backups exist.  Backup names can contain an arbitrary
+	// number of slashes so the backup names are kept in a separate folder tree from their actual data.
+	static const std::string INDEXFOLDER;
 
 	Reference<BlobStoreEndpoint> m_bstore;
 	std::string m_name;
+
+	std::string dataPath(const std::string path) {
+		return DATAFOLDER + "/" + m_name + "/" + path;
+	}
+
+	// Get the path of the backups's index entry
+	std::string indexEntry() {
+		return INDEXFOLDER + "/" + m_name;
+	}
 
 public:
 	BackupContainerBlobStore(Reference<BlobStoreEndpoint> bstore, std::string name)
@@ -1003,7 +993,7 @@ public:
 	Future<Reference<IAsyncFile>> readFile(std::string path) {
 			return Reference<IAsyncFile>(
 				new AsyncFileReadAheadCache(
-					Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, BACKUP_BUCKET, m_name + "/" + path)),
+					Reference<IAsyncFile>(new AsyncFileBlobStoreRead(m_bstore, BUCKET, dataPath(path))),
 					m_bstore->knobs.read_block_size,
 					m_bstore->knobs.read_ahead_blocks,
 					m_bstore->knobs.concurrent_reads_per_file,
@@ -1013,10 +1003,11 @@ public:
 	}
 
 	ACTOR static Future<std::vector<std::string>> listURLs(Reference<BlobStoreEndpoint> bstore) {
-		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(BACKUP_BUCKET, {}, '/'));
+		state std::string basePath = INDEXFOLDER + '/';
+		BlobStoreEndpoint::ListResult contents = wait(bstore->listBucket(BUCKET, basePath));
 		std::vector<std::string> results;
-		for(auto &f : contents.commonPrefixes) {
-			results.push_back(bstore->getResourceURL(f));
+		for(auto &f : contents.objects) {
+			results.push_back(bstore->getResourceURL(f.name.substr(basePath.size())));
 		}
 		return results;
 	}
@@ -1043,25 +1034,28 @@ public:
 	};
 
 	Future<Reference<IBackupFile>> writeFile(std::string path) {
-		return Reference<IBackupFile>(new BackupFile(path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, BACKUP_BUCKET, m_name + "/" + path))));
+		return Reference<IBackupFile>(new BackupFile(path, Reference<IAsyncFile>(new AsyncFileBlobStoreWrite(m_bstore, BUCKET, dataPath(path)))));
 	}
 
 	Future<Void> deleteFile(std::string path) {
-		return m_bstore->deleteObject(BACKUP_BUCKET, m_name + "/" + path);
+		return m_bstore->deleteObject(BUCKET, dataPath(path));
 	}
 
 	ACTOR static Future<FilesAndSizesT> listFiles_impl(Reference<BackupContainerBlobStore> bc, std::string path, std::function<bool(std::string const &)> pathFilter) {
 		// pathFilter expects container based paths, so create a wrapper which converts a raw path
 		// to a container path by removing the known backup name prefix.
-		int prefixTrim = bc->m_name.size() + 1;
+		state int prefixTrim = bc->dataPath("").size();
 		std::function<bool(std::string const &)> rawPathFilter = [=](const std::string &folderPath) {
+			ASSERT(folderPath.size() >= prefixTrim);
 			return pathFilter(folderPath.substr(prefixTrim));
 		};
 
-		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BACKUP_BUCKET, bc->m_name + "/" + path, '/', std::numeric_limits<int>::max(), rawPathFilter));
+		state BlobStoreEndpoint::ListResult result = wait(bc->m_bstore->listBucket(BUCKET, bc->dataPath(path), '/', std::numeric_limits<int>::max(), rawPathFilter));
 		FilesAndSizesT files;
-		for(auto &o : result.objects)
-			files.push_back({o.name.substr(bc->m_name.size() + 1), o.size});
+		for(auto &o : result.objects) {
+			ASSERT(o.name.size() >= prefixTrim);
+			files.push_back({o.name.substr(prefixTrim), o.size});
+		}
 		return files;
 	}
 
@@ -1070,7 +1064,13 @@ public:
 	}
 
 	ACTOR static Future<Void> create_impl(Reference<BackupContainerBlobStore> bc) {
-		Void _ = wait(bc->m_bstore->createBucket(BACKUP_BUCKET));
+		Void _ = wait(bc->m_bstore->createBucket(BUCKET));
+
+		// Check/create the index entry
+		bool exists = wait(bc->m_bstore->objectExists(BUCKET, bc->indexEntry()));
+		if(!exists) {
+			Void _ = wait(bc->m_bstore->writeEntireFile(BUCKET, bc->indexEntry(), ""));
+		}
 
 		return Void();
 	}
@@ -1081,7 +1081,7 @@ public:
 
 	ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
 		state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-		state Future<Void> done = bc->m_bstore->listBucketStream(BACKUP_BUCKET, resultStream, bc->m_name + "/", '/', std::numeric_limits<int>::max());
+		state Future<Void> done = bc->m_bstore->listBucketStream(BUCKET, resultStream, bc->dataPath(""), '/', std::numeric_limits<int>::max());
 		state std::list<Future<Void>> deleteFutures;
 		loop {
 			choose {
@@ -1091,7 +1091,7 @@ public:
 				when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
 					for(auto &object : list.objects) {
 						int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
-						deleteFutures.push_back(map(bc->m_bstore->deleteObject(BACKUP_BUCKET, object.name), [pNumDeletedCopy](Void) {
+						deleteFutures.push_back(map(bc->m_bstore->deleteObject(BUCKET, object.name), [pNumDeletedCopy](Void) {
 							if(pNumDeletedCopy != nullptr)
 								++*pNumDeletedCopy;
 							return Void();
@@ -1111,6 +1111,9 @@ public:
 			deleteFutures.pop_front();
 		}
 
+		// Now that all files are deleted, delete the index entry
+		Void _ = wait(bc->m_bstore->deleteObject(BUCKET, bc->indexEntry()));
+
 		return Void();
 	}
 
@@ -1119,7 +1122,10 @@ public:
 	}
 };
 
-const std::string BackupContainerBlobStore::BACKUP_BUCKET = "FDB_BACKUPS_V2";
+const std::string BackupContainerBlobStore::BUCKET = "FDB_BACKUPS_V2";
+const std::string BackupContainerBlobStore::DATAFOLDER = "data";
+const std::string BackupContainerBlobStore::INDEXFOLDER = "backups";
+
 std::string IBackupContainer::lastOpenError;
 
 std::vector<std::string> IBackupContainer::getURLFormats() {
@@ -1148,7 +1154,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 			if(resource.empty())
 				throw backup_invalid_url();
 			for(auto c : resource)
-				if(!isalnum(c) && c != '_' && c != '-' && c != '.')
+				if(!isalnum(c) && c != '_' && c != '-' && c != '.' && c != '/')
 					throw backup_invalid_url();
 			r = Reference<IBackupContainer>(new BackupContainerBlobStore(bstore, resource));
 		}
@@ -1214,6 +1220,103 @@ Future<std::vector<std::string>> IBackupContainer::listContainers(std::string ba
 	return listContainers_impl(baseURL);
 }
 
+ACTOR Future<Version> timeKeeperVersionFromDatetime(std::string datetime, Database db) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
+
+	int year, month, day, hour, minute, second;
+	if (sscanf(datetime.c_str(), "%d-%d-%d.%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
+		fprintf(stderr, "ERROR: Incorrect date/time format.\n");
+		throw backup_error();
+	}
+	struct tm expDateTime = {0};
+	expDateTime.tm_year = year - 1900;
+	expDateTime.tm_mon = month - 1;
+	expDateTime.tm_mday = day;
+	expDateTime.tm_hour = hour;
+	expDateTime.tm_min = minute;
+	expDateTime.tm_sec = second;
+	expDateTime.tm_isdst = -1;
+	state int64_t time = (int64_t) mktime(&expDateTime);
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, 0, time, 1, false, true) );
+			if (results.size() != 1) {
+				// No key less than time was found in the database
+				// Look for a key >= time.
+				Void _ = wait( store( versionMap.getRange(tr, time, std::numeric_limits<int64_t>::max(), 1), results) );
+
+				if(results.size() != 1) {
+					fprintf(stderr, "ERROR: Unable to calculate a version for given date/time.\n");
+					throw backup_error();
+				}
+			}
+
+			// Adjust version found by the delta between time and the time found and min with 0.
+			auto &result = results[0];
+			return std::max<Version>(0, result.second + (time - result.first) * CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+
+		} catch (Error& e) {
+			Void _ = wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Optional<int64_t>> timeKeeperEpochsFromVersion(Version v, Reference<ReadYourWritesTransaction> tr) {
+	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
+
+	// Binary search to find the closest date with a version <= v
+	state int64_t min = 0;
+	state int64_t max = (int64_t)now();
+	state int64_t mid;
+	state std::pair<int64_t, Version> found;
+
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+	loop {
+		mid = (min + max + 1) / 2;  // ceiling
+
+		// Find the highest time < mid
+		state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, min, mid, 1, false, true) );
+
+		if (results.size() != 1) {
+			if(mid == min) {
+				// There aren't any records having a version < v, so just look for any record having a time < now
+				// and base a result on it
+				Void _ = wait(store(versionMap.getRange(tr, 0, (int64_t)now(), 1), results));
+
+				if (results.size() != 1) {
+					// There aren't any timekeeper records to base a result on so return nothing
+					return Optional<int64_t>();
+				}
+
+				found = results[0];
+				break;
+			}
+
+			min = mid;
+			continue;
+		}
+
+		found = results[0];
+
+		if(v < found.second) {
+			max = found.first;
+		}
+		else {
+			if(found.first == min) {
+				break;
+			}
+			min = found.first;
+		}
+	}
+
+	return found.first + (v - found.second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
+}
+
 ACTOR Future<Void> writeAndVerifyFile(Reference<IBackupContainer> c, Reference<IBackupFile> f, int size) {
 	state Standalone<StringRef> content;
 	if(size > 0) {
@@ -1251,28 +1354,28 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 
 	Void _ = wait(c->create());
 
-	state int64_t versionMultiplier = g_random->randomInt64(0, std::numeric_limits<Version>::max() / 500);
+	state int64_t versionShift = g_random->randomInt64(0, std::numeric_limits<Version>::max() - 500);
 
-	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100 * versionMultiplier, 150 * versionMultiplier, 10));
+	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100 + versionShift, 150 + versionShift, 10));
 	Void _ = wait(writeAndVerifyFile(c, log1, 0));
 
-	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150 * versionMultiplier, 300 * versionMultiplier, 10));
+	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150 + versionShift, 300 + versionShift, 10));
 	Void _ = wait(writeAndVerifyFile(c, log2, g_random->randomInt(0, 10000000)));
 
-	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160 * versionMultiplier, 10));
+	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160 + versionShift, 10));
 	Void _ = wait(writeAndVerifyFile(c, range1, g_random->randomInt(0, 1000)));
 
-	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300 * versionMultiplier, 10));
+	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300 + versionShift, 10));
 	Void _ = wait(writeAndVerifyFile(c, range2, g_random->randomInt(0, 100000)));
 
-	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310 * versionMultiplier, 10));
+	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310 + versionShift, 10));
 	Void _ = wait(writeAndVerifyFile(c, range3, g_random->randomInt(0, 3000000)));
 
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size()));
 
 	Void _ = wait(c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size()));
 
-	printf("Checking full file listing\n");
+	printf("Checking file list dump\n");
 	FullBackupListing listing = wait(c->dumpFileList());
 	ASSERT(listing.logs.size() == 2);
 	ASSERT(listing.ranges.size() == 3);
@@ -1287,30 +1390,30 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	ASSERT(rest.get().logs.size() == 0);
 	ASSERT(rest.get().ranges.size() == 1);
 
-	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(150 * versionMultiplier));
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(150 + versionShift));
 	ASSERT(!rest.present());
 
-	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(300 * versionMultiplier));
+	Optional<RestorableFileSet> rest = wait(c->getRestoreSet(300 + versionShift));
 	ASSERT(rest.present());
 	ASSERT(rest.get().logs.size() == 1);
 	ASSERT(rest.get().ranges.size() == 2);
 
 	printf("Expire 1\n");
-	Void _ = wait(c->expireData(100 * versionMultiplier));
+	Void _ = wait(c->expireData(100 + versionShift));
 	BackupDescription d = wait(c->describeBackup());
 	printf("Backup Description 2\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin == 100 * versionMultiplier);
+	ASSERT(d.minLogBegin == 100 + versionShift);
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
 	printf("Expire 2\n");
-	Void _ = wait(c->expireData(101 * versionMultiplier));
+	Void _ = wait(c->expireData(101 + versionShift));
 	BackupDescription d = wait(c->describeBackup());
 	printf("Backup Description 3\n%s", d.toString().c_str());
-	ASSERT(d.minLogBegin == 100 * versionMultiplier);
+	ASSERT(d.minLogBegin == 100 + versionShift);
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
 	printf("Expire 3\n");
-	Void _ = wait(c->expireData(300 * versionMultiplier));
+	Void _ = wait(c->expireData(300 + versionShift));
 	BackupDescription d = wait(c->describeBackup());
 	printf("Backup Description 4\n%s", d.toString().c_str());
 	ASSERT(d.minLogBegin.present());
@@ -1318,7 +1421,7 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	ASSERT(d.maxRestorableVersion == desc.maxRestorableVersion);
 
 	printf("Expire 4\n");
-	Void _ = wait(c->expireData(301 * versionMultiplier, true));
+	Void _ = wait(c->expireData(301 + versionShift, true));
 	BackupDescription d = wait(c->describeBackup());
 	printf("Backup Description 4\n%s", d.toString().c_str());
 	ASSERT(d.snapshots.size() == 1);
@@ -1353,7 +1456,7 @@ TEST_CASE("backup/containers/url") {
 	return Void();
 };
 
-TEST_CASE("backup/containers/list") {
+TEST_CASE("backup/containers_list") {
 	if (!g_network->isSimulated()) {
 		state const char *url = getenv("FDB_TEST_BACKUP_URL");
 		ASSERT(url != nullptr);

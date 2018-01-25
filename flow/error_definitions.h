@@ -99,6 +99,8 @@ ERROR( checksum_failed, 1520, "A data checksum failed" )
 ERROR( io_timeout, 1521, "A disk IO operation failed to complete in a timely manner" )
 ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
 ERROR( http_request_failed, 1523, "HTTP response code indicated failure" )
+ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
+
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
 // be internally caused, it should be 41xx

@@ -92,7 +92,7 @@ enum {
 	// Backup constants
 	OPT_DESTCONTAINER, OPT_SNAPSHOTINTERVAL, OPT_ERRORLIMIT, OPT_NOSTOPWHENDONE,
 	OPT_EXPIRE_BEFORE_VERSION, OPT_EXPIRE_BEFORE_DATETIME, OPT_EXPIRE_RESTORABLE_AFTER_VERSION, OPT_EXPIRE_RESTORABLE_AFTER_DATETIME,
-	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP,
+	OPT_BASEURL, OPT_BLOB_CREDENTIALS, OPT_DESCRIBE_DEEP, OPT_DESCRIBE_TIMESTAMPS,
 
 	// Backup and Restore constants
 	OPT_TAGNAME, OPT_BACKUPKEYS, OPT_WAITFORDONE,
@@ -369,7 +369,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 #ifdef _WIN32
 	{ OPT_PARENTPID,      "--parentpid",       SO_REQ_SEP },
 #endif
-	{ OPT_CLUSTERFILE,	   "-C",               SO_REQ_SEP },
+	{ OPT_CLUSTERFILE,     "-C",               SO_REQ_SEP },
 	{ OPT_CLUSTERFILE,     "--cluster_file",   SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "-d",               SO_REQ_SEP },
 	{ OPT_DESTCONTAINER,   "--destcontainer",  SO_REQ_SEP },
@@ -389,6 +389,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob_credentials", SO_REQ_SEP },
 	{ OPT_KNOB,            "--knob_",          SO_REQ_SEP },
 	{ OPT_DESCRIBE_DEEP,   "--deep",           SO_NONE },
+	{ OPT_DESCRIBE_TIMESTAMPS, "--version_timestamps", SO_NONE },
 
 	SO_END_OF_OPTIONS
 };
@@ -648,6 +649,18 @@ static void printVersion() {
 	printf("protocol %llx\n", (long long) currentProtocolVersion);
 }
 
+const char *BlobCredentialInfo = 
+	"  BLOB CREDENTIALS\n"
+	"     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
+	"     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
+	"     These files can be specified with the --blob_credentials argument described above or via the environment variable\n"
+	"     FDB_BLOB_CREDENTIALS, whose value is a colon-separated list of files.  The command line takes priority over\n"
+	"     over the environment but all files from both sources are used.\n\n"
+	"     At connect time, the specified files are read in order and the first matching account specification (user@host)\n"
+	"     will be used to obtain the secret key.\n\n"
+	"     The JSON schema is:\n"
+	"        { \"accounts\" : { \"user@host\" : { \"secret\" : \"SECRETKEY\" }, \"user2@host2\" : { \"secret\" : \"SECRET\" } } }\n";
+
 static void printHelpTeaser( const char *name ) {
 	fprintf(stderr, "Try `%s --help' for more information.\n", name);
 }
@@ -668,6 +681,7 @@ static void printAgentUsage(bool devhelp) {
 		   "                 without a unit, MiB is assumed.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
+
 	if (devhelp) {
 #ifdef _WIN32
 		printf("  -n             Create a new console.\n");
@@ -676,6 +690,9 @@ static void printAgentUsage(bool devhelp) {
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
 	}
+
+	printf("\n");
+	puts(BlobCredentialInfo);
 
 	return;
 }
@@ -709,8 +726,10 @@ static void printBackupUsage(bool devhelp) {
 	       "                 Version cutoff for expire operations.  Deletes data files containing no data at or after VERSION.\n");
 	printf("  --restorable_after_timestamp DATETIME\n"
 		   "                 For expire operations, set minimum acceptable restorability to the version equivalent of DATETIME and later.\n");
-	printf("  --restorable_after_timestamp VERSION\n"
+	printf("  --restorable_after_version VERSION\n"
 		   "                 For expire operations, set minimum acceptable restorability to the VERSION and later.\n");
+	printf("  --version_timestamps\n");
+	printf("                 For describe operations, lookup versions in the database to obtain timestamps.  A cluster file is required.\n");
 	printf("  -f, --force    For expire operations, force expiration even if minimum restorability would be violated.\n");
 	printf("  -s, --snapshot_interval DURATION\n"
 	       "                 For start operations, specifies the backup's target snapshot interval as DURATION seconds.  Defaults to %d.\n", CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC);
@@ -732,20 +751,12 @@ static void printBackupUsage(bool devhelp) {
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
 		printf("  --deep         For describe operations, do not use cached metadata.  Warning: Very slow\n");
+		
 	}
 	printf("\n"
 		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
-	printf("\n"
-		   "  BLOB CREDENTIALS\n"
-		   "     Blob account secret keys can optionally be omitted from blobstore:// URLs, in which case they will be\n"
-		   "     loaded, if possible, from 1 or more blob credentials definition files.\n\n"
-		   "     These files can be specified with the --blob_credentials argument described above or via the environment variable\n"
-		   "     FDB_BLOB_CREDENTIALS, whose value is a colon-separated list of files.  The command line takes priority over\n"
-		   "     over the environment but all files from both sources are used.\n\n"
-		   "     At connect time, the specified files are read in order and the first matching account specification (user@host)\n"
-		   "     will be used to obtain the secret key.\n\n"
-		   "     The JSON schema is:\n"
-		   "        { \"accounts\" : { \"user@host\" : { \"secret\" : \"SECRETKEY\" }, \"user2@host2\" : { \"secret\" : \"SECRET\" } } }\n");
+	printf("\n");
+	puts(BlobCredentialInfo);
 
 	return;
 }
@@ -780,6 +791,11 @@ static void printRestoreUsage(bool devhelp ) {
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
 	}
+
+	printf("\n"
+		   "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
+	printf("\n");
+	puts(BlobCredentialInfo);
 
 	return;
 }
@@ -1807,53 +1823,18 @@ Reference<IBackupContainer> openBackupContainer(const char *name, std::string de
 	return c;
 }
 
-ACTOR Future<Version> getVersionFromDateTime(std::string datetime, Database db) {
-	state KeyBackedMap<int64_t, Version> versionMap(timeKeeperPrefixRange.begin);
-	state Reference<ReadYourWritesTransaction> tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(db));
-
-	int year, month, day, hour, minute, second;
-	if (sscanf(datetime.c_str(), "%d-%d-%d.%d:%d:%d", &year, &month, &day, &hour, &minute, &second) != 6) {
-		fprintf(stderr, "ERROR: Incorrect date/time format.\n");
-		throw backup_error();
-	}
-	struct tm expDateTime = {0};
-	expDateTime.tm_year = year - 1900;
-	expDateTime.tm_mon = month - 1;
-	expDateTime.tm_mday = day;
-	expDateTime.tm_hour = hour;
-	expDateTime.tm_min = minute;
-	expDateTime.tm_sec = second;
-	expDateTime.tm_isdst = -1;
-	state int64_t time = (int64_t) mktime(&expDateTime);
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			state std::vector<std::pair<int64_t, Version>> results = wait( versionMap.getRange(tr, 0, Optional<int64_t>(time), 1, false, true) );
-			if (results.size() != 1) {
-				fprintf(stderr, "ERROR: Unable to find a version with given date/time.\n");
-				throw backup_error();
-			}
-
-			return results[0].second;
-		} catch (Error& e) {
-			Void _ = wait(tr->onError(e));
-		}
-	}
-}
-
 ACTOR Future<Void> expireBackupData(const char *name, std::string destinationContainer, Version endVersion, std::string endDatetime, Database db, bool force, Version restorableAfterVersion, std::string restorableAfterDatetime) {
 	if (!endDatetime.empty()) {
-		Version v = wait( getVersionFromDateTime(endDatetime, db) );
+		Version v = wait( timeKeeperVersionFromDatetime(endDatetime, db) );
 		endVersion = v;
 	}
 
 	if (!restorableAfterDatetime.empty()) {
-		Version v = wait( getVersionFromDateTime(restorableAfterDatetime, db) );
+		Version v = wait( timeKeeperVersionFromDatetime(restorableAfterDatetime, db) );
 		restorableAfterVersion = v;
 	}
 
-	if (!endVersion) {
+	if (endVersion == invalidVersion) {
 		fprintf(stderr, "ERROR: No version or date/time is specified.\n");
 		printHelpTeaser(name);
 		throw backup_error();;
@@ -2272,12 +2253,13 @@ int main(int argc, char* argv[]) {
 
 		std::string destinationContainer;
 		bool describeDeep = false;
+		bool describeTimestamps = false;
 		int snapshotIntervalSeconds = CLIENT_KNOBS->BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC;
 		std::string clusterFile;
 		std::string sourceClusterFile;
 		std::string baseUrl;
 		std::string expireDatetime;
-		Version expireVersion = 0;
+		Version expireVersion = invalidVersion;
 		std::string expireRestorableAfterDatetime;
 		Version expireRestorableAfterVersion = std::numeric_limits<Version>::max();
 		std::vector<std::pair<std::string, std::string>> knobs;
@@ -2489,6 +2471,9 @@ int main(int argc, char* argv[]) {
 					break;
 				case OPT_DESCRIBE_DEEP:
 					describeDeep = true;
+					break;
+				case OPT_DESCRIBE_TIMESTAMPS:
+					describeTimestamps = true;
 					break;
 				case OPT_PREFIX_ADD:
 					addPrefix = args->OptionArg();
@@ -2834,9 +2819,10 @@ int main(int argc, char* argv[]) {
 
 			case BACKUP_EXPIRE:
 				// Must have a usable cluster if either expire DateTime options were used
-				if(!expireDatetime.empty() || !expireRestorableAfterDatetime.empty())
+				if(!expireDatetime.empty() || !expireRestorableAfterDatetime.empty()) {
 					if(!initCluster())
 						return FDB_EXIT_ERROR;
+				}
 				f = stopAfter( expireBackupData(argv[0], destinationContainer, expireVersion, expireDatetime, db, forceAction, expireRestorableAfterVersion, expireRestorableAfterDatetime) );
 				break;
 
@@ -2845,10 +2831,13 @@ int main(int argc, char* argv[]) {
 				break;
 
 			case BACKUP_DESCRIBE:
-				// Describe will lookup version timestamps if a cluster file was given, but quietly skip them if not.
-				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, initCluster(true) ? db : Optional<Database>()) );
-				break;
+				// If timestamp lookups are desired, require a cluster file
+				if(describeTimestamps && !initCluster())
+					return FDB_EXIT_ERROR;
 
+				// Only pass database optionDatabase Describe will lookup version timestamps if a cluster file was given, but quietly skip them if not.
+				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>()) );
+				break;
 			case BACKUP_LIST:
 				f = stopAfter( listBackup(baseUrl) );
 				break;

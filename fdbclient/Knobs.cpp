@@ -85,13 +85,13 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	// TaskBucket
 	init( TASKBUCKET_MAX_PRIORITY,                   1 );
-	init( TASKBUCKET_CHECK_TIMEOUT_CHANCE,        0.01 ); if( randomize && BUGGIFY ) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
+	init( TASKBUCKET_CHECK_TIMEOUT_CHANCE,        0.02 ); if( randomize && BUGGIFY ) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
 	init( TASKBUCKET_TIMEOUT_JITTER_OFFSET,        0.9 );
 	init( TASKBUCKET_TIMEOUT_JITTER_RANGE,         0.2 );
 	init( TASKBUCKET_CHECK_ACTIVE_DELAY,           0.5 );
 	init( TASKBUCKET_CHECK_ACTIVE_AMOUNT,           10 );
 	init( TASKBUCKET_TIMEOUT_VERSIONS,     60*CORE_VERSIONSPERSECOND ); if( randomize && BUGGIFY ) TASKBUCKET_TIMEOUT_VERSIONS = 30*CORE_VERSIONSPERSECOND;
-	init( TASKBUCKET_MAX_TASK_KEYS,              10000 ); if( randomize && BUGGIFY ) TASKBUCKET_MAX_TASK_KEYS = 20;
+	init( TASKBUCKET_MAX_TASK_KEYS,               1000 ); if( randomize && BUGGIFY ) TASKBUCKET_MAX_TASK_KEYS = 20;
 
 	//Backup
 	init( BACKUP_SIMULATED_LIMIT_BYTES,		       1e6 ); if( randomize && BUGGIFY ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
@@ -120,7 +120,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
 	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
-	init( RESTORE_DISPATCH_ADDTASK_SIZE,          1000 );
+	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 1;
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
