@@ -25,6 +25,7 @@ import glob
 
 import fdb
 
+
 def initialize_logger_level(logging_level):
     logger = get_logger()
 
@@ -39,10 +40,13 @@ def initialize_logger_level(logging_level):
     elif logging_level == "ERROR":
         logger.setLevel(logging.ERROR)
 
+
 def get_logger():
     return logging.getLogger('foundationdb.bindingtester')
 
 # Attempts to get the name associated with a process termination signal
+
+
 def signal_number_to_name(signal_num):
     name = []
     for key in signal.__dict__.keys():
@@ -52,6 +56,7 @@ def signal_number_to_name(signal_num):
         return name[0]
     else:
         return str(signal_num)
+
 
 def import_subclasses(filename, module_path):
     for f in glob.glob(os.path.join(os.path.dirname(filename), '*.py')):
@@ -63,10 +68,11 @@ def import_subclasses(filename, module_path):
 # Attempts to unpack a subspace
 # This throws an exception if the subspace cannot be unpacked as a tuple
 # As a result, the binding tester cannot use subspaces that have non-tuple raw prefixes
+
+
 def subspace_to_tuple(subspace):
     try:
         return fdb.tuple.unpack(subspace.key())
     except Exception as e:
         get_logger().debug(e)
         raise Exception('The binding tester does not support subspaces with non-tuple raw prefixes')
-

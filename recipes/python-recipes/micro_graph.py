@@ -26,26 +26,32 @@ graph = fdb.Subspace(('G',))
 edge = graph['E']
 inverse = graph['I']
 
+
 @fdb.transactional
 def set_edge(tr, node, neighbor):
     tr[edge[node][neighbor]] = ''
     tr[inverse[neighbor][node]] = ''
+
 
 @fdb.transactional
 def del_edge(tr, node, neighbor):
     del tr[edge[node][neighbor]]
     del tr[inverse[neighbor][node]]
 
+
 @fdb.transactional
 def get_out_neighbors(tr, node):
     return [edge.unpack(k)[1] for k, _ in tr[edge[node].range()]]
+
 
 @fdb.transactional
 def get_in_neighbors(tr, node):
     return [inverse.unpack(k)[1] for k, _ in tr[inverse[node].range()]]
 
+
 @fdb.transactional
 def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
+
 
 clear_subspace(db, graph)

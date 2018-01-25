@@ -34,11 +34,13 @@ import fdb
 import fdb.tuple
 fdb.api_version(400)
 
-#A class that mimics some of the operations of the FoundationDB key-value store
+# A class that mimics some of the operations of the FoundationDB key-value store
+
+
 class KeyValueStore():
 
-    #Uses a simple dictionary to store key-value pairs
-    #Any operations that depend on the order of keys first sort the data
+    # Uses a simple dictionary to store key-value pairs
+    # Any operations that depend on the order of keys first sort the data
     store = dict()
 
     def get(self, key):
@@ -130,7 +132,7 @@ class PythonCorrectness(PythonTest):
     callback = False
     callbackError = ''
 
-    #Python correctness tests (checks if functions run and yield correct results)
+    # Python correctness tests (checks if functions run and yield correct results)
     def run_test(self):
         try:
             db = fdb.open(None, 'DB')
@@ -152,13 +154,15 @@ class PythonCorrectness(PythonTest):
         except:
             self.result.add_error(self.getError('Failed to complete all tests'))
 
-    #Generates a random set of keys and values
-    def generateData(self, numKeys, minKeyLength, maxKeyLength, minValueLength, maxValueLength, prefix = '', allowDuplicates = True):
+    # Generates a random set of keys and values
+    def generateData(self, numKeys, minKeyLength, maxKeyLength, minValueLength, maxValueLength, prefix='', allowDuplicates=True):
         data = list()
         keys = set()
         while len(data) < numKeys:
-            #key = prefix + ''.join(random.choice(string.ascii_lowercase) for i in range(0, random.randint(minKeyLength - len(prefix), maxKeyLength - len(prefix))))
-            key = prefix + ''.join(chr(random.randint(0, 254)) for i in range(0, random.randint(minKeyLength - len(prefix), maxKeyLength - len(prefix))))
+            # key = prefix + ''.join(random.choice(string.ascii_lowercase)
+            #                        for i in range(0, random.randint(minKeyLength - len(prefix), maxKeyLength - len(prefix))))
+            key = prefix + ''.join(chr(random.randint(0, 254))
+                                   for i in range(0, random.randint(minKeyLength - len(prefix), maxKeyLength - len(prefix))))
             if not allowDuplicates:
                 if key in keys:
                     continue
@@ -170,7 +174,7 @@ class PythonCorrectness(PythonTest):
 
         return data
 
-    #Function to test the callback feature of Future objects
+    # Function to test the callback feature of Future objects
     def testCallback(self, future):
         try:
             future.wait()
@@ -181,7 +185,7 @@ class PythonCorrectness(PythonTest):
 
         self.callback = True
 
-    #Tests that all of the functions in the python API can be called without failing
+    # Tests that all of the functions in the python API can be called without failing
     def testFunctions(self, db):
         self.callback = False
         self.callbackError = ''
@@ -223,8 +227,8 @@ class PythonCorrectness(PythonTest):
 
         try:
             value = tr['fakekey']
-            #The following line would generate a segfault
-            #value.capi.fdb_future_block_until_ready(0)
+            # The following line would generate a segfault
+            # value.capi.fdb_future_block_until_ready(0)
             value.wait()
         except KeyboardInterrupt:
             raise
@@ -261,7 +265,6 @@ class PythonCorrectness(PythonTest):
             raise
         except:
             self.result.add_error(self.getError('Get and reset failed'))
-
 
         try:
             tr.set_read_version(version.wait())
@@ -314,13 +317,13 @@ class PythonCorrectness(PythonTest):
             tr['testkey2'] = 'testvalue2'
             tr['testkey3'] = 'testvalue3'
 
-            for k,v in tr.get_range('testkey1', 'testkey3'):
+            for k, v in tr.get_range('testkey1', 'testkey3'):
                 v += ''
 
-            for k,v in tr.get_range('testkey1', 'testkey2', 2):
+            for k, v in tr.get_range('testkey1', 'testkey2', 2):
                 v += ''
 
-            for k,v in tr['testkey1':'testkey3']:
+            for k, v in tr['testkey1':'testkey3']:
                 v += ''
         except KeyboardInterrupt:
             raise
@@ -331,7 +334,7 @@ class PythonCorrectness(PythonTest):
             tr['otherkey1'] = 'othervalue1'
             tr['otherkey2'] = 'othervalue2'
 
-            for k,v in tr.get_range_startswith('testkey'):
+            for k, v in tr.get_range_startswith('testkey'):
                 v += ''
         except KeyboardInterrupt:
             raise
@@ -365,13 +368,13 @@ class PythonCorrectness(PythonTest):
             self.result.add_error(self.getError('Create key selector failed'))
 
         try:
-            for k,v in tr.get_range(begin, end):
+            for k, v in tr.get_range(begin, end):
                 v += ''
 
-            for k,v in tr.get_range(begin, end, 2):
+            for k, v in tr.get_range(begin, end, 2):
                 v += ''
 
-            for k,v in tr[begin:end]:
+            for k, v in tr[begin:end]:
                 v += ''
         except KeyboardInterrupt:
             raise
@@ -399,13 +402,13 @@ class PythonCorrectness(PythonTest):
             begin = fdb.KeySelector.last_less_than('testkey2')
             end = fdb.KeySelector.first_greater_or_equal('testkey2')
 
-            for k,v in tr.get_range(begin, end):
+            for k, v in tr.get_range(begin, end):
                 v += ''
 
             begin = fdb.KeySelector.last_less_or_equal('testkey2')
             end = fdb.KeySelector.first_greater_than('testkey2')
 
-            for k,v in tr.get_range(begin, end):
+            for k, v in tr.get_range(begin, end):
                 v += ''
         except KeyboardInterrupt:
             raise
@@ -442,7 +445,7 @@ class PythonCorrectness(PythonTest):
             tr[fdb.tuple.pack(('k1', 'k2', 'k3'))] = 'v1'
             tr[fdb.tuple.pack(('k1', 'k2', 'k3', 'k4'))] = 'v2'
 
-            for k,v in tr[fdb.tuple.range(('k1', 'k2'))]:
+            for k, v in tr[fdb.tuple.range(('k1', 'k2'))]:
                 v += ''
 
         except KeyboardInterrupt:
@@ -467,30 +470,30 @@ class PythonCorrectness(PythonTest):
         if len(self.callbackError) > 0:
             self.result.add_error(self.callbackError)
 
-    #Compares a FoundationDB database with an in-memory key-value store
+    # Compares a FoundationDB database with an in-memory key-value store
     def compareDatabaseToMemory(self, db, store):
         dbResult = self.correctnessGetRangeTransactional(db, '\x00', '\xff')
         storeResult = store.get_range('\x00', '\xff')
 
         return self.compareResults(dbResult, storeResult)
 
-    #Compares result sets coming from a FoundationDB database and an in-memory key-value store
+    # Compares result sets coming from a FoundationDB database and an in-memory key-value store
     def compareResults(self, dbResults, storeResults):
         if len(dbResults) != len(storeResults):
-            #print 'mismatched lengths: ' + str(len(dbResults)) + ' - ' + str(len(storeResults))
+            # print 'mismatched lengths: ' + str(len(dbResults)) + ' - ' + str(len(storeResults))
             return False
 
         for i in range(0, len(dbResults)):
-            #if i >= len(storeResults):
+            # if i >= len(storeResults):
             #    print 'mismatched key: ' + dbResults[i].key
             #    return False
             if dbResults[i].key != storeResults[i][0] or dbResults[i].value != storeResults[i][1]:
-                #print 'mismatched key: ' + dbResults[i].key + ' - ' + storeResults[i][0]
+                # print 'mismatched key: ' + dbResults[i].key + ' - ' + storeResults[i][0]
                 return False
 
         return True
 
-    #Performs the same operations on a FoundationDB database and an in-memory key-value store and compares the results
+    # Performs the same operations on a FoundationDB database and an in-memory key-value store and compares the results
     def testCorrectness(self, db):
         numKeys = 5000
         ratioShortKeys = 0.5
@@ -516,51 +519,51 @@ class PythonCorrectness(PythonTest):
         try:
             store = KeyValueStore()
 
-            #Generate some random data
+            # Generate some random data
             data = self.generateData(numKeys * ratioShortKeys, minShortKeyLength, maxShortKeyLength, minValueLength, maxValueLength)
             data.extend(self.generateData(numKeys * (1 - ratioShortKeys), minLongKeyLength, maxLongKeyLength, minValueLength, maxValueLength))
 
-            #Insert the data
+            # Insert the data
             self.correctnessSet(db, store, data, maxKeysPerTransaction)
             if not self.compareDatabaseToMemory(db, store):
                 self.result.add_error('transaction.set resulted in incorrect database')
 
-            #Compare the results of single key reads
+            # Compare the results of single key reads
             if not self.correctnessGet(db, store, data, numReads, maxKeysPerTransaction):
                 self.result.add_error('transaction.get returned incorrect result')
 
-            #Compare the results of range reads
+            # Compare the results of range reads
             for i in range(0, numRangeReads):
-               if not self.correctnessGetRange(db, store, data):
+                if not self.correctnessGetRange(db, store, data):
                     self.result.add_error('transaction.get_range returned incorrect results')
                     break
 
-            #Compare the results of prefix reads
+            # Compare the results of prefix reads
             for i in range(0, numPrefixReads):
                 if not self.correctnessGetPrefix(db, store, data):
                     self.result.add_error('transaction.get_range_startswith returned incorrect results')
                     break
 
-            #Compare the results of get key
+            # Compare the results of get key
             if not self.correctnessGetKey(db, store, data, numGetKeys, maxKeysPerTransaction):
                 self.result.add_error('transaction.get_key returned incorrect results')
 
-            #Compare the results of clear
+            # Compare the results of clear
             clearedKeys = self.correctnessClear(db, store, data, numClears, maxKeysPerTransaction)
             if not self.compareDatabaseToMemory(db, store):
                 self.result.add_error('transaction.clear resulted in incorrect database')
 
             #    for key in clearedKeys:
             #        print 'clearing key ' + key
-            #else:
+            # else:
             #    print 'successful compare'
 
-            #Fill the database back up with data
+            # Fill the database back up with data
             self.correctnessSet(db, store, data, maxKeysPerTransaction)
             if not self.compareDatabaseToMemory(db, store):
                 self.result.add_error('transaction.set resulted in incorrect database')
 
-            #Compare the results of clear_range
+            # Compare the results of clear_range
             for i in range(0, numRangeClears):
                 self.correctnessClearRange(db, store, data)
 
@@ -568,7 +571,7 @@ class PythonCorrectness(PythonTest):
                 if not success:
                     self.result.add_error('transaction.clear_range resulted in incorrect database')
 
-                #Fill the database back up with data
+                # Fill the database back up with data
                 self.correctnessSet(db, store, data, maxKeysPerTransaction)
                 if not self.compareDatabaseToMemory(db, store):
                     self.result.add_error('transaction.set resulted in incorrect database')
@@ -577,7 +580,7 @@ class PythonCorrectness(PythonTest):
                 if not success:
                     break
 
-            #Compare the results of clear_range_startswith
+            # Compare the results of clear_range_startswith
             self.correctnessClearPrefix(db, store, data, numPrefixClears)
             if not self.compareDatabaseToMemory(db, store):
                 self.result.add_error('transaction.clear_range_startswith resulted in incorrect database')
@@ -587,23 +590,23 @@ class PythonCorrectness(PythonTest):
         except:
             self.result.add_error(self.getError('Database error in correctness test'))
 
-    #Stores data in the database and a memory key-value store
+    # Stores data in the database and a memory key-value store
     def correctnessSet(self, db, store, data, maxKeysPerTransaction):
         for [key, value] in data:
             store.set(key, value)
 
         keysCommitted = 0
         while keysCommitted < len(data):
-            self.correctnessSetTransactional(db, data[keysCommitted : keysCommitted + maxKeysPerTransaction])
+            self.correctnessSetTransactional(db, data[keysCommitted: keysCommitted + maxKeysPerTransaction])
             keysCommitted += maxKeysPerTransaction
 
-    #Stores data in the database
+    # Stores data in the database
     @fdb.transactional
     def correctnessSetTransactional(self, tr, data):
         for [key, value] in data:
             tr.set(key, value)
 
-    #Compares the results of the get operation from the database and a memory key-value store
+    # Compares the results of the get operation from the database and a memory key-value store
     def correctnessGet(self, db, store, data, numReads, maxKeysPerTransaction):
         keys = []
         for i in range(0, numReads):
@@ -612,7 +615,7 @@ class PythonCorrectness(PythonTest):
 
         keysRetrieved = 0
         while keysRetrieved < len(keys):
-            subKeys = keys[keysRetrieved : keysRetrieved + maxKeysPerTransaction]
+            subKeys = keys[keysRetrieved: keysRetrieved + maxKeysPerTransaction]
 
             values = self.correctnessGetTransactional(db, subKeys)
             for i in range(0, numReads):
@@ -623,7 +626,7 @@ class PythonCorrectness(PythonTest):
 
         return True
 
-    #Gets the values for the specified list of keys from the database
+    # Gets the values for the specified list of keys from the database
     @fdb.transactional
     def correctnessGetTransactional(self, tr, keys):
         futures = []
@@ -636,7 +639,7 @@ class PythonCorrectness(PythonTest):
 
         return values
 
-    #Compares the results of the get_range operation from the database and a memory key-value store
+    # Compares the results of the get_range operation from the database and a memory key-value store
     def correctnessGetRange(self, db, store, data):
         index = random.randint(0, len(data) - 1)
         index2 = random.randint(0, len(data) - 1)
@@ -649,15 +652,15 @@ class PythonCorrectness(PythonTest):
 
         return self.compareResults(dbResults, storeResults)
 
-    #Gets the entries in the range [key1,key2) from the database
+    # Gets the entries in the range [key1,key2) from the database
     @fdb.transactional
-    def correctnessGetRangeTransactional(self, tr, key1, key2, data = None):
+    def correctnessGetRangeTransactional(self, tr, key1, key2, data=None):
         if data is not None:
             return list(tr.get_range(key1, key2, len(data)))
         else:
             return list(tr.get_range(key1, key2))
 
-    #Compares the results of the get_range_startswith operation from the database and a memory key-value store
+    # Compares the results of the get_range_startswith operation from the database and a memory key-value store
     def correctnessGetPrefix(self, db, store, data):
         prefix = ''.join(chr(random.randint(0, 254)) for i in range(0, random.randint(1, 3)))
         dbResults = self.correctnessGetPrefixTransactional(db, prefix)
@@ -665,12 +668,12 @@ class PythonCorrectness(PythonTest):
 
         return self.compareResults(dbResults, storeResults)
 
-    #Gets the entries with a given prefix from the database
+    # Gets the entries with a given prefix from the database
     @fdb.transactional
     def correctnessGetPrefixTransactional(self, tr, prefix):
         return list(tr.get_range_startswith(prefix))
 
-    #Compares the results of the get_key operation from the database and a memory key-value store
+    # Compares the results of the get_key operation from the database and a memory key-value store
     def correctnessGetKey(self, db, store, data, numGetKeys, maxKeysPerTransaction):
         selectors = []
         for i in range(0, numGetKeys):
@@ -684,7 +687,7 @@ class PythonCorrectness(PythonTest):
 
         keysRetrieved = 0
         while keysRetrieved < len(selectors):
-            subSelectors = selectors[keysRetrieved : keysRetrieved + maxKeysPerTransaction]
+            subSelectors = selectors[keysRetrieved: keysRetrieved + maxKeysPerTransaction]
             dbKeys = self.correctnessGetKeyTransactional(db, subSelectors)
             for i in range(0, numGetKeys):
                 if dbKeys[i] != store.get_key(subSelectors[i]):
@@ -693,7 +696,7 @@ class PythonCorrectness(PythonTest):
 
         return True
 
-    #Gets the keys specified by the list of key selectors
+    # Gets the keys specified by the list of key selectors
     @fdb.transactional
     def correctnessGetKeyTransactional(self, tr, keySelectors):
         futures = []
@@ -710,7 +713,7 @@ class PythonCorrectness(PythonTest):
 
         return keys
 
-    #Clears data from a database and a memory key-value store
+    # Clears data from a database and a memory key-value store
     def correctnessClear(self, db, store, data, numClears, maxKeysPerTransaction):
         clearedKeys = []
         for i in range(0, numClears):
@@ -720,18 +723,18 @@ class PythonCorrectness(PythonTest):
 
         keysCleared = 0
         while keysCleared < len(clearedKeys):
-            self.correctnessClearTransactional(db, clearedKeys[keysCleared : keysCleared + maxKeysPerTransaction])
+            self.correctnessClearTransactional(db, clearedKeys[keysCleared: keysCleared + maxKeysPerTransaction])
             keysCleared += maxKeysPerTransaction
 
         return clearedKeys
 
-    #Clears a list of keys from the database
+    # Clears a list of keys from the database
     @fdb.transactional
     def correctnessClearTransactional(self, tr, clearedKeys):
         for key in clearedKeys:
             tr.clear(key)
 
-    #Clears a range of data from a database and a memory key-value store
+    # Clears a range of data from a database and a memory key-value store
     def correctnessClearRange(self, db, store, data):
         index = random.randint(0, len(data) - 1)
         index2 = random.randint(0, len(data) - 1)
@@ -742,12 +745,12 @@ class PythonCorrectness(PythonTest):
         self.correctnessClearRangeTransactional(db, key1, key2)
         store.clear_range(key1, key2)
 
-    #Clears a range of memory from a database
+    # Clears a range of memory from a database
     @fdb.transactional
     def correctnessClearRangeTransactional(self, tr, key1, key2):
         tr.clear_range(key1, key2)
 
-    #Clears data with random prefixes from a database and a memory key-value store
+    # Clears data with random prefixes from a database and a memory key-value store
     def correctnessClearPrefix(self, db, store, data, numPrefixClears):
         prefixes = []
         for i in range(0, numPrefixClears):
@@ -757,19 +760,21 @@ class PythonCorrectness(PythonTest):
 
         self.correctnessClearPrefixTransactional(db, prefixes)
 
-    #Clears keys from a database that have a prefix in the prefixes list
+    # Clears keys from a database that have a prefix in the prefixes list
     @fdb.transactional
     def correctnessClearPrefixTransactional(self, tr, prefixes):
         for prefix in prefixes:
             tr.clear_range_startswith(prefix)
 
-    #Adds the stack trace to an error message
+    # Adds the stack trace to an error message
     def getError(self, message):
         errorMessage = message + "\n" + traceback.format_exc()
         print('%s', errorMessage)
         return errorMessage
 
+
 if __name__ == '__main__':
-    print("Running PythonCorrectness test on Python version %d.%d.%d%s%d" % (sys.version_info[0], sys.version_info[1], sys.version_info[2], sys.version_info[3][0], sys.version_info[4]))
+    print("Running PythonCorrectness test on Python version %d.%d.%d%s%d" %
+          (sys.version_info[0], sys.version_info[1], sys.version_info[2], sys.version_info[3][0], sys.version_info[4]))
 
     PythonCorrectness().run()

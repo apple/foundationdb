@@ -31,6 +31,7 @@ from bindingtester import util
 from bindingtester import FDB_API_VERSION
 from bindingtester.known_testers import COMMON_TYPES
 
+
 class RandomGenerator(object):
     def __init__(self, max_int_bits=64, api_version=FDB_API_VERSION, types=COMMON_TYPES):
         self.max_int_bits = max_int_bits
@@ -41,13 +42,13 @@ class RandomGenerator(object):
         return u''.join(self.random_unicode_char() for i in range(0, length))
 
     def random_int(self):
-        num_bits = random.randint(0, self.max_int_bits) # This way, we test small numbers with higher probability
+        num_bits = random.randint(0, self.max_int_bits)  # This way, we test small numbers with higher probability
 
         max_value = (1 << num_bits) - 1
         min_value = -max_value - 1
         num = random.randint(min_value, max_value)
 
-        #util.get_logger().debug('generating int (%d): %d - %s' % (num_bits, num, repr(fdb.tuple.pack((num,)))))
+        # util.get_logger().debug('generating int (%d): %d - %s' % (num_bits, num, repr(fdb.tuple.pack((num,)))))
         return num
 
     def random_float(self, exp_bits):
@@ -57,7 +58,7 @@ class RandomGenerator(object):
         else:
             # Choose a value from all over the range of acceptable floats for this precision.
             sign = -1 if random.random() < 0.5 else 1
-            exponent = random.randint(-(1 << (exp_bits-1))-10, (1 << (exp_bits-1) - 1))
+            exponent = random.randint(-(1 << (exp_bits - 1)) - 10, (1 << (exp_bits - 1) - 1))
             mantissa = random.random()
             return sign * math.pow(2, exponent) * mantissa
 
@@ -117,12 +118,12 @@ class RandomGenerator(object):
                 smaller_size = random.randint(1, len(to_add))
                 tuples.append(to_add[:smaller_size])
             else:
-                non_empty = filter(lambda (i,x): (isinstance(x, list) or isinstance(x, tuple)) and len(x) > 0, enumerate(to_add))
+                non_empty = filter(lambda i_x: (isinstance(i_x[1], list) or isinstance(i_x[1], tuple)) and len(i_x[1]) > 0, enumerate(to_add))
                 if len(non_empty) > 0 and random.random() < 0.25:
                     # Add a smaller list to test prefixes of nested structures.
                     idx, choice = random.choice(non_empty)
                     smaller_size = random.randint(0, len(to_add[idx]))
-                    tuples.append(to_add[:idx] + (choice[:smaller_size],) + to_add[idx+1:])
+                    tuples.append(to_add[:idx] + (choice[:smaller_size],) + to_add[idx + 1:])
 
         random.shuffle(tuples)
         return tuples
@@ -133,7 +134,7 @@ class RandomGenerator(object):
         elif random.random() < 0.75:
             limit = 0
         else:
-            limit = random.randint(1e8, (1<<31)-1)
+            limit = random.randint(1e8, (1 << 31) - 1)
 
         return (limit, random.randint(0, 1), random.randint(-2, 4))
 
@@ -149,13 +150,13 @@ class RandomGenerator(object):
         if length == 0:
             return ''
 
-        return chr(random.randint(0, 254)) + ''.join(chr(random.randint(0, 255)) for i in range(0, length-1))
+        return chr(random.randint(0, 254)) + ''.join(chr(random.randint(0, 255)) for i in range(0, length - 1))
 
     def random_unicode_char(self):
         while True:
             if random.random() < 0.05:
                 # Choose one of these special character sequences.
-                specials = [u'\U0001f4a9', u'\U0001f63c', u'\U0001f3f3\ufe0f\u200d\U0001f308', u'\U0001f1f5\U0001f1f2', u'\uf8ff', 
+                specials = [u'\U0001f4a9', u'\U0001f63c', u'\U0001f3f3\ufe0f\u200d\U0001f308', u'\U0001f1f5\U0001f1f2', u'\uf8ff',
                             u'\U0002a2b2', u'\u05e9\u05dc\u05d5\u05dd']
                 return random.choice(specials)
             c = random.randint(0, 0xffff)
@@ -166,10 +167,12 @@ class RandomGenerator(object):
 def error_string(error_code):
     return fdb.tuple.pack(('ERROR', str(error_code)))
 
+
 def blocking_commit(instructions):
     instructions.append('COMMIT')
     instructions.append('WAIT_FUTURE')
     instructions.append('RESET')
+
 
 def to_front(instructions, index):
     if index == 0:
@@ -178,19 +181,19 @@ def to_front(instructions, index):
         instructions.push_args(1)
         instructions.append('SWAP')
     elif index == 2:
-        instructions.push_args(index-1)
+        instructions.push_args(index - 1)
         instructions.append('SWAP')
         instructions.push_args(index)
         instructions.append('SWAP')
     else:
-        instructions.push_args(index-1)
+        instructions.push_args(index - 1)
         instructions.append('SWAP')
         instructions.push_args(index)
         instructions.append('SWAP')
-        instructions.push_args(index-1)
+        instructions.push_args(index - 1)
         instructions.append('SWAP')
-        to_front(instructions, index-1)
+        to_front(instructions, index - 1)
+
 
 def with_length(tup):
     return (len(tup),) + tup
-

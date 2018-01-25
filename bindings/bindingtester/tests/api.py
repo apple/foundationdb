@@ -32,11 +32,12 @@ from bindingtester.tests import test_util
 
 fdb.api_version(FDB_API_VERSION)
 
+
 class ApiTest(Test):
     def __init__(self, subspace):
         super(ApiTest, self).__init__(subspace)
-        self.workspace = self.subspace['workspace'] # The keys and values here must match between subsequent runs of the same test
-        self.scratch = self.subspace['scratch'] # The keys and values here can differ between runs
+        self.workspace = self.subspace['workspace']  # The keys and values here must match between subsequent runs of the same test
+        self.scratch = self.subspace['scratch']  # The keys and values here can differ between runs
         self.stack_subspace = self.subspace['stack']
 
         self.versionstamped_values = self.scratch['versionstamped_values']
@@ -78,7 +79,7 @@ class ApiTest(Test):
         self.key_depth = max(0, self.key_depth - num)
 
         self.outstanding_ops = [i for i in self.outstanding_ops if i[0] <= self.stack_size]
-        
+
     def ensure_string(self, instructions, num):
         while self.string_depth < num:
             instructions.push_args(self.random.random_string(random.randint(0, 100)))
@@ -97,7 +98,7 @@ class ApiTest(Test):
         tup = self.random.random_tuple(5)
         self.generated_keys.append(tup)
 
-        return self.workspace.pack(tup) 
+        return self.workspace.pack(tup)
 
     def ensure_key(self, instructions, num):
         while self.key_depth < num:
@@ -131,7 +132,7 @@ class ApiTest(Test):
     def wait_for_reads(self, instructions):
         while len(self.outstanding_ops) > 0 and self.outstanding_ops[-1][0] <= self.stack_size:
             read = self.outstanding_ops.pop()
-            #print '%d. waiting for read at instruction %r' % (len(instructions), read)
+            # print '%d. waiting for read at instruction %r' % (len(instructions), read)
             test_util.to_front(instructions, self.stack_size - read[0])
             instructions.append('WAIT_FUTURE')
 
@@ -187,7 +188,7 @@ class ApiTest(Test):
             index = len(instructions)
             read_performed = False
 
-            #print 'Adding instruction %s at %d' % (op, index)
+            # print 'Adding instruction %s at %d' % (op, index)
 
             if args.concurrency == 1 and (op in database_mutations):
                 self.wait_for_reads(instructions)
@@ -211,7 +212,7 @@ class ApiTest(Test):
                 instructions.push_args(random.randint(0, 5000))
                 instructions.append(op)
 
-                self.outstanding_ops.append((self.stack_size, len(instructions)-1))
+                self.outstanding_ops.append((self.stack_size, len(instructions) - 1))
                 if args.concurrency == 1:
                     self.wait_for_reads(instructions)
 
@@ -236,7 +237,7 @@ class ApiTest(Test):
                     test_util.to_front(instructions, 3)
                     instructions.append(op)
 
-                    #Don't add key here because we may be outside of our prefix
+                    # Don't add key here because we may be outside of our prefix
                     self.add_strings(1)
                     self.can_set_version = False
                     read_performed = True
@@ -249,7 +250,7 @@ class ApiTest(Test):
                 test_util.to_front(instructions, 4)
                 instructions.append(op)
 
-                if range_params[0] >= 1 and range_params[0] <= 1000: # avoid adding a string if the limit is large
+                if range_params[0] >= 1 and range_params[0] <= 1000:  # avoid adding a string if the limit is large
                     self.add_strings(1)
                 else:
                     self.add_stack_items(1)
@@ -258,14 +259,14 @@ class ApiTest(Test):
                 read_performed = True
 
             elif op == 'GET_RANGE_STARTS_WITH' or op == 'GET_RANGE_STARTS_WITH_SNAPSHOT' or op == 'GET_RANGE_STARTS_WITH_DATABASE':
-                #TODO: not tested well
+                # TODO: not tested well
                 self.ensure_key(instructions, 1)
                 range_params = self.random.random_range_params()
                 instructions.push_args(*range_params)
                 test_util.to_front(instructions, 3)
                 instructions.append(op)
 
-                if range_params[0] >= 1 and range_params[0] <= 1000: # avoid adding a string if the limit is large
+                if range_params[0] >= 1 and range_params[0] <= 1000:  # avoid adding a string if the limit is large
                     self.add_strings(1)
                 else:
                     self.add_stack_items(1)
@@ -285,7 +286,7 @@ class ApiTest(Test):
                     test_util.to_front(instructions, 9)
                     instructions.append(op)
 
-                    if range_params[0] >= 1 and range_params[0] <= 1000: # avoid adding a string if the limit is large
+                    if range_params[0] >= 1 and range_params[0] <= 1000:  # avoid adding a string if the limit is large
                         self.add_strings(1)
                     else:
                         self.add_stack_items(1)
@@ -302,8 +303,8 @@ class ApiTest(Test):
                 self.ensure_key_value(instructions)
                 instructions.append(op)
                 if op == 'SET_DATABASE':
-                    self.add_stack_items(1)   
-                
+                    self.add_stack_items(1)
+
             elif op == 'SET_READ_VERSION':
                 if self.has_version and self.can_set_version:
                     instructions.append(op)
@@ -316,7 +317,7 @@ class ApiTest(Test):
                     self.add_stack_items(1)
 
             elif op == 'CLEAR_RANGE' or op == 'CLEAR_RANGE_DATABASE':
-                #Protect against inverted range
+                # Protect against inverted range
                 key1 = self.workspace.pack(self.random.random_tuple(5))
                 key2 = self.workspace.pack(self.random.random_tuple(5))
 
@@ -334,7 +335,7 @@ class ApiTest(Test):
                 instructions.append(op)
                 if op == 'CLEAR_RANGE_STARTS_WITH_DATABASE':
                     self.add_stack_items(1)
-                    
+
             elif op == 'ATOMIC_OP' or op == 'ATOMIC_OP_DATABASE':
                 self.ensure_key_value(instructions)
                 if op == 'ATOMIC_OP' or args.concurrency > 1:
@@ -351,10 +352,10 @@ class ApiTest(Test):
                 key1 = self.versionstamped_values.pack((rand_str1,))
 
                 split = random.randint(0, 70)
-                rand_str2 = self.random.random_string(20+split) + fdb.tuple.Versionstamp._UNSET_TR_VERSION + self.random.random_string(70-split)
+                rand_str2 = self.random.random_string(20 + split) + fdb.tuple.Versionstamp._UNSET_TR_VERSION + self.random.random_string(70 - split)
                 key2 = self.versionstamped_keys.pack() + rand_str2
                 index = key2.find(fdb.tuple.Versionstamp._UNSET_TR_VERSION)
-                key2 += chr(index%256)+chr(index/256)
+                key2 += chr(index % 256) + chr(index / 256)
 
                 instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', key1, fdb.tuple.Versionstamp._UNSET_TR_VERSION + rand_str2)
                 instructions.append('ATOMIC_OP')
@@ -436,8 +437,8 @@ class ApiTest(Test):
 
                 version_key = self.versionstamped_keys.pack(tup)
                 first_incomplete = version_key.find(fdb.tuple.Versionstamp._UNSET_TR_VERSION)
-                second_incomplete = -1 if first_incomplete < 0 else version_key.find(fdb.tuple.Versionstamp._UNSET_TR_VERSION,
-                                                                                     first_incomplete + len(fdb.tuple.Versionstamp._UNSET_TR_VERSION) + 1)
+                second_incomplete = -1 if first_incomplete < 0 else \
+                    version_key.find(fdb.tuple.Versionstamp._UNSET_TR_VERSION, first_incomplete + len(fdb.tuple.Versionstamp._UNSET_TR_VERSION) + 1)
 
                 # If there is exactly one incomplete versionstamp, perform the versionstamped key operation.
                 if first_incomplete >= 0 and second_incomplete < 0:
@@ -449,7 +450,8 @@ class ApiTest(Test):
                     instructions.append('ATOMIC_OP')
 
                     version_value_key = self.versionstamped_values.pack((rand_str,))
-                    instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', version_value_key, fdb.tuple.Versionstamp._UNSET_TR_VERSION + fdb.tuple.pack(tup))
+                    instructions.push_args(u'SET_VERSIONSTAMPED_VALUE', version_value_key,
+                                           fdb.tuple.Versionstamp._UNSET_TR_VERSION + fdb.tuple.pack(tup))
                     instructions.append('ATOMIC_OP')
                     self.can_use_key_selectors = False
 
@@ -469,7 +471,7 @@ class ApiTest(Test):
                 instructions.append(op)
                 self.add_strings(len(tups))
 
-            #Use SUB to test if integers are correctly unpacked
+            # Use SUB to test if integers are correctly unpacked
             elif op == 'SUB':
                 a = self.random.random_int() / 2
                 b = self.random.random_int() / 2
@@ -512,7 +514,7 @@ class ApiTest(Test):
                 assert False
 
             if read_performed and op not in database_reads:
-                self.outstanding_ops.append((self.stack_size, len(instructions)-1))
+                self.outstanding_ops.append((self.stack_size, len(instructions) - 1))
 
             if args.concurrency == 1 and (op in database_reads or op in database_mutations):
                 instructions.append('WAIT_FUTURE')
@@ -536,7 +538,7 @@ class ApiTest(Test):
     def check_versionstamps(self, tr, begin_key, limit):
         next_begin = None
         incorrect_versionstamps = 0
-        for k,v in tr.get_range(begin_key, self.versionstamped_values.range().stop, limit=limit):
+        for k, v in tr.get_range(begin_key, self.versionstamped_values.range().stop, limit=limit):
             next_begin = k + '\x00'
             tup = fdb.tuple.unpack(k)
             key = self.versionstamped_keys.pack() + v[10:].replace(fdb.tuple.Versionstamp._UNSET_TR_VERSION, v[:10], 1)
@@ -544,7 +546,6 @@ class ApiTest(Test):
                 util.get_logger().error('  INCORRECT VERSIONSTAMP:')
                 util.get_logger().error('    %s != %s', repr(tr[key]), repr(tup[-1]))
                 incorrect_versionstamps += 1
-
 
         return (next_begin, incorrect_versionstamps)
 
@@ -564,8 +565,7 @@ class ApiTest(Test):
         return errors
 
     def get_result_specifications(self):
-        return [ 
-            ResultSpecification(self.workspace, global_error_filter=[1007, 1021]), 
-            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1, global_error_filter=[1007, 1021]) 
+        return [
+            ResultSpecification(self.workspace, global_error_filter=[1007, 1021]),
+            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1, global_error_filter=[1007, 1021])
         ]
-

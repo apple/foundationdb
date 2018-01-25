@@ -32,6 +32,7 @@ from bindingtester.tests.directory_util import DirListEntry
 
 fdb.api_version(FDB_API_VERSION)
 
+
 class DirectoryTest(Test):
 
     def __init__(self, subspace):
@@ -71,12 +72,12 @@ class DirectoryTest(Test):
         instructions = InstructionSet()
 
         op_choices = ['NEW_TRANSACTION', 'COMMIT']
-        
+
         general = ['DIRECTORY_CREATE_SUBSPACE', 'DIRECTORY_CREATE_LAYER']
 
         op_choices += general
 
-        directory_mutations = ['DIRECTORY_CREATE_OR_OPEN', 'DIRECTORY_CREATE', 'DIRECTORY_MOVE', 'DIRECTORY_MOVE_TO', 
+        directory_mutations = ['DIRECTORY_CREATE_OR_OPEN', 'DIRECTORY_CREATE', 'DIRECTORY_MOVE', 'DIRECTORY_MOVE_TO',
                                'DIRECTORY_REMOVE', 'DIRECTORY_REMOVE_IF_EXISTS']
         directory_reads = ['DIRECTORY_EXISTS', 'DIRECTORY_OPEN', 'DIRECTORY_LIST']
 
@@ -105,17 +106,18 @@ class DirectoryTest(Test):
 
         # Generate some directories that we are going to create in advance. This tests that other bindings
         # are compatible with the Python implementation
-        self.prepopulated_dirs = [ (generate_path(min_length=1), self.generate_layer()) for i in range(5) ]
+        self.prepopulated_dirs = [(generate_path(min_length=1), self.generate_layer()) for i in range(5)]
 
         for path, layer in self.prepopulated_dirs:
             instructions.push_args(layer)
             instructions.push_args(*test_util.with_length(path))
             instructions.append('DIRECTORY_OPEN')
-            #print '%d. Selected %s, dir=%s, has_known_prefix=%s, dir_list_len=%d' % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), False, len(self.dir_list))
+            # print '%d. Selected %s, dir=%s, has_known_prefix=%s, dir_list_len=%d' \
+            #        % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), False, len(self.dir_list))
             self.dir_list.append(self.dir_list[0].add_child(path, default_path, self.root, DirListEntry(True, True, has_known_prefix=False)))
 
         instructions.setup_complete()
-        
+
         for i in range(args.num_ops):
             if random.random() < 0.5:
                 self.dir_index = random.randrange(0, len(self.dir_list))
@@ -131,7 +133,8 @@ class DirectoryTest(Test):
             op = random.choice(choices)
             dir_entry = self.dir_list[self.dir_index]
 
-            #print '%d. Selected %s, dir=%s, has_known_prefix=%s, dir_list_len=%d' % (len(instructions), op, repr(self.dir_index), repr(dir_entry.has_known_prefix), len(self.dir_list))
+            # print '%d. Selected %s, dir=%s, has_known_prefix=%s, dir_list_len=%d' \
+            #        % (len(instructions), op, repr(self.dir_index), repr(dir_entry.has_known_prefix), len(self.dir_list))
 
             if op.endswith('_DATABASE') or op.endswith('_SNAPSHOT'):
                 root_op = op[0:-9]
@@ -160,7 +163,7 @@ class DirectoryTest(Test):
                     indices.append(len(self.dir_list))
                     self.dir_list.append(DirListEntry(False, True))
 
-                instructions.push_args(random.choice([0,1]))
+                instructions.push_args(random.choice([0, 1]))
                 instructions.push_args(*indices)
                 instructions.append(op)
                 self.dir_list.append(DirListEntry(True, False, False))
@@ -172,7 +175,7 @@ class DirectoryTest(Test):
                     test_util.blocking_commit(instructions)
 
                 path = generate_path()
-                op_args =  test_util.with_length(path) + (self.generate_layer(),)
+                op_args = test_util.with_length(path) + (self.generate_layer(),)
                 directory_util.push_instruction_and_record_prefix(instructions, op, op_args, path, len(self.dir_list), self.random, self.prefix_log)
 
                 if not op.endswith('_DATABASE') and args.concurrency == 1:
@@ -189,18 +192,19 @@ class DirectoryTest(Test):
 
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
                 # transactions that allocate/remove these prefixes in a comparison test
-                if op.endswith('_DATABASE') and args.concurrency == 1: # and allow_empty_prefix:
+                if op.endswith('_DATABASE') and args.concurrency == 1:  # and allow_empty_prefix:
                     test_util.blocking_commit(instructions)
 
                 path = generate_path()
-                op_args = test_util.with_length(path) + (layer, prefix) 
+                op_args = test_util.with_length(path) + (layer, prefix)
                 if prefix is None:
-                    directory_util.push_instruction_and_record_prefix(instructions, op, op_args, path, len(self.dir_list), self.random, self.prefix_log)
+                    directory_util.push_instruction_and_record_prefix(
+                        instructions, op, op_args, path, len(self.dir_list), self.random, self.prefix_log)
                 else:
                     instructions.push_args(*op_args)
                     instructions.append(op)
 
-                if not op.endswith('_DATABASE') and args.concurrency == 1: # and allow_empty_prefix:
+                if not op.endswith('_DATABASE') and args.concurrency == 1:  # and allow_empty_prefix:
                     test_util.blocking_commit(instructions)
 
                 self.dir_list.append(dir_entry.add_child(path, default_path, self.root, DirListEntry(True, True, bool(prefix))))
@@ -228,13 +232,14 @@ class DirectoryTest(Test):
                 new_path = generate_path()
                 instructions.push_args(*test_util.with_length(new_path))
                 instructions.append(op)
-                self.dir_list.append(dir_entry.root.add_child(new_path, default_path, self.root, DirListEntry(True, True, dir_entry.has_known_prefix)))
+                self.dir_list.append(dir_entry.root.add_child(new_path, default_path, self.root,
+                                                              DirListEntry(True, True, dir_entry.has_known_prefix)))
 
                 # Make sure that the default directory subspace still exists after moving the current directory
                 self.ensure_default_directory_subspace(instructions, default_path)
 
             # FIXME: There is currently a problem with removing partitions. In these generated tests, it's possible
-            # for a removed partition to resurrect itself and insert keys into the database using its allocated 
+            # for a removed partition to resurrect itself and insert keys into the database using its allocated
             # prefix. The result is non-deterministic HCA errors.
             elif root_op == 'DIRECTORY_REMOVE' or root_op == 'DIRECTORY_REMOVE_IF_EXISTS':
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
@@ -242,7 +247,7 @@ class DirectoryTest(Test):
                 if op.endswith('_DATABASE') and args.concurrency == 1:
                     test_util.blocking_commit(instructions)
 
-                path = () 
+                path = ()
                 count = random.randint(0, 1)
                 if count == 1:
                     path = generate_path()
@@ -256,14 +261,14 @@ class DirectoryTest(Test):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
             elif root_op == 'DIRECTORY_LIST' or root_op == 'DIRECTORY_EXISTS':
-                path = () 
+                path = ()
                 count = random.randint(0, 1)
                 if count == 1:
                     path = generate_path()
                     instructions.push_args(*test_util.with_length(path))
                 instructions.push_args(count)
                 instructions.append(op)
-            
+
             elif root_op == 'DIRECTORY_PACK_KEY':
                 t = self.random.random_tuple(5)
                 instructions.push_args(*test_util.with_length(t))
@@ -305,10 +310,10 @@ class DirectoryTest(Test):
                 instructions.push_args(self.directory_log.key())
                 instructions.append('DIRECTORY_LOG_DIRECTORY')
             if dir_entry.has_known_prefix and dir_entry.is_subspace:
-                #print '%d. Logging subspace: %d' % (i, dir_entry.dir_id)
+                # print '%d. Logging subspace: %d' % (i, dir_entry.dir_id)
                 instructions.push_args(self.subspace_log.key())
                 instructions.append('DIRECTORY_LOG_SUBSPACE')
-            if (i+1) % 100 == 0:
+            if (i + 1) % 100 == 0:
                 test_util.blocking_commit(instructions)
 
         instructions.push_args(self.stack_subspace.key())
@@ -332,18 +337,20 @@ class DirectoryTest(Test):
         # If a partition is created, allocates a prefix, and then is removed, subsequent prefix
         # allocations could collide with prior ones. We can get around this by not allowing
         # a removed directory (or partition) to be used, but that weakens the test in another way.
-        #errors += directory_util.check_for_duplicate_prefixes(db, self.prefix_log)
+        # errors += directory_util.check_for_duplicate_prefixes(db, self.prefix_log)
         return errors
 
     def get_result_specfications(self):
-        return [ 
-            ResultSpecification(self.stack, key_start_index=1, ordering_index=1), 
-            ResultSpecification(self.directory_log, ordering_index=0), 
-            ResultSpecification(self.subspace_log, ordering_index=0) 
+        return [
+            ResultSpecification(self.stack, key_start_index=1, ordering_index=1),
+            ResultSpecification(self.directory_log, ordering_index=0),
+            ResultSpecification(self.subspace_log, ordering_index=0)
         ]
 
 # Utility functions
-def generate_path(min_length = 0):
+
+
+def generate_path(min_length=0):
     length = int(random.random() * random.random() * (4 - min_length)) + min_length
     path = ()
     for i in range(length):
@@ -351,8 +358,9 @@ def generate_path(min_length = 0):
             path = path + (u'',)
         else:
             path = path + (random.choice([u'1', u'2', u'3']),)
-    
+
     return path
+
 
 def generate_prefix(allow_empty=True, is_partition=False):
     if allow_empty and random.random() < 0.8:
@@ -364,7 +372,7 @@ def generate_prefix(allow_empty=True, is_partition=False):
 
         if not is_partition:
             first = chr(random.randint(ord('\x1d'), 255) % 255)
-            return first + ''.join(chr(random.randrange(0, 256)) for i in range(0, length-1))
+            return first + ''.join(chr(random.randrange(0, 256)) for i in range(0, length - 1))
         else:
             return ''.join(chr(random.randrange(ord('\x02'), ord('\x14'))) for i in range(0, length))
     else:

@@ -20,50 +20,57 @@
 
 # FoundationDB Python API
 
-import ctypes, uuid, struct, math
+import ctypes
+import uuid
+import struct
+import math
 from bisect import bisect_left
 
 from fdb import six
 import fdb
 
-_size_limits = tuple( (1 << (i*8))-1 for i in range(9) )
+_size_limits = tuple((1 << (i * 8)) - 1 for i in range(9))
 
 # Define type codes:
-NULL_CODE         = 0x00
-BYTES_CODE        = 0x01
-STRING_CODE       = 0x02
-NESTED_CODE       = 0x05
-INT_ZERO_CODE     = 0x14
-POS_INT_END       = 0x1d
-NEG_INT_START     = 0x0b
-FLOAT_CODE        = 0x20
-DOUBLE_CODE       = 0x21
-FALSE_CODE        = 0x26
-TRUE_CODE         = 0x27
-UUID_CODE         = 0x30
+NULL_CODE = 0x00
+BYTES_CODE = 0x01
+STRING_CODE = 0x02
+NESTED_CODE = 0x05
+INT_ZERO_CODE = 0x14
+POS_INT_END = 0x1d
+NEG_INT_START = 0x0b
+FLOAT_CODE = 0x20
+DOUBLE_CODE = 0x21
+FALSE_CODE = 0x26
+TRUE_CODE = 0x27
+UUID_CODE = 0x30
 VERSIONSTAMP_CODE = 0x33
 
 # Reserved: Codes 0x03, 0x04, 0x23, and 0x24 are reserved for historical reasons.
 
-def _find_terminator( v, pos ):
+
+def _find_terminator(v, pos):
     # Finds the start of the next terminator [\x00]![\xff] or the end of v
     while True:
         pos = v.find(b'\x00', pos)
         if pos < 0:
             return len(v)
-        if pos+1 == len(v) or v[pos+1:pos+2] != b'\xff':
+        if pos + 1 == len(v) or v[pos + 1:pos + 2] != b'\xff':
             return pos
         pos += 2
 
 # If encoding and sign bit is 1 (negative), flip all of the bits. Otherwise, just flip sign.
 # If decoding and sign bit is 0 (negative), flip all of the bits. Otherwise, just flip sign.
-def _float_adjust( v, encode ):
+
+
+def _float_adjust(v, encode):
     if encode and six.indexbytes(v, 0) & 0x80 != 0x00:
         return b''.join(map(lambda x: six.int2byte(x ^ 0xff), six.iterbytes(v)))
     elif not encode and six.indexbytes(v, 0) & 0x80 != 0x80:
         return b''.join(map(lambda x: six.int2byte(x ^ 0xff), six.iterbytes(v)))
     else:
         return six.int2byte(six.indexbytes(v, 0) ^ 0x80) + v[1:]
+
 
 class SingleFloat(object):
     def __init__(self, value):
@@ -115,6 +122,7 @@ class SingleFloat(object):
 
     def __nonzero__(self):
         return bool(self.value)
+
 
 class Versionstamp(object):
     LENGTH = 12
@@ -218,60 +226,61 @@ class Versionstamp(object):
     def __nonzero__(self):
         return self.is_complete()
 
+
 def _decode(v, pos):
     code = six.indexbytes(v, pos)
     if code == NULL_CODE:
-        return None, pos+1
+        return None, pos + 1
     elif code == BYTES_CODE:
-        end = _find_terminator(v, pos+1)
-        return v[pos+1:end].replace(b"\x00\xFF", b"\x00"), end+1
+        end = _find_terminator(v, pos + 1)
+        return v[pos + 1:end].replace(b"\x00\xFF", b"\x00"), end + 1
     elif code == STRING_CODE:
-        end = _find_terminator(v, pos+1)
-        return v[pos+1:end].replace(b"\x00\xFF", b"\x00").decode("utf-8"), end+1
+        end = _find_terminator(v, pos + 1)
+        return v[pos + 1:end].replace(b"\x00\xFF", b"\x00").decode("utf-8"), end + 1
     elif code >= INT_ZERO_CODE and code < POS_INT_END:
         n = code - 20
         end = pos + 1 + n
-        return struct.unpack(">Q", b'\x00'*(8-n) + v[pos+1:end])[0], end
+        return struct.unpack(">Q", b'\x00' * (8 - n) + v[pos + 1:end])[0], end
     elif code > NEG_INT_START and code < INT_ZERO_CODE:
         n = 20 - code
         end = pos + 1 + n
-        return struct.unpack(">Q", b'\x00'*(8-n) + v[pos+1:end])[0]-_size_limits[n], end
-    elif code == POS_INT_END: # 0x1d; Positive 9-255 byte integer
-        length = six.indexbytes(v, pos+1)
+        return struct.unpack(">Q", b'\x00' * (8 - n) + v[pos + 1:end])[0] - _size_limits[n], end
+    elif code == POS_INT_END:  # 0x1d; Positive 9-255 byte integer
+        length = six.indexbytes(v, pos + 1)
         val = 0
         for i in _range(length):
             val = val << 8
-            val += six.indexbytes(v, pos+2+i)
-        return val, pos+2+length
-    elif code == NEG_INT_START: # 0x0b; Negative 9-255 byte integer
-        length = six.indexbytes(v, pos+1)^0xff
+            val += six.indexbytes(v, pos + 2 + i)
+        return val, pos + 2 + length
+    elif code == NEG_INT_START:  # 0x0b; Negative 9-255 byte integer
+        length = six.indexbytes(v, pos + 1) ^ 0xff
         val = 0
         for i in _range(length):
             val = val << 8
-            val += six.indexbytes(v, pos+2+i)
-        return val - (1<<(length*8)) + 1, pos+2+length
+            val += six.indexbytes(v, pos + 2 + i)
+        return val - (1 << (length * 8)) + 1, pos + 2 + length
     elif code == FLOAT_CODE:
-        return SingleFloat(struct.unpack(">f", _float_adjust(v[pos+1:pos+5], False))[0]), pos+5
+        return SingleFloat(struct.unpack(">f", _float_adjust(v[pos + 1:pos + 5], False))[0]), pos + 5
     elif code == DOUBLE_CODE:
-        return struct.unpack(">d", _float_adjust(v[pos+1:pos+9], False))[0], pos+9
+        return struct.unpack(">d", _float_adjust(v[pos + 1:pos + 9], False))[0], pos + 9
     elif code == UUID_CODE:
-        return uuid.UUID(bytes=v[pos+1:pos+17]), pos+17
+        return uuid.UUID(bytes=v[pos + 1:pos + 17]), pos + 17
     elif code == FALSE_CODE:
         if hasattr(fdb, "_version") and fdb._version < 500:
             raise ValueError("Invalid API version " + str(fdb._version) + " for boolean types")
-        return False, pos+1
+        return False, pos + 1
     elif code == TRUE_CODE:
         if hasattr(fdb, "_version") and fdb._version < 500:
             raise ValueError("Invalid API version " + str(fdb._version) + " for boolean types")
-        return True, pos+1
+        return True, pos + 1
     elif code == VERSIONSTAMP_CODE:
-        return Versionstamp.from_bytes(v, pos+1), pos + 1 + Versionstamp.LENGTH
+        return Versionstamp.from_bytes(v, pos + 1), pos + 1 + Versionstamp.LENGTH
     elif code == NESTED_CODE:
         ret = []
-        end_pos = pos+1
+        end_pos = pos + 1
         while end_pos < len(v):
             if six.indexbytes(v, end_pos) == 0x00:
-                if end_pos+1 < len(v) and six.indexbytes(v, end_pos+1) == 0xff:
+                if end_pos + 1 < len(v) and six.indexbytes(v, end_pos + 1) == 0xff:
                     ret.append(None)
                     end_pos += 2
                 else:
@@ -279,9 +288,10 @@ def _decode(v, pos):
             else:
                 val, end_pos = _decode(v, end_pos)
                 ret.append(val)
-        return tuple(ret), end_pos+1
+        return tuple(ret), end_pos + 1
     else:
         raise ValueError("Unknown data type in DB: " + repr(v))
+
 
 def _reduce_children(child_values):
     version_pos = -1
@@ -296,6 +306,7 @@ def _reduce_children(child_values):
         bytes_list.append(child_bytes)
     return bytes_list, version_pos
 
+
 def _encode(value, nested=False):
     # returns [code][data] (code != 0xFF)
     # encoded values are self-terminating
@@ -305,7 +316,7 @@ def _encode(value, nested=False):
             return b''.join([six.int2byte(NULL_CODE), six.int2byte(0xff)]), -1
         else:
             return b''.join([six.int2byte(NULL_CODE)]), -1
-    elif isinstance(value, bytes): # also gets non-None fdb.impl.Value
+    elif isinstance(value, bytes):  # also gets non-None fdb.impl.Value
         return six.int2byte(BYTES_CODE) + value.replace(b'\x00', b'\x00\xFF') + b'\x00', -1
     elif isinstance(value, six.text_type):
         return six.int2byte(STRING_CODE) + value.encode('utf-8').replace(b'\x00', b'\x00\xFF') + b'\x00', -1
@@ -314,26 +325,26 @@ def _encode(value, nested=False):
             return b''.join([six.int2byte(INT_ZERO_CODE)]), -1
         elif value > 0:
             if value >= _size_limits[-1]:
-                length = (value.bit_length()+7)//8
+                length = (value.bit_length() + 7) // 8
                 data = [six.int2byte(POS_INT_END), six.int2byte(length)]
-                for i in _range(length-1,-1,-1):
-                    data.append(six.int2byte( (value>>(8*i))&0xff ))
+                for i in _range(length - 1, -1, -1):
+                    data.append(six.int2byte((value >> (8 * i)) & 0xff))
                 return b''.join(data), -1
 
-            n = bisect_left( _size_limits, value )
-            return six.int2byte(INT_ZERO_CODE + n) + struct.pack( ">Q", value )[-n:], -1
+            n = bisect_left(_size_limits, value)
+            return six.int2byte(INT_ZERO_CODE + n) + struct.pack(">Q", value)[-n:], -1
         else:
             if -value >= _size_limits[-1]:
-                length = (value.bit_length()+7)//8
-                value += (1<<(length*8)) - 1
-                data = [six.int2byte(NEG_INT_START), six.int2byte(length^0xff)]
-                for i in _range(length-1,-1,-1):
-                    data.append(six.int2byte( (value>>(8*i))&0xff ))
+                length = (value.bit_length() + 7) // 8
+                value += (1 << (length * 8)) - 1
+                data = [six.int2byte(NEG_INT_START), six.int2byte(length ^ 0xff)]
+                for i in _range(length - 1, -1, -1):
+                    data.append(six.int2byte((value >> (8 * i)) & 0xff))
                 return b''.join(data), -1
 
-            n = bisect_left( _size_limits, -value )
+            n = bisect_left(_size_limits, -value)
             maxv = _size_limits[n]
-            return six.int2byte(INT_ZERO_CODE - n) + struct.pack( ">Q", maxv+value)[-n:], -1
+            return six.int2byte(INT_ZERO_CODE - n) + struct.pack(">Q", maxv + value)[-n:], -1
     elif isinstance(value, ctypes.c_float) or isinstance(value, SingleFloat):
         return six.int2byte(FLOAT_CODE) + _float_adjust(struct.pack(">f", value.value), True), -1
     elif isinstance(value, ctypes.c_double):
@@ -363,6 +374,8 @@ def _encode(value, nested=False):
 #  * if there is exactly one incomplete versionstamp member, it returns the tuple with the
 #    two extra version bytes and the position of the version start
 #  * if there is more than one incomplete versionstamp member, it throws an error
+
+
 def _pack_maybe_with_versionstamp(t, prefix=None):
     if not isinstance(t, tuple):
         raise Exception("fdbtuple pack() expects a tuple, got a " + str(type(t)))
@@ -380,6 +393,8 @@ def _pack_maybe_with_versionstamp(t, prefix=None):
     return b''.join(bytes_list), version_pos
 
 # packs the specified tuple into a key
+
+
 def pack(t, prefix=None):
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos >= 0:
@@ -387,6 +402,8 @@ def pack(t, prefix=None):
     return res
 
 # packs the specified tuple into a key for versionstamp operations
+
+
 def pack_with_versionstamp(t, prefix=None):
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos < 0:
@@ -394,6 +411,8 @@ def pack_with_versionstamp(t, prefix=None):
     return res
 
 # unpacks the specified key into a tuple
+
+
 def unpack(key, prefix_len=0):
     pos = prefix_len
     res = []
@@ -403,6 +422,8 @@ def unpack(key, prefix_len=0):
     return tuple(res)
 
 # determines if there is at least one incomplete versionstamp in a tuple
+
+
 def has_incomplete_versionstamp(t):
     def _elem_has_incomplete(item):
         if item is None:
@@ -415,7 +436,10 @@ def has_incomplete_versionstamp(t):
             return False
     return any(map(_elem_has_incomplete, t))
 
+
 _range = range
+
+
 def range(t):
     """Returns a slice of keys that includes all tuples of greater
     length than the specified tuple that that start with the
@@ -428,8 +452,9 @@ def range(t):
 
     p = pack(t)
     return slice(
-        p+b'\x00',
-        p+b'\xff')
+        p + b'\x00',
+        p + b'\xff')
+
 
 def _code_for(value):
     if value == None:
@@ -455,6 +480,7 @@ def _code_for(value):
     else:
         raise ValueError("Unsupported data type: " + str(type(value)))
 
+
 def _compare_floats(f1, f2):
     sign1 = int(math.copysign(1, f1))
     sign2 = int(math.copysign(1, f2))
@@ -473,7 +499,8 @@ def _compare_floats(f1, f2):
     # There are enough edge cases that bit comparison is safer.
     bytes1 = struct.pack(">d", f1)
     bytes2 = struct.pack(">d", f2)
-    return sign1*(-1 if bytes1 < bytes2 else 0 if bytes1 == bytes2 else 1)
+    return sign1 * (-1 if bytes1 < bytes2 else 0 if bytes1 == bytes2 else 1)
+
 
 def _compare_values(value1, value2):
     code1 = _code_for(value1)
@@ -506,6 +533,8 @@ def _compare_values(value1, value2):
         return -1 if value1 < value2 else 0 if value1 == value2 else 1
 
 # compare element by element and return -1 if t1 < t2 or 1 if t1 > t2 or 0 if t1 == t2
+
+
 def compare(t1, t2):
     i = 0
     while i < len(t1) and i < len(t2):

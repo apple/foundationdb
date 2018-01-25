@@ -30,7 +30,7 @@ import random
 import time
 import traceback
 
-sys.path[:0]=[os.path.join(os.path.dirname(__file__), '..')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
 import fdb
 fdb.api_version(int(sys.argv[2]))
 
@@ -51,6 +51,7 @@ if len(sys.argv) == 4:
     db = fdb.open(sys.argv[3])
 else:
     db = fdb.open()
+
 
 class Stack:
     def __init__(self):
@@ -90,7 +91,7 @@ class Stack:
                     else:
                         raw[i] = (raw[i][0], val)
                 except fdb.FDBError as e:
-                    #print('ERROR: %s' % repr(e))
+                    # print('ERROR: %s' % repr(e))
                     raw[i] = (raw[i][0], fdb.tuple.pack((b'ERROR', str(e.code).encode('ascii'))))
 
         if count is None:
@@ -103,6 +104,7 @@ class Stack:
                 return raw
             else:
                 return [item[1] for item in raw]
+
 
 class Instruction:
     def __init__(self, tr, stack, op, index, isDatabase=False, isSnapshot=False):
@@ -119,6 +121,7 @@ class Instruction:
     def push(self, val):
         self.stack.push(self.index, val)
 
+
 @fdb.transactional
 def test_options(tr):
     tr.options.set_priority_system_immediate()
@@ -130,15 +133,16 @@ def test_options(tr):
     tr.options.set_read_system_keys()
     tr.options.set_access_system_keys()
     tr.options.set_durability_dev_null_is_web_scale()
-    tr.options.set_timeout(60*1000);
-    tr.options.set_retry_limit(50);
-    tr.options.set_max_retry_delay(100);
+    tr.options.set_timeout(60 * 1000)
+    tr.options.set_retry_limit(50)
+    tr.options.set_max_retry_delay(100)
     tr.options.set_used_during_commit_protection_disable()
     tr.options.set_transaction_logging_enable('my_transaction')
     tr.options.set_read_lock_aware()
     tr.options.set_lock_aware()
 
     tr.get(b'\xff').wait()
+
 
 def check_watches(db, watches, expected):
     for i, watch in enumerate(watches):
@@ -153,6 +157,7 @@ def check_watches(db, watches, expected):
                 return False
 
     return True
+
 
 def test_watches(db):
     while True:
@@ -196,10 +201,11 @@ def test_watches(db):
         if check_watches(db, watches, True):
             return
 
+
 @fdb.transactional
 def test_locality(tr):
-    tr.options.set_timeout(60*1000)
-    tr.options.set_read_system_keys() # We do this because the last shard (for now, someday the last N shards) is in the /FF/ keyspace
+    tr.options.set_timeout(60 * 1000)
+    tr.options.set_read_system_keys()  # We do this because the last shard (for now, someday the last N shards) is in the /FF/ keyspace
 
     # This isn't strictly transactional, thought we expect it to be given the size of our database
     boundary_keys = list(fdb.locality.get_boundary_keys(tr, b'', b'\xff\xff')) + [b'\xff\xff']
@@ -211,12 +217,14 @@ def test_locality(tr):
     if [set(s.wait()) for s in start_addresses] != [set(e.wait()) for e in end_addresses]:
         raise Exception("Locality not internally consistent.")
 
+
 def test_predicates():
     assert fdb.predicates.is_retryable(fdb.FDBError(1020))
     assert not fdb.predicates.is_retryable(fdb.FDBError(10))
 
+
 class Tester:
-    tr_map = { }
+    tr_map = {}
     tr_map_lock = threading.RLock()
 
     def __init__(self, db, prefix):
@@ -234,16 +242,16 @@ class Tester:
 
     def push_range(self, inst, iter, prefix_filter=None):
         kvs = []
-        for k,v in iter:
+        for k, v in iter:
             if prefix_filter is None or k.startswith(prefix_filter):
-                kvs += [k,v]
+                kvs += [k, v]
 
-        inst.push( fdb.tuple.pack( tuple(kvs) ) )
+        inst.push(fdb.tuple.pack(tuple(kvs)))
 
     @staticmethod
     @fdb.transactional
     def wait_empty(tr, prefix):
-        res = tr.get_range_startswith(prefix, 1).to_list();
+        res = tr.get_range_startswith(prefix, 1).to_list()
         if len(res) == 1:
             raise fdb.FDBError(1020)
 
@@ -254,7 +262,6 @@ class Tester:
             pv = fdb.tuple.pack((el,))
 
             tr.set(pk, pv[:40000])
-
 
     def current_transaction(self):
         with Tester.tr_map_lock:
@@ -267,7 +274,7 @@ class Tester:
     def switch_transaction(self, name):
         self.tr_name = name
         with Tester.tr_map_lock:
-            if not self.tr_name in Tester.tr_map:
+            if self.tr_name not in Tester.tr_map:
                 self.new_transaction()
 
     def run(self):
@@ -277,7 +284,7 @@ class Tester:
 
             # print("Stack is %r" % self.stack)
             # if op != "PUSH" and op != "SWAP":
-                # print("%d. Instruction is %s" % (idx, op))
+            # print("%d. Instruction is %s" % (idx, op))
 
             isDatabase = op.endswith(six.u('_DATABASE'))
             isSnapshot = op.endswith(six.u('_SNAPSHOT'))
@@ -387,7 +394,7 @@ class Tester:
                     prefix = inst.pop()
                     entries = {}
                     while len(self.stack) > 0:
-                        stack_index = len(self.stack)-1
+                        stack_index = len(self.stack) - 1
                         entries[stack_index] = inst.pop(with_idx=True)
                         if len(entries) == 100:
                             self.log_stack(self.db, prefix, entries)
@@ -401,10 +408,10 @@ class Tester:
                     if obj == self.db:
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == six.u("SET_READ_VERSION"):
-                    inst.tr.set_read_version( self.last_version )
+                    inst.tr.set_read_version(self.last_version)
                 elif inst.op == six.u("CLEAR"):
                     if random.random() < 0.5:
-                        del obj[ inst.pop() ]
+                        del obj[inst.pop()]
                     else:
                         obj.clear(inst.pop())
 
@@ -418,25 +425,25 @@ class Tester:
                     elif num == 1:
                         obj.clear_range(begin, end)
                     else:
-                        obj.__delitem__( slice( begin, end ) )
+                        obj.__delitem__(slice(begin, end))
 
                     if obj == self.db:
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == six.u("CLEAR_RANGE_STARTS_WITH"):
-                    obj.clear_range_startswith( inst.pop() )
+                    obj.clear_range_startswith(inst.pop())
                     if obj == self.db:
                         inst.push(b"RESULT_NOT_PRESENT")
                 elif inst.op == six.u("READ_CONFLICT_RANGE"):
-                    inst.tr.add_read_conflict_range( inst.pop(), inst.pop() )
+                    inst.tr.add_read_conflict_range(inst.pop(), inst.pop())
                     inst.push(b"SET_CONFLICT_RANGE")
                 elif inst.op == six.u("WRITE_CONFLICT_RANGE"):
-                    inst.tr.add_write_conflict_range( inst.pop(), inst.pop() )
+                    inst.tr.add_write_conflict_range(inst.pop(), inst.pop())
                     inst.push(b"SET_CONFLICT_RANGE")
                 elif inst.op == six.u("READ_CONFLICT_KEY"):
-                    inst.tr.add_read_conflict_key( inst.pop() )
+                    inst.tr.add_read_conflict_key(inst.pop())
                     inst.push(b"SET_CONFLICT_KEY")
                 elif inst.op == six.u("WRITE_CONFLICT_KEY"):
-                    inst.tr.add_write_conflict_key( inst.pop() )
+                    inst.tr.add_write_conflict_key(inst.pop())
                     inst.push(b"SET_CONFLICT_KEY")
                 elif inst.op == six.u("DISABLE_WRITE_CONFLICT"):
                     inst.tr.options.set_next_write_no_write_conflict_range()
@@ -472,7 +479,7 @@ class Tester:
                             else:
                                 inst.push(b"ERROR: MULTIPLE")
                 elif inst.op == six.u("TUPLE_UNPACK"):
-                    for i in fdb.tuple.unpack( inst.pop() ):
+                    for i in fdb.tuple.unpack(inst.pop()):
                         inst.push(fdb.tuple.pack((i,)))
                 elif inst.op == six.u("TUPLE_SORT"):
                     count = inst.pop()
@@ -487,7 +494,7 @@ class Tester:
                 elif inst.op == six.u("TUPLE_RANGE"):
                     count = inst.pop()
                     items = inst.pop(count)
-                    r = fdb.tuple.range( tuple(items) )
+                    r = fdb.tuple.range(tuple(items))
                     inst.push(r.start)
                     inst.push(r.stop)
                 elif inst.op == six.u("ENCODE_FLOAT"):
@@ -507,7 +514,7 @@ class Tester:
                     d_bytes = struct.pack(">d", d)
                     inst.push(d_bytes)
                 elif inst.op == six.u("START_THREAD"):
-                    t = Tester( self.db, inst.pop() )
+                    t = Tester(self.db, inst.pop())
                     thr = threading.Thread(target=t.run)
                     thr.start()
                     self.threads.append(thr)
@@ -539,12 +546,13 @@ class Tester:
                     raise Exception("Unknown op %s" % inst.op)
             except fdb.FDBError as e:
                 # print('ERROR: %s' % repr(e))
-                inst.stack.push( idx, fdb.tuple.pack( (b"ERROR", str(e.code).encode('ascii')) ) )
+                inst.stack.push(idx, fdb.tuple.pack((b"ERROR", str(e.code).encode('ascii'))))
 
             # print("        to %s" % self.stack)
             # print()
 
         [thr.join() for thr in self.threads]
+
 
 if __name__ == '__main__':
     t = Tester(db, sys.argv[1].encode('ascii'))
