@@ -1003,7 +1003,8 @@ namespace fileBackup {
 							.detail("ReadVersion", outVersion)
 							.detail("BeginKey", beginKey.printable())
 							.detail("EndKey", nextKey.printable())
-							.detail("AddedFileToMap", usedFile);
+							.detail("AddedFileToMap", usedFile)
+							.suppressFor(60, true);
 
 						nrKeys = 0;
 						beginKey = nextKey;
@@ -1422,6 +1423,11 @@ namespace fileBackup {
 				tr->reset();
 				loop {
 					try {
+						TraceEvent("FileBackupSnapshotDispatchAddingTasks")
+							.detail("TasksToAdd", rangesToAdd.size())
+							.detail("NewBatchSize", newBatchSize)
+							.suppressFor(2, true);
+
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -1477,16 +1483,20 @@ namespace fileBackup {
 									config.snapshotRangeDispatchMap().set(tr, range.end, false);
 								}
 
-								// Choose a random version between now and the next dispatch version at which to start this range task
-								Version randomVersion = recentReadVersion + g_random->random01() * (nextDispatchVersion - recentReadVersion);
-								addTaskFutures.push_back(success(BackupRangeTaskFunc::addTask(tr, taskBucket, task, range.begin, range.end, TaskCompletionKey::joinWith(snapshotBatchFuture), Reference<TaskFuture>(), 0, randomVersion)));
+								Version scheduledVersion = invalidVersion;
+								// If the next dispatch version is in the future, choose a random version at which to start the new task.
+								if(nextDispatchVersion > recentReadVersion)
+									scheduledVersion = recentReadVersion + g_random->random01() * (nextDispatchVersion - recentReadVersion);
+
+								addTaskFutures.push_back(success(BackupRangeTaskFunc::addTask(tr, taskBucket, task, range.begin, range.end, TaskCompletionKey::joinWith(snapshotBatchFuture), Reference<TaskFuture>(), 0, scheduledVersion)));
 
 								TraceEvent("FileBackupSnapshotRangeDispatched")
 									.detail("BackupUID", config.getUid())
 									.detail("CurrentVersion", recentReadVersion)
-									.detail("ScheduledVersion", randomVersion)
+									.detail("ScheduledVersion", scheduledVersion)
 									.detail("BeginKey", range.begin.printable())
-									.detail("EndKey", range.end.printable());
+									.detail("EndKey", range.end.printable())
+									.suppressFor(2, true);
 							}
 							else {
 								// This shouldn't happen because if the transaction was already done or if another execution
@@ -1688,8 +1698,8 @@ namespace fileBackup {
 				.detail("Size", outFile->size())
 				.detail("BeginVersion", beginVersion)
 				.detail("EndVersion", endVersion)
-				.suppressFor(60, true)
-				.detail("LastReadVersion", latestVersion);
+				.detail("LastReadVersion", latestVersion)
+				.suppressFor(60, true);
 
 			Params.fileSize().set(task, outFile->size());
 
@@ -1812,9 +1822,11 @@ namespace fileBackup {
 
 			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
 
-			if(endVersion - beginVersion > g_random->randomInt64(0, CLIENT_KNOBS->BACKUP_VERSION_DELAY)) {
-				TraceEvent("FileBackupLogDispatch").detail("BeginVersion", beginVersion).detail("EndVersion", endVersion).detail("RestorableVersion", restorableVersion.orDefault(-1));
-			}
+			TraceEvent("FileBackupLogDispatch")
+				.detail("BeginVersion", beginVersion)
+				.detail("EndVersion", endVersion)
+				.detail("RestorableVersion", restorableVersion.orDefault(-1))
+				.suppressFor(60, true);
 
 			state Reference<TaskFuture> logDispatchBatchFuture = futureBucket->future(tr);
 
@@ -1827,7 +1839,8 @@ namespace fileBackup {
 			TraceEvent("FileBackupLogsDispatchContinuing")
 				.detail("BackupUID", config.getUid())
 				.detail("BeginVersion", beginVersion)
-				.detail("EndVersion", endVersion).suppressFor(60, true);
+				.detail("EndVersion", endVersion)
+				.suppressFor(60, true);
 
 			return Void();
 		}

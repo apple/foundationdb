@@ -86,9 +86,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="fdbJNI.h" />
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="fdbJNI.cpp" />
   </ItemGroup>
   <ImportGroup Label="ExtensionTargets" />
