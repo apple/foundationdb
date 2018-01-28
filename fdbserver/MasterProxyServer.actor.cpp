@@ -200,6 +200,22 @@ struct ProxyCommitData {
 
 	std::map<UID, Reference<StorageInfo>> storageCache;
 
+	//The tag related to a storage server rarely change, so we keep a vector of tags for each key range to be slightly more CPU efficient.
+	//When a tag related to a storage server does change, we empty out all of these vectors to signify they must be repopulated.
+	//We do not repopulate them immediately to avoid a slow task.
+	const vector<Tag>& tagsForKey(StringRef key) {
+		auto& tags = keyInfo[key].tags;
+		if(!tags.size()) {
+			auto& r = keyInfo.rangeContaining(key).value();
+			r.tags.resize(r.info.size());
+			for(int i = 0; i < r.info.size(); i++) {
+				r.tags[i] = r.info[i]->tag;
+			}
+			return r.tags;
+		}
+		return tags;
+	}
+
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
 		: dbgid(dbgid), stats(dbgid, &version, &committedVersion), master(master), 
 			logAdapter(NULL), txnStateStore(NULL),
@@ -533,10 +549,9 @@ ACTOR Future<Void> commitBatch(
 				mutationBytes += m.expectedSize();
 				// Determine the set of tags (responsible storage servers) for the mutation, splitting it
 				// if necessary.  Serialize (splits of) the mutation into the message buffer and add the tags.
-				// FIXME: Make this process not disgustingly CPU intensive
 
 				if (isSingleKeyMutation((MutationRef::Type) m.type)) {
-					auto& tags = self->keyInfo[m.param1].tags;
+					auto& tags = self->tagsForKey(m.param1);
 	
 					if(self->singleKeyMutationEvent->enabled) {
 						KeyRangeRef shard = self->keyInfo.rangeContaining(m.param1).range();
@@ -562,14 +577,31 @@ ACTOR Future<Void> commitBatch(
 						// Fast path
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(ranges.begin().value().tags)).detail("Mutation", m.toString()).detail("Version", commitVersion);
-						for (auto& tag : ranges.begin().value().tags)
+						
+						auto& tags = ranges.begin().value().tags;
+						if(!tags.size()) {
+							tags.resize(ranges.begin().value().info.size());
+							for( int i = 0; i < tags.size(); i++ ) {
+								tags[i] = ranges.begin().value().info[i]->tag;
+							}
+						}
+						
+						for (auto& tag : tags)
 							toCommit.addTag(tag);
 					}
 					else {
 						TEST(true); //A clear range extends past a shard boundary
 						std::set<Tag> allSources;
-						for (auto r : ranges)
-							allSources.insert(r.value().tags.begin(), r.value().tags.end());
+						for (auto r : ranges) {
+							auto& tags = r.value().tags;
+							if(!tags.size()) {
+								tags.resize(r.value().info.size());
+								for( int i = 0; i < tags.size(); i++ ) {
+									tags[i] = r.value().info[i]->tag;
+								}
+							}
+							allSources.insert(tags.begin(), tags.end());
+						}
 						if (debugMutation("ProxyCommit", commitVersion, m))
 							TraceEvent("ProxyCommitTo", self->dbgid).detail("To", describe(allSources)).detail("Mutation", m.toString()).detail("Version", commitVersion);
 						for (auto& tag : allSources)
@@ -681,7 +713,7 @@ ACTOR Future<Void> commitBatch(
 				backupMutation.param1 = wr.toStringRef();
 				ASSERT( backupMutation.param1.startsWith(logRangeMutation.first) );  // We are writing into the configured destination
 					
-				auto& tags = self->keyInfo[backupMutation.param1].tags;
+				auto& tags = self->tagsForKey(backupMutation.param1);
 				for (auto& tag : tags)
 					toCommit.addTag(tag);
 				toCommit.addTypedMessage(backupMutation);
@@ -1051,11 +1083,44 @@ ACTOR static Future<Void> readRequestServer(
 					GetStorageServerRejoinInfoReply rep;
 					rep.version = commitData->version;
 					rep.tag = decodeServerTagValue( commitData->txnStateStore->readValue(serverTagKeyFor(req.id)).get().get() );
-					if(commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get().present() && decodeTagLocalityListValue(commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get().get()) == rep.tag.locality) {
-						req.reply.send(rep);
-					} else {
-						req.reply.sendError(storage_changed_locality());
+					Standalone<VectorRef<KeyValueRef>> history = commitData->txnStateStore->readRange(serverTagHistoryRangeFor(req.id)).get();
+					for(int i = history.size()-1; i >= 0; i-- ) {
+						rep.history.push_back(std::make_pair(decodeServerTagHistoryKey(history[i].key), decodeServerTagValue(history[i].value)));
 					}
+					auto localityKey = commitData->txnStateStore->readValue(tagLocalityListKeyFor(req.dcId)).get();
+					if( localityKey.present() ) {
+						rep.newLocality = false;
+						int8_t locality = decodeTagLocalityListValue(localityKey.get());
+						if(locality != rep.tag.locality) {
+							uint16_t tagId = 0;
+							std::vector<uint16_t> usedTags;
+							for( auto& kv : commitData->txnStateStore->readRange(serverTagKeys).get() ) {
+								Tag t = decodeServerTagValue( kv.value );
+								if(t.locality == locality) {
+									usedTags.push_back(t.id);
+								}
+							}
+							std::sort(usedTags.begin(), usedTags.end());
+
+							int usedIdx = 0;
+							for(; usedTags.size() > 0 && tagId <= usedTags.end()[-1]; tagId++) {
+								if(tagId < usedTags[usedIdx]) {
+									break;
+								} else {
+									usedIdx++;
+								}
+							}
+							rep.newTag = Tag(locality, tagId);
+						}
+					} else {
+						rep.newLocality = true;
+						int8_t maxTagLocality = 0;
+						for( auto& kv : commitData->txnStateStore->readRange(tagLocalityListKeys).get() ) {
+							maxTagLocality = std::max(maxTagLocality, decodeTagLocalityListValue( kv.value ));
+						}
+						rep.newTag = Tag(maxTagLocality+1,0);
+					}
+					req.reply.send(rep);
 				} else {
 					req.reply.sendError(worker_removed());
 				}

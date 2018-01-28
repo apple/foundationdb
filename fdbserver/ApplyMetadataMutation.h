@@ -135,6 +135,10 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 							(*storageCache)[id] = storageInfo;
 						} else {
 							cacheItr->second->tag = tag;
+							//These tag vectors will be repopulated by the proxy when it detects their sizes are 0.
+							for(auto& it : keyInfo->ranges()) {
+								it.value().tags.clear();
+							}
 						}
 					}
 				}
@@ -171,7 +175,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					}
 				}
 			} else if( m.param1 == databaseLockedKey || m.param1.startsWith(applyMutationsBeginRange.begin) ||
-				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) ) {
+				m.param1.startsWith(applyMutationsAddPrefixRange.begin) || m.param1.startsWith(applyMutationsRemovePrefixRange.begin) || m.param1.startsWith(tagLocalityListPrefix) || m.param1.startsWith(serverTagHistoryPrefix) ) {
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
 			else if (m.param1.startsWith(applyMutationsEndRange.begin)) {
@@ -303,6 +307,17 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						storageCache->erase(decodeServerTagKey(clearRange.begin));
 					}
 				}
+			}
+			if ( serverTagHistoryKeys.intersects( range )) {
+				//Once a tag has been removed from history we should pop it, since we no longer have a record of the tag once it has been removed from history
+				if (logSystem && popVersion) {
+					auto serverKeysCleared = txnStateStore->readRange( range & serverTagHistoryKeys ).get();	// read is expected to be immediately available
+					for(auto &kv : serverKeysCleared) {
+						TraceEvent("ServerTagHistoryRemove").detail("popVersion", popVersion).detail("tag", decodeServerTagValue(kv.value).toString()).detail("version", decodeServerTagHistoryKey(kv.key));
+						logSystem->pop( popVersion, decodeServerTagValue(kv.value) );
+					}
+				}
+				if(!initialCommit) txnStateStore->clear( range & serverTagHistoryKeys );
 			}
 			if (range.contains(coordinatorsKey)) {
 				if(!initialCommit) txnStateStore->clear(singleKeyRange(coordinatorsKey));

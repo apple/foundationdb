@@ -262,6 +262,7 @@ private:
 
 public:
 	Tag tag;
+	vector<pair<Version,Tag>> history;
 	std::map<Version, Arena> freeable;  // for each version, an Arena that must be held until that version is < oldestVersion
 	Arena lastArena;
 
@@ -276,6 +277,20 @@ public:
 	void byteSampleApplyMutation( MutationRef const& m, Version ver );
 	void byteSampleApplySet( KeyValueRef kv, Version ver );
 	void byteSampleApplyClear( KeyRangeRef range, Version ver );
+
+	void popVersion(Version v) {
+		if(logSystem) {
+			while(history.size() && v > history.back().first ) {
+				logSystem->pop( v, history.back().second );
+				history.pop_back();
+			}
+			if(history.size()) {
+				logSystem->pop( v, history.back().second );
+			} else {
+				logSystem->pop( v, tag );
+			}
+		}
+	}
 
 	Standalone<VersionUpdateRef>& addVersionToMutationLog(Version v) {
 		// return existing version...
@@ -2553,8 +2568,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		Void _ = wait( delay(0, TaskUpdateStorage) );
 
-		if (data->logSystem)
-			data->logSystem->pop( data->durableVersion.get() + 1, data->tag );
+		data->popVersion( data->durableVersion.get() + 1 );
 
 		while (!changeDurableVersion( data, newOldestVersion )) {
 			Void _ = wait( yield(TaskUpdateStorage) );
@@ -3113,8 +3127,8 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 				if( self->db->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
 					self->logSystem = ILogSystem::fromServerDBInfo( self->thisServerID, self->db->get() );
 					if (self->logSystem) {
-						self->logCursor = self->logSystem->peekSingle( self->version.get() + 1, self->tag );
-						self->logSystem->pop( self->durableVersion.get() + 1, self->tag );
+						self->logCursor = self->logSystem->peekSingle( self->version.get() + 1, self->tag, self->history );
+						self->popVersion( self->durableVersion.get() + 1 );
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be cancelled.  But if it is waiting later,
 					// cancelling it could cause problems (e.g. fetchKeys that already committed to transitioning to waiting state)
@@ -3244,16 +3258,51 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 		state Future<Void> infoChanged = self->db->onChange();
 		state Reference<MultiInterface<MasterProxyInterface>> proxies( new MultiInterface<MasterProxyInterface>(self->db->get().client.proxies, self->db->get().myLocality, ALWAYS_FRESH) );
 		choose {
-			when( GetStorageServerRejoinInfoReply rep = wait( proxies->size() ? loadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
-				self->tag = rep.tag;
+			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? loadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
+				state GetStorageServerRejoinInfoReply rep = _rep;
 				try {
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr.setVersion( rep.version );
+
 					tr.addReadConflictRange(singleKeyRange(serverListKeyFor(ssi.id())));
+					tr.addReadConflictRange(singleKeyRange(serverTagKeyFor(ssi.id())));
+					tr.addReadConflictRange(serverTagHistoryRangeFor(ssi.id()));
+					tr.addReadConflictRange(singleKeyRange(tagLocalityListKeyFor(ssi.locality.dcId())));
+
 					tr.set(serverListKeyFor(ssi.id()), serverListValue(ssi));
+					
+					if(rep.newLocality) {
+						tr.addReadConflictRange(tagLocalityListKeys);
+						tr.set( tagLocalityListKeyFor(ssi.locality.dcId()), tagLocalityListValue(rep.newTag.get().locality) );
+					}
+
+					if(rep.newTag.present()) {
+						KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(rep.newTag.get()));
+						tr.addReadConflictRange( conflictRange );
+						tr.addWriteConflictRange( conflictRange );
+						tr.set(serverTagKeyFor(ssi.id()), serverTagValue(rep.newTag.get()));
+						tr.atomicOp(serverTagHistoryKeyFor(ssi.id()), serverTagValue(rep.tag), MutationRef::SetVersionstampedKey);
+						tr.atomicOp( serverMaxTagKeyFor(rep.newTag.get().locality), serverTagMaxValue(rep.newTag.get()), MutationRef::Max );
+					}
+
+					if(rep.history.size() && rep.history.back().first <= self->version.get()) {
+						tr.clear(serverTagHistoryRangeBefore(ssi.id(), self->version.get()));
+					}
+
 					choose {
 						when ( Void _ = wait( tr.commit() ) ) {
+							self->history = rep.history;
+							if(rep.newTag.present()) {
+								self->tag = rep.newTag.get();
+								self->history.push_back(std::make_pair(tr.getCommittedVersion(), rep.tag));
+							} else {
+								self->tag = rep.tag;
+							}
+							for(auto it : self->history) {
+								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString());
+							}
+
 							break;
 						}
 						when ( Void _ = wait(infoChanged) ) {}

@@ -1510,6 +1510,9 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	Void _ = wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fUnrecoveredBefore, fRecoverCounts) ) );
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
+		TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
+		flushAndExit(0);
+
 		TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid).detail("Format", printable(fFormat.get().get())).detail("Expected", persistFormat.value.toString());
 		throw worker_recovery_failed();
 	}
@@ -1725,18 +1728,18 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 			}
 		}
 
-		//TraceEvent("LogRecoveringTagResults", logData->logId).detail("Tag", tag);
+		//TraceEvent("LogRecoveringTagResults", logData->logId).detail("Tag", tag.toString());
 
 		Version ver = 0;
 		BinaryWriter wr( Unversioned() );
 		int writtenBytes = 0;
 		while (true) {
 			bool foundMessage = r->hasMessage();
-			//TraceEvent("LogRecoveringMsg", logData->logId).detail("Tag", tag).detail("foundMessage", foundMessage).detail("ver", r->version().toString());
+			//TraceEvent("LogRecoveringMsg", logData->logId).detail("Tag", tag.toString()).detail("foundMessage", foundMessage).detail("ver", r->version().toString());
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					//TraceEvent("LogRecoveringTagVersion", logData->logId).detail("Tag", tag).detail("Ver", ver).detail("Bytes", wr.getLength());
+					//TraceEvent("LogRecoveringTagVersion", logData->logId).detail("Tag", tag.toString()).detail("Ver", ver).detail("Bytes", wr.getLength());
 					writtenBytes += 100 + wr.getLength();
 					self->persistentData->set( KeyValueRef( persistTagMessagesKey( logData->logId, tag, ver ), wr.toStringRef() ) );
 				}

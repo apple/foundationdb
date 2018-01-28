@@ -227,7 +227,7 @@ struct ILogSystem {
 
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
 
-		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, bool hasMsg, Version poppedVersion );
+		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, bool hasMsg, Version poppedVersion, Tag tag );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 
@@ -466,7 +466,7 @@ struct ILogSystem {
 		// If pop was previously or concurrently called with upTo > begin, the cursor may not return all such messages.  In that case cursor->popped() will
 		// be greater than begin to reflect that.
 
-	virtual Reference<IPeekCursor> peekSingle( Version begin, Tag tag ) = 0;
+	virtual Reference<IPeekCursor> peekSingle( Version begin, Tag tag, vector<pair<Version,Tag>> history = vector<pair<Version,Tag>>() ) = 0;
 		// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is correspondingly less expensive)
 
 	virtual void pop( Version upTo, Tag tag ) = 0;

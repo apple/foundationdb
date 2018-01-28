@@ -137,7 +137,6 @@ ERROR( address_in_use, 2105, "Local address in use" )
 ERROR( invalid_local_address, 2106, "Invalid local address" )
 ERROR( tls_error, 2107, "TLS error" )
 ERROR( unsupported_operation, 2108, "Operation is not supported" )
-ERROR( storage_changed_locality, 2109, "Storage server files were moved to a different datacenter")
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

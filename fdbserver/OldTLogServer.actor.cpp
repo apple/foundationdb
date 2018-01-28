@@ -1390,27 +1390,6 @@ namespace oldTLog {
 		return Void();
 	}
 
-	bool tlogTerminated( TLogData* self, IKeyValueStore* persistentData, TLogQueue* persistentQueue, Error const& e ) {
-		// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just close it.
-		self->terminated = true;
-		if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
-			persistentData->dispose();
-			persistentQueue->dispose();
-		} else {
-			persistentData->close();
-			persistentQueue->close();
-		}
-
-		if ( e.code() == error_code_worker_removed ||
-			 e.code() == error_code_recruitment_failed ||
-			 e.code() == error_code_file_not_found )
-		{
-			TraceEvent("TLogTerminated", self->dbgid).error(e, true);
-			return true;
-		} else
-			return false;
-	}
-
 	ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQueue, Reference<AsyncVar<ServerDBInfo>> db, LocalityData locality, UID tlogId )
 	{
 		state TLogData self( tlogId, persistentData, persistentQueue, db );
@@ -1436,11 +1415,7 @@ namespace oldTLog {
 				}
 			}
 
-			if (tlogTerminated( &self, persistentData, self.persistentQueue, e )) {
-				return Void();
-			} else {
-				throw;
-			}
+			throw;
 		}
 	}
 }

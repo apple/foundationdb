@@ -107,6 +107,7 @@ const KeyRangeRef serverTagKeys(
 	LiteralStringRef("\xff/serverTag/"),
 	LiteralStringRef("\xff/serverTag0") );
 const KeyRef serverTagPrefix = serverTagKeys.begin;
+const KeyRef serverTagMaxOldKey = LiteralStringRef("\xff/serverTagMax");
 const KeyRangeRef serverTagMaxKeys(
 	LiteralStringRef("\xff/serverTagMax/"),
 	LiteralStringRef("\xff/serverTagMax0") );
@@ -114,6 +115,10 @@ const KeyRangeRef serverTagConflictKeys(
 	LiteralStringRef("\xff/serverTagConflict/"),
 	LiteralStringRef("\xff/serverTagConflict0") );
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
+const KeyRangeRef serverTagHistoryKeys(
+	LiteralStringRef("\xff/serverTagHistory/"),
+	LiteralStringRef("\xff/serverTagHistory0") );
+const KeyRef serverTagHistoryPrefix = serverTagHistoryKeys.begin;
 
 const Key serverMaxTagKeyFor( int8_t tagLocality ) {
 	BinaryWriter wr(Unversioned());
@@ -129,6 +134,33 @@ const Key serverTagKeyFor( UID serverID ) {
 	return wr.toStringRef();
 }
 
+const Key serverTagHistoryKeyFor( UID serverID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( serverTagHistoryKeys.begin );
+	wr << serverID;
+	return addVersionStampAtEnd(wr.toStringRef());
+}
+
+const KeyRange serverTagHistoryRangeFor( UID serverID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( serverTagHistoryKeys.begin );
+	wr << serverID;
+	return prefixRange(wr.toStringRef());
+}
+
+const KeyRange serverTagHistoryRangeBefore( UID serverID, Version version ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( serverTagHistoryKeys.begin );
+	wr << serverID;
+	version = bigEndian64(version);
+	
+	Key versionStr = makeString( 8 );
+	uint8_t* data = mutateString( versionStr );
+	memcpy(data, &version, 8);
+
+	return KeyRangeRef( wr.toStringRef(), versionStr.withPrefix(wr.toStringRef()) );
+}
+
 const Value serverTagValue( Tag tag ) {
 	BinaryWriter wr(IncludeVersion());
 	wr << tag;
@@ -140,6 +172,13 @@ UID decodeServerTagKey( KeyRef const& key ) {
 	BinaryReader rd( key.removePrefix(serverTagKeys.begin), Unversioned() );
 	rd >> serverID;
 	return serverID;
+}
+
+Version decodeServerTagHistoryKey( KeyRef const& key ) {
+	Version parsedVersion;
+	memcpy(&parsedVersion, key.substr(key.size()-10).begin(), sizeof(Version));
+	parsedVersion = bigEndian64(parsedVersion);
+	return parsedVersion;
 }
 
 Tag decodeServerTagValue( ValueRef const& value ) {
@@ -171,7 +210,7 @@ const Key serverTagConflictKeyFor( Tag tag ) {
 }
 
 const Value serverTagMaxValue( Tag tag ) {
-	BinaryWriter wr(Unversioned());
+	BinaryWriter wr(Unversioned()); //This has to be unversioned because we are using an atomic op to max it
 	wr << tag;
 	return wr.toStringRef();
 }
@@ -180,6 +219,23 @@ Tag decodeServerTagMaxValue( ValueRef const& value ) {
 	Tag s;
 	BinaryReader reader( value, Unversioned() );
 	reader >> s;
+	return s;
+}
+
+Tag decodeServerTagMaxValueOld( ValueRef const& value ) {
+	Tag s;
+	BinaryReader reader( value, Unversioned() );
+	int16_t id;
+	reader >> id;
+	if(id == invalidTagOld) {
+		s = invalidTag;
+	} else if(id == txsTagOld) {
+		s = txsTag;
+	} else {
+		ASSERT(id >= 0);
+		s.id = id;
+		s.locality = tagLocalityUpgraded;
+	}
 	return s;
 }
 

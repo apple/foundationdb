@@ -26,11 +26,11 @@
 ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore )
 			: interf(interf), tag(tag), messageVersion(begin), end(end), hasMsg(false), rd(results.arena, results.messages, Unversioned()), randomID(g_random->randomUniqueID()), poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), parallelGetMore(parallelGetMore) {
 	this->results.maxKnownVersion = 0;
-	//TraceEvent("SPC_starting", randomID).detail("tag", printable(tag)).detail("begin", begin).detail("end", end);
+	//TraceEvent("SPC_starting", randomID).detail("tag", tag.toString()).detail("begin", begin).detail("end", end).backtrace();
 }
 
-ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, bool hasMsg, Version poppedVersion )
-			: results(results), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageLength(messageLength), hasMsg(hasMsg), randomID(g_random->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), parallelGetMore(false)
+ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, bool hasMsg, Version poppedVersion, Tag tag )
+			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageLength(messageLength), hasMsg(hasMsg), randomID(g_random->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), parallelGetMore(false)
 {
 	//TraceEvent("SPC_clone", randomID);
 	this->results.maxKnownVersion = 0;
@@ -41,7 +41,7 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, Lo
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::ServerPeekCursor::cloneNoMore() {
-	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageLength, hasMsg, poppedVersion ) );
+	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageLength, hasMsg, poppedVersion, tag ) );
 }
 
 void ILogSystem::ServerPeekCursor::setProtocolVersion( uint64_t version ) {
@@ -73,7 +73,7 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 		Version ver;
 		rd >> dummy >> ver;
 
-		//TraceEvent("SPC_process_Seq", randomID).detail("messageVersion", messageVersion.toString()).detail("ver", ver);
+		//TraceEvent("SPC_process_Seq", randomID).detail("messageVersion", messageVersion.toString()).detail("ver", ver).detail("tag", tag.toString());
 		//ASSERT( ver >= messageVersion.version );
 
 		messageVersion.reset(ver);

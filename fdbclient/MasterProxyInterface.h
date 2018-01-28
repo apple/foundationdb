@@ -179,10 +179,13 @@ struct GetRawCommittedVersionRequest {
 struct GetStorageServerRejoinInfoReply {
 	Version version;
 	Tag tag;
+	Optional<Tag> newTag;
+	bool newLocality;
+	vector<pair<Version, Tag>> history;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & tag;
+		ar & version & tag & newTag & newLocality & history;
 	}
 };
 
