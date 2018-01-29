@@ -215,34 +215,50 @@ Future<Void> BlobStoreEndpoint::deleteObject(std::string const &bucket, std::str
 	return deleteObject_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-ACTOR Future<Void> deleteBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket, int *pNumDeleted) {
+ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string prefix, int *pNumDeleted) {
 	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-	state Future<Void> done = b->listBucketStream(bucket, resultStream);
-	state std::vector<Future<Void>> deleteFutures;
-	loop {
-		choose {
-			when(Void _ = wait(done)) {
-				break;
+	// Start a recursive parallel listing which will send results to resultStream as they are received
+	state Future<Void> done = b->listBucketStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
+	// Wrap done in an actor which will send end_of_stream since listBucketStream() does not (so that many calls can write to the same stream)
+	done = map(done, [=](Void) {
+			resultStream.sendError(end_of_stream());
+			return Void();
+		});
+
+	state std::list<Future<Void>> deleteFutures;
+	try {
+		loop {
+			BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture());
+			for(auto &object : list.objects) {
+				int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
+				deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [pNumDeletedCopy](Void) -> Void {
+					if(pNumDeletedCopy != nullptr)
+						++*pNumDeletedCopy;
+					return Void();
+				}));
 			}
-			when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
-				for(auto &object : list.objects) {
-					int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
-					deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [pNumDeletedCopy](Void) -> Void {
-						if(pNumDeletedCopy != nullptr)
-							++*pNumDeletedCopy;
-						return Void();
-					}));
-				}
+
+			// This is just a precaution to avoid having too many outstanding delete actors waiting to run
+			while(deleteFutures.size() > CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS) {
+				Void _ = wait(deleteFutures.front());
+				deleteFutures.pop_front();
 			}
 		}
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream)
+			throw;
 	}
 
-	Void _ = wait(waitForAll(deleteFutures));
+	while(deleteFutures.size() > 0) {
+		Void _ = wait(deleteFutures.front());
+		deleteFutures.pop_front();
+	}
+
 	return Void();
 }
 
-Future<Void> BlobStoreEndpoint::deleteBucket(std::string const &bucket, int *pNumDeleted) {
-	return deleteBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, pNumDeleted);
+Future<Void> BlobStoreEndpoint::deleteRecursively(std::string const &bucket, std::string prefix, int *pNumDeleted) {
+	return deleteRecursively_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted);
 }
 
 ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
@@ -649,17 +665,23 @@ ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreE
 	state BlobStoreEndpoint::ListResult results;
 	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
 	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
-	loop {
-		choose {
-			when(Void _ = wait(done)) {
-				break;
-			}
-			when(BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
-				results.commonPrefixes.insert(results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
-				results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
-			}
+	// Wrap done in an actor which sends end_of_stream because list does not so that many lists can write to the same stream
+	done = map(done, [=](Void) {
+			resultStream.sendError(end_of_stream());
+			return Void();
+		});
+
+	try {
+		loop {
+			BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture());
+			results.commonPrefixes.insert(results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
+			results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
 		}
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream)
+			throw;
 	}
+
 	return results;
 }
 
