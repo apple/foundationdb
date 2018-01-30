@@ -44,14 +44,23 @@ public:
 	std::vector<int> logIndexArray;
 	std::map<int,LocalityEntry>	logEntryMap;
 	bool isLocal;
-	bool hasBest;
+	int32_t hasBestPolicy;
 	int8_t locality;
 
-	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBest(true), locality(-99) {}
+	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(-99) {}
 
 	int bestLocationFor( Tag tag ) {
-		if(tag == txsTag) return hasBest ? txsTagOld % logServers.size() : -1;
-		return hasBest ? tag.id % logServers.size() : -1;
+		if(hasBestPolicy == HasBestPolicyNone) {
+			return -1;
+		} else if(hasBestPolicy == HasBestPolicyId) {
+			//This policy supports upgrades from 5.X
+			if(tag == txsTag) return txsTagOld % logServers.size();
+			return tag.id % logServers.size();
+		} else {
+			//Unsupported policy
+			ASSERT(false);
+			throw internal_error();
+		}
 	}
 
 	void updateLocalitySet() {
@@ -94,7 +103,7 @@ public:
 		alsoServers.clear();
 		resultEntries.clear();
 
-		if(hasBest) {
+		if(hasBestPolicy) {
 			for(auto& t : tags) {
 				if(t.locality == locality || t.locality == tagLocalitySpecial || locality == tagLocalitySpecial) {
 					newLocations.push_back(bestLocationFor(t));

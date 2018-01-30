@@ -129,7 +129,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSet->tLogPolicy = tLogSet.tLogPolicy;
 			logSet->tLogLocalities = tLogSet.tLogLocalities;
 			logSet->isLocal = tLogSet.isLocal;
-			logSet->hasBest = tLogSet.hasBest;
+			logSet->hasBestPolicy = tLogSet.hasBestPolicy;
 			logSet->locality = tLogSet.locality;
 			logSet->updateLocalitySet();
 			filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
@@ -153,7 +153,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->tLogPolicy = tLogData.tLogPolicy;
 				logSet->tLogLocalities = tLogData.tLogLocalities;
 				logSet->isLocal = tLogData.isLocal;
-				logSet->hasBest = tLogData.hasBest;
+				logSet->hasBestPolicy = tLogData.hasBestPolicy;
 				logSet->locality = tLogData.locality;
 				//logSet.UpdateLocalitySet(); we do not update the locality set, since we never push to old logs
 			}
@@ -186,7 +186,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->tLogPolicy = tLogSet.tLogPolicy;
 				logSet->tLogLocalities = tLogSet.tLogLocalities;
 				logSet->isLocal = tLogSet.isLocal;
-				logSet->hasBest = tLogSet.hasBest;
+				logSet->hasBestPolicy = tLogSet.hasBestPolicy;
 				logSet->locality = tLogSet.locality;
 				//logSet->updateLocalitySet(); we do not update the locality set, since we never push to old logs
 			}
@@ -210,7 +210,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					logSet->tLogPolicy = tLogSet.tLogPolicy;
 					logSet->tLogLocalities = tLogSet.tLogLocalities;
 					logSet->isLocal = tLogSet.isLocal;
-					logSet->hasBest = tLogSet.hasBest;
+					logSet->hasBestPolicy = tLogSet.hasBestPolicy;
 					logSet->locality = tLogSet.locality;
 					//logSet->updateLocalitySet(); we do not update the locality set, since we never push to old logs
 				}
@@ -237,7 +237,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			coreSet.tLogReplicationFactor = t->tLogReplicationFactor;
 			coreSet.tLogPolicy = t->tLogPolicy;
 			coreSet.isLocal = t->isLocal;
-			coreSet.hasBest = t->hasBest;
+			coreSet.hasBestPolicy = t->hasBestPolicy;
 			coreSet.locality = t->locality;
 			newState.tLogs.push_back(coreSet);
 		}
@@ -256,7 +256,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					coreSet.tLogReplicationFactor = t->tLogReplicationFactor;
 					coreSet.tLogPolicy = t->tLogPolicy;
 					coreSet.isLocal = t->isLocal;
-					coreSet.hasBest = t->hasBest;
+					coreSet.hasBestPolicy = t->hasBestPolicy;
 					coreSet.locality = t->locality;
 					newState.oldTLogData[i].tLogs.push_back(coreSet);
 				}
@@ -352,7 +352,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			int bestSet = -1;
 			for(int t = 0; t < tLogs.size(); t++) {
-				if(tLogs[t]->hasBest && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
+				if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
 					bestSet = t;
 					break;
 				}
@@ -368,7 +368,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for(int i = 0; i < oldLogData.size() && begin < oldLogData[i].epochEnd; i++) {
 					int bestOldSet = -1;
 					for(int t = 0; t < oldLogData[i].tLogs.size(); t++) {
-						if(oldLogData[i].tLogs[t]->hasBest && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial)) {
+						if(oldLogData[i].tLogs[t]->hasBestPolicy && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial)) {
 							bestOldSet = t;
 							break;
 						}
@@ -395,7 +395,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		} else {
 			int bestSet = -1;
 			for(int t = 0; t < tLogs.size(); t++) {
-				if(tLogs[t]->hasBest && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
+				if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
 					bestSet = t;
 					break;
 				}
@@ -420,7 +420,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for(int i = 0; i < history.size(); i++) {
 					bestSet = -1;
 					for(int t = 0; t < tLogs.size(); t++) {
-						if(tLogs[t]->hasBest && (tLogs[t]->locality == history[i].second.locality || history[i].second.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
+						if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == history[i].second.locality || history[i].second.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
 							bestSet = t;
 							break;
 						}
@@ -575,7 +575,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				log.tLogPolicy = logSet->tLogPolicy;
 				log.tLogLocalities = logSet->tLogLocalities;
 				log.isLocal = logSet->isLocal;
-				log.hasBest = logSet->hasBest;
+				log.hasBestPolicy = logSet->hasBestPolicy;
 				log.locality = logSet->locality;
 
 				for( int i = 0; i < logSet->logServers.size(); i++ ) {
@@ -601,7 +601,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					log.tLogPolicy = logSet->tLogPolicy;
 					log.tLogLocalities = logSet->tLogLocalities;
 					log.isLocal = logSet->isLocal;
-					log.hasBest = logSet->hasBest;
+					log.hasBestPolicy = logSet->hasBestPolicy;
 					log.locality = logSet->locality;
 
 					for( int i = 0; i < logSet->logServers.size(); i++ ) {
@@ -752,7 +752,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSet->tLogPolicy = coreSet.tLogPolicy;
 			logSet->tLogLocalities = coreSet.tLogLocalities;
 			logSet->isLocal = coreSet.isLocal;
-			logSet->hasBest = coreSet.hasBest;
+			logSet->hasBestPolicy = coreSet.hasBestPolicy;
 			logSet->locality = coreSet.locality;
 			logFailed.push_back(failed);
 		}
@@ -775,7 +775,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->tLogPolicy = log.tLogPolicy;
 				logSet->tLogLocalities = log.tLogLocalities;
 				logSet->isLocal = log.isLocal;
-				logSet->hasBest = log.hasBest;
+				logSet->hasBestPolicy = log.hasBestPolicy;
 				logSet->locality = log.locality;
 			}
 			oldData.epochEnd = old.epochEnd;
@@ -994,7 +994,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSet->tLogReplicationFactor = configuration.remoteTLogReplicationFactor;
 		logSet->tLogPolicy = configuration.remoteTLogPolicy;
 		logSet->isLocal = false;
-		logSet->hasBest = true;
+		logSet->hasBestPolicy = HasBestPolicyId;
 		logSet->locality = remoteLocality;
 		
 		//recruit temporary log routers and update registration with them
@@ -1082,7 +1082,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogs[0]->tLogReplicationFactor = configuration.tLogReplicationFactor;
 		logSystem->tLogs[0]->tLogPolicy = configuration.tLogPolicy;
 		logSystem->tLogs[0]->isLocal = true;
-		logSystem->tLogs[0]->hasBest = true;
+		logSystem->tLogs[0]->hasBestPolicy = HasBestPolicyId;
 		logSystem->tLogs[0]->locality = primaryLocality;
 
 		if(configuration.satelliteTLogReplicationFactor > 0) {
@@ -1091,7 +1091,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogs[1]->tLogReplicationFactor = configuration.satelliteTLogReplicationFactor;
 			logSystem->tLogs[1]->tLogPolicy = configuration.satelliteTLogPolicy;
 			logSystem->tLogs[1]->isLocal = true;
-			logSystem->tLogs[1]->hasBest = false;
+			logSystem->tLogs[1]->hasBestPolicy = HasBestPolicyNone;
 			logSystem->tLogs[1]->locality = -99;
 			logSystem->expectedLogSets++;
 		}
