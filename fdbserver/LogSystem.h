@@ -50,6 +50,7 @@ public:
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBest(true), locality(-99) {}
 
 	int bestLocationFor( Tag tag ) {
+		if(tag == txsTag) return hasBest ? txsTagOld % logServers.size() : -1;
 		return hasBest ? tag.id % logServers.size() : -1;
 	}
 
