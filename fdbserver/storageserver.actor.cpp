@@ -3303,6 +3303,10 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString());
 							}
 
+							if(self->history.size() && BUGGIFY) {
+								throw please_reboot();
+							}
+
 							break;
 						}
 						when ( Void _ = wait(infoChanged) ) {}
