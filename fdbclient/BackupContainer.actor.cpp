@@ -962,7 +962,7 @@ private:
 	// Backup files to under a single folder prefix with subfolders for each named backup
 	static const std::string DATAFOLDER;
 
-	// The metafolder contains keys for which user-named backups exist.  Backup names can contain an arbitrary
+	// Indexfolder contains keys for which user-named backups exist.  Backup names can contain an arbitrary
 	// number of slashes so the backup names are kept in a separate folder tree from their actual data.
 	static const std::string INDEXFOLDER;
 
@@ -1080,36 +1080,8 @@ public:
 	}
 
 	ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
-		state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-		state Future<Void> done = bc->m_bstore->listBucketStream(BUCKET, resultStream, bc->dataPath(""), '/', std::numeric_limits<int>::max());
-		state std::list<Future<Void>> deleteFutures;
-		loop {
-			choose {
-				when(Void _ = wait(done)) {
-					break;
-				}
-				when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
-					for(auto &object : list.objects) {
-						int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
-						deleteFutures.push_back(map(bc->m_bstore->deleteObject(BUCKET, object.name), [pNumDeletedCopy](Void) {
-							if(pNumDeletedCopy != nullptr)
-								++*pNumDeletedCopy;
-							return Void();
-						}));
-					}
-
-					while(deleteFutures.size() > CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS) {
-						Void _ = wait(deleteFutures.front());
-						deleteFutures.pop_front();
-					}
-				}
-			}
-		}
-
-		while(deleteFutures.size() > 0) {
-			Void _ = wait(deleteFutures.front());
-			deleteFutures.pop_front();
-		}
+		// First delete everything under the data prefix in the bucket
+		Void _ = wait(bc->m_bstore->deleteRecursively(BUCKET, bc->dataPath(""), pNumDeleted));
 
 		// Now that all files are deleted, delete the index entry
 		Void _ = wait(bc->m_bstore->deleteObject(BUCKET, bc->indexEntry()));
