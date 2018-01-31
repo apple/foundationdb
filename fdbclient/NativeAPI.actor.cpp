@@ -464,8 +464,9 @@ DatabaseContext::DatabaseContext(
 	transactionsReadVersions(0), transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsPastVersions(0),
 	transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), taskID(taskID),
 	outstandingWatches(0), maxOutstandingWatches(CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
-	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) {
-		logger = databaseLogger( this );
+	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) 
+{
+	logger = databaseLogger( this );
 	locationCacheSize = g_network->isSimulated() ?
 			CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE_SIM :
 			CLIENT_KNOBS->LOCATION_CACHE_EVICTION_SIZE;
