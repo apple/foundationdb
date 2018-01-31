@@ -829,6 +829,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			loop {
 				state int tciIndex = 0;
 				state bool foundTeams = true;
+				state int healthyCount = 0;
 				destination.clear();
 				loop{
 					if (tciIndex == self->teamCollections.size()) {
@@ -843,6 +844,9 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					req.sources = rd.src;
 					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					if (bestTeam.present()) {
+						if(bestTeam.get()->isHealthy()) {
+							healthyCount++;
+						}
 						destination.addTeam(bestTeam.get());
 					}
 					else {
@@ -851,7 +855,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					}
 					tciIndex++;
 				}
-				if (foundTeams) {
+				if (foundTeams && healthyCount > 0) {
 					break;
 				}
 				TEST(true); //did not find a healthy destination team on the first attempt

@@ -470,11 +470,10 @@ struct DDTeamCollection {
 	Debouncer restartRecruiting;
 
 	int healthyTeamCount;
-	PromiseStream<Void> zeroHealthyTeams;
+	AsyncVar<bool> zeroHealthyTeams;
 
 	int optimalTeamCount;
-	PromiseStream<Void> optimalTeamChange;
-	Promise<Void> onOptimalTeamChange;
+	AsyncVar<bool> zeroOptimalTeams;
 
 	AsyncMap< AddressExclusion, bool > excludedServers;  // true if an address is in the excluded list in the database.  Updated asynchronously (eventually)
 
@@ -570,12 +569,17 @@ struct DDTeamCollection {
 			//   tracking is "edge triggered")
 			// SOMEDAY: Account for capacity, load (when shardMetrics load is high)
 
+			if( !self->teams.size() ) {
+				req.reply.send( Optional<Reference<IDataDistributionTeam>>() );
+				return Void();
+			}
+
 			int64_t bestLoadBytes = 0;
 			Optional<Reference<IDataDistributionTeam>> bestOption;
 			std::vector<std::pair<int, Reference<IDataDistributionTeam>>> randomTeams;
+			std::set< UID > sources;
 
 			if( !req.wantsNewServers ) {
-				std::set< UID > sources;
 				std::vector<Reference<IDataDistributionTeam>> similarTeams;
 				bool foundExact = false;
 
@@ -632,11 +636,6 @@ struct DDTeamCollection {
 				}
 			}
 
-			if( !self->teams.size() ) {
-				req.reply.send( Optional<Reference<IDataDistributionTeam>>() );
-				return Void();
-			}
-
 			if( req.wantsTrueBest ) {
 				ASSERT( !bestOption.present() );
 				for( int i = 0; i < self->teams.size(); i++ ) {
@@ -673,6 +672,36 @@ struct DDTeamCollection {
 					}
 				}
 			}
+
+			if(!bestOption.present() && self->zeroHealthyTeams.get()) {
+				//Attempt to find the unhealthy source server team and return it
+				if(!sources.size()) {
+					for( int i = 0; i < req.sources.size(); i++ ) {
+						sources.insert( req.sources[i] );
+					}
+				}
+
+				for( int i = 0; i < req.sources.size(); i++ ) {
+					if( self->server_info.count( req.sources[i] ) ) {
+						auto& teamList = self->server_info[ req.sources[i] ]->teams;
+						for( int j = 0; j < teamList.size(); j++ ) {
+							bool found = true;
+							for( int k = 0; k < teamList[j]->serverIDs.size(); k++ ) {
+								if( !sources.count( teamList[j]->serverIDs[k] ) ) {
+									found = false;
+									break;
+								}
+							}
+							if(found) {
+								bestOption = teamList[j];
+								break;
+							}
+						}
+						break;
+					}
+				}
+			}
+
 			req.reply.send( bestOption );
 			return Void();
 		} catch( Error &e ) {
@@ -1145,18 +1174,20 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 	state bool wrongSize = team->getServerIDs().size() != self->configuration.storageTeamSize;
 	state bool lastReady = self->initialFailureReactionDelay.isReady();
 	state bool lastHealthy = team->isHealthy();
-	state bool lastOptimal = team->isOptimal();
+	state bool lastOptimal = team->isOptimal() && lastHealthy;
 	state bool lastWrongConfiguration = team->isWrongConfiguration();
 
 	if(lastHealthy) {
 		self->healthyTeamCount++;
-
-		if(lastOptimal) {
-			self->optimalTeamCount++;
-			if( self->optimalTeamCount == 1 )
-				self->optimalTeamChange.send(Void());
-		}
+		self->zeroHealthyTeams.set(false);
 	}
+
+	if(lastOptimal) {
+		self->optimalTeamCount++;
+		self->zeroOptimalTeams.set(false);
+	}
+
+	state bool lastZeroHealthy = self->zeroHealthyTeams.get();
 
 	TraceEvent("TeamTrackerStarting", self->masterId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
 
@@ -1186,9 +1217,11 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 			if( !self->initialFailureReactionDelay.isReady() )
 				change.push_back( self->initialFailureReactionDelay );
+			change.push_back( self->zeroHealthyTeams.onChange() );
 
-			bool recheck = lastReady != self->initialFailureReactionDelay.isReady() && ( !matchesPolicy || anyUndesired || team->getServerIDs().size() != self->configuration.storageTeamSize );
+			bool recheck = (lastReady != self->initialFailureReactionDelay.isReady() || (lastZeroHealthy && !self->zeroHealthyTeams.get())) && (!matchesPolicy || anyUndesired || team->getServerIDs().size() != self->configuration.storageTeamSize);
 			lastReady = self->initialFailureReactionDelay.isReady();
+			lastZeroHealthy = self->zeroHealthyTeams.get();
 
 			if( serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired || anyWrongConfiguration != lastWrongConfiguration || wrongSize || recheck ) {
 				TraceEvent("TeamHealthChanged", self->masterId)
@@ -1201,12 +1234,13 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 				team->setWrongConfiguration( anyWrongConfiguration );
 
-				bool optimal = team->isOptimal();
-				int lastOptimalCount = self->optimalTeamCount;
+				bool optimal = team->isOptimal() && healthy;
 				if( optimal != lastOptimal ) {
 					lastOptimal = optimal;
-					if( lastHealthy )
-						self->optimalTeamCount += lastOptimal ? 1 : -1;
+					self->optimalTeamCount += optimal ? 1 : -1;
+
+					ASSERT( self->optimalTeamCount >= 0 );
+					self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 				}
 
 				if( lastHealthy != healthy ) {
@@ -1214,26 +1248,17 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 					self->healthyTeamCount += healthy ? 1 : -1;
 
 					ASSERT( self->healthyTeamCount >= 0 );
+					self->zeroHealthyTeams.set(self->healthyTeamCount == 0);
 
 					if( self->healthyTeamCount == 0 ) {
-						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->masterId)
-							.detail("SignallingTeam", team->getDesc());
-						self->zeroHealthyTeams.send( Void() );
+						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->masterId).detail("SignallingTeam", team->getDesc());
 					}
-
-					if( lastOptimal )
-						self->optimalTeamCount += lastHealthy ? 1 : -1;
 
 					TraceEvent("TeamHealthDifference", self->masterId)
 						.detail("LastOptimal", lastOptimal)
 						.detail("LastHealthy", lastHealthy)
 						.detail("Optimal", optimal)
 						.detail("OptimalTeamCount", self->optimalTeamCount);
-				}
-
-				if( lastOptimalCount != self->optimalTeamCount && ( self->optimalTeamCount == 0 || self->optimalTeamCount == 1 ) ) {
-					TraceEvent("OptimalTeamsChanging", self->masterId);
-					self->optimalTeamChange.send( Void() );
 				}
 
 				lastServersLeft = serversLeft;
@@ -1260,7 +1285,8 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 					team->setPriority( PRIORITY_TEAM_HEALTHY );
 				TraceEvent("TeamPriorityChange", self->masterId).detail("Priority", team->getPriority());
 
-				if( self->initialFailureReactionDelay.isReady() ) {
+				lastZeroHealthy = self->zeroHealthyTeams.get(); //set this again in case it changed from this teams health changing
+				if( self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams.get() ) {
 					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( team->getServerIDs() );
 
 					for(int i=0; i<shards.size(); i++) {
@@ -1308,7 +1334,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 						}
 					}
 				} else {
-					TraceEvent("TeamHealthNotReady", self->masterId);
+					TraceEvent("TeamHealthNotReady", self->masterId).detail("healthyTeamCount", self->healthyTeamCount);
 				}
 			}
 
@@ -1323,7 +1349,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 			if( self->healthyTeamCount == 0 ) {
 				TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->masterId).detail("SignallingTeam", team->getDesc());
-				self->zeroHealthyTeams.send( Void() );
+				self->zeroHealthyTeams.set(true);
 			}
 		}
 		throw;
@@ -1550,7 +1576,7 @@ ACTOR Future<Void> storageServerTracker(
 					TraceEvent(SevWarn, "UndesiredStorageServer", masterId).detail("Server", server->id).detail("OptimalTeamCount", self->optimalTeamCount);
 					status.isUndesired = true;
 				}
-				otherChanges.push_back( self->onOptimalTeamChange.getFuture() );
+				otherChanges.push_back( self->zeroOptimalTeams.onChange() );
 			}
 
 			//If this storage server has the wrong key-value store type, then mark it undesired so it will be replaced with a server having the correct type
@@ -1830,14 +1856,11 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 
 				self.restartRecruiting.trigger();
 			}
-			when( Void _ = waitNext( self.zeroHealthyTeams.getFuture() ) ) {
-				self.restartRecruiting.trigger();
-				self.noHealthyTeams();
-			}
-			when( Void _ = waitNext( self.optimalTeamChange.getFuture() ) ) {
-				Promise<Void> oldChange = self.onOptimalTeamChange;
-				self.onOptimalTeamChange = Promise<Void>();
-				oldChange.send(Void());
+			when( Void _ = wait( self.zeroHealthyTeams.onChange() ) ) {
+				if(self.zeroHealthyTeams.get()) {
+					self.restartRecruiting.trigger();
+					self.noHealthyTeams();
+				}
 			}
 			when( Void _ = waitNext( self.serverFailures.getFuture() ) ) {
 				self.restartRecruiting.trigger();
