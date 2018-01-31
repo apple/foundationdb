@@ -106,8 +106,14 @@ struct DBCoreState {
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ASSERT( ar.protocolVersion() >= 0x0FDB00A460010001LL);
-		if( ar.protocolVersion() >= 0x0FDB00A560010001LL) {
+		//FIXME: remove when we no longer need to test upgrades from 4.X releases
+		if(ar.protocolVersion() < 0x0FDB00A460010001LL) {
+			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
+			flushAndExit(0);
+		}
+		
+		ASSERT(ar.protocolVersion() >= 0x0FDB00A460010001LL);
+		if(ar.protocolVersion() >= 0x0FDB00A560010001LL) {
 			ar & tLogs & oldTLogData & recoveryCount & logSystemType;
 		} else if(ar.isDeserializing) {
 			tLogs.push_back(CoreTLogSet());

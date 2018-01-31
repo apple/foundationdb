@@ -1510,6 +1510,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	Void _ = wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fUnrecoveredBefore, fRecoverCounts) ) );
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
+		//FIXME: remove when we no longer need to test upgrades from 4.X releases
 		TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
 		flushAndExit(0);
 
