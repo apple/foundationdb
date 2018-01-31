@@ -135,7 +135,7 @@ public:
 	int64_t transactionsReadVersions;
 	int64_t transactionsCommitStarted;
 	int64_t transactionsCommitCompleted;
-	int64_t transactionsPastVersions;
+	int64_t transactionsTooOld;
 	int64_t transactionsFutureVersions;
 	int64_t transactionsNotCommitted;
 	int64_t transactionsMaybeCommitted; 

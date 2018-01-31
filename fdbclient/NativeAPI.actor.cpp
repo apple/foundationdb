@@ -209,7 +209,7 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 			.detail("ReadVersions", cx->transactionsReadVersions)
 			.detail("CommitStarted", cx->transactionsCommitStarted)
 			.detail("CommitCompleted", cx->transactionsCommitCompleted)
-			.detail("PastVersions", cx->transactionsPastVersions)
+			.detail("TooOld", cx->transactionsTooOld)
 			.detail("FutureVersions", cx->transactionsFutureVersions)
 			.detail("NotCommitted", cx->transactionsNotCommitted)
 			.detail("MaybeCommitted", cx->transactionsMaybeCommitted)
@@ -461,7 +461,7 @@ DatabaseContext::DatabaseContext(
 	Standalone<StringRef> dbName, Standalone<StringRef> dbId,
 	int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware )
   : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
-	transactionsReadVersions(0), transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsPastVersions(0),
+	transactionsReadVersions(0), transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0),
 	transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), taskID(taskID),
 	outstandingWatches(0), maxOutstandingWatches(CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) 
@@ -2765,7 +2765,7 @@ Future<Void> Transaction::onError( Error const& e ) {
 		e.code() == error_code_future_version)
 	{
 		if( e.code() == error_code_transaction_too_old )
-			cx->transactionsPastVersions++;
+			cx->transactionsTooOld++;
 		else if( e.code() == error_code_future_version )
 			cx->transactionsFutureVersions++;
 

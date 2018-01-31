@@ -631,7 +631,7 @@ ACTOR Future<Version> waitForVersion( StorageServer* data, Version version ) {
 	}
 }
 
-ACTOR Future<Version> waitForVersionNoPastVersion( StorageServer* data, Version version ) {
+ACTOR Future<Version> waitForVersionNoTooOld( StorageServer* data, Version version ) {
 	// This could become an Actor transparently, but for now it just does the lookup
 	if (version == latestVersion)
 		version = std::max(Version(1), data->version.get());
@@ -735,7 +735,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("WatchValueDebug", req.debugID.get().first(), "watchValueQ.Before"); //.detail("TaskID", g_network->getCurrentTask());
 
-		Version version = wait( waitForVersionNoPastVersion( data, req.version ) );
+		Version version = wait( waitForVersionNoTooOld( data, req.version ) );
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("WatchValueDebug", req.debugID.get().first(), "watchValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
@@ -1624,13 +1624,13 @@ void coalesceShards(StorageServer *data, KeyRangeRef keys) {
 	}
 }
 
-ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version version, KeyRangeRef keys, GetRangeLimits limits, bool* isPastVersion ) {
+ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version version, KeyRangeRef keys, GetRangeLimits limits, bool* isTooOld ) {
 	state Transaction tr( cx );
 	state Standalone<RangeResultRef> output;
 	state KeySelectorRef begin = firstGreaterOrEqual( keys.begin );
 	state KeySelectorRef end = firstGreaterOrEqual( keys.end );
 
-	if( *isPastVersion )
+	if( *isTooOld )
 		throw transaction_too_old();
 
 	tr.setVersion( version );
@@ -1672,7 +1672,7 @@ ACTOR Future<Standalone<RangeResultRef>> tryGetRange( Database cx, Version versi
 	} catch( Error &e ) {
 		if( begin.getKey() != keys.begin && ( e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ) ) {
 			if( e.code() == error_code_transaction_too_old )
-				*isPastVersion = true;
+				*isTooOld = true;
 			output.more = true;
 			if( begin.isFirstGreaterOrEqual() )
 				output.readThrough = begin.getKey();
@@ -1769,13 +1769,13 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		// Get the history
 		state int debug_getRangeRetries = 0;
 		state int debug_nextRetryToLog = 1;
-		state bool isPastVersion = false;
+		state bool isTooOld = false;
 
 		loop {
 			try {
 				TEST(true);		// Fetching keys for transferred shard
 
-				state Standalone<RangeResultRef> this_block = wait( tryGetRange( data->cx, fetchVersion, keys, GetRangeLimits( CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, fetchBlockBytes ), &isPastVersion ) );
+				state Standalone<RangeResultRef> this_block = wait( tryGetRange( data->cx, fetchVersion, keys, GetRangeLimits( CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, fetchBlockBytes ), &isTooOld ) );
 
 				int expectedSize = (int)this_block.expectedSize() + (8-(int)sizeof(KeyValueRef))*this_block.size();
 
@@ -1846,7 +1846,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					Void _ = wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
 					Version lastFV = fetchVersion;
 					fetchVersion = data->version.get();
-					isPastVersion = false;
+					isTooOld = false;
 
 					// Throw away deferred updates from before fetchVersion, since we don't need them to use blocks fetched at that version
 					while (!shard->updates.empty() && shard->updates[0].version <= fetchVersion) shard->updates.pop_front();
