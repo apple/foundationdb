@@ -64,7 +64,10 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						ASSERT(storageCache);
 						Reference<StorageInfo> storageInfo;
 						ServerCacheInfo info;
-						
+						info.tags.reserve(src.size() + dest.size());
+						info.src_info.reserve(src.size());
+						info.dest_info.reserve(dest.size());
+
 						for(auto id : src) {
 							auto cacheItr = storageCache->find(id);
 							if(cacheItr == storageCache->end()) {
@@ -77,7 +80,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 							}
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back( storageInfo->tag );
-							info.info.push_back( storageInfo );
+							info.src_info.push_back( storageInfo );
 						}
 						for(auto id : dest) {
 							auto cacheItr = storageCache->find(id);
@@ -91,6 +94,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 							}
 							ASSERT(storageInfo->tag != invalidTag);
 							info.tags.push_back( storageInfo->tag );
+							info.dest_info.push_back( storageInfo );
 						}
 						uniquify(info.tags);
 						keyInfo->insert(insertRange,info);

@@ -207,10 +207,13 @@ struct ProxyCommitData {
 		auto& tags = keyInfo[key].tags;
 		if(!tags.size()) {
 			auto& r = keyInfo.rangeContaining(key).value();
-			r.tags.resize(r.info.size());
-			for(int i = 0; i < r.info.size(); i++) {
-				r.tags[i] = r.info[i]->tag;
+			for(auto info : r.src_info) {
+				r.tags.push_back(info->tag);
 			}
+			for(auto info : r.dest_info) {
+				r.tags.push_back(info->tag);
+			}
+			uniquify(r.tags);
 			return r.tags;
 		}
 		return tags;
@@ -580,10 +583,13 @@ ACTOR Future<Void> commitBatch(
 						
 						auto& tags = ranges.begin().value().tags;
 						if(!tags.size()) {
-							tags.resize(ranges.begin().value().info.size());
-							for( int i = 0; i < tags.size(); i++ ) {
-								tags[i] = ranges.begin().value().info[i]->tag;
+							for( auto info : ranges.begin().value().src_info ) {
+								tags.push_back( info->tag );
 							}
+							for( auto info : ranges.begin().value().dest_info ) {
+								tags.push_back( info->tag );
+							}
+							uniquify(tags);
 						}
 						
 						for (auto& tag : tags)
@@ -595,10 +601,13 @@ ACTOR Future<Void> commitBatch(
 						for (auto r : ranges) {
 							auto& tags = r.value().tags;
 							if(!tags.size()) {
-								tags.resize(r.value().info.size());
-								for( int i = 0; i < tags.size(); i++ ) {
-									tags[i] = r.value().info[i]->tag;
+								for( auto info : r.value().src_info ) {
+									tags.push_back(info->tag);
 								}
+								for( auto info : r.value().dest_info ) {
+									tags.push_back(info->tag);
+								}
+								uniquify(tags);
 							}
 							allSources.insert(tags.begin(), tags.end());
 						}
@@ -1043,8 +1052,8 @@ ACTOR static Future<Void> readRequestServer(
 				if(!req.end.present()) {
 					auto r = req.reverse ? commitData->keyInfo.rangeContainingKeyBefore(req.begin) : commitData->keyInfo.rangeContaining(req.begin);
 					vector<StorageServerInterface> ssis;
-					ssis.reserve(r.value().info.size());
-					for(auto& it : r.value().info) {
+					ssis.reserve(r.value().src_info.size());
+					for(auto& it : r.value().src_info) {
 						ssis.push_back(it->interf);
 					}
 					rep.results.push_back(std::make_pair(r.range(), ssis));
@@ -1052,8 +1061,8 @@ ACTOR static Future<Void> readRequestServer(
 					int count = 0;
 					for(auto r = commitData->keyInfo.rangeContaining(req.begin); r != commitData->keyInfo.ranges().end() && count < req.limit && r.begin() < req.end.get(); ++r) {
 						vector<StorageServerInterface> ssis;
-						ssis.reserve(r.value().info.size());
-						for(auto& it : r.value().info) {
+						ssis.reserve(r.value().src_info.size());
+						for(auto& it : r.value().src_info) {
 							ssis.push_back(it->interf);
 						}
 						rep.results.push_back(std::make_pair(r.range(), ssis));
@@ -1064,8 +1073,8 @@ ACTOR static Future<Void> readRequestServer(
 					auto r = commitData->keyInfo.rangeContainingKeyBefore(req.end.get());
 					while( count < req.limit && req.begin < r.end() ) {
 						vector<StorageServerInterface> ssis;
-						ssis.reserve(r.value().info.size());
-						for(auto& it : r.value().info) {
+						ssis.reserve(r.value().src_info.size());
+						for(auto& it : r.value().src_info) {
 							ssis.push_back(it->interf);
 						}
 						rep.results.push_back(std::make_pair(r.range(), ssis));
@@ -1242,7 +1251,8 @@ ACTOR Future<Void> masterProxyServerCore(
 								if(k != allKeys.end) {
 									decodeKeyServersValue(kv.value, src, dest);
 									info.tags.clear();
-									info.info.clear();
+									info.src_info.clear();
+									info.dest_info.clear();
 									for(auto& id : src) {
 										auto cacheItr = commitData.storageCache.find(id);
 										if(cacheItr == commitData.storageCache.end()) {
@@ -1255,7 +1265,7 @@ ACTOR Future<Void> masterProxyServerCore(
 										}
 										ASSERT(storageInfo->tag != invalidTag);
 										info.tags.push_back( storageInfo->tag );
-										info.info.push_back( storageInfo );
+										info.src_info.push_back( storageInfo );
 									}
 									for(auto& id : dest) {
 										auto cacheItr = commitData.storageCache.find(id);
@@ -1269,6 +1279,7 @@ ACTOR Future<Void> masterProxyServerCore(
 										}
 										ASSERT(storageInfo->tag != invalidTag);
 										info.tags.push_back( storageInfo->tag );
+										info.dest_info.push_back( storageInfo );
 									}
 									uniquify(info.tags);
 									keyInfoData.push_back( std::make_pair(MapPair<Key,ServerCacheInfo>(k, info), 1) );
