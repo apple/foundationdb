@@ -30,6 +30,19 @@ ACTOR Future<bool> allTrue( std::vector<Future<bool>> all ) {
 	return true;
 }
 
+ACTOR Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> input, Reference<AsyncVar<bool>> output ) {
+	loop {
+		bool oneTrue = false;
+		std::vector<Future<Void>> changes;
+		for(auto it : input) {
+			if( it->get() ) oneTrue = true;
+			changes.push_back( it->onChange() );
+		}
+		output->set( oneTrue );
+		Void _ = wait( waitForAny(changes) );
+	}
+}
+
 ACTOR Future<Void> cancelOnly( std::vector<Future<Void>> futures ) {
 	// We don't do anything with futures except hold them, we never return, but if we are cancelled we (naturally) drop the futures
 	Void _ = wait( Never() );

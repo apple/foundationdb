@@ -261,9 +261,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 								src.push_back(uid.get());
 							}
 						}
-
-						std::sort( src.begin(), src.end() );
-						src.resize( std::unique( src.begin(), src.end() ) - src.begin() );
+						uniquify(src);
 
 						//Update dest servers for this range to be equal to servers
 						krmSetPreviouslyEmptyRange( &tr, keyServersPrefix, rangeIntersectKeys, keyServersValue(src, servers), old[i+1].value );
@@ -276,11 +274,8 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 						}
 
 						//Keep track of src shards so that we can preserve their values when we overwrite serverKeys
-						std::set<UID> sources;
-						for(auto s = src.begin(); s != src.end(); ++s)
-							sources.insert(*s);
-						for(auto s = sources.begin(); s != sources.end(); ++s) {
-							shardMap[*s].push_back(old.arena(), rangeIntersectKeys);
+						for(auto& uid : src) {
+							shardMap[uid].push_back(old.arena(), rangeIntersectKeys);
 							/*TraceEvent("StartMoveKeysShardMapAdd", relocationIntervalId)
 								.detail("Server", *s);*/
 						}
@@ -458,6 +453,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					state std::set<UID> allServers;
 					state std::set<UID> intendedTeam(destinationTeam.begin(), destinationTeam.end());
 					state vector<UID> src;
+					vector<UID> completeSrc;
 
 					//Iterate through the beginning of keyServers until we find one that hasn't already been processed
 					int currentIndex;
@@ -465,12 +461,25 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						decodeKeyServersValue( keyServers[currentIndex].value, src, dest );
 
 						std::set<UID> srcSet;
-						for(int s = 0; s < src.size(); s++)
+						for(int s = 0; s < src.size(); s++) {
 							srcSet.insert(src[s]);
+						}
+
+						if(currentIndex == 0) {
+							completeSrc = src;
+						} else {
+							for(int i = 0; i < completeSrc.size(); i++) {
+								if(!srcSet.count(completeSrc[i])) {
+									std::swap(completeSrc[i--], completeSrc.back());
+									completeSrc.pop_back();
+								}
+							}
+						}
 
 						std::set<UID> destSet;
-						for(int s = 0; s < dest.size(); s++)
+						for(int s = 0; s < dest.size(); s++) {
 							destSet.insert(dest[s]);
+						}
 
 						allServers.insert(srcSet.begin(), srcSet.end());
 						allServers.insert(destSet.begin(), destSet.end());
@@ -509,6 +518,13 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						for(int s = 0; s < src2.size(); s++)
 							srcSet.insert(src2[s]);
 
+						for(int i = 0; i < completeSrc.size(); i++) {
+							if(!srcSet.count(completeSrc[i])) {
+								std::swap(completeSrc[i--], completeSrc.back());
+								completeSrc.pop_back();
+							}
+						}
+
 						allServers.insert(srcSet.begin(), srcSet.end());
 
 						alreadyMoved = dest2.empty() && srcSet == intendedTeam;
@@ -546,12 +562,19 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					// They must also have at least the transaction read version so they can't "forget" the shard between
 					//   now and when this transaction commits.
 					state vector< Future<Void> > serverReady;	// only for count below
+					state vector<UID> newDestinations;
+					std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
+					for(auto& it : dest) {
+						if(!completeSrcSet.count(it)) {
+							newDestinations.push_back(it);
+						}
+					}
 
 					// for smartQuorum
 					state vector<StorageServerInterface> storageServerInterfaces;
 					vector< Future< Optional<Value> > > serverListEntries;
-					for(int s=0; s<dest.size(); s++)
-						serverListEntries.push_back( tr.get( serverListKeyFor(dest[s]) ) );
+					for(int s=0; s<newDestinations.size(); s++)
+						serverListEntries.push_back( tr.get( serverListKeyFor(newDestinations[s]) ) );
 					state vector<Optional<Value>> serverListValues = wait( getAll(serverListEntries) );
 
 					releaser.release();
@@ -559,16 +582,16 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					for(int s=0; s<serverListValues.size(); s++) {
 						ASSERT( serverListValues[s].present() );  // There should always be server list entries for servers in keyServers
 						auto si = decodeServerListValue(serverListValues[s].get());
-						ASSERT( si.id() == dest[s] );
+						ASSERT( si.id() == newDestinations[s] );
 						storageServerInterfaces.push_back( si );
 					}
 
 					for(int s=0; s<storageServerInterfaces.size(); s++)
 						serverReady.push_back( waitForShardReady( storageServerInterfaces[s], keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE) );
 					Void _ = wait( timeout(
-						smartQuorum( serverReady, durableStorageQuorum, SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, TaskMoveKeys ),
+						smartQuorum( serverReady, std::max<int>(0, durableStorageQuorum - (dest.size() - newDestinations.size())), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, TaskMoveKeys ),
 						SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskMoveKeys ) );
-					int count = 0;
+					int count = dest.size() - newDestinations.size();
 					for(int s=0; s<serverReady.size(); s++)
 						count += serverReady[s].isReady() && !serverReady[s].isError();
 
@@ -589,9 +612,6 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						}
 
 						Void _ = wait(waitForAll(actors));
-
-						//printf("  fMK: committing\n");
-
 						Void _ = wait( tr.commit() );
 
 						begin = endKey;
@@ -617,8 +637,6 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e, true);
 		throw;
 	}
-	//printf("Moved keys: ( '%s'-'%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
-
 	return Void();
 }
 
@@ -795,6 +813,7 @@ ACTOR Future<Void> moveKeys(
 	Database cx,
 	KeyRange keys,
 	vector<UID> destinationTeam,
+	vector<UID> healthyDestinations,
 	MoveKeysLock lock,
 	int durableStorageQuorum,
 	Promise<Void> dataMovementComplete,
@@ -806,7 +825,7 @@ ACTOR Future<Void> moveKeys(
 	std::sort( destinationTeam.begin(), destinationTeam.end() );
 	Void _ = wait( startMoveKeys( cx, keys, destinationTeam, lock, durableStorageQuorum, startMoveKeysParallelismLock, relocationIntervalId ) );
 
-	state Future<Void> completionSignaller = checkFetchingState( cx, destinationTeam, keys, dataMovementComplete, relocationIntervalId );
+	state Future<Void> completionSignaller = checkFetchingState( cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId );
 
 	Void _ = wait( finishMoveKeys( cx, keys, destinationTeam, lock, durableStorageQuorum, finishMoveKeysParallelismLock, relocationIntervalId ) );
 

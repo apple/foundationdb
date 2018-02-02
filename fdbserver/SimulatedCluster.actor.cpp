@@ -813,7 +813,6 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.hasRemoteReplication = simconfig.db.remoteTLogReplicationFactor > 0;
 	g_simulator.remoteTLogPolicy = simconfig.db.remoteTLogPolicy;
 	g_simulator.remoteDcId = simconfig.db.remoteDcId;
-	g_simulator.remoteStoragePolicy = simconfig.db.remoteStoragePolicy;
 	g_simulator.hasSatelliteReplication = simconfig.db.satelliteTLogReplicationFactor > 0;
 	g_simulator.satelliteTLogPolicy = simconfig.db.satelliteTLogPolicy;
 	g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.satelliteTLogWriteAntiQuorum;
@@ -821,7 +820,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.remoteSatelliteDcIds = simconfig.db.remoteSatelliteDcIds;
 
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
-	ASSERT(!g_simulator.hasRemoteReplication || (g_simulator.remoteTLogPolicy && g_simulator.remoteStoragePolicy));
+	ASSERT(!g_simulator.hasRemoteReplication || g_simulator.remoteTLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
 	TraceEvent("simulatorConfig").detail("ConfigString", startingConfigString);
 

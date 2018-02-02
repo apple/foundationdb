@@ -61,6 +61,7 @@ enum {
 
 struct IDataDistributionTeam {
 	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() = 0;
+	virtual int size() = 0;
 	virtual vector<UID> const& getServerIDs() = 0;
 	virtual void addDataInFlightToTeam( int64_t delta ) = 0;
 	virtual int64_t getDataInFlightToTeam() = 0;
@@ -97,10 +98,11 @@ struct GetTeamRequest {
 	bool preferLowerUtilization;
 	double inflightPenalty;
 	std::vector<UID> sources;
+	std::vector<UID> completeSources;
 	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty(inflightPenalty) {}
+	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty( inflightPenalty ) {}
 };
 
 struct GetMetricsRequest {
@@ -183,6 +185,7 @@ Future<Void> dataDistributionTracker(
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
+	Reference<AsyncVar<bool>> const& zeroHealthyTeams,
 	UID const& masterId);
 
 Future<Void> dataDistributionQueue(

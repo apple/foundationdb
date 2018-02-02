@@ -87,11 +87,6 @@ struct DatabaseConfiguration {
 	IRepPolicyRef remoteTLogPolicy;
 	Optional<Standalone<StringRef>> remoteDcId;
 
-	// Remote Storage Servers
-	IRepPolicyRef remoteStoragePolicy;
-	int32_t remoteDurableStorageQuorum;
-	int32_t remoteStorageTeamSize;
-
 	// Satellite TLogs
 	IRepPolicyRef satelliteTLogPolicy;
 	int32_t satelliteDesiredTLogCount;

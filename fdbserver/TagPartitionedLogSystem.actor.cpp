@@ -64,6 +64,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	Future<Void> remoteRecoveryComplete;
 	bool recoveryCompleteWrittenToCoreState;
 	bool remoteLogsWrittenToCoreState;
+	bool hasRemoteServers;
 
 	Optional<Version> epochEndVersion;
 	std::set< Tag > epochEndTags;
@@ -73,7 +74,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	ActorCollection actors;
 	std::vector<OldLogData> oldLogData;
 
-	TagPartitionedLogSystem( UID dbgid, LocalityData locality ) : dbgid(dbgid), locality(locality), actors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(0), minRouters(std::numeric_limits<int>::max()), expectedLogSets(0) {}
+	TagPartitionedLogSystem( UID dbgid, LocalityData locality ) : dbgid(dbgid), locality(locality), actors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(0), minRouters(std::numeric_limits<int>::max()), expectedLogSets(0), hasRemoteServers(false) {}
 
 	virtual void stopRejoins() {
 		rejoins = Future<Void>();
@@ -294,25 +295,43 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Future<Void> onError() {
+		return onError_internal(this);
+	}
+
+	ACTOR static Future<Void> onError_internal( TagPartitionedLogSystem* self ) {
 		// Never returns normally, but throws an error if the subsystem stops working
-		// FIXME: Run waitFailureClient on the master instead of these onFailedFor?
-		vector<Future<Void>> failed;
+		loop {
+			vector<Future<Void>> failed;
+			vector<Future<Void>> changes;
 
-		for( auto& it : tLogs ) {
-			for(auto &t : it->logServers) {
-				if( t->get().present() ) {
-					failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+			for( auto& it : self->tLogs ) {
+				for(auto &t : it->logServers) {
+					if( t->get().present() ) {
+						failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+					} else {
+						changes.push_back(t->onChange());
+					}
+				}
+				for(auto &t : it->logRouters) {
+					if( t->get().present() ) {
+						failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
+					} else {
+						changes.push_back(t->onChange());
+					}
 				}
 			}
-			for(auto &t : it->logRouters) {
-				if( t->get().present() ) {
-					failed.push_back( waitFailureClient( t->get().interf().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
-				}
+
+			if(self->hasRemoteServers && !self->remoteRecovery.isReady()) {
+				changes.push_back(self->remoteRecovery);
 			}
+
+			if(!changes.size()) {
+				changes.push_back(Never()); //waiting on an empty vector will return immediately
+			}
+
+			ASSERT( failed.size() >= 1 );
+			Void _ = wait( quorum(changes, 1) || tagError<Void>( quorum( failed, 1 ), master_tlog_failed() ) || self->actors.getResult() );
 		}
-
-		ASSERT( failed.size() >= 1 );
-		return tagError<Void>( quorum( failed, 1 ), master_tlog_failed() ) || actors.getResult();
 	}
 
 	virtual Future<Void> push( Version prevVersion, Version version, Version knownCommittedVersion, LogPushData& data, Optional<UID> debugID ) {
@@ -1200,8 +1219,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->recoveryComplete = waitForAll(recoveryComplete);
 		
 		if(configuration.remoteTLogReplicationFactor > 0) {
+			logSystem->hasRemoteServers = true;
 			logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), oldLogSystem, fRemoteWorkers, configuration, recoveryCount, minTag, remoteLocality);
 		} else {
+			logSystem->hasRemoteServers = false;
 			logSystem->remoteRecovery = logSystem->recoveryComplete;
 			logSystem->remoteRecoveryComplete = logSystem->recoveryComplete;
 		}

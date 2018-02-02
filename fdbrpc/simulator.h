@@ -292,7 +292,6 @@ public:
 	bool hasRemoteReplication;
 	IRepPolicyRef remoteTLogPolicy;
 	Optional<Standalone<StringRef>> remoteDcId;
-	IRepPolicyRef remoteStoragePolicy;
 	bool hasSatelliteReplication;
 	IRepPolicyRef satelliteTLogPolicy;
 	int32_t satelliteTLogWriteAntiQuorum;

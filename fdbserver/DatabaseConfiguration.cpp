@@ -35,9 +35,9 @@ void DatabaseConfiguration::resetInternal() {
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
 	primaryDcId = remoteDcId = Optional<Standalone<StringRef>>();
-	tLogPolicy = storagePolicy = remoteTLogPolicy = remoteStoragePolicy = satelliteTLogPolicy = IRepPolicyRef();
+	tLogPolicy = storagePolicy = remoteTLogPolicy = satelliteTLogPolicy = IRepPolicyRef();
 
-	remoteDesiredTLogCount = remoteTLogReplicationFactor = remoteDurableStorageQuorum = remoteStorageTeamSize = satelliteDesiredTLogCount = satelliteTLogReplicationFactor = satelliteTLogWriteAntiQuorum = satelliteTLogUsableDcs = logRouterCount = 0;
+	remoteDesiredTLogCount = remoteTLogReplicationFactor = satelliteDesiredTLogCount = satelliteTLogReplicationFactor = satelliteTLogWriteAntiQuorum = satelliteTLogUsableDcs = logRouterCount = 0;
 	primarySatelliteDcIds.clear();
 	remoteSatelliteDcIds.clear();
 }
@@ -65,7 +65,6 @@ void parseReplicationPolicy(IRepPolicyRef* policy, ValueRef const& v) {
 
 void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	storagePolicy = IRepPolicyRef(new PolicyAcross(storageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
-	remoteStoragePolicy = IRepPolicyRef(new PolicyAcross(remoteStorageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
 	tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
 	remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
 	satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(satelliteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
@@ -90,9 +89,8 @@ bool DatabaseConfiguration::isValid() const {
 		tLogPolicy &&
 		remoteDesiredTLogCount >= 0 &&
 		remoteTLogReplicationFactor >= 0 &&
-		( remoteTLogReplicationFactor == 0 || ( remoteStoragePolicy && remoteTLogPolicy && primaryDcId.present() && remoteDcId.present() && remoteDurableStorageQuorum >= 1 && logRouterCount >= 1 ) ) &&
+		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && primaryDcId.present() && remoteDcId.present() && logRouterCount >= 1 && durableStorageQuorum == storageTeamSize ) ) &&
 		primaryDcId.present() == remoteDcId.present() &&
-		remoteDurableStorageQuorum <= remoteStorageTeamSize &&
 		satelliteDesiredTLogCount >= 0 &&
 		satelliteTLogReplicationFactor >= 0 &&
 		satelliteTLogWriteAntiQuorum >= 0 &&
@@ -175,16 +173,14 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 			result["satellite_replication"] = format("%d", satelliteTLogReplicationFactor);
 		}
 
-		if( remoteDurableStorageQuorum == remoteStorageTeamSize && remoteDurableStorageQuorum > 0) {
-			if( remoteTLogReplicationFactor == 1 && remoteDurableStorageQuorum == 1 )
-				result["remote_redundancy_mode"] = "remote_single";
-			else if( remoteTLogReplicationFactor == 2 && remoteDurableStorageQuorum == 2 )
-				result["remote_redundancy_mode"] = "remote_double";
-			else if( remoteTLogReplicationFactor == 3 && remoteDurableStorageQuorum == 3 )
-				result["remote_redundancy_mode"] = "remote_triple";
-			else
-				result["remote_redundancy_mode"] = "custom";
-		}
+		if( remoteTLogReplicationFactor == 1 )
+			result["remote_redundancy_mode"] = "remote_single";
+		else if( remoteTLogReplicationFactor == 2 )
+			result["remote_redundancy_mode"] = "remote_double";
+		else if( remoteTLogReplicationFactor == 3 )
+			result["remote_redundancy_mode"] = "remote_triple";
+		else if(remoteTLogReplicationFactor > 0)
+			result["remote_redundancy_mode"] = "custom";
 
 		if( desiredTLogCount != -1 )
 			result["logs"] = format("%d", desiredTLogCount);
@@ -239,10 +235,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
-	else if (ck == LiteralStringRef("remote_storage_policy")) parseReplicationPolicy(&remoteStoragePolicy, value);
 	else if (ck == LiteralStringRef("satellite_log_policy")) parseReplicationPolicy(&satelliteTLogPolicy, value);
-	else if (ck == LiteralStringRef("remote_storage_quorum")) parse(&remoteDurableStorageQuorum, value);
-	else if (ck == LiteralStringRef("remote_storage_replicas")) parse(&remoteStorageTeamSize, value);
 	else if (ck == LiteralStringRef("satellite_logs")) parse(&satelliteDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("satellite_log_replicas")) parse(&satelliteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("satellite_anti_quorum")) parse(&satelliteTLogWriteAntiQuorum, value);

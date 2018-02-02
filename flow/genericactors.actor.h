@@ -726,6 +726,7 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 }
 
 Future<bool> allTrue( const std::vector<Future<bool>>& all );
+Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output );
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );
 Future<Void> timeoutWarningCollector( FutureStream<Void> const& input, double const& logDelay, const char* const& context, UID const& id );
 Future<bool> quorumEqualsTrue( std::vector<Future<bool>> const& futures, int const& required );

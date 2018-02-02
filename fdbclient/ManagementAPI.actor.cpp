@@ -155,25 +155,23 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	}
 
 	std::string remote_redundancy, remote_log_replicas;
-	IRepPolicyRef remoteStoragePolicy;
 	IRepPolicyRef remoteTLogPolicy;
 	bool remoteRedundancySpecified = true;
 	if (mode == "remote_single") {
 		remote_redundancy="1";
 		remote_log_replicas="1";
-		remoteStoragePolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
+		remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
 	} else if(mode == "remote_double") {
 		remote_redundancy="2";
 		remote_log_replicas="2";
-		remoteStoragePolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "remote_triple") {
 		remote_redundancy="3";
 		remote_log_replicas="3";
-		remoteStoragePolicy = remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "remote_three_data_hall") {
 		remote_redundancy="3";
 		remote_log_replicas="4";
-		remoteStoragePolicy = IRepPolicyRef(new PolicyAcross(3, "data_hall", IRepPolicyRef(new PolicyOne())));
 		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
@@ -186,10 +184,6 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 			out[p+"log_routers"] = remote_log_replicas;
 
 		BinaryWriter policyWriter(IncludeVersion());
-		serializeReplicationPolicy(policyWriter, remoteStoragePolicy);
-		out[p+"remote_storage_policy"] = policyWriter.toStringRef().toString();
-
-		policyWriter = BinaryWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
 		out[p+"remote_log_policy"] = policyWriter.toStringRef().toString();
 		return out;

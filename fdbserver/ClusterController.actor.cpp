@@ -632,7 +632,7 @@ public:
 				result.storageServers.push_back(primaryStorageServers[i].first);
 
 			if(req.configuration.remoteTLogReplicationFactor > 0) {
-				auto remoteStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.remoteStoragePolicy, result.remoteDcId );
+				auto remoteStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, result.remoteDcId );
 				for(int i = 0; i < remoteStorageServers.size(); i++)
 					result.storageServers.push_back(remoteStorageServers[i].first);
 			}
