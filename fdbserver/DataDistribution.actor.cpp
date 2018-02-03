@@ -2002,14 +2002,19 @@ ACTOR Future<Void> popOldTags( Database cx, Reference<ILogSystem> logSystem, Ver
 	loop {
 		try {
 			state Future<Standalone<RangeResultRef>> fTagLocalities = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
-			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY, true);
+			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY );
+			state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY );
 
-			Void _ = wait( success(fTagLocalities) && success(fTags) );
+			Void _ = wait( success(fTagLocalities) && success(fTags) && success(fHistoryTags) );
 
 			state std::vector<Future<Void>> popActors;
 			state std::vector<Tag> tags;
 
 			for(auto& kv : fTags.get()) {
+				tags.push_back(decodeServerTagValue( kv.value ));
+			}
+
+			for(auto& kv : fHistoryTags.get()) {
 				tags.push_back(decodeServerTagValue( kv.value ));
 			}
 

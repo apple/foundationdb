@@ -797,6 +797,7 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 
 				tr.clear( serverListKeyFor(serverID) );
 				tr.clear( serverTagKeyFor(serverID) );
+				tr.clear( serverTagHistoryRangeFor(serverID) );
 				retry = true;
 				Void _ = wait( tr.commit() );
 				return Void();
