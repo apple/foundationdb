@@ -1799,10 +1799,17 @@ namespace fileBackup {
 			state bool stopWhenDone;
 			state Optional<Version> restorableVersion;
 			state EBackupState backupState;
+			state Optional<std::string> tag;
 
 			Void _ = wait(store(config.stopWhenDone().getOrThrow(tr), stopWhenDone) 
 						&& store(config.getLatestRestorableVersion(tr), restorableVersion)
-						&& store(config.stateEnum().getOrThrow(tr), backupState));
+						&& store(config.stateEnum().getOrThrow(tr), backupState)
+						&& store(config.tag().get(tr), tag));
+
+			// If restorable, update the last restorable version for this tag
+			if(restorableVersion.present() && tag.present()) {
+				FileBackupAgent().setLastRestorable(tr, StringRef(tag.get()), restorableVersion.get());
+			}
 
 			// If the backup is restorable but the state is not differential then set state to differential
 			if(restorableVersion.present() && backupState != BackupAgentBase::STATE_DIFFERENTIAL)
@@ -2014,11 +2021,18 @@ namespace fileBackup {
 			state EBackupState backupState;
 			state Optional<Version> restorableVersion;
 			state Optional<Version> firstSnapshotEndVersion;
+			state Optional<std::string> tag;
 
 			Void _ = wait(store(config.stopWhenDone().getOrThrow(tr), stopWhenDone) 
 						&& store(config.stateEnum().getOrThrow(tr), backupState)
 						&& store(config.getLatestRestorableVersion(tr), restorableVersion)
-						&& store(config.firstSnapshotEndVersion().get(tr), firstSnapshotEndVersion));
+						&& store(config.firstSnapshotEndVersion().get(tr), firstSnapshotEndVersion)
+						&& store(config.tag().get(tr), tag));
+
+			// If restorable, update the last restorable version for this tag
+			if(restorableVersion.present() && tag.present()) {
+				FileBackupAgent().setLastRestorable(tr, StringRef(tag.get()), restorableVersion.get());
+			}
 
 			if(!firstSnapshotEndVersion.present()) {
 				config.firstSnapshotEndVersion().set(tr, Params.endVersion().get(task));
