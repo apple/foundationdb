@@ -219,11 +219,12 @@ struct JSONDoc {
 		return mergeOperator<T>(op, op_a, op_b, a.get_value<T>(), b.get_value<T>());
 	}
 
-	static inline std::string getOperator(const json_spirit::mObject &obj) {
+	static inline const std::string & getOperator(const json_spirit::mObject &obj) {
+		static const std::string empty;
 		for(auto &k : obj)
 			if(!k.first.empty() && k.first[0] == '$')
 				return k.first;
-		return std::string();
+		return empty;
 	}
 
 	// Merge src into dest, applying merge operators

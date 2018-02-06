@@ -1112,6 +1112,18 @@ ACTOR template <class T> void tagAndForwardError( Promise<T>* pOutputPromise, Er
 	out.sendError(value);
 }
 
+ACTOR template <class T> Future<T> waitOrError(Future<T> f, Future<Void> errorSignal) {
+	choose {
+		when(T val = wait(f)) {
+			return val;
+		}
+		when(Void _ = wait(errorSignal)) {
+			ASSERT(false);
+			throw internal_error();
+		}
+	}
+}
+
 struct FlowLock : NonCopyable, public ReferenceCounted<FlowLock> {
 	// FlowLock implements a nonblocking critical section: there can be only a limited number of clients executing code between
 	// wait(take()) and release(). Not thread safe. take() returns only when the number of holders of the lock is fewer than the
