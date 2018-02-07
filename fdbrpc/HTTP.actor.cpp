@@ -307,6 +307,9 @@ namespace HTTP {
 		if(pContent == NULL)
 			pContent = &empty;
 
+		state bool earlyResponse = false;
+		state int total_sent = 0;
+
 		try {
 			// Write headers to a packet buffer chain
 			PacketBuffer *pFirst = new PacketBuffer();
@@ -321,11 +324,25 @@ namespace HTTP {
 					printf("Request Header: %s: %s\n", h.first.c_str(), h.second.c_str());
 			}
 
+			state Reference<HTTP::Response> r(new HTTP::Response());
+			state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE");
+
 			state double send_start = timer();
-			state double total_sent = 0;
+
 			loop {
 				Void _ = wait(conn->onWritable());
 				Void _ = wait( delay( 0, TaskWriteSocket ) );
+
+				// If we already got a response, before finishing sending the request, then close the connection,
+				// set the Connection header to "close" as a hint to the caller that this connection can't be used
+				// again, and break out of the send loop.
+				if(responseReading.isReady()) {
+					conn->close();
+					r->headers["Connection"] = "close";
+					earlyResponse = true;
+					break;
+				}
+
 				state int trySend = CLIENT_KNOBS->HTTP_SEND_SIZE;
 				Void _ = wait(sendRate->getAllowance(trySend));
 				int len = conn->write(pContent->getUnsent(), trySend);
@@ -338,18 +355,20 @@ namespace HTTP {
 					break;
 			}
 
-			state Reference<HTTP::Response> r(new HTTP::Response());
-			Void _ = wait(r->read(conn, verb == "HEAD" || verb == "DELETE"));
+			Void _ = wait(responseReading);
+
 			double elapsed = timer() - send_start;
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
-				printf("[%s] HTTP code=%d, time=%fs %s %s [%u out, response content len %d]\n", conn->getDebugID().toString().c_str(), r->code, elapsed, verb.c_str(), resource.c_str(), (int)total_sent, (int)r->contentLen);
+				printf("[%s] HTTP code=%d early=%d, time=%fs %s %s contentLen=%d [%d out, response content len %d]\n",
+					conn->getDebugID().toString().c_str(), r->code, earlyResponse, elapsed, verb.c_str(), resource.c_str(), contentLen, total_sent, (int)r->contentLen);
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 2)
 				printf("[%s] HTTP RESPONSE:  %s %s\n%s\n", conn->getDebugID().toString().c_str(), verb.c_str(), resource.c_str(), r->toString().c_str());
 			return r;
 		} catch(Error &e) {
 			double elapsed = timer() - send_start;
 			if(CLIENT_KNOBS->HTTP_VERBOSE_LEVEL > 0)
-				printf("[%s] HTTP *ERROR*=%s, time=%fs %s %s [%u out]\n", conn->getDebugID().toString().c_str(), e.name(), elapsed, verb.c_str(), resource.c_str(), (int)total_sent);
+				printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
+					conn->getDebugID().toString().c_str(), e.name(), earlyResponse, elapsed, verb.c_str(), resource.c_str(), contentLen, total_sent);
 			throw;
 		}
 	}
