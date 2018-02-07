@@ -206,7 +206,11 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 	loop {
 		Void _ = wait( delay( CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, cx->taskID ) );
 		TraceEvent("TransactionMetrics")
-			.detail("ReadVersions", cx->transactionsReadVersions)
+			.detail("ReadVersions", cx->transactionReadVersions)
+			.detail("LogicalUncachedReads", cx->transactionLogicalReads)
+			.detail("PhysicalReadRequests", cx->transactionPhysicalReads)
+			.detail("CommittedMutations", cx->transactionCommittedMutations)
+			.detail("CommittedMutationBytes", cx->transactionCommittedMutationBytes)
 			.detail("CommitStarted", cx->transactionsCommitStarted)
 			.detail("CommitCompleted", cx->transactionsCommitCompleted)
 			.detail("TooOld", cx->transactionsTooOld)
@@ -461,8 +465,8 @@ DatabaseContext::DatabaseContext(
 	Standalone<StringRef> dbName, Standalone<StringRef> dbId,
 	int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware )
   : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
-	transactionsReadVersions(0), transactionsCommitStarted(0), transactionsCommitCompleted(0), transactionsTooOld(0),
-	transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), taskID(taskID),
+	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), transactionsCommitStarted(0), 
+	transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), taskID(taskID),
 	outstandingWatches(0), maxOutstandingWatches(CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) 
 {
@@ -1163,6 +1167,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			++cx->getValueSubmitted;
 			startTime = timer_int();
 			startTimeD = now();
+			++cx->transactionPhysicalReads;
 			state GetValueReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getValue, GetValueRequest(key, ver, getValueID), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 			double latency = now() - startTimeD;
 			cx->readLatencies.addSample(latency);
@@ -1223,6 +1228,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 		try {
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("offset",k.offset).detail("orEqual",k.orEqual);
+			++cx->transactionPhysicalReads;
 			GetKeyReply reply = wait( loadBalance( ssi.second, &StorageServerInterface::getKey, GetKeyRequest(k, version.get()), TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.After"); //.detail("NextKey",printable(reply.sel.key)).detail("offset", reply.sel.offset).detail("orEqual", k.orEqual);
@@ -1381,6 +1387,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 					.detail("Reverse", reverse)
 					.detail("Servers", locations[shard].second->description());*/
 				}
+				++cx->transactionPhysicalReads;
 				GetKeyValuesReply rep = wait( loadBalance( locations[shard].second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getExactRange.After");
@@ -1650,6 +1657,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 						.detail("Servers", beginServer.second->description());*/
 				}
 
+				++cx->transactionPhysicalReads;
 				GetKeyValuesReply rep = wait( loadBalance(beginServer.second, &StorageServerInterface::getKeyValues, req, TaskDefaultPromiseEndpoint, false, cx->enableLocalityLoadBalance ? &cx->queueModel : NULL ) );
 
 				if( info.debugID.present() ) {
@@ -1828,6 +1836,7 @@ void Transaction::setVersion( Version v ) {
 }
 
 Future<Optional<Value>> Transaction::get( const Key& key, bool snapshot ) {
+	++cx->transactionLogicalReads;
 	//ASSERT (key < allKeys.end);
 
 	//There are no keys in the database with size greater than KEY_SIZE_LIMIT
@@ -1914,6 +1923,7 @@ ACTOR Future< Standalone< VectorRef< const char*>>> getAddressesForKeyActor( Key
 }
 
 Future< Standalone< VectorRef< const char*>>> Transaction::getAddressesForKey( const Key& key ) {
+	++cx->transactionLogicalReads;
 	auto ver = getReadVersion();
 
 	return getAddressesForKeyActor(key, ver, cx, info);
@@ -1936,6 +1946,7 @@ ACTOR Future< Key > getKeyAndConflictRange(
 }
 
 Future< Key > Transaction::getKey( const KeySelector& key, bool snapshot ) {
+	++cx->transactionLogicalReads;
 	if( snapshot )
 		return ::getKey(cx, key, getReadVersion(), info);
 
@@ -1951,6 +1962,8 @@ Future< Standalone<RangeResultRef> > Transaction::getRange(
 	bool snapshot,
 	bool reverse )
 {
+	++cx->transactionLogicalReads;
+
 	if( limits.isReached() )
 		return Standalone<RangeResultRef>();
 
@@ -2367,6 +2380,8 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 
 					tr->numErrors = 0;
 					cx->transactionsCommitCompleted++;
+					cx->transactionCommittedMutations += req.transaction.mutations.size();
+					cx->transactionCommittedMutationBytes += req.transaction.mutations.expectedSize();
 
 					if(info.debugID.present())
 						g_traceBatch.addEvent("CommitDebug", commitID.get().first(), "NativeAPI.commit.After");
@@ -2720,7 +2735,7 @@ ACTOR Future<Version> extractReadVersion(DatabaseContext* cx, Reference<Transact
 }
 
 Future<Version> Transaction::getReadVersion(uint32_t flags) {
-	cx->transactionsReadVersions++;
+	cx->transactionReadVersions++;
 	flags |= options.getReadVersionFlags;
 
 	auto& batcher = cx->versionBatcher[ flags ];
