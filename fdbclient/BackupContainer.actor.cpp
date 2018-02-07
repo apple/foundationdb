@@ -1329,23 +1329,23 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state int64_t versionShift = g_random->randomInt64(0, std::numeric_limits<Version>::max() - 500);
 
 	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100 + versionShift, 150 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, log1, 0));
-
 	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150 + versionShift, 300 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, log2, g_random->randomInt(0, 10000000)));
-
 	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, range1, g_random->randomInt(0, 1000)));
-
 	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, range2, g_random->randomInt(0, 100000)));
-
 	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, range3, g_random->randomInt(0, 3000000)));
 
-	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size()));
+	Void _ = wait(
+		   writeAndVerifyFile(c, log1, 0)
+		&& writeAndVerifyFile(c, log2, g_random->randomInt(0, 10000000))
+		&& writeAndVerifyFile(c, range1, g_random->randomInt(0, 1000))
+		&& writeAndVerifyFile(c, range2, g_random->randomInt(0, 100000))
+		&& writeAndVerifyFile(c, range3, g_random->randomInt(0, 3000000))
+	);
 
-	Void _ = wait(c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size()));
+	Void _ = wait(
+		   c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size())
+		&& c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size())
+	);
 
 	printf("Checking file list dump\n");
 	FullBackupListing listing = wait(c->dumpFileList());
