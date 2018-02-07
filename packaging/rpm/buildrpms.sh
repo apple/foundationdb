@@ -44,7 +44,6 @@ install -m 0755 packaging/make_public.py $INSTDIR/usr/lib/foundationdb
 
 ln -s ../lib/foundationdb/backup_agent/backup_agent $INSTDIR/usr/bin/fdbbackup
 ln -s ../lib/foundationdb/backup_agent/backup_agent $INSTDIR/usr/bin/fdbrestore
-ln -s ../lib/foundationdb/backup_agent/backup_agent $INSTDIR/usr/bin/fdbblob
 ln -s ../lib/foundationdb/backup_agent/backup_agent $INSTDIR/usr/bin/fdbdr
 ln -s ../lib/foundationdb/backup_agent/backup_agent $INSTDIR/usr/bin/dr_agent
 

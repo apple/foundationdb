@@ -60,7 +60,6 @@ chmod 0644 $CLIENTSDIR/usr/share/doc/foundationdb-clients/README
 install -m 0755 bin/fdbbackup $CLIENTSDIR/usr/lib/foundationdb/backup_agent/backup_agent
 ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbbackup
 ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbrestore
-ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbblob
 ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/fdbdr
 ln -s ../lib/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/bin/dr_agent
 

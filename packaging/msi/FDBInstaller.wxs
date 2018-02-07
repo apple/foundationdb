@@ -151,7 +151,6 @@
             <Component Id='FDBBackupClientExecutable' Guid='{F5E0A796-EC21-406F-88E1-3195165E3078}' Win64='yes'>
               <File Id='FDBBACKUPEXE' Name='fdbbackup.exe' DiskId='1' Source='$(var.bindir)fdbbackup.exe' KeyPath='yes'/>
               <File Id='FDBRESTOREEXE' Name='fdbrestore.exe' DiskId='1' Source='$(var.bindir)fdbrestore.exe' KeyPath='no'/>
-              <File Id='FDBBLOBEXE' Name='fdbblob.exe' DiskId='1' Source='$(var.bindir)fdbblob.exe' KeyPath='no'/>
               <File Id='FDBDREXE' Name='fdbdr.exe' DiskId='1' Source='$(var.bindir)fdbdr.exe' KeyPath='no'/>
             </Component>
 
