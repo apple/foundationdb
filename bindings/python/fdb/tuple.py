@@ -59,10 +59,9 @@ def _find_terminator(v, pos):
             return pos
         pos += 2
 
+
 # If encoding and sign bit is 1 (negative), flip all of the bits. Otherwise, just flip sign.
 # If decoding and sign bit is 0 (negative), flip all of the bits. Otherwise, just flip sign.
-
-
 def _float_adjust(v, encode):
     if encode and six.indexbytes(v, 0) & 0x80 != 0x00:
         return b''.join(map(lambda x: six.int2byte(x ^ 0xff), six.iterbytes(v)))
@@ -368,14 +367,13 @@ def _encode(value, nested=False):
     else:
         raise ValueError("Unsupported data type: " + str(type(value)))
 
+
 # packs the tuple possibly for versionstamp operations and returns the position of the
 # incomplete versionstamp
 #  * if there are no incomplete versionstamp members, this returns the packed tuple and -1
 #  * if there is exactly one incomplete versionstamp member, it returns the tuple with the
 #    two extra version bytes and the position of the version start
 #  * if there is more than one incomplete versionstamp member, it throws an error
-
-
 def _pack_maybe_with_versionstamp(t, prefix=None):
     if not isinstance(t, tuple):
         raise Exception("fdbtuple pack() expects a tuple, got a " + str(type(t)))
@@ -392,27 +390,24 @@ def _pack_maybe_with_versionstamp(t, prefix=None):
 
     return b''.join(bytes_list), version_pos
 
+
 # packs the specified tuple into a key
-
-
 def pack(t, prefix=None):
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos >= 0:
         raise ValueError("Incomplete versionstamp included in vanilla tuple pack")
     return res
 
+
 # packs the specified tuple into a key for versionstamp operations
-
-
 def pack_with_versionstamp(t, prefix=None):
     res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
     if version_pos < 0:
         raise ValueError("No incomplete versionstamp included in tuple pack with versionstamp")
     return res
 
+
 # unpacks the specified key into a tuple
-
-
 def unpack(key, prefix_len=0):
     pos = prefix_len
     res = []
@@ -421,9 +416,8 @@ def unpack(key, prefix_len=0):
         res.append(r)
     return tuple(res)
 
+
 # determines if there is at least one incomplete versionstamp in a tuple
-
-
 def has_incomplete_versionstamp(t):
     def _elem_has_incomplete(item):
         if item is None:
@@ -532,9 +526,8 @@ def _compare_values(value1, value2):
         # Booleans, UUIDs, integers, and Versionstamps can just use standard comparison.
         return -1 if value1 < value2 else 0 if value1 == value2 else 1
 
+
 # compare element by element and return -1 if t1 < t2 or 1 if t1 > t2 or 0 if t1 == t2
-
-
 def compare(t1, t2):
     i = 0
     while i < len(t1) and i < len(t2):

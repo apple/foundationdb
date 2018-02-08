@@ -347,6 +347,7 @@ class DirectoryTest(Test):
             ResultSpecification(self.subspace_log, ordering_index=0)
         ]
 
+
 # Utility functions
 
 

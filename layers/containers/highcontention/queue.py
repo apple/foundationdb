@@ -41,6 +41,7 @@ import fdb.tuple
 
 fdb.api_version(22)
 
+
 ###################################
 # This defines a Subspace of keys #
 ###################################
@@ -66,6 +67,7 @@ class Subspace (object):
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
         return slice(self.rawPrefix + p.start, self.rawPrefix + p.stop)
+
 
 #########
 # Queue #
@@ -282,6 +284,7 @@ class Queue:
             except fdb.FDBError as e:
                 tr.on_error(e.code).wait()
 
+
 ##################
 # Internal tests #
 ##################
@@ -308,13 +311,13 @@ def queue_test(db):
     queue.clear(db)
     print 'Empty? %s' % queue.empty(db)
 
+
 ######################
 # Queue sample usage #
 ######################
 
+
 # caution: modifies the database!
-
-
 def queue_single_client_example(db):
     queue = Queue(Subspace(('queue_example',)), False)
     queue.clear(db)

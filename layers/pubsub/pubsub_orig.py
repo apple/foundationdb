@@ -206,9 +206,9 @@ def _post_message_internal(tr, feed, contents):
     # update the watchers on the feed to mark those inboxes as stale
     # prefix = fdb.tuple_to_key(key_for_feed(feed), 'watchers')
     # for k,v in tr.get_range_startswith(prefix):
-    #    stale_inbox = fdb.key_to_tuple(k)[3]
-    #    tr[key_for_inbox_stale_feed(stale_inbox, feed)] = ''
-    #    del tr[k]
+    #     stale_inbox = fdb.key_to_tuple(k)[3]
+    #     tr[key_for_inbox_stale_feed(stale_inbox, feed)] = ''
+    #     del tr[k]
 
     return True
 

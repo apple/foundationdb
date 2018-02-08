@@ -31,6 +31,7 @@ import threading
 
 fdb.api_version(22)
 
+
 ###################################
 # This defines a Subspace of keys #
 ###################################
@@ -56,6 +57,7 @@ class Subspace (object):
     def range(self, tuple=()):
         p = fdb.tuple.range(tuple)
         return slice(self.rawPrefix + p.start, self.rawPrefix + p.stop)
+
 
 ########################
 # _ImplicitTransaction #
@@ -85,6 +87,7 @@ class _ImplicitTransaction:
 
     def __exit__(self, type, value, traceback):
         self.vector.local.tr = self.initialValue
+
 
 ##########
 # Vector #
@@ -387,6 +390,7 @@ class Vector:
 # internal tests #
 ##################
 
+
 # caution: modifies the database!
 @fdb.transactional
 def vector_test(tr):
@@ -509,6 +513,7 @@ def vector_test(tr):
         _print_vector(vector, tr)
         print 'Size:', vector.size()
 
+
 ##############################
 # Vector sample usage #
 ##############################
@@ -516,9 +521,8 @@ def vector_test(tr):
 
 import sys
 
+
 # caution: modifies the database!
-
-
 @fdb.transactional
 def vector_example(tr):
     vector = Vector(Subspace(('my_vector',)), 0)

@@ -34,9 +34,8 @@ import fdb
 import fdb.tuple
 fdb.api_version(400)
 
+
 # A class that mimics some of the operations of the FoundationDB key-value store
-
-
 class KeyValueStore():
 
     # Uses a simple dictionary to store key-value pairs
@@ -554,9 +553,9 @@ class PythonCorrectness(PythonTest):
                 self.result.add_error('transaction.clear resulted in incorrect database')
 
             #    for key in clearedKeys:
-            #        print 'clearing key ' + key
+            #         print 'clearing key ' + key
             # else:
-            #    print 'successful compare'
+            #     print 'successful compare'
 
             # Fill the database back up with data
             self.correctnessSet(db, store, data, maxKeysPerTransaction)

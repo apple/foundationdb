@@ -336,8 +336,8 @@ class TestRunner(object):
                 for i, error in enumerate(errors):
                     util.get_logger().error('  %d. %s' % (i + 1, error))
 
-        log_message = '\nTest with seed %d and concurrency %d had %d incorrect result(s) and %d error(s) at API version %d' % (
-            self.args.seed, self.args.concurrency, num_incorrect, num_errors, self.args.api_version)
+        log_message = '\nTest with seed %d and concurrency %d had %d incorrect result(s) and %d error(s) at API version %d' %\
+            (self.args.seed, self.args.concurrency, num_incorrect, num_errors, self.args.api_version)
         if num_errors == 0 and (num_incorrect == 0 or has_filtered_error):
             util.get_logger().info(log_message)
             if has_filtered_error:

@@ -118,7 +118,7 @@ class RandomGenerator(object):
                 smaller_size = random.randint(1, len(to_add))
                 tuples.append(to_add[:smaller_size])
             else:
-                non_empty = filter(lambda i_x: (isinstance(i_x[1], list) or isinstance(i_x[1], tuple)) and len(i_x[1]) > 0, enumerate(to_add))
+                non_empty = filter(lambda (_, x): (isinstance(x, list) or isinstance(x, tuple)) and len(x) > 0, enumerate(to_add))
                 if len(non_empty) > 0 and random.random() < 0.25:
                     # Add a smaller list to test prefixes of nested structures.
                     idx, choice = random.choice(non_empty)

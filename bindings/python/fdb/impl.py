@@ -1222,14 +1222,13 @@ else:
     raise Exception("Platform (%s) %s is not supported by the FoundationDB API!" % (sys.platform, platform.system()))
 this_dir = os.path.dirname(__file__)
 
+
 # Preferred installation: The C API library or a symbolic link to the
 #    library should be in the same directory as this module.
 # Failing that, a file named $(capi_name).pth should be in the same directory,
 #    and a relative path to the library (including filename)
 # Failing that, we try to load the C API library without qualification, and
 #    the library should be on the platform's dynamic library search path
-
-
 def read_pth_file():
     pth_file = os.path.join(this_dir, capi_name + '.pth')
     if not os.path.exists(pth_file):

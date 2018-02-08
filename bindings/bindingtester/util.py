@@ -44,9 +44,8 @@ def initialize_logger_level(logging_level):
 def get_logger():
     return logging.getLogger('foundationdb.bindingtester')
 
+
 # Attempts to get the name associated with a process termination signal
-
-
 def signal_number_to_name(signal_num):
     name = []
     for key in signal.__dict__.keys():
@@ -65,11 +64,10 @@ def import_subclasses(filename, module_path):
             continue
         __import__('%s.%s' % (module_path, os.path.splitext(fn)[0]))
 
+
 # Attempts to unpack a subspace
 # This throws an exception if the subspace cannot be unpacked as a tuple
 # As a result, the binding tester cannot use subspaces that have non-tuple raw prefixes
-
-
 def subspace_to_tuple(subspace):
     try:
         return fdb.tuple.unpack(subspace.key())

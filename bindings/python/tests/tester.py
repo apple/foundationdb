@@ -284,7 +284,7 @@ class Tester:
 
             # print("Stack is %r" % self.stack)
             # if op != "PUSH" and op != "SWAP":
-            # print("%d. Instruction is %s" % (idx, op))
+            #     print("%d. Instruction is %s" % (idx, op))
 
             isDatabase = op.endswith(six.u('_DATABASE'))
             isSnapshot = op.endswith(six.u('_SNAPSHOT'))
