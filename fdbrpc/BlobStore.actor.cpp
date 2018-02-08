@@ -294,7 +294,7 @@ ACTOR Future<json_spirit::mObject> tryReadJSONFile(std::string path) {
 	state std::string content;
 
 	try {
-		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY, 0));
+		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 		state int64_t size = wait(f->size());
 		state Standalone<StringRef> buf = makeString(size);
 		int r = wait(f->read(mutateString(buf), size, 0));
