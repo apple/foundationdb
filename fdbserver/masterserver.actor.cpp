@@ -1139,7 +1139,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	state bool debugResult = debug_checkMinRestoredVersion( UID(), self->lastEpochEnd, "DBRecovery", SevWarn );
 
 	CommitTransactionRequest recoveryCommitRequest;
-	recoveryCommitRequest.isLockAware = true;
+	recoveryCommitRequest.flags = recoveryCommitRequest.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 	CommitTransactionRef &tr = recoveryCommitRequest.transaction;
 	int mmApplied = 0;  // The number of mutations in tr.mutations that have been applied to the txnStateStore so far
 	if (self->lastEpochEnd != 0) {

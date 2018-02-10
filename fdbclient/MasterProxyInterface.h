@@ -74,15 +74,25 @@ struct CommitID {
 };
 
 struct CommitTransactionRequest {
+	enum { 
+		FLAG_IS_LOCK_AWARE = 0x1,
+		FLAG_FIRST_IN_BATCH = 0x2
+	};
+
+	bool isLockAware() const { return flags & FLAG_IS_LOCK_AWARE; }
+	bool firstInBatch() const { return flags & FLAG_FIRST_IN_BATCH; }
+	
 	Arena arena;
 	CommitTransactionRef transaction;
-	ReplyPromise<CommitID> reply;		
+	ReplyPromise<CommitID> reply;
+	uint32_t flags;
 	Optional<UID> debugID;
-	bool isLockAware;
+
+	CommitTransactionRequest() : flags(0) {}
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & transaction & reply & arena & debugID & isLockAware;
+		ar & transaction & reply & arena & flags & debugID;
 	}
 };
 

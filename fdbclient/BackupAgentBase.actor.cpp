@@ -610,7 +610,7 @@ ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Referenc
 		// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
 		// for our transaction to be aborted due to conflicts.
 		req.transaction.read_snapshot = committedVersion->get();
-		req.isLockAware = true;
+		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 
 		totalBytes += mutationSize;
 		Void _ = wait( commitLock->take(TaskDefaultYield, mutationSize) );
@@ -651,7 +651,7 @@ ACTOR Future<Void> coalesceKeyVersionCache(Key uid, Version endVersion, Referenc
 		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(countKey));
 		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::AddValue, countKey, StringRef((uint8_t*)&removed, 8)));
 		req.transaction.read_snapshot = committedVersion->get();
-		req.isLockAware = true;
+		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
 
 		Void _ = wait( commitLock->take(TaskDefaultYield, mutationSize) );
 		addActor.send( commitLock->releaseWhen( success(commit.getReply(req)), mutationSize ) );

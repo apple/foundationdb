@@ -506,7 +506,7 @@ ACTOR Future<Void> commitBatch(
 	state int commitCount = 0;
 	for (t = 0; t < trs.size() && !forceRecovery; t++)
 	{
-		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware)) {
+		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			commitCount++;
 			applyMetadataMutations(self->dbgid, arena, trs[t].transaction.mutations, self->txnStateStore, &toCommit, &forceRecovery, self->logSystem, commitVersion+1, &self->vecBackupKeys, &self->keyInfo, self->firstProxy ? &self->uid_applyMutationsData : NULL, self->commit, self->cx, &self->committedVersion, &self->storageCache);
 		}
@@ -545,7 +545,7 @@ ACTOR Future<Void> commitBatch(
 
 	for (int t = 0; t<trs.size(); t++) {
 
-		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware)) {
+		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 
 			for (auto m : trs[t].transaction.mutations) {
 				mutationCount++;
@@ -829,7 +829,7 @@ ACTOR Future<Void> commitBatch(
 	// Send replies to clients
 	for (int t = 0; t < trs.size(); t++)
 	{
-		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware)) {
+		if (committed[t] == ConflictBatch::TransactionCommitted && (!locked || trs[t].isLockAware())) {
 			ASSERT_WE_THINK(commitVersion != invalidVersion);
 			trs[t].reply.send(CommitID(commitVersion, t));
 		}

@@ -2514,7 +2514,12 @@ Future<Void> Transaction::commitMutations() {
 				TraceEvent("TransactionMutation", u).detail("T", i->type).detail("P1", printable(i->param1)).detail("P2", printable(i->param2));
 		}
 
-		tr.isLockAware = options.lockAware;
+		if(options.lockAware) {
+			tr.flags = tr.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+		}
+		if(options.firstInBatch) {
+			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
+		}
 
 		Future<Void> commitResult = tryCommit( cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options );
 
@@ -2653,6 +2658,11 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 				options.lockAware = true;
 				options.readOnly = true;
 			}
+			break;
+
+		case FDBTransactionOptions::FIRST_IN_BATCH:
+			validateOptionValue(value, false);
+			options.firstInBatch = true;
 			break;
 
 		default:

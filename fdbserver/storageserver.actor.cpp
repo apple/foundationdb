@@ -3281,8 +3281,9 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 						KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(rep.newTag.get()));
 						tr.addReadConflictRange( conflictRange );
 						tr.addWriteConflictRange( conflictRange );
-						tr.set(serverTagKeyFor(ssi.id()), serverTagValue(rep.newTag.get()));
-						tr.atomicOp(serverTagHistoryKeyFor(ssi.id()), serverTagValue(rep.tag), MutationRef::SetVersionstampedKey);
+						tr.setOption(FDBTransactionOptions::FIRST_IN_BATCH);
+						tr.set( serverTagKeyFor(ssi.id()), serverTagValue(rep.newTag.get()) );
+						tr.atomicOp( serverTagHistoryKeyFor(ssi.id()), serverTagValue(rep.tag), MutationRef::SetVersionstampedKey );
 						tr.atomicOp( serverMaxTagKeyFor(rep.newTag.get().locality), serverTagMaxValue(rep.newTag.get()), MutationRef::Max );
 					}
 
@@ -3300,10 +3301,11 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 								self->tag = rep.tag;
 							}
 							for(auto it : self->history) {
-								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString());
+								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString()).detail("myTag", self->tag.toString());
 							}
 
 							if(self->history.size() && BUGGIFY) {
+								TraceEvent("SSHistoryReboot", self->thisServerID);
 								throw please_reboot();
 							}
 
