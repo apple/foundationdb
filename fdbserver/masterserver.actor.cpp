@@ -228,14 +228,14 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		Standalone<StringRef> const& dbId,
 		PromiseStream<Future<Void>> const& addActor
 		)
-		: dbgid( myInterface.id() ),
+		: dbgid(myInterface.id()),
 		  myInterface(myInterface),
 		  dbInfo(dbInfo),
 		  cstate(coordinators, addActor, dbgid),
 		  coordinators(coordinators),
 		  clusterController(clusterController),
-		  dbName( dbName ),
-		  dbId( dbId ),
+		  dbName(dbName),
+		  dbId(dbId),
 		  lastEpochEnd(invalidVersion),
 		  recoveryTransactionVersion(invalidVersion),
 		  lastCommitTime(0),

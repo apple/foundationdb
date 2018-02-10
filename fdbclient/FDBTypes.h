@@ -585,4 +585,41 @@ static bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 	return exclusions.count( AddressExclusion(addr.ip, addr.port) ) || exclusions.count( AddressExclusion(addr.ip) );
 }
 
+struct ClusterControllerPriorityInfo {
+	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
+
+	static DCFitness calculateDCFitness(Optional<Key> dcId, vector<Optional<Key>> dcPriority) {
+		if(!dcPriority.size()) {
+			return FitnessUnknown;
+		} else if(dcPriority.size() == 1) {
+			if(dcId == dcPriority[0]) {
+				return FitnessPreferred;
+			} else {
+				return FitnessUnknown;
+			}
+		} else {
+			if(dcId == dcPriority[0]) {
+				return FitnessPrimary;
+			} else if(dcId == dcPriority[1]) {
+				return FitnessRemote;
+			} else {
+				return FitnessBad;
+			}
+		}
+	}
+
+	uint8_t processClassFitness;
+	bool isExcluded;
+	uint8_t dcFitness;
+
+	bool operator== (ClusterControllerPriorityInfo const& r) const { return processClassFitness == r.processClassFitness && isExcluded == r.isExcluded && dcFitness == r.dcFitness; }
+
+	ClusterControllerPriorityInfo(uint8_t processClassFitness, bool isExcluded, uint8_t dcFitness) : processClassFitness(processClassFitness), isExcluded(isExcluded), dcFitness(dcFitness) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & processClassFitness & isExcluded & dcFitness;
+	}
+};
+
 #endif

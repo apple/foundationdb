@@ -143,32 +143,32 @@ struct RecruitStorageRequest {
 
 struct RegisterWorkerReply {
 	ProcessClass processClass;
-	bool isExcluded;
+	ClusterControllerPriorityInfo priorityInfo;
 
-	RegisterWorkerReply() {}
-	RegisterWorkerReply(ProcessClass processClass, bool isExcluded) : processClass(processClass), isExcluded(isExcluded) {}
+	RegisterWorkerReply() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo) : processClass(processClass), priorityInfo(priorityInfo) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & processClass & isExcluded;
+		ar & processClass & priorityInfo;
 	}
 };
 
 struct RegisterWorkerRequest {
 	WorkerInterface wi;
-	ProcessClass processClass;
 	ProcessClass initialClass;
-	bool isExcluded;
+	ProcessClass processClass;
+	ClusterControllerPriorityInfo priorityInfo;
 	Generation generation;
 	ReplyPromise<RegisterWorkerReply> reply;
 
-	RegisterWorkerRequest() {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, bool isExcluded, Generation generation) : 
-	wi(wi), initialClass(initialClass), processClass(processClass), isExcluded(isExcluded), generation(generation) {}
+	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation) : 
+	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & wi & initialClass & processClass & isExcluded & generation & reply;
+		ar & wi & initialClass & processClass & priorityInfo & generation & reply;
 	}
 };
 

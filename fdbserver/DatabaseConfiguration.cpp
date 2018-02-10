@@ -37,7 +37,8 @@ void DatabaseConfiguration::resetInternal() {
 	primaryDcId = remoteDcId = Optional<Standalone<StringRef>>();
 	tLogPolicy = storagePolicy = remoteTLogPolicy = satelliteTLogPolicy = IRepPolicyRef();
 
-	remoteDesiredTLogCount = remoteTLogReplicationFactor = satelliteDesiredTLogCount = satelliteTLogReplicationFactor = satelliteTLogWriteAntiQuorum = satelliteTLogUsableDcs = logRouterCount = 0;
+	remoteDesiredTLogCount = satelliteDesiredTLogCount = desiredLogRouterCount = -1;
+	remoteTLogReplicationFactor = satelliteTLogReplicationFactor = satelliteTLogWriteAntiQuorum = satelliteTLogUsableDcs = 0;
 	primarySatelliteDcIds.clear();
 	remoteSatelliteDcIds.clear();
 }
@@ -87,17 +88,17 @@ bool DatabaseConfiguration::isValid() const {
 		autoDesiredTLogCount >= 1 &&
 		storagePolicy &&
 		tLogPolicy &&
-		remoteDesiredTLogCount >= 0 &&
+		getDesiredRemoteLogs() >= 1 &&
+		getDesiredLogRouters() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
-		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && primaryDcId.present() && remoteDcId.present() && logRouterCount >= 1 && durableStorageQuorum == storageTeamSize ) ) &&
+		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && primaryDcId.present() && remoteDcId.present() && durableStorageQuorum == storageTeamSize ) ) &&
 		primaryDcId.present() == remoteDcId.present() &&
-		satelliteDesiredTLogCount >= 0 &&
+		getDesiredSatelliteLogs() >= 1 &&
 		satelliteTLogReplicationFactor >= 0 &&
 		satelliteTLogWriteAntiQuorum >= 0 &&
 		satelliteTLogUsableDcs >= 0 &&
 		( satelliteTLogReplicationFactor == 0 || ( satelliteTLogPolicy && primarySatelliteDcIds.size() && remoteSatelliteDcIds.size() && remoteTLogReplicationFactor > 0 ) ) &&
-		primarySatelliteDcIds.size() == remoteSatelliteDcIds.size() &&
-		logRouterCount >= 0;
+		primarySatelliteDcIds.size() == remoteSatelliteDcIds.size();
 }
 
 std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
@@ -244,7 +245,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("remote_dc")) remoteDcId = value;
 	else if (ck == LiteralStringRef("primary_satellite_dcs")) parse(&primarySatelliteDcIds, value);
 	else if (ck == LiteralStringRef("remote_satellite_dcs")) parse(&remoteSatelliteDcIds, value);
-	else if (ck == LiteralStringRef("log_routers")) parse(&logRouterCount, value);
+	else if (ck == LiteralStringRef("log_routers")) parse(&desiredLogRouterCount, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect
 }
