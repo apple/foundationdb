@@ -1307,7 +1307,7 @@ Future< Standalone<VectorRef<const char*> >> ReadYourWritesTransaction::getAddre
 
 	// If key >= allKeys.end, then our resulting address vector will be empty.
 	
-	Future< Standalone<VectorRef<const char*> >> result = tr.getAddressesForKey(key);
+	Future< Standalone<VectorRef<const char*> >> result = waitOrError(tr.getAddressesForKey(key), resetPromise.getFuture());
 	reading.add( success( result ) ); 
 	return result;
 }
@@ -1679,6 +1679,14 @@ Future<Void> ReadYourWritesTransaction::commit() {
 		return resetPromise.getFuture().getError();
 	
 	return RYWImpl::commit( this );
+}
+
+Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
+	if(checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	return waitOrError(tr.getVersionstamp(), resetPromise.getFuture());
 }
 
 void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) { 

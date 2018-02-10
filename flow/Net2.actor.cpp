@@ -835,7 +835,7 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr ) {
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
-	state Promise<std::vector<NetworkAddress>> result;
+	Promise<std::vector<NetworkAddress>> result;
 
 	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
 		if(ec) {

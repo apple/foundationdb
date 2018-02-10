@@ -103,13 +103,7 @@ public:
 
 	Future<Void> commit();
 	Version getCommittedVersion() { return tr.getCommittedVersion(); }
-	Future<Standalone<StringRef>> getVersionstamp() {
-		if(checkUsedDuringCommit()) {
-			return used_during_commit();
-		}
-
-		return tr.getVersionstamp();
-	}
+	Future<Standalone<StringRef>> getVersionstamp();
 
 	void setOption( FDBTransactionOptions::Option option, Optional<StringRef> value = Optional<StringRef>() );
 
