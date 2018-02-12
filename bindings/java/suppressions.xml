@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE suppressions PUBLIC
+        "-//Puppy Crawl//DTD Suppressions 1.1//EN"
+        "http://checkstyle.sourceforge.net/dtds/suppressions_1_1.dtd">
+
+<suppressions>
+    <!-- These files are auto generated. Ignore those files for style checks. -->
+    <suppress files=".+Options\.java" checks=".*"/>
+    <suppress files=".+ConflictRangeType\.java" checks=".*"/>
+    <suppress files=".+FDBException\.java" checks=".*"/>
+    <suppress files=".+MutationType\.java" checks=".*"/>
+    <suppress files=".+StreamingMode\.java" checks=".*"/>
+</suppressions>

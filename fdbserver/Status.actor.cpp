@@ -46,7 +46,7 @@ const char* RecoveryStatus::descriptions[] = {
 	// locking_coordinated_state
 	"Locking coordination state. Verify that a majority of coordination server processes are active.",
 	// locking_old_transaction_servers
-	"Locking old transaction servers. Verify that a least one transaction server from the previous generation is running.",
+	"Locking old transaction servers. Verify that at least one transaction server from the previous generation is running.",
 	// reading_transaction_system_state
 	"Recovering transaction server state. Verify that the transaction server processes are active.",
 	// configuration_missing
@@ -868,7 +868,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 	return processMap;
 }
 
-static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap) {
+static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap, std::map<NetworkAddress, std::string> traceLogGroupMap) {
 	StatusObject clientStatus;
 
 	clientStatus["count"] = (int64_t)clientVersionMap.size();
@@ -890,10 +890,13 @@ static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap) {
 
 		StatusArray clients = StatusArray();
 		for(auto client : cv.second) {
-			clients.push_back(client.toString());
+			StatusObject cli;
+			cli["address"] = client.toString();
+			cli["log_group"] = traceLogGroupMap[client];
+			clients.push_back(cli);
 		}
 
-		ver["clients"] = clients;
+		ver["connected_clients"] = clients;
 		versionsArray.push_back(ver);
 	}
 
@@ -904,11 +907,11 @@ static StatusObject clientStatusFetcher(ClientVersionMap clientVersionMap) {
 	return clientStatus;
 }
 
-ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, int workerCount, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, int workerCount, std::set<std::string> *incomplete_reasons) {
 	state StatusObject message;
 
 	try {
-		Standalone<StringRef> md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(StringRef(dbName+"/MasterRecoveryState") ) ), 1.0) );
+		Standalone<StringRef> md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest( LiteralStringRef("MasterRecoveryState") ) ), 1.0) );
 		state int mStatusCode = parseInt( extractAttribute(md, LiteralStringRef("StatusCode")) );
 		if (mStatusCode < 0 || mStatusCode >= RecoveryStatus::END)
 			throw attribute_not_found();
@@ -926,6 +929,8 @@ ACTOR static Future<StatusObject> recoveryStateStatusFetcher(std::pair<WorkerInt
 			message["required_logs"] = requiredLogs;
 			message["required_proxies"] = requiredProxies;
 			message["required_resolvers"] = requiredResolvers;
+		} else if (mStatusCode == RecoveryStatus::locking_old_transaction_servers) {
+			message["missing_logs"] = extractAttribute(md, LiteralStringRef("MissingIDs")).c_str();
 		}
 		// TODO:  time_in_recovery: 0.5
 		//        time_in_state: 0.1
@@ -1075,9 +1080,7 @@ ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database 
 						status_incomplete_reasons->insert("Too many configuration parameters set.");
 					}
 					else {
-						for (int i = 0; i < res.size(); i++) {
-							configuration.set(res[i].key, res[i].value);
-						}
+						configuration.fromKeyValues((VectorRef<KeyValueRef>)res);
 					}
 
 					result = configuration;
@@ -1525,11 +1528,11 @@ static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configurat
 }
 
 static std::string getIssueDescription(std::string name) {
-	if(name == "unable_to_write_cluster_file") {
-		return "Unable to update cluster file.";
+	if(name == "incorrect_cluster_file_contents") {
+		return "Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.";
 	}
 
-	// FIXME: name and description will be the same unless the message is 'unable_to_write_cluster_file', which is currently the only possible message
+	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which is currently the only possible message
 	return name;
 }
 
@@ -1686,6 +1689,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		ProcessIssuesMap workerIssues,
 		ProcessIssuesMap clientIssues,
 		ClientVersionMap clientVersionMap,
+		std::map<NetworkAddress, std::string> traceLogGroupMap,
 		ServerCoordinators coordinators,
 		std::vector<NetworkAddress> incompatibleConnections )
 {
@@ -1744,7 +1748,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		}
 
 		// construct status information for cluster subsections
-		state StatusObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, dbName, workers.size(), &status_incomplete_reasons));
+		state StatusObject recoveryStateStatus = wait(recoveryStateStatusFetcher(mWorker, workers.size(), &status_incomplete_reasons));
 
 		// machine metrics
 		state WorkerEvents mMetrics = workerEventsVec[0].present() ? workerEventsVec[0].get().first : WorkerEvents();
@@ -1864,7 +1868,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		StatusObject processStatus = wait(processStatusFetcher(db, workers, pMetrics, mMetrics, latestError, traceFileOpenErrors, programStarts, processIssues, storageServers, tLogs, cx, configuration, &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
-		statusObj["clients"] = clientStatusFetcher(clientVersionMap);
+		statusObj["clients"] = clientStatusFetcher(clientVersionMap, traceLogGroupMap);
 
 		StatusArray incompatibleConnectionsArray;
 		for(auto it : incompatibleConnections) {
@@ -1929,6 +1933,8 @@ TEST_CASE("status/json/merging") {
 	a.create("not_expired_and_merged.$expires.seven.$sum") = 1;
 	a.create("not_expired_and_merged.$expires.one.$min") = 3;
 	a.create("not_expired_and_merged.version") = 3;
+	a.create("mixed_numeric_sum_6.$sum") = 0.5;
+	a.create("mixed_numeric_min_0.$min") = 1.5;
 
 	b.create("int_one") = 1;
 	b.create("int_unmatched") = 3;
@@ -1952,6 +1958,8 @@ TEST_CASE("status/json/merging") {
 	b.create("latest_obj.timestamp") = 2;
 	b.create("latest_int_5.$latest") = 7;
 	b.create("latest_int_5.timestamp") = 2;
+	b.create("mixed_numeric_sum_6.$sum") = 1;
+	b.create("mixed_numeric_min_0.$min") = 4.5;
 
 	c.create("int_total_30.$sum") = 0;
 	c.create("not_expired.$expires") = "I am still valid";
@@ -1967,18 +1975,25 @@ TEST_CASE("status/json/merging") {
 	c.create("latest_obj.$latest.not_expired.$expires") = "Still alive.";
 	c.create("latest_obj.$latest.not_expired.version") = 3;
 	c.create("latest_obj.timestamp") = 3;
-	b.create("latest_int_5.$latest") = 5;
-	b.create("latest_int_5.timestamp") = 3;
+	c.create("latest_int_5.$latest") = 5;
+	c.create("latest_int_5.timestamp") = 3;
+	c.create("mixed_numeric_sum_6.$sum") = 4.5;
+	c.create("mixed_numeric_min_0.$min") = (double)0.0;
+
+	printf("a = \n%s\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print).c_str());
+	printf("b = \n%s\n", json_spirit::write_string(json_spirit::mValue(objB), json_spirit::pretty_print).c_str());
+	printf("c = \n%s\n", json_spirit::write_string(json_spirit::mValue(objC), json_spirit::pretty_print).c_str());
 
 	JSONDoc::expires_reference_version = 2;
 	a.absorb(b);
 	a.absorb(c);
 	a.cleanOps();
+	printf("result = \n%s\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print).c_str());
 	std::string result = json_spirit::write_string(json_spirit::mValue(objA));
-	std::string expected = "{\"a\":\"justA\",\"b\":\"justB\",\"bool_true\":true,\"expired\":null,\"int_one\":1,\"int_total_30\":30,\"int_unmatched\":{\"ERROR\":\"Values do not match.\",\"a\":2,\"b\":3},\"last_hello\":\"hello\",\"latest_int_5\":5,\"latest_obj\":{\"a\":\"a\",\"b\":\"b\",\"not_expired\":\"Still alive.\"},\"not_expired\":\"I am still valid\",\"not_expired_and_merged\":{\"one\":1,\"seven\":7},\"string\":\"test\",\"subdoc\":{\"double_max_5\":5,\"double_min_2\":2,\"int_11\":11,\"obj_count_3\":3}}";
+	std::string expected = "{\"a\":\"justA\",\"b\":\"justB\",\"bool_true\":true,\"expired\":null,\"int_one\":1,\"int_total_30\":30,\"int_unmatched\":{\"ERROR\":\"Values do not match.\",\"a\":2,\"b\":3},\"last_hello\":\"hello\",\"latest_int_5\":5,\"latest_obj\":{\"a\":\"a\",\"b\":\"b\",\"not_expired\":\"Still alive.\"},\"mixed_numeric_min_0\":0,\"mixed_numeric_sum_6\":6,\"not_expired\":\"I am still valid\",\"not_expired_and_merged\":{\"one\":1,\"seven\":7},\"string\":\"test\",\"subdoc\":{\"double_max_5\":5,\"double_min_2\":2,\"int_11\":11,\"obj_count_3\":3}}";
 
 	if(result != expected) {
-		printf("ERROR:  Combined doc does not match expected.\nexpected: %s\nresult:   %s\n", expected.c_str(), result.c_str());
+		printf("ERROR:  Combined doc does not match expected.\nexpected:\n\n%s\nresult:\n%s\n", expected.c_str(), result.c_str());
 		ASSERT(false);
 	}
 

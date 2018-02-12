@@ -88,7 +88,7 @@ namespace vexillographer
             }
 
             IEnumerable<Option> options;
-            int result = parseOptions(args[0], out options);
+            int result = parseOptions(args[0], out options, args[1]);
             if (result != 0)
                 return result;
 
@@ -117,7 +117,7 @@ namespace vexillographer
                 Environment.GetCommandLineArgs()[0]);
         }
 
-        private static int parseOptions(string path, out IEnumerable<Option> options)
+        private static int parseOptions(string path, out IEnumerable<Option> options, string binding)
         {
 
             var list = new List<Option>();
@@ -132,18 +132,28 @@ namespace vexillographer
                     {
                         var paramTypeStr = oDoc.AttributeOrNull("paramType");
                         ParamType p = paramTypeStr == null ? ParamType.None : (ParamType)Enum.Parse(typeof(ParamType), paramTypeStr);
-						bool hidden = oDoc.AttributeOrNull("hidden") == "true";
-
-                        list.Add(new Option
+                        bool hidden = oDoc.AttributeOrNull("hidden") == "true";
+                        string disableOn = oDoc.AttributeOrNull("disableOn");
+                        bool disabled = false;
+                        if(disableOn != null)
                         {
-                            scope = s,
-                            name = oDoc.AttributeNonNull("name"),
-                            code = int.Parse(oDoc.AttributeNonNull("code")),
-                            paramType = p,
-                            paramDesc = oDoc.AttributeOrNull("paramDescription"),
-                            comment = oDoc.AttributeOrNull("description"),
-							hidden = hidden
-                        });
+                            string[] disabledBindings = disableOn.Split(',');
+                            disabled = disabledBindings.Contains(binding);
+                        }
+
+                        if (!disabled)
+                        {
+                            list.Add(new Option
+                            {
+                                scope = s,
+                                name = oDoc.AttributeNonNull("name"),
+                                code = int.Parse(oDoc.AttributeNonNull("code")),
+                                paramType = p,
+                                paramDesc = oDoc.AttributeOrNull("paramDescription"),
+                                comment = oDoc.AttributeOrNull("description"),
+                                hidden = hidden
+                            });
+                        }
                     }
                 }
                 options = list;

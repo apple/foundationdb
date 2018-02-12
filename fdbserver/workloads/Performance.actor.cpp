@@ -107,7 +107,7 @@ struct PerformanceWorkload : TestWorkload {
 
 		loop {
 			choose {
-				when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::FLAG_TESTER_CLASS ) ) ) ) ) { 
+				when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( self->dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( GetWorkersRequest::TESTER_CLASS_ONLY | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY ) ) ) ) ) { 
 					workers = w;
 					break; 
 				}
@@ -169,7 +169,7 @@ struct PerformanceWorkload : TestWorkload {
 				DistributedTestResults r = wait( runWorkload( cx, self->testers, self->dbName, spec ) );
 				results = r;
 			} catch(Error& e) {
-				TraceEvent("PerformanceRunError").detail("Error", e.what()).detail("Workload", printable(self->probeWorkload));
+				TraceEvent("PerformanceRunError").detail("Workload", printable(self->probeWorkload)).error(e, true);
 				break;
 			}
 			PerfMetric tpsMetric = self->getNamedMetric( "Transactions/sec", results.metrics );

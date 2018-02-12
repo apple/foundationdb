@@ -66,8 +66,6 @@ public:
 	Reference<LocationInfo> setCachedLocation( const KeyRangeRef&, const vector<struct StorageServerInterface>& );
 	void invalidateCache( const KeyRef&, bool isBackward = false );
 	void invalidateCache( const KeyRangeRef& );
-	void invalidateCache( Reference<LocationInfo> const& );
-	void invalidateCache( std::vector<UID> const& );
 
 	Reference<ProxyInfo> getMasterProxies();
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture();
@@ -101,6 +99,8 @@ public:
 
 	// Key DB-specific information
 	Reference<AsyncVar<ClientDBInfo>> clientInfo;
+	AsyncTrigger masterProxiesChangeTrigger;
+	Future<Void> monitorMasterProxiesInfoChange;
 	Reference<ProxyInfo> masterProxies;
 	UID masterProxiesLastChange;
 	LocalityData clientLocality;
@@ -125,12 +125,6 @@ public:
 	// Cache of location information
 	int locationCacheSize;
 	CoalescedKeyRangeMap< Reference<LocationInfo> > locationCache;
-	mutable SpinLock locationCacheLock;
-
-	// Maps the non-instance-specific SSI.id() (as stored in keyServers) to a specific instance of
-	//  the interface (as stored in serverList)
-	std::map< UID, Future< Optional<StorageServerInterface> > > SSInterfaceCache;
-	mutable SpinLock SSInterfaceCacheLock;
 
 	std::map< std::vector<UID>, LocationInfo* > ssid_locationInfo;
 
@@ -138,10 +132,14 @@ public:
 	Standalone<StringRef> dbName;
 	Standalone<StringRef> dbId;
 
-	int64_t transactionsReadVersions;
+	int64_t transactionReadVersions;
+	int64_t transactionLogicalReads;
+	int64_t transactionPhysicalReads;
+	int64_t transactionCommittedMutations;
+	int64_t transactionCommittedMutationBytes;
 	int64_t transactionsCommitStarted;
 	int64_t transactionsCommitCompleted;
-	int64_t transactionsPastVersions;
+	int64_t transactionsTooOld;
 	int64_t transactionsFutureVersions;
 	int64_t transactionsNotCommitted;
 	int64_t transactionsMaybeCommitted; 

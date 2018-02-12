@@ -30,13 +30,13 @@ struct CycleWorkload : TestWorkload {
 	Key		keyPrefix;
 
 	vector<Future<Void>> clients;
-	PerfIntCounter transactions, retries, pastVersionRetries, commitFailedRetries;
+	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
 	CycleWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx),
 		transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
-		pastVersionRetries("Retries.past_version"), commitFailedRetries("Retries.commit_failed")
+		tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed")
 	{
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 5000.0 ) / clientCount;
@@ -69,7 +69,7 @@ struct CycleWorkload : TestWorkload {
 	virtual void getMetrics( vector<PerfMetric>& m ) {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
-		m.push_back( pastVersionRetries.getMetric() );
+		m.push_back( tooOldRetries.getMetric() );
 		m.push_back( commitFailedRetries.getMetric() );
 		m.push_back( PerfMetric( "Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true ) );
 		m.push_back( PerfMetric( "Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, false ) );
@@ -120,7 +120,7 @@ struct CycleWorkload : TestWorkload {
 						//TraceEvent("CycleCommit");
 						break;
 					} catch (Error& e) {
-						if (e.code() == error_code_past_version) ++self->pastVersionRetries;
+						if (e.code() == error_code_transaction_too_old) ++self->tooOldRetries;
 						else if (e.code() == error_code_not_committed) ++self->commitFailedRetries;
 						Void _ = wait( tr.onError(e) );
 					}
@@ -137,28 +137,28 @@ struct CycleWorkload : TestWorkload {
 	}
 	bool cycleCheckData( const VectorRef<KeyValueRef>& data, Version v ) {
 		if (data.size() != nodeCount) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v);
+			TraceEvent(SevError, "TestFailure").detail("Reason", "Node count changed").detail("Before", nodeCount).detail("After", data.size()).detail("Version", v).detail("KeyPrefix", keyPrefix.printable());
 			return false;
 		}
 		int i=0;
 		for(int c=0; c<nodeCount; c++) {
 			if (c && !i) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got shorter");
+				TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got shorter").detail("Before", nodeCount).detail("After", c).detail("KeyPrefix", keyPrefix.printable());
 				return false;
 			}
 			if (data[i].key != key(i)) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Key changed");
+				TraceEvent(SevError, "TestFailure").detail("Reason", "Key changed").detail("KeyPrefix", keyPrefix.printable());
 				return false;
 			}
 			double d = testKeyToDouble(data[i].value, keyPrefix);
 			i = (int)d;
 			if ( i != d || i<0 || i>=nodeCount) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Invalid value");
+				TraceEvent(SevError, "TestFailure").detail("Reason", "Invalid value").detail("KeyPrefix", keyPrefix.printable());
 				return false;
 			}
 		}
 		if (i != 0) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer");
+			TraceEvent(SevError, "TestFailure").detail("Reason", "Cycle got longer").detail("KeyPrefix", keyPrefix.printable());
 			return false;
 		}
 		return true;

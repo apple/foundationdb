@@ -125,6 +125,15 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
+	} else if(mode == "multi_dc") {
+		redundancy="6";
+		log_replicas="4";
+		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
 	} else
 		redundancySpecified = false;
 	if (redundancySpecified) {
@@ -243,7 +252,7 @@ ACTOR Future<ConfigurationResult::Type> changeConfig( Database cx, std::map<std:
 			break;
 		} catch (Error& e) {
 			state Error e1(e);
-			if ( (e.code() == error_code_not_committed || e.code() == error_code_past_version ) && creating) {
+			if ( (e.code() == error_code_not_committed || e.code() == error_code_transaction_too_old ) && creating) {
 				// The database now exists.  Determine whether we created it or it was already existing/created by someone else.  The latter is an error.
 				tr.reset();
 				loop {
@@ -1129,6 +1138,21 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 			Void _ = wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
 			Void _ = wait( tr.onError(e) );
+		}
+	}
+}
+
+ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
+	loop {
+		state Transaction tr(cx);
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.set(timeKeeperDisableKey, StringRef());
+			Void _ = wait(tr.commit());
+			return Void();
+		} catch (Error &e) {
+			Void _ = wait(tr.onError(e));
 		}
 	}
 }

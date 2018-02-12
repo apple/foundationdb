@@ -997,16 +997,22 @@ struct DDTeamCollection {
 				state int teamsToBuild = desiredTeams - teamCount;
 
 				state vector<std::vector<UID>> builtTeams;
-				int addedTeams = wait( self->addAllTeams( self, desiredServerVector, &builtTeams, teamsToBuild ) );
 
-				if( addedTeams < teamsToBuild ) {
-					for( int i = 0; i < builtTeams.size(); i++ ) {
-						std::sort(builtTeams[i].begin(), builtTeams[i].end());
-						self->addTeam( builtTeams[i].begin(), builtTeams[i].end() );
+				if (self->teamSize <= 3) {
+					int addedTeams = wait( self->addAllTeams( self, desiredServerVector, &builtTeams, teamsToBuild ) );
+
+					if( addedTeams < teamsToBuild ) {
+						for( int i = 0; i < builtTeams.size(); i++ ) {
+							std::sort(builtTeams[i].begin(), builtTeams[i].end());
+							self->addTeam( builtTeams[i].begin(), builtTeams[i].end() );
+						}
+						TraceEvent("AddAllTeams", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", builtTeams.size());
 					}
-					TraceEvent("AddAllTeams", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", builtTeams.size());
-				}
-				else {
+					else {
+						int addedTeams = self->addTeamsBestOf( teamsToBuild );
+						TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
+					}
+				} else {
 					int addedTeams = self->addTeamsBestOf( teamsToBuild );
 					TraceEvent("AddTeamsBestOf", self->masterId).detail("CurrentTeams", self->teams.size()).detail("AddedTeams", addedTeams);
 				}
@@ -1380,7 +1386,7 @@ ACTOR Future<vector<std::pair<StorageServerInterface, ProcessClass>>> getServerL
 }
 
 ACTOR Future<Void> waitServerListChange( DDTeamCollection *self, Database cx, FutureStream<Void> serverRemoved ) {
-	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskDataDistribution);
+	state Future<Void> checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
 	state Future<vector<std::pair<StorageServerInterface, ProcessClass>>> serverListAndProcessClasses = Never();
 	state bool isFetchingResults = false;
 	state Transaction tr(cx);
@@ -1415,7 +1421,7 @@ ACTOR Future<Void> waitServerListChange( DDTeamCollection *self, Database cx, Fu
 					}
 
 					tr = Transaction(cx);
-					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY, TaskDataDistribution);
+					checkSignal = delay(SERVER_KNOBS->SERVER_LIST_DELAY);
 				}
 				when( Void _ = waitNext( serverRemoved ) ) {
 					if( isFetchingResults ) {

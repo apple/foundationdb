@@ -44,8 +44,8 @@ public:
 	};
 
 	// Read from the underlying file to a CacheBlock
-	ACTOR static Future<Reference<CacheBlock>> readBlock(Reference<AsyncFileReadAheadCache> f, int length, int64_t offset) {
-		Void _ = wait(f->m_max_concurrent_reads.take(1));
+	ACTOR static Future<Reference<CacheBlock>> readBlock(AsyncFileReadAheadCache *f, int length, int64_t offset) {
+		Void _ = wait(f->m_max_concurrent_reads.take());
 
 		state Reference<CacheBlock> block(new CacheBlock(length));
 		try {
@@ -93,7 +93,7 @@ public:
 			// If not found, start the read.
 			if(i == f->m_blocks.end() || (i->second.isValid() && i->second.isError())) {
 				//printf("starting read of %s block %d\n", f->getFilename().c_str(), blockNum);
-				fblock = readBlock(f, f->m_block_size, f->m_block_size * blockNum);
+				fblock = readBlock(f.getPtr(), f->m_block_size, f->m_block_size * blockNum);
 				f->m_blocks[blockNum] = fblock;
 			}
 			else
@@ -170,7 +170,11 @@ public:
 
 	virtual std::string getFilename() { return m_f->getFilename(); }
 
-	virtual ~AsyncFileReadAheadCache() {}
+	virtual ~AsyncFileReadAheadCache() {
+		for(auto &it : m_blocks) {
+			it.second.cancel();
+		}
+	}
 
 	Reference<IAsyncFile> m_f;
 	int m_block_size;

@@ -500,8 +500,8 @@ struct RunResult getSingleKeyRange(struct ResultSet *rs, FDBTransaction *tr) {
 		FDBFuture *f = fdb_transaction_get_range(tr,
 			keys[key], keySize, 1, 0,
 			keys[key + 1], keySize, 1, 0,
-			0, 0,
-			FDB_STREAMING_MODE_WANT_ALL, 1, 0, 0);
+			2, 0,
+			FDB_STREAMING_MODE_EXACT, 1, 0, 0);
 
 		e = maybeLogError(fdb_future_block_until_ready(f), "waiting for single key range", rs);
 		if(e) {
@@ -516,7 +516,7 @@ struct RunResult getSingleKeyRange(struct ResultSet *rs, FDBTransaction *tr) {
 		}
 
 		if(outCount != 1) {
-			logError(4100, "non-1 number of keys returned in single key range read", rs);
+			logError(4100, "more than one key returned in single key range read", rs);
 			fdb_future_destroy(f);
 			return RES(0, 4100);
 		}
@@ -602,7 +602,7 @@ void runTests(struct ResultSet *rs) {
 int main(int argc, char **argv) {
 	srand(time(NULL));
 	struct ResultSet *rs = newResultSet();
-	checkError(fdb_select_api_version(500), "select API version", rs);
+	checkError(fdb_select_api_version(510), "select API version", rs);
 	printf("Running performance test at client version: %s\n", fdb_get_client_version());
 
 	valueStr = (uint8_t*)malloc((sizeof(uint8_t))*valueSize);

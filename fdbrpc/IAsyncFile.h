@@ -24,10 +24,14 @@
 
 #include "flow/flow.h"
 
-//All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
+// All outstanding operations must be cancelled before the destructor of IAsyncFile is called.
+// The desirability of the above semantic is disputed. Some classes (AsyncFileBlobStore,
+// AsyncFileCached) maintain references, while others (AsyncFileNonDurable) don't, and the comment
+// is unapplicable to some others as well (AsyncFileKAIO). It's safest to assume that all operations
+// must complete or cancel, but you should probably look at the file implementations you'll be using.
 class IAsyncFile {
 public:
-	IAsyncFile();
+	virtual ~IAsyncFile();
 	// Pass these to g_network->open to get an IAsyncFile
 	enum {
 		// Implementation relies on the low bits being the same as the SQLite flags (this is validated by a static_assert there)
@@ -52,15 +56,14 @@ public:
 	// For read() and write(), the data buffer must remain valid until the future is ready
 	virtual Future<int> read( void* data, int length, int64_t offset ) = 0;  // Returns number of bytes actually read (from [0,length])
 	virtual Future<Void> write( void const* data, int length, int64_t offset ) = 0;
+	// The zeroed data is not guaranteed to be durable after `zeroRange` returns.  A call to sync() would be required.
+	// This operation holds a reference to the AsyncFile, and does not need to be cancelled before a reference is dropped.
+	virtual Future<Void> zeroRange( int64_t offset, int64_t length );
 	virtual Future<Void> truncate( int64_t size ) = 0;
 	virtual Future<Void> sync() = 0;
 	virtual Future<Void> flush() { return Void();  }      // Sends previous writes to the OS if they have been buffered in memory, but does not make them power safe
 	virtual Future<int64_t> size() = 0;
 	virtual std::string getFilename() = 0;
-
-	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
-	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
-	static Future<Void> incrementalDelete( std::string filename, bool mustBeDurable );
 
 	// Attempt to read the *length bytes at offset without copying.  If successful, a pointer to the
 	//   requested bytes is written to *data, and the number of bytes successfully read is
@@ -83,11 +86,15 @@ typedef void (*runCycleFuncPtr)();
 
 class IAsyncFileSystem {
 public:
-	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode ) = 0;
 	// Opens a file for asynchronous I/O
+	virtual Future< Reference<class IAsyncFile> > open( std::string filename, int64_t flags, int64_t mode ) = 0;
 
-	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable ) = 0;
 	// Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	virtual Future< Void > deleteFile( std::string filename, bool mustBeDurable ) = 0;
+
+	// Unlinks a file and then deletes it slowly by truncating the file repeatedly.
+	// If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
+	virtual Future<Void> incrementalDeleteFile( std::string filename, bool mustBeDurable );
 
 	static IAsyncFileSystem* filesystem() { return filesystem(g_network); }
 	static runCycleFuncPtr runCycleFunc() { return reinterpret_cast<runCycleFuncPtr>(reinterpret_cast<flowGlobalType>(g_network->global(INetwork::enRunCycleFunc))); }

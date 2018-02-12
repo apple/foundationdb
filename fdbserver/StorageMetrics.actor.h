@@ -132,7 +132,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			int64_t delta = queue.front().second.second;
 			ASSERT( delta != 0 );
 
-			if( sample.addMetric( Key(key), delta ) == 0 )
+			if( sample.addMetric( key, delta ) == 0 )
 				sample.erase( key );
 
 			StorageMetrics deltaM = m * delta;
@@ -155,7 +155,7 @@ struct TransientStorageMetricSample : StorageMetricSample {
 			int64_t delta = queue.front().second.second;
 			ASSERT( delta != 0 );
 
-			if( sample.addMetric( Key(key), delta ) == 0 )
+			if( sample.addMetric( key, delta ) == 0 )
 				sample.erase( key );
 
 			queue.pop_front();
@@ -173,7 +173,7 @@ private:
 			metric = metric<0 ? -metricUnitsPerSample : metricUnitsPerSample;
 		}
 		
-		if( sample.addMetric( Key(key), metric ) == 0 )
+		if( sample.addMetric( key, metric ) == 0 )
 			sample.erase( key );
 
 		return metric;
@@ -267,20 +267,30 @@ struct StorageServerMetrics {
 
 	//static void waitMetrics( StorageServerMetrics* const& self, WaitMetricsRequest const& req );
 
+	// This function can run on untrusted user data.  We must validate all divisions carefully.
 	KeyRef getSplitKey( int64_t remaining, int64_t estimated, int64_t limits, int64_t used, int64_t infinity,
-		bool isLastShard, StorageMetricSample& sample, double divisor, KeyRef const& lastKey, KeyRef const& key ) {
+		bool isLastShard, StorageMetricSample& sample, double divisor, KeyRef const& lastKey, KeyRef const& key, bool hasUsed ) 
+	{	
+		ASSERT(remaining >= 0);
+		ASSERT(limits > 0);
+		ASSERT(divisor > 0);
+
 		if( limits < infinity / 2 ) {
 			int64_t expectedSize;
-			if( isLastShard || remaining > estimated )
-				expectedSize = remaining / ( ( double( remaining ) / limits ) + 0.5 );
-			else
-				expectedSize = estimated / ( ( double( estimated ) / limits ) + 0.5 );
+			if( isLastShard || remaining > estimated ) {
+				double remaining_divisor = ( double( remaining ) / limits ) + 0.5;
+				expectedSize = remaining / remaining_divisor;
+			} else {
+				// If we are here, then estimated >= remaining >= 0
+				double estimated_divisor = ( double( estimated ) / limits ) + 0.5;
+				expectedSize = remaining / estimated_divisor;
+			}
 
 			if( remaining > expectedSize ) {
 				// This does the conversion from native units to bytes using the divisor.
 				double offset = (expectedSize - used) / divisor;
 				if( offset <= 0 )
-					return lastKey;
+					return hasUsed ? lastKey : key;
 				return sample.splitEstimate( KeyRangeRef(lastKey, key), offset * ( ( 1.0 - SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) + 2 * g_random->random01() * SERVER_KNOBS->SPLIT_JITTER_AMOUNT ) );
 			}
 		}
@@ -302,16 +312,16 @@ struct StorageServerMetrics {
 				if( remaining.bytes < 2*SERVER_KNOBS->MIN_SHARD_BYTES )
 					break;
 				KeyRef key = req.keys.end;
-
+				bool hasUsed = used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0;
 				key = getSplitKey( remaining.bytes, estimated.bytes, req.limits.bytes, used.bytes, 
-					req.limits.infinity, req.isLastShard, byteSample, 1, lastKey, key );
+					req.limits.infinity, req.isLastShard, byteSample, 1, lastKey, key, hasUsed );
 				if( used.bytes < SERVER_KNOBS->MIN_SHARD_BYTES )
 					key = std::max( key, byteSample.splitEstimate( KeyRangeRef(lastKey, req.keys.end), SERVER_KNOBS->MIN_SHARD_BYTES - used.bytes ) );
 				key = getSplitKey( remaining.iosPerKSecond, estimated.iosPerKSecond, req.limits.iosPerKSecond, used.iosPerKSecond, 
-					req.limits.infinity, req.isLastShard, iopsSample, SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS, lastKey, key );
+					req.limits.infinity, req.isLastShard, iopsSample, SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS, lastKey, key, hasUsed );
 				key = getSplitKey( remaining.bytesPerKSecond, estimated.bytesPerKSecond, req.limits.bytesPerKSecond, used.bytesPerKSecond, 
-					req.limits.infinity, req.isLastShard, bandwidthSample, SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS, lastKey, key );
-				ASSERT( key != lastKey || used.bytes != 0 || used.bytesPerKSecond != 0 || used.iosPerKSecond != 0);
+					req.limits.infinity, req.isLastShard, bandwidthSample, SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS, lastKey, key, hasUsed );
+				ASSERT( key != lastKey || hasUsed);
 				if( key == req.keys.end )
 					break;
 				reply.splits.push_back_deep( reply.splits.arena(), key );

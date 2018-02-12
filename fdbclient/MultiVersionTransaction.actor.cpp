@@ -1134,10 +1134,23 @@ void MultiVersionApi::setupNetwork() {
 
 THREAD_FUNC_RETURN runNetworkThread(void *param) {
 	try {
-		((IClientApi*)param)->runNetwork();
+		((ClientInfo*)param)->api->runNetwork();
 	}
 	catch(Error &e) {
 		TraceEvent(SevError, "RunNetworkError").error(e);
+	}
+
+	std::vector<std::pair<void (*)(void*), void*>> &hooks = ((ClientInfo*)param)->threadCompletionHooks;
+	for(auto &hook : hooks) {
+		try {
+			hook.first(hook.second);
+		}
+		catch(Error &e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+		}
 	}
 
 	THREAD_RETURN;
@@ -1156,12 +1169,34 @@ void MultiVersionApi::runNetwork() {
 	if(!bypassMultiClientApi) {
 		runOnExternalClients([&handles](Reference<ClientInfo> client) {
 			if(client->external) {
-				handles.push_back(g_network->startThread(&runNetworkThread, client->api));
+				handles.push_back(g_network->startThread(&runNetworkThread, client.getPtr()));
 			}
 		});
 	}
 
-	localClient->api->runNetwork();
+	Error *runErr = NULL;
+	try {
+		localClient->api->runNetwork();
+	}
+	catch(Error &e) {
+		runErr = &e;
+	}
+
+	for(auto &hook : localClient->threadCompletionHooks) {
+		try {
+			hook.first(hook.second);
+		}
+		catch(Error &e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+		}
+	}
+
+	if(runErr != NULL) {
+		throw *runErr;
+	}
 
 	for(auto h : handles) {
 		waitThread(h);
@@ -1185,11 +1220,29 @@ void MultiVersionApi::stopNetwork() {
 	}
 }
 
-ThreadFuture<Reference<ICluster>> MultiVersionApi::createCluster(const char *clusterFilePath) {
+void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
 	lock.enter();
 	if(!networkSetup) {
 		lock.leave();
 		throw network_not_setup();
+	}
+	lock.leave();
+
+	auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
+	threadCompletionHooks.push_back(hookPair);
+
+	if(!bypassMultiClientApi) {
+		for( auto it : externalClients ) {
+			it.second->threadCompletionHooks.push_back(hookPair);
+		}
+	}
+}
+
+ThreadFuture<Reference<ICluster>> MultiVersionApi::createCluster(const char *clusterFilePath) {
+	lock.enter();
+	if(!networkSetup) {
+		lock.leave();
+		return network_not_setup();
 	}
 	lock.leave();
 
@@ -1470,7 +1523,7 @@ THREAD_FUNC setAbort(void *arg) {
 		((ThreadSingleAssignmentVar<Void>*)arg)->delref();
 	}
 	catch(Error &e) {
-		printf("Caught error in setAbort: %s\n", e.what());
+		printf("Caught error in setAbort: %s\n", e.name());
 		ASSERT(false);
 	}
 	THREAD_RETURN;
@@ -1489,7 +1542,7 @@ THREAD_FUNC releaseMem(void *arg) {
 		((ThreadSingleAssignmentVar<int>*)arg)->releaseMemory();
 	}
 	catch(Error &e) {
-		printf("Caught error in releaseMem: %s\n", e.what());
+		printf("Caught error in releaseMem: %s\n", e.name());
 		ASSERT(false);
 	}
 	THREAD_RETURN;
@@ -1501,7 +1554,7 @@ THREAD_FUNC destroy(void *arg) {
 		((ThreadSingleAssignmentVar<int>*)arg)->cancel();
 	}
 	catch(Error &e) {
-		printf("Caught error in destroy: %s\n", e.what());
+		printf("Caught error in destroy: %s\n", e.name());
 		ASSERT(false);
 	}
 	THREAD_RETURN;
@@ -1514,7 +1567,7 @@ THREAD_FUNC cancel(void *arg) {
 		destroy(arg);
 	}
 	catch(Error &e) {
-		printf("Caught error in cancel: %s\n", e.what());
+		printf("Caught error in cancel: %s\n", e.name());
 		ASSERT(false);
 	}
 	THREAD_RETURN;
@@ -1608,7 +1661,7 @@ THREAD_FUNC runSingleAssignmentVarTest(void *arg) {
 		}, NULL);
 	}
 	catch(Error &e) {
-		printf("Caught error in test: %s\n", e.what());
+		printf("Caught error in test: %s\n", e.name());
 		*done = true;
 		ASSERT(false);
 	}

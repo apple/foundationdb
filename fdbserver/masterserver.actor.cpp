@@ -77,6 +77,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
+	bool hasConfiguration;
 
 	ServerCoordinators coordinators;
 
@@ -138,7 +139,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  version(invalidVersion),
 		  lastVersionTime(0),
 		  txnStateStore(0),
-		  memoryLimit(2e9)
+		  memoryLimit(2e9),
+		  hasConfiguration(false)
 	{
 	}
 	~MasterData() { if(txnStateStore) txnStateStore->close(); }
@@ -214,6 +216,7 @@ ACTOR Future<Void> newProxies( Reference<MasterData> self, Future< RecruitFromCo
 	}
 
 	vector<MasterProxyInterface> newRecruits = wait( getAll( initializationReplies ) );
+	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->proxies[0] is the firstProxy.
 	self->proxies = newRecruits;
 
 	return Void();
@@ -250,53 +253,34 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, Future< RecruitFr
 	return Void();
 }
 
-ACTOR Future<Void> newSeedServers( Reference<MasterData> self, vector<StorageServerInterface>* servers ) {
+ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfigurationReply recruits, vector<StorageServerInterface>* servers ) {
 	// This is only necessary if the database is at version 0
 	servers->clear();
 	if (self->lastEpochEnd) return Void();
 
 	state Tag tag = 0;
-	state std::set<Optional<Standalone<StringRef>>> dataCenters;
-	while( servers->size() < self->configuration.storageTeamSize ) {
-		try {
-			RecruitStorageRequest req;
-			req.criticalRecruitment = true;
-			for(auto s = servers->begin(); s != servers->end(); ++s)
-				req.excludeMachines.push_back(s->locality.zoneId());
+	while( tag < recruits.storageServers.size() ) {
+		TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
+			.detail("CandidateWorker", recruits.storageServers[tag].locality.toString());
 
-			TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
-				.detail("ExcludingMachines", req.excludeMachines.size())
-				.detail("ExcludingDataCenters", req.excludeDCs.size());
+		InitializeStorageRequest isr;
+		isr.seedTag = tag;
+		isr.storeType = self->configuration.storageServerStoreType;
+		isr.reqId = g_random->randomUniqueID();
+		isr.interfaceId = g_random->randomUniqueID();
 
-			RecruitStorageReply candidateWorker = wait( brokenPromiseToNever( self->clusterController.recruitStorage.getReply( req ) ) );
+		ErrorOr<StorageServerInterface> newServer = wait( recruits.storageServers[tag].storage.tryGetReply( isr ) );
 
-			TraceEvent("MasterRecruitingInitialStorageServer", self->dbgid)
-				.detail("CandidateWorker", candidateWorker.worker.locality.toString());
+		if( newServer.isError() ) {
+			if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
+				throw newServer.getError();
 
-			InitializeStorageRequest isr;
-			isr.seedTag = tag;
-			isr.storeType = self->configuration.storageServerStoreType;
-			isr.reqId = g_random->randomUniqueID();
-			isr.interfaceId = g_random->randomUniqueID();
-
-			ErrorOr<StorageServerInterface> newServer = wait( candidateWorker.worker.storage.tryGetReply( isr ) );
-
-			if( newServer.isError() ) {
-				if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
-					throw newServer.getError();
-
-				TEST( true ); // masterserver initial storage recuitment loop failed to get new server
-				Void _ = wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY) );
-			}
-			else {
-				servers->push_back( newServer.get() );
-				dataCenters.insert( newServer.get().locality.dcId() );
-				tag++;
-			}
-		} catch ( Error &e ) {
-			if(e.code() != error_code_timed_out) {
-				throw;
-			}
+			TEST( true ); // masterserver initial storage recuitment loop failed to get new server
+			Void _ = wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY) );
+		}
+		else {
+			servers->push_back( newServer.get() );
+			tag++;
 		}
 	}
 
@@ -376,7 +360,7 @@ Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& lo
 	masterReq.proxies = proxies;
 	masterReq.resolvers = resolvers;
 	masterReq.recoveryCount = recoveryCount;
-	masterReq.configuration = self->configuration;
+	if(self->hasConfiguration) masterReq.configuration = self->configuration;
 	masterReq.registrationCount = ++self->registrationCount;
 	masterReq.priorCommittedLogServers = priorCommittedLogServers;
 	masterReq.recoveryState = self->recoveryState;
@@ -450,8 +434,8 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 				}
 			}
 		}
-		when ( ReplyPromise<vector<pair<KeyRangeRef, vector<StorageServerInterface>>>> req = waitNext( parent->provisionalProxies[0].getKeyServersLocations.getFuture() ) ) {
-			req.send(Never());
+		when ( GetKeyServerLocationsRequest req = waitNext( parent->provisionalProxies[0].getKeyServersLocations.getFuture() ) ) {
+			req.reply.send(Never());
 		}
 		when ( Void _ = wait( waitFailure ) ) { throw worker_removed(); }
 	}
@@ -469,7 +453,7 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 		TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", status)
 			.detail("Status", RecoveryStatus::names[status])
-			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("MasterRecoveryState");
 		return Never();
 	} else
 		TraceEvent("MasterRecoveryState", self->dbgid)
@@ -482,11 +466,11 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 			.detail("RequiredResolvers", 1)
 			.detail("DesiredResolvers", self->configuration.getDesiredResolvers())
 			.detail("storeType", self->configuration.storageServerStoreType)
-			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("MasterRecoveryState");
 
 	RecruitFromConfigurationReply recruits = wait(
 		brokenPromiseToNever( self->clusterController.recruitFromConfiguration.getReply(
-			RecruitFromConfigurationRequest( self->configuration ) ) ) );
+			RecruitFromConfigurationRequest( self->configuration, self->lastEpochEnd==0 ) ) ) );
 
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
@@ -494,12 +478,12 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 		.detail("Proxies", recruits.proxies.size())
 		.detail("TLogs", recruits.tLogs.size())
 		.detail("Resolvers", recruits.resolvers.size())
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand new database we are sort of lying that we are
 	// past the recruitment phase.  In a perfect world we would split that up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
 
-	Void _ = wait( newProxies( self, recruits ) && newResolvers( self, recruits ) && newTLogServers( self, recruits, oldLogSystem ) && newSeedServers( self, seedServers ) );
+	Void _ = wait( newProxies( self, recruits ) && newResolvers( self, recruits ) && newTLogServers( self, recruits, oldLogSystem ) && newSeedServers( self, recruits, seedServers ) );
 	return Void();
 }
 
@@ -543,6 +527,15 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
 	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false );
 
+	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
+	// that we may recover to, as they embed the version in user-readable data and require that no
+	// transactions will be committed at a lower version.
+	Optional<Standalone<StringRef>> requiredCommitVersion = wait(self->txnStateStore->readValue( minRequiredCommitVersionKey ));
+	Version minRequiredCommitVersion = -1;
+	if (requiredCommitVersion.present()) {
+		minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(requiredCommitVersion.get(), Unversioned());
+	}
+
 	// Recover version info
 	self->lastEpochEnd = oldLogSystem->getEnd() - 1;
 	if (self->lastEpochEnd == 0) {
@@ -552,6 +545,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		if(BUGGIFY) {
 			self->recoveryTransactionVersion += g_random->randomInt64(0, SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT);
 		}
+		if ( self->recoveryTransactionVersion < minRequiredCommitVersion ) self->recoveryTransactionVersion = minRequiredCommitVersion;
 	}
 
 	TraceEvent("MasterRecovering", self->dbgid).detail("lastEpochEnd", self->lastEpochEnd).detail("recoveryTransactionVersion", self->recoveryTransactionVersion);
@@ -559,6 +553,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	Standalone<VectorRef<KeyValueRef>> rawConf = wait( self->txnStateStore->readRange( configKeys ) );
 	self->configuration.fromKeyValues( rawConf );
 	self->originalConfiguration = self->configuration;
+	self->hasConfiguration = true;
 	TraceEvent("MasterRecoveredConfig", self->dbgid).detail("conf", self->configuration.toString()).trackLatest("RecoveredConfig");
 
 	//auto kvs = self->txnStateStore->readRange( systemKeys );
@@ -645,7 +640,8 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::reading_transaction_system_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::reading_transaction_system_state])
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
+	self->hasConfiguration = false;
 
 	if(BUGGIFY)
 		Void _ = wait( delay(10.0) );
@@ -961,9 +957,41 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 	}
 }
 
+ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
+	state Database cx = openDBOnServer(self->dbInfo, TaskDefaultEndpoint, true, true);
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state Future<Standalone<RangeResultRef>> fresults = tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY );
+				Void _ = wait( success(fresults) ); 
+				Standalone<RangeResultRef> results = fresults.get();
+				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
+
+				DatabaseConfiguration conf;
+				conf.fromKeyValues((VectorRef<KeyValueRef>) results);
+				if(conf != self->configuration) {
+					self->configuration = conf;
+					self->registrationTrigger.trigger();
+				}
+
+				state Future<Void> watchFuture = tr.watch(excludedServersVersionKey);
+				Void _ = wait(tr.commit());
+				Void _ = wait(watchFuture);
+				break;
+			} catch (Error& e) {
+				Void _ = wait( tr.onError(e) );
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<Void>> addActor )
 {
 	state TraceInterval recoveryInterval("MasterRecovery");
+	state double recoverStartTime = now();
 
 	addActor.send( waitFailureServer(self->myInterface.waitFailure.getFuture()) );
 
@@ -973,7 +1001,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::reading_coordinated_state)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::reading_coordinated_state])
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	Value prevDBStateRaw = wait( self->cstate1.read() );
 	addActor.send( masterTerminateOnConflict( self, self->cstate1.onConflict() ) );
@@ -988,7 +1016,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 		.detail("TLogs", self->prevDBState.tLogs.size())
 		.detail("MyRecoveryCount", self->prevDBState.recoveryCount+2)
 		.detail("StateSize", prevDBStateRaw.size())
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	state Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems( new AsyncVar<Reference<ILogSystem>> );
 	state Future<Void> recoverAndEndEpoch = ILogSystem::recoverAndEndEpoch(oldLogSystems, self->dbgid, self->prevDBState, self->myInterface.tlogRejoin.getFuture(), self->myInterface.locality);
@@ -1002,11 +1030,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	state vector<StorageServerInterface> seedServers;
 	state vector<Standalone<CommitTransactionRef>> initialConfChanges;
 	state Future<Void> logChanges;
-
-	TraceEvent("MasterRecoveryState", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::locking_old_transaction_servers)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::locking_old_transaction_servers])
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
 
 	loop {
 		Reference<ILogSystem> oldLogSystem = oldLogSystems->get();
@@ -1032,7 +1055,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::recovery_transaction)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::recovery_transaction])
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	// Recovery transaction
 	state bool debugResult = debug_checkMinRestoredVersion( UID(), self->lastEpochEnd, "DBRecovery", SevWarn );
@@ -1108,7 +1131,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::writing_coordinated_state])
 		.detail("TLogs", self->logSystem->getLogServerCount())
 		.detail("TLogList", self->logSystem->describe())
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.trackLatest("MasterRecoveryState");
 
 	// Multiple masters prevent conflicts between themselves via CoordinatedState (self->cstate)
 	//  1. If SetMaster succeeds, then by CS's contract, these "new" Tlogs are the immediate
@@ -1140,11 +1163,18 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	TraceEvent(recoveryInterval.end(), self->dbgid).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
 	self->recoveryState = RecoveryState::FULLY_RECOVERED;
+	double recoveryDuration = now() - recoverStartTime;
+
+	TraceEvent(recoveryDuration > 4 ? SevWarnAlways : SevInfo, "MasterRecoveryDuration", self->dbgid)
+		.detail("recoveryDuration", recoveryDuration)
+		.trackLatest("MasterRecoveryDuration");
+
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::fully_recovered)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
 		.detail("storeType", self->configuration.storageServerStoreType)
-		.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		.detail("recoveryDuration", recoveryDuration)
+		.trackLatest("MasterRecoveryState");
 
 	// Now that recovery is complete, we register ourselves with the cluster controller, so that the client and server information
 	// it hands out can be updated
@@ -1161,6 +1191,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 	if( self->resolvers.size() > 1 )
 		addActor.send( resolutionBalancing(self) );
 
+	state Future<Void> configMonitor = configurationMonitor( self );
 	addActor.send( changeCoordinators(self, skipTransition) );
 	addActor.send( trackTlogRecovery(self, oldLogSystems, skipTransition) );
 
@@ -1168,7 +1199,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self, PromiseStream<Future<
 		when( Void _ = wait( tlogFailure ) ) { throw internal_error(); }
 		when( Void _ = wait( proxyFailure ) ) { throw internal_error(); }
 		when( Void _ = wait( resolverFailure ) ) { throw internal_error(); }
-		when (Void _ = wait(providingVersions)) { throw internal_error(); }
+		when( Void _ = wait( providingVersions ) ) { throw internal_error(); }
+		when( Void _ = wait( configMonitor ) ) { throw internal_error(); }
 	}
 }
 

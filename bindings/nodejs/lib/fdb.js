@@ -43,8 +43,8 @@ module.exports = {
 			throw new Error('Cannot select multiple different FDB API versions');
 		if(version < 500)
 			throw new RangeError('FDB API versions before 500 are not supported');
-		if(version > 500)
-			throw new RangeError('Latest known FDB API version is 500');
+		if(version > 510)
+			throw new RangeError('Latest known FDB API version is 510');
 
 		if(!selectedApiVersion.value) {
 			fdb.apiVersion(version);

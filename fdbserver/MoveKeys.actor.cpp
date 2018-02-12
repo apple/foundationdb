@@ -94,11 +94,11 @@ Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock ) {
 	return checkMoveKeysLock(tr, lock, false);
 }
 
-ACTOR Future<bool> checkReadWrite( Future< ErrorOr<Version> > fReply ) {
+ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<Version> > fReply, UID uid ) {
 	ErrorOr<Version> reply = wait( fReply );
 	if (!reply.present())
-		return false;
-	return true;
+		return Optional<UID>();
+	return Optional<UID>(uid);
 }
 
 Future<Void> removeOldDestinations(Transaction *tr, UID oldDest, VectorRef<KeyRangeRef> shards, KeyRangeRef currentKeys) {
@@ -118,79 +118,51 @@ Future<Void> removeOldDestinations(Transaction *tr, UID oldDest, VectorRef<KeyRa
 	return waitForAll(actors);
 }
 
-//Returns a vector with as many elements as the shards vector
-//Result[i] == true if there are enough src servers for shards[i] that have the state isReadWrite
-ACTOR Future<Standalone<VectorRef<bool>>> checkEnoughServersOk(Standalone<RangeResultRef> shards, int durableStorageQuorum, UID relocationIntervalId, Transaction* tr) {
-	state std::vector<Future<bool>> enoughServersOk;
-	state std::map<UID, StorageServerInterface> ssiMap;
-	state vector<Future<Optional<Value>>> serverListEntries;
-
-	state int i = 0;
-	for(i = 0; i < shards.size() - 1; ++i) {
-		KeyRangeRef rangeIntersectKeys( shards[i].key, shards[i+1].key );
+ACTOR Future<vector<vector<Optional<UID>>>> findReadWriteDestinations(Standalone<RangeResultRef> shards, UID relocationIntervalId, Transaction* tr) {
+	vector<Future<Optional<Value>>> serverListEntries;
+	for(int i = 0; i < shards.size() - 1; ++i) {
 		vector<UID> src;
 		vector<UID> dest;
 
 		decodeKeyServersValue( shards[i].value, src, dest );
 
-		for(int s=0; s<src.size(); s++) {
-			serverListEntries.push_back( tr->get( serverListKeyFor(src[s]) ) );
+		for(int s=0; s<dest.size(); s++) {
+			serverListEntries.push_back( tr->get( serverListKeyFor(dest[s]) ) );
 		}
 	}
 
-	state vector<Optional<Value>> serverListValues = wait( getAll(serverListEntries) );
+	vector<Optional<Value>> serverListValues = wait( getAll(serverListEntries) );
 
+	std::map<UID, StorageServerInterface> ssiMap;
 	for(int s=0; s<serverListValues.size(); s++) {
 		auto si = decodeServerListValue(serverListValues[s].get());
 		StorageServerInterface ssi = decodeServerListValue(serverListValues[s].get());
 		ssiMap[ssi.id()] = ssi;
 	}
 
-	for(i = 0; i < shards.size() - 1; ++i) {
+	vector<Future<vector<Optional<UID>>>> allChecks;
+	for(int i = 0; i < shards.size() - 1; ++i) {
 		KeyRangeRef rangeIntersectKeys( shards[i].key, shards[i+1].key );
 		vector<UID> src;
 		vector<UID> dest;
 		vector<StorageServerInterface> storageServerInterfaces;
-		Future<bool> shardServersOk = true;
 
 		decodeKeyServersValue( shards[i].value, src, dest );
 
-		for(int s=0; s<src.size(); s++)
-			storageServerInterfaces.push_back( ssiMap[src[s]] );
+		for(int s=0; s<dest.size(); s++)
+			storageServerInterfaces.push_back( ssiMap[dest[s]] );
 
-		//We may need to incorporate existing dest servers into the src servers if there are insufficient src servers with the state isReadWrite
-		if (dest.size()) {
-			if (src.size() == 0) {
-				TraceEvent(SevError,"MoveKeysNoSrc", relocationIntervalId).detail("BeginKey", printable(rangeIntersectKeys.begin)).detail("EndKey", printable(rangeIntersectKeys.end))
-					.detail("SrcCount", (int)src.size()).detail("DestCount", (int)dest.size());
-				ASSERT(false);
-			}
-
-			// We want at least durableStorageQuorum of the src servers to have state isReadWrite
-			state bool tooFewSrcServers = storageServerInterfaces.size() < durableStorageQuorum;
-
-			// If the shard is not available on enough source servers, create an emergency team
-			if( !tooFewSrcServers ) {
-				vector< Future<bool> > checks;
-				for(int s=0; s<storageServerInterfaces.size(); s++) {
-					checks.push_back( checkReadWrite( storageServerInterfaces[s].getShardState.getReplyUnlessFailedFor(
-						GetShardStateRequest( rangeIntersectKeys, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ) ) );
-				}
-
-				shardServersOk = quorumEqualsTrue( checks, durableStorageQuorum );
-			}
+		vector< Future<Optional<UID>> > checks;
+		for(int s=0; s<storageServerInterfaces.size(); s++) {
+			checks.push_back( checkReadWrite( storageServerInterfaces[s].getShardState.getReplyUnlessFailedFor(
+				GetShardStateRequest( rangeIntersectKeys, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), dest[s] ) );
 		}
 
-		enoughServersOk.push_back(shardServersOk);
+		allChecks.push_back(getAll(checks));
 	}
 
-	Void _ = wait(waitForAll(enoughServersOk));
-	Standalone<VectorRef<bool>> result;
-
-	for(int i = 0; i < enoughServersOk.size(); ++i)
-		result.push_back(result.arena(), enoughServersOk[i].get());
-
-	return result;
+	vector<vector<Optional<UID>>> readWriteDestinations = wait(getAll(allChecks));
+	return readWriteDestinations;
 }
 
 // Set keyServers[keys].dest = servers
@@ -268,7 +240,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					//	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
 
 					//Check that enough servers for each shard are in the correct state
-					Standalone<VectorRef<bool>> enoughServersOk = wait(checkEnoughServersOk(old, durableStorageQuorum, relocationIntervalId, &tr));
+					vector<vector<Optional<UID>>> readWriteDestinations = wait(findReadWriteDestinations(old, relocationIntervalId, &tr));
 
 					// For each intersecting range, update keyServers[range] dest to be servers and clear existing dest servers from serverKeys
 					for(int i = 0; i < old.size() - 1; ++i) {
@@ -284,21 +256,14 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 							.detail("OldDest", describe(dest))
 							.detail("ReadVersion", tr.getReadVersion().get());*/
 
-						if ( !enoughServersOk[i] ) {
-							// The 'src' servers for this shard are seriously degraded.
-							// For safety, we combine the src and dest servers into a temporary
-							//   team and make that the new src, to minimize the chance of losing
-							//   data during this move.
-							TEST( true );
-							src.insert( src.end(), dest.begin(), dest.end() );
-							std::sort( src.begin(), src.end() );
-							src.resize( std::unique( src.begin(), src.end() ) - src.begin() );
-							dest.clear();
-							TraceEvent(SevWarn,"StartMoveKeysShardDegraded", relocationIntervalId)
-								.detail("KeyBegin", printable(rangeIntersectKeys.begin))
-								.detail("KeyEnd", printable(rangeIntersectKeys.end))
-								.detail("CombinedTeamSize", src.size());
+						for(auto& uid : readWriteDestinations[i]) {
+							if(uid.present()) {
+								src.push_back(uid.get());
+							}
 						}
+
+						std::sort( src.begin(), src.end() );
+						src.resize( std::unique( src.begin(), src.end() ) - src.begin() );
 
 						//Update dest servers for this range to be equal to servers
 						krmSetPreviouslyEmptyRange( &tr, keyServersPrefix, rangeIntersectKeys, keyServersValue(src, servers), old[i+1].value );
@@ -817,8 +782,8 @@ void seedShardServers(
 	tr.read_conflict_ranges.push_back_deep( arena, allKeys );
 
 	for(int s=0; s<servers.size(); s++) {
-		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
 		tr.set(arena, serverTagKeyFor(servers[s].id()), serverTagValue(server_tag[servers[s].id()]));
+		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
 	}
 	tr.set(arena, serverTagMaxKey, serverTagMaxValue(servers.size()-1));
 

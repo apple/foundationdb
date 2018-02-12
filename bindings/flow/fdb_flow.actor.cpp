@@ -33,7 +33,7 @@ THREAD_FUNC networkThread(void* fdb) {
 }
 
 ACTOR Future<Void> _test() {
-	API *fdb = FDB::API::selectAPIVersion(500);
+	API *fdb = FDB::API::selectAPIVersion(510);
 	auto c = fdb->createCluster( std::string() );
 	auto db = c->createDatabase();
 	state Reference<Transaction> tr( new Transaction(db) );
@@ -41,7 +41,7 @@ ACTOR Future<Void> _test() {
 	// tr->setVersion(1);
 
 	Version ver = wait( tr->getReadVersion() );
-	printf("%ld\n", ver);
+	printf("%lld\n", ver);
 
 	state std::vector< Future<Version> > versions;
 
@@ -77,7 +77,7 @@ ACTOR Future<Void> _test() {
 }
 
 void fdb_flow_test() {
-	API *fdb = FDB::API::selectAPIVersion(500);
+	API *fdb = FDB::API::selectAPIVersion(510);
 	fdb->setupNetwork();
 	startThread(networkThread, fdb);
 

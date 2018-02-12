@@ -1,4 +1,4 @@
 testTitle=RandomReadWriteTest
 testName=ConflictRange
 testReadYourWrites=true
-simEnableConnectionFailures=false
+connectionFailuresDisableDuration=100000

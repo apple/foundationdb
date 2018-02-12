@@ -81,11 +81,18 @@ ErrorCodeTable& Error::errorCodeTable() {
 	return table;
 }
 
+const char* Error::name() const {
+	auto table = errorCodeTable();
+	auto it = table.find(error_code);
+	if (it == table.end()) return "UNKNOWN_ERROR";
+	return it->second.first;
+}
+
 const char* Error::what() const {
 	auto table = errorCodeTable();
 	auto it = table.find(error_code);
 	if (it == table.end()) return "UNKNOWN_ERROR";
-	return it->second;
+	return it->second.second;
 }
 
 void Error::init() {
@@ -99,12 +106,12 @@ Error Error::asInjectedFault() const {
 }
 
 ErrorCodeTable::ErrorCodeTable() {
-	#define ERROR(name, number, comment) (*this)[number] = #name; enum { Duplicate_Error_Code_##number = 0 };
+	#define ERROR(name, number, description) addCode(number, #name, description); enum { Duplicate_Error_Code_##number = 0 };
 	#include "error_definitions.h"
 }
 
-void ErrorCodeTable::addCode(int code, const char* message) {
-	(*this)[code] = message;
+void ErrorCodeTable::addCode(int code, const char *name, const char *description) {
+	(*this)[code] = std::make_pair(name, description);
 }
 
 bool isAssertDisabled(int line) {

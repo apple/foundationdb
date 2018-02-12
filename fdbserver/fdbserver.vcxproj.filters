@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <ActorCompiler Include="ClusterController.actor.cpp" />
@@ -154,7 +154,6 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="networktest.actor.cpp" />
-    <ActorCompiler Include="MetricLogger.actor.cpp" />
     <ActorCompiler Include="workloads\SaveAndKill.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -202,7 +201,6 @@
     <ActorCompiler Include="workloads\UnitTests.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
-    <ActorCompiler Include="workloads\WorkerErrors.actor.cpp" />
     <ActorCompiler Include="workloads\FuzzApiCorrectness.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -221,6 +219,9 @@
     <ActorCompiler Include="workloads\AtomicOps.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\StatusWorkload.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -237,6 +238,12 @@
     <ActorCompiler Include="workloads\LockDatabase.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\TimeKeeperCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -246,10 +253,21 @@
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
-    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp" />
     <ActorCompiler Include="MemoryPager.actor.cpp" />
     <ActorCompiler Include="IndirectShadowPager.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
+    <ActorCompiler Include="workloads\LowLatency.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\WorkerErrors.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SkipList.cpp" />
@@ -337,6 +355,7 @@
     <ClInclude Include="IVersionedStore.h" />
     <ClInclude Include="MemoryPager.h" />
     <ClInclude Include="IndirectShadowPager.h" />
+    <ClInclude Include="template_fdb.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="workloads">

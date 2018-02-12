@@ -66,3 +66,19 @@ std::string toIPVectorString(std::vector<uint32_t> ips) {
 	return output;
 }
 
+Future<Reference<IConnection>> INetworkConnections::connect( std::string host, std::string service, bool useTLS ) {
+	// Use map to create an actor that returns an endpoint or throws
+	Future<NetworkAddress> pickEndpoint = map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const &addresses) -> NetworkAddress {
+		NetworkAddress addr = addresses[g_random->randomInt(0, addresses.size())];
+		if(useTLS)
+			addr.flags = NetworkAddress::FLAG_TLS;
+		return addr;
+	});
+
+	// Wait for the endpoint to return, then wait for connect(endpoint) and return it.
+	// Template types are being provided explicitly because they can't be automatically deduced for some reason.
+	return mapAsync<NetworkAddress, std::function<Future<Reference<IConnection>>(NetworkAddress const &)>, Reference<IConnection> >
+		(pickEndpoint, [=](NetworkAddress const &addr) -> Future<Reference<IConnection>> {
+		return connect(addr);
+	});
+}

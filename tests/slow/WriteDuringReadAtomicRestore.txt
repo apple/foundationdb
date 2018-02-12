@@ -8,7 +8,7 @@ testTitle=WriteDuringReadTest
 
     testName=AtomicRestore
     startAfter=10.0
-    switch1After=50.0
+    restoreAfter=50.0
     clearAfterTest=false
     simBackupAgents=BackupToFile
     

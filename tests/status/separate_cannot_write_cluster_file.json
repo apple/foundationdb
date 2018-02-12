@@ -100,8 +100,8 @@
                 "description" : "Some clients of this cluster have issues.",
                 "issues" : [
                     {
-                        "description" : "Unable to update cluster file.",
-                        "name" : "unable_to_write_cluster_file"
+                        "description" : "Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.",
+                        "name" : "incorrect_cluster_file_contents"
                     }
                 ],
                 "name" : "client_issues"

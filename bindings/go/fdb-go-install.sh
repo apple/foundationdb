@@ -12,7 +12,7 @@
 #
 
 DESTDIR="${DESTDIR:-}"
-FDBVER="${FDBVER:-5.0.1}"
+FDBVER="${FDBVER:-5.1.0}"
 REMOTE="${REMOTE:-github.com}"
 FDBREPO="${FDBREPO:-apple/foundationdb}"
 

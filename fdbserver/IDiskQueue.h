@@ -55,6 +55,6 @@ public:
 	virtual StorageBytes getStorageBytes() = 0;
 };
 
-IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid);  // opens basename+"0."+ext and basename+"1."+ext
+IDiskQueue* openDiskQueue( std::string basename, std::string ext, UID dbgid, int64_t fileSizeWarningLimit = -1);  // opens basename+"0."+ext and basename+"1."+ext
 
 #endif

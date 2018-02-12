@@ -28,10 +28,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 500)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 510)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 500
+#elif FDB_API_VERSION > 510
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -88,6 +88,8 @@ extern "C" {
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_run_network();
 
     DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_stop_network();
+
+    DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*), void *hook_parameter);
 
 #pragma pack(push, 4)
     typedef struct keyvalue {

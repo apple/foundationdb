@@ -101,37 +101,61 @@ void unmonitor_fd( fdb_fd_set list, int fd ) {
 #endif
 }
 
-void get_cur_timestamp(char *buf, int len) {
-	if(len <= 0)
-		return;
+double get_cur_timestamp() {
 	struct tm tm_info;
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	localtime_r(&tv.tv_sec, &tm_info);
-	char *end = buf + len;
-	buf += strftime(buf, end - buf, "%Z %Y-%m-%d %H:%M:%S", &tm_info);
-	// Add fractional seconds
-	if(buf < end)
-		buf += snprintf(buf, end - buf, ".%06d", tv.tv_usec);
-	// Add epoch seconds after timestamp
-	if(buf < end)
-		buf += snprintf(buf, end - buf, " (%lld.%06d)", (long long int)tv.tv_sec, tv.tv_usec);
+
+	return tv.tv_sec + 1e-6*tv.tv_usec;
+}
+
+enum Severity { SevDebug=5, SevInfo=10, SevWarn=20, SevWarnAlways=30, SevError=40 };
+int severity_to_priority(Severity severity) {
+	switch(severity) {
+		case SevError:
+			return LOG_ERR;
+		case SevWarnAlways:
+			return LOG_WARNING;
+		case SevWarn:
+			return LOG_NOTICE;
+		case SevDebug:
+			return LOG_DEBUG;
+		case SevInfo:
+		default:
+			return LOG_INFO;
+
+	}
 }
 
 bool daemonize = false;
+std::string logGroup = "default";
 
-void log_msg(int priority, const char* format, ...) {
+void vlog_process_msg(Severity severity, const char* process, const char* format, va_list args) {
+	if (daemonize) {
+		char buf[4096];
+		int len = vsnprintf( buf, 4096, format, args);
+		syslog(severity_to_priority(severity), "LogGroup=\"%s\" Process=\"%s\": %.*s", logGroup.c_str(), process, len, buf);
+	} else {
+		fprintf(stderr, "Time=\"%.6f\" Severity=\"%d\" LogGroup=\"%s\" Process=\"%s\": ", get_cur_timestamp(), (int)severity, logGroup.c_str(), process);
+		vfprintf(stderr, format, args);
+	}
+}
+
+void log_msg(Severity severity, const char* format, ...) {
 	va_list args;
 	va_start(args, format);
 
-	if (daemonize) {
-		vsyslog(priority, format, args);
-	} else {
-		char timebuf[64];
-		get_cur_timestamp(timebuf, 64);
-		fprintf(stderr, "%s: ", timebuf);
-		vfprintf(stderr, format, args);
-	}
+	vlog_process_msg(severity, "fdbmonitor", format, args);
+
+	va_end(args);
+}
+
+void log_process_msg(Severity severity, const char* process, const char* format, ...) {
+	va_list args;
+	va_start(args, format);
+
+	vlog_process_msg(severity, process, format, args);
 
 	va_end(args);
 }
@@ -141,10 +165,11 @@ void log_err(const char* func, int err, const char* format, ...) {
 	va_start(args, format);
 
 	char buf[4096];
-
 	int len = vsnprintf( buf, 4096, format, args );
 
-	log_msg( LOG_ERR, "%.*s (%s error %d: %s)\n", len, buf, func, err, strerror(err) );
+	log_msg( SevError, "%.*s (%s error %d: %s)\n", len, buf, func, err, strerror(err) );
+
+	va_end(args);
 }
 
 const char* get_value_multi(const CSimpleIni& ini, const char* key, ...) {
@@ -209,7 +234,7 @@ std::string abspath(std::string const& filename) {
 			}
 		}
 
-		perror("abspath");
+		log_err("realpath", errno, "Unable to get real path for %s", filename.c_str());
 		return "";
 	}
 	return std::string(r);
@@ -252,8 +277,8 @@ public:
 	double restart_backoff;
 	uint32_t restart_delay_reset_interval;
 	double last_start;
+	double fork_retry_time;
 	bool quiet;
-	//bool delete_wd40_env;
 	const char *delete_envvars;
 	bool deconfigured;
 	bool kill_on_configuration_change;
@@ -262,7 +287,7 @@ public:
 	int pipes[2][2];
 
 	Command() : argv(NULL) { }
-	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
+	Command(const CSimpleIni& ini, std::string _section, uint64_t id, fdb_fd_set fds, int* maxfd) : section(_section), argv(NULL), fork_retry_time(-1), quiet(false), delete_envvars(NULL), fds(fds), deconfigured(false), kill_on_configuration_change(true) {
 		char _ssection[strlen(section.c_str()) + 22];
 		snprintf(_ssection, strlen(section.c_str()) + 22, "%s.%llu", section.c_str(), id);
 		ssection = _ssection;
@@ -295,13 +320,13 @@ public:
 		char* endptr;
 		const char* rd = get_value_multi(ini, "restart_delay", ssection.c_str(), section.c_str(), "general", "fdbmonitor", NULL);
 		if (!rd) {
-			log_msg(LOG_ERR, "Unable to resolve restart delay for %s\n", ssection.c_str());
+			log_msg(SevError, "Unable to resolve restart delay for %s\n", ssection.c_str());
 			return;
 		}
 		else {
 			max_restart_delay = strtoul(rd, &endptr, 10);
 			if (*endptr != '\0') {
-				log_msg(LOG_ERR, "Unable to parse restart delay for %s\n", ssection.c_str());
+				log_msg(SevError, "Unable to parse restart delay for %s\n", ssection.c_str());
 				return;
 			}
 		}
@@ -313,7 +338,7 @@ public:
 		else {
 			initial_restart_delay = std::min<uint32_t>(max_restart_delay, strtoul(mrd, &endptr, 10));
 			if (*endptr != '\0') {
-				log_msg(LOG_ERR, "Unable to parse initial restart delay for %s\n", ssection.c_str());
+				log_msg(SevError, "Unable to parse initial restart delay for %s\n", ssection.c_str());
 				return;
 			}
 		}
@@ -327,11 +352,11 @@ public:
 		else {
 			restart_backoff = strtod(rbo, &endptr);
 			if (*endptr != '\0') {
-				log_msg(LOG_ERR, "Unable to parse restart backoff for %s\n", ssection.c_str());
+				log_msg(SevError, "Unable to parse restart backoff for %s\n", ssection.c_str());
 				return;
 			}
 			if (restart_backoff < 1.0) {
-				log_msg(LOG_ERR, "Invalid restart backoff value %lf for %s\n", restart_backoff, ssection.c_str());
+				log_msg(SevError, "Invalid restart backoff value %lf for %s\n", restart_backoff, ssection.c_str());
 				return;
 			}
 		}
@@ -343,7 +368,7 @@ public:
 		else {
 			restart_delay_reset_interval = strtoul(rdri, &endptr, 10);
 			if (*endptr != '\0') {
-				log_msg(LOG_ERR, "Unable to parse restart delay reset interval for %s\n", ssection.c_str());
+				log_msg(SevError, "Unable to parse restart delay reset interval for %s\n", ssection.c_str());
 				return;
 			}
 		}
@@ -362,7 +387,7 @@ public:
 
 		const char* binary = get_value_multi(ini, "command", ssection.c_str(), section.c_str(), "general", NULL);
 		if (!binary) {
-			log_msg(LOG_ERR, "Unable to resolve command for %s\n", ssection.c_str());
+			log_msg(SevError, "Unable to resolve command for %s\n", ssection.c_str());
 			return;
 		}
 		std::stringstream ss(binary);
@@ -385,7 +410,17 @@ public:
 			while ((pos = opt.find("$ID", pos)) != opt.npos)
 				opt.replace(pos, 3, id_s, strlen(id_s));
 
-			commands.push_back(std::string("--").append(i.pItem).append("=").append(opt));
+			const char *flagName = i.pItem + 5;
+			if(strncmp("flag_", i.pItem, 5) == 0 && strlen(flagName) > 0) {
+				if(opt == "true")
+					commands.push_back(std::string("--") + flagName);
+				else if(opt != "false") {
+					log_msg(SevError, "Bad flag value, must be true/false.  Flag: '%s'  Value: '%s'\n", flagName, opt.c_str());
+					return;
+				}
+			}
+			else
+				commands.push_back(std::string("--").append(i.pItem).append("=").append(opt));
 		}
 
 		argv = new const char* [commands.size() + 1];
@@ -446,11 +481,12 @@ std::unordered_map<uint64_t, Command*> id_command;
 std::unordered_map<pid_t, uint64_t> pid_id;
 std::unordered_map<uint64_t, pid_t> id_pid;
 
-enum { OPT_CONFFILE, OPT_LOCKFILE, OPT_DAEMONIZE, OPT_HELP };
+enum { OPT_CONFFILE, OPT_LOCKFILE, OPT_LOGGROUP, OPT_DAEMONIZE, OPT_HELP };
 
 CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_CONFFILE, "--conffile", SO_REQ_SEP },
 	{ OPT_LOCKFILE, "--lockfile", SO_REQ_SEP },
+	{ OPT_LOGGROUP, "--loggroup", SO_REQ_SEP },
 	{ OPT_DAEMONIZE, "--daemonize", SO_NONE },
 	{ OPT_HELP, "-?", SO_NONE },
 	{ OPT_HELP, "-h", SO_NONE },
@@ -465,7 +501,10 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 	pid_t pid = fork();
 
 	if (pid < 0) { /* fork error */
-		log_err("fork", errno, "Failed to launch new %s process", cmd->argv[0]);
+		cmd->last_start = timer();
+		int fork_delay = cmd->get_and_update_current_restart_delay();
+		cmd->fork_retry_time = cmd->last_start + fork_delay;
+		log_err("fork", errno, "Unable to fork new %s process, restarting %s in %d seconds", cmd->argv[0], cmd->ssection.c_str(), fork_delay);
 		return;
 	} else if (pid == 0) { /* we are the child */
 		/* remove signal handlers from parent */
@@ -473,15 +512,21 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 		signal(SIGINT, SIG_DFL);
 		signal(SIGTERM, SIG_DFL);
 
+		/* All output in this block should be to stdout (for SevInfo messages) or stderr (for SevError messages) */
+		/* Using log_msg() or log_err() from the child will cause the logs to be written incorrectly */
+		dup2( cmd->pipes[0][1], fileno(stdout) );
+		dup2( cmd->pipes[1][1], fileno(stderr) );
+
 		if(cmd->delete_envvars != NULL && std::strlen(cmd->delete_envvars) > 0) {
 			std::string vars(cmd->delete_envvars);
 			size_t start = 0;
 			do {
 				size_t bound = vars.find(" ", start);
 				std::string var = vars.substr(start, bound - start);
-				log_msg(LOG_INFO, "Deleting parent environment variable: \"%s\"\n", var.c_str());
+				fprintf(stdout, "Deleting parent environment variable: \'%s\'\n", var.c_str());
+				fflush(stdout);
 				if(unsetenv(var.c_str())) {
-					log_err("unsetenv", errno, "Failed to remove parent environment variable: %s\n", var.c_str());
+					fprintf(stderr, "Unable to remove parent environment variable: %s (unsetenv error %d: %s)\n", var.c_str(), errno, strerror(errno));
 					exit(1);
 				}
 				start = bound;
@@ -489,9 +534,6 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 					start++;
 			} while(start <= vars.length());
 		}
-
-		dup2( cmd->pipes[0][1], fileno(stdout) );
-		dup2( cmd->pipes[1][1], fileno(stderr) );
 
 #ifdef __linux__
 		signal(SIGCHLD, SIG_DFL);
@@ -509,12 +551,12 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 
 		if (getegid() != gid)
 			if (setgid(gid) != 0) {
-				log_err("setgid", errno, "Failed to set GID to %d", gid);
+				fprintf(stderr, "Unable to set GID to %d (setgid error %d: %s)\n", gid, errno, strerror(errno));
 				exit(1);
 			}
 		if (geteuid() != uid)
 			if (setuid(uid) != 0) {
-				log_err("setuid", errno, "Failed to set UID to %d", uid);
+				fprintf(stderr, "Unable to set UID to %d (setuid error %d: %s)\n", uid, errno, strerror(errno));
 				exit(1);
 			}
 
@@ -527,14 +569,17 @@ void start_process(Command* cmd, uint64_t id, uid_t uid, gid_t gid, int delay, s
 			exit(0);
 #endif
 
-		if (!cmd->quiet)
-			log_msg(LOG_INFO, "Launching %s (%d) for %s\n", cmd->argv[0], getpid(), cmd->ssection.c_str());
+		if (!cmd->quiet) {
+			fprintf(stdout, "Launching %s (%d) for %s\n", cmd->argv[0], getpid(), cmd->ssection.c_str());
+			fflush(stdout);
+		}
 		execv(cmd->argv[0], (char* const*)cmd->argv);
-		log_err("execv", errno, "Failed to launch %s for %s", cmd->argv[0], cmd->ssection.c_str());
+		fprintf(stderr, "Unable to launch %s for %s\n", cmd->argv[0], cmd->ssection.c_str());
 		_exit(0);
 	}
 
 	cmd->last_start = timer() + delay;
+	cmd->fork_retry_time = -1;
 	pid_id[pid] = id;
 	id_pid[id] = pid;
 }
@@ -568,6 +613,9 @@ void print_usage(const char* name) {
 		"  --lockfile LOCKFILE\n"
 		"                 The path of the mutual exclusion file for this instance of\n"
 		"                 fdbmonitor. The default is `/var/run/fdbmonitor.pid'.\n"
+		"  --loggroup LOGGROUP\n"
+		"                 Sets the 'LogGroup' field with the specified value for all\n"
+		"                 entries in the log output. The default log group is 'default'."
 		"  --daemonize    Background the fdbmonitor process.\n"
 		"  -h, --help     Display this help and exit.\n", name);
 }
@@ -590,7 +638,7 @@ bool argv_equal(const char** a1, const char** a2)
 void kill_process(uint64_t id) {
 	pid_t pid = id_pid[id];
 
-	log_msg(LOG_INFO, "Killing process %d\n", pid);
+	log_msg(SevInfo, "Killing process %d\n", pid);
 
 	kill(pid, SIGTERM);
 	waitpid(pid, NULL, 0);
@@ -601,70 +649,72 @@ void kill_process(uint64_t id) {
 
 void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb_fd_set rfds, int* maxfd)
 {
-	log_msg(LOG_INFO, "Loading configuration %s\n", confpath);
+	log_msg(SevInfo, "Loading configuration %s\n", confpath);
 
 	CSimpleIniA ini;
 	ini.SetUnicode();
 
 	SI_Error err = ini.LoadFile(confpath);
-	if (err<0) {
-		log_msg(LOG_ERR, "Unable to load configuration file %s (SI_Error: %d, errno: %d)\n", confpath, err, errno);
-		return;
+	bool loadedConf = err >= 0;
+	if (!loadedConf) {
+		log_msg(SevError, "Unable to load configuration file %s (SI_Error: %d, errno: %d)\n", confpath, err, errno);
 	}
 
-	uid_t _uid;
-	gid_t _gid;
+	if(loadedConf) {
+		uid_t _uid;
+		gid_t _gid;
 
-	const char* user = ini.GetValue("fdbmonitor", "user", NULL);
-	const char* group = ini.GetValue("fdbmonitor", "group", NULL);
+		const char* user = ini.GetValue("fdbmonitor", "user", NULL);
+		const char* group = ini.GetValue("fdbmonitor", "group", NULL);
 
-	if (user) {
-		errno = 0;
-		struct passwd* pw = getpwnam(user);
-		if (!pw) {
-			log_err( "getpwnam", errno, "Unable to lookup user %s", user );
-			return;
-		}
-		_uid = pw->pw_uid;
-	} else
-		_uid = geteuid();
+		if (user) {
+			errno = 0;
+			struct passwd* pw = getpwnam(user);
+			if (!pw) {
+				log_err( "getpwnam", errno, "Unable to lookup user %s", user );
+				return;
+			}
+			_uid = pw->pw_uid;
+		} else
+			_uid = geteuid();
 
-	if (group) {
-		errno = 0;
-		struct group* gr = getgrnam(group);
-		if (!gr) {
-			log_err( "getgrnam", errno, "Unable to lookup group %s", group );
-			return;
-		}
-		_gid = gr->gr_gid;
-	} else
-		_gid = getegid();
+		if (group) {
+			errno = 0;
+			struct group* gr = getgrnam(group);
+			if (!gr) {
+				log_err( "getgrnam", errno, "Unable to lookup group %s", group );
+				return;
+			}
+			_gid = gr->gr_gid;
+		} else
+			_gid = getegid();
 
-	/* Any change to uid or gid requires the process to be restarted to take effect */
-	if (uid != _uid || gid != _gid) {
-		std::vector<uint64_t> kill_ids;
-		for (auto i : id_pid) {
-			if(id_command[i.first]->kill_on_configuration_change) {
-				kill_ids.push_back(i.first);
+		/* Any change to uid or gid requires the process to be restarted to take effect */
+		if (uid != _uid || gid != _gid) {
+			std::vector<uint64_t> kill_ids;
+			for (auto i : id_pid) {
+				if(id_command[i.first]->kill_on_configuration_change) {
+					kill_ids.push_back(i.first);
+				}
+			}
+			for (auto i : kill_ids) {
+				kill_process(i);
+				delete id_command[i];
+				id_command.erase(i);
 			}
 		}
-		for (auto i : kill_ids) {
-			kill_process(i);
-			delete id_command[i];
-			id_command.erase(i);
-		}
-	}
 
-	uid = _uid;
-	gid = _gid;
+		uid = _uid;
+		gid = _gid;
+	}
 
 	std::list<uint64_t> kill_ids;
 	std::list<std::pair<uint64_t, Command*>> start_ids;
 
 	for (auto i : id_pid) {
-		if (ini.GetSectionSize(id_command[i.first]->ssection.c_str()) == -1) {
+		if (!loadedConf || ini.GetSectionSize(id_command[i.first]->ssection.c_str()) == -1) {
 			/* Server on this port no longer configured; deconfigure it and kill it if required */
-			log_msg(LOG_INFO, "Deconfigured %s\n", id_command[i.first]->ssection.c_str());
+			log_msg(SevInfo, "Deconfigured %s\n", id_command[i.first]->ssection.c_str());
 
 			id_command[i.first]->deconfigured = true;
 
@@ -678,7 +728,7 @@ void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb
 
 			// If we just turned on 'kill_on_configuration_change', then kill the process to make sure we pick up any of its pending config changes
 			if (*(id_command[i.first]) != *cmd || (cmd->kill_on_configuration_change && !id_command[i.first]->kill_on_configuration_change)) {
-				log_msg(LOG_INFO, "Found new configuration for %s\n", id_command[i.first]->ssection.c_str());
+				log_msg(SevInfo, "Found new configuration for %s\n", id_command[i.first]->ssection.c_str());
 				delete id_command[i.first];
 				id_command[i.first] = cmd;
 
@@ -687,7 +737,7 @@ void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb
 					start_ids.push_back(std::make_pair(i.first, cmd));
 				}
 			} else {
-				log_msg(LOG_INFO, "Updated configuration for %s\n", id_command[i.first]->ssection.c_str());
+				log_msg(SevInfo, "Updated configuration for %s\n", id_command[i.first]->ssection.c_str());
 				id_command[i.first]->update(*cmd);
 				delete cmd;
 			}
@@ -703,23 +753,37 @@ void load_conf(const char* confpath, uid_t &uid, gid_t &gid, sigset_t* mask, fdb
 
 	/* We've handled deconfigured sections, now look for newly
 	   configured sections */
-	CSimpleIniA::TNamesDepend sections;
-	ini.GetAllSections(sections);
-	for (auto i : sections) {
-		if (auto dot = strrchr(i.pItem, '.')) {
-			char* strtol_end;
+	if(loadedConf) {
+		CSimpleIniA::TNamesDepend sections;
+		ini.GetAllSections(sections);
+		for (auto i : sections) {
+			if (auto dot = strrchr(i.pItem, '.')) {
+				char* strtol_end;
 
-			uint64_t id = strtoull(dot + 1, &strtol_end, 10);
+				uint64_t id = strtoull(dot + 1, &strtol_end, 10);
 
-			if (*strtol_end != '\0' || !(id > 0)) {
-				log_msg(LOG_ERR, "Found bogus id in %s\n", i.pItem);
-			} else {
-				if (!id_pid.count(id)) {
-					/* Found something we haven't yet started */
-					log_msg(LOG_INFO, "Starting %s\n", i.pItem);
-					std::string section(i.pItem, dot - i.pItem);
-					id_command[id] = new Command(ini, section, id, rfds, maxfd);
-					start_process(id_command[id], id, uid, gid, 0, mask);
+				if (*strtol_end != '\0' || !(id > 0)) {
+					log_msg(SevError, "Found bogus id in %s\n", i.pItem);
+				} else {
+					if (!id_pid.count(id)) {
+						/* Found something we haven't yet started */
+						Command *cmd;
+
+						auto itr = id_command.find(id);
+						if(itr != id_command.end()) {
+							cmd = itr->second;
+						}
+						else {
+							std::string section(i.pItem, dot - i.pItem);
+							cmd = new Command(ini, section, id, rfds, maxfd);
+							id_command[id] = cmd;
+						}
+
+						if(cmd->fork_retry_time <= timer()) {
+							log_msg(SevInfo, "Starting %s\n", i.pItem);
+							start_process(cmd, id, uid, gid, 0, mask);
+						}
+					}
 				}
 			}
 		}
@@ -743,22 +807,64 @@ void read_child_output( Command* cmd, int pipe_idx, fdb_fd_set fds ) {
 	}
 
 	// pipe_idx == 0 is stdout, pipe_idx == 1 is stderr
-	int priority = (pipe_idx == 0) ? LOG_INFO : LOG_ERR;
+	Severity priority = (pipe_idx == 0) ? SevInfo : SevError;
 
 	int start = 0;
 	for ( int i = 0; i < len; i++ ) {
 		if ( buf[i] == '\n' ) {
-			log_msg( priority, "%s: %.*s", cmd->ssection.c_str(), i - start + 1, buf + start );
+			log_process_msg( priority, cmd->ssection.c_str(), "%.*s", i - start + 1, buf + start );
 			start = i + 1;
 		}
 	}
 
 	if ( start < len ) {
-		log_msg( priority, "%s: %.*s\n", cmd->ssection.c_str(), len - start, buf + start );
+		log_process_msg( priority, cmd->ssection.c_str(), "%.*s\n", len - start, buf + start );
 	}
 }
 
 #ifdef __APPLE__
+void watch_conf_dir( int kq, int* confd_fd, std::string confdir ) {
+	struct kevent ev;
+	std::string original = confdir;
+
+	while(true) {
+		/* If already watching, drop it and close */
+		if ( *confd_fd >= 0 ) {
+			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_DELETE, NOTE_WRITE, 0, NULL );
+			kevent( kq, &ev, 1, NULL, 0, NULL );
+			close( *confd_fd );
+		}
+
+		confdir = original;
+		std::string child = confdir;
+
+		/* Find the nearest existing ancestor */
+		while( (*confd_fd = open( confdir.c_str(), O_EVTONLY )) < 0 && errno == ENOENT ) {
+			child = confdir;
+			confdir = parentDirectory(confdir);
+		}
+
+		if ( *confd_fd >= 0 ) {
+			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL );
+			kevent( kq, &ev, 1, NULL, 0, NULL );
+
+			/* If our child appeared since we last tested it, start over from the beginning */
+			if ( confdir != child && (access(child.c_str(), F_OK) == 0 || errno != ENOENT) ) {
+				continue;
+			}
+
+			if(confdir != original) {
+				log_msg(SevInfo, "Watching parent directory of missing directory %s\n", child.c_str());
+			}
+			else {
+				log_msg(SevInfo, "Watching conf dir %s\n", confdir.c_str());
+			}
+		}
+
+		return;
+	}
+}
+
 void watch_conf_file( int kq, int* conff_fd, const char* confpath ) {
 	struct kevent ev;
 
@@ -779,14 +885,12 @@ void watch_conf_file( int kq, int* conff_fd, const char* confpath ) {
 #endif
 
 #ifdef __linux__
-void fdbmon_stat(const char *path, struct stat *path_stat, bool is_link) {
-	int result = is_link ? lstat(path, path_stat) : stat(path, path_stat);
-	if(result) {
-		perror(is_link ? "lstat" : "stat");
-		exit(1);
-	}
+int fdbmon_stat(const char *path, struct stat *path_stat, bool is_link) {
+	return is_link ? lstat(path, path_stat) : stat(path, path_stat);
 }
 
+/* Sets watches to track changes to all symlinks on a path.
+ * Also sets a watch on the last existing ancestor of a path if the full path doesn't exist. */
 std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string path, int ifd) {
 	std::unordered_map<int, std::unordered_set<std::string>> additional_watch_wds;
 	struct stat path_stat;
@@ -795,37 +899,71 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 		return additional_watch_wds;
 
 	int idx = 1;
-	while(idx != std::string::npos) {
+	bool exists = true;
+
+	/* Check each level of the path, setting a watch on any symlinks.
+	 * Stop checking once we get to a part of the path that doesn't exist.
+	 * If we encounter a non-existing path, watch the closest existing ancestor. */
+	while(idx != std::string::npos && exists) {
 		idx = path.find_first_of('/', idx+1);
 		std::string subpath = path.substr(0, idx);
 
 		int level = 0;
 		while(true) {
-			if(level++ == 100) {
-				log_msg(LOG_ERR, "Too many nested symlinks in path %s\n", path.c_str());
-				exit(1);
+			/* Check path existence */
+			int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
+			if(result != 0) {
+				if(errno == ENOENT) {
+					exists = false;
+				}
+				else {
+					log_err("lstat", errno, "Unable to stat %s", path.c_str());
+					exit(1);
+				}
 			}
 
-			fdbmon_stat(subpath.c_str(), &path_stat, true);
-			if(!S_ISLNK(path_stat.st_mode)) {
-				break;
+			if(exists) {
+				/* Don't do anything for existing non-links */
+				if(!S_ISLNK(path_stat.st_mode)) {
+					break;
+				}
+				else if(level++ == 100) {
+					log_msg(SevError, "Too many nested symlinks in path %s\n", path.c_str());
+					exit(1);
+				}
 			}
 
 			std::string parent = parentDirectory(subpath);
 
+			/* Watch the parent directory of the current path for changes */
 			int wd = inotify_add_watch(ifd, parent.c_str(), IN_CREATE | IN_MOVED_TO);
 			if (wd < 0) {
-				perror("inotify_add_watch link");
+				log_err("inotify_add_watch", errno, "Unable to add watch to parent directory %s", parent.c_str());
 				exit(1);
 			}
 
-			log_msg(LOG_INFO, "Watching parent directory of symlink %s (%d)\n", subpath.c_str(), wd);
-			additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+			if(exists) {
+				log_msg(SevInfo, "Watching parent directory of symlink %s (%d)\n", subpath.c_str(), wd);
+				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+			}
+			else {
+				/* If the subpath has appeared since we set the watch, we should cancel it and resume traversing the path */
+				int result = fdbmon_stat(subpath.c_str(), &path_stat, true);
+				if(result == 0 || errno != ENOENT) {
+					inotify_rm_watch(ifd, wd);
+					continue;
+				}
 
+				log_msg(SevInfo, "Watching parent directory of missing directory %s (%d)\n", subpath.c_str(), wd);
+				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+				break;
+			}
+
+			/* Follow the symlink */
 			char buf[PATH_MAX+1];
 			ssize_t len = readlink(subpath.c_str(), buf, PATH_MAX);
 			if(len < 0) {
-				perror("readlink");
+				log_err("readlink", errno, "Unable to follow symlink %s", subpath.c_str());
 				exit(1);
 			}
 
@@ -860,6 +998,13 @@ int main(int argc, char** argv) {
 				case OPT_LOCKFILE:
 					lockfile = args.OptionArg();
 					break;
+				case OPT_LOGGROUP:
+					if(strchr(args.OptionArg(), '"') != NULL) {
+						log_msg(SevError, "Invalid log group '%s', cannot contain '\"'\n", args.OptionArg());
+						exit(1);
+					}
+					logGroup = args.OptionArg();
+					break;
 				case OPT_DAEMONIZE:
 					daemonize = true;
 					break;
@@ -873,13 +1018,13 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	log_msg(LOG_INFO, "Started FoundationDB Process Monitor " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
+	log_msg(SevInfo, "Started FoundationDB Process Monitor " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
 
 	// Modify _confpath to be absolute for further traversals
 	if(!_confpath.empty() && _confpath[0] != '/') {
 		char buf[PATH_MAX];
 		if( !getcwd(buf, PATH_MAX) ) {
-			perror("getcwd");
+			log_err("getcwd", errno, "Unable to get cwd");
 			exit(1);
 		}
 
@@ -890,7 +1035,7 @@ int main(int argc, char** argv) {
 	// symbolic link, /./ or /../ components
 	const char *p = realpath(_confpath.c_str(), NULL);
 	if (!p) {
-		log_msg(LOG_ERR, "No configuration file at %s\n", _confpath.c_str());
+		log_msg(SevError, "No configuration file at %s\n", _confpath.c_str());
 		exit(1);
 	}
 
@@ -901,30 +1046,18 @@ int main(int argc, char** argv) {
 	std::string conffile = confpath.substr(confdir.size()+1);
 
 #ifdef __linux__
-	// Watch for changes to our configuration file
+	// Setup inotify
 	int ifd = inotify_init();
 	if (ifd < 0) {
-		perror("inotify_init");
+		log_err("inotify_init", errno, "Unable to initialize inotify");
 		exit(1);
 	}
 
-	int conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
-	if (conffile_wd < 0) {
-		perror("inotify_add_watch conf file");
-		exit(1);
-	} else {
-		log_msg(LOG_INFO, "Watching config file %s\n", confpath.c_str());
-	}
+	int conffile_wd = -1;
+	int confdir_wd = -1;
+	std::unordered_map<int, std::unordered_set<std::string>> additional_watch_wds;
 
-	int confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
-	if (confdir_wd < 0) {
-		perror("inotify_add_watch conf dir");
-		exit(1);
-	} else {
-		log_msg(LOG_INFO, "Watching config dir %s\n", confdir.c_str());
-	}
-
-	auto additional_watch_wds = set_watches(_confpath, ifd);
+	bool reload_additional_watches = true;
 #endif
 
 	/* fds we're blocking on via pselect or kevent */
@@ -955,7 +1088,7 @@ int main(int argc, char** argv) {
 #ifdef __APPLE__
 #pragma GCC diagnostic pop
 #endif
-			perror("daemon");
+			log_err("daemon", errno, "Unable to daemonize");
 			exit(1);
 		}
 
@@ -976,7 +1109,7 @@ int main(int argc, char** argv) {
 	/* open and lock our lockfile for mutual exclusion */
 	std::string lockfileDir = parentDirectory(abspath(lockfile));
 	if(lockfileDir.size() == 0) {
-		log_msg(LOG_ERR, "Unable to determine parent directory of lockfile %s\n", lockfile.c_str());
+		log_msg(SevError, "Unable to determine parent directory of lockfile %s\n", lockfile.c_str());
 		exit(1);
 	}
 
@@ -1033,14 +1166,12 @@ int main(int argc, char** argv) {
 	EV_SET( &ev, SIGCHLD, EVFILT_SIGNAL, EV_ADD, 0, 0, NULL);
 	kevent( kq, &ev, 1, NULL, 0, NULL );
 
-	int confd_fd = open(confdir.c_str(), O_EVTONLY);
+	int confd_fd = -1;
+	int conff_fd = -1;
 
 	// Watch the directory holding the configuration file
-	EV_SET( &ev, confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL );
-	kevent( kq, &ev, 1, NULL, 0, NULL );
+	watch_conf_dir( kq, &confd_fd, confdir );
 
-	int conff_fd = -1;
-	watch_conf_file( kq, &conff_fd, confpath.c_str() );
 #endif
 
 #ifdef __linux__
@@ -1065,17 +1196,111 @@ int main(int argc, char** argv) {
 	struct stat st_buf;
 	struct timespec mtimespec;
 
-	if (stat(confpath.c_str(), &st_buf) < 0)
-		perror("stat");
+	if (stat(confpath.c_str(), &st_buf) < 0) {
+		log_err("stat", errno, "Unable to stat configuration file %s", confpath.c_str());
+	}
 
 	memcpy(&mtimespec, &(st_buf.st_mtimespec), sizeof(struct timespec));
 #endif
 
-	load_conf(confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd);
-
+	bool reload = true;
 	while (1) {
-#ifdef __APPLE__
-		int nev = kevent( kq, NULL, 0, &ev, 1, NULL );
+		if (reload) {
+			reload = false;
+#ifdef __linux__
+			/* Remove existing watches on conf file and directory */
+			if(confdir_wd >= 0 && inotify_rm_watch(ifd, confdir_wd) < 0) {
+				log_msg(SevInfo, "Could not remove inotify conf dir watch, continuing...\n");
+			}
+			if(conffile_wd >= 0 && inotify_rm_watch(ifd, conffile_wd) < 0) {
+				log_msg(SevInfo, "Could not remove inotify conf file watch, continuing...\n");
+			}
+
+			/* Create new watches */
+			conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
+			if (conffile_wd < 0) {
+				if(errno != ENOENT) {
+					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file %s", confpath.c_str());
+					exit(1);
+				}
+				else {
+					log_msg(SevInfo, "Conf file has been deleted %s\n", confpath.c_str());
+				}
+			} else {
+				log_msg(SevInfo, "Watching conf file %s\n", confpath.c_str());
+			}
+
+			confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
+			if (confdir_wd < 0) {
+				if(errno != ENOENT) {
+					log_err("inotify_add_watch", errno, "Unable to set watch on configuration file parent directory %s", confdir.c_str());
+					exit(1);
+				}
+				else {
+					reload_additional_watches = true;
+					log_msg(SevInfo, "Conf dir has been deleted %s\n", confdir.c_str());
+				}
+			} else {
+				log_msg(SevInfo, "Watching conf dir %s (%d)\n", confdir.c_str(), confdir_wd);
+			}
+
+			/* Reload watches on symlinks and/or the oldest existing ancestor */
+			if(reload_additional_watches) {
+				additional_watch_wds = set_watches(_confpath, ifd);
+			}
+
+			load_conf(confpath.c_str(), uid, gid, &normal_mask, &rfds, &maxfd);
+			reload_additional_watches = false;
+#elif defined(__APPLE__)
+			load_conf( confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd );
+			watch_conf_file( kq, &conff_fd, confpath.c_str() );
+			watch_conf_dir( kq, &confd_fd, confdir );
+#endif
+		}
+
+		double end_time = std::numeric_limits<double>::max();
+		for(auto i : id_command) {
+			if(i.second->fork_retry_time >= 0) {
+				end_time = std::min(i.second->fork_retry_time, end_time);
+			}
+		}
+		struct timespec tv;
+		double timeout = -1;
+		if(end_time < std::numeric_limits<double>::max()) {
+			timeout = std::max(0.0, end_time - timer());
+			if(timeout > 0) {
+				tv.tv_sec = timeout;
+				tv.tv_nsec = 1e9*(timeout-tv.tv_sec);
+			}
+		}
+
+#ifdef __linux__
+		/* Block until something interesting happens (while atomically
+		   unblocking signals) */
+		srfds = rfds;
+		nfds = 0;
+		if(timeout < 0) {
+			nfds = pselect(maxfd+1, &srfds, NULL, NULL, NULL, &normal_mask);
+		}
+		else if(timeout > 0) {
+			nfds = pselect(maxfd+1, &srfds, NULL, NULL, &tv, &normal_mask);
+		}
+
+		if(nfds == 0) {
+			reload = true;
+		}
+#elif defined(__APPLE__)
+		int nev = 0;
+		if(timeout < 0) {
+			nev = kevent( kq, NULL, 0, &ev, 1, NULL );
+		}
+		else if(timeout > 0) {
+			nev = kevent( kq, NULL, 0, &ev, 1, &tv );
+		}
+
+		if(nev == 0) {
+			reload = true;
+		}
 
 		if (nev > 0) {
 			switch (ev.filter) {
@@ -1088,13 +1313,11 @@ int main(int argc, char** argv) {
 						kevent( kq, &timeout, 1, NULL, 0, NULL );
 					} else {
 						/* Direct writes to the conf file; reload! */
-						load_conf( confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd );
-						watch_conf_file( kq, &conff_fd, confpath.c_str() );
+						reload = true;
 					}
 					break;
 				case EVFILT_TIMER:
-					watch_conf_file( kq, &conff_fd, confpath.c_str() );
-					load_conf( confpath.c_str(), uid, gid, &normal_mask, watched_fds, &maxfd );
+					reload = true;
 					break;
 				case EVFILT_SIGNAL:
 					switch (ev.ident) {
@@ -1120,16 +1343,25 @@ int main(int argc, char** argv) {
 					break;
 			}
 		}
+		else {
+			reload = true;
+		}
 #endif
+
 		/* select() could have returned because received an exit signal */
 		if (exit_signal > 0) {
 			switch(exit_signal) {
 				case SIGHUP:
-					log_msg(LOG_INFO, "Received signal %d (%s), doing nothing\n", exit_signal, strsignal(exit_signal));
+					for(auto i : id_command) {
+						i.second->current_restart_delay = i.second->initial_restart_delay;
+						i.second->fork_retry_time = -1;
+					}
+					reload = true;
+					log_msg(SevInfo, "Received signal %d (%s), resetting timeouts and reloading configuration\n", exit_signal, strsignal(exit_signal));
 					break;
 				case SIGINT:
 				case SIGTERM:
-					log_msg(LOG_NOTICE, "Received signal %d (%s), shutting down\n", exit_signal, strsignal(exit_signal));
+					log_msg(SevWarn, "Received signal %d (%s), shutting down\n", exit_signal, strsignal(exit_signal));
 
 					/* Unblock signals */
 					signal(SIGCHLD, SIG_IGN);
@@ -1172,21 +1404,17 @@ int main(int argc, char** argv) {
 				if (len < 0)
 					log_err("read", errno, "Error reading inotify message");
 
-				bool reload = false;
-				bool reload_additional_watches = false;
-
 				while (i < len) {
 					struct inotify_event* event = (struct inotify_event*) &buf[i];
 
 					auto search = additional_watch_wds.find(event->wd);
 					if(event->wd != conffile_wd) {
 						if(search != additional_watch_wds.end() && event->len && search->second.count(event->name)) {
-							log_msg(LOG_INFO, "Changes detected on watched symlink `%s': (%d, %#010x)\n", event->name, event->wd, event->mask);
+							log_msg(SevInfo, "Changes detected on watched symlink `%s': (%d, %#010x)\n", event->name, event->wd, event->mask);
 
 							char *redone_confpath = realpath(_confpath.c_str(), NULL);
 							if(!redone_confpath) {
-								log_msg(LOG_INFO, "Error calling realpath on `%s', continuing...\n", _confpath.c_str());
-								perror("realpath");
+								log_msg(SevInfo, "Error calling realpath on `%s', continuing...\n", _confpath.c_str());
 								// exit(1);
 								i += sizeof(struct inotify_event) + event->len;
 								continue;
@@ -1201,9 +1429,9 @@ int main(int argc, char** argv) {
 							// Remove all the old watches
 							for(auto wd : additional_watch_wds) {
 								if(inotify_rm_watch(ifd, wd.first) < 0) {
-									// perror("inotify_rm_watch symlink");
+									// log_err("inotify_rm_watch", errno, "Unable to remove symlink watch %d", wd.first);
 									// exit(1);
-									log_msg(LOG_INFO, "Could not remove inotify watch %d, continuing...\n", wd.first);
+									log_msg(SevInfo, "Could not remove inotify watch %d, continuing...\n", wd.first);
 								}
 							}
 
@@ -1221,36 +1449,6 @@ int main(int argc, char** argv) {
 					}
 
 					i += sizeof(struct inotify_event) + event->len;
-				}
-
-				if (reload) {
-					if(inotify_rm_watch(ifd, confdir_wd) < 0) {
-						log_msg(LOG_INFO, "Could not remove inotify conf dir watch, continuing...\n");
-					}
-					if(inotify_rm_watch(ifd, conffile_wd) < 0) {
-						log_msg(LOG_INFO, "Could not remove inotify conf file watch, continuing...\n");
-					}
-					conffile_wd = inotify_add_watch(ifd, confpath.c_str(), IN_CLOSE_WRITE);
-					if (conffile_wd < 0) {
-						perror("inotify_add_watch conf file");
-						exit(1); // Deleting the conf file causes fdbmonitor to terminate
-					} else {
-						log_msg(LOG_INFO, "Watching config file %s\n", confpath.c_str());
-					}
-
-					confdir_wd = inotify_add_watch(ifd, confdir.c_str(), IN_CLOSE_WRITE | IN_MOVED_TO);
-					if (confdir_wd < 0) {
-						perror("inotify_add_watch conf dir");
-						exit(1);
-					} else {
-						log_msg(LOG_INFO, "Watching config dir %s (%d)\n", confdir.c_str(), confdir_wd);
-					}
-
-					if(reload_additional_watches) {
-						additional_watch_wds = set_watches(_confpath, ifd);
-					}
-
-					load_conf(confpath.c_str(), uid, gid, &normal_mask, &rfds, &maxfd);
 				}
 			}
 		}
@@ -1282,12 +1480,12 @@ int main(int argc, char** argv) {
 					int delay = cmd->get_and_update_current_restart_delay();
 					if (!cmd->quiet) {
 						if (WIFEXITED(child_status)) {
-							int priority = (WEXITSTATUS(child_status) == 0) ? LOG_NOTICE : LOG_ERR;
-							log_msg(priority, "Process %d exited %d, restarting %s in %d seconds\n", pid, WEXITSTATUS(child_status), cmd->ssection.c_str(), delay);
+							Severity priority = (WEXITSTATUS(child_status) == 0) ? SevWarn : SevError;
+							log_process_msg(priority, cmd->ssection.c_str(), "Process %d exited %d, restarting in %d seconds\n", pid, WEXITSTATUS(child_status), delay);
 						} else if (WIFSIGNALED(child_status))
-							log_msg(LOG_NOTICE, "Process %d terminated by signal %d, restarting %s in %d seconds\n", pid, WTERMSIG(child_status), cmd->ssection.c_str(), delay);
+							log_process_msg(SevWarn, cmd->ssection.c_str(), "Process %d terminated by signal %d, restarting in %d seconds\n", pid, WTERMSIG(child_status), delay);
 						else
-							log_msg(LOG_WARNING, "Process %d exited for unknown reason, restarting %s in %d seconds\n", pid, cmd->ssection.c_str(), delay);
+							log_process_msg(SevWarnAlways, cmd->ssection.c_str(), "Process %d exited for unknown reason, restarting in %d seconds\n", pid, delay);
 					}
 
 					start_process(cmd, id, uid, gid, delay, &normal_mask);
@@ -1295,12 +1493,5 @@ int main(int argc, char** argv) {
 			}
 			child_exited = false;
 		}
-
-#ifdef __linux__
-		/* Block until something interesting happens (while atomically
-		   unblocking signals) */
-		srfds = rfds;
-		nfds = pselect(maxfd+1, &srfds, NULL, NULL, NULL, &normal_mask);
-#endif
 	}
 }

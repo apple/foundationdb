@@ -77,18 +77,22 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 	std::map<std::string, std::string> result;
 
 	if( initialized ) {
+		std::string tlogInfo = tLogPolicy->info();
+		std::string storageInfo = storagePolicy->info();
 		if( durableStorageQuorum == storageTeamSize &&
 			tLogWriteAntiQuorum == 0 ) {
 			if( tLogReplicationFactor == 1 && durableStorageQuorum == 1 )
 				result["redundancy_mode"] = "single";
 			else if( tLogReplicationFactor == 2 && durableStorageQuorum == 2 )
 				result["redundancy_mode"] = "double";
+			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 && tlogInfo == "((dcid^3 x 1) & (zoneid^3 x 1))" && storageInfo == "((dcid^3 x 1) & (zoneid^3 x 1))" )
+				result["redundancy_mode"] = "three_datacenter";
 			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 )
 				result["redundancy_mode"] = "triple";
-			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 2 )
-				result["redundancy_mode"] = "fast_recovery_double";
-			else if( tLogReplicationFactor == 4 && durableStorageQuorum == 3 )
-				result["redundancy_mode"] = "fast_recovery_triple";
+			else if( tLogReplicationFactor == 4 && durableStorageQuorum == 3 && tlogInfo == "data_hall^2 x zoneid^2 x 1" && storageInfo == "data_hall^3 x 1" )
+				result["redundancy_mode"] = "three_data_hall";
+			else if( tLogReplicationFactor == 4 && durableStorageQuorum == 6 && tlogInfo == "dcid^2 x zoneid^2 x 1" && storageInfo == "dcid^3 x zoneid^2 x 1" )
+				result["redundancy_mode"] = "multi_dc";
 			else
 				result["redundancy_mode"] = "custom";
 		} else
@@ -104,6 +108,15 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 			result["storage_engine"] = "memory";
 		else
 			result["storage_engine"] = "custom";
+
+		if( desiredTLogCount != -1 )
+			result["logs"] = format("%d", desiredTLogCount);
+
+		if( masterProxyCount != -1 )
+			result["proxies"] = format("%d", masterProxyCount);
+
+		if( resolverCount != -1 )
+			result["resolvers"] = format("%d", resolverCount);
 	}
 
 	return result;

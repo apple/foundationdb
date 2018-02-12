@@ -745,6 +745,8 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetMaxRetryDelay(100)
 			tr.Options().SetUsedDuringCommitProtectionDisable()
 			tr.Options().SetTransactionLoggingEnable("my_transaction")
+			tr.Options().SetReadLockAware()
+			tr.Options().SetLockAware()
 
 			return tr.Get(fdb.Key("\xff")).MustGet(), nil
 		})

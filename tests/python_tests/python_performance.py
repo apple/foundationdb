@@ -275,7 +275,7 @@ class PythonPerformance(PythonTest):
 
         for i in range(count):
             index = random.randint(0, self.key_count)
-            list(tr[self.key(index):self.key(index+1)])
+            list(tr.get_range(self.key(index), self.key(index+1), limit=2))
 
         return count / (time.time() - s)
 

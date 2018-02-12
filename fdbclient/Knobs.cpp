@@ -33,26 +33,25 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( TOO_MANY,                            1000000 );
 
-	init( CLUSTER_FILE_REWRITE_DELAY,             30.0 );
-
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
 
 	init( FAILURE_MAX_DELAY,                      10.0 ); if( randomize && BUGGIFY ) FAILURE_MAX_DELAY = 5.0;
 	init( FAILURE_MIN_DELAY,                       5.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 2.0;
 	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
+	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
 
 	// wrong_shard_server sometimes comes from the only nonfailed server, so we need to avoid a fast spin
 
 	init( WRONG_SHARD_SERVER_DELAY,                .01 ); if( randomize && BUGGIFY ) WRONG_SHARD_SERVER_DELAY = g_random->random01(); // FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY; // SOMEDAY: This delay can limit performance of retrieving data when the cache is mostly wrong (e.g. dumping the database after a test)
 	init( FUTURE_VERSION_RETRY_DELAY,              .01 ); if( randomize && BUGGIFY ) FUTURE_VERSION_RETRY_DELAY = g_random->random01();// FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY;
-	init( REPLY_BYTE_LIMIT,                     500000 );
+	init( REPLY_BYTE_LIMIT,                      80000 );
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = g_random->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
 	init( BACKOFF_GROWTH_RATE,                     2.0 );
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );
-	init( SYSTEM_KEY_SIZE_LIMIT,                   2e4 );
+	init( SYSTEM_KEY_SIZE_LIMIT,                   3e4 );
 	init( VALUE_SIZE_LIMIT,                        1e5 );
 	init( SPLIT_KEY_SIZE_LIMIT,                    KEY_SIZE_LIMIT/2 ); if( randomize && BUGGIFY ) SPLIT_KEY_SIZE_LIMIT = KEY_SIZE_LIMIT - serverKeysPrefixFor(UID()).size() - 1;
 
@@ -63,8 +62,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( LOCATION_CACHE_EVICTION_SIZE_SIM,         10 ); if( randomize && BUGGIFY ) LOCATION_CACHE_EVICTION_SIZE_SIM = 3;
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
-	init( WARM_RANGE_SHARD_LIMIT,                10000 );
-	init( STORAGE_METRICS_SHARD_LIMIT,           10000 ); if( randomize && BUGGIFY ) STORAGE_METRICS_SHARD_LIMIT = 3;
+	init( WARM_RANGE_SHARD_LIMIT,                  100 );
+	init( STORAGE_METRICS_SHARD_LIMIT,             100 ); if( randomize && BUGGIFY ) STORAGE_METRICS_SHARD_LIMIT = 3;
 	init( STORAGE_METRICS_UNFAIR_SPLIT_LIMIT,  2.0/3.0 );
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
 
@@ -83,13 +82,13 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	// TaskBucket
 	init( TASKBUCKET_MAX_PRIORITY,                   1 );
-	init( TASKBUCKET_CHECK_TIMEOUT_CHANCE,        0.01 ); if( randomize && BUGGIFY ) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
+	init( TASKBUCKET_CHECK_TIMEOUT_CHANCE,        0.02 ); if( randomize && BUGGIFY ) TASKBUCKET_CHECK_TIMEOUT_CHANCE = 1.0;
 	init( TASKBUCKET_TIMEOUT_JITTER_OFFSET,        0.9 );
 	init( TASKBUCKET_TIMEOUT_JITTER_RANGE,         0.2 );
 	init( TASKBUCKET_CHECK_ACTIVE_DELAY,           0.5 );
 	init( TASKBUCKET_CHECK_ACTIVE_AMOUNT,           10 );
 	init( TASKBUCKET_TIMEOUT_VERSIONS,     60*CORE_VERSIONSPERSECOND ); if( randomize && BUGGIFY ) TASKBUCKET_TIMEOUT_VERSIONS = 30*CORE_VERSIONSPERSECOND;
-	init( TASKBUCKET_MAX_TASK_KEYS,              10000 ); if( randomize && BUGGIFY ) TASKBUCKET_MAX_TASK_KEYS = 20;
+	init( TASKBUCKET_MAX_TASK_KEYS,               1000 ); if( randomize && BUGGIFY ) TASKBUCKET_MAX_TASK_KEYS = 20;
 
 	//Backup
 	init( BACKUP_SIMULATED_LIMIT_BYTES,		       1e6 ); if( randomize && BUGGIFY ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
@@ -97,6 +96,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_LOCK_BYTES,                       1e8 );
 	init( BACKUP_RANGE_TIMEOUT,   TASKBUCKET_TIMEOUT_VERSIONS/CORE_VERSIONSPERSECOND/2.0 );
 	init( BACKUP_RANGE_MINWAIT,   std::max(1.0, BACKUP_RANGE_TIMEOUT/2.0));
+	init( BACKUP_SNAPSHOT_DISPATCH_INTERVAL_SEC,  60 * 60 );  // 1 hour
+	init( BACKUP_DEFAULT_SNAPSHOT_INTERVAL_SEC,   3600 * 24 * 10); // 10 days
 	init( BACKUP_SHARD_TASK_LIMIT,                1000 ); if( randomize && BUGGIFY ) BACKUP_SHARD_TASK_LIMIT = 4;
 	init( BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL, 60);
 	init( BACKUP_AGGREGATE_POLL_RATE,              2.0 ); // polls per second target for all agents on the cluster
@@ -111,11 +112,12 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_MAP_KEY_UPPER_LIMIT,              1e5 ); if( buggifyMapLimits ) BACKUP_MAP_KEY_UPPER_LIMIT = 30;
 	init( BACKUP_COPY_TASKS,                        90 );
 	init( BACKUP_BLOCK_SIZE,   LOG_RANGE_BLOCK_SIZE/10 );
-	init( BACKUP_TASKS_PER_AGENT,                   80 );
+	init( BACKUP_TASKS_PER_AGENT,                   20 );
 	init( SIM_BACKUP_TASKS_PER_AGENT,               10 );
 	init( BACKUP_RANGEFILE_BLOCK_SIZE,      1024 * 1024);
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
-	init( RESTORE_DISPATCH_ADDTASK_SIZE,          1000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_ADDTASK_SIZE = 1;
+	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
+	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 1;
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
@@ -137,24 +139,26 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( HTTP_READ_SIZE,                     128*1024 );
 	init( HTTP_SEND_SIZE,                      32*1024 );
 	init( HTTP_VERBOSE_LEVEL,                        0 );
-	init( BLOBSTORE_CONNECT_TRIES,                   3 );
+	init( BLOBSTORE_CONNECT_TRIES,                  10 );
 	init( BLOBSTORE_CONNECT_TIMEOUT,                10 );
+	init( BLOBSTORE_MAX_CONNECTION_LIFE,           120 );
 	init( BLOBSTORE_REQUEST_TRIES,                  10 );
-	init( BLOBSTORE_REQUEST_TIMEOUT,                15 );
+	init( BLOBSTORE_REQUEST_TIMEOUT,                60 );
 
-	init( BLOBSTORE_CONCURRENT_UPLOADS,             BACKUP_TASKS_PER_AGENT * 15 );
+	init( BLOBSTORE_CONCURRENT_UPLOADS, BACKUP_TASKS_PER_AGENT*2 );
+	init( BLOBSTORE_CONCURRENT_LISTS,               20 );
+	init( BLOBSTORE_CONCURRENT_REQUESTS, BLOBSTORE_CONCURRENT_UPLOADS + BLOBSTORE_CONCURRENT_LISTS + 5);
 
+	init( BLOBSTORE_CONCURRENT_WRITES_PER_FILE,      5 );
 	init( BLOBSTORE_CONCURRENT_READS_PER_FILE,       3 );
 	init( BLOBSTORE_READ_BLOCK_SIZE,       1024 * 1024 );
 	init( BLOBSTORE_READ_AHEAD_BLOCKS,               0 );
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
 	init( BLOBSTORE_MULTIPART_MAX_PART_SIZE,  20000000 );
 	init( BLOBSTORE_MULTIPART_MIN_PART_SIZE,   5242880 );
-	init( BLOBSTORE_BACKUP_BUCKETS,                100 );
 
 	// These are basically unlimited by default but can be used to reduce blob IO if needed
-	init( BLOBSTORE_REQUESTS_PER_SECOND,           20000);
-	init( BLOBSTORE_CONCURRENT_REQUESTS,            2000);
+	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );
 	init( BLOBSTORE_MAX_SEND_BYTES_PER_SECOND,      1e9 );
 	init( BLOBSTORE_MAX_RECV_BYTES_PER_SECOND,      1e9 );
 

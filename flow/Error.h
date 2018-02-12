@@ -32,15 +32,16 @@
 
 enum { invalid_error_code = 0xffff };
 
-class ErrorCodeTable : public std::map<int, const char*> {
+class ErrorCodeTable : public std::map<int, std::pair<const char*, const char*>> {
 public:
 	ErrorCodeTable();
-	void addCode(int code, const char* message);
+	void addCode(int code, const char *name, const char *description);
 };
 
 class Error {
 public:
 	int code() const { return error_code; }
+	const char* name() const;
 	const char* what() const;
 	bool isInjectedFault() const { return flags & FLAG_INJECTED_FAULT; }  // Use as little as possible, so injected faults effectively test real faults!
 	bool isValid() const { return error_code != invalid_error_code; }
@@ -68,7 +69,7 @@ private:
 };
 
 #undef ERROR
-#define ERROR(name, number, comment) inline Error name() { return Error( number ); }; enum { error_code_##name = number };
+#define ERROR(name, number, description) inline Error name() { return Error( number ); }; enum { error_code_##name = number };
 #include "error_definitions.h"
 
 //actor_cancelled has been renamed

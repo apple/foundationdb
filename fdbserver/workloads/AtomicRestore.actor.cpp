@@ -26,14 +26,14 @@
 
 //A workload which test the correctness of backup and restore process
 struct AtomicRestoreWorkload : TestWorkload {
-	double startAfter, switch1After;
+	double startAfter, restoreAfter;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 
 	AtomicRestoreWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx) {
 
 		startAfter = getOption(options, LiteralStringRef("startAfter"), 10.0);
-		switch1After = getOption(options, LiteralStringRef("switch1After"), 20.0);
+		restoreAfter = getOption(options, LiteralStringRef("restoreAfter"), 20.0);
 		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 	}
 
@@ -60,25 +60,25 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
-		state Future<Void> switch1After = delay(self->switch1After);
 		state Future<Void> disabler = disableConnectionFailuresAfter(300, "atomicRestore");
-		Void _ = wait( delay(self->startAfter) );
-		TraceEvent("AR_Start");
+
+		Void _ = wait( delay(self->startAfter * g_random->random01()) );
+		TraceEvent("AtomicRestore_Start");
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
-			Void _ = wait(backupAgent.submitBackup(cx, StringRef(backupContainer), BackupAgentBase::getDefaultTag(), self->backupRanges, false));
+			Void _ = wait(backupAgent.submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), BackupAgentBase::getDefaultTagName(), self->backupRanges, false));
 		}
 		catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
 		}
 
-		TraceEvent("AS_Wait1");
-		int _ = wait( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTag(), false) );
-		TraceEvent("AS_Ready1");
-		Void _ = wait( switch1After );
-		TraceEvent("AS_Switch1");
+		TraceEvent("AtomicRestore_Wait");
+		int _ = wait( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false) );
+		TraceEvent("AtomicRestore_BackupStart");
+		Void _ = wait( delay(self->restoreAfter * g_random->random01()) );
+		TraceEvent("AtomicRestore_RestoreStart");
 
 		loop {
 			std::vector<Future<Version>> restores;
@@ -102,7 +102,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 			g_simulator.backupAgents = ISimulator::NoBackupAgents;
 		}
 
-		TraceEvent("AS_Done");
+		TraceEvent("AtomicRestore_Done");
 		return Void();
 	}
 };

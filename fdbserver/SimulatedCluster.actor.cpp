@@ -661,7 +661,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 }
 
 struct SimulationConfig {
-	explicit SimulationConfig(int extraDB);
+	explicit SimulationConfig(int extraDB, int minimumReplication);
 	int extraDB;
 
 	DatabaseConfiguration db;
@@ -677,11 +677,11 @@ struct SimulationConfig {
 	std::string toString();
 
 private:
-	void generateNormalConfig();
+	void generateNormalConfig(int minimumReplication);
 };
 
-SimulationConfig::SimulationConfig(int extraDB) : extraDB(extraDB) {
-	generateNormalConfig();
+SimulationConfig::SimulationConfig(int extraDB, int minimumReplication) : extraDB(extraDB) {
+	generateNormalConfig(minimumReplication);
 }
 
 void SimulationConfig::set_config(std::string config) {
@@ -696,7 +696,7 @@ StringRef StringRefOf(const char* s) {
   return StringRef((uint8_t*)s, strlen(s));
 }
 
-void SimulationConfig::generateNormalConfig() {
+void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
 	datacenters = g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
@@ -709,14 +709,14 @@ void SimulationConfig::generateNormalConfig() {
 		set_config("memory");
 	}*/
 
-	int replication_type = std::min(g_random->randomInt( 1, 6 ), 3);
+	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt( 0, 6 ), 3));
 	//replication_type = 1;  //ahm
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
 		int storage_servers = g_random->randomInt(1,5);
 		int replication_factor = g_random->randomInt(1,5);
-		int anti_quorum = g_random->randomInt(0, db.tLogReplicationFactor);
+		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d storage_quorum:=%d "
 		                  "log_replicas:=%d log_anti_quorum:=%1 "
@@ -758,6 +758,10 @@ void SimulationConfig::generateNormalConfig() {
 	}
 
 	machine_count = g_random->randomInt( std::max( 2+datacenters, db.minMachinesRequired() ), extraDB ? 6 : 10 );
+	if(minimumReplication > 1 && datacenters == 3) {
+		//low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for logs to recover.
+		machine_count = std::max( machine_count, 6);
+	}
 	processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
 	coordinators = BUGGIFY ? g_random->randomInt(1, machine_count+1) : std::min( machine_count, db.maxMachineFailuresTolerated()*2 + 1 );
 }
@@ -786,10 +790,10 @@ std::string SimulationConfig::toString() {
 
 void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseFolder,
 							int* pTesterCount, Optional<ClusterConnectionString> *pConnString,
-							Standalone<StringRef> *pStartingConfiguration, int extraDB)
+							Standalone<StringRef> *pStartingConfiguration, int extraDB, int minimumReplication)
 {
 	// SOMEDAY: this does not test multi-interface configurations
-	SimulationConfig simconfig(extraDB);
+	SimulationConfig simconfig(extraDB, minimumReplication);
 	std::string startingConfigString = simconfig.toString();
 
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;
@@ -807,7 +811,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	// half the time, when we have more than 4 machines that are not the first in their dataCenter, assign classes
 	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
-	// Use SSL half the time
+	// Use SSL 5% of the time
 	bool sslEnabled = g_random->random01() < 0.05;
 	TEST( sslEnabled ); // SSL enabled
 	TEST( !sslEnabled ); // SSL disabled
@@ -966,11 +970,11 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	Void _ = wait( DatabaseContext::configureDatabase( *pZookeeper, ClusterInterface::ALL, mode ) );*/
 }
 
-int checkExtraDB(const char *testFile) {
+void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication) {
 	std::ifstream ifs;
 	ifs.open(testFile, std::ifstream::in);
 	if (!ifs.good())
-		return 0;
+		return;
 
 	std::string cline;
 
@@ -988,15 +992,15 @@ int checkExtraDB(const char *testFile) {
 		std::string value = removeWhitespace(line.substr(found + 1));
 
 		if (attrib == "extraDB") {
-			int v = 0;
-			sscanf( value.c_str(), "%d", &v );
-			ifs.close();
-			return v;
+			sscanf( value.c_str(), "%d", &extraDB );
+		}
+
+		if (attrib == "minimumReplication") {
+			sscanf( value.c_str(), "%d", &minimumReplication );
 		}
 	}
 
 	ifs.close();
-	return 0;
 }
 
 ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting ) {
@@ -1004,7 +1008,9 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	state Optional<ClusterConnectionString> connFile;
 	state Standalone<StringRef> startingConfiguration;
 	state int testerCount = 1;
-	state int extraDB = checkExtraDB(testFile);
+	state int extraDB = 0;
+	state int minimumReplication = 0;
+	checkExtraDB(testFile, extraDB, minimumReplication);
 
 	Void _ = wait( g_simulator.onProcess( g_simulator.newProcess(
 			"TestSystem", 0x01010101, 1, LocalityData(Optional<Standalone<StringRef>>(), Standalone<StringRef>(g_random->randomUniqueID().toString()), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()), ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "" ), TaskDefaultYield ) );
@@ -1021,7 +1027,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		}
 		else {
 			g_expect_full_pointermap = 1;
-			setupSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB );
+			setupSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB, minimumReplication );
 			Void _ = wait( delay(1.0) ); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath( dataFolder, g_random->randomUniqueID().toString() );

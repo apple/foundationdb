@@ -146,7 +146,7 @@ public:
 			if(key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
-				read.end = firstGreaterOrEqual(key);
+				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
 
 		Standalone<RangeResultRef> v = wait( ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, Reverse) );
@@ -292,7 +292,10 @@ public:
 
 		if ( key.offset <= 0 && it.beginKey() == key.getKey() && key.getKey() != allKeys.begin )
 			--it;
+
 		ExtStringRef keykey = key.getKey();
+		bool keyNeedsCopy = false;
+
 		// Invariant: it.beginKey() <= keykey && keykey <= it.endKey() && (key.isBackward() ? it.beginKey() != keykey : it.endKey() != keykey)
 		// Maintaining this invariant, we transform the key selector toward firstGreaterOrEqual form until we reach an unknown range or the result
 		while (key.offset > 1 && !it.is_unreadable() && !it.is_unknown_range() && it.endKey() < maxKey ) {
@@ -300,17 +303,20 @@ public:
 				--key.offset;
 			++it;
 			keykey = it.beginKey();
+			keyNeedsCopy = true;
 		}
 		while (key.offset < 1 && !it.is_unreadable() && !it.is_unknown_range() && it.beginKey() != allKeys.begin) {
 			if (it.is_kv()) {
 				++key.offset;
 				if (key.offset == 1) {
 					keykey = it.beginKey();
+					keyNeedsCopy = true;
 					break;
 				}
 			}
 			--it;
 			keykey = it.endKey();
+			keyNeedsCopy = true;
 		}
 
 		if(!alreadyExhausted) {
@@ -326,7 +332,7 @@ public:
 		
 		if (!it.is_unreadable() && !it.is_unknown_range() && key.offset > 1) {
 			*readThroughEnd = true;
-			key.setKey(maxKey);
+			key.setKey(maxKey); // maxKey is a KeyRef, but points to a LiteralStringRef. TODO: how can we ASSERT this?
 			key.offset = 1;
 			return;
 		}
@@ -334,9 +340,12 @@ public:
 		while (!it.is_unreadable() && it.is_empty_range() && it.endKey() < maxKey) {
 			++it;
 			keykey = it.beginKey();
+			keyNeedsCopy = true;
 		}
 
-		key.setKey(keykey.toArenaOrRef(key.arena()));
+		if(keyNeedsCopy) {
+			key.setKey(keykey.toArena(key.arena()));
+		}
 	}
 
 	static KeyRangeRef getKnownKeyRange( RangeResultRef data, KeySelector begin, KeySelector end, Arena& arena ) {
@@ -348,10 +357,12 @@ public:
 
 		if( data.size() ) {
 			beginKey = std::min( beginKey, data[0].key );
-
-			if( data.readThrough.present() ) 
+			if( data.readThrough.present() ) {
 				endKey = std::max<ExtStringRef>( endKey, data.readThrough.get() );
-			endKey = !data.more && data.end()[-1].key < endKey ? endKey : ExtStringRef( data.end()[-1].key, 1 );
+			}
+			else {
+				endKey = !data.more && data.end()[-1].key < endKey ? endKey : ExtStringRef( data.end()[-1].key, 1 );
+			}
 		}
 		if (beginKey >= endKey) return KeyRangeRef();
 
@@ -449,7 +460,7 @@ public:
 		resolveKeySelectorFromCache( begin, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
 		resolveKeySelectorFromCache( end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset );
 
-		if( begin.getKey() >= end.getKey() && actualBeginOffset >= actualEndOffset ) {
+		if( actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey() ) {
 			return RangeResultRef(false, false);
 		}
 		else if( ( begin.isFirstGreaterOrEqual() && begin.getKey() == ryw->getMaxReadKey() ) 
@@ -489,16 +500,16 @@ public:
 				.detail("unknown", it.is_unknown_range())
 				.detail("requests", requestCount);*/
 
-			if( !result.size() && begin.getKey() >= end.getKey() && actualBeginOffset >= actualEndOffset ) {
+			if( !result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey() ) {
 				return RangeResultRef(false, false);
 			}
 
-			if( end.getKey() == allKeys.begin && end.offset <= 1 ) {
+			if( end.offset <= 1 && end.getKey() == allKeys.begin ) {
 				return RangeResultRef(readToBegin, readThroughEnd);
 			}
 			
-			if( ( begin.getKey() >= end.getKey() && begin.offset >= end.offset ) ||
-				( begin.getKey() >= ryw->getMaxReadKey() && begin.offset >= 1) ) {
+			if( ( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) ||
+				( begin.offset >= 1 && begin.getKey() >= ryw->getMaxReadKey() ) ) {
 				if( end.isFirstGreaterOrEqual() ) break;
 				if( !result.size() ) break;
 				Key resolvedEnd = wait( read( ryw, GetKeyReq(end), pit ) ); //do not worry about iterator invalidation, because we are breaking for the loop
@@ -510,7 +521,7 @@ public:
 				break;
 			}
 
-			if( it.beginKey() > itEnd.beginKey() && !it.is_unreadable() && !it.is_unknown_range() ) {
+			if( !it.is_unreadable() && !it.is_unknown_range() && it.beginKey() > itEnd.beginKey() ) {
 				if( end.isFirstGreaterOrEqual() ) break;
 				return RangeResultRef(readToBegin, readThroughEnd);
 			}
@@ -533,10 +544,11 @@ public:
 				
 				state KeySelector read_end;
 				if ( ucEnd!=itEnd ) {
-					read_end = firstGreaterOrEqual(ucEnd.endKey().toStandaloneStringRef());
+					Key k = ucEnd.endKey().toStandaloneStringRef();
+					read_end = KeySelector(firstGreaterOrEqual(k), k.arena());
 					if( end.offset < 1 ) additionalRows += 1 - end.offset; // extra for items past end
 				} else if( end.offset < 1 ) {
-					read_end = firstGreaterOrEqual( end.getKey() );
+					read_end = KeySelector(firstGreaterOrEqual(end.getKey()), end.arena());
 					additionalRows += 1 - end.offset;
 				} else {
 					read_end = end;
@@ -550,10 +562,11 @@ public:
 
 				state KeySelector read_begin;
 				if (begin.isFirstGreaterOrEqual()) {
-					begin = firstGreaterOrEqual( it.beginKey() > begin.getKey() ? it.beginKey().toStandaloneStringRef() : begin.getKey() );
+					Key k = it.beginKey() > begin.getKey() ? it.beginKey().toStandaloneStringRef() : Key(begin.getKey(), begin.arena());
+					begin = KeySelector(firstGreaterOrEqual(k), k.arena());
 					read_begin = begin;
 				} else if( begin.offset > 1 ) {
-					read_begin = firstGreaterOrEqual(begin.getKey());
+					read_begin = KeySelector(firstGreaterOrEqual(begin.getKey()), begin.arena());
 					additionalRows += begin.offset - 1;
 				} else {
 					read_begin = begin;
@@ -564,7 +577,10 @@ public:
 					additionalRows += singleClears;
 				}
 
-				read_end.setKey(std::max(read_end.getKey(), read_begin.getKey()));
+				if(read_end.getKey() < read_begin.getKey()) {
+					read_end.setKey(read_begin.getKey());
+					read_end.arena().dependsOn(read_begin.arena());
+				}
 
 				state GetRangeLimits requestLimit = limits;
 				setRequestLimits(requestLimit, additionalRows, 2-read_begin.offset, requestCount);
@@ -630,10 +646,13 @@ public:
 		if (data.readThroughEnd) endKey = allKeys.end;
 
 		if( data.size() ) {
-			beginKey = !data.more && data.end()[-1].key > beginKey ? beginKey : data.end()[-1].key;
-			
-			if( data.readThrough.present() )
+			if( data.readThrough.present() ) {
 				beginKey = std::min( data.readThrough.get(), beginKey );
+			}
+			else {
+				beginKey = !data.more && data.end()[-1].key > beginKey ? beginKey : data.end()[-1].key;
+			}
+			
 			endKey = data[0].key < endKey ? endKey : ExtStringRef( data[0].key, 1 );
 		}
 		if (beginKey >= endKey) return KeyRangeRef();
@@ -710,7 +729,7 @@ public:
 		resolveKeySelectorFromCache( end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset );
 		resolveKeySelectorFromCache( begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
 
-		if( ( begin.getKey() >= end.getKey() && actualBeginOffset >= actualEndOffset ) ) {
+		if( actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey() ) {
 			return RangeResultRef(false, false);
 		}
 		else if( ( begin.isFirstGreaterOrEqual() && begin.getKey() == ryw->getMaxReadKey() ) 
@@ -751,16 +770,16 @@ public:
 				.detail("kv", it.is_kv())
 				.detail("requests", requestCount);*/
 
-			if(!result.size() && begin.getKey() >= end.getKey() && actualBeginOffset >= actualEndOffset) {
+			if(!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 				return RangeResultRef(false, false);
 			}
 			
-			if( begin.getKey() >= ryw->getMaxReadKey() && !begin.isBackward() ) {
+			if( !begin.isBackward() && begin.getKey() >= ryw->getMaxReadKey() ) {
 				return RangeResultRef(readToBegin, readThroughEnd);
 			}
 
-			if( ( begin.getKey() >= end.getKey() && begin.offset >= end.offset ) ||
-				( end.getKey() == allKeys.begin && end.offset <= 1 ) ) {
+			if( ( begin.offset >= end.offset && begin.getKey() >= end.getKey() ) ||
+				( end.offset <= 1 && end.getKey() == allKeys.begin ) ) {
 				if( begin.isFirstGreaterOrEqual() ) break;
 				if( !result.size() ) break;
 				Key resolvedBegin = wait( read( ryw, GetKeyReq(begin), pit ) ); //do not worry about iterator invalidation, because we are breaking for the loop
@@ -772,7 +791,7 @@ public:
 				break;
 			}
 			
-			if (it.beginKey() < itEnd.beginKey() && !it.is_unreadable() && !it.is_unknown_range() && itemsPastBegin >= begin.offset - 1) {
+			if (itemsPastBegin >= begin.offset - 1 && !it.is_unreadable() && !it.is_unknown_range() && it.beginKey() < itEnd.beginKey()) {
 				if( begin.isFirstGreaterOrEqual() ) break;
 				return RangeResultRef(readToBegin, readThroughEnd);
 			}
@@ -798,10 +817,11 @@ public:
 				
 				state KeySelector read_begin;
 				if ( ucEnd!=itEnd ) {
-					read_begin = firstGreaterOrEqual(ucEnd.beginKey().toStandaloneStringRef());
+					Key k = ucEnd.beginKey().toStandaloneStringRef();
+					read_begin = KeySelector(firstGreaterOrEqual(k), k.arena());
 					if( begin.offset > 1 ) additionalRows += begin.offset - 1; // extra for items past end
 				} else if( begin.offset > 1 ) {
-					read_begin = firstGreaterOrEqual( begin.getKey() );
+					read_begin = KeySelector(firstGreaterOrEqual( begin.getKey() ), begin.arena());
 					additionalRows += begin.offset - 1;
 				} else {
 					read_begin = begin;
@@ -815,10 +835,11 @@ public:
 
 				state KeySelector read_end;
 				if (end.isFirstGreaterOrEqual()) {
-					end = firstGreaterOrEqual( it.endKey() < end.getKey() ? it.endKey().toStandaloneStringRef() : end.getKey() );
+					Key k = it.endKey() < end.getKey() ? it.endKey().toStandaloneStringRef() : end.getKey();
+					end = KeySelector(firstGreaterOrEqual(k), k.arena());
 					read_end = end;
 				} else if (end.offset < 1) {
-					read_end = firstGreaterOrEqual(end.getKey());
+					read_end = KeySelector(firstGreaterOrEqual(end.getKey()), end.arena());
 					additionalRows += 1 - end.offset;
 				} else {
 					read_end = end;
@@ -829,7 +850,10 @@ public:
 					additionalRows += singleClears;
 				}
 
-				read_begin.setKey(std::min( read_begin.getKey(), read_end.getKey() ));
+				if(read_begin.getKey() > read_end.getKey()) {
+					read_begin.setKey(read_end.getKey());
+					read_begin.arena().dependsOn(read_end.arena());
+				}
 
 				state GetRangeLimits requestLimit = limits;
 				setRequestLimits(requestLimit, additionalRows, read_end.offset, requestCount);
@@ -1283,7 +1307,7 @@ Future< Standalone<VectorRef<const char*> >> ReadYourWritesTransaction::getAddre
 
 	// If key >= allKeys.end, then our resulting address vector will be empty.
 	
-	Future< Standalone<VectorRef<const char*> >> result = tr.getAddressesForKey(key);
+	Future< Standalone<VectorRef<const char*> >> result = waitOrError(tr.getAddressesForKey(key), resetPromise.getFuture());
 	reading.add( success( result ) ); 
 	return result;
 }
@@ -1388,7 +1412,7 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 			for( int i = 0; i < op.size(); ++i) {
 				switch(op[i].type) {
 					case MutationRef::SetValue:
-						tr.set( it.beginKey().assertRef(), op[i].value, false );
+						tr.set( it.beginKey().assertRef(), op[i].value.get(), false );
 						break;
 					case MutationRef::AddValue:
 					case MutationRef::AppendIfFits:
@@ -1399,7 +1423,11 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::Min:
 					case MutationRef::SetVersionstampedKey:
 					case MutationRef::SetVersionstampedValue:
-						tr.atomicOp( it.beginKey().assertRef(), op[i].value, op[i].type, false );
+					case MutationRef::ByteMin:
+					case MutationRef::ByteMax:
+					case MutationRef::MinV2:
+					case MutationRef::AndV2:
+						tr.atomicOp( it.beginKey().assertRef(), op[i].value.get(), op[i].type, false );
 						break;
 					default:
 						break;
@@ -1470,6 +1498,13 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	if (operationType == MutationRef::SetVersionstampedValue && operand.size() < 10)
 		throw client_invalid_operation();
 		
+	if (tr.apiVersionAtLeast(510)) {
+		if (operationType == MutationRef::Min)
+			operationType = MutationRef::MinV2;
+		else if (operationType == MutationRef::And)
+			operationType = MutationRef::AndV2;
+	}
+
 	if(options.readYourWritesDisabled) {
 		return tr.atomicOp(key, operand, (MutationRef::Type) operationType, addWriteConflict);
 	}
@@ -1644,6 +1679,14 @@ Future<Void> ReadYourWritesTransaction::commit() {
 		return resetPromise.getFuture().getError();
 	
 	return RYWImpl::commit( this );
+}
+
+Future<Standalone<StringRef>> ReadYourWritesTransaction::getVersionstamp() {
+	if(checkUsedDuringCommit()) {
+		return used_during_commit();
+	}
+
+	return waitOrError(tr.getVersionstamp(), resetPromise.getFuture());
 }
 
 void ReadYourWritesTransaction::setOption( FDBTransactionOptions::Option option, Optional<StringRef> value ) { 

@@ -146,98 +146,113 @@ void JSONDoc::mergeInto(json_spirit::mObject &dst, const json_spirit::mObject &s
 	}
 }
 
-void JSONDoc::mergeValueInto(json_spirit::mValue &d, const json_spirit::mValue &s) {
-	if(s.is_null())
+void JSONDoc::mergeValueInto(json_spirit::mValue &dst, const json_spirit::mValue &src) {
+	if(src.is_null())
 		return;
 
-	if(d.is_null()) {
-		d = s;
-		return;
-	}
-
-	if(d.type() != s.type()) {
-		// Skip errors already found
-		if(d.type() == json_spirit::obj_type && d.get_obj().count("ERROR"))
-			return;
-		d = json_spirit::mObject({{"ERROR", "Incompatible types."}, {"a", d}, {"b", s}});
+	if(dst.is_null()) {
+		dst = src;
 		return;
 	}
 
-	switch(d.type()) {
+	// Do nothing if d is already an error
+	if(dst.type() == json_spirit::obj_type && dst.get_obj().count("ERROR"))
+		return;
+
+	if(dst.type() != src.type()) {
+		dst = json_spirit::mObject({{"ERROR", "Incompatible types."}, {"a", dst}, {"b", src}});
+		return;
+	}
+
+	switch(dst.type()) {
 		case json_spirit::obj_type:
 		{
-			std::string op = getOperator(d.get_obj());
-			
-			//printf("Operator: %s\n", op.c_str());
+			// Refs to the objects, for convenience.
+			json_spirit::mObject &aObj = dst.get_obj();
+			const json_spirit::mObject &bObj = src.get_obj();
 
+			const std::string &op = getOperator(aObj);
+			const std::string &opB = getOperator(bObj);
+
+			// Operators must be the same, which could mean both are empty (if these objects are not operators)
+			if(op != opB) {
+				dst = json_spirit::mObject({ {"ERROR", "Operators do not match"}, {"a", dst}, {"b", src} });
+				break;
+			}
+
+			// If objects are not operators then defer to mergeInto
 			if(op.empty()) {
-				mergeInto(d.get_obj(), s.get_obj());
+				mergeInto(dst.get_obj(), src.get_obj());
 				break;
 			}
 
-			// Refs to the operator objects to combine
-			const json_spirit::mObject &op_a = d.get_obj();
-			const json_spirit::mObject &op_b = s.get_obj();
-
-			if(!op_b.count(op)) {
-				d = json_spirit::mObject({{"ERROR", "Operators do not match"}, {"s", s}, {"d", d}});
-				break;
-			}
-
-			const json_spirit::mValue &a = d.get_obj().at(op);
-			const json_spirit::mValue &b = s.get_obj().at(op);					
+			// Get the operator values 
+			json_spirit::mValue &a = aObj.at(op);
+			const json_spirit::mValue &b = bObj.at(op);
 
 			// First try the operators that are type-agnostic
 			try {
-				d = mergeOperator<json_spirit::mValue>(op, op_a, op_b, a, b);
+				dst = mergeOperator<json_spirit::mValue>(op, aObj, bObj, a, b);
 				return;
 			} catch(std::exception &e) {
 			}
 
-			// If that didn't work, the types must match or we have no operators left to try.
+			// Now try type and type pair specific operators
+			// First, if types are incompatible try to make them compatible or return an error
 			if(a.type() != b.type()) {
-				d = json_spirit::mObject({{"ERROR", "Types do not match"}, {"s", s}, {"d", d}});
-				return;
+				// It's actually okay if the type mismatch is double vs int since once can be converted to the other.
+				if(    (a.type() == json_spirit::int_type && b.type() == json_spirit::real_type)
+					|| (b.type() == json_spirit::int_type && a.type() == json_spirit::real_type) )
+				{
+					// Convert d's op value (which a is a reference to) to a double so that the
+					// switch block below will do the operation with doubles.
+					a = a.get_real();
+				}
+				else {
+					// Otherwise, output an error as the types do not match
+					dst = json_spirit::mObject({{"ERROR", "Incompatible operator value types"}, {"a", dst}, {"b", src}});
+					return;
+				}
 			}
 
 			// Now try the type-specific operators.
 			try {
 				switch(a.type()) {
 					case json_spirit::bool_type:
-						d = mergeOperatorWrapper<bool>(op, op_a, op_b, a, b);
+						dst = mergeOperatorWrapper<bool>(op, aObj, bObj, a, b);
 						break;
 					case json_spirit::int_type:
-						d = mergeOperatorWrapper<int64_t>(op, op_a, op_b, a, b);
+						dst = mergeOperatorWrapper<int64_t>(op, aObj, bObj, a, b);
 						break;
 					case json_spirit::real_type:
-						d = mergeOperatorWrapper<double>(op, op_a, op_b, a, b);
+						dst = mergeOperatorWrapper<double>(op, aObj, bObj, a, b);
 						break;
 					case json_spirit::str_type:
-						d = mergeOperatorWrapper<std::string>(op, op_a, op_b, a, b);
+						dst = mergeOperatorWrapper<std::string>(op, aObj, bObj, a, b);
 						break;
 					case json_spirit::array_type:
-						d = mergeOperatorWrapper<json_spirit::mArray>(op, op_a, op_b, a, b);
+						dst = mergeOperatorWrapper<json_spirit::mArray>(op, aObj, bObj, a, b);
 						break;
 					case json_spirit::obj_type:
-						d = mergeOperatorWrapper<json_spirit::mObject>(op, op_a, op_b, a, b);
+						dst = mergeOperatorWrapper<json_spirit::mObject>(op, aObj, bObj, a, b);
 						break;
 					case json_spirit::null_type:
 						break;
 				}
 			} catch(...) {
-				d = json_spirit::mObject({{"ERROR", "Unsupported operator / value type combination."}, {"operator", op}, {"type", a.type()}});
+				dst = json_spirit::mObject({{"ERROR", "Unsupported operator / value type combination."}, {"operator", op}, {"type", a.type()}});
 			}
 			break;
 		}
 
 		case json_spirit::array_type:
-			for(auto &ai : s.get_array())
-				d.get_array().push_back(ai);
+			for(auto &ai : src.get_array())
+				dst.get_array().push_back(ai);
 			break;
 
 		default:
-			if(d != s)
-				d = json_spirit::mObject({{"ERROR", "Values do not match."}, {"a", d}, {"b", s}});
+			if(dst != src)
+				dst = json_spirit::mObject({{"ERROR", "Values do not match."}, {"a", dst}, {"b", src}});
 	}
 }
 
@@ -305,12 +320,13 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<ClusterConnectionFile> 
 	statusObj["cluster_file"] = statusObjClusterFile;
 
 	if (!contentsUpToDate){
-		std::string description = "Cluster file is not up to date.\nIt contains the connection string: ";
+		std::string description = "Cluster file contents do not match current cluster connection string.";
+		description += "\nThe file contains the connection string: ";
 		description += ClusterConnectionFile(f->getFilename()).getConnectionString().toString().c_str();
-		description += "\nThe original connection string is: ";
+		description += "\nThe current connection string is: ";
 		description += f->getConnectionString().toString().c_str();
-		description += "\nThis must mean that file permissions or other platform issues have prevented the file from being updated. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
-		messages->push_back(makeMessage("inconsistent_cluster_file", description.c_str()));
+		description += "\nVerify cluster file is writable and has not been overwritten externally. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
+		messages->push_back(makeMessage("incorrect_cluster_file_contents", description.c_str()));
 	}
 
 	return statusObj;

@@ -29,13 +29,13 @@ struct Increment : TestWorkload {
 	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
 
 	vector<Future<Void>> clients;
-	PerfIntCounter transactions, retries, pastVersionRetries, commitFailedRetries;
+	PerfIntCounter transactions, retries, tooOldRetries, commitFailedRetries;
 	PerfDoubleCounter totalLatency;
 
 	Increment(WorkloadContext const& wcx)
 		: TestWorkload(wcx),
 		transactions("Transactions"), retries("Retries"), totalLatency("Latency"),
-		pastVersionRetries("Retries.past_version"), commitFailedRetries("Retries.commit_failed")
+		tooOldRetries("Retries.too_old"), commitFailedRetries("Retries.commit_failed")
 	{
 		testDuration = getOption( options, LiteralStringRef("testDuration"), 10.0 );
 		transactionsPerSecond = getOption( options, LiteralStringRef("transactionsPerSecond"), 5000.0 );
@@ -68,7 +68,7 @@ struct Increment : TestWorkload {
 	virtual void getMetrics( vector<PerfMetric>& m ) {
 		m.push_back( transactions.getMetric() );
 		m.push_back( retries.getMetric() );
-		m.push_back( pastVersionRetries.getMetric() );
+		m.push_back( tooOldRetries.getMetric() );
 		m.push_back( commitFailedRetries.getMetric() );
 		m.push_back( PerfMetric( "Avg Latency (ms)", 1000 * totalLatency.getValue() / transactions.getValue(), true ) );
 		m.push_back( PerfMetric( "Read rows/simsec (approx)", transactions.getValue() * 3 / testDuration, false ) );
@@ -94,7 +94,7 @@ struct Increment : TestWorkload {
 						Void _ = wait( tr.commit() );
 						break;
 					} catch (Error& e) {
-						if (e.code() == error_code_past_version) ++self->pastVersionRetries;
+						if (e.code() == error_code_transaction_too_old) ++self->tooOldRetries;
 						else if (e.code() == error_code_not_committed) ++self->commitFailedRetries;
 						Void _ = wait( tr.onError(e) );
 					}

@@ -41,7 +41,7 @@ struct IDispatched {
 };
 
 #define REGISTER_DISPATCHED(Type, Instance, Key, Func) struct Type##Instance { Type##Instance() { ASSERT(Type::dispatches().find(Key) == Type::dispatches().end()); Type::dispatches()[Key] = Func; } }; Type##Instance _Type##Instance
-
+#define REGISTER_DISPATCHED_ALIAS(Type, Instance, Target, Alias) struct Type##Instance { Type##Instance() { ASSERT(Type::dispatches().find(Alias) == Type::dispatches().end()); ASSERT(Type::dispatches().find(Target) != Type::dispatches().end()); Type::dispatches()[Alias] = Type::dispatches()[Target]; } }; Type##Instance _Type##Instance;
 #define REGISTER_COMMAND(Type, Instance, Key, Func) REGISTER_DISPATCHED(Type, Instance, Instance::Key, Instance::Func)
 
 /*

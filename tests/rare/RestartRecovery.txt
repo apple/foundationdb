@@ -8,7 +8,7 @@ testTitle=DDBalance_test
     moversPerClient=10
     actorsPerClient=100
     nodes=100000
-    simEnableConnectionFailures=false
+    connectionFailuresDisableDuration=100000
 
     testName=RestartRecovery
     killAt=30.0

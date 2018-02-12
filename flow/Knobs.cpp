@@ -34,6 +34,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( DELAY_JITTER_RANGE,                                  0.2 );
 	init( BUSY_WAIT_THRESHOLD,                                   0 ); // 1e100 == never sleep
 	init( CLIENT_REQUEST_INTERVAL,                             0.1 ); if( randomize && BUGGIFY ) CLIENT_REQUEST_INTERVAL = 1.0;
+	init( SERVER_REQUEST_INTERVAL,                             0.1 ); if( randomize && BUGGIFY ) SERVER_REQUEST_INTERVAL = 1.0;
 
 	init( REACTOR_FLAGS,                                         0 );
 
@@ -52,7 +53,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 
 	//FlowTransport
 	init( CONNECTION_REJECTED_MESSAGE_DELAY,                   1.0 );
-	init( CONNECTION_ID_TIMEOUT,                             600.0 );
+	init( CONNECTION_ID_TIMEOUT,                             600.0 ); if( randomize && BUGGIFY ) CONNECTION_ID_TIMEOUT = 60.0;
 	init( CONNECTION_CLEANUP_DELAY,                          100.0 );
 	init( INITIAL_RECONNECTION_TIME,                          0.05 );
 	init( MAX_RECONNECTION_TIME,                               0.5 );
@@ -115,6 +116,9 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MIN_TRACE_SEVERITY,                 isSimulated ? 0 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_FSYNC_ENABLED,                                   0 );
+	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,				   500 );
+	init( TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY,				   1800.0 ); // 30 mins
+	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,					  20000 );
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
@@ -169,6 +173,10 @@ bool Knobs::setKnob( std::string const& knob, std::string const& value ) {
 		}
 		return true;
 	}
+	if (string_knobs.count(knob)) {
+		*string_knobs[knob] = value;
+		return true;
+	}
 	return false;
 }
 
@@ -197,11 +205,18 @@ void Knobs::initKnob( int& knob, int value, std::string const& name ) {
 	int_knobs[toLower(name)] = &knob;
 }
 
+void Knobs::initKnob( std::string& knob, const std::string& value, const std::string& name ) {
+	knob = value;
+	string_knobs[toLower(name)] = &knob;
+}
+
 void Knobs::trace() {
 	for(auto &k : double_knobs)
 		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
 	for(auto &k : int_knobs)
 		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
 	for(auto &k : int64_knobs)
+		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
+	for(auto &k : string_knobs)
 		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
 }

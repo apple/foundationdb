@@ -37,6 +37,12 @@ typedef int64_t Generation;
 struct KeyRangeRef;
 struct KeyValueRef;
 
+template <class Collection>
+void uniquify( Collection& c ) {
+	std::sort(c.begin(), c.end());
+	c.resize( std::unique(c.begin(), c.end()) - c.begin() );
+}
+
 static std::string describe( const Tag item ) {
 	return format("%d", item);
 }
@@ -95,6 +101,12 @@ std::string printable( const VectorRef<StringRef>& val );
 std::string printable( const VectorRef<KeyValueRef>& val );
 std::string printable( const KeyValueRef& val );
 
+inline bool equalsKeyAfter( const KeyRef& key, const KeyRef& compareKey ) {
+	if( key.size()+1 != compareKey.size() || compareKey[compareKey.size()-1] != 0 )
+		return false;
+	return compareKey.startsWith( key );
+}
+
 struct KeyRangeRef {
 	const KeyRef begin, end;
 	KeyRangeRef() {}
@@ -110,6 +122,7 @@ struct KeyRangeRef {
 	bool contains( const KeyRangeRef& keys ) const { return begin <= keys.begin && keys.end <= end; }
 	bool intersects( const KeyRangeRef& keys ) const { return begin < keys.end && keys.begin < end; }
 	bool empty() const { return begin == end; }
+	bool singleKeyRange() const { return equalsKeyAfter(begin, end); }
 
 	Standalone<KeyRangeRef> withPrefix( const StringRef& prefix ) const {
 		return KeyRangeRef( begin.withPrefix(prefix), end.withPrefix(prefix) );
@@ -222,11 +235,6 @@ inline KeyRef keyAfter( const KeyRef& key, Arena& arena ) {
 	t[key.size()] = 0;
 	return KeyRef(t,key.size()+1);
 }
-inline bool equalsKeyAfter( const KeyRef& key, const KeyRef& compareKey ) {
-	if( key.size()+1 != compareKey.size() || compareKey[compareKey.size()-1] != 0 )
-		return false;
-	return compareKey.startsWith( key );
-}
 inline KeyRange singleKeyRange( const KeyRef& a ) {
 	return KeyRangeRef(a, keyAfter(a));
 }
@@ -235,6 +243,13 @@ inline KeyRangeRef singleKeyRange( KeyRef const& key, Arena& arena ) {
 	memcpy(t, key.begin(), key.size() );
 	t[key.size()] = 0;
 	return KeyRangeRef( KeyRef(t,key.size()), KeyRef(t, key.size()+1) );
+}
+inline KeyRange prefixRange( KeyRef prefix ) {
+	Standalone<KeyRangeRef> range;
+	KeyRef start = KeyRef(range.arena(), prefix);
+	KeyRef end = strinc(prefix, range.arena());
+	range.contents() = KeyRangeRef(start, end);
+	return range;
 }
 inline KeyRef keyBetween( const KeyRangeRef& keys ) {
 	// Returns (one of) the shortest key(s) either contained in keys or equal to keys.end,

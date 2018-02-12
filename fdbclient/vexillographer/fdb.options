@@ -82,7 +82,7 @@ description is not currently required but encouraged.
     <Option name="disable_multi_version_client_api" code="60"
             description="Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network." />
     <Option name="callbacks_on_external_threads" code="61"
-            description="If set, callbacks from external client libraries can be called from threads created by the FoundationDB client library. Otherwise, callbacks will be called from either the thread used to add the callback or the network thread. Setting this option can improve performance when connected using an external client, but may not be safe to use in all environments. Must be set before setting up the network." />
+            description="If set, callbacks from external client libraries can be called from threads created by the FoundationDB client library. Otherwise, callbacks will be called from either the thread used to add the callback or the network thread. Setting this option can improve performance when connected using an external client, but may not be safe to use in all environments. Must be set before setting up the network. WARNING: This feature is considered experimental at this time. " />
     <Option name="external_client_library" code="62"
             paramType="String" paramDescription="path to client library"
             description="Adds an external client library for use by the multi-version client API. Must be set before setting up the network." />
@@ -131,6 +131,8 @@ description is not currently required but encouraged.
     <Option name="causal_read_disable" code="21" />
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
+    <Option name="commit_on_first_proxy" code="40"
+            description="Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'." />
     <Option name="check_writes_enable" code="50" />
     <Option name="read_your_writes_disable" code="51"
             description="Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction."/>
@@ -170,6 +172,8 @@ description is not currently required but encouraged.
             description="The transaction can read and write to locked databases, and is resposible for checking that it took the lock."/>
     <Option name="used_during_commit_protection_disable" code="701"
             description="By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail."/>
+    <Option name="read_lock_aware" code="702"
+            description="The transaction can read from locked databases."/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without
@@ -200,7 +204,7 @@ description is not currently required but encouraged.
             description="Deprecated"/>
     <Option name="bit_and" code="6"
             paramType="Bytes" paramDescription="value with which to perform bitwise and"
-            description="Performs a bitwise ``and`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``."/>
+            description="Performs a bitwise ``and`` operation.  If the existing value in the database is not present, then ``param`` is stored in the database. If the existing value in the database is shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``."/>
     <Option name="or" code="7"
             paramType="Bytes" paramDescription="value with which to perform bitwise or"
             description="Deprecated"/>
@@ -218,13 +222,19 @@ description is not currently required but encouraged.
             description="Performs a little-endian comparison of byte strings. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The larger of the two values is then stored in the database."/>
     <Option name="min" code="13"
             paramType="Bytes" paramDescription="value to check against database value"
-            description="Performs a little-endian comparison of byte strings. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The smaller of the two values is then stored in the database."/>
+            description="Performs a little-endian comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored in the database. If the existing value in the database is shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The smaller of the two values is then stored in the database."/>
     <Option name="set_versionstamped_key" code="14"
             paramType="Bytes" paramDescription="value to which to set the transformed key"
-            description="Transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time versionstamps are not compatible with the Tuple layer. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers." />
+            description="Transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages." />
     <Option name="set_versionstamped_value" code="15"
             paramType="Bytes" paramDescription="value to versionstamp and set"
-            description="Transforms ``param`` using a versionstamp for the transaction. Sets ``key`` in the database to the transformed parameter. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time versionstamps are not compatible with the Tuple layer." />
+            description="Transforms ``param`` using a versionstamp for the transaction. Sets ``key`` in the database to the transformed parameter. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time versionstamped values are not compatible with the Tuple layer." />
+    <Option name="byte_min" code="16"
+            paramType="Bytes" paramDescription="value to check against database value"
+            description="Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the smaller of the two values is then stored in the database."/>
+    <Option name="byte_max" code="17"
+            paramType="Bytes" paramDescription="value to check against database value"
+            description="Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then ``param`` is stored. Otherwise the larger of the two values is then stored in the database."/>
   </Scope>
 
   <Scope name="ConflictRangeType">
