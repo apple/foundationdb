@@ -812,7 +812,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 		}
 
 		//Run the consistency check workload
-		if(spec.runConsistencyCheck && false) { //FIXME: re-enable consistency check
+		if(spec.runConsistencyCheck) {
 			try {
 				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 				Void _ = wait(timeoutError(checkConsistency(cx, testers, database, quiescent, 10000.0, 18000, spec.databasePingDelay), 20000.0));
@@ -1038,7 +1038,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		}
 	}
 
-	if (useDB && waitForQuiescenceBegin && false) { //FIXME: re-enable quiescence
+	if (useDB && waitForQuiescenceBegin) {
 		TraceEvent("TesterStartingPreTestChecks").detail("DatabasePingDelay", databasePingDelay).detail("StartDelay", startDelay);
 		try {
 			Void _ = wait( quietDatabase( cx, dbInfo, "Start") || 
@@ -1060,7 +1060,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	printf("\n%d tests passed; %d tests failed, waiting for DD to end...\n\n", passCount, failCount);
 	
 	//If the database was deleted during the workload we need to recreate the database
-	if(tests.empty() || useDB && false ) { //FIXME: re-enable quiescence
+	if(tests.empty() || useDB) {
 		if(waitForQuiescenceEnd) {
 			try {
 				Void _ = wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) || 

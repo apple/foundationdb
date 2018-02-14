@@ -1093,7 +1093,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality) );
 		state UID recruitmentID = g_random->randomUniqueID();
 		logSystem->logSystemType = 2;
-		logSystem->minRouters = configuration.getDesiredLogRouters();
 		logSystem->expectedLogSets = 1;
 		
 		logSystem->tLogs.push_back( Reference<LogSet>( new LogSet() ) );
@@ -1116,7 +1115,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		if(configuration.remoteTLogReplicationFactor > 0) {
+			logSystem->minRouters = configuration.getDesiredLogRouters();
 			logSystem->expectedLogSets++;
+		} else {
+			logSystem->minRouters = 0;
 		}
 		
 		if(oldLogSystem->tLogs.size()) {

@@ -1921,9 +1921,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			throw logData->removed.getError();
 		}
 
-		if (req.recoverFrom.logSystemType == 1) {
-			ASSERT(false);
-		} else if (req.recoverFrom.logSystemType == 2) {
+		if (req.recoverFrom.logSystemType == 2) {
 			logData->unrecoveredBefore = req.knownCommittedVersion;
 			logData->persistentDataVersion = req.recoverAt;
 			logData->persistentDataDurableVersion = req.recoverAt; // durable is a white lie until initPersistentState() commits the store
@@ -1944,6 +1942,11 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		} else {
 			// Brand new tlog, initialization has already been done by caller
 			Void _ = wait( initPersistentState( self, logData, 0 ) || logData->removed );
+
+			if(logData->recoveryComplete.isSet()) {
+				throw worker_removed();
+			}
+
 			logData->recoveryComplete.send(Void());
 		}
 	} catch( Error &e ) {
