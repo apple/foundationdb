@@ -94,9 +94,9 @@ Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock ) {
 	return checkMoveKeysLock(tr, lock, false);
 }
 
-ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<Version> > fReply, UID uid ) {
+ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<Version> > fReply, UID uid, Version version ) {
 	ErrorOr<Version> reply = wait( fReply );
-	if (!reply.present())
+	if (!reply.present() || reply.get() < version)
 		return Optional<UID>();
 	return Optional<UID>(uid);
 }
@@ -155,7 +155,7 @@ ACTOR Future<vector<vector<Optional<UID>>>> findReadWriteDestinations(Standalone
 		vector< Future<Optional<UID>> > checks;
 		for(int s=0; s<storageServerInterfaces.size(); s++) {
 			checks.push_back( checkReadWrite( storageServerInterfaces[s].getShardState.getReplyUnlessFailedFor(
-				GetShardStateRequest( rangeIntersectKeys, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), dest[s] ) );
+				GetShardStateRequest( rangeIntersectKeys, GetShardStateRequest::NO_WAIT), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, 0, TaskMoveKeys ), dest[s], tr->getReadVersion().get() ) );
 		}
 
 		allChecks.push_back(getAll(checks));
