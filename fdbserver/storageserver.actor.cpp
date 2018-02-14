@@ -1882,7 +1882,6 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
-					Void _ = wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
 					Version lastFV = fetchVersion;
 					fetchVersion = data->version.get();
 					isTooOld = false;
@@ -1897,8 +1896,10 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					}
 				} else if (e.code() == error_code_future_version) {
 					TEST(true); // fetchKeys got future_version, so there must be a huge storage lag somewhere.  Keep trying.
-				} else
+				} else {
 					throw;
+				}
+				Void _ = wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
 			}
 		}
 
