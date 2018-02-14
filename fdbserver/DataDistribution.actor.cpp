@@ -1980,6 +1980,8 @@ ACTOR Future<Void> popOldTags( Transaction* tr, Reference<ILogSystem> logSystem,
 
 	state Tag maxTag = tagLocality == tagLocalityUpgraded ? decodeServerTagMaxValueOld(val.get()) : decodeServerTagMaxValue( val.get() );
 
+	TraceEvent("PopOldTags").detail("maxTag", maxTag.toString());
+
 	std::set<Tag> unusedTags;
 	for(uint16_t i = 0; i <= maxTag.id; i++)
 		unusedTags.insert(Tag(tagLocality, i));

@@ -263,6 +263,7 @@ private:
 public:
 	Tag tag;
 	vector<pair<Version,Tag>> history;
+	vector<pair<Version,Tag>> allHistory;
 	std::map<Version, Arena> freeable;  // for each version, an Arena that must be held until that version is < oldestVersion
 	Arena lastArena;
 
@@ -278,14 +279,21 @@ public:
 	void byteSampleApplySet( KeyValueRef kv, Version ver );
 	void byteSampleApplyClear( KeyRangeRef range, Version ver );
 
-	void popVersion(Version v) {
+	void popVersion(Version v, bool popAllTags = false) {
 		if(logSystem) {
-			while(history.size() && v > history.back().first ) {
-				logSystem->pop( v, history.back().second );
-				history.pop_back();
+			vector<pair<Version,Tag>>* hist = &history;
+			vector<pair<Version,Tag>> allHistoryCopy;
+			if(popAllTags) {
+				allHistoryCopy = allHistory;
+				hist = &allHistoryCopy;
 			}
-			if(history.size()) {
-				logSystem->pop( v, history.back().second );
+			
+			while(hist->size() && v > hist->back().first ) {
+				logSystem->pop( v, hist->back().second );
+				hist->pop_back();
+			}
+			if(hist->size()) {
+				logSystem->pop( v, hist->back().second );
 			} else {
 				logSystem->pop( v, tag );
 			}
@@ -3128,7 +3136,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 					self->logSystem = ILogSystem::fromServerDBInfo( self->thisServerID, self->db->get() );
 					if (self->logSystem) {
 						self->logCursor = self->logSystem->peekSingle( self->version.get() + 1, self->tag, self->history );
-						self->popVersion( self->durableVersion.get() + 1 );
+						self->popVersion( self->durableVersion.get() + 1, true );
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be cancelled.  But if it is waiting later,
 					// cancelling it could cause problems (e.g. fetchKeys that already committed to transitioning to waiting state)
@@ -3300,6 +3308,8 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 							} else {
 								self->tag = rep.tag;
 							}
+							self->allHistory = self->history;
+
 							for(auto it : self->history) {
 								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString()).detail("myTag", self->tag.toString());
 							}
