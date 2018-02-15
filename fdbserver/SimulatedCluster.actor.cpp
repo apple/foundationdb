@@ -758,7 +758,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	if(datacenters == 2 && g_random->random01() < 0.5) {
 		db.primaryDcId = LiteralStringRef("0");
 		db.remoteDcId = LiteralStringRef("1");
-		machine_count = g_random->randomInt( std::max( 2+datacenters, datacenters*db.minMachinesRequired() ), std::max(extraDB ? 6 : 10, datacenters*db.minMachinesRequired() + 1) );
+		machine_count = g_random->randomInt( std::max( 6, datacenters*db.minMachinesRequired() ), std::max(extraDB ? 7 : 10, datacenters*db.minMachinesRequired() + 1) );
 	} else {
 		machine_count = g_random->randomInt( std::max( 2+datacenters, db.minMachinesRequired() ), extraDB ? 6 : 10 );
 	}
