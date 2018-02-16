@@ -624,7 +624,8 @@ void getBackupDRTags(StatusObjectReader &statusObjCluster, const char *context, 
 		for(auto itr : tags.obj()) {
 			JSONDoc tag(itr.second);
 			bool running = false;
-			if(tag.tryGet("running_backup", running)) {
+			tag.tryGet("running_backup", running);
+			if(running) {
 				std::string uid;
 				if(tag.tryGet("mutation_stream_id", uid)) {
 					tagMap[itr.first] = uid;

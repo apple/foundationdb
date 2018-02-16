@@ -1748,9 +1748,10 @@ namespace fileBackup {
 			state Version beginVersion = Params.beginVersion().get(task);
 			state Version endVersion = Params.endVersion().get(task);
 			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
+			state BackupConfig config(task);
 
 			if(Params.fileSize().exists(task)) {
-				BackupConfig(task).logBytesWritten().atomicOp(tr, Params.fileSize().get(task), MutationRef::AddValue);
+				config.logBytesWritten().atomicOp(tr, Params.fileSize().get(task), MutationRef::AddValue);
 			}
 
 			if (Params.addBackupLogRangeTasks().get(task)) {
@@ -1761,7 +1762,7 @@ namespace fileBackup {
 			}
 
 			if(endVersion > beginVersion) {
-				Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, task->params[FileBackupAgent::keyConfigLogUid]);
+				Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, config.getUidAsKey());
 				for (auto & rng : ranges)
 					tr->clear(rng);
 			}

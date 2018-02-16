@@ -1,7 +1,7 @@
 #!/bin/bash -x
 
 rm -f /usr/local/libexec/{fdbserver,fdbmonitor}
-rm -f /usr/local/bin/{fdbcli,fdbbackup,fdbrestore,fdbblob,fdbdr}
+rm -f /usr/local/bin/{fdbcli,fdbbackup,fdbrestore,fdbdr}
 rm -f /usr/local/lib/libfdb_c.dylib
 rm -rf /usr/local/include/foundationdb
 rm -rf /usr/local/foundationdb/backup_agent

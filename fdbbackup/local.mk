@@ -47,7 +47,7 @@ bin/fdbbackup: bin/coverage.fdbbackup.xml
 
 bin/fdbbackup.debug: bin/fdbbackup
 
-BACKUP_ALIASES = fdbrestore fdbblob fdbdr dr_agent backup_agent
+BACKUP_ALIASES = fdbrestore fdbdr dr_agent backup_agent
 
 $(addprefix bin/, $(BACKUP_ALIASES)): bin/fdbbackup
 	@[ -f $@ ] || (echo "SymLinking     $@" && ln -s fdbbackup $@)
