@@ -279,4 +279,19 @@ static void transformSetVersionstampedValue( MutationRef& mutation, Version vers
 	mutation.type = MutationRef::SetValue;
 }
 
+static void transformSetVersionstampedValuePos( MutationRef& mutation, Version version, uint16_t transactionNumber ) {
+	if (mutation.param2.size() >= 4) {
+		int32_t pos;
+		memcpy(&pos, mutation.param2.end() - sizeof(int32_t), sizeof(int32_t));
+		pos = littleEndian32(pos);
+		mutation.param2 = mutation.param2.substr(0, mutation.param2.size() - 4);
+
+		if (pos >= 0 && pos + 10 <= mutation.param2.size()) {
+			placeVersionstamp( mutateString(mutation.param2) + pos, version, transactionNumber );
+		}
+	}
+
+	mutation.type = MutationRef::SetValue;
+}
+
 #endif
