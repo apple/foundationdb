@@ -1423,6 +1423,7 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::Min:
 					case MutationRef::SetVersionstampedKey:
 					case MutationRef::SetVersionstampedValue:
+					case MutationRef::SetVersionstampedValuePos:
 					case MutationRef::ByteMin:
 					case MutationRef::ByteMax:
 					case MutationRef::MinV2:
@@ -1495,8 +1496,18 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		}
 	}
 
-	if (operationType == MutationRef::SetVersionstampedValue && operand.size() < 10)
+	if(operationType == MutationRef::SetVersionstampedValue && operand.size() < 10)
 		throw client_invalid_operation();
+
+	if(operationType == MutationRef::SetVersionstampedValuePos) {
+		if(operand.size() < 4)
+			throw client_invalid_operation();
+		int32_t pos;
+		memcpy(&pos, operand.end() - sizeof(int32_t), sizeof(int32_t));
+		pos = littleEndian32(pos);
+		if (pos < 0 || pos + 10 > operand.size() - 4)
+			throw client_invalid_operation();
+	}
 		
 	if (tr.apiVersionAtLeast(510)) {
 		if (operationType == MutationRef::Min)

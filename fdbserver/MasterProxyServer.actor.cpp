@@ -248,6 +248,8 @@ struct ResolutionRequestBuilder {
 				trIn.write_conflict_ranges.push_back( requests[0].arena, singleKeyRange( m.param1, requests[0].arena ) );
 			} else if (m.type == MutationRef::SetVersionstampedValue ) {
 				transformSetVersionstampedValue( m, requests[0].version, transactionNumberInBatch );
+			} else if (m.type == MutationRef::SetVersionstampedValuePos ) {
+				transformSetVersionstampedValuePos( m, requests[0].version, transactionNumberInBatch );
 			}
 			if (isMetadataMutation(m)) {
 				isTXNStateTransaction = true;
