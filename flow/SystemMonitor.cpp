@@ -42,6 +42,7 @@ void systemMonitor() {
 }
 
 #define TRACEALLOCATOR( size ) TraceEvent("MemSample").detail("Count", FastAllocator<size>::getMemoryUnused()/size).detail("TotalSize", FastAllocator<size>::getMemoryUnused()).detail("SampleCount", 1).detail("Hash", "FastAllocatedUnused" #size ).detail("Bt", "na")
+#define DETAILALLOCATORMEMUSAGE( size ) detail("AllocatedMemory"#size, FastAllocator<size>::getMemoryUsed()).detail("ApproximateUnusedMemory"#size, FastAllocator<size>::getMemoryUnused())
 
 SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *statState, bool machineMetrics) {
 	SystemStatistics currentStats = getSystemStatistics(machineState.folder.present() ? machineState.folder.get() : "", 
@@ -59,6 +60,15 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("UptimeSeconds", now() - machineState.monitorStartTime)
 				.detail("Memory", currentStats.processMemory)
 				.detail("ResidentMemory", currentStats.processResidentMemory)
+				.DETAILALLOCATORMEMUSAGE(16)
+				.DETAILALLOCATORMEMUSAGE(32)
+				.DETAILALLOCATORMEMUSAGE(64)
+				.DETAILALLOCATORMEMUSAGE(128)
+				.DETAILALLOCATORMEMUSAGE(256)
+				.DETAILALLOCATORMEMUSAGE(512)
+				.DETAILALLOCATORMEMUSAGE(1024)
+				.DETAILALLOCATORMEMUSAGE(2048)
+				.DETAILALLOCATORMEMUSAGE(4096)
 				.detail("MbpsSent", ((netData.bytesSent - statState->networkState.bytesSent) * 8e-6) / currentStats.elapsed)
 				.detail("MbpsReceived", ((netData.bytesReceived - statState->networkState.bytesReceived) * 8e-6) / currentStats.elapsed)
 				.detail("DiskTotalBytes", currentStats.processDiskTotalBytes)
