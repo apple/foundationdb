@@ -65,10 +65,18 @@ void parseReplicationPolicy(IRepPolicyRef* policy, ValueRef const& v) {
 }
 
 void DatabaseConfiguration::setDefaultReplicationPolicy() {
-	storagePolicy = IRepPolicyRef(new PolicyAcross(storageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
-	tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
-	remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
-	satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(satelliteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	if(!storagePolicy) {
+		storagePolicy = IRepPolicyRef(new PolicyAcross(storageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
+	}
+	if(!tLogPolicy) {
+		tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	}
+	if(remoteTLogReplicationFactor > 0 && !remoteTLogPolicy) {
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	}
+	if(satelliteTLogReplicationFactor > 0 && !satelliteTLogPolicy) {
+		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(satelliteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	}
 }
 
 bool DatabaseConfiguration::isValid() const {
@@ -170,18 +178,33 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 			result["remote_satellite_dcs"] = remoteDcStr;
 		}
 
-		if(satelliteTLogReplicationFactor > 0) {
-			result["satellite_replication"] = format("%d", satelliteTLogReplicationFactor);
+		if(satelliteTLogReplicationFactor == 1 && satelliteTLogUsableDcs == 1 && satelliteTLogWriteAntiQuorum == 0) {
+			result["satellite_redundancy_mode"] = "one_satellite_single";
+		} else if(satelliteTLogReplicationFactor == 2 && satelliteTLogUsableDcs == 1 && satelliteTLogWriteAntiQuorum == 0) {
+			result["satellite_redundancy_mode"] = "one_satellite_double";
+		} else if(satelliteTLogReplicationFactor == 3 && satelliteTLogUsableDcs == 1 && satelliteTLogWriteAntiQuorum == 0) {
+			result["satellite_redundancy_mode"] = "one_satellite_triple";
+		} else if(satelliteTLogReplicationFactor == 4 && satelliteTLogUsableDcs == 2 && satelliteTLogWriteAntiQuorum == 0) {
+			result["satellite_redundancy_mode"] = "two_satellite_safe";
+		} else if(satelliteTLogReplicationFactor == 4 && satelliteTLogUsableDcs == 2 && satelliteTLogWriteAntiQuorum == 2) {
+			result["satellite_redundancy_mode"] = "two_satellite_fast";
+		} else if(satelliteTLogReplicationFactor == 0) {
+			result["satellite_redundancy_mode"] = "none";
+		} else {
+			result["satellite_redundancy_mode"] = "custom";
 		}
 
-		if( remoteTLogReplicationFactor == 1 )
+		if( remoteTLogReplicationFactor == 1 ) {
 			result["remote_redundancy_mode"] = "remote_single";
-		else if( remoteTLogReplicationFactor == 2 )
+		} else if( remoteTLogReplicationFactor == 2 ) {
 			result["remote_redundancy_mode"] = "remote_double";
-		else if( remoteTLogReplicationFactor == 3 )
+		} else if( remoteTLogReplicationFactor == 3 ) {
 			result["remote_redundancy_mode"] = "remote_triple";
-		else if(remoteTLogReplicationFactor > 0)
+		} else if(remoteTLogReplicationFactor == 0) {
+			result["remote_redundancy_mode"] = "none";
+		} else {
 			result["remote_redundancy_mode"] = "custom";
+		}
 
 		if( desiredTLogCount != -1 )
 			result["logs"] = format("%d", desiredTLogCount);

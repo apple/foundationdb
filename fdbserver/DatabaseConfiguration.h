@@ -54,8 +54,21 @@ struct DatabaseConfiguration {
 	}
 
 	// SOMEDAY: think about changing storageTeamSize to durableStorageQuorum
-	int32_t minMachinesRequired() const { return std::max(tLogReplicationFactor, storageTeamSize); }
-	int32_t maxMachineFailuresTolerated() const { return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, durableStorageQuorum - 1); }
+	int32_t minDatacentersRequired() const {
+		if(!primaryDcId.present()) return 1;
+		return 2 + primarySatelliteDcIds.size() + remoteSatelliteDcIds.size();
+	}
+	int32_t minMachinesRequiredPerDatacenter() const { return std::max( satelliteTLogReplicationFactor/std::max(1,satelliteTLogUsableDcs), std::max( remoteTLogReplicationFactor, std::max(tLogReplicationFactor, storageTeamSize) ) ); }
+
+	//Killing an entire datacenter counts as killing one machine in modes that support it
+	int32_t maxMachineFailuresTolerated() const {
+		if(remoteTLogReplicationFactor > 0 && satelliteTLogReplicationFactor > 0) {
+			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, satelliteTLogReplicationFactor - 1 - satelliteTLogWriteAntiQuorum), durableStorageQuorum - 1);
+		} else if(satelliteTLogReplicationFactor > 0) {
+			return std::min(tLogReplicationFactor + satelliteTLogReplicationFactor - 2 - tLogWriteAntiQuorum - satelliteTLogWriteAntiQuorum, durableStorageQuorum - 1);
+		}
+		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, durableStorageQuorum - 1);
+	}
 
 	// MasterProxy Servers
 	int32_t masterProxyCount;
@@ -120,9 +133,7 @@ struct DatabaseConfiguration {
 		if (ar.isDeserializing) {
 			for(auto c=rawConfiguration.begin(); c!=rawConfiguration.end(); ++c)
 				setInternal(c->key, c->value);
-			if(!storagePolicy || !tLogPolicy) {
-				setDefaultReplicationPolicy();
-			}
+			setDefaultReplicationPolicy();
 		}
 	}
 
@@ -131,9 +142,7 @@ struct DatabaseConfiguration {
 		this->rawConfiguration = rawConfig;
 		for(auto c=rawConfiguration.begin(); c!=rawConfiguration.end(); ++c)
 			setInternal(c->key, c->value);
-		if(!storagePolicy || !tLogPolicy) {
-			setDefaultReplicationPolicy();
-		}
+		setDefaultReplicationPolicy();
 	}
 
 private:

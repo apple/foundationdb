@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : killedMachines(0), killableMachines(0), machinesNeededForProgress(3), neededDatacenters(1), killableDatacenters(0), killedDatacenters(0), maxCoordinatorsInDatacenter(0), desiredCoordinators(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), extraDB(NULL) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), extraDB(NULL) {}
 
 	// Order matters!
 	enum KillType { None, KillInstantly, InjectFaults, RebootAndDelete, Reboot, RebootProcessAndDelete, RebootProcess };
@@ -270,17 +270,8 @@ public:
 	virtual void destroyProcess( ProcessInfo *p ) = 0;
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& zoneId ) = 0;
 
-	// These are here for reasoning about whether it is possible to kill machines (or delete their data)
-	//  and maintain the durability of the database.
-	int killedMachines;
-	int killableMachines;
-	int machinesNeededForProgress;
 	int desiredCoordinators;
-	int neededDatacenters;
-	int killedDatacenters;
-	int killableDatacenters;
 	int physicalDatacenters;
-	int maxCoordinatorsInDatacenter;
 	int processesPerMachine;
 	std::set<NetworkAddress> protectedAddresses;
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;

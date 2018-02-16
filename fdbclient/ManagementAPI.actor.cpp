@@ -737,10 +737,6 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 	state Transaction tr(cx);
 	state int retries = 0;
 
-	//quorum changes do not balance coordinators evenly across datacenters
-	if(g_network->isSimulated())
-		g_simulator.maxCoordinatorsInDatacenter = g_simulator.killableMachines + 1;
-
 	loop {
 		try {
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );

@@ -1535,7 +1535,7 @@ static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configurat
 	statusObj["max_machine_failures_without_losing_data"] = std::max(machineFailuresWithoutLosingData, 0);
 
 	// without losing availablity
-	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(numTLogEligibleMachines - configuration.minMachinesRequired(), machineFailuresWithoutLosingData), 0);
+	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(numTLogEligibleMachines - configuration.minMachinesRequiredPerDatacenter(), machineFailuresWithoutLosingData), 0);
 	return statusObj;
 }
 

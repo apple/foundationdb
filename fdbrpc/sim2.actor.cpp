@@ -1194,10 +1194,9 @@ public:
 		}
 	}
 	virtual void killProcess( ProcessInfo* machine, KillType kt ) {
-		TraceEvent("attemptingKillProcess").detail("killedMachines", killedMachines).detail("killableMachines", killableMachines);
+		TraceEvent("attemptingKillProcess");
 		if (kt < RebootAndDelete ) {
 			killProcess_internal( machine, kt );
-			killedMachines++;
 		}
 	}
 	virtual void killInterface( NetworkAddress address, KillType kt  ) {
@@ -1205,7 +1204,6 @@ public:
 			std::vector<ProcessInfo*>& processes = machines[ addressMap[address]->locality.zoneId() ].processes;
 			for( int i = 0; i < processes.size(); i++ )
 				killProcess_internal( processes[i], kt );
-			killedMachines++;
 		}
 	}
 	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType kt, bool killIsSafe, bool forceKill, KillType* ktFinal) {
@@ -1319,7 +1317,7 @@ public:
 			return false;
 		}
 
-		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KilledMachines", killedMachines).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig).detail("killIsSafe", killIsSafe);
+		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig).detail("killIsSafe", killIsSafe);
 		if (kt < RebootAndDelete ) {
 			if(kt == InjectFaults && machines[zoneId].machineProcess != nullptr)
 				killProcess_internal( machines[zoneId].machineProcess, kt );
@@ -1425,10 +1423,6 @@ public:
 		}
 
 		TraceEvent("killDataCenter")
-			.detail("killedMachines", killedMachines)
-			.detail("killableMachines", killableMachines)
-			.detail("killableDatacenters", killableDatacenters)
-			.detail("maxCoordinatorsInDatacenter", maxCoordinatorsInDatacenter)
 			.detail("DcZones", datacenterZones.size())
 			.detail("DcProcesses", dcProcesses)
 			.detailext("DCID", dcId)
