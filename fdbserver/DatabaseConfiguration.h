@@ -118,7 +118,7 @@ struct DatabaseConfiguration {
 	int32_t getDesiredLogs() const { if(desiredTLogCount == -1) return autoDesiredTLogCount; return desiredTLogCount; }
 	int32_t getDesiredSatelliteLogs() const { if(satelliteDesiredTLogCount == -1) return autoDesiredTLogCount; return satelliteDesiredTLogCount; }
 	int32_t getDesiredRemoteLogs() const { if(remoteDesiredTLogCount == -1) return autoDesiredTLogCount; return remoteDesiredTLogCount; }
-	int32_t getDesiredLogRouters() const { if(desiredLogRouterCount == -1) return autoDesiredTLogCount; return desiredLogRouterCount; }
+	int32_t getDesiredLogRouters() const { if(desiredLogRouterCount == -1) return getDesiredRemoteLogs(); return desiredLogRouterCount; }
 
 	bool operator == ( DatabaseConfiguration const& rhs ) const {
 		const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();

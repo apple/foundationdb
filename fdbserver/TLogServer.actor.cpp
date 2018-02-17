@@ -38,7 +38,6 @@
 #include "LogSystem.h"
 #include "WaitFailure.h"
 #include "RecoveryState.h"
-#include "fdbrpc/simulator.h"
 
 using std::pair;
 using std::make_pair;
@@ -567,7 +566,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	state int totalSize = 0;
 
 	if(logData->stopped) {
-		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD || (g_network->isSimulated() && g_simulator.speedUpSimulation)) {
+		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD) {
 			while(logData->persistentDataDurableVersion != logData->version.get()) {
 				std::vector<std::pair<std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator, std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator>> iters;
 				for(auto tag = logData->tag_data.begin(); tag != logData->tag_data.end(); ++tag)

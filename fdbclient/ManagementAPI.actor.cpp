@@ -65,7 +65,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs" || key == "log_routers") && isInteger(value) ) {
 			out[p+key] = value;
 		}
 
@@ -157,7 +157,11 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	std::string remote_redundancy, remote_log_replicas;
 	IRepPolicyRef remoteTLogPolicy;
 	bool remoteRedundancySpecified = true;
-	if (mode == "remote_single") {
+	if (mode == "remote_none") {
+		remote_redundancy="0";
+		remote_log_replicas="0";
+		remoteTLogPolicy = IRepPolicyRef();
+	} else if (mode == "remote_single") {
 		remote_redundancy="1";
 		remote_log_replicas="1";
 		remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
@@ -180,8 +184,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	if (remoteRedundancySpecified) {
 		out[p+"remote_storage_replicas"] =
 			out[p+"remote_storage_quorum"] = remote_redundancy;
-		out[p+"remote_log_replicas"] = 
-			out[p+"log_routers"] = remote_log_replicas;
+		out[p+"remote_log_replicas"] = remote_log_replicas;
 
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
@@ -192,7 +195,12 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	std::string satellite_log_replicas, satellite_anti_quorum, satellite_usable_dcs;
 	IRepPolicyRef satelliteTLogPolicy;
 	bool satelliteRedundancySpecified = true;
-	if (mode == "one_satellite_single") {
+	if (mode == "satellite_none") {
+		satellite_anti_quorum="0";
+		satellite_usable_dcs="0";
+		satellite_log_replicas="0";
+		satelliteTLogPolicy = IRepPolicyRef();
+	} else if (mode == "one_satellite_single") {
 		satellite_anti_quorum="0";
 		satellite_usable_dcs="1";
 		satellite_log_replicas="1";
@@ -240,13 +248,15 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& modeTokens, std::map<std::string, std::string>& outConf ) {
 	for(auto it : modeTokens) {
 		std::string mode = it.toString();
-
 		auto m = configForToken( mode );
-		if( !m.size() )
+		if( !m.size() ) {
+			TraceEvent(SevWarnAlways, "UnknownOption").detail("option", mode);
 			return ConfigurationResult::UNKNOWN_OPTION;
+		}
 
 		for( auto t = m.begin(); t != m.end(); ++t ) {
 			if( outConf.count( t->first ) ) {
+				TraceEvent(SevWarnAlways, "ConflictingOption").detail("option", printable(StringRef(t->first)));
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
@@ -268,7 +278,6 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
 	}
-
 	return ConfigurationResult::SUCCESS;
 }
 
