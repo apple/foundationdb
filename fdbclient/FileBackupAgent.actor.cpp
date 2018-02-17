@@ -1497,7 +1497,7 @@ namespace fileBackup {
 									.detail("ScheduledVersion", scheduledVersion)
 									.detail("BeginKey", range.begin.printable())
 									.detail("EndKey", range.end.printable())
-									.suppressFor(2, true);
+									.suppressFor(2);
 							}
 							else {
 								// This shouldn't happen because if the transaction was already done or if another execution
