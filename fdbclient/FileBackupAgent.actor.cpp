@@ -178,7 +178,8 @@ public:
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
 		std::string msg = format("ERROR: %s (%s)", details.c_str(), e.what());
-		return lastError().set(cx, {msg, (int64_t)now()});
+
+		return updateErrorInfo(cx, e, msg);
 	}
 
 	Key mutationLogPrefix() {
@@ -283,7 +284,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 	state Future<StringRef> status = restore.stateText(tr);
 	state Future<Version> lag = restore.getApplyVersionLag(tr);
 	state Future<std::string> tag = restore.tag().getD(tr);
-	state Future<std::pair<std::string, int64_t>> lastError = restore.lastError().getD(tr);
+	state Future<std::pair<std::string, Version>> lastError = restore.lastError().getD(tr);
 
 	// restore might no longer be valid after the first wait so make sure it is not needed anymore.
 	state UID uid = restore.getUid();
@@ -291,7 +292,7 @@ ACTOR Future<std::string> RestoreConfig::getProgress_impl(RestoreConfig restore,
 
 	std::string errstr = "None";
 	if(lastError.get().second != 0)
-		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(), (int64_t)now() - lastError.get().second);
+		errstr = format("'%s' %llds ago.\n", lastError.get().first.c_str(), (tr->getReadVersion().get() - lastError.get().second) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND );
 
 	TraceEvent("FileRestoreProgress")
 		.detail("RestoreUID", uid)
@@ -3474,7 +3475,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<std::string> getStatus(FileBackupAgent* backupAgent, Database cx, int errorLimit, std::string tagName) {
+	ACTOR static Future<std::string> getStatus(FileBackupAgent* backupAgent, Database cx, bool showErrors, std::string tagName) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		state std::string statusText;
 
@@ -3501,8 +3502,15 @@ public:
 					statusText += "No previous backups found.\n";
 				} else {
 					state std::string backupStatus(BackupAgentBase::getStateText(backupState));
-					state Reference<IBackupContainer> bc = wait(config.backupContainer().getOrThrow(tr));
-					state Optional<Version> stopVersion = wait(config.getLatestRestorableVersion(tr));
+					state Reference<IBackupContainer> bc;
+					state Optional<Version> latestRestorableVersion;
+					state Version recentReadVersion;
+					
+					Void _ = wait( store(config.getLatestRestorableVersion(tr), latestRestorableVersion)
+								&& store(config.backupContainer().getOrThrow(tr), bc)
+								&& store(tr->getReadVersion(), recentReadVersion)
+							);
+
 					bool snapshotProgress = false;
 
 					switch (backupState) {
@@ -3518,7 +3526,7 @@ public:
 							snapshotProgress = true;
 							break;
 						case BackupAgentBase::STATE_COMPLETED:
-							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed at version " + format("%lld", stopVersion.orDefault(-1)) + ".\n";
+							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " completed at version " + format("%lld", latestRestorableVersion.orDefault(-1)) + ".\n";
 							break;
 						default:
 							statusText += "The previous backup on tag `" + tagName + "' at " + bc->getURL() + " " + backupStatus + ".\n";
@@ -3527,29 +3535,45 @@ public:
 
 					if(snapshotProgress) {
 						state int64_t snapshotInterval;
-						state Version recentReadVersion;
 						state Version snapshotBeginVersion;
 						state Version snapshotTargetEndVersion;
 
-						Void _ = wait(store(config.snapshotBeginVersion().getOrThrow(tr), snapshotBeginVersion)
+						Void _ = wait( store(config.snapshotBeginVersion().getOrThrow(tr), snapshotBeginVersion)
 									&& store(config.snapshotTargetEndVersion().getOrThrow(tr), snapshotTargetEndVersion)
 									&& store(config.snapshotIntervalSeconds().getOrThrow(tr), snapshotInterval)
-									&& store(tr->getReadVersion(), recentReadVersion));
+								);
 
 						statusText += format("Snapshot interval is %lld seconds.  ", snapshotInterval);
 						if(backupState == BackupAgentBase::STATE_DIFFERENTIAL)
-							statusText += format("Current snapshot progress target is %3.2f%%\n", 100.0 * (recentReadVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion)) ;
+							statusText += format("Current snapshot progress target is %3.2f%% (>100%% means the snapshot is supposed to be done)\n", 100.0 * (recentReadVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion)) ;
 						else
 							statusText += "The initial snapshot is still running.\n";
 					}
-				}
 
-				// Append the errors, if requested
-				if (errorLimit > 0 && config.getUid().isValid()) {
-					Optional<std::pair<std::string, int64_t>> errMsg = wait(config.lastError().get(tr));
-					if (errMsg.present()) {
-						statusText += "WARNING: Some backup agents have reported issues:\n";
-						statusText += format("[%lld]: %s\n", errMsg.get().second, errMsg.get().first.c_str());
+					// Append the errors, if requested
+					if (showErrors) {
+						KeyBackedMap<int64_t, std::pair<std::string, Version>>::PairsType errors = wait(config.lastErrorPerType().getRange(tr, 0, std::numeric_limits<int>::max(), CLIENT_KNOBS->TOO_MANY));
+						std::string recentErrors;
+						std::string pastErrors;
+
+						for(auto &e : errors) {
+							Version v = e.second.second;
+							std::string msg = format("%s (%lld seconds ago)\n", e.second.first.c_str(),
+														(recentReadVersion - v) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+
+							// If error version is at or more recent than the latest restorable version then it could be inhibiting progress
+							if(v >= latestRestorableVersion.orDefault(0)) {
+								recentErrors += msg;
+							}
+							else {
+								pastErrors += msg;
+							}
+						}
+
+						if(!recentErrors.empty())
+							statusText += "Errors possibly preventing progress:\n" + recentErrors;
+						if(!pastErrors.empty())
+							statusText += "Older errors:\n" + pastErrors;
 					}
 				}
 
@@ -3770,8 +3794,8 @@ Future<Void> FileBackupAgent::abortBackup(Reference<ReadYourWritesTransaction> t
 	return FileBackupAgentImpl::abortBackup(this, tr, tagName);
 }
 
-Future<std::string> FileBackupAgent::getStatus(Database cx, int errorLimit, std::string tagName) {
-	return FileBackupAgentImpl::getStatus(this, cx, errorLimit, tagName);
+Future<std::string> FileBackupAgent::getStatus(Database cx, bool showErrors, std::string tagName) {
+	return FileBackupAgentImpl::getStatus(this, cx, showErrors, tagName);
 }
 
 Future<Version> FileBackupAgent::getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName) {
