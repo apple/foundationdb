@@ -650,7 +650,7 @@ TraceEvent::TraceEvent(Severity severity, const char* type, const Optional<Stand
 }
 
 TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id) {
-	init(SevInfo, interval);
+	init(interval.severity, interval);
 	detail("ID", id);
 }
 

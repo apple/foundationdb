@@ -193,6 +193,8 @@ struct DDQueueData {
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 
 	double* lastLimited;
+	double lastInterval;
+	int suppressIntervals;
 
 	DDQueueData( MasterInterface mi, MoveKeysLock lock, Database cx, TeamCollectionInterface teamCollection,
 		Reference<ShardsAffectedByTeamFailure> sABTF, PromiseStream<Promise<int64_t>> getAverageShardBytes,
@@ -202,7 +204,7 @@ struct DDQueueData {
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), mi( mi ), lock( lock ),
 			cx( cx ), teamSize( teamSize ), durableStorageQuorum( durableStorageQuorum ), input( input ),
 			getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
-			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited) {}
+			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited), suppressIntervals(0), lastInterval(0) {}
 
 	void validate() {
 		if( EXPENSIVE_VALIDATION ) {
@@ -652,9 +654,19 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 	state Reference<IDataDistributionTeam> destination;
 
 	try {
+		if(now() - self->lastInterval < 1.0) {
+			relocateShardInterval.severity = SevDebug;
+			self->suppressIntervals++;
+		}
+
 		TraceEvent(relocateShardInterval.begin(), masterId)
 			.detail("KeyBegin", printable(rd.keys.begin)).detail("KeyEnd", printable(rd.keys.end))
-			.detail("Priority", rd.priority).detail("RelocationID", relocateShardInterval.pairID);
+			.detail("Priority", rd.priority).detail("RelocationID", relocateShardInterval.pairID).detail("SuppressedEventCount", self->suppressIntervals);
+
+		if(relocateShardInterval.severity != SevDebug) {
+			self->lastInterval = now();
+			self->suppressIntervals = 0;
+		}
 
 		state StorageMetrics metrics = wait( brokenPromiseToNever( self->getShardMetrics.getReply( GetMetricsRequest( rd.keys ) ) ) );
 

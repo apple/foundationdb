@@ -1840,7 +1840,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 				break;
 			} catch (Error& e) {
-				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true);
+				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true).suppressFor(1.0);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
 					Void _ = wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
@@ -2290,9 +2290,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			if (now() - waitStartT >= .1) {
 				TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
 					.detail("Version", data->version.get())
-					.detail("DurableVersion", data->durableVersion.get())
-					//.detail("ExtraBytes", usedBytesOlderThanDesiredDurableVersion(data))
-					;
+					.detail("DurableVersion", data->durableVersion.get()).suppressFor(1.0);
 				waitStartT = now();
 			}
 
