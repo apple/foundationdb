@@ -70,7 +70,6 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup( Database cx, ConfigureDatabaseWorkload *self ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(600, "ConfigureDatabaseSetup");
 		ConfigurationResult::Type _ = wait( changeConfig( cx, "single" ) );
 		return Void();
 	}

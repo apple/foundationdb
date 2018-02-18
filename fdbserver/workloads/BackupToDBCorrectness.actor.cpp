@@ -414,7 +414,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "backupAndRestore");
 		TraceEvent("BARW_Arguments").detail("backupTag", printable(self->backupTag)).detail("backupAfter", self->backupAfter)
 			.detail("abortAndRestartAfter", self->abortAndRestartAfter).detail("differentialAfter", self->stopDifferentialAfter);
 

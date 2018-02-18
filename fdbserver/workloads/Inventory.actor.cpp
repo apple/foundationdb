@@ -103,7 +103,6 @@ struct InventoryTestWorkload : TestWorkload {
 		Database cx,
 		InventoryTestWorkload* self)
 	{
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "Inventory");
 		if (self->failures()) {
 			TraceEvent(SevError, "TestFailure").detail("Reason", "There were client failures.");
 			return false;

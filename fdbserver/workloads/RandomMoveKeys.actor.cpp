@@ -53,7 +53,6 @@ struct MoveKeysWorkload : TestWorkload {
 		if( self->enabled ) {
 			// Get the database configuration so as to use proper team size
 			state Transaction tr(cx);
-			state Future<Void> disabler = disableConnectionFailuresAfter(300, "moveKeys");
 			loop {
 				try {
 					Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, 1000) );

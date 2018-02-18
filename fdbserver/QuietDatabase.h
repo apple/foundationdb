@@ -36,7 +36,4 @@ Future<vector<StorageServerInterface>> getStorageServers( Database const& cx, bo
 Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> const& dbInfo, int const& flags = 0 );
 Future<WorkerInterface> getMasterWorker( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
 
-//Waits for f to complete. If simulated, disables connection failures after waiting a specified amount of time
-Future<Void> disableConnectionFailuresAfter( Future<Void> const& f, double const& disableTime, std::string const& context );
-
 #endif

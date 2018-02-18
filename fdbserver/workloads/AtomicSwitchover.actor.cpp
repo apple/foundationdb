@@ -56,7 +56,6 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _setup(Database cx, AtomicSwitchoverWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "atomicSwitchover");
 		try {
 			TraceEvent("AS_Submit1");
 			Void _ = wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
@@ -153,7 +152,6 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, AtomicSwitchoverWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "atomicSwitchover");
 
 		TraceEvent("AS_Wait1");
 		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );

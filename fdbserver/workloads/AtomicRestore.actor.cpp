@@ -60,7 +60,6 @@ struct AtomicRestoreWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "atomicRestore");
 
 		Void _ = wait( delay(self->startAfter * g_random->random01()) );
 		TraceEvent("AtomicRestore_Start");

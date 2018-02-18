@@ -437,7 +437,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> loadAndRun( Database cx, WriteDuringReadWorkload* self ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "WriteDuringRead");
 		state double startTime = now();
 		loop {
 			state int i = 0;

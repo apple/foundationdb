@@ -285,7 +285,6 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state FileBackupAgent backupAgent;
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "backupAndRestore");
 		TraceEvent("BARW_Arguments").detail("backupTag", printable(self->backupTag)).detail("performRestore", self->performRestore)
 			.detail("backupAfter", self->backupAfter).detail("restoreAfter", self->restoreAfter)
 			.detail("abortAndRestartAfter", self->abortAndRestartAfter).detail("differentialAfter", self->stopDifferentialAfter);

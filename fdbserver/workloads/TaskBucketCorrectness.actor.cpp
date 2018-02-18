@@ -205,7 +205,6 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 		state Subspace taskSubspace(LiteralStringRef("backup-agent"));
 		state Reference<TaskBucket> taskBucket(new TaskBucket(taskSubspace.get(LiteralStringRef("tasks"))));
 		state Reference<FutureBucket> futureBucket(new FutureBucket(taskSubspace.get(LiteralStringRef("futures"))));
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "TaskBucketCorrectness");
 
 		try {
 			if (self->clientId == 0){

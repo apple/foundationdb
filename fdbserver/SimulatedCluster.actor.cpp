@@ -685,7 +685,8 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	datacenters = g_random->randomInt( 1, 4 );
+	bool generateFearless = true; //FIXME randomize
+	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);
@@ -695,7 +696,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("memory");
 	}
 
-	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt(0,6), 3));
+	int replication_type = 1; //std::max(minimumReplication, std::min(g_random->randomInt(0,6), 3)); //FIXME
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
@@ -721,7 +722,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		break;
 	}
 	case 3: {
-		if( datacenters == 1 ) {
+		if( datacenters == 1 || generateFearless ) {
 			TEST( true );  // Simulated cluster running in triple redundancy mode
 			set_config("triple");
 		}
@@ -742,12 +743,34 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		ASSERT(false);  // Programmer forgot to adjust cases.
 	}
 
-	if(datacenters == 2 && g_random->random01() < 0.5) {
+	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		db.primaryDcId = LiteralStringRef("0");
 		db.remoteDcId = LiteralStringRef("1");	
 	}
+
+	if(generateFearless) {
+		db.primarySatelliteDcIds.resize(1);
+		db.primarySatelliteDcIds[0] = LiteralStringRef("2");
+		db.remoteSatelliteDcIds.resize(1);
+		db.remoteSatelliteDcIds[0] = LiteralStringRef("3");
+
+		//FIXME: random setups
+		set_config("remote_single");
+		set_config("one_satellite_single");
+
+		db.remoteDesiredTLogCount = 1; 
+		db.desiredLogRouterCount = 1;
+		db.satelliteDesiredTLogCount = 1;
+
+		//FIXME: delete
+		db.desiredTLogCount = 1;
+		db.masterProxyCount = 1;
+		db.resolverCount = 1;
+	}
 	
-	if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
+	if(generateFearless) {
+		machine_count = 12;
+	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
 		machine_count = 9;
 	} else {
 		//datacenters+2 so that the configure database workload can configure into three_data_hall
@@ -763,7 +786,12 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		machine_count = std::max( machine_count, 6);
 		coordinators = 3;
 	}
-	processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
+
+	if(generateFearless) {
+		processes_per_machine = 1;
+	} else {
+		processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
+	}
 }
 
 std::string SimulationConfig::toString() {

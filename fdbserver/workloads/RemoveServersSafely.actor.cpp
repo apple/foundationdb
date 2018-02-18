@@ -281,7 +281,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> workloadMain( RemoveServersSafelyWorkload* self, Database cx, double waitSeconds,
 			std::set<AddressExclusion> toKill1, std::set<AddressExclusion> toKill2 ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter( 500.0, "RemoveServersSafely" );
 		Void _ = wait( delay( waitSeconds ) );
 
 		// Removing the first set of machines might legitimately bring the database down, so a timeout is not an error
