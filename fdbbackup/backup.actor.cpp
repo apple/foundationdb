@@ -1557,12 +1557,12 @@ ACTOR Future<Void> statusDBBackup(Database src, Database dest, std::string tagNa
 	return Void();
 }
 
-ACTOR Future<Void> statusBackup(Database db, std::string tagName, int errorLimit) {
+ACTOR Future<Void> statusBackup(Database db, std::string tagName, bool showErrors) {
 	try
 	{
 		state FileBackupAgent backupAgent;
 
-		std::string	statusText = wait(backupAgent.getStatus(db, errorLimit, tagName));
+		std::string	statusText = wait(backupAgent.getStatus(db, showErrors, tagName));
 		printf("%s\n", statusText.c_str());
 	}
 	catch (Error& e) {
@@ -2279,6 +2279,8 @@ int main(int argc, char* argv[]) {
 		bool dryRun = false;
 		std::string traceDir = "";
 		std::string traceLogGroup;
+		uint64_t traceRollSize = TRACE_DEFAULT_ROLL_SIZE;
+		uint64_t traceMaxLogsSize = TRACE_DEFAULT_MAX_LOGS_SIZE;
 		ESOError	lastError;
 		bool partial = true;
 		LocalityData localities;
@@ -2706,6 +2708,14 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
+		// Opens a trace file if trace is set (and if a trace file isn't already open)
+		// For most modes, initCluster() will open a trace file, but some fdbbackup operations do not require
+		// a cluster so they should use this instead.
+		auto initTraceFile = [&]() {
+			if(trace)
+				openTraceFile(NetworkAddress(), traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
+		};
+
 		auto initCluster = [&](bool quiet = false) {
 			auto resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName(clusterFile);
 			try {
@@ -2784,7 +2794,7 @@ int main(int argc, char* argv[]) {
 			case BACKUP_STATUS:
 				if(!initCluster())
 					return FDB_EXIT_ERROR;
-				f = stopAfter( statusBackup(db, tagName, maxErrors) );
+				f = stopAfter( statusBackup(db, tagName, true) );
 				break;
 
 			case BACKUP_ABORT:
@@ -2818,6 +2828,7 @@ int main(int argc, char* argv[]) {
 				break;
 
 			case BACKUP_EXPIRE:
+				initTraceFile();
 				// Must have a usable cluster if either expire DateTime options were used
 				if(!expireDatetime.empty() || !expireRestorableAfterDatetime.empty()) {
 					if(!initCluster())
@@ -2827,10 +2838,12 @@ int main(int argc, char* argv[]) {
 				break;
 
 			case BACKUP_DELETE:
+				initTraceFile();
 				f = stopAfter( deleteBackupContainer(argv[0], destinationContainer) );
 				break;
 
 			case BACKUP_DESCRIBE:
+				initTraceFile();
 				// If timestamp lookups are desired, require a cluster file
 				if(describeTimestamps && !initCluster())
 					return FDB_EXIT_ERROR;
@@ -2839,6 +2852,7 @@ int main(int argc, char* argv[]) {
 				f = stopAfter( describeBackup(argv[0], destinationContainer, describeDeep, describeTimestamps ? Optional<Database>(db) : Optional<Database>()) );
 				break;
 			case BACKUP_LIST:
+				initTraceFile();
 				f = stopAfter( listBackup(baseUrl) );
 				break;
 

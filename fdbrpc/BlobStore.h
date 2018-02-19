@@ -185,11 +185,12 @@ public:
 	// Delete an object in a bucket
 	Future<Void> deleteObject(std::string const &bucket, std::string const &object);
 
-	// Delete a bucket - note this is not atomic as blob store does not support this operation directly.
-	// This method is just a convenience method that lists and deletes all of the objects in the bucket
+	// Delete all objects in a bucket under a prefix.  Note this is not atomic as blob store does not
+	// support this operation directly. This method is just a convenience method that lists and deletes
+	// all of the objects in the bucket under the given prefix.
 	// Since it can take a while, if a pNumDeleted is provided then it will be incremented every time
 	// a deletion of an object completes.
-	Future<Void> deleteBucket(std::string const &bucket, int *pNumDeleted = NULL);
+	Future<Void> deleteRecursively(std::string const &bucket, std::string prefix = "", int *pNumDeleted = NULL);
 
 	// Create a bucket if it does not already exists.
 	Future<Void> createBucket(std::string const &bucket);

@@ -133,6 +133,5 @@ ifdef(`RHEL6', `/usr/lib/foundationdb/argparse.py')
 /usr/bin/fdbdr
 /usr/bin/fdbbackup
 /usr/bin/fdbrestore
-/usr/bin/fdbblob
 /usr/lib64/libfdb_c.so
 /usr/include/*

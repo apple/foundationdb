@@ -32,7 +32,7 @@
 
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
   <Product Name='$(var.Title)'
-           Id='{62160341-2769-4104-9D74-4235618775EA}'
+           Id='{61C46988-7589-4B8A-9BB9-D850FD5B8B05}'
            UpgradeCode='{A95EA002-686E-4164-8356-C715B7F8B1C8}'
            Version='$(var.Version)'
            Manufacturer='$(var.Manufacturer)'
@@ -151,7 +151,6 @@
             <Component Id='FDBBackupClientExecutable' Guid='{F5E0A796-EC21-406F-88E1-3195165E3078}' Win64='yes'>
               <File Id='FDBBACKUPEXE' Name='fdbbackup.exe' DiskId='1' Source='$(var.bindir)fdbbackup.exe' KeyPath='yes'/>
               <File Id='FDBRESTOREEXE' Name='fdbrestore.exe' DiskId='1' Source='$(var.bindir)fdbrestore.exe' KeyPath='no'/>
-              <File Id='FDBBLOBEXE' Name='fdbblob.exe' DiskId='1' Source='$(var.bindir)fdbblob.exe' KeyPath='no'/>
               <File Id='FDBDREXE' Name='fdbdr.exe' DiskId='1' Source='$(var.bindir)fdbdr.exe' KeyPath='no'/>
             </Component>
 

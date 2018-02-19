@@ -215,34 +215,56 @@ Future<Void> BlobStoreEndpoint::deleteObject(std::string const &bucket, std::str
 	return deleteObject_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, object);
 }
 
-ACTOR Future<Void> deleteBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket, int *pNumDeleted) {
+ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string prefix, int *pNumDeleted) {
 	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-	state Future<Void> done = b->listBucketStream(bucket, resultStream);
-	state std::vector<Future<Void>> deleteFutures;
-	loop {
-		choose {
-			when(Void _ = wait(done)) {
-				break;
-			}
-			when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
-				for(auto &object : list.objects) {
-					int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
-					deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [pNumDeletedCopy](Void) -> Void {
-						if(pNumDeletedCopy != nullptr)
-							++*pNumDeletedCopy;
-						return Void();
-					}));
+	// Start a recursive parallel listing which will send results to resultStream as they are received
+	state Future<Void> done = b->listBucketStream(bucket, resultStream, prefix, '/', std::numeric_limits<int>::max());
+	// Wrap done in an actor which will send end_of_stream since listBucketStream() does not (so that many calls can write to the same stream)
+	done = map(done, [=](Void) {
+		resultStream.sendError(end_of_stream());
+		return Void();
+	});
+
+	state std::list<Future<Void>> deleteFutures;
+	try {
+		loop {
+			choose {
+				// Throw if done throws, otherwise don't stop until end_of_stream
+				when(Void _ = wait(done)) {}
+
+				when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
+					for(auto &object : list.objects) {
+						int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
+						deleteFutures.push_back(map(b->deleteObject(bucket, object.name), [pNumDeletedCopy](Void) -> Void {
+							if(pNumDeletedCopy != nullptr)
+								++*pNumDeletedCopy;
+							return Void();
+						}));
+					}
 				}
 			}
+
+			// This is just a precaution to avoid having too many outstanding delete actors waiting to run
+			while(deleteFutures.size() > CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS) {
+				Void _ = wait(deleteFutures.front());
+				deleteFutures.pop_front();
+			}
 		}
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream)
+			throw;
 	}
 
-	Void _ = wait(waitForAll(deleteFutures));
+	while(deleteFutures.size() > 0) {
+		Void _ = wait(deleteFutures.front());
+		deleteFutures.pop_front();
+	}
+
 	return Void();
 }
 
-Future<Void> BlobStoreEndpoint::deleteBucket(std::string const &bucket, int *pNumDeleted) {
-	return deleteBucket_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, pNumDeleted);
+Future<Void> BlobStoreEndpoint::deleteRecursively(std::string const &bucket, std::string prefix, int *pNumDeleted) {
+	return deleteRecursively_impl(Reference<BlobStoreEndpoint>::addRef(this), bucket, prefix, pNumDeleted);
 }
 
 ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
@@ -274,35 +296,35 @@ Future<int64_t> BlobStoreEndpoint::objectSize(std::string const &bucket, std::st
 // Try to read a file, parse it as JSON, and return the resulting document.
 // It will NOT throw if any errors are encountered, it will just return an empty
 // JSON object and will log trace events for the errors encountered.
-ACTOR Future<json_spirit::mObject> tryReadJSONFile(std::string path) {
+ACTOR Future<Optional<json_spirit::mObject>> tryReadJSONFile(std::string path) {
 	state std::string content;
 
+	// Event type to be logged in the event of an exception
+	state const char *errorEventType = "BlobCredentialFileError";
+
 	try {
-		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY, 0));
+		state Reference<IAsyncFile> f = wait(IAsyncFileSystem::filesystem()->open(path, IAsyncFile::OPEN_NO_AIO | IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 		state int64_t size = wait(f->size());
 		state Standalone<StringRef> buf = makeString(size);
 		int r = wait(f->read(mutateString(buf), size, 0));
 		ASSERT(r == size);
 		content = buf.toString();
-	} catch(Error &e) {
-		if(e.code() != error_code_actor_cancelled)
-			TraceEvent(SevWarn, "BlobCredentialFileError").detail("File", path).error(e).suppressFor(60, true);
-		return json_spirit::mObject();
-	}
 
-	try {
+		// Any exceptions from hehre forward are parse failures
+		errorEventType = "BlobCredentialFileParseFailed";
 		json_spirit::mValue json;
 		json_spirit::read_string(content, json);
 		if(json.type() == json_spirit::obj_type)
 			return json.get_obj();
 		else
 			TraceEvent(SevWarn, "BlobCredentialFileNotJSONObject").detail("File", path).suppressFor(60, true);
+
 	} catch(Error &e) {
 		if(e.code() != error_code_actor_cancelled)
-			TraceEvent(SevWarn, "BlobCredentialFileParseFailed").detail("File", path).error(e).suppressFor(60, true);
+			TraceEvent(SevWarn, errorEventType).detail("File", path).error(e).suppressFor(60, true);
 	}
 
-	return json_spirit::mObject();
+	return Optional<json_spirit::mObject>();
 }
 
 ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
@@ -310,7 +332,7 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 	if(pFiles == nullptr)
 		return Void();
 
-	state std::vector<Future<json_spirit::mObject>> reads;
+	state std::vector<Future<Optional<json_spirit::mObject>>> reads;
 	for(auto &f : *pFiles)
 		reads.push_back(tryReadJSONFile(f));
 
@@ -318,13 +340,22 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 
 	std::string key = b->key + "@" + b->host;
 
+	int invalid = 0;
+
 	for(auto &f : reads) {
-		JSONDoc doc(f.get());
+		// If value not present then the credentials file wasn't readable or valid.  Continue to check other results.
+		if(!f.get().present()) {
+			++invalid;
+			continue;
+		}
+
+		JSONDoc doc(f.get().get());
 		if(doc.has("accounts") && doc.last().type() == json_spirit::obj_type) {
 			JSONDoc accounts(doc.last().get_obj());
 			if(accounts.has(key, false) && accounts.last().type() == json_spirit::obj_type) {
 				JSONDoc account(accounts.last());
 				std::string secret;
+				// Once we find a matching account, use it.
 				if(account.tryGet("secret", secret)) {
 					b->secret = secret;
 					return Void();
@@ -333,7 +364,12 @@ ACTOR Future<Void> updateSecret_impl(Reference<BlobStoreEndpoint> b) {
 		}
 	}
 
-	return Void();
+	// If any sources were invalid
+	if(invalid > 0)
+		throw backup_auth_unreadable();
+
+	// All sources were valid but didn't contain the desired info
+	throw backup_auth_missing();
 }
 
 Future<Void> BlobStoreEndpoint::updateSecret() {
@@ -435,12 +471,9 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			rconn.conn.clear();
 
 		} catch(Error &e) {
-			// For timeouts, conn failure, or bad reponse reported by HTTP:doRequest, save the error and handle it / possibly retry below.
-			// Any other error is rethrown.
-			if(e.code() == error_code_connection_failed || e.code() == error_code_timed_out || e.code() == error_code_http_bad_response)
-				err = e;
-			else
+			if(e.code() == error_code_actor_cancelled)
 				throw;
+			err = e;
 		}
 
 		// If err is not present then r is valid.
@@ -649,17 +682,29 @@ ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreE
 	state BlobStoreEndpoint::ListResult results;
 	state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
 	state Future<Void> done = bstore->listBucketStream(bucket, resultStream, prefix, delimiter, maxDepth, recurseFilter);
-	loop {
-		choose {
-			when(Void _ = wait(done)) {
-				break;
-			}
-			when(BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
-				results.commonPrefixes.insert(results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
-				results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
+	// Wrap done in an actor which sends end_of_stream because list does not so that many lists can write to the same stream
+	done = map(done, [=](Void) {
+		resultStream.sendError(end_of_stream());
+		return Void();
+	});
+
+	try {
+		loop {
+			choose {
+				// Throw if done throws, otherwise don't stop until end_of_stream
+				when(Void _ = wait(done)) {}
+
+				when(BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
+					results.commonPrefixes.insert(results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
+					results.objects.insert(results.objects.end(), info.objects.begin(), info.objects.end());
+				}
 			}
 		}
+	} catch(Error &e) {
+		if(e.code() != error_code_end_of_stream)
+			throw;
 	}
+
 	return results;
 }
 

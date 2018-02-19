@@ -1933,6 +1933,8 @@ TEST_CASE("status/json/merging") {
 	a.create("not_expired_and_merged.$expires.seven.$sum") = 1;
 	a.create("not_expired_and_merged.$expires.one.$min") = 3;
 	a.create("not_expired_and_merged.version") = 3;
+	a.create("mixed_numeric_sum_6.$sum") = 0.5;
+	a.create("mixed_numeric_min_0.$min") = 1.5;
 
 	b.create("int_one") = 1;
 	b.create("int_unmatched") = 3;
@@ -1956,6 +1958,8 @@ TEST_CASE("status/json/merging") {
 	b.create("latest_obj.timestamp") = 2;
 	b.create("latest_int_5.$latest") = 7;
 	b.create("latest_int_5.timestamp") = 2;
+	b.create("mixed_numeric_sum_6.$sum") = 1;
+	b.create("mixed_numeric_min_0.$min") = 4.5;
 
 	c.create("int_total_30.$sum") = 0;
 	c.create("not_expired.$expires") = "I am still valid";
@@ -1971,18 +1975,25 @@ TEST_CASE("status/json/merging") {
 	c.create("latest_obj.$latest.not_expired.$expires") = "Still alive.";
 	c.create("latest_obj.$latest.not_expired.version") = 3;
 	c.create("latest_obj.timestamp") = 3;
-	b.create("latest_int_5.$latest") = 5;
-	b.create("latest_int_5.timestamp") = 3;
+	c.create("latest_int_5.$latest") = 5;
+	c.create("latest_int_5.timestamp") = 3;
+	c.create("mixed_numeric_sum_6.$sum") = 4.5;
+	c.create("mixed_numeric_min_0.$min") = (double)0.0;
+
+	printf("a = \n%s\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print).c_str());
+	printf("b = \n%s\n", json_spirit::write_string(json_spirit::mValue(objB), json_spirit::pretty_print).c_str());
+	printf("c = \n%s\n", json_spirit::write_string(json_spirit::mValue(objC), json_spirit::pretty_print).c_str());
 
 	JSONDoc::expires_reference_version = 2;
 	a.absorb(b);
 	a.absorb(c);
 	a.cleanOps();
+	printf("result = \n%s\n", json_spirit::write_string(json_spirit::mValue(objA), json_spirit::pretty_print).c_str());
 	std::string result = json_spirit::write_string(json_spirit::mValue(objA));
-	std::string expected = "{\"a\":\"justA\",\"b\":\"justB\",\"bool_true\":true,\"expired\":null,\"int_one\":1,\"int_total_30\":30,\"int_unmatched\":{\"ERROR\":\"Values do not match.\",\"a\":2,\"b\":3},\"last_hello\":\"hello\",\"latest_int_5\":5,\"latest_obj\":{\"a\":\"a\",\"b\":\"b\",\"not_expired\":\"Still alive.\"},\"not_expired\":\"I am still valid\",\"not_expired_and_merged\":{\"one\":1,\"seven\":7},\"string\":\"test\",\"subdoc\":{\"double_max_5\":5,\"double_min_2\":2,\"int_11\":11,\"obj_count_3\":3}}";
+	std::string expected = "{\"a\":\"justA\",\"b\":\"justB\",\"bool_true\":true,\"expired\":null,\"int_one\":1,\"int_total_30\":30,\"int_unmatched\":{\"ERROR\":\"Values do not match.\",\"a\":2,\"b\":3},\"last_hello\":\"hello\",\"latest_int_5\":5,\"latest_obj\":{\"a\":\"a\",\"b\":\"b\",\"not_expired\":\"Still alive.\"},\"mixed_numeric_min_0\":0,\"mixed_numeric_sum_6\":6,\"not_expired\":\"I am still valid\",\"not_expired_and_merged\":{\"one\":1,\"seven\":7},\"string\":\"test\",\"subdoc\":{\"double_max_5\":5,\"double_min_2\":2,\"int_11\":11,\"obj_count_3\":3}}";
 
 	if(result != expected) {
-		printf("ERROR:  Combined doc does not match expected.\nexpected: %s\nresult:   %s\n", expected.c_str(), result.c_str());
+		printf("ERROR:  Combined doc does not match expected.\nexpected:\n\n%s\nresult:\n%s\n", expected.c_str(), result.c_str());
 		ASSERT(false);
 	}
 

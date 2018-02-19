@@ -1242,7 +1242,7 @@ ThreadFuture<Reference<ICluster>> MultiVersionApi::createCluster(const char *clu
 	lock.enter();
 	if(!networkSetup) {
 		lock.leave();
-		throw network_not_setup();
+		return network_not_setup();
 	}
 	lock.leave();
 

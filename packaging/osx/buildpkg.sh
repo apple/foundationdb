@@ -33,7 +33,6 @@ dos2unix README.md $CLIENTSDIR/usr/local/foundationdb/README
 chmod 0644 $CLIENTSDIR/usr/local/foundationdb/README
 ln -s /usr/local/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/local/bin/fdbbackup
 ln -s /usr/local/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/local/bin/fdbrestore
-ln -s /usr/local/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/local/bin/fdbblob
 ln -s /usr/local/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/local/bin/fdbdr
 ln -s /usr/local/foundationdb/backup_agent/backup_agent $CLIENTSDIR/usr/local/bin/dr_agent
 

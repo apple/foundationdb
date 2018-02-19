@@ -124,6 +124,15 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
+		state FileBackupAgent agent;
+		loop {
+			std::string status = wait(agent.getStatus(cx, true, tag));
+			puts(status.c_str());
+			Void _ = wait(delay(2.0));
+		}
+	}
+
 	ACTOR static Future<Void> doBackup(BackupAndRestoreCorrectnessWorkload* self, double startDelay, FileBackupAgent* backupAgent, Database cx,
 		Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges, double stopDifferentialDelay, Promise<Void> submittted) {
 
@@ -148,6 +157,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_doBackupSubmitBackup", randomID).detail("tag", printable(tag)).detail("stopWhenDone", stopDifferentialDelay ? "False" : "True");
 
 		state std::string backupContainer = "file://simfdb/backups/";
+		state Future<Void> status = statusLoop(cx, tag.toString());
+
 		try {
 			Void _ = wait(backupAgent->submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
 		}

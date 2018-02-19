@@ -962,7 +962,7 @@ private:
 	// Backup files to under a single folder prefix with subfolders for each named backup
 	static const std::string DATAFOLDER;
 
-	// The metafolder contains keys for which user-named backups exist.  Backup names can contain an arbitrary
+	// Indexfolder contains keys for which user-named backups exist.  Backup names can contain an arbitrary
 	// number of slashes so the backup names are kept in a separate folder tree from their actual data.
 	static const std::string INDEXFOLDER;
 
@@ -1080,36 +1080,8 @@ public:
 	}
 
 	ACTOR static Future<Void> deleteContainer_impl(Reference<BackupContainerBlobStore> bc, int *pNumDeleted) {
-		state PromiseStream<BlobStoreEndpoint::ListResult> resultStream;
-		state Future<Void> done = bc->m_bstore->listBucketStream(BUCKET, resultStream, bc->dataPath(""), '/', std::numeric_limits<int>::max());
-		state std::list<Future<Void>> deleteFutures;
-		loop {
-			choose {
-				when(Void _ = wait(done)) {
-					break;
-				}
-				when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
-					for(auto &object : list.objects) {
-						int *pNumDeletedCopy = pNumDeleted;   // avoid capture of this
-						deleteFutures.push_back(map(bc->m_bstore->deleteObject(BUCKET, object.name), [pNumDeletedCopy](Void) {
-							if(pNumDeletedCopy != nullptr)
-								++*pNumDeletedCopy;
-							return Void();
-						}));
-					}
-
-					while(deleteFutures.size() > CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS) {
-						Void _ = wait(deleteFutures.front());
-						deleteFutures.pop_front();
-					}
-				}
-			}
-		}
-
-		while(deleteFutures.size() > 0) {
-			Void _ = wait(deleteFutures.front());
-			deleteFutures.pop_front();
-		}
+		// First delete everything under the data prefix in the bucket
+		Void _ = wait(bc->m_bstore->deleteRecursively(BUCKET, bc->dataPath(""), pNumDeleted));
 
 		// Now that all files are deleted, delete the index entry
 		Void _ = wait(bc->m_bstore->deleteObject(BUCKET, bc->indexEntry()));
@@ -1357,23 +1329,23 @@ ACTOR Future<Void> testBackupContainer(std::string url) {
 	state int64_t versionShift = g_random->randomInt64(0, std::numeric_limits<Version>::max() - 500);
 
 	state Reference<IBackupFile> log1 = wait(c->writeLogFile(100 + versionShift, 150 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, log1, 0));
-
 	state Reference<IBackupFile> log2 = wait(c->writeLogFile(150 + versionShift, 300 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, log2, g_random->randomInt(0, 10000000)));
-
 	state Reference<IBackupFile> range1 = wait(c->writeRangeFile(160 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, range1, g_random->randomInt(0, 1000)));
-
 	state Reference<IBackupFile> range2 = wait(c->writeRangeFile(300 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, range2, g_random->randomInt(0, 100000)));
-
 	state Reference<IBackupFile> range3 = wait(c->writeRangeFile(310 + versionShift, 10));
-	Void _ = wait(writeAndVerifyFile(c, range3, g_random->randomInt(0, 3000000)));
 
-	Void _ = wait(c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size()));
+	Void _ = wait(
+		   writeAndVerifyFile(c, log1, 0)
+		&& writeAndVerifyFile(c, log2, g_random->randomInt(0, 10000000))
+		&& writeAndVerifyFile(c, range1, g_random->randomInt(0, 1000))
+		&& writeAndVerifyFile(c, range2, g_random->randomInt(0, 100000))
+		&& writeAndVerifyFile(c, range3, g_random->randomInt(0, 3000000))
+	);
 
-	Void _ = wait(c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size()));
+	Void _ = wait(
+		   c->writeKeyspaceSnapshotFile({range1->getFileName(), range2->getFileName()}, range1->size() + range2->size())
+		&& c->writeKeyspaceSnapshotFile({range3->getFileName()}, range3->size())
+	);
 
 	printf("Checking file list dump\n");
 	FullBackupListing listing = wait(c->dumpFileList());
