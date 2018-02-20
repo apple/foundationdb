@@ -37,6 +37,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 	static int backupAgentRequests;
 	bool locked;
 	bool allowPauses;
+	bool shareLogRange;
 
 	BackupAndRestoreCorrectnessWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx) {
@@ -53,12 +54,21 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			differentialBackup ? g_random->random01() * (restoreAfter - std::max(abortAndRestartAfter,backupAfter)) + std::max(abortAndRestartAfter,backupAfter) : 0.0);
 		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
 		allowPauses = getOption(options, LiteralStringRef("allowPauses"), true);
+		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 
 		KeyRef beginRange;
 		KeyRef endRange;
 		UID randomID = g_nondeterministic_random->randomUniqueID();
 
-		if(backupRangesCount <= 0) {
+		if (shareLogRange) {
+			if (g_random->random01() < 0.5) {
+				backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+			} else if (g_random->random01() < 0.75) {
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, LiteralStringRef("\x7f")));
+			} else {
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(LiteralStringRef("\x7f"), normalKeys.end));
+			}
+		} else if (backupRangesCount <= 0) {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
 			// Add backup ranges
@@ -331,6 +341,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			state KeyBackedTag keyBackedTag = makeBackupTag(self->backupTag.toString());
 			UidAndAbortedFlagT uidFlag = wait(keyBackedTag.getOrThrow(cx));
 			state UID logUid = uidFlag.first;
+			state Key destUidValue = wait(BackupConfig(logUid).destUidValue().getD(cx));
 			state Reference<IBackupContainer> lastBackupContainer = wait(BackupConfig(logUid).backupContainer().getD(cx));
 
 			// Occasionally start yet another backup that might still be running when we restore
@@ -420,8 +431,10 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			state Key	backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
-			state Key	backupLogValuesKey = uidPrefixKey(backupLogKeys.begin, logUid);
+			state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
+			state Key backupLogValuesKey = destUidValue.withPrefix(backupLogKeys.begin);
+			state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
+			state Key backupLatestVersionsKey = uidPrefixKey(backupLatestVersionsPath, logUid);
 			state int displaySystemKeys = 0;
 
 			// Ensure that there is no left over key within the backup subspace
@@ -433,39 +446,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-					Standalone<RangeResultRef> agentValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
-					// Error if the system keyspace for the backup tag is not empty
-					if (agentValues.size() > 0) {
-						displaySystemKeys ++;
-						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n", agentValues.size(), printable(backupAgentKey).c_str());
-						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID).detail("backupTag", printable(self->backupTag))
-							.detail("LeftOverKeys", agentValues.size()).detail("keySpace", printable(backupAgentKey));
-						for (auto & s : agentValues) {
-							TraceEvent("BARW_LeftOverKey", randomID).detail("key", printable(StringRef(s.key.toString()))).detail("value", printable(StringRef(s.value.toString())));
-							printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(), printable(StringRef(s.value.toString())).c_str());
-						}
-					}
-					else {
-						printf("No left over backup agent configuration keys\n");
-					}
-
-					Standalone<RangeResultRef> logValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
-
-					// Error if the log/mutation keyspace for the backup tag  is not empty
-					if (logValues.size() > 0) {
-						displaySystemKeys ++;
-						printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n", logValues.size(), printable(backupLogValuesKey).c_str());
-						TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID).detail("backupTag", printable(self->backupTag))
-							.detail("LeftOverKeys", logValues.size()).detail("keySpace", printable(backupLogValuesKey));
-						for (auto & s : logValues) {
-							TraceEvent("BARW_LeftOverKey", randomID).detail("key", printable(StringRef(s.key.toString()))).detail("value", printable(StringRef(s.value.toString())));
-							printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(), printable(StringRef(s.value.toString())).c_str());
-						}
-					}
-					else {
-						printf("No left over backup log keys\n");
-					}
 
 					// Check the left over tasks
 					// We have to wait for the list to empty since an abort and get status
@@ -501,6 +482,48 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						displaySystemKeys ++;
 						TraceEvent(SevError, "BARW_NonzeroTaskCount", randomID).detail("backupTag", printable(self->backupTag)).detail("taskCount", taskCount).detail("waitCycles", waitCycles);
 						printf("BackupCorrectnessLeftOverLogTasks: %ld\n", (long) taskCount);
+					}
+
+
+
+					Standalone<RangeResultRef> agentValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
+
+					// Error if the system keyspace for the backup tag is not empty
+					if (agentValues.size() > 0) {
+						displaySystemKeys ++;
+						printf("BackupCorrectnessLeftOverMutationKeys: (%d) %s\n", agentValues.size(), printable(backupAgentKey).c_str());
+						TraceEvent(SevError, "BackupCorrectnessLeftOverMutationKeys", randomID).detail("backupTag", printable(self->backupTag))
+							.detail("LeftOverKeys", agentValues.size()).detail("keySpace", printable(backupAgentKey));
+						for (auto & s : agentValues) {
+							TraceEvent("BARW_LeftOverKey", randomID).detail("key", printable(StringRef(s.key.toString()))).detail("value", printable(StringRef(s.value.toString())));
+							printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(), printable(StringRef(s.value.toString())).c_str());
+						}
+					}
+					else {
+						printf("No left over backup agent configuration keys\n");
+					}
+
+					Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
+					if (latestVersion.present()) {
+						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID).detail("backupTag", printable(self->backupTag)).detail("backupLatestVersionsKey", backupLatestVersionsKey.printable()).detail("destUidValue", destUidValue.printable());
+					} else {
+						printf("No left over backup version key\n");
+					}
+
+					Standalone<RangeResultRef> versions = wait(tr->getRange(KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
+					if (!self->shareLogRange || !versions.size()) {
+						Standalone<RangeResultRef> logValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
+
+						// Error if the log/mutation keyspace for the backup tag  is not empty
+						if (logValues.size() > 0) {
+							displaySystemKeys ++;
+							printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n", logValues.size(), printable(backupLogValuesKey).c_str());
+							TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID).detail("backupTag", printable(self->backupTag))
+								.detail("LeftOverKeys", logValues.size()).detail("keySpace", printable(backupLogValuesKey));
+						}
+						else {
+							printf("No left over backup log keys\n");
+						}
 					}
 
 					break;

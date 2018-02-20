@@ -146,7 +146,19 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 			it.cancel();
 		}
 	}
-	else if (g_simulator.backupAgents == ISimulator::BackupToDB) {
+
+	Void _= wait(Future<Void>(Never()));
+	throw internal_error();
+}
+
+ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
+	state std::vector<Future<Void>> agentFutures;
+
+	while (g_simulator.drAgents == ISimulator::WaitForType) {
+		Void _ = wait(delay(1.0));
+	}
+
+	if (g_simulator.drAgents == ISimulator::BackupToDB) {
 		Reference<Cluster> cluster = Cluster::createCluster(connFile, -1);
 		Database cx = cluster->createDatabase(LiteralStringRef("DB")).get();
 
@@ -154,7 +166,7 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 		Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
 		state Database extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
 
-		TraceEvent("StartingBackupAgents").detail("connFile", connFile->getConnectionString().toString()).detail("extraString", extraFile->getConnectionString().toString());
+		TraceEvent("StartingDrAgents").detail("connFile", connFile->getConnectionString().toString()).detail("extraString", extraFile->getConnectionString().toString());
 
 		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
 		state DatabaseBackupAgent extraAgent = DatabaseBackupAgent(extraDB);
@@ -165,11 +177,11 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 		agentFutures.push_back(extraAgent.run(cx, &dr1PollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 		agentFutures.push_back(dbAgent.run(extraDB, &dr2PollDelay, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT));
 
-		while (g_simulator.backupAgents == ISimulator::BackupToDB) {
+		while (g_simulator.drAgents == ISimulator::BackupToDB) {
 			Void _ = wait(delay(1.0));
 		}
 
-		TraceEvent("StoppingBackupAgents");
+		TraceEvent("StoppingDrAgents");
 
 		for(auto it : agentFutures) {
 			it.cancel();
@@ -243,8 +255,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				Future<Void> listen = FlowTransport::transport().bind( n, n );
 				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "");
 				Future<Void> backup = runBackupAgents ? runBackup(connFile) : Future<Void>(Never());
+				Future<Void> dr = runBackupAgents ? runDr(connFile) : Future<Void>(Never());
 
-				Void _ = wait(listen || fd || success(onShutdown) || backup);
+				Void _ = wait(listen || fd || success(onShutdown) || backup || dr);
 			} catch (Error& e) {
 				// If in simulation, if we make it here with an error other than io_timeout but enASIOTimedOut is set then somewhere an io_timeout was converted to a different error.
 				if(g_network->isSimulated() && e.code() != error_code_io_timeout && (bool)g_network->global(INetwork::enASIOTimedOut))

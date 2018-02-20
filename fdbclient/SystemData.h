@@ -149,7 +149,7 @@ KeyRef logRangesDecodeKey(KeyRef key, UID* logUid = NULL);
 Key logRangesDecodeValue(KeyRef keyValue, Key* destKeyPrefix = NULL);
 
 // Returns the encoded key value comprised of the end key and destination prefix
-Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destKeyPrefix);
+Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath);
 
 // Returns a key prefixed with the specified key with
 // the given uid encoded at the end
@@ -201,6 +201,9 @@ extern const KeyRangeRef fileRestorePrefixRange;
 
 // Key range reserved by database backup agent to storing configuration and state information
 extern const KeyRangeRef databaseBackupPrefixRange;
+
+extern const KeyRef destUidLookupPrefix;
+extern const KeyRef backupLatestVersionsPrefix;
 
 // Key range reserved by backup agent to storing mutations
 extern const KeyRangeRef backupLogKeys;

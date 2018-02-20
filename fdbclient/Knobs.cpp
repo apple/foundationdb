@@ -128,6 +128,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_ERROR_DELAY,                     10.0 );
 	init( BACKUP_STATUS_DELAY,                    40.0 );
 	init( BACKUP_STATUS_JITTER,                   0.05 );
+	init( CLEAR_LOG_RANGE_COUNT,                   1500); // transaction size / (size of '\xff\x02/blog/' + size of UID + size of hash result) = 200,000 / (8 + 16 + 8)
 
 	// Configuration
 	init( DEFAULT_AUTO_PROXIES,                      3 );
