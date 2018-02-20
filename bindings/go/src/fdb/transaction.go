@@ -70,7 +70,7 @@ type Transaction struct {
 
 type transaction struct {
 	ptr *C.FDBTransaction
-	db Database
+	db  Database
 }
 
 // TransactionOptions is a handle with which to set options that affect a
@@ -110,7 +110,7 @@ func (t Transaction) GetDatabase() Database {
 //
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
-func (t Transaction) Transact(f func (Transaction) (interface{}, error)) (r interface{}, e error) {
+func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r interface{}, e error) {
 	defer panicToError(&e)
 
 	r, e = f(t)
@@ -260,11 +260,11 @@ func (t *transaction) getRange(r Range, options RangeOptions, snapshot bool) Ran
 	f := t.doGetRange(r, options, snapshot, 1)
 	begin, end := r.FDBRangeKeySelectors()
 	return RangeResult{
-		t: t,
-		sr: SelectorRange{begin, end},
-		options: options,
+		t:        t,
+		sr:       SelectorRange{begin, end},
+		options:  options,
 		snapshot: snapshot,
-		f: &f,
+		f:        &f,
 	}
 }
 
@@ -402,7 +402,7 @@ func (t Transaction) AddReadConflictRange(er ExactRange) error {
 }
 
 func copyAndAppend(orig []byte, b byte) []byte {
-	ret := make([]byte, len(orig) + 1)
+	ret := make([]byte, len(orig)+1)
 	copy(ret, orig)
 	ret[len(orig)] = b
 	return ret

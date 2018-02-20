@@ -24,6 +24,7 @@ import tarfile
 import argparse
 import glob
 
+
 def createTarball(outFile, rootDir, inFiles):
     tar = tarfile.open(outFile, 'w:gz')
     for fStr in inFiles:
@@ -34,6 +35,7 @@ def createTarball(outFile, rootDir, inFiles):
                 tar.add(f, rootDir + "/" + f)
 
     tar.close()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Python tar utility')

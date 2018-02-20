@@ -27,18 +27,20 @@ import sys
 
 functions = {}
 
-func_re = re.compile("^\s*FDB_API_(?:CHANGED|REMOVED)\s*\(\s*([^,]*),\s*([^)]*)\).*")
+func_re = re.compile(
+    "^\s*FDB_API_(?:CHANGED|REMOVED)\s*\(\s*([^,]*),\s*([^)]*)\).*")
 
 with open(source, 'r') as srcfile:
     for l in srcfile:
         m = func_re.match(l)
         if m:
             func, ver = m.groups()
-            if not func in functions:
+            if func not in functions:
                 functions[func] = []
             ver = int(ver)
-            if not ver in functions[func]:
+            if ver not in functions[func]:
                 functions[func].append(ver)
+
 
 def write_windows_asm(asmfile, functions):
     asmfile.write(".data\n")
@@ -55,6 +57,7 @@ def write_windows_asm(asmfile, functions):
 
     asmfile.write("\nEND\n")
 
+
 def write_unix_asm(asmfile, functions, prefix):
     asmfile.write(".intel_syntax noprefix\n")
 
@@ -70,13 +73,17 @@ def write_unix_asm(asmfile, functions, prefix):
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
         asmfile.write("%s%s:\n" % (prefix, f))
-        asmfile.write("\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))
+        asmfile.write(
+            "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))
         asmfile.write("\tmov r11, qword ptr [r11]\n")
         asmfile.write("\tjmp r11\n")
 
+
 with open(asm, 'w') as asmfile, open(h, 'w') as hfile:
-    hfile.write("void fdb_api_ptr_unimpl() { fprintf(stderr, \"UNIMPLEMENTED FDB API FUNCTION\\n\"); abort(); }\n\n")
-    hfile.write("void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
+    hfile.write(
+        "void fdb_api_ptr_unimpl() { fprintf(stderr, \"UNIMPLEMENTED FDB API FUNCTION\\n\"); abort(); }\n\n")
+    hfile.write(
+        "void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
 
     if platform == "linux":
         write_unix_asm(asmfile, functions, '')
@@ -90,4 +97,4 @@ with open(asm, 'w') as asmfile, open(h, 'w') as hfile:
             hfile.write("extern \"C\" ")
         hfile.write("void* fdb_api_ptr_%s = (void*)&fdb_api_ptr_unimpl;\n" % f)
         for v in functions[f]:
-            hfile.write("#define %s_v%d_PREV %s_v%d\n" % (f, v, f, v-1))
+            hfile.write("#define %s_v%d_PREV %s_v%d\n" % (f, v, f, v - 1))

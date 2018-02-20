@@ -31,11 +31,13 @@ feeds = simpledoc.root.feeds
 inboxes = simpledoc.root.inboxes
 messages = simpledoc.root.messages
 
+
 @simpledoc.transactional
 def _create_feed_internal(metadata):
     feed = feeds[metadata]
     feed.set_value(metadata)
     return feed
+
 
 @simpledoc.transactional
 def _create_inbox_internal(metadata):
@@ -43,17 +45,20 @@ def _create_inbox_internal(metadata):
     inbox.set_value(metadata)
     return inbox
 
+
 @simpledoc.transactional
 def _create_feed_and_inbox_internal(metadata):
     _create_feed_internal(metadata)
     _create_inbox_internal(metadata)
     return True
 
+
 @simpledoc.transactional
 def _create_subscription_internal(feed, inbox):
     inbox.subs[feed.get_name()] = ""
     inbox.dirtyfeeds[feed.get_name()] = "1"
     return True
+
 
 @simpledoc.transactional
 def _post_message_internal(feed, message_id, contents):
@@ -66,13 +71,15 @@ def _post_message_internal(feed, message_id, contents):
         inboxes[inbox.get_name()].dirtyfeeds[feed.get_name()] = "1"
     feed.watchinginboxes.clear_all()
 
+
 @simpledoc.transactional
 def _list_messages_internal(inbox):
     print "messages in %s's inbox:" % inbox.get_value()
     for feed in inbox.subs.get_children():
-        print " from %s:" %  feeds[feed.get_name()].get_value()
+        print " from %s:" % feeds[feed.get_name()].get_value()
         for message in feed_messages.find_all(feed.get_name()):
             print "   ", message.get_value()
+
 
 @simpledoc.transactional
 def _get_feed_messages_internal(feed, limit):
@@ -85,26 +92,28 @@ def _get_feed_messages_internal(feed, limit):
         counter += 1
     return message_list
 
+
 @simpledoc.transactional
 def _copy_dirty_feeds(inbox):
     changed = False
     latest_id = inbox.latest_message.get_value()
-    #print "latest message is", latest_id
+    # print "latest message is", latest_id
     for feed in inbox.dirtyfeeds.get_children():
-        #print "working on dirty feed", feed.get_name()
+        # print "working on dirty feed", feed.get_name()
         for message in feed_messages.find_all(feed.get_name()):
-            #print "found message", message.get_name()
+            # print "found message", message.get_name()
             if latest_id != None and message.get_name() >= latest_id:
                 break
             changed = True
             inbox.messages[message.get_name()] = feed.get_name()
-            #print "copied message", message.get_name()
+            # print "copied message", message.get_name()
 
         # now that we have copied, mark this inbox as watching the feed
         feeds[feed.get_name()].watchinginboxes[inbox.get_name()] = "1"
 
     inbox.dirtyfeeds.clear_all()
     return changed
+
 
 @simpledoc.transactional
 def _get_inbox_subscriptions_internal(inbox, limit):
@@ -114,6 +123,7 @@ def _get_inbox_subscriptions_internal(inbox, limit):
         subscriptions.append(message.get_name())
 
     return subscriptions
+
 
 @simpledoc.transactional
 def _get_inbox_messages_internal(inbox, limit):
@@ -133,16 +143,19 @@ def _get_inbox_messages_internal(inbox, limit):
 
     return [messages[mid].get_value() for mid in message_ids]
 
+
 @simpledoc.transactional
 def _clear_all_messages():
     simpledoc.root.clear_all()
 
+
 @simpledoc.transactional
-def _print_internals(feed_or_inbox = None):
+def _print_internals(feed_or_inbox=None):
     if feed_or_inbox is None:
         print simpledoc.root.get_json(False)
     else:
         print feed_or_inbox.get_json(False)
+
 
 class PubSub(object):
     def __init__(self, db):
@@ -187,4 +200,3 @@ class PubSub(object):
 
     def print_internals(self):
         _print_internals(self.db)
-

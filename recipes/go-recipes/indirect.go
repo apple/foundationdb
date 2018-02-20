@@ -21,12 +21,12 @@
 package main
 
 import (
-	"log"
 	"fmt"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+	"log"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
@@ -54,19 +54,23 @@ func _pack(t interface{}) []byte {
 
 func _unpack(t []byte) tuple.Tuple {
 	i, e := tuple.Unpack(t)
-	if e != nil {return nil}
+	if e != nil {
+		return nil
+	}
 	return i
 }
 
 type Workspace struct {
 	Dir directory.Directory
-	db fdb.Database
+	db  fdb.Database
 }
 
 func (wrkspc Workspace) _Update(trtr fdb.Transactor) {
 	trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		_, err := wrkspc.Dir.Remove(tr, []string{"current"})
-		if err != nil {log.Fatal(err)}
+		if err != nil {
+			log.Fatal(err)
+		}
 
 		_, err = wrkspc.Dir.Move(tr, []string{"new"}, []string{"current"})
 		return nil, err
@@ -80,7 +84,9 @@ func (wrkspc Workspace) GetCurrent() (dir directory.DirectorySubspace, err error
 
 func (wrkspc Workspace) Session(foo func(directory.DirectorySubspace)) (err error) {
 	newdir, err := wrkspc.Dir.CreateOrOpen(wrkspc.db, []string{"new"}, nil)
-	if err != nil {return}
+	if err != nil {
+		return
+	}
 	foo(newdir)
 	wrkspc._Update(wrkspc.db)
 	return
@@ -92,7 +98,9 @@ func main() {
 	db := fdb.MustOpenDefault()
 
 	WorkspaceDemoDir, err := directory.CreateOrOpen(db, []string{"Workspace"}, nil)
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	clear_subspace(db, WorkspaceDemoDir)
 
@@ -108,7 +116,6 @@ func main() {
 
 	print_subspace(db, current)
 
-
 	w.Session(func(dir directory.DirectorySubspace) {
 		db.Transact(func(tr fdb.Transaction) (interface{}, error) {
 			tr.Set(dir.Pack(tuple.Tuple{"b"}), _pack("World"))
@@ -116,6 +123,8 @@ func main() {
 		})
 	})
 	current, err = w.GetCurrent()
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 	print_subspace(db, current)
 }

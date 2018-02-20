@@ -23,16 +23,16 @@
 package directory
 
 import (
+	"bytes"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
-	"bytes"
 )
 
 type node struct {
-	subspace subspace.Subspace
-	path []string
+	subspace   subspace.Subspace
+	path       []string
 	targetPath []string
-	_layer fdb.FutureByteSlice
+	_layer     fdb.FutureByteSlice
 }
 
 func (n *node) exists() bool {

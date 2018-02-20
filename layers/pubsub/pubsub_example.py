@@ -46,10 +46,10 @@ ps.clear_all_messages()
 # Create the specified numbers of feeds and inboxes. Subscribe each inbox to a
 # randomly selected subset of feeds.
 def setup_topology(feeds, inboxes):
-    feed_map = {f: ps.create_feed('Alice '+str(f)) for f in range(feeds)}
+    feed_map = {f: ps.create_feed('Alice ' + str(f)) for f in range(feeds)}
     inbox_map = {}
     for i in range(inboxes):
-        inbox_map[i] = ps.create_inbox('Bob '+str(i))
+        inbox_map[i] = ps.create_inbox('Bob ' + str(i))
         for f in random.sample(xrange(feeds), random.randint(1, feeds)):
             ps.create_subscription(inbox_map[i], feed_map[f])
     return feed_map, inbox_map
@@ -81,7 +81,8 @@ def inbox_driver(inbox):
         get_and_print_inbox_messages(inbox)
         changed = (latest != inbox.latest_message)
         latest = inbox.latest_message
-        if not changed and waited > wait_limit: break
+        if not changed and waited > wait_limit:
+            break
         waited += wait_inc
         time.sleep(wait_inc)
 
@@ -92,15 +93,20 @@ def run_threads(feed_map, inbox_map, messages):
                     for id in feed_map]
     inbox_threads = [threading.Thread(target=inbox_driver, args=(inbox_map[id],))
                      for id in inbox_map]
-    for f in feed_threads: f.start()
-    for i in inbox_threads: i.start()
-    for f in feed_threads: f.join()
-    for i in inbox_threads: i.join()
+    for f in feed_threads:
+        f.start()
+    for i in inbox_threads:
+        i.start()
+    for f in feed_threads:
+        f.join()
+    for i in inbox_threads:
+        i.join()
 
 
 def sample_pubsub(feeds, inboxes, messages):
     feed_map, inbox_map = setup_topology(feeds, inboxes)
     run_threads(feed_map, inbox_map, messages)
+
 
 if __name__ == "__main__":
     sample_pubsub(3, 3, 3)

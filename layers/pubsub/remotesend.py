@@ -23,7 +23,7 @@
 import os
 import sys
 
-sys.path[:0]=[os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
 import fdb
 import argparse
 import random
@@ -54,6 +54,7 @@ name = os.uname()[1]
 
 print 'sending messages',
 
+
 def message_client():
     gevent.sleep(random.random())
     messages_sent = 0
@@ -65,8 +66,8 @@ def message_client():
         else:
             ps.get_inbox_messages(ps.get_inbox_by_name('%09d' % user), 10)
 
+
 jobs = [gevent.spawn(message_client) for i in range(0, args.threads)]
 gevent.joinall(jobs)
 
 print 'done'
-

@@ -44,9 +44,11 @@ log_ops = False
 log_dirs = False
 log_errors = False
 
+
 def log_op(msg, force=False):
     if log_ops or log_all or force:
         print(msg)
+
 
 class DirectoryExtension():
     def __init__(self):
@@ -60,7 +62,7 @@ class DirectoryExtension():
             actual_num = 1
 
         tuples = tuple([tuple(stack.pop(stack.pop())) for i in range(actual_num)])
-        
+
         if num is None:
             return tuples[0]
 
@@ -71,7 +73,7 @@ class DirectoryExtension():
             print('pushed %s at %d (op=%s)' % (dir.__class__.__name__, len(self.dir_list), inst.op))
 
         self.dir_list.append(dir)
-    
+
     def process_instruction(self, inst):
         try:
             if log_all or log_instructions:
@@ -86,14 +88,15 @@ class DirectoryExtension():
             elif inst.op == six.u('DIRECTORY_CREATE_LAYER'):
                 index1, index2, allow_manual_prefixes = inst.pop(3)
                 if self.dir_list[index1] is None or self.dir_list[index2] is None:
-                    log_op('create directory layer: None');
+                    log_op('create directory layer: None')
                     self.append_dir(inst, None)
                 else:
-                    log_op('create directory layer: node_subspace (%d) = %r, content_subspace (%d) = %r, allow_manual_prefixes = %d' % (index1, self.dir_list[index1].rawPrefix, index2, self.dir_list[index2].rawPrefix, allow_manual_prefixes))
+                    log_op('create directory layer: node_subspace (%d) = %r, content_subspace (%d) = %r, allow_manual_prefixes = %d' %
+                           (index1, self.dir_list[index1].rawPrefix, index2, self.dir_list[index2].rawPrefix, allow_manual_prefixes))
                     self.append_dir(inst, fdb.DirectoryLayer(self.dir_list[index1], self.dir_list[index2], allow_manual_prefixes == 1))
             elif inst.op == six.u('DIRECTORY_CHANGE'):
                 self.dir_index = inst.pop()
-                if not self.dir_list[self.dir_index]: 
+                if not self.dir_list[self.dir_index]:
                     self.dir_index = self.error_index
                 if log_dirs or log_all:
                     new_dir = self.dir_list[self.dir_index]
@@ -123,7 +126,7 @@ class DirectoryExtension():
                 log_op('move %s to %s' % (repr(directory.get_path() + old_path), repr(directory.get_path() + new_path)))
                 self.append_dir(inst, directory.move(inst.tr, old_path, new_path))
             elif inst.op == six.u('DIRECTORY_MOVE_TO'):
-                new_absolute_path =  self.pop_tuples(inst.stack)
+                new_absolute_path = self.pop_tuples(inst.stack)
                 log_op('move %s to %s' % (repr(directory.get_path()), repr(new_absolute_path)))
                 self.append_dir(inst, directory.move_to(inst.tr, new_absolute_path))
             elif inst.op == six.u('DIRECTORY_REMOVE'):
@@ -220,7 +223,7 @@ class DirectoryExtension():
         except Exception as e:
             if log_all or log_errors:
                 print(e)
-                #traceback.print_exc(file=sys.stdout)
+                # traceback.print_exc(file=sys.stdout)
 
             if inst.op in ops_that_create_dirs:
                 self.append_dir(inst, None)

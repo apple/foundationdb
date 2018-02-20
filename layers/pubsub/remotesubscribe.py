@@ -23,7 +23,7 @@
 import os
 import sys
 
-sys.path[:0]=[os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
 import fdb
 import argparse
 import random
@@ -55,8 +55,8 @@ for i in range(0, args.followers):
         print i,
 print 'done'
 
-#@fdb.transactional
-#def done(tr):
-#    tr['/done/%d' % args.userStart] = 'done'
+# @fdb.transactional
+# def done(tr):
+#     tr['/done/%d' % args.userStart] = 'done'
 #
-#done(db)
+# done(db)

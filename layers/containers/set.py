@@ -23,11 +23,13 @@ import fdb.tuple
 
 fdb.api_version(16)
 
+
 def nextStopToNone(gen):
     try:
         return gen.next()
     except StopIteration:
         return None
+
 
 class FdbSet (object):
     def __init__(self, path):
@@ -36,13 +38,13 @@ class FdbSet (object):
     @fdb.transactional
     def length(self, tr):
         setLength = 0
-        for k,v in tr[fdb.tuple.range((self._path,))]:
+        for k, v in tr[fdb.tuple.range((self._path,))]:
             setLength += 1
         return setLength
 
     @fdb.transactional
     def iterate(self, tr):
-        for k,v in tr[fdb.tuple.range((self._path,))]:
+        for k, v in tr[fdb.tuple.range((self._path,))]:
             yield fdb.tuple.unpack(k)[1]
 
     @fdb.transactional
@@ -50,18 +52,18 @@ class FdbSet (object):
         return tr[fdb.tuple.pack((self._path, x))].present()
 
     @fdb.transactional
-    def issubset(self, tr, t): #s <= t
-        for k,v in tr[fdb.tuple.range((self._path,))]:
+    def issubset(self, tr, t):  # s <= t
+        for k, v in tr[fdb.tuple.range((self._path,))]:
             if not t.contains(tr, fdb.tuple.unpack(k)[1]):
                 return False
         return True
 
     @fdb.transactional
-    def issuperset(self, tr, t): #s >= t
+    def issuperset(self, tr, t):  # s >= t
         return t.issubset(tr, self)
 
     @fdb.transactional
-    def union(self, tr, t): #s | t
+    def union(self, tr, t):  # s | t
         s_gen = self.iterate(tr)
         t_gen = t.iterate(tr)
         s_key = nextStopToNone(s_gen)
@@ -82,7 +84,7 @@ class FdbSet (object):
                 t_key = nextStopToNone(t_gen)
 
     @fdb.transactional
-    def intersection(self, tr, t): #s & t
+    def intersection(self, tr, t):  # s & t
         s_key = self.first_greater_or_equal(tr, "")
         t_key = t.first_greater_or_equal(tr, "")
 
@@ -99,7 +101,7 @@ class FdbSet (object):
                 t_key = t.first_greater_than(tr, t_key)
 
     @fdb.transactional
-    def difference(self, tr, t): #s - t
+    def difference(self, tr, t):  # s - t
         s_gen = self.iterate(tr)
         s_key = nextStopToNone(s_gen)
         t_key = t.first_greater_or_equal(tr, "")
@@ -116,7 +118,7 @@ class FdbSet (object):
                 s_key = nextStopToNone(s_gen)
 
     @fdb.transactional
-    def symmetric_difference(self, tr, t): #s ^ t
+    def symmetric_difference(self, tr, t):  # s ^ t
         s_gen = self.iterate(tr)
         t_gen = t.iterate(tr)
         s_key = nextStopToNone(s_gen)
@@ -136,12 +138,12 @@ class FdbSet (object):
                 t_key = nextStopToNone(t_gen)
 
     @fdb.transactional
-    def update(self, tr, t): #s |= t T
+    def update(self, tr, t):  # s |= t T
         for k in t.iterate(tr):
             self.add(tr, k)
 
     @fdb.transactional
-    def intersection_update(self, tr, t): #s &= t
+    def intersection_update(self, tr, t):  # s &= t
         lastValue = fdb.tuple.pack((self._path,))
         for k in self.intersection(tr, t):
             if k != lastValue:
@@ -150,12 +152,12 @@ class FdbSet (object):
         del tr[lastValue + '\x00':fdb.tuple.pack((self._path + chr(0),))]
 
     @fdb.transactional
-    def difference_update(self, tr, t): #s -= t
+    def difference_update(self, tr, t):  # s -= t
         for k in self.intersection(tr, t):
-            del tr[fdb.tuple.pack((self._path,k))]
+            del tr[fdb.tuple.pack((self._path, k))]
 
     @fdb.transactional
-    def symmetric_difference_update(self, tr, t): #s ^ t
+    def symmetric_difference_update(self, tr, t):  # s ^ t
         s_gen = self.iterate(tr)
         t_gen = t.iterate(tr)
         s_key = nextStopToNone(s_gen)
@@ -177,17 +179,17 @@ class FdbSet (object):
 
     @fdb.transactional
     def add(self, tr, x):
-        tr[fdb.tuple.pack((self._path,x))] = ""
+        tr[fdb.tuple.pack((self._path, x))] = ""
 
     @fdb.transactional
     def remove(self, tr, x):
-        if tr[fdb.tuple.pack((self._path,x))] == None:
+        if tr[fdb.tuple.pack((self._path, x))] == None:
             raise KeyError
-        del tr[fdb.tuple.pack((self._path,x))]
+        del tr[fdb.tuple.pack((self._path, x))]
 
     @fdb.transactional
     def discard(self, tr, x):
-        del tr[fdb.tuple.pack((self._path,x))]
+        del tr[fdb.tuple.pack((self._path, x))]
 
     @fdb.transactional
     def pop(self, tr):
@@ -217,6 +219,7 @@ class FdbSet (object):
 
     def _keyInRange(self, key):
         return key < fdb.tuple.pack((self._path + chr(0),))
+
 
 def test(db):
     print "starting set test"

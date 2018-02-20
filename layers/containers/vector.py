@@ -31,25 +31,33 @@ import threading
 
 fdb.api_version(22)
 
+
 ###################################
 # This defines a Subspace of keys #
 ###################################
 
+
 class Subspace (object):
     def __init__(self, prefixTuple, rawPrefix=""):
         self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
+
     def __getitem__(self, name):
-        return Subspace( (name,), self.rawPrefix )
+        return Subspace((name,), self.rawPrefix)
+
     def key(self):
         return self.rawPrefix
+
     def pack(self, tuple):
-        return self.rawPrefix + fdb.tuple.pack( tuple )
+        return self.rawPrefix + fdb.tuple.pack(tuple)
+
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
         return fdb.tuple.unpack(key[len(self.rawPrefix):])
+
     def range(self, tuple=()):
-        p = fdb.tuple.range( tuple )
+        p = fdb.tuple.range(tuple)
         return slice(self.rawPrefix + p.start, self.rawPrefix + p.stop)
+
 
 ########################
 # _ImplicitTransaction #
@@ -63,6 +71,7 @@ class Subspace (object):
 #     vector[0] = 1
 #     vector.push(1)
 #     ...
+
 
 class _ImplicitTransaction:
     def __init__(self, vector, tr):
@@ -79,28 +88,30 @@ class _ImplicitTransaction:
     def __exit__(self, type, value, traceback):
         self.vector.local.tr = self.initialValue
 
+
 ##########
 # Vector #
 ##########
 
-## Vector stores each of its values using its index as the key.
-## The size of a vector is equal to the index of its last key + 1.
+# Vector stores each of its values using its index as the key.
+# The size of a vector is equal to the index of its last key + 1.
 ##
-## For indexes smaller than the vector's size that have no associated key
-## in the database, the value will be the specified defaultValue.
+# For indexes smaller than the vector's size that have no associated key
+# in the database, the value will be the specified defaultValue.
 ##
-## If the last value in the vector has the default value, its key will
-## always be set so that size can be determined.
+# If the last value in the vector has the default value, its key will
+# always be set so that size can be determined.
 ##
-## By creating Vector with a Subspace, all kv pairs modified by the
-## layer will have keys that start within that Subspace.
+# By creating Vector with a Subspace, all kv pairs modified by the
+# layer will have keys that start within that Subspace.
+
 
 class Vector:
     """Represents a potentially sparse array in FoundationDB."""
 
     # Public functions
 
-    def __init__(self, subspace, defaultValue = ''):
+    def __init__(self, subspace, defaultValue=''):
         self.subspace = subspace
         self.defaultValue = defaultValue
         self.local = threading.local()
@@ -183,7 +194,6 @@ class Vector:
         else:
             return self.get(index)
 
-
     # Private functions
 
     @fdb.transactional
@@ -194,7 +204,7 @@ class Vector:
     def _back(self, tr):
         keyRange = self.subspace.range()
         last = tr.get_range(keyRange.start, keyRange.stop, 1, True)
-        for k,v in last:
+        for k, v in last:
             return fdb.tuple.unpack(v)[0]
         return None
 
@@ -218,7 +228,7 @@ class Vector:
 
         # Second to last item is being represented sparsely
         elif len(lastTwo) == 1 or indices[0] > indices[1] + 1:
-            tr[self._key_at(indices[0]-1)] = fdb.tuple.pack((self.defaultValue,))
+            tr[self._key_at(indices[0] - 1)] = fdb.tuple.pack((self.defaultValue,))
 
         del tr[lastTwo[0].key]
         return fdb.tuple.unpack(lastTwo[0].value)[0]
@@ -253,8 +263,8 @@ class Vector:
         start = self._key_at(index)
         end = self.subspace.range().stop
 
-        output = tr.get_range(start,end,1)
-        for k,v in output:
+        output = tr.get_range(start, end, 1)
+        for k, v in output:
             # The requested index had an associated key
             if(start == k):
                 return fdb.tuple.unpack(v)[0]
@@ -289,7 +299,7 @@ class Vector:
             if step > 0:
                 start = self._key_at(startIndex)
             else:
-                end = self._key_at(startIndex+1)
+                end = self._key_at(startIndex + 1)
 
         if endIndex is None:
             if step > 0:
@@ -301,7 +311,7 @@ class Vector:
             if step > 0:
                 end = self._key_at(endIndex)
             else:
-                start = self._key_at(endIndex+1)
+                start = self._key_at(endIndex + 1)
 
         result = tr.get_range(start, end, 0, step < 0)
 
@@ -310,11 +320,11 @@ class Vector:
             if step > 0:
                 currentIndex = 0
             else:
-                currentIndex = size-1
+                currentIndex = size - 1
         elif currentIndex >= size:
-            currentIndex = size-1
+            currentIndex = size - 1
 
-        for k,v in result:
+        for k, v in result:
             keyIndex = self.subspace.unpack(k)[0]
             while (step > 0 and currentIndex < keyIndex) or (step < 0 and currentIndex > keyIndex):
                 currentIndex = currentIndex + step
@@ -353,11 +363,11 @@ class Vector:
 
         # Check if the new end of the vector was being sparsely represented
         if self._size(tr) < length:
-            tr[self._key_at(length-1)] = fdb.tuple.pack((self.defaultValue,))
+            tr[self._key_at(length - 1)] = fdb.tuple.pack((self.defaultValue,))
 
     @fdb.transactional
     def _expand(self, tr, length, currentSize):
-        tr[self._key_at(length-1)] = fdb.tuple.pack((self.defaultValue,))
+        tr[self._key_at(length - 1)] = fdb.tuple.pack((self.defaultValue,))
 
     @fdb.transactional
     def _clear(self, tr):
@@ -380,6 +390,7 @@ class Vector:
 # internal tests #
 ##################
 
+
 # caution: modifies the database!
 @fdb.transactional
 def vector_test(tr):
@@ -398,11 +409,11 @@ def vector_test(tr):
         _print_vector(vector, tr)
 
         # Swap
-        vector.swap(0,2)
+        vector.swap(0, 2)
         _print_vector(vector, tr)
 
         # Pop
-        print 'Popped:', vector.pop();
+        print 'Popped:', vector.pop()
         _print_vector(vector, tr)
 
         # Clear
@@ -502,11 +513,14 @@ def vector_test(tr):
         _print_vector(vector, tr)
         print 'Size:', vector.size()
 
+
 ##############################
 # Vector sample usage #
 ##############################
 
+
 import sys
+
 
 # caution: modifies the database!
 @fdb.transactional
@@ -531,6 +545,7 @@ def vector_example(tr):
         vector.swap(1, 10)
         _print_vector(vector, tr)
 
+
 def _print_vector(vector, tr):
     first = True
     with vector.use_transaction(tr):
@@ -543,8 +558,9 @@ def _print_vector(vector, tr):
 
     print
 
+
 # caution: modifies the database!
 if __name__ == '__main__':
     db = fdb.open()
     vector_example(db)
-    #vector_test(db)
+    # vector_test(db)

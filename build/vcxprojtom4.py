@@ -64,10 +64,10 @@ else:
     print "ERROR: Unable to determine configuration type"
     sys.exit()
 
-sources = [ node.getAttribute("Include").replace('\\', '/') for node in
-            dom.getElementsByTagName("ActorCompiler") +
-            dom.getElementsByTagName("ClCompile") +
-            dom.getElementsByTagName("ClInclude")
-            if not node.getElementsByTagName("ExcludedFromBuild") and node.hasAttribute("Include") ]
+sources = [node.getAttribute("Include").replace('\\', '/') for node in
+           dom.getElementsByTagName("ActorCompiler") +
+           dom.getElementsByTagName("ClCompile") +
+           dom.getElementsByTagName("ClInclude")
+           if not node.getElementsByTagName("ExcludedFromBuild") and node.hasAttribute("Include")]
 
 print "define(`GENSOURCES', `%s')dnl" % ' '.join(sorted(sources))

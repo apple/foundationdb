@@ -53,7 +53,7 @@ func (e Error) Error() string {
 var (
 	errNetworkNotSetup = Error{2008}
 
-	errAPIVersionUnset = Error{2200}
-	errAPIVersionAlreadySet = Error{2201}
+	errAPIVersionUnset        = Error{2200}
+	errAPIVersionAlreadySet   = Error{2201}
 	errAPIVersionNotSupported = Error{2203}
 )

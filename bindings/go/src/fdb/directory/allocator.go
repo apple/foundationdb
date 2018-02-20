@@ -23,10 +23,10 @@
 package directory
 
 import (
+	"bytes"
+	"encoding/binary"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
-	"encoding/binary"
-	"bytes"
 	"math/rand"
 	"sync"
 )
@@ -53,14 +53,18 @@ func windowSize(start int64) int64 {
 	// can't be too small.  So start small and scale up.  We don't want this to
 	// ever get *too* big because we have to store about window_size/2 recent
 	// items.
-	if start < 255 { return 64 }
-	if start < 65535 { return 1024 }
+	if start < 255 {
+		return 64
+	}
+	if start < 65535 {
+		return 1024
+	}
 	return 8192
 }
 
 func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subspace) (subspace.Subspace, error) {
 	for {
-		rr := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit:1, Reverse:true})
+		rr := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit: 1, Reverse: true})
 		kvs := rr.GetSliceOrPanic()
 
 		var start int64
@@ -106,7 +110,7 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 			}
 
 			window = windowSize(start)
-			if count * 2 < window {
+			if count*2 < window {
 				break
 			}
 
@@ -124,7 +128,7 @@ func (hca highContentionAllocator) allocate(tr fdb.Transaction, s subspace.Subsp
 
 			allocatorMutex.Lock()
 
-			latestCounter := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit:1, Reverse:true})
+			latestCounter := tr.Snapshot().GetRange(hca.counters, fdb.RangeOptions{Limit: 1, Reverse: true})
 			candidateValue := tr.Get(key)
 			tr.Options().SetNextWriteNoWriteConflictRange()
 			tr.Set(key, []byte(""))

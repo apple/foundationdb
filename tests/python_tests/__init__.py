@@ -32,7 +32,7 @@ class Result(object):
         self.errors = []
 
     def add_kpi(self, name, value, units):
-        self.kpis[name] = {'value' : value, 'units' : units}
+        self.kpis[name] = {'value': value, 'units': units}
 
     def add_error(self, error):
         self.errors.append(error)
@@ -43,7 +43,8 @@ class Result(object):
             file = os.path.join(dir, file)
 
         with open(file, 'w') as f:
-            json.dump({'kpis' : self.kpis, 'errors' : self.errors}, f)
+            json.dump({'kpis': self.kpis, 'errors': self.errors}, f)
+
 
 class PythonTest(object):
     def __init__(self):
@@ -70,9 +71,11 @@ class PythonTest(object):
         if parser is None:
             parser = argparse.ArgumentParser()
 
-        parser.add_argument('--output-directory', default='', type=str, help='The directory to store the output JSON in. If not set, the current directory is used')
+        parser.add_argument('--output-directory', default='', type=str,
+                            help='The directory to store the output JSON in. If not set, the current directory is used')
         parser.add_argument('--disable-multiversion-api', action='store_true', help='Disables the multi-version client API')
-        parser.add_argument('--enable-callbacks-on-external-threads', action='store_true', help='Allows callbacks to be called on threads created by the client library')
+        parser.add_argument('--enable-callbacks-on-external-threads', action='store_true',
+                            help='Allows callbacks to be called on threads created by the client library')
         parser.add_argument('--use-external-client', action='store_true', help='Connect to the server using an external client')
 
         self.args = parser.parse_args()
