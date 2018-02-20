@@ -23,7 +23,7 @@
 import os
 import sys
 
-sys.path[:0]=[os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
 import fdb
 import argparse
 from pubsub_bigdoc import PubSub
@@ -50,8 +50,8 @@ for i in range(args.userStart, args.userCount):
         print i,
 print 'done'
 
-#@fdb.transactional
-#def done(tr):
-#    tr['/done/%d' % args.userStart] = 'done'
+# @fdb.transactional
+# def done(tr):
+#     tr['/done/%d' % args.userStart] = 'done'
 #
-#done(db)
+# done(db)

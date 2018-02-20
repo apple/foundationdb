@@ -33,10 +33,10 @@
 package subspace
 
 import (
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"bytes"
 	"errors"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 // Subspace represents a well-defined region of keyspace in a FoundationDB
@@ -134,7 +134,7 @@ func (s subspace) FDBRangeKeySelectors() (fdb.Selectable, fdb.Selectable) {
 }
 
 func concat(a []byte, b ...byte) []byte {
-	r := make([]byte, len(a) + len(b))
+	r := make([]byte, len(a)+len(b))
 	copy(r, a)
 	copy(r[len(a):], b)
 	return r

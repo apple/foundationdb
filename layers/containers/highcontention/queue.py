@@ -41,29 +41,38 @@ import fdb.tuple
 
 fdb.api_version(22)
 
+
 ###################################
 # This defines a Subspace of keys #
 ###################################
 
+
 class Subspace (object):
     def __init__(self, prefixTuple, rawPrefix=""):
         self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
+
     def __getitem__(self, name):
-        return Subspace( (name,), self.rawPrefix )
+        return Subspace((name,), self.rawPrefix)
+
     def key(self):
         return self.rawPrefix
+
     def pack(self, tuple):
-        return self.rawPrefix + fdb.tuple.pack( tuple )
+        return self.rawPrefix + fdb.tuple.pack(tuple)
+
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
         return fdb.tuple.unpack(key[len(self.rawPrefix):])
+
     def range(self, tuple=()):
-        p = fdb.tuple.range( tuple )
+        p = fdb.tuple.range(tuple)
         return slice(self.rawPrefix + p.start, self.rawPrefix + p.stop)
+
 
 #########
 # Queue #
 #########
+
 
 class Queue:
     # Public functions
@@ -119,7 +128,7 @@ class Queue:
         return self._conflictedItem.pack((subKey,))
 
     def _randID(self):
-        return os.urandom(20) # this relies on good random data from the OS to avoid collisions
+        return os.urandom(20)  # this relies on good random data from the OS to avoid collisions
 
     def _encodeValue(self, value):
         return fdb.tuple.pack((value,))
@@ -191,7 +200,7 @@ class Queue:
 
         i = 0
         pops = list(pops)
-        for pop,(k,v) in zip(pops, items):
+        for pop, (k, v) in zip(pops, items):
             key = self._conflictedPop.unpack(pop.key)
             storageKey = self._conflictedItemKey(key[1])
             tr[storageKey] = v
@@ -275,9 +284,11 @@ class Queue:
             except fdb.FDBError as e:
                 tr.on_error(e.code).wait()
 
+
 ##################
 # Internal tests #
 ##################
+
 
 def queue_test(db):
     queue = Queue(Subspace(('queue_test',)), False)
@@ -300,9 +311,11 @@ def queue_test(db):
     queue.clear(db)
     print 'Empty? %s' % queue.empty(db)
 
+
 ######################
 # Queue sample usage #
 ######################
+
 
 # caution: modifies the database!
 def queue_single_client_example(db):
@@ -315,9 +328,11 @@ def queue_single_client_example(db):
     for i in range(10):
         print queue.pop(db)
 
+
 def push_thread(queue, db, id, num):
     for i in range(num):
         queue.push(db, '%d.%d' % (id, i))
+
 
 def pop_thread(queue, db, id, num):
     for i in range(num):
@@ -325,7 +340,9 @@ def pop_thread(queue, db, id, num):
 
     print 'Finished pop thread %d' % id
 
+
 import threading
+
 
 def queue_multi_client_example(db):
     descriptions = ["simple queue", "high contention queue"]
@@ -335,18 +352,23 @@ def queue_multi_client_example(db):
         queue = Queue(Subspace(('queue_example',)), highContention > 0)
         queue.clear(db)
 
-        pushThreads = [ threading.Thread(target=push_thread, args=(queue, db, i, 100)) for i in range(10) ]
-        popThreads = [ threading.Thread(target=pop_thread, args=(queue, db, i, 100)) for i in range(10) ]
+        pushThreads = [threading.Thread(target=push_thread, args=(queue, db, i, 100)) for i in range(10)]
+        popThreads = [threading.Thread(target=pop_thread, args=(queue, db, i, 100)) for i in range(10)]
 
         start = time.time()
 
-        for push in pushThreads: push.start()
-        for pop in popThreads: pop.start()
-        for push in pushThreads: push.join()
-        for pop in popThreads: pop.join()
+        for push in pushThreads:
+            push.start()
+        for pop in popThreads:
+            pop.start()
+        for push in pushThreads:
+            push.join()
+        for pop in popThreads:
+            pop.join()
 
         end = time.time()
         print 'Finished %s in %f seconds' % (descriptions[highContention], end - start)
+
 
 def queue_example(db):
     print "Running single client example:"
@@ -355,10 +377,10 @@ def queue_example(db):
     print "\nRunning multi-client example:"
     queue_multi_client_example(db)
 
+
 # caution: modifies the database!
 if __name__ == '__main__':
     db = fdb.open()
 
     queue_example(db)
-    #queue_test(db)
-
+    # queue_test(db)

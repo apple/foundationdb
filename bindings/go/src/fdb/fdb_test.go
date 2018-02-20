@@ -23,8 +23,8 @@
 package fdb_test
 
 import (
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"fmt"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"testing"
 )
 
@@ -52,7 +52,7 @@ func ExampleVersionstamp(t *testing.T) {
 	fdb.MustAPIVersion(400)
 	db := fdb.MustOpenDefault()
 
-	setVs := func(t fdb.Transactor, key fdb.Key ) (fdb.FutureKey, error) {
+	setVs := func(t fdb.Transactor, key fdb.Key) (fdb.FutureKey, error) {
 		fmt.Printf("setOne called with:  %T\n", t)
 		ret, e := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
 			tr.SetVersionstampedValue(key, []byte("blahblahbl"))
@@ -100,7 +100,7 @@ func ExampleTransactor() {
 	setMany := func(t fdb.Transactor, value []byte, keys ...fdb.Key) error {
 		fmt.Printf("setMany called with: %T\n", t)
 		_, e := t.Transact(func(tr fdb.Transaction) (interface{}, error) {
-			for _, key := range(keys) {
+			for _, key := range keys {
 				setOne(tr, key, value)
 			}
 			return nil, nil

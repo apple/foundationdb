@@ -24,23 +24,29 @@ import fdb
 fdb.api_version(300)
 db = fdb.open()
 
+
 @fdb.transactional
 def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
 
+
 queue = fdb.Subspace(('Q',))
 clear_subspace(db, queue)
+
 
 @fdb.transactional
 def dequeue(tr):
     item = first_item(tr)
-    if item is None: return None
+    if item is None:
+        return None
     del tr[item.key]
     return item.value
+
 
 @fdb.transactional
 def enqueue(tr, value):
     tr[queue[last_index(tr) + 1][os.urandom(20)]] = value
+
 
 @fdb.transactional
 def last_index(tr):
@@ -49,11 +55,13 @@ def last_index(tr):
         return queue.unpack(key)[0]
     return 0
 
+
 @fdb.transactional
 def first_item(tr):
     r = queue.range()
     for kv in tr.get_range(r.start, r.stop, limit=1):
         return kv
+
 
 def smoke_test():
     enqueue(db, 'a')
@@ -83,8 +91,8 @@ def smoke_test():
     print dequeue(db)
     print dequeue(db)
 
+
 if __name__ == "__main__":
     db = fdb.open()
     clear_subspace(db, queue)
     smoke_test()
-

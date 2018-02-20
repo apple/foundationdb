@@ -21,6 +21,7 @@
 import fdb
 fdb.api_version(300)
 
+
 class Workspace(object):
 
     def __init__(self, directory, db):
@@ -42,14 +43,17 @@ class Workspace(object):
     def current(self):
         return self.dir.create_or_open(self.db, (u'current',))
 
+
 @fdb.transactional
 def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
+
 
 @fdb.transactional
 def print_subspace(tr, subspace):
     for k, v in tr[subspace.range()]:
         print subspace.unpack(k), v
+
 
 def smoke_test():
     db = fdb.open()
@@ -68,6 +72,6 @@ def smoke_test():
     print "contents:"
     print_subspace(db, workspace.current)
 
+
 if __name__ == "__main__":
     smoke_test()
-

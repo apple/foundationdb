@@ -22,6 +22,7 @@
 
 import fdb.tuple
 
+
 class Subspace (object):
 
     def __init__(self, prefixTuple=tuple(), rawPrefix=b''):

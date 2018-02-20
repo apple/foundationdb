@@ -34,7 +34,7 @@ import (
 
 // KeyValue represents a single key-value pair in the database.
 type KeyValue struct {
-	Key Key
+	Key   Key
 	Value []byte
 }
 
@@ -121,11 +121,11 @@ func (sr SelectorRange) FDBRangeKeySelectors() (Selectable, Selectable) {
 // A RangeResult should not be returned from a transactional function passed to
 // the Transact method of a Transactor.
 type RangeResult struct {
-	t *transaction
-	sr SelectorRange
-	options RangeOptions
+	t        *transaction
+	sr       SelectorRange
+	options  RangeOptions
 	snapshot bool
-	f *futureKeyValueArray
+	f        *futureKeyValueArray
 }
 
 // GetSliceWithError returns a slice of KeyValue objects satisfying the range
@@ -173,12 +173,12 @@ func (rr RangeResult) GetSliceOrPanic() []KeyValue {
 // range specified in the read that returned this RangeResult.
 func (rr RangeResult) Iterator() *RangeIterator {
 	return &RangeIterator{
-		t: rr.t,
-		f: rr.f,
-		sr: rr.sr,
-		options: rr.options,
+		t:         rr.t,
+		f:         rr.f,
+		sr:        rr.sr,
+		options:   rr.options,
 		iteration: 1,
-		snapshot: rr.snapshot,
+		snapshot:  rr.snapshot,
 	}
 }
 
@@ -193,17 +193,17 @@ func (rr RangeResult) Iterator() *RangeIterator {
 // RangeResult and used concurrently. RangeIterator should not be returned from
 // a transactional function passed to the Transact method of a Transactor.
 type RangeIterator struct {
-	t *transaction
-	f *futureKeyValueArray
-	sr SelectorRange
-	options RangeOptions
+	t         *transaction
+	f         *futureKeyValueArray
+	sr        SelectorRange
+	options   RangeOptions
 	iteration int
-	done bool
-	more bool
-	kvs []KeyValue
-	index int
-	err error
-	snapshot bool
+	done      bool
+	more      bool
+	kvs       []KeyValue
+	index     int
+	err       error
+	snapshot  bool
 }
 
 // Advance attempts to advance the iterator to the next key-value pair. Advance

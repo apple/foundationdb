@@ -22,22 +22,27 @@ import fdb
 fdb.api_version(300)
 db = fdb.open()
 
+
 @fdb.transactional
 def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
+
 
 CHUNK_LARGE = 5
 
 blob = fdb.Subspace(('B',))
 
+
 @fdb.transactional
 def write_blob(tr, data):
-    if not len(data): return
-    num_chunks = (len(data)+CHUNK_LARGE-1) / CHUNK_LARGE
-    chunk_size = (len(data)+num_chunks)/num_chunks
-    chunks = [(n, n+chunk_size) for n in range(0, len(data), chunk_size)]
+    if not len(data):
+        return
+    num_chunks = (len(data) + CHUNK_LARGE - 1) / CHUNK_LARGE
+    chunk_size = (len(data) + num_chunks) / num_chunks
+    chunks = [(n, n + chunk_size) for n in range(0, len(data), chunk_size)]
     for start, end in chunks:
         tr[blob[start]] = data[start:end]
+
 
 @fdb.transactional
 def read_blob(tr):
@@ -45,6 +50,7 @@ def read_blob(tr):
     for k, v in tr[blob.range()]:
         value += v
     return value
+
 
 clear_subspace(db, blob)
 write_blob(db, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ')

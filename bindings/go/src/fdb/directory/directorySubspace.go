@@ -38,8 +38,8 @@ type DirectorySubspace interface {
 
 type directorySubspace struct {
 	subspace.Subspace
-	dl directoryLayer
-	path []string
+	dl    directoryLayer
+	path  []string
 	layer []byte
 }
 

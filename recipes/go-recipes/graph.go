@@ -21,12 +21,12 @@
 package main
 
 import (
+	"fmt"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"log"
-	"fmt"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
@@ -50,8 +50,8 @@ func (graph *Graph) NewGraph(dir subspace.Subspace, name string) {
 
 func (graph *Graph) set_edge(trtr fdb.Transactor, node, neighbor int) (inter interface{}, err error) {
 	inter, err = trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-		tr.Set(graph.EdgeSpace.Pack( tuple.Tuple{ node, neighbor } ), []byte(""))
-		tr.Set(graph.InvSpace.Pack( tuple.Tuple{  neighbor, node } ), []byte(""))
+		tr.Set(graph.EdgeSpace.Pack(tuple.Tuple{node, neighbor}), []byte(""))
+		tr.Set(graph.InvSpace.Pack(tuple.Tuple{neighbor, node}), []byte(""))
 		return nil, nil
 	})
 	return
@@ -59,8 +59,8 @@ func (graph *Graph) set_edge(trtr fdb.Transactor, node, neighbor int) (inter int
 
 func (graph *Graph) del_edge(trtr fdb.Transactor, node, neighbor int) (inter interface{}, err error) {
 	inter, err = trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-		tr.Clear(graph.EdgeSpace.Pack( tuple.Tuple{ node, neighbor } ))
-		tr.Clear(graph.InvSpace.Pack( tuple.Tuple{  neighbor, node } ))
+		tr.Clear(graph.EdgeSpace.Pack(tuple.Tuple{node, neighbor}))
+		tr.Clear(graph.InvSpace.Pack(tuple.Tuple{neighbor, node}))
 		return nil, nil
 	})
 	return
@@ -70,10 +70,12 @@ func (graph *Graph) get_out_neighbors(trtr fdb.Transactor, node int) ([]int, err
 
 	val, err := trtr.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 
-		kr, err := fdb.PrefixRange(graph.EdgeSpace.Pack( tuple.Tuple{ node } ))
-		if err != nil { return nil, err }
+		kr, err := fdb.PrefixRange(graph.EdgeSpace.Pack(tuple.Tuple{node}))
+		if err != nil {
+			return nil, err
+		}
 
-		ri := rtr.GetRange(kr, fdb.RangeOptions{}).Iterator();
+		ri := rtr.GetRange(kr, fdb.RangeOptions{}).Iterator()
 		neighbors := make([]int, 0)
 
 		for ri.Advance() {
@@ -81,7 +83,9 @@ func (graph *Graph) get_out_neighbors(trtr fdb.Transactor, node int) ([]int, err
 			kv := ri.MustGet()
 
 			t, err := graph.EdgeSpace.Unpack(kv.Key)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 
 			neighbors = append(neighbors, int(t[1].(int64)))
 		}
@@ -94,10 +98,12 @@ func (graph *Graph) get_out_neighbors(trtr fdb.Transactor, node int) ([]int, err
 func (graph *Graph) get_in_neighbors(trtr fdb.Transactor, node int) ([]int, error) {
 	val, err := trtr.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 
-		kr, err := fdb.PrefixRange(graph.InvSpace.Pack( tuple.Tuple{ node } ))
-		if err != nil { return nil, err }
+		kr, err := fdb.PrefixRange(graph.InvSpace.Pack(tuple.Tuple{node}))
+		if err != nil {
+			return nil, err
+		}
 
-		ri := rtr.GetRange(kr, fdb.RangeOptions{}).Iterator();
+		ri := rtr.GetRange(kr, fdb.RangeOptions{}).Iterator()
 		neighbors := make([]int, 0)
 
 		for ri.Advance() {
@@ -105,7 +111,9 @@ func (graph *Graph) get_in_neighbors(trtr fdb.Transactor, node int) ([]int, erro
 
 			t, err := graph.InvSpace.Unpack(kv.Key)
 
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 
 			neighbors = append(neighbors, int(t[1].(int64)))
 		}
@@ -121,7 +129,9 @@ func main() {
 	db := fdb.MustOpenDefault()
 
 	GraphDemoDir, err := directory.CreateOrOpen(db, []string{"Graph"}, nil)
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	clear_subspace(db, GraphDemoDir)
 
@@ -134,22 +144,30 @@ func main() {
 	g.set_edge(db, 1, 2)
 
 	i, err := g.get_out_neighbors(db, 0)
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Println(i)
 
 	_, err = g.del_edge(db, 0, 2)
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	i, err = g.get_in_neighbors(db, 2)
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Println(i)
 
 	clear_subspace(db, GraphDemoDir)
 
 	i, err = g.get_in_neighbors(db, 2)
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Println(i)
 }

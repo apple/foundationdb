@@ -23,7 +23,7 @@
 import os
 import sys
 
-sys.path[:0]=[os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
 import fdb
 from pubsub_bigdoc import PubSub
 

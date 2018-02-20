@@ -21,35 +21,36 @@
 import sys
 import os
 
-sys.path[:0]=[os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
 
 import util
 
 FDB_API_VERSION = 510
 
 LOGGING = {
-    'version' : 1,
-    'disable_existing_loggers' : False,
-    'formatters' : {
-        'simple' : {
-            'format' : '%(message)s'
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {
+            'format': '%(message)s'
         }
     },
-    'handlers' : {
-        'console' : {
-            'level' : 'NOTSET',
-            'class' : 'logging.StreamHandler',
-            'stream' : sys.stdout,
-            'formatter' : 'simple'
+    'handlers': {
+        'console': {
+            'level': 'NOTSET',
+            'class': 'logging.StreamHandler',
+            'stream': sys.stdout,
+            'formatter': 'simple'
         }
     },
-    'loggers' : {
-        'foundationdb.bindingtester' : {
-            'level' : 'INFO',
-            'handlers' : ['console']
+    'loggers': {
+        'foundationdb.bindingtester': {
+            'level': 'INFO',
+            'handlers': ['console']
         }
     }
 }
+
 
 class Result:
     def __init__(self, subspace, key, values):
@@ -63,7 +64,7 @@ class Result:
 
         left_key = self.key_tuple[specification.key_start_index:]
         right_key = self.key_tuple[specification.key_start_index:]
-        
+
         if len(left_key) != len(right_key) or left_key != right_key:
             return False
 
@@ -81,7 +82,7 @@ class Result:
     def sequence_num(self, specification):
         if specification.ordering_index is not None:
             return self.key_tuple[specification.ordering_index]
-        
+
         return None
 
     def __str__(self):
@@ -91,4 +92,3 @@ class Result:
             value_str = repr(self.values)
 
         return '%s = %s' % (repr(self.subspace_tuple + self.key_tuple), value_str)
-
