@@ -147,7 +147,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				//TraceEvent("ConfigureTestConfigureBegin").detail("newConfig", newConfig);
 				int redundancy = g_random->randomInt( 0, sizeof(redundancies)/sizeof(redundancies[0]));
 				std::string config = redundancies[redundancy];
-				if(config == "triple" && g_simulator.physicalDatacenters > 2) {
+				if(config == "triple" && g_simulator.physicalDatacenters == 3) {
 					config = "three_data_hall";
 				}
 

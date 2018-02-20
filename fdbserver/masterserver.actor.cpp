@@ -1011,7 +1011,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		state DBCoreState newState;
 		self->logSystem->toCoreState( newState );
 		newState.recoveryCount = recoverCount;
-
+		state Future<Void> changed = self->logSystem->onCoreStateChanged();
 		ASSERT( newState.tLogs[0].tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum && newState.tLogs[0].tLogReplicationFactor == self->configuration.tLogReplicationFactor );
 
 		state bool finalUpdate = !newState.oldTLogData.size() && newState.tLogs.size() == self->configuration.expectedLogSets();
@@ -1037,7 +1037,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			return Void();
 		}
 
-		Void _ = wait( self->logSystem->onCoreStateChanged() );
+		Void _ = wait( changed );
 	}
 }
 
