@@ -25,6 +25,7 @@
 const Key BackupAgentBase::keyFolderId = LiteralStringRef("config_folderid");
 const Key BackupAgentBase::keyBeginVersion = LiteralStringRef("beginVersion");
 const Key BackupAgentBase::keyEndVersion = LiteralStringRef("endVersion");
+const Key BackupAgentBase::keyPrevBeginVersion = LiteralStringRef("prevBeginVersion");
 const Key BackupAgentBase::keyConfigBackupTag = LiteralStringRef("config_backup_tag");
 const Key BackupAgentBase::keyConfigLogUid = LiteralStringRef("config_log_uid");
 const Key BackupAgentBase::keyConfigBackupRanges = LiteralStringRef("config_backup_ranges");
@@ -34,6 +35,8 @@ const Key BackupAgentBase::keyStateStatus = LiteralStringRef("state_status");
 const Key BackupAgentBase::keyLastUid = LiteralStringRef("last_uid");
 const Key BackupAgentBase::keyBeginKey = LiteralStringRef("beginKey");
 const Key BackupAgentBase::keyEndKey = LiteralStringRef("endKey");
+const Key BackupAgentBase::destUid = LiteralStringRef("destUid");
+const Key BackupAgentBase::backupDone = LiteralStringRef("backupDone");
 
 const Key BackupAgentBase::keyTagName = LiteralStringRef("tagname");
 const Key BackupAgentBase::keyStates = LiteralStringRef("state");
@@ -68,12 +71,12 @@ Version getVersionFromString(std::string const& value) {
 // \xff / bklog / keyspace in a funny order for performance reasons.
 // Return the ranges of keys that contain the data for the given range
 // of versions.
-Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key backupUid, int blockSize) {
+Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize) {
 	Standalone<VectorRef<KeyRangeRef>> ret;
 
-	Key baLogRangePrefix = backupUid.withPrefix(backupLogKeys.begin);
+	Key baLogRangePrefix = destUidValue.withPrefix(backupLogKeys.begin);
 
-	//TraceEvent("getLogRanges").detail("backupUid", backupUid).detail("prefix", printable(StringRef(baLogRangePrefix)));
+	//TraceEvent("getLogRanges").detail("destUidValue", destUidValue).detail("prefix", printable(StringRef(baLogRangePrefix)));
 
 	for (int64_t vblock = beginVersion / blockSize; vblock < (endVersion + blockSize - 1) / blockSize; ++vblock) {
 		int64_t tb = vblock * blockSize / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -618,4 +621,70 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "AM_error").error(e);
 		throw;	
 	}
+}
+
+ACTOR Future<Void> _clearLogRanges(Reference<ReadYourWritesTransaction> tr, bool clearVersionHistory, Key logUidValue, Key destUidValue, Version beginVersion, Version endVersion) {
+	if (!destUidValue.size()) {
+		return Void();
+	}
+
+	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
+	state Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+	
+	Optional<Key> v = wait(tr->get(backupLatestVersionsKey));
+	if (!v.present()) {
+		return Void();
+	}
+
+	state Standalone<RangeResultRef> backupVersions = wait(tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
+	Version nextSmallestVersion = endVersion;
+	bool clearLogRangesRequired = true;
+
+	// More than one backup/DR with the same range
+	if (backupVersions.size() > 1) {
+		bool countSelf = false;
+
+		for (auto backupVersion : backupVersions) {
+			Version currVersion = BinaryReader::fromStringRef<Version>(backupVersion.value, Unversioned());
+			if (currVersion > beginVersion) {
+				if (currVersion < nextSmallestVersion) {
+					nextSmallestVersion = currVersion;
+				}
+			} else if (currVersion == beginVersion && !countSelf) {
+				countSelf = true;
+			} else {
+				clearLogRangesRequired = false;
+				break;
+			}
+		}
+	}
+
+	if (clearVersionHistory && backupVersions.size() == 1) {
+		tr->clear(prefixRange(backupLatestVersionsPath));
+		tr->clear(prefixRange(destUidValue.withPrefix(backupLogKeys.begin)));
+	} else {
+		if (clearVersionHistory) {
+			// Clear current backup version history
+			tr->clear(backupLatestVersionsKey);
+		} else {
+			// Update current backup latest version
+			tr->set(backupLatestVersionsKey, BinaryWriter::toValue<Version>(endVersion, Unversioned()));
+		}
+
+		// Clear log ranges if needed
+		if (clearLogRangesRequired) {
+			Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, nextSmallestVersion, destUidValue);
+			for (auto& range : ranges) {
+				tr->clear(range);
+			}
+		}
+	}
+
+	return Void();
+}
+
+Future<Void> clearLogRanges(Reference<ReadYourWritesTransaction> tr, bool clearVersionHistory, Key logUidValue, Key destUidValue, Version beginVersion, Version endVersion) {
+	return _clearLogRanges(tr, clearVersionHistory, logUidValue, destUidValue, beginVersion, endVersion);
 }

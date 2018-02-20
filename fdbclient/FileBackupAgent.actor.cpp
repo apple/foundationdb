@@ -807,7 +807,8 @@ namespace fileBackup {
 										   BackupConfig config,
 										   Reference<TaskFuture> waitFor = Reference<TaskFuture>(),
 										   std::function<void(Reference<Task>)> setupTaskFn = NOP_SETUP_TASK_FN,
-										   int priority = 0) {
+										   int priority = 0,
+										   bool setValidation = true) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -815,7 +816,7 @@ namespace fileBackup {
 		state Reference<Task> task(new Task(name, version, doneKey, priority));
 
 		// Bind backup config to new task
-		Void _ = wait(config.toTask(tr, task));
+		Void _ = wait(config.toTask(tr, task, setValidation));
 
 		// Set task specific params
 		setupTaskFn(task);
@@ -1539,7 +1540,7 @@ namespace fileBackup {
 									.detail("ScheduledVersion", scheduledVersion)
 									.detail("BeginKey", range.begin.printable())
 									.detail("EndKey", range.end.printable())
-									.suppressFor(2);
+									.suppressFor(2, true);
 							}
 							else {
 								// This shouldn't happen because if the transaction was already done or if another execution
@@ -1680,7 +1681,8 @@ namespace fileBackup {
 				}
 			}
 
-			state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, config.getUidAsKey());
+			Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
+			state Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, destUidValue);
 			if (ranges.size() > CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES) {
 				Params.addBackupLogRangeTasks().set(task, true);
 				return Void();
@@ -1804,12 +1806,6 @@ namespace fileBackup {
 				Void _ = wait(taskFuture->set(tr, taskBucket));
 			}
 
-			if(endVersion > beginVersion) {
-				Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, endVersion, config.getUidAsKey());
-				for (auto & rng : ranges)
-					tr->clear(rng);
-			}
-
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
 		}
@@ -1819,11 +1815,146 @@ namespace fileBackup {
 	const uint32_t BackupLogRangeTaskFunc::version = 1;
 	REGISTER_TASKFUNC(BackupLogRangeTaskFunc);
 
+	struct EraseLogRangeTaskFunc : BackupTaskFuncBase {
+		static StringRef name;
+		static const uint32_t version;
+		StringRef getName() const { return name; };
+
+		static struct {
+			static TaskParam<Version> beginVersion() {
+				return LiteralStringRef(__FUNCTION__);
+			}
+			static TaskParam<Version> endVersion() {
+				return LiteralStringRef(__FUNCTION__);
+			}
+			static TaskParam<bool> backupDone() {
+				return LiteralStringRef(__FUNCTION__);
+			}
+			static TaskParam<Key> destUidValue() {
+				return LiteralStringRef(__FUNCTION__);
+			}
+		} Params;
+
+		ACTOR static Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, bool backupDone, Version beginVersion, Version endVersion) {
+			if (endVersion <= beginVersion)
+				return Void();
+
+			state Version currBeginVersion = beginVersion;
+			state Version currEndVersion;
+			state bool clearVersionHistory = false;
+
+			while (currBeginVersion < endVersion) {
+				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				
+				loop{
+					try {
+						currEndVersion = std::min(currBeginVersion + CLIENT_KNOBS->CLEAR_LOG_RANGE_COUNT * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE, endVersion);
+						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+						if (backupDone && currEndVersion == endVersion) {
+							clearVersionHistory = true;
+						}
+						Void _ = wait(clearLogRanges(tr, clearVersionHistory, logUidValue, destUidValue, currBeginVersion, currEndVersion));
+						Void _ = wait(tr->commit());
+						currBeginVersion = currEndVersion;
+						break;
+					} catch (Error &e) {
+						Void _ = wait(tr->onError(e));
+					}
+				}
+			}
+
+			return Void();
+		}
+
+		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
+			Void _ = wait(checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version));
+
+			state Version beginVersion = Params.beginVersion().get(task);
+			state Version endVersion = Params.endVersion().get(task);
+			state bool backupDone = Params.backupDone().get(task);
+			state Key destUidValue = Params.destUidValue().get(task);
+
+			state BackupConfig config(task);
+			state Key logUidValue = config.getUidAsKey();
+
+			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+
+					if (beginVersion == 0) {
+						Key latestVersionKey = logUidValue.withPrefix(destUidValue.withPrefix(backupLatestVersionsPrefix));
+
+						Optional<Key> bVersion = wait(tr->get(latestVersionKey));
+						if (bVersion.present()) {
+							beginVersion = BinaryReader::fromStringRef<Version>(bVersion.get(), Unversioned());
+						} else {
+							return Void();
+						}
+
+						Version eVersion = wait(tr->getReadVersion());
+						endVersion = eVersion;
+					}
+
+					break;
+				} catch (Error &e) {
+					Void _ = wait(tr->onError(e));
+				}
+			}
+
+			Void _ = wait(eraseLogData(cx, logUidValue, destUidValue, backupDone, beginVersion, endVersion));
+
+			return Void();
+		}
+
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, UID logUid, TaskCompletionKey completionKey, bool backupDone, Key destUidValue, Version beginVersion = 0, Version endVersion = 0, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+			Key key = wait(addBackupTask(EraseLogRangeTaskFunc::name,
+										 EraseLogRangeTaskFunc::version,
+										 tr, taskBucket, completionKey,
+										 BackupConfig(logUid),
+										 waitFor,
+										 [=](Reference<Task> task) {
+											 Params.beginVersion().set(task, beginVersion);
+											 Params.endVersion().set(task, endVersion);
+											 Params.backupDone().set(task, backupDone);
+											 Params.destUidValue().set(task, destUidValue);
+										 },
+										 0, false));
+
+			return key;
+		}
+
+
+		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
+			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
+
+			Void _ = wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
+
+			return Void();
+		}
+
+		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _execute(cx, tb, fb, task); };
+		Future<Void> finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return _finish(tr, tb, fb, task); };
+	};
+	StringRef EraseLogRangeTaskFunc::name = LiteralStringRef("file_backup_erase_logs");
+	const uint32_t EraseLogRangeTaskFunc::version = 1;
+	REGISTER_TASKFUNC(EraseLogRangeTaskFunc);
+
+
+
 	struct BackupLogsDispatchTask : BackupTaskFuncBase {
 		static StringRef name;
 		static const uint32_t version;
 
 		static struct {
+			static TaskParam<Version> prevBeginVersion() {
+				return LiteralStringRef(__FUNCTION__);
+			}
 			static TaskParam<Version> beginVersion() {
 				return LiteralStringRef(__FUNCTION__);
 			}
@@ -1836,6 +1967,7 @@ namespace fileBackup {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			state Reference<TaskFuture> onDone = task->getDoneFuture(futureBucket);
+			state Version prevBeginVersion = Params.prevBeginVersion().get(task);
 			state Version beginVersion = Params.beginVersion().get(task);
 			state BackupConfig config(task);
 			config.latestLogEndVersion().set(tr, beginVersion);
@@ -1883,7 +2015,13 @@ namespace fileBackup {
 
 			// Add the next logs dispatch task which will run after this batch is done
 			Key _ = wait(BackupLogRangeTaskFunc::addTask(tr, taskBucket, task, beginVersion, endVersion, TaskCompletionKey::joinWith(logDispatchBatchFuture)));
-			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture));
+
+			// Do not erase at the first time
+			if (prevBeginVersion > 0) {
+				state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
+				Key _ = wait(EraseLogRangeTaskFunc::addTask(tr, taskBucket, config.getUid(), TaskCompletionKey::joinWith(logDispatchBatchFuture), false, destUidValue, prevBeginVersion, beginVersion));
+			}
+			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, beginVersion, endVersion, TaskCompletionKey::signal(onDone), logDispatchBatchFuture));
 
 			Void _ = wait(taskBucket->finish(tr, task));
 
@@ -1896,13 +2034,14 @@ namespace fileBackup {
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
+		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version prevBeginVersion, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
 			Key key = wait(addBackupTask(BackupLogsDispatchTask::name,
 										 BackupLogsDispatchTask::version,
 										 tr, taskBucket, completionKey,
 										 BackupConfig(parentTask),
 										 waitFor,
 										 [=](Reference<Task> task) {
+											 Params.prevBeginVersion().set(task, prevBeginVersion);
 											 Params.beginVersion().set(task, beginVersion);
 										 }));
 			return key;
@@ -1930,11 +2069,12 @@ namespace fileBackup {
 			state UID uid = backup.getUid();
 
 			state Key configPath = uidPrefixKey(logRangesRange.begin, uid);
-			state Key logsPath = uidPrefixKey(backupLogKeys.begin, uid);
 
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
-			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+			state Key destUidValue = wait(backup.destUidValue().getOrThrow(tr));
+			Key _ = wait(EraseLogRangeTaskFunc::addTask(tr, taskBucket, backup.getUid(), TaskCompletionKey::noSignal(), true, destUidValue));
+			
 			backup.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
 			Void _ = wait(taskBucket->finish(tr, task));
@@ -2153,11 +2293,15 @@ namespace fileBackup {
 			state BackupConfig config(task);
 			state Version beginVersion = Params.beginVersion().get(task);
 
-			state std::vector<KeyRange> backupRanges = wait(config.backupRanges().getOrThrow(tr));
+			state Future<std::vector<KeyRange>> backupRangesFuture = config.backupRanges().getOrThrow(tr);
+			state Future<Key> destUidValueFuture = config.destUidValue().getOrThrow(tr);
+			Void _ = wait(success(backupRangesFuture) && success(destUidValueFuture));
+			std::vector<KeyRange> backupRanges = backupRangesFuture.get();
+			Key destUidValue = destUidValueFuture.get();
 
 			// Start logging the mutations for the specified ranges of the tag
 			for (auto &backupRange : backupRanges) {
-				config.startMutationLogs(tr, backupRange);
+				config.startMutationLogs(tr, backupRange, destUidValue);
 			}
 
 			config.stateEnum().set(tr, EBackupState::STATE_BACKUP);
@@ -2168,7 +2312,7 @@ namespace fileBackup {
 			// The initial snapshot has a desired duration of 0, meaning go as fast as possible.
 			Void _ = wait(config.initNewSnapshot(tr, 0));
 			Key _ = wait(BackupSnapshotDispatchTask::addTask(tr, taskBucket, task, TaskCompletionKey::joinWith(backupFinished)));
-			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(backupFinished)));
+			Key _ = wait(BackupLogsDispatchTask::addTask(tr, taskBucket, task, 0, beginVersion, TaskCompletionKey::joinWith(backupFinished)));
 
 			// If a clean stop is requested, the log and snapshot tasks will quit after the backup is restorable, then the following
 			// task will clean up and set the completed state.
@@ -3307,6 +3451,21 @@ public:
 
 		config.clear(tr);
 
+		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
+		if (normalizedRanges.size() == 1) {
+			state Key destUidLookupPath = BinaryWriter::toValue(normalizedRanges[0], IncludeVersion()).withPrefix(destUidLookupPrefix);
+			Optional<Key> existingDestUidValue = wait(tr->get(destUidLookupPath));
+			if (existingDestUidValue.present()) {
+				destUidValue = existingDestUidValue.get();
+			} else {
+				destUidValue = BinaryWriter::toValue(g_random->randomUniqueID(), Unversioned());
+				tr->set(destUidLookupPath, destUidValue);
+			}
+		}
+		Version initVersion = 1;
+		tr->set(config.getUidAsKey().withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix), BinaryWriter::toValue<Version>(initVersion, Unversioned()));
+		config.destUidValue().set(tr, destUidValue);
+
 		// Point the tag to this new uid
 		tag.set(tr, {uid, false});
 
@@ -3464,11 +3623,14 @@ public:
 			Void _ = wait(tag.cancel(tr));
 
 			Key configPath = uidPrefixKey(logRangesRange.begin, config.getUid());
-			Key logsPath = uidPrefixKey(backupLogKeys.begin, config.getUid());
 
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
 			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
-			tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+
+			state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
+			state Version endVersion = wait(tr->getReadVersion());
+
+			Key _ = wait(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), true, destUidValue));
 
 			config.stateEnum().set(tr, EBackupState::STATE_COMPLETED);
 
@@ -3494,6 +3656,7 @@ public:
 		state UidAndAbortedFlagT current = wait(tag.getOrThrow(tr, false, backup_unneeded()));
 
 		state BackupConfig config(current.first);
+		state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 		EBackupState status = wait(config.stateEnum().getD(tr, EBackupState::STATE_NEVERRAN));
 
 		if (!backupAgent->isRunnable((BackupAgentBase::enumState)status)) {
@@ -3508,10 +3671,9 @@ public:
 		Void _ = wait(tag.cancel(tr));
 
 		Key configPath = uidPrefixKey(logRangesRange.begin, config.getUid());
-		Key logsPath = uidPrefixKey(backupLogKeys.begin, config.getUid());
 
 		tr->clear(KeyRangeRef(configPath, strinc(configPath)));
-		tr->clear(KeyRangeRef(logsPath, strinc(logsPath)));
+		Key _ = wait(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), true, destUidValue));
 
 		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);
 
