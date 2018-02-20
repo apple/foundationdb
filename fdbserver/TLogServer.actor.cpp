@@ -1787,21 +1787,20 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 
 ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom, Reference<AsyncVar<Reference<ILogSystem>>> logSystem) {
 	loop {
-		TraceEvent("TLogUpdate", self->dbgid).detail("logId", logData->logId).detail("recoverFrom", recoverFrom.toString()).detail("dbInfo", self->dbInfo->get().logSystemConfig.toString());
-		for(auto it : self->dbInfo->get().logSystemConfig.oldTLogs) {
-			TraceEvent("TLogUpdateOld", self->dbgid).detail("logId", logData->logId).detail("dbInfo", it.toString());
-		}
-
 		bool found = false;
-		if( self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom) ) {
-			logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
-			found = true;
-		} else if( self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom) ) {
+		if( self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom) ) {
 			logSystem->set(ILogSystem::fromOldLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
+			found = true;
+		} else if( self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom) || self->dbInfo->get().logSystemConfig.oldTLogs.size() == 0 ) {
+			logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
 			found = true;
 		}
 		if( !found ) {
 			logSystem->set(Reference<ILogSystem>());
+		}
+		TraceEvent("TLogUpdate", self->dbgid).detail("logId", logData->logId).detail("recoverFrom", recoverFrom.toString()).detail("dbInfo", self->dbInfo->get().logSystemConfig.toString()).detail("found", found);
+		for(auto it : self->dbInfo->get().logSystemConfig.oldTLogs) {
+			TraceEvent("TLogUpdateOld", self->dbgid).detail("logId", logData->logId).detail("dbInfo", it.toString());
 		}
 		Void _ = wait( self->dbInfo->onChange() );
 	}
