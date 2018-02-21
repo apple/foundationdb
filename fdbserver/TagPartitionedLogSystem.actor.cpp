@@ -107,7 +107,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return epochEnd( outLogSystem, dbgid, oldState, rejoins, locality );
 	}
 
-	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, LocalityData const& locality, LogSystemConfig const& lsConf ) {
+	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, LocalityData const& locality, LogSystemConfig const& lsConf, bool excludeRemote ) {
 		ASSERT( lsConf.logSystemType == 2 || (lsConf.logSystemType == 0 && !lsConf.tLogs.size()) );
 		//ASSERT(lsConf.epoch == epoch);  //< FIXME
 		Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality) );
@@ -116,24 +116,26 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->expectedLogSets = lsConf.expectedLogSets;
 		logSystem->minRouters = lsConf.minRouters;
 		for( int i = 0; i < lsConf.tLogs.size(); i++ ) {
-			Reference<LogSet> logSet = Reference<LogSet>( new LogSet() );
-			logSystem->tLogs[i] = logSet;
 			TLogSet const& tLogSet = lsConf.tLogs[i];
-			for( auto& log : tLogSet.tLogs) {
-				logSet->logServers.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
+			if(!excludeRemote || tLogSet.isLocal) {
+				Reference<LogSet> logSet = Reference<LogSet>( new LogSet() );
+				logSystem->tLogs[i] = logSet;
+				for( auto& log : tLogSet.tLogs) {
+					logSet->logServers.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
+				}
+				for( auto& log : tLogSet.logRouters) {
+					logSet->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
+				}
+				logSet->tLogWriteAntiQuorum = tLogSet.tLogWriteAntiQuorum;
+				logSet->tLogReplicationFactor = tLogSet.tLogReplicationFactor;
+				logSet->tLogPolicy = tLogSet.tLogPolicy;
+				logSet->tLogLocalities = tLogSet.tLogLocalities;
+				logSet->isLocal = tLogSet.isLocal;
+				logSet->hasBestPolicy = tLogSet.hasBestPolicy;
+				logSet->locality = tLogSet.locality;
+				logSet->updateLocalitySet();
+				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
 			}
-			for( auto& log : tLogSet.logRouters) {
-				logSet->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
-			}
-			logSet->tLogWriteAntiQuorum = tLogSet.tLogWriteAntiQuorum;
-			logSet->tLogReplicationFactor = tLogSet.tLogReplicationFactor;
-			logSet->tLogPolicy = tLogSet.tLogPolicy;
-			logSet->tLogLocalities = tLogSet.tLogLocalities;
-			logSet->isLocal = tLogSet.isLocal;
-			logSet->hasBestPolicy = tLogSet.hasBestPolicy;
-			logSet->locality = tLogSet.locality;
-			logSet->updateLocalitySet();
-			filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
 		}
 
 		logSystem->oldLogData.resize(lsConf.oldTLogs.size());
@@ -1471,11 +1473,11 @@ Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSys
 	return TagPartitionedLogSystem::recoverAndEndEpoch( outLogSystem, dbgid, oldState, rejoins, locality );
 }
 
-Reference<ILogSystem> ILogSystem::fromLogSystemConfig( UID const& dbgid, struct LocalityData const& locality, struct LogSystemConfig const& conf ) {
+Reference<ILogSystem> ILogSystem::fromLogSystemConfig( UID const& dbgid, struct LocalityData const& locality, struct LogSystemConfig const& conf, bool excludeRemote ) {
 	if (conf.logSystemType == 0)
 		return Reference<ILogSystem>();
 	else if (conf.logSystemType == 2)
-		return TagPartitionedLogSystem::fromLogSystemConfig( dbgid, locality, conf );
+		return TagPartitionedLogSystem::fromLogSystemConfig( dbgid, locality, conf, excludeRemote );
 	else
 		throw internal_error();
 }
