@@ -112,14 +112,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		//ASSERT(lsConf.epoch == epoch);  //< FIXME
 		Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality) );
 
-		logSystem->tLogs.resize(lsConf.tLogs.size());
+		logSystem->tLogs.reserve(lsConf.tLogs.size());
 		logSystem->expectedLogSets = lsConf.expectedLogSets;
 		logSystem->minRouters = lsConf.minRouters;
 		for( int i = 0; i < lsConf.tLogs.size(); i++ ) {
 			TLogSet const& tLogSet = lsConf.tLogs[i];
 			if(!excludeRemote || tLogSet.isLocal) {
 				Reference<LogSet> logSet = Reference<LogSet>( new LogSet() );
-				logSystem->tLogs[i] = logSet;
+				logSystem->tLogs.push_back( logSet );
 				for( auto& log : tLogSet.tLogs) {
 					logSet->logServers.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( log ) ) );
 				}
