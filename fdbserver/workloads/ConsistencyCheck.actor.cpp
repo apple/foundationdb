@@ -312,59 +312,63 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 		loop
 		{
+			state bool successful = true;
+			state bool masterProxiesChanged = false;
 			state Reference<ProxyInfo> proxyInfo = wait(cx->getMasterProxiesFuture());
 
 			//Try getting key server locations from the master proxies
 			state vector<Future<ErrorOr<GetKeyServerLocationsReply>>> keyServerLocationFutures;
 			state KeyRange keyServerRange = keyServersKeys;
-			for(int i = 0; i < proxyInfo->size(); i++)
-				keyServerLocationFutures.push_back(proxyInfo->get(i,&MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(keyServerRange.begin, keyServerRange.end, 1000, false, keyServerRange.arena()), 2, 0));
 
-			choose {
-				when( Void _ = wait(waitForAll(keyServerLocationFutures)) ) {
+			while (keyServerRange.begin.size()) {
+				keyServerLocationFutures.clear();
+				for (int i = 0; i < proxyInfo->size(); i++)
+					keyServerLocationFutures.push_back(proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(keyServerRange.begin, keyServerRange.end, 100, false, keyServerRange.arena()), 2, 0));
 
-					//Read the key server location results
-					state bool successful = true;
-					for(int i = 0; i < keyServerLocationFutures.size(); i++)
-					{
-						ErrorOr<GetKeyServerLocationsReply> shards = keyServerLocationFutures[i].get();
-
-						//If performing quiescent check, then all master proxies should be reachable.  Otherwise, only one needs to be reachable
-						if(self->performQuiescentChecks && !shards.present())
+				state bool keyServersInsertedForThisIteration = false;
+				choose {
+					when(Void _ = wait(waitForAll(keyServerLocationFutures))) {
+						//Read the key server location results
+						for (int i = 0; i < keyServerLocationFutures.size(); i++)
 						{
-							TraceEvent("ConsistencyCheck_MasterProxyUnavailable").detail("MasterProxyID", proxyInfo->getId(i));
-							self->testFailure("Master proxy unavailable");
-							return false;
-						}
+							ErrorOr<GetKeyServerLocationsReply> shards = keyServerLocationFutures[i].get();
 
-						//Get the list of shards if one was returned.  If not doing a quiescent check, we can break if it is.
-						//If we are doing a quiescent check, then we only need to do this for the first shard.
-						if(shards.present() && (i == 0 || !self->performQuiescentChecks))
-						{
-							keyServers = shards.get().results;
-							if(!self->performQuiescentChecks)
-								break;
-						}
+							//If performing quiescent check, then all master proxies should be reachable.  Otherwise, only one needs to be reachable
+							if (self->performQuiescentChecks && !shards.present())
+							{
+								TraceEvent("ConsistencyCheck_MasterProxyUnavailable").detail("MasterProxyID", proxyInfo->getId(i));
+								self->testFailure("Master proxy unavailable");
+								return false;
+							}
 
-						//If none of the master proxies responded, then we will have to try again
-						else if(i == keyServerLocationFutures.size() - 1 && !self->performQuiescentChecks)
-						{
-							TraceEvent("ConsistencyCheck_NoMasterProxiesAvailable");
+							//Get the list of shards if one was returned.  If not doing a quiescent check, we can break if it is.
+							//If we are doing a quiescent check, then we only need to do this for the first shard.
+							if (shards.present() && !keyServersInsertedForThisIteration)
+							{
+								keyServers.insert(keyServers.end(), shards.get().results.begin(), shards.get().results.end());
+								keyServersInsertedForThisIteration = true;
+								keyServerRange = shards.get().results[shards.get().results.size() - 1].first.end < keyServersKeys.end ?
+													KeyRangeRef(shards.get().results[shards.get().results.size() - 1].first.end, keyServersKeys.end)
+													: KeyRangeRef();
 
-							//Retry (continues outer loop)
-							successful = false;
-						}
+								if (!self->performQuiescentChecks)
+									break;
+							}
+						} // End of For	
 					}
+					when(Void _ = wait(cx->onMasterProxiesChanged())) { masterProxiesChanged = true; }
+				} // End of choose
+				
+				if (masterProxiesChanged || !keyServersInsertedForThisIteration) { // Retry the entire workflow
+					successful = false;
+					break;
+				}
 
-					//If master proxy check and tlog check were successful
-					if(successful)
-						break;
-
-					Void _ = wait(delay(1.0));
-				} when( Void _ = wait(cx->onMasterProxiesChanged()) ) {}
-			}
+			} // End of while
+			if (successful)
+				break;
+			Void _ = wait(delay(1.0));
 		}
-
 		keyServersPromise.send(keyServers);
 		return true;
 	}
