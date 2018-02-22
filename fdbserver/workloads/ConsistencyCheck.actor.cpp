@@ -317,12 +317,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state int limitKeyServers = BUGGIFY ? 1 : 100;
 
 		while (begin < end) {
-			state Reference<ProxyInfo> proxyInfo = cx->getMasterProxies();
-			while (!proxyInfo) {
-				Reference<ProxyInfo> _ = wait( cx->getMasterProxiesFuture() );
-				proxyInfo = cx->getMasterProxies();
-			} 
-
+			state Reference<ProxyInfo> proxyInfo = wait(cx->getMasterProxiesFuture());
 			keyServerLocationFutures.clear();
 			for (int i = 0; i < proxyInfo->size(); i++)
 				keyServerLocationFutures.push_back(proxyInfo->get(i, &MasterProxyInterface::getKeyServersLocations).getReplyUnlessFailedFor(GetKeyServerLocationsRequest(begin, end, limitKeyServers, false, Arena()), 2, 0));
