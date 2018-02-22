@@ -891,9 +891,8 @@ Reference<ProxyInfo> DatabaseContext::getMasterProxies() {
 
 //Actor which will wait until the ProxyInfo returned by the DatabaseContext cx is not NULL
 ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx) {
-	state Reference<ProxyInfo> proxies;
 	loop{
-		proxies = cx->getMasterProxies();
+		Reference<ProxyInfo> proxies = cx->getMasterProxies();
 		if (proxies)
 			return proxies;
 		Void _ = wait( cx->onMasterProxiesChanged() );
