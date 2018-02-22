@@ -719,9 +719,11 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 			if(e.code() == error_code_commit_unknown_result)
 				throw recruitment_failed();  // There is a remote possibility that we successfully added ourselves and then someone removed us, so we have to fail
 
-			Void _ = wait( tr.onError(e) );
+			if(e.code() == error_code_not_committed) {
+				maxSkipTags = std::min<int>(maxSkipTags * SERVER_KNOBS->SKIP_TAGS_GROWTH_RATE, SERVER_KNOBS->MAX_SKIP_TAGS);
+			}
 
-			maxSkipTags = std::min<int>(maxSkipTags * SERVER_KNOBS->SKIP_TAGS_GROWTH_RATE, SERVER_KNOBS->MAX_SKIP_TAGS);
+			Void _ = wait( tr.onError(e) );
 		}
 	}
 }
