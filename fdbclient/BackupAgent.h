@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -265,7 +265,7 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return abortBackup(tr, tagName); });
 	}
 
-	Future<std::string> getStatus(Database cx, int errorLimit, std::string tagName);
+	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
 
 	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
@@ -530,8 +530,29 @@ public:
 	}
 
 	// lastError is a pair of error message and timestamp expressed as an int64_t
-	KeyBackedProperty<std::pair<std::string, int64_t>> lastError() {
+	KeyBackedProperty<std::pair<std::string, Version>> lastError() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Updates the error per type map and the last error property
+	Future<Void> updateErrorInfo(Database cx, Error e, std::string message) {
+		// Avoid capture of this ptr
+		auto &copy = *this;
+
+		return runRYWTransaction(cx, [=] (Reference<ReadYourWritesTransaction> tr) mutable {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return map(tr->getReadVersion(), [=] (Version v) mutable {
+				copy.lastError().set(tr, {message, v});
+				copy.lastErrorPerType().set(tr, e.code(), {message, v});
+				return Void();
+			});
+		});
 	}
 
 protected:
@@ -715,7 +736,8 @@ public:
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
 		std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
-		return lastError().set(cx, {msg, (int64_t)now()});
+
+		return updateErrorInfo(cx, e, msg);
 	}
 };
 #endif

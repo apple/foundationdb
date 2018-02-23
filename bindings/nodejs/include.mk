@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,6 +24,9 @@ TARGETS += fdb_node fdb_node_npm
 CLEAN_TARGETS += fdb_node_clean fdb_node_npm_clean
 
 NODE_VERSIONS := 0.8.22 0.10.0
+
+NODE_DIST_URL ?= https://nodejs.org/dist
+NODE_REGISTRY_URL ?= https://registry.npmjs.org/
 
 ifeq ($(RELEASE),true)
   NPMVER = $(VERSION)
@@ -46,7 +49,7 @@ bindings/nodejs/fdb_node.stamp: bindings/nodejs/src/FdbOptions.g.cpp bindings/no
 	for ver in $(NODE_VERSIONS); do \
 		MMVER=`echo $$ver | sed -e 's,\., ,g' | awk '{print $$1 "." $$2}'` && \
 		mkdir modules/$$MMVER && \
-		node-gyp configure --dist-url=https://nodejs.org/dist --target=$$ver && \
+		node-gyp configure --dist-url=$(NODE_DIST_URL) --target=$$ver && \
 		node-gyp -v build && \
 		cp build/Release/fdblib.node modules/$${MMVER} ; \
 	done
@@ -67,7 +70,7 @@ bindings/nodejs/package.json: bindings/nodejs/package.json.in $(ALL_MAKEFILES) v
 	@m4 -DVERSION=$(NPMVER) $< > $@
 	@echo "Updating       Node dependencies"
 	@cd bindings/nodejs && \
-	npm config set registry "https://registry.npmjs.org/" && \
+	npm config set registry "$(NODE_REGISTRY_URL)" && \
 	npm update
 
 fdb_node_npm: fdb_node versions.target bindings/nodejs/README.md bindings/nodejs/lib/*.js bindings/nodejs/src/* bindings/nodejs/binding.gyp LICENSE

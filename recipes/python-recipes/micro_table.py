@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -26,26 +26,32 @@ table = fdb.Subspace(('T',))
 row_index = table['R']
 col_index = table['C']
 
+
 def _pack(value):
     return fdb.tuple.pack((value,))
 
+
 def _unpack(value):
     return fdb.tuple.unpack(value)[0]
+
 
 @fdb.transactional
 def table_set_cell(tr, row, column, value):
     tr[row_index[row][column]] = _pack(value)
     tr[col_index[column][row]] = _pack(value)
 
+
 @fdb.transactional
 def table_get_cell(tr, row, column):
     return tr[row_index[row][column]]
+
 
 @fdb.transactional
 def table_set_row(tr, row, cols):
     del tr[row_index[row].range()]
     for c, v in cols.iteritems():
         table_set_cell(tr, row, c, v)
+
 
 @fdb.transactional
 def table_get_row(tr, row):
@@ -55,6 +61,7 @@ def table_get_row(tr, row):
         cols[c] = _unpack(v)
     return cols
 
+
 @fdb.transactional
 def table_get_col(tr, col):
     rows = {}
@@ -63,8 +70,9 @@ def table_get_col(tr, col):
         rows[r] = _unpack(v)
     return rows
 
+
 @fdb.transactional
 def clear_subspace(tr, subspace):
     tr.clear_range_startswith(subspace.key())
 
-#clear_subspace(db, table)
+# clear_subspace(db, table)

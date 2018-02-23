@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -35,9 +35,9 @@
 package tuple
 
 import (
-	"fmt"
-	"encoding/binary"
 	"bytes"
+	"encoding/binary"
+	"fmt"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 )
 
@@ -68,33 +68,33 @@ type UUID [16]byte
 
 // Type codes: These prefix the different elements in a packed Tuple
 // to indicate what type they are.
-const nilCode     = 0x00
-const bytesCode   = 0x01
-const stringCode  = 0x02
-const nestedCode  = 0x05
+const nilCode = 0x00
+const bytesCode = 0x01
+const stringCode = 0x02
+const nestedCode = 0x05
 const intZeroCode = 0x14
-const posIntEnd   = 0x1c
+const posIntEnd = 0x1c
 const negIntStart = 0x0c
-const floatCode   = 0x20
-const doubleCode  = 0x21
-const falseCode   = 0x26
-const trueCode    = 0x27
-const uuidCode    = 0x30
+const floatCode = 0x20
+const doubleCode = 0x21
+const falseCode = 0x26
+const trueCode = 0x27
+const uuidCode = 0x30
 
 var sizeLimits = []uint64{
-	1 << (0 * 8) - 1,
-	1 << (1 * 8) - 1,
-	1 << (2 * 8) - 1,
-	1 << (3 * 8) - 1,
-	1 << (4 * 8) - 1,
-	1 << (5 * 8) - 1,
-	1 << (6 * 8) - 1,
-	1 << (7 * 8) - 1,
-	1 << (8 * 8) - 1,
+	1<<(0*8) - 1,
+	1<<(1*8) - 1,
+	1<<(2*8) - 1,
+	1<<(3*8) - 1,
+	1<<(4*8) - 1,
+	1<<(5*8) - 1,
+	1<<(6*8) - 1,
+	1<<(7*8) - 1,
+	1<<(8*8) - 1,
 }
 
 func adjustFloatBytes(b []byte, encode bool) {
-	if (encode && b[0] & 0x80 != 0x00) || (!encode && b[0] & 0x80 == 0x00) {
+	if (encode && b[0]&0x80 != 0x00) || (!encode && b[0]&0x80 == 0x00) {
 		// Negative numbers: flip all of the bytes.
 		for i := 0; i < len(b); i++ {
 			b[i] = b[i] ^ 0xff
@@ -131,11 +131,11 @@ func encodeInt(buf *bytes.Buffer, i int64) {
 	switch {
 	case i > 0:
 		n = bisectLeft(uint64(i))
-		buf.WriteByte(byte(intZeroCode+n))
+		buf.WriteByte(byte(intZeroCode + n))
 		binary.Write(&ibuf, binary.BigEndian, i)
 	case i < 0:
 		n = bisectLeft(uint64(-i))
-		buf.WriteByte(byte(0x14-n))
+		buf.WriteByte(byte(0x14 - n))
 		binary.Write(&ibuf, binary.BigEndian, int64(sizeLimits[n])+i)
 	}
 
@@ -170,7 +170,7 @@ func encodeTuple(buf *bytes.Buffer, t Tuple, nested bool) {
 		buf.WriteByte(nestedCode)
 	}
 
-	for i, e := range(t) {
+	for i, e := range t {
 		switch e := e.(type) {
 		case Tuple:
 			encodeTuple(buf, e, true)
@@ -232,7 +232,7 @@ func findTerminator(b []byte) int {
 	for {
 		idx := bytes.IndexByte(bp, 0x00)
 		length += idx
-		if idx + 1 == len(bp) || bp[idx+1] != 0xFF {
+		if idx+1 == len(bp) || bp[idx+1] != 0xFF {
 			break
 		}
 		length += 2
@@ -276,7 +276,7 @@ func decodeInt(b []byte) (int64, int) {
 		ret -= int64(sizeLimits[n])
 	}
 
-	return ret, n+1
+	return ret, n + 1
 }
 
 func decodeFloat(b []byte) (float32, int) {
@@ -317,11 +317,11 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 			if !nested {
 				el = nil
 				off = 1
-			} else if i + 1 < len(b) && b[i+1] == 0xff {
+			} else if i+1 < len(b) && b[i+1] == 0xff {
 				el = nil
 				off = 2
 			} else {
-				return t, i+1, nil
+				return t, i + 1, nil
 			}
 		case b[i] == bytesCode:
 			el, off = decodeBytes(b[i:])
@@ -330,12 +330,12 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 		case negIntStart <= b[i] && b[i] <= posIntEnd:
 			el, off = decodeInt(b[i:])
 		case b[i] == floatCode:
-			if i + 5 > len(b) {
+			if i+5 > len(b) {
 				return nil, i, fmt.Errorf("insufficient bytes to decode float starting at position %d of byte array for tuple", i)
 			}
 			el, off = decodeFloat(b[i:])
 		case b[i] == doubleCode:
-			if i + 9 > len(b) {
+			if i+9 > len(b) {
 				return nil, i, fmt.Errorf("insufficient bytes to decode double starting at position %d of byte array for tuple", i)
 			}
 			el, off = decodeDouble(b[i:])
@@ -346,7 +346,7 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 			el = false
 			off = 1
 		case b[i] == uuidCode:
-			if i + 17 > len(b) {
+			if i+17 > len(b) {
 				return nil, i, fmt.Errorf("insufficient bytes to decode UUID starting at position %d of byte array for tuple", i)
 			}
 			el, off = decodeUUID(b[i:])
@@ -401,7 +401,7 @@ func (t Tuple) FDBRangeKeySelectors() (fdb.Selectable, fdb.Selectable) {
 }
 
 func concat(a []byte, b ...byte) []byte {
-	r := make([]byte, len(a) + len(b))
+	r := make([]byte, len(a)+len(b))
 	copy(r, a)
 	copy(r[len(a):], b)
 	return r

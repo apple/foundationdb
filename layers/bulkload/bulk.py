@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -60,20 +60,26 @@ db = fdb.open(event_model="gevent")
 ## This defines a Subspace of keys ##
 #####################################
 
+
 class Subspace (object):
     def __init__(self, prefixTuple, rawPrefix=""):
         self.rawPrefix = rawPrefix + fdb.tuple.pack(prefixTuple)
+
     def __getitem__(self, name):
-        return Subspace( (name,), self.rawPrefix )
+        return Subspace((name,), self.rawPrefix)
+
     def key(self):
         return self.rawPrefix
+
     def pack(self, tuple):
-        return self.rawPrefix + fdb.tuple.pack( tuple )
+        return self.rawPrefix + fdb.tuple.pack(tuple)
+
     def unpack(self, key):
         assert key.startswith(self.rawPrefix)
         return fdb.tuple.unpack(key[len(self.rawPrefix):])
+
     def range(self, tuple=()):
-        p = fdb.tuple.range( tuple )
+        p = fdb.tuple.range(tuple)
         return slice(self.rawPrefix + p.start, self.rawPrefix + p.stop)
 
 
@@ -91,6 +97,7 @@ class BulkLoader(Queue):
     Supports the use of multiple concurrent transactions for efficiency, with a
     default of 50 concurrent transactions.
     '''
+
     def __init__(self, number_producers=1, number_consumers=50, **kwargs):
         # Setting maxsize to the number of consumers will make producers
         # wait to put a task in the queue until some consumer is free
@@ -101,7 +108,8 @@ class BulkLoader(Queue):
 
     def _producer(self):
         # put will block if maxsize of queue is reached
-        for data in self.reader(): self.put(data)
+        for data in self.reader():
+            self.put(data)
 
     def _consumer(self):
         try:
@@ -109,7 +117,8 @@ class BulkLoader(Queue):
                 data = self.get(block=False)
                 self.writer(db, data)
                 gevent.sleep(0)  # yield
-        except Empty: pass
+        except Empty:
+            pass
 
     def produce_and_consume(self):
         producers = [gevent.spawn(self._producer) for _ in xrange(self._number_producers)]
@@ -158,6 +167,7 @@ class ReadCSV(BulkLoader):
         names and skip it. Otherwise, treat the first line as data to be read.
         Default is False.
     '''
+
     def __init__(self, number_producers=1, number_consumers=50, **kwargs):
         super(ReadCSV, self).__init__(number_producers, number_consumers, **kwargs)
         self._filename = kwargs.get('filename', '*')
@@ -168,7 +178,8 @@ class ReadCSV(BulkLoader):
 
     def reader(self):
         for fully_pathed in glob.iglob(os.path.join(self._dir, self._filename)):
-            if not os.path.isfile(fully_pathed): continue
+            if not os.path.isfile(fully_pathed):
+                continue
             with open(fully_pathed, 'rb') as csv_file:
                 csv_reader = csv.reader(csv_file, delimiter=self._delimiter)
                 first_line = True
@@ -198,6 +209,7 @@ class ReadJSON(BulkLoader):
     convert_numbers=<bool>. If True, returns byte strings rather than numbers or
         unicode in the deserialized object. Default is False.
     '''
+
     def __init__(self, number_producers=1, number_consumers=50, **kwargs):
         super(ReadJSON, self).__init__(number_producers, number_consumers, **kwargs)
         self._filename = kwargs.get('filename', '*')
@@ -220,7 +232,8 @@ class ReadJSON(BulkLoader):
 
     def reader(self):
         for fully_pathed in glob.iglob(os.path.join(self._dir, self._filename)):
-            if not os.path.isfile(fully_pathed): continue
+            if not os.path.isfile(fully_pathed):
+                continue
             with open(fully_pathed, 'r') as json_file:
                 if self._convert_numbers:
                     json_object = json.load(json_file,
@@ -247,6 +260,7 @@ class ReadBlob(BulkLoader):
 
     chunk_size=<int>. Number of bytes to read from file. Default is 10240.
     '''
+
     def __init__(self, number_producers=1, number_consumers=50, **kwargs):
         super(ReadBlob, self).__init__(number_producers, number_consumers, **kwargs)
         self._filename = kwargs.get('filename', '*')
@@ -255,16 +269,19 @@ class ReadBlob(BulkLoader):
 
     def reader(self):
         files_found = list(glob.iglob(os.path.join(self._dir, self._filename)))
-        if len(files_found) != 1: raise Exception("Must specify single file")
+        if len(files_found) != 1:
+            raise Exception("Must specify single file")
         fully_pathed = files_found[0]
-        if not os.path.isfile(fully_pathed): raise Exception("No file found")
+        if not os.path.isfile(fully_pathed):
+            raise Exception("No file found")
         with open(fully_pathed, 'rb') as blob_file:
-            file_size = os.stat(fully_pathed).st_size;
+            file_size = os.stat(fully_pathed).st_size
             position = 0
             while (position < file_size):
                 try:
                     chunk = blob_file.read(self._chunk_size)
-                    if not chunk: break;
+                    if not chunk:
+                        break
                     offset = position
                     position += self._chunk_size
                     yield offset, chunk
@@ -291,12 +308,14 @@ class WriteKVP(BulkLoader):
     clear=<bool>. If True, clears the specified subspace before writing to it.
         Default is False.
     '''
+
     def __init__(self, number_producers=1, number_consumers=50, **kwargs):
         super(WriteKVP, self).__init__(number_producers, number_consumers, **kwargs)
         self._empty_value = kwargs.get('empty_value', False)
         self._subspace = kwargs.get('subspace', Subspace(('bulk_kvp',)))
         self._clear = kwargs.get('clear', False)
-        if self._clear: clear_subspace(db, self._subspace)
+        if self._clear:
+            clear_subspace(db, self._subspace)
 
     @fdb.transactional
     def writer(self, tr, data):
@@ -319,11 +338,13 @@ class WriteDoc(BulkLoader):
         Can be used to load a specified collection or arbitrary subdocument.
         Defaults to root.
     '''
+
     def __init__(self, number_producers=1, number_consumers=50, **kwargs):
         super(WriteDoc, self).__init__(number_producers, number_consumers, **kwargs)
         self._document = kwargs.get('document', simpledoc.root)
         self._clear = kwargs.get('clear', False)
-        if self._clear: _simpledoc_clear(db, self._document)
+        if self._clear:
+            _simpledoc_clear(db, self._document)
 
     def writer(self, tr, data):
         _writer_doc(db, self._document, data)
@@ -363,11 +384,13 @@ class WriteBlob(BulkLoader):
     blob=<Doc()>. Specifies the Blob object to which data is written. Default is
         Blob(Subspace('bulk_blob',)).
     '''
+
     def __init__(self, number_producers=1, number_consumers=50, **kwargs):
         super(WriteBlob, self).__init__(number_producers, number_consumers, **kwargs)
         self._blob = kwargs.get('blob', blob.Blob(Subspace(('bulk_blob',))))
         self._clear = kwargs.get('clear', False)
-        if self._clear: self._blob.delete(db)
+        if self._clear:
+            self._blob.delete(db)
 
     @fdb.transactional
     def writer(self, tr, data):

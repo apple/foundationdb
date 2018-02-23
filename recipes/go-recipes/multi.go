@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -34,13 +34,13 @@ func clear_subspace(db fdb.Transactor, ss subspace.Subspace) {
 	db.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		tr.ClearRange(ss)
 		return nil, nil
-})
+	})
 	return
 
 }
 
 type MultiMap struct {
-	MapSS subspace.Subspace
+	MapSS    subspace.Subspace
 	Pos, Neg []byte
 }
 
@@ -72,13 +72,17 @@ func (multi MultiMap) MultiSubtract(trtr fdb.Transactor, index, value interface{
 func (multi MultiMap) MultiGet(tr fdb.ReadTransactor, index int) (ret []interface{}, e error) {
 	_, e = tr.ReadTransact(func(tr fdb.ReadTransaction) (interface{}, error) {
 		pr, err := fdb.PrefixRange(multi.MapSS.Pack(tuple.Tuple{index}))
-		if err != nil {return nil, err}
+		if err != nil {
+			return nil, err
+		}
 		kvs := tr.GetRange(pr, fdb.RangeOptions{0, -1, false}).GetSliceOrPanic()
 		ret := make([]interface{}, len(kvs))
 		i := 0
 		for _, kv := range kvs {
 			temp, err := multi.MapSS.Unpack(kv.Key)
-			if err != nil {return nil, err}
+			if err != nil {
+				return nil, err
+			}
 			ret[i] = temp[1]
 			i++
 		}
@@ -89,8 +93,10 @@ func (multi MultiMap) MultiGet(tr fdb.ReadTransactor, index int) (ret []interfac
 
 func (multi MultiMap) MultiGetCounts(trtr fdb.Transactor, index interface{}) (map[interface{}]int, error) {
 	i, e := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-		kr, err := fdb.PrefixRange(multi.MapSS.Pack( tuple.Tuple{}))
-		if err != nil {return nil, err}
+		kr, err := fdb.PrefixRange(multi.MapSS.Pack(tuple.Tuple{}))
+		if err != nil {
+			return nil, err
+		}
 
 		ks, err := tr.GetRange(kr, fdb.RangeOptions{}).GetSliceWithError()
 
@@ -99,10 +105,12 @@ func (multi MultiMap) MultiGetCounts(trtr fdb.Transactor, index interface{}) (ma
 		for _, v := range ks {
 			bs := v.Value
 			k, err := multi.MapSS.Unpack(v.Key)
-			if err != nil {return nil, err}
+			if err != nil {
+				return nil, err
+			}
 			counts[k[1]] = 0
 			for i, j := 0, 1; i < len(bs); i++ {
-				counts[k[1]] += int(bs[i])*j
+				counts[k[1]] += int(bs[i]) * j
 				j = j << 4
 			}
 		}
@@ -113,7 +121,7 @@ func (multi MultiMap) MultiGetCounts(trtr fdb.Transactor, index interface{}) (ma
 
 func (multi MultiMap) MultiIsElement(trtr fdb.Transactor, index, value interface{}) bool {
 	item, _ := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-		r := tr.Get(multi.MapSS.Pack(tuple.Tuple{ index, value } )).MustGet()
+		r := tr.Get(multi.MapSS.Pack(tuple.Tuple{index, value})).MustGet()
 		if r == nil {
 			return false, nil
 		}
