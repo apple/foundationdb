@@ -105,7 +105,7 @@ public:
 
 		if(hasBestPolicy) {
 			for(auto& t : tags) {
-				if(t.locality == locality || t.locality == tagLocalitySpecial || locality == tagLocalitySpecial) {
+				if(t.locality == locality || t.locality == tagLocalitySpecial || locality == tagLocalitySpecial || (isLocal && t.locality == tagLocalityLogRouter)) {
 					newLocations.push_back(bestLocationFor(t));
 				}
 			}

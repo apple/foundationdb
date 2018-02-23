@@ -379,7 +379,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		} else {
 			int bestSet = -1;
 			for(int t = 0; t < tLogs.size(); t++) {
-				if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
+				if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial || (tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
 					bestSet = t;
 					break;
 				}
@@ -395,7 +395,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for(int i = 0; i < oldLogData.size() && begin < oldLogData[i].epochEnd; i++) {
 					int bestOldSet = -1;
 					for(int t = 0; t < oldLogData[i].tLogs.size(); t++) {
-						if(oldLogData[i].tLogs[t]->hasBestPolicy && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial)) {
+						if(oldLogData[i].tLogs[t]->hasBestPolicy && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || (oldLogData[i].tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
 							bestOldSet = t;
 							break;
 						}
@@ -411,56 +411,47 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Reference<IPeekCursor> peekSingle( Version begin, Tag tag, vector<pair<Version,Tag>> history ) {
-		if(tag.locality == tagLocalityLogRouter) {
-			ASSERT(history.size() == 0);
-			if(tLogs.size() < 1) {
-				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+		int bestSet = -1;
+		for(int t = 0; t < tLogs.size(); t++) {
+			if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial || (tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
+				bestSet = t;
+				break;
 			}
-			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[0]->logServers.size() ?
-					tLogs[0]->logServers[tLogs[0]->bestLocationFor( tag )] :
-					Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+		}
+
+		while(history.size() && begin >= history.back().first) {
+			history.pop_back();		
+		}
+
+		if(history.size() == 0) {
+
+			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( (tLogs.size() && bestSet >= 0 && tLogs[bestSet]->logServers.size()) ?
+				tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )] :
+				Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 		} else {
-			int bestSet = -1;
-			for(int t = 0; t < tLogs.size(); t++) {
-				if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
-					bestSet = t;
-					break;
-				}
-			}
-
-			while(history.size() && begin >= history.back().first) {
-				history.pop_back();		
-			}
-
-			if(history.size() == 0) {
-				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( (tLogs.size() && bestSet >= 0 && tLogs[bestSet]->logServers.size()) ?
-					tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )] :
-					Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
-			} else {
-				std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
-				std::vector< LogMessageVersion > epochEnds;
+			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
+			std::vector< LogMessageVersion > epochEnds;
 				
-				cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( (tLogs.size() && bestSet >= 0 && tLogs[bestSet]->logServers.size()) ?
-					tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )] :
-					Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) ) );
+			cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( (tLogs.size() && bestSet >= 0 && tLogs[bestSet]->logServers.size()) ?
+				tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )] :
+				Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) ) );
 
-				for(int i = 0; i < history.size(); i++) {
-					bestSet = -1;
-					for(int t = 0; t < tLogs.size(); t++) {
-						if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == history[i].second.locality || history[i].second.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial)) {
-							bestSet = t;
-							break;
-						}
+			for(int i = 0; i < history.size(); i++) {
+				bestSet = -1;
+				for(int t = 0; t < tLogs.size(); t++) {
+					if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == history[i].second.locality || history[i].second.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial || (tLogs[t]->isLocal && history[i].second.locality == tagLocalityLogRouter))) {
+						bestSet = t;
+						break;
 					}
-					
-					cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( (tLogs.size() && bestSet >= 0 && tLogs[bestSet]->logServers.size()) ?
-						tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( history[i].second )] :
-						Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), history[i].second, i+1 == history.size() ? begin : std::max(history[i+1].first, begin), history[i].first, false, false ) ) );
-					epochEnds.push_back(LogMessageVersion(history[i].first));
 				}
-
-				return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
+					
+				cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( (tLogs.size() && bestSet >= 0 && tLogs[bestSet]->logServers.size()) ?
+					tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( history[i].second )] :
+					Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), history[i].second, i+1 == history.size() ? begin : std::max(history[i+1].first, begin), history[i].first, false, false ) ) );
+				epochEnds.push_back(LogMessageVersion(history[i].first));
 			}
+
+			return Reference<ILogSystem::MultiCursor>( new ILogSystem::MultiCursor(cursors, epochEnds) );
 		}
 	}
 

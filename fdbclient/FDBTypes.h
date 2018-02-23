@@ -79,10 +79,15 @@ static std::string describe( const Tag item ) {
 	return format("%d:%d", item.locality, item.id);
 }
 
+static std::string describe( const int item ) {
+	return format("%d", item);
+}
+
 template <class T>
 static std::string describe( T const& item ) {
 	return item.toString();
 }
+
 template <class K, class V>
 static std::string describe( std::map<K, V> const& items, int max_items = -1 ) {
 	if(!items.size())
