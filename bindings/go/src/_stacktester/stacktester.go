@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,23 +24,23 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"log"
-	"fmt"
 	"os"
+	"reflect"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
-	"runtime"
-	"reflect"
 	"time"
-	"strconv"
 )
 
 const verbose bool = false
 
-var trMap = map[string]fdb.Transaction {}
+var trMap = map[string]fdb.Transaction{}
 var trMapLock = sync.RWMutex{}
 
 // Make tuples sortable by byte-order
@@ -69,17 +69,17 @@ func int64ToBool(i int64) bool {
 
 type stackEntry struct {
 	item interface{}
-	idx int
+	idx  int
 }
 
 type StackMachine struct {
-	prefix []byte
-	trName string
-	stack []stackEntry
+	prefix      []byte
+	trName      string
+	stack       []stackEntry
 	lastVersion int64
-	threads sync.WaitGroup
-	verbose bool
-	de *DirectoryExtension
+	threads     sync.WaitGroup
+	verbose     bool
+	de          *DirectoryExtension
 }
 
 func newStackMachine(prefix []byte, verbose bool) *StackMachine {
@@ -99,7 +99,7 @@ func (sm *StackMachine) waitAndPop() (ret stackEntry) {
 		}
 	}()
 
-	ret, sm.stack = sm.stack[len(sm.stack) - 1], sm.stack[:len(sm.stack) - 1]
+	ret, sm.stack = sm.stack[len(sm.stack)-1], sm.stack[:len(sm.stack)-1]
 	switch el := ret.item.(type) {
 	case []byte:
 		ret.item = el
@@ -150,9 +150,9 @@ func (sm *StackMachine) popPrefixRange() fdb.ExactRange {
 }
 
 func (sm *StackMachine) pushRange(idx int, sl []fdb.KeyValue, prefixFilter []byte) {
-	var t tuple.Tuple = make(tuple.Tuple, 0, len(sl) * 2)
+	var t tuple.Tuple = make(tuple.Tuple, 0, len(sl)*2)
 
-	for _, kv := range(sl) {
+	for _, kv := range sl {
 		if prefixFilter == nil || bytes.HasPrefix(kv.Key, prefixFilter) {
 			t = append(t, kv.Key)
 			t = append(t, kv.Value)
@@ -240,7 +240,7 @@ func (sm *StackMachine) dumpStack() {
 	}
 }
 
-func (sm *StackMachine) executeMutation(t fdb.Transactor, f func (fdb.Transaction) (interface{}, error), isDB bool, idx int) {
+func (sm *StackMachine) executeMutation(t fdb.Transactor, f func(fdb.Transaction) (interface{}, error), isDB bool, idx int) {
 	_, e := t.Transact(f)
 	if e != nil {
 		panic(e)
@@ -250,8 +250,8 @@ func (sm *StackMachine) executeMutation(t fdb.Transactor, f func (fdb.Transactio
 	}
 }
 
-func (sm *StackMachine) checkWatches(watches [4]fdb.FutureNil, expected bool) (bool) {
-	for _, watch := range(watches) {
+func (sm *StackMachine) checkWatches(watches [4]fdb.FutureNil, expected bool) bool {
+	for _, watch := range watches {
 		if watch.IsReady() || expected {
 			e := watch.Get()
 			if e != nil {
@@ -283,7 +283,9 @@ func (sm *StackMachine) testWatches() {
 			tr.Set(fdb.Key("w3"), []byte("3"))
 			return nil, nil
 		})
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 
 		var watches [4]fdb.FutureNil
 
@@ -297,7 +299,9 @@ func (sm *StackMachine) testWatches() {
 			tr.Clear(fdb.Key("w1"))
 			return nil, nil
 		})
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 
 		time.Sleep(5 * time.Second)
 
@@ -312,7 +316,9 @@ func (sm *StackMachine) testWatches() {
 			tr.BitXor(fdb.Key("w3"), []byte("\xff\xff"))
 			return nil, nil
 		})
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 
 		if sm.checkWatches(watches, true) {
 			return
@@ -322,21 +328,23 @@ func (sm *StackMachine) testWatches() {
 
 func (sm *StackMachine) testLocality() {
 	_, e := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
-		tr.Options().SetTimeout(60*1000)
+		tr.Options().SetTimeout(60 * 1000)
 		tr.Options().SetReadSystemKeys()
 		boundaryKeys, e := db.LocalityGetBoundaryKeys(fdb.KeyRange{fdb.Key(""), fdb.Key("\xff\xff")}, 0, 0)
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 
-		for i:=0; i<len(boundaryKeys)-1 ; i++ {
+		for i := 0; i < len(boundaryKeys)-1; i++ {
 			start := boundaryKeys[i]
 			end := tr.GetKey(fdb.LastLessThan(boundaryKeys[i+1])).MustGet()
 
 			startAddresses := tr.LocalityGetAddressesForKey(start).MustGet()
 			endAddresses := tr.LocalityGetAddressesForKey(end).MustGet()
 
-			for _, address1 := range(startAddresses) {
+			for _, address1 := range startAddresses {
 				found := false
-				for _, address2 := range(endAddresses) {
+				for _, address2 := range endAddresses {
 					if address1 == address2 {
 						found = true
 						break
@@ -351,7 +359,9 @@ func (sm *StackMachine) testLocality() {
 		return nil, nil
 	})
 
-	if e != nil { panic(e) }
+	if e != nil {
+		panic(e)
+	}
 }
 
 func (sm *StackMachine) logStack(entries map[int]stackEntry, prefix []byte) {
@@ -377,7 +387,9 @@ func (sm *StackMachine) logStack(entries map[int]stackEntry, prefix []byte) {
 		return nil, nil
 	})
 
-	if e != nil { panic(e) }
+	if e != nil {
+		panic(e)
+	}
 	return
 }
 
@@ -467,28 +479,28 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 	case op == "PUSH":
 		sm.store(idx, inst[1])
 	case op == "DUP":
-		entry := sm.stack[len(sm.stack) - 1]
+		entry := sm.stack[len(sm.stack)-1]
 		sm.store(entry.idx, entry.item)
 	case op == "EMPTY_STACK":
 		sm.stack = []stackEntry{}
 		sm.stack = make([]stackEntry, 0)
 	case op == "SWAP":
 		idx := sm.waitAndPop().item.(int64)
-		sm.stack[len(sm.stack) - 1], sm.stack[len(sm.stack) - 1 - int(idx)] = sm.stack[len(sm.stack) - 1 - int(idx)], sm.stack[len(sm.stack) - 1]
+		sm.stack[len(sm.stack)-1], sm.stack[len(sm.stack)-1-int(idx)] = sm.stack[len(sm.stack)-1-int(idx)], sm.stack[len(sm.stack)-1]
 	case op == "POP":
-		sm.stack = sm.stack[:len(sm.stack) - 1]
+		sm.stack = sm.stack[:len(sm.stack)-1]
 	case op == "SUB":
-		sm.store(idx, sm.waitAndPop().item.(int64) - sm.waitAndPop().item.(int64))
+		sm.store(idx, sm.waitAndPop().item.(int64)-sm.waitAndPop().item.(int64))
 	case op == "CONCAT":
 		str1 := sm.waitAndPop().item
 		str2 := sm.waitAndPop().item
 		switch str1.(type) {
-			case string:
-				sm.store(idx, str1.(string) + str2.(string))
-			case []byte:
-				sm.store(idx, append(str1.([]byte), str2.([]byte)...))
-			default:
-				panic("Invalid CONCAT parameter")
+		case string:
+			sm.store(idx, str1.(string)+str2.(string))
+		case []byte:
+			sm.store(idx, append(str1.([]byte), str2.([]byte)...))
+		default:
+			panic("Invalid CONCAT parameter")
 		}
 	case op == "NEW_TRANSACTION":
 		sm.newTransaction()
@@ -497,16 +509,18 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 	case op == "ON_ERROR":
 		sm.store(idx, sm.currentTransaction().OnError(fdb.Error{int(sm.waitAndPop().item.(int64))}))
 	case op == "GET_READ_VERSION":
-		_, e = rt.ReadTransact(func (rtr fdb.ReadTransaction) (interface{}, error) {
+		_, e = rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 			sm.lastVersion = rtr.GetReadVersion().MustGet()
 			sm.store(idx, []byte("GOT_READ_VERSION"))
 			return nil, nil
 		})
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 	case op == "SET":
 		key := fdb.Key(sm.waitAndPop().item.([]byte))
 		value := sm.waitAndPop().item.([]byte)
-		sm.executeMutation(t, func (tr fdb.Transaction) (interface{}, error) {
+		sm.executeMutation(t, func(tr fdb.Transaction) (interface{}, error) {
 			tr.Set(key, value)
 			return nil, nil
 		}, isDB, idx)
@@ -525,10 +539,12 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		sm.logStack(entries, prefix)
 	case op == "GET":
 		key := fdb.Key(sm.waitAndPop().item.([]byte))
-		res, e := rt.ReadTransact(func (rtr fdb.ReadTransaction) (interface{}, error) {
+		res, e := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 			return rtr.Get(key), nil
 		})
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 
 		sm.store(idx, res.(fdb.FutureByteSlice))
 	case op == "COMMIT":
@@ -537,7 +553,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		sm.currentTransaction().Reset()
 	case op == "CLEAR":
 		key := fdb.Key(sm.waitAndPop().item.([]byte))
-		sm.executeMutation(t, func (tr fdb.Transaction) (interface{}, error) {
+		sm.executeMutation(t, func(tr fdb.Transaction) (interface{}, error) {
 			tr.Clear(key)
 			return nil, nil
 		}, isDB, idx)
@@ -557,10 +573,12 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 	case op == "GET_KEY":
 		sel := sm.popSelector()
 		prefix := sm.waitAndPop().item.([]byte)
-		res, e := rt.ReadTransact(func (rtr fdb.ReadTransaction) (interface{}, error) {
+		res, e := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 			return rtr.GetKey(sel).MustGet(), nil
 		})
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 
 		key := res.(fdb.Key)
 
@@ -570,7 +588,9 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			sm.store(idx, prefix)
 		} else {
 			s, e := fdb.Strinc(prefix)
-			if e != nil { panic(e) }
+			if e != nil {
+				panic(e)
+			}
 			sm.store(idx, s)
 		}
 	case strings.HasPrefix(op, "GET_RANGE"):
@@ -591,10 +611,12 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			prefix = sm.waitAndPop().item.([]byte)
 		}
 
-		res, e := rt.ReadTransact(func (rtr fdb.ReadTransaction) (interface{}, error) {
+		res, e := rt.ReadTransact(func(rtr fdb.ReadTransaction) (interface{}, error) {
 			return rtr.GetRange(r, ro).GetSliceOrPanic(), nil
 		})
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 
 		sm.pushRange(idx, res.([]fdb.KeyValue), prefix)
 	case strings.HasPrefix(op, "CLEAR_RANGE"):
@@ -607,7 +629,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			er = sm.popKeyRange()
 		}
 
-		sm.executeMutation(t, func (tr fdb.Transaction) (interface{}, error) {
+		sm.executeMutation(t, func(tr fdb.Transaction) (interface{}, error) {
 			tr.ClearRange(er)
 			return nil, nil
 		}, isDB, idx)
@@ -623,7 +645,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		if e != nil {
 			panic(e)
 		}
-		for _, el := range(t) {
+		for _, el := range t {
 			sm.store(idx, []byte(tuple.Tuple{el}.Pack()))
 		}
 	case op == "TUPLE_SORT":
@@ -681,7 +703,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		if e != nil {
 			panic(e)
 		}
-		db.Transact(func (tr fdb.Transaction) (interface{}, error) {
+		db.Transact(func(tr fdb.Transaction) (interface{}, error) {
 			v := tr.GetRange(er, fdb.RangeOptions{}).GetSliceOrPanic()
 			if len(v) != 0 {
 				panic(fdb.Error{1020})
@@ -718,7 +740,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		key := fdb.Key(sm.waitAndPop().item.([]byte))
 		ival := sm.waitAndPop().item
 		value := ival.([]byte)
-		sm.executeMutation(t, func (tr fdb.Transaction) (interface{}, error) {
+		sm.executeMutation(t, func(tr fdb.Transaction) (interface{}, error) {
 			reflect.ValueOf(tr).MethodByName(opname).Call([]reflect.Value{reflect.ValueOf(key), reflect.ValueOf(value)})
 			return nil, nil
 		}, isDB, idx)
@@ -740,7 +762,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetReadSystemKeys()
 			tr.Options().SetAccessSystemKeys()
 			tr.Options().SetDurabilityDevNullIsWebScale()
-			tr.Options().SetTimeout(60*1000)
+			tr.Options().SetTimeout(60 * 1000)
 			tr.Options().SetRetryLimit(50)
 			tr.Options().SetMaxRetryDelay(100)
 			tr.Options().SetUsedDuringCommitProtectionDisable()
@@ -751,7 +773,9 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			return tr.Get(fdb.Key("\xff")).MustGet(), nil
 		})
 
-		if e != nil { panic(e) }
+		if e != nil {
+			panic(e)
+		}
 
 		sm.testWatches()
 		sm.testLocality()
@@ -772,7 +796,7 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 }
 
 func (sm *StackMachine) Run() {
-	r, e := db.Transact(func (tr fdb.Transaction) (interface{}, error) {
+	r, e := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		return tr.GetRange(tuple.Tuple{sm.prefix}, fdb.RangeOptions{}).GetSliceOrPanic(), nil
 	})
 	if e != nil {
@@ -781,7 +805,7 @@ func (sm *StackMachine) Run() {
 
 	instructions := r.([]fdb.KeyValue)
 
-	for i, kv := range(instructions) {
+	for i, kv := range instructions {
 		inst, _ := tuple.Unpack(fdb.Key(kv.Value))
 
 		if sm.verbose {

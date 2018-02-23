@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -31,6 +31,8 @@ from bindingtester.tests import test_util
 fdb.api_version(FDB_API_VERSION)
 
 # SOMEDAY: This should probably be broken up into smaller tests
+
+
 class ScriptedTest(Test):
     TEST_API_VERSION = 510
 
@@ -38,15 +40,15 @@ class ScriptedTest(Test):
         super(ScriptedTest, self).__init__(subspace, ScriptedTest.TEST_API_VERSION, ScriptedTest.TEST_API_VERSION)
         self.workspace = self.subspace['workspace']
         self.results_subspace = self.subspace['results']
-        #self.thread_subspace = self.subspace['threads'] # TODO: update START_THREAD so that we can create threads in subspaces
+        # self.thread_subspace = self.subspace['threads'] # TODO: update START_THREAD so that we can create threads in subspaces
 
     def setup(self, args):
         if args.concurrency > 1:
             raise Exception('Scripted tests cannot be run with a concurrency greater than 1')
-        
+
         # SOMEDAY: this is only a limitation because we don't know how many operations the bisection should start with
         # it should be fixable.
-        # 
+        #
         # We also need to enable the commented out support for num_ops in this file and make it so the default value runs
         # the entire test
         if args.bisect:
@@ -58,7 +60,7 @@ class ScriptedTest(Test):
         test_instructions = ThreadedInstructionSet()
         main_thread = test_instructions.create_thread()
 
-        foo = [self.workspace.pack(('foo%d' % i,)) for i in range(0,6)]
+        foo = [self.workspace.pack(('foo%d' % i,)) for i in range(0, 6)]
 
         main_thread.append('NEW_TRANSACTION')
         main_thread.push_args(1020)
@@ -270,8 +272,8 @@ class ScriptedTest(Test):
 
         stampKey = 'stampedXXXXXXXXXXsuffix'
         stampKeyIndex = stampKey.find('XXXXXXXXXX')
-        stampKeyStr = chr(stampKeyIndex%256) + chr(stampKeyIndex/256) 
-        main_thread.push_args(u'SET_VERSIONSTAMPED_KEY',  stampKey + stampKeyStr, 'stampedBar')
+        stampKeyStr = chr(stampKeyIndex % 256) + chr(stampKeyIndex / 256)
+        main_thread.push_args(u'SET_VERSIONSTAMPED_KEY', stampKey + stampKeyStr, 'stampedBar')
         main_thread.append('ATOMIC_OP')
         main_thread.push_args(u'SET_VERSIONSTAMPED_VALUE', 'stampedValue', 'XXXXXXXXXX')
         main_thread.append('ATOMIC_OP')
@@ -305,7 +307,7 @@ class ScriptedTest(Test):
 
         if not args.no_threads:
             wait_key = 'waitKey'
-            #threads = [self.thread_subspace[i] for i in range(0, 2)]
+            # threads = [self.thread_subspace[i] for i in range(0, 2)]
             threads = ['thread_spec%d' % i for i in range(0, 2)]
             for thread_spec in threads:
                 main_thread.push_args(self.workspace.pack((wait_key, thread_spec)), '')
@@ -314,11 +316,12 @@ class ScriptedTest(Test):
 
             for thread_spec in threads:
                 main_thread.push_args(thread_spec)
-                #if len(main_thread) < args.num_ops:
+                # if len(main_thread) < args.num_ops:
                 main_thread.append('START_THREAD')
                 thread = test_instructions.create_thread(fdb.Subspace((thread_spec,)))
                 thread.append('NEW_TRANSACTION')
-                thread.push_args(foo[1], foo[1], 'bar%s' % thread_spec, self.workspace.pack((wait_key, thread_spec)), self.workspace.pack((wait_key, thread_spec)))
+                thread.push_args(foo[1], foo[1], 'bar%s' % thread_spec, self.workspace.pack(
+                    (wait_key, thread_spec)), self.workspace.pack((wait_key, thread_spec)))
                 thread.append('GET')
                 thread.append('POP')
                 thread.append('SET')
@@ -333,20 +336,20 @@ class ScriptedTest(Test):
                 thread.push_args(foo[1])
                 thread.append('GET')
                 self.add_result(thread, args, 'barthread_spec0', 'barthread_spec1')
-        
+
         main_thread.append('EMPTY_STACK')
-        #if len(main_thread) > args.num_ops:
-            #main_thread[args.num_ops:] = []
+        # if len(main_thread) > args.num_ops:
+        #     main_thread[args.num_ops:] = []
 
         return test_instructions
 
     def get_result_specifications(self):
-        return [ 
-            ResultSpecification(self.results_subspace, ordering_index=0, global_error_filter=[1007, 1021]) 
+        return [
+            ResultSpecification(self.results_subspace, ordering_index=0, global_error_filter=[1007, 1021])
         ]
 
     def get_expected_results(self):
-        return { self.results_subspace : self.results }
+        return {self.results_subspace: self.results}
 
     def append_range_test(self, instructions, args, num_pairs, kv_length):
         instructions.append('NEW_TRANSACTION')
@@ -355,7 +358,7 @@ class ScriptedTest(Test):
         instructions.append('CLEAR_RANGE_STARTS_WITH')
 
         kvpairs = []
-        for i in range(0, num_pairs*2):
+        for i in range(0, num_pairs * 2):
             kvpairs.append(self.workspace.pack(('foo', ''.join(chr(random.randint(0, 254)) for i in range(0, kv_length)))))
 
         kvpairs = list(set(kvpairs))
@@ -364,7 +367,7 @@ class ScriptedTest(Test):
         kvpairs.sort()
 
         instructions.push_args(*kvpairs)
-        for i in range(0, len(kvpairs)/2):
+        for i in range(0, len(kvpairs) / 2):
             instructions.append('SET')
             if i % 100 == 99:
                 test_util.blocking_commit(instructions)
@@ -388,8 +391,7 @@ class ScriptedTest(Test):
         instructions.push_args(key)
         instructions.append('SET_DATABASE')
 
-        #if len(instructions) <= args.num_ops:
+        # if len(instructions) <= args.num_ops:
         self.results.append(Result(self.results_subspace, key, values))
 
         instructions.append('POP')
-

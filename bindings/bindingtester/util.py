@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,6 +24,7 @@ import os
 import glob
 
 import fdb
+
 
 def initialize_logger_level(logging_level):
     logger = get_logger()
@@ -39,8 +40,10 @@ def initialize_logger_level(logging_level):
     elif logging_level == "ERROR":
         logger.setLevel(logging.ERROR)
 
+
 def get_logger():
     return logging.getLogger('foundationdb.bindingtester')
+
 
 # Attempts to get the name associated with a process termination signal
 def signal_number_to_name(signal_num):
@@ -53,12 +56,14 @@ def signal_number_to_name(signal_num):
     else:
         return str(signal_num)
 
+
 def import_subclasses(filename, module_path):
     for f in glob.glob(os.path.join(os.path.dirname(filename), '*.py')):
         fn = os.path.basename(f)
         if fn == '__init__.py':
             continue
         __import__('%s.%s' % (module_path, os.path.splitext(fn)[0]))
+
 
 # Attempts to unpack a subspace
 # This throws an exception if the subspace cannot be unpacked as a tuple
@@ -69,4 +74,3 @@ def subspace_to_tuple(subspace):
     except Exception as e:
         get_logger().debug(e)
         raise Exception('The binding tester does not support subspaces with non-tuple raw prefixes')
-

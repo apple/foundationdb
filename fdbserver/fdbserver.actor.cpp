@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -1594,9 +1594,15 @@ int main(int argc, char* argv[]) {
 		} else if (role == MultiTester) {
 			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile, StringRef(), localities ) );
 			g_network->run();
-		} else if (role == Test || role == ConsistencyCheck) {
+		} else if (role == Test) {
 			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
-			f = stopAfter( runTests( connectionFile, role == ConsistencyCheck ? TEST_TYPE_CONSISTENCY_CHECK : TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile, StringRef(), localities ) );
+			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile, StringRef(), localities ) );
+			g_network->run();
+		} else if (role == ConsistencyCheck) {
+			setupSlowTaskProfiler();
+
+			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
+			f = stopAfter( runTests( connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == CreateTemplateDatabase) {
 			createTemplateDatabase();

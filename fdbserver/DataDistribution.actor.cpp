@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -1759,7 +1759,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection *self, Reference<AsyncVar<
 			for(auto s = self->server_info.begin(); s != self->server_info.end(); ++s) {
 				auto serverStatus = self->server_status.get( s->second->lastKnownInterface.id() );
 				if( serverStatus.excludeOnRecruit() ) {
-					TraceEvent("DDRecruitExcl1").detail("Excluding", s->second->lastKnownInterface.address());
+					TraceEvent(SevDebug, "DDRecruitExcl1").detail("Excluding", s->second->lastKnownInterface.address());
 					auto addr = s->second->lastKnownInterface.address();
 					exclusions.insert( AddressExclusion( addr.ip, addr.port ) );
 				}
@@ -1771,7 +1771,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection *self, Reference<AsyncVar<
 			auto excl = self->excludedServers.getKeys();
 			for(auto& s : excl)
 				if (self->excludedServers.get(s)) {
-					TraceEvent("DDRecruitExcl2").detail("Excluding", s.toString());
+					TraceEvent(SevDebug, "DDRecruitExcl2").detail("Excluding", s.toString());
 					exclusions.insert( s );
 				}
 			rsr.criticalRecruitment = self->healthyTeamCount == 0;

@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,11 +30,11 @@ package fdb
 import "C"
 
 import (
+	"fmt"
+	"log"
 	"runtime"
 	"sync"
 	"unsafe"
-	"fmt"
-	"log"
 )
 
 /* Would put this in futures.go but for the documented issue with
@@ -53,7 +53,7 @@ type Transactor interface {
 	// Transact executes the caller-provided function, providing it with a
 	// Transaction (itself a Transactor, allowing composition of transactional
 	// functions).
-	Transact(func (Transaction) (interface{}, error)) (interface{}, error)
+	Transact(func(Transaction) (interface{}, error)) (interface{}, error)
 
 	// All Transactors are also ReadTransactors, allowing them to be used with
 	// read-only transactional functions.
@@ -68,7 +68,7 @@ type ReadTransactor interface {
 	// ReadTransact executes the caller-provided function, providing it with a
 	// ReadTransaction (itself a ReadTransactor, allowing composition of
 	// read-only transactional functions).
-	ReadTransact(func (ReadTransaction) (interface{}, error)) (interface{}, error)
+	ReadTransact(func(ReadTransaction) (interface{}, error)) (interface{}, error)
 }
 
 func setOpt(setter func(*C.uint8_t, C.int) C.fdb_error_t, param []byte) error {

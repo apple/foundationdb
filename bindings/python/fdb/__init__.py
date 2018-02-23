@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,17 +23,22 @@
 """Documentation for this API can be found at
 https://foundationdb.org/documentation/api-python.html"""
 
+
 def open(*args, **kwargs):
     raise RuntimeError('You must call api_version() before using any fdb methods')
 
+
 init = open
+
 
 def transactional(*args, **kwargs):
     raise RuntimeError('You must call api_version() before using fdb.transactional')
 
+
 def _add_symbols(module, symbols):
     for symbol in symbols:
         globals()[symbol] = getattr(module, symbol)
+
 
 def api_version(ver):
     header_version = 510
@@ -52,10 +57,12 @@ def api_version(ver):
     import fdb.impl
 
     err = fdb.impl._capi.fdb_select_api_version_impl(ver, header_version)
-    if err == 2203: # api_version_not_supported, but that's not helpful to the user
+    if err == 2203:  # api_version_not_supported, but that's not helpful to the user
         max_supported_ver = fdb.impl._capi.fdb_get_max_api_version()
         if header_version > max_supported_ver:
-            raise RuntimeError("This version of the FoundationDB Python binding is not supported by the installed FoundationDB C library. The binding requires a library that supports API version %d, but the installed library supports a maximum version of %d." % (header_version, max_supported_ver))
+            raise RuntimeError("This version of the FoundationDB Python binding is not supported by the installed "
+                               "FoundationDB C library. The binding requires a library that supports API version "
+                               "%d, but the installed library supports a maximum version of %d." % (header_version, max_supported_ver))
 
         else:
             raise RuntimeError("API version %d is not supported by the installed FoundationDB C library." % ver)
@@ -78,7 +85,7 @@ def api_version(ver):
         'transactional',
         'options',
         'StreamingMode',
-        )
+    )
 
     _add_symbols(fdb.impl, list)
 
@@ -97,7 +104,8 @@ def api_version(ver):
                 if issubclass(o, fdb.impl.Future):
                     if hasattr(o, "wait"):
                         o.get = o.wait
-            except TypeError: pass
+            except TypeError:
+                pass
 
         # FDBRange used to be called FDBRangeIter and was an iterator,
         # but it's now a container. In v13 we have to make it act like
@@ -117,4 +125,3 @@ def api_version(ver):
     import fdb.subspace_impl
     subspace_symbols = ('Subspace',)
     _add_symbols(fdb.subspace_impl, subspace_symbols)
-

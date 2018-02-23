@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,11 +28,12 @@ from bindingtester import util
 
 fdb.api_version(FDB_API_VERSION)
 
+
 class ResultSpecification(object):
     def __init__(self, subspace, key_start_index=0, ordering_index=None, global_error_filter=None):
         self.subspace = subspace
         self.key_start_index = key_start_index
-        self.ordering_index = ordering_index 
+        self.ordering_index = ordering_index
 
         if global_error_filter is not None:
             error_str = '|'.join(['%d' % e for e in global_error_filter])
@@ -45,7 +46,7 @@ class ResultSpecification(object):
             return False
 
         return self.error_regex.search(str) is not None
-        
+
 
 class Test(object):
     def __init__(self, subspace, min_api_version=0, max_api_version=int(1e9)):
@@ -54,7 +55,7 @@ class Test(object):
         self.max_api_version = max_api_version
 
     # Returns nothing
-    def setup(self, args):   
+    def setup(self, args):
         pass
 
     # Returns an instance of TestInstructions
@@ -75,7 +76,7 @@ class Test(object):
     def get_expected_results(self):
         return {}
 
-    # Returns a list of error strings 
+    # Returns a list of error strings
     def validate(self, db, args):
         return []
 
@@ -87,6 +88,7 @@ class Test(object):
             return None
 
         return test_class[0](subspace)
+
 
 class Instruction(object):
     def __init__(self, operation):
@@ -103,6 +105,7 @@ class Instruction(object):
     def __repr__(self):
         return repr(self.operation)
 
+
 class PushInstruction(Instruction):
     def __init__(self, argument):
         self.operation = 'PUSH'
@@ -115,6 +118,7 @@ class PushInstruction(Instruction):
     def __repr__(self):
         return '%r %r' % (self.operation, self.argument)
 
+
 class TestInstructions(object):
     def __init__(self):
         pass
@@ -126,13 +130,14 @@ class TestInstructions(object):
     def insert_operations(self, db, subspace):
         pass
 
+
 class InstructionSet(TestInstructions, list):
     def __init__(self):
         TestInstructions.__init__(self)
         list.__init__(self)
 
         self.core_test_begin = 0
-        self.core_test_end = None 
+        self.core_test_end = None
 
     def push_args(self, *args):
         self.extend([PushInstruction(arg) for arg in reversed(args)])
@@ -144,7 +149,7 @@ class InstructionSet(TestInstructions, list):
             list.append(self, Instruction(instruction))
 
     def get_threads(self, subspace):
-        return { subspace : self }
+        return {subspace: self}
 
     def setup_complete(self):
         self.core_test_begin = len(self)
@@ -153,16 +158,17 @@ class InstructionSet(TestInstructions, list):
         self.core_test_end = len(self)
 
     def core_instructions(self):
-        return self[self.core_test_begin : self.core_test_end]
-    
+        return self[self.core_test_begin: self.core_test_end]
+
     @fdb.transactional
     def _insert_operations_transactional(self, tr, subspace, start, count):
-        for i, instruction in enumerate(self[start : start+count]):
+        for i, instruction in enumerate(self[start: start + count]):
             tr[subspace.pack((start + i,))] = instruction.to_value()
 
     def insert_operations(self, db, subspace):
         for i in range(0, int(math.ceil(len(self) / 1000.0))):
-            self._insert_operations_transactional(db, subspace, i*1000, 1000)
+            self._insert_operations_transactional(db, subspace, i * 1000, 1000)
+
 
 class ThreadedInstructionSet(TestInstructions):
     def __init__(self):
@@ -193,5 +199,6 @@ class ThreadedInstructionSet(TestInstructions):
 
         self.threads[subspace] = thread_instructions
         return thread_instructions
+
 
 util.import_subclasses(__file__, 'bindingtester.tests')

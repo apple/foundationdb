@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -41,9 +41,9 @@ package fdb
 import "C"
 
 import (
-	"unsafe"
-	"sync"
 	"runtime"
+	"sync"
+	"unsafe"
 )
 
 // A Future represents a value (or error) to be available at some later
@@ -253,7 +253,7 @@ type futureKeyValueArray struct {
 }
 
 func stringRefToSlice(ptr unsafe.Pointer) []byte {
-	size := *((*C.int)(unsafe.Pointer(uintptr(ptr)+8)))
+	size := *((*C.int)(unsafe.Pointer(uintptr(ptr) + 8)))
 
 	if size == 0 {
 		return []byte{}
@@ -278,13 +278,13 @@ func (f futureKeyValueArray) Get() ([]KeyValue, bool, error) {
 	ret := make([]KeyValue, int(count))
 
 	for i := 0; i < int(count); i++ {
-		kvptr := unsafe.Pointer(uintptr(unsafe.Pointer(kvs)) + uintptr(i * 24))
+		kvptr := unsafe.Pointer(uintptr(unsafe.Pointer(kvs)) + uintptr(i*24))
 
 		ret[i].Key = stringRefToSlice(kvptr)
 		ret[i].Value = stringRefToSlice(unsafe.Pointer(uintptr(kvptr) + 12))
 	}
 
- 	return ret, (more != 0), nil
+	return ret, (more != 0), nil
 }
 
 // FutureInt64 represents the asynchronous result of a function that returns a
@@ -361,7 +361,7 @@ func (f futureStringSlice) Get() ([]string, error) {
 	ret := make([]string, int(count))
 
 	for i := 0; i < int(count); i++ {
-		ret[i] = C.GoString((*C.char)(*(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(strings))+uintptr(i*8)))))
+		ret[i] = C.GoString((*C.char)(*(**C.char)(unsafe.Pointer(uintptr(unsafe.Pointer(strings)) + uintptr(i*8)))))
 	}
 
 	return ret, nil

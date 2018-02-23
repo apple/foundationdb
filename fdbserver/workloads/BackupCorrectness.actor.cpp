@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -124,6 +124,15 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> statusLoop(Database cx, std::string tag) {
+		state FileBackupAgent agent;
+		loop {
+			std::string status = wait(agent.getStatus(cx, true, tag));
+			puts(status.c_str());
+			Void _ = wait(delay(2.0));
+		}
+	}
+
 	ACTOR static Future<Void> doBackup(BackupAndRestoreCorrectnessWorkload* self, double startDelay, FileBackupAgent* backupAgent, Database cx,
 		Key tag, Standalone<VectorRef<KeyRangeRef>> backupRanges, double stopDifferentialDelay, Promise<Void> submittted) {
 
@@ -148,6 +157,8 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		TraceEvent("BARW_doBackupSubmitBackup", randomID).detail("tag", printable(tag)).detail("stopWhenDone", stopDifferentialDelay ? "False" : "True");
 
 		state std::string backupContainer = "file://simfdb/backups/";
+		state Future<Void> status = statusLoop(cx, tag.toString());
+
 		try {
 			Void _ = wait(backupAgent->submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), tag.toString(), backupRanges, stopDifferentialDelay ? false : true));
 		}

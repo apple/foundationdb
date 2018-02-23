@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -51,6 +51,14 @@ GO_SRC := $(shell find $(CURDIR)/bindings/go/src -name '*.go')
 
 fdb_go: $(GO_PACKAGE_OBJECTS) $(GO_SRC)
 
+fdb_go_fmt: $(GO_SRC)
+	@echo "Formatting     fdb_go"
+	@gofmt -w $(GO_SRC)
+
+fdb_go_fmt_check: $(GO_SRC)
+	@echo "Checking       fdb_go"
+	@bash -c 'fmtoutstr=$$(gofmt -l $(GO_SRC)) ; if [[ -n "$${fmtoutstr}" ]] ; then echo "Detected go formatting violations for the following files:" ; echo "$${fmtoutstr}" ; echo "Try running: make fdb_go_fmt"; exit 1 ; fi'
+
 fdb_go_path: $(GO_SRC)
 	@echo "Creating       fdb_go_path"
 	@mkdir -p $(GO_DEST)
@@ -66,27 +74,27 @@ fdb_go_tester_clean:
 	@echo "Cleaning       fdb_go_tester"
 	@rm -rf $(GOPATH)/bin
 
-$(GOPATH)/bin/_stacktester: fdb_go_path $(GO_SRC) $(GO_PACKAGE_OBJECTS) $(GO_DEST)/fdb/generated.go
+$(GOPATH)/bin/_stacktester: fdb_go_path fdb_go_fmt_check $(GO_SRC) $(GO_PACKAGE_OBJECTS) $(GO_DEST)/fdb/generated.go
 	@echo "Compiling      $(basename $(notdir $@))"
 	@go install $(GO_IMPORT_PATH)/_stacktester
 
-$(GO_PACKAGE_OUTDIR)/fdb/tuple.a: fdb_go_path $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_DEST)/fdb/generated.go
+$(GO_PACKAGE_OUTDIR)/fdb/tuple.a: fdb_go_path fdb_go_fmt_check $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_DEST)/fdb/generated.go
 	@echo "Compiling      fdb/tuple"
 	@go install $(GO_IMPORT_PATH)/fdb/tuple
 
-$(GO_PACKAGE_OUTDIR)/fdb/subspace.a: fdb_go_path $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_PACKAGE_OUTDIR)/fdb/tuple.a $(GO_DEST)/fdb/generated.go
+$(GO_PACKAGE_OUTDIR)/fdb/subspace.a: fdb_go_path fdb_go_fmt_check $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_PACKAGE_OUTDIR)/fdb/tuple.a $(GO_DEST)/fdb/generated.go
 	@echo "Compiling      fdb/subspace"
 	@go install $(GO_IMPORT_PATH)/fdb/subspace
 
-$(GO_PACKAGE_OUTDIR)/fdb/directory.a: fdb_go_path $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_PACKAGE_OUTDIR)/fdb/tuple.a $(GO_PACKAGE_OUTDIR)/fdb/subspace.a $(GO_DEST)/fdb/generated.go
+$(GO_PACKAGE_OUTDIR)/fdb/directory.a: fdb_go_path fdb_go_fmt_check $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_PACKAGE_OUTDIR)/fdb/tuple.a $(GO_PACKAGE_OUTDIR)/fdb/subspace.a $(GO_DEST)/fdb/generated.go
 	@echo "Compiling      fdb/directory"
 	@go install $(GO_IMPORT_PATH)/fdb/directory
 
-$(GO_PACKAGE_OUTDIR)/fdb.a: fdb_go_path $(GO_SRC) $(GO_DEST)/fdb/generated.go
+$(GO_PACKAGE_OUTDIR)/fdb.a: fdb_go_path fdb_go_fmt_check $(GO_SRC) $(GO_DEST)/fdb/generated.go
 	@echo "Compiling      fdb"
 	@go install $(GO_IMPORT_PATH)/fdb
 
-$(GO_DEST)/fdb/generated.go: fdb_go_path lib/libfdb_c.$(DLEXT) bindings/go/src/_util/translate_fdb_options.go fdbclient/vexillographer/fdb.options
+$(GO_DEST)/fdb/generated.go: fdb_go_path fdb_go_fmt_check lib/libfdb_c.$(DLEXT) bindings/go/src/_util/translate_fdb_options.go fdbclient/vexillographer/fdb.options
 	@echo "Building       $@"
 	@go run bindings/go/src/_util/translate_fdb_options.go < fdbclient/vexillographer/fdb.options > $@
 

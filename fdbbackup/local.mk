@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -47,7 +47,7 @@ bin/fdbbackup: bin/coverage.fdbbackup.xml
 
 bin/fdbbackup.debug: bin/fdbbackup
 
-BACKUP_ALIASES = fdbrestore fdbblob fdbdr dr_agent backup_agent
+BACKUP_ALIASES = fdbrestore fdbdr dr_agent backup_agent
 
 $(addprefix bin/, $(BACKUP_ALIASES)): bin/fdbbackup
 	@[ -f $@ ] || (echo "SymLinking     $@" && ln -s fdbbackup $@)

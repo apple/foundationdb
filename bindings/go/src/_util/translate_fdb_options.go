@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -24,26 +24,26 @@ package main
 
 import (
 	"encoding/xml"
-	"io/ioutil"
 	"fmt"
+	"go/doc"
+	"io/ioutil"
 	"log"
-	"strings"
 	"os"
+	"strings"
 	"unicode"
 	"unicode/utf8"
-	"go/doc"
 )
 
 type Option struct {
-	Name string `xml:"name,attr"`
-	Code int `xml:"code,attr"`
-	ParamType string `xml:"paramType,attr"`
-	ParamDesc string `xml:"paramDescription,attr"`
+	Name        string `xml:"name,attr"`
+	Code        int    `xml:"code,attr"`
+	ParamType   string `xml:"paramType,attr"`
+	ParamDesc   string `xml:"paramDescription,attr"`
 	Description string `xml:"description,attr"`
-	Hidden bool `xml:"hidden,attr"`
+	Hidden      bool   `xml:"hidden,attr"`
 }
 type Scope struct {
-	Name string `xml:"name,attr"`
+	Name   string `xml:"name,attr"`
 	Option []Option
 }
 type Options struct {
@@ -114,12 +114,12 @@ func translateName(old string) string {
 	return strings.Replace(strings.Title(strings.Replace(old, "_", " ", -1)), " ", "", -1)
 }
 
-func lowerFirst (s string) string {
-        if s == "" {
-                return ""
-        }
-        r, n := utf8.DecodeRuneInString(s)
-        return string(unicode.ToLower(r)) + s[n:]
+func lowerFirst(s string) string {
+	if s == "" {
+		return ""
+	}
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToLower(r)) + s[n:]
 }
 
 func writeMutation(opt Option) {
@@ -139,7 +139,7 @@ func writeEnum(scope Scope, opt Option, delta int) {
 		doc.ToText(os.Stdout, opt.Description, "    // ", "", 73)
 		// fmt.Printf("	// %s\n", opt.Description)
 	}
-	fmt.Printf("	%s %s = %d\n", scope.Name + translateName(opt.Name), scope.Name, opt.Code + delta)
+	fmt.Printf("	%s %s = %d\n", scope.Name+translateName(opt.Name), scope.Name, opt.Code+delta)
 }
 
 func main() {
@@ -182,11 +182,11 @@ func int64ToBytes(i int64) ([]byte, error) {
 }
 `)
 
-	for _, scope := range(v.Scope) {
+	for _, scope := range v.Scope {
 		if strings.HasSuffix(scope.Name, "Option") {
 			receiver := scope.Name + "s"
 
-			for _, opt := range(scope.Option) {
+			for _, opt := range scope.Option {
 				if opt.Description != "Deprecated" && !opt.Hidden { // Eww
 					writeOpt(receiver, opt)
 				}
@@ -195,7 +195,7 @@ func int64ToBytes(i int64) ([]byte, error) {
 		}
 
 		if scope.Name == "MutationType" {
-			for _, opt := range(scope.Option) {
+			for _, opt := range scope.Option {
 				if opt.Description != "Deprecated" && !opt.Hidden { // Eww
 					writeMutation(opt)
 				}
@@ -218,7 +218,7 @@ func int64ToBytes(i int64) ([]byte, error) {
 type %s int
 const (
 `, scope.Name)
-		for _, opt := range(scope.Option) {
+		for _, opt := range scope.Option {
 			if !opt.Hidden {
 				writeEnum(scope, opt, d)
 			}

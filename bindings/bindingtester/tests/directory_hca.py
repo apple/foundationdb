@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -30,6 +30,7 @@ from bindingtester.tests import test_util, directory_util
 
 fdb.api_version(FDB_API_VERSION)
 
+
 class DirectoryHcaTest(Test):
     def __init__(self, subspace):
         super(DirectoryHcaTest, self).__init__(subspace)
@@ -39,7 +40,7 @@ class DirectoryHcaTest(Test):
 
     def setup(self, args):
         self.random = test_util.RandomGenerator(args.max_int_bits, args.api_version, args.types)
-        self.transactions = ['tr%d' % i for i in range(3)] # SOMEDAY: parameterize this number?
+        self.transactions = ['tr%d' % i for i in range(3)]  # SOMEDAY: parameterize this number?
         self.barrier_num = 0
 
         self.max_directories_per_transaction = 30
@@ -58,7 +59,7 @@ class DirectoryHcaTest(Test):
 
     def barrier(self, instructions, thread_number, thread_ending=False):
         if not thread_ending:
-            instructions.push_args(self.coordination[(self.barrier_num+1)][thread_number].key(), '')
+            instructions.push_args(self.coordination[(self.barrier_num + 1)][thread_number].key(), '')
             instructions.append('SET_DATABASE')
             instructions.append('WAIT_FUTURE')
 
@@ -101,8 +102,9 @@ class DirectoryHcaTest(Test):
 
             for i in range(num_directories):
                 path = (self.random.random_unicode_str(16),)
-                op_args = test_util.with_length(path) + ('', None) 
-                directory_util.push_instruction_and_record_prefix(instructions, 'DIRECTORY_CREATE', op_args, path, num_dirs, self.random, self.prefix_log)
+                op_args = test_util.with_length(path) + ('', None)
+                directory_util.push_instruction_and_record_prefix(instructions, 'DIRECTORY_CREATE',
+                                                                  op_args, path, num_dirs, self.random, self.prefix_log)
                 num_dirs += 1
 
             current_op += num_directories
@@ -127,4 +129,3 @@ class DirectoryHcaTest(Test):
         errors += directory_util.validate_hca_state(db)
 
         return errors
-
