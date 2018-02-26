@@ -1241,7 +1241,7 @@ public:
 		// Check if machine can be removed, if requested
 		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
 		{
-			std::vector<ProcessInfo*>	processesLeft, processesDead;
+			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int	protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
 			for (auto machineRec : machines) {
@@ -1251,19 +1251,19 @@ public:
 						// Do not include any excluded machines
 						if (processInfo->isExcluded()) {
 							processesDead.push_back(processInfo);
-							excluded ++;
+							excluded++;
 						}
 						else if (!processInfo->isCleared()) {
 							processesDead.push_back(processInfo);
-							cleared ++;
+							cleared++;
 						}
 						else if (!processInfo->isAvailable()) {
 							processesDead.push_back(processInfo);
-							unavailable ++;
+							unavailable++;
 						}
 						else if (protectedAddresses.count(processInfo->address)) {
 							processesLeft.push_back(processInfo);
-							protectedWorker ++;
+							protectedWorker++;
 						}
 						else if (machineRec.second.zoneId != zoneId)
 							processesLeft.push_back(processInfo);

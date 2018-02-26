@@ -105,7 +105,7 @@ struct LeaderInfo {
 
 	// The first 7 bits of ChangeID represent cluster controller process class fitness, the lower the better
 	void updateChangeID(ClusterControllerPriorityInfo info) {
-		changeID = UID( ((uint64_t)info.isExcluded << 63) | ((uint64_t)info.dcFitness << 60) | ((uint64_t)info.processClassFitness << 57) | (changeID.first() & mask), changeID.second() );
+		changeID = UID( ((uint64_t)info.processClassFitness << 57) | ((uint64_t)info.isExcluded << 60) | ((uint64_t)info.dcFitness << 61) | (changeID.first() & mask), changeID.second() );
 	}
 
 	// All but the first 7 bits are used to represent process id

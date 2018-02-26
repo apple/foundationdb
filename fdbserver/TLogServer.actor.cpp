@@ -1335,6 +1335,10 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 			}
 		}
 
+		if(logData->stopped) {
+			return Void();
+		}
+
 		Version ver = 0;
 		Arena arena;
 		BinaryWriter wr(Unversioned());
