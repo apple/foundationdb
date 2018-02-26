@@ -685,7 +685,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	bool generateFearless = true; //FIXME randomize
+	bool generateFearless = g_random->random01() < 0.5;
 	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
@@ -696,12 +696,12 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("memory");
 	}
 
-	int replication_type = 1; //std::max(minimumReplication, std::min(g_random->randomInt(0,6), 3)); //FIXME
+	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt(0,6), 3));
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
-		int storage_servers = g_random->randomInt(1,5);
-		int replication_factor = g_random->randomInt(1,5);
+		int storage_servers = g_random->randomInt(1, generateFearless ? 4 : 5);
+		int replication_factor = g_random->randomInt(1, generateFearless ? 4 : 5);
 		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d storage_quorum:=%d "
@@ -761,11 +761,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		db.remoteDesiredTLogCount = 1; 
 		db.desiredLogRouterCount = 1;
 		db.satelliteDesiredTLogCount = 1;
-
-		//FIXME: delete
-		db.desiredTLogCount = 1;
-		db.masterProxyCount = 1;
-		db.resolverCount = 1;
 	}
 	
 	if(generateFearless) {
@@ -910,7 +905,6 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		}
 	}
 
-	//FIXME: protected addresses will potentially protect too many datacenters from being fully killed
 	g_random->randomShuffle(coordinatorAddresses);
 	for(int i = 0; i < (coordinatorAddresses.size()/2)+1; i++) {
 		TraceEvent("ProtectCoordinator").detail("Address", coordinatorAddresses[i]).detail("Coordinators", describe(coordinatorAddresses)).backtrace();
@@ -944,7 +938,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			if(assignClasses) {
 				if(assignedMachines < 4)
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 2), ProcessClass::CommandLineSource); //Unset or Storage
-				else if(assignedMachines == 4)
+				else if(assignedMachines == 4 && !g_simulator.hasRemoteReplication && !g_simulator.hasSatelliteReplication)
 					processClass = ProcessClass((ProcessClass::ClassType) (g_random->randomInt(0, 2) * ProcessClass::ResolutionClass), ProcessClass::CommandLineSource); //Unset or Resolution
 				else
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 3), ProcessClass::CommandLineSource); //Unset, Storage, or Transaction
@@ -1032,13 +1026,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		.detail("ProcessesPerServer", processesPerMachine)
 		.detail("SSLEnabled", sslEnabled)
 		.detail("ClassesAssigned", assignClasses)
-		.detail("StartingConfiguration", pStartingConfiguration->toString())
-		//.detail("TesterCount", testerCount)
-		;
-
-	// FIXME
-	/*Void _ = wait( DatabaseContext::configureDatabase( *pZookeeper, ClusterInterface::DEFAULT, mode ) );
-	Void _ = wait( DatabaseContext::configureDatabase( *pZookeeper, ClusterInterface::ALL, mode ) );*/
+		.detail("StartingConfiguration", pStartingConfiguration->toString());
 }
 
 void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication) {
