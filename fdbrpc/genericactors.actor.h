@@ -80,19 +80,6 @@ Future<T> timeoutWarning( Future<T> what, double time, PromiseStream<Void> outpu
 	}
 }
 
-
-ACTOR template <class T> 
-Future<T> sendCanceler( ReplyPromise<T> reply, PacketID send ) {
-	try {
-		T t = wait( reply.getFuture() );
-		FlowTransport::transport().cancelReliable(send);
-		return t;
-	} catch (...) {
-		FlowTransport::transport().cancelReliable(send);
-		throw;
-	}
-}
-
 ACTOR template <class T>
 void networkSender( Future<T> input, Endpoint endpoint ) {
 	try {
@@ -190,6 +177,33 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 	}
 }
 
+ACTOR template <class T> 
+Future<T> sendCanceler( ReplyPromise<T> reply, PacketID send, Endpoint endpoint ) {
+	try {
+		T t = wait( reply.getFuture() );
+		FlowTransport::transport().cancelReliable(send);
+		return t;
+	} catch (Error& e) {
+		FlowTransport::transport().cancelReliable(send);
+		if (e.code() == error_code_broken_promise) {
+			IFailureMonitor::failureMonitor().endpointNotFound( endpoint );
+		}
+		throw;
+	}
+}
+
+ACTOR template <class X>
+Future<X> reportEndpointFailure( Future<X> value, Endpoint endpoint ) {
+	try { 
+		X x = wait(value);
+		return x; 
+	} catch (Error& e) {
+		if (e.code() == error_code_broken_promise) {
+			IFailureMonitor::failureMonitor().endpointNotFound( endpoint );
+		}
+		throw;
+	}
+}
 
 Future<Void> disableConnectionFailuresAfter( double const& time, std::string const& context );
 

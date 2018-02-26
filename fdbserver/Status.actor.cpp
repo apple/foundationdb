@@ -37,7 +37,7 @@ const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
 	"configuration_missing", "configuration_never_created", "configuration_invalid",
 	"recruiting_transaction_servers", "initializing_transaction_servers", "recovery_transaction",
-	"writing_coordinated_state", "fully_recovered"
+	"writing_coordinated_state", "fully_recovered", "remote_recovered"
 };
 static_assert( sizeof(RecoveryStatus::names) == sizeof(RecoveryStatus::names[0])*RecoveryStatus::END, "RecoveryStatus::names[] size" );
 const char* RecoveryStatus::descriptions[] = {
@@ -64,7 +64,9 @@ const char* RecoveryStatus::descriptions[] = {
 	// writing_coordinated_state
 	"Writing coordinated state. Verify that a majority of coordination server processes are active.",
 	// fully_recovered
-	"Recovery complete."
+	"Recovery complete.",
+	// remote_recovered
+	"Remote recovery complete."
 };
 static_assert( sizeof(RecoveryStatus::descriptions) == sizeof(RecoveryStatus::descriptions[0])*RecoveryStatus::END, "RecoveryStatus::descriptions[] size" );
 
@@ -1145,6 +1147,8 @@ static StatusObject configurationFetcher(Optional<DatabaseConfiguration> conf, S
 			else if (configuration.autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS)
 				statusObj["auto_logs"] = configuration.autoDesiredTLogCount;
 
+			statusObj["remote_logs"] = configuration.remoteDesiredTLogCount;
+
 			if(configuration.storagePolicy) {
 				statusObj["storage_policy"] = configuration.storagePolicy->info();
 			}
@@ -1446,29 +1450,37 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 static StatusArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<struct ServerDBInfo>> db, std::unordered_map<NetworkAddress, WorkerInterface> const& address_workers) {
 	StatusArray oldTlogsArray;
 
-	if(db->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
+	if(db->get().recoveryState >= RecoveryState::FULLY_RECOVERED) {
 		for(auto it : db->get().logSystemConfig.oldTLogs) {
 			StatusObject statusObj;
-			int failedLogs = 0;
 			StatusArray logsObj;
-			for(auto log : it.tLogs) {
-				StatusObject logObj;
-				bool failed = !log.present() || !address_workers.count(log.interf().address());
-				logObj["id"] = log.id().shortString();
-				logObj["healthy"] = !failed;
-				if(log.present()) {
-					logObj["address"] = log.interf().address().toString();
+			int maxFaultTolerance = 0;
+			
+			for(int i = 0; i < it.tLogs.size(); i++) {
+				int failedLogs = 0;
+				for(auto& log : it.tLogs[i].tLogs) {
+					StatusObject logObj;
+					bool failed = !log.present() || !address_workers.count(log.interf().address());
+					logObj["id"] = log.id().shortString();
+					logObj["healthy"] = !failed;
+					if(log.present()) {
+						logObj["address"] = log.interf().address().toString();
+					}
+					logsObj.push_back(logObj);
+					if(failed) {
+						failedLogs++;
+					}
 				}
-				logsObj.push_back(logObj);
-				if(failed) {
-					failedLogs++;
+				maxFaultTolerance = std::max(maxFaultTolerance, it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs);
+				//FIXME: add information for remote and satellites
+				if(i==0) {
+					statusObj["log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
+					statusObj["log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
+					statusObj["log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
 				}
 			}
-			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, it.tLogReplicationFactor - 1 - it.tLogWriteAntiQuorum - failedLogs);
+			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, maxFaultTolerance);
 			statusObj["logs"] = logsObj;
-			statusObj["log_replication_factor"] = it.tLogReplicationFactor;
-			statusObj["log_write_anti_quorum"] = it.tLogWriteAntiQuorum;
-			statusObj["log_fault_tolerance"] = it.tLogReplicationFactor - 1 - it.tLogWriteAntiQuorum - failedLogs;
 			oldTlogsArray.push_back(statusObj);
 		}
 	}
@@ -1523,7 +1535,7 @@ static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configurat
 	statusObj["max_machine_failures_without_losing_data"] = std::max(machineFailuresWithoutLosingData, 0);
 
 	// without losing availablity
-	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(numTLogEligibleMachines - configuration.minMachinesRequired(), machineFailuresWithoutLosingData), 0);
+	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(numTLogEligibleMachines - configuration.minMachinesRequiredPerDatacenter(), machineFailuresWithoutLosingData), 0);
 	return statusObj;
 }
 
@@ -1807,7 +1819,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			state std::vector<StatusObject> workerStatuses = wait(getAll(futures2));
 
 			int oldLogFaultTolerance = 100;
-			if(db->get().recoveryState == RecoveryState::FULLY_RECOVERED && db->get().logSystemConfig.oldTLogs.size() > 0) {
+			if(db->get().recoveryState >= RecoveryState::FULLY_RECOVERED && db->get().logSystemConfig.oldTLogs.size() > 0) {
 				statusObj["old_logs"] = oldTlogFetcher(&oldLogFaultTolerance, db, address_workers);
 			}
 

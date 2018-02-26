@@ -107,17 +107,58 @@ const KeyRangeRef serverTagKeys(
 	LiteralStringRef("\xff/serverTag/"),
 	LiteralStringRef("\xff/serverTag0") );
 const KeyRef serverTagPrefix = serverTagKeys.begin;
-const KeyRef serverTagMaxKey = LiteralStringRef("\xff/serverTagMax");
+const KeyRef serverTagMaxOldKey = LiteralStringRef("\xff/serverTagMax");
+const KeyRangeRef serverTagMaxKeys(
+	LiteralStringRef("\xff/serverTagMax/"),
+	LiteralStringRef("\xff/serverTagMax0") );
 const KeyRangeRef serverTagConflictKeys(
 	LiteralStringRef("\xff/serverTagConflict/"),
 	LiteralStringRef("\xff/serverTagConflict0") );
 const KeyRef serverTagConflictPrefix = serverTagConflictKeys.begin;
+const KeyRangeRef serverTagHistoryKeys(
+	LiteralStringRef("\xff/serverTagHistory/"),
+	LiteralStringRef("\xff/serverTagHistory0") );
+const KeyRef serverTagHistoryPrefix = serverTagHistoryKeys.begin;
+
+const Key serverMaxTagKeyFor( int8_t tagLocality ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( serverTagMaxKeys.begin );
+	wr << tagLocality;
+	return wr.toStringRef();
+}
 
 const Key serverTagKeyFor( UID serverID ) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes( serverTagKeys.begin );
 	wr << serverID;
 	return wr.toStringRef();
+}
+
+const Key serverTagHistoryKeyFor( UID serverID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( serverTagHistoryKeys.begin );
+	wr << serverID;
+	return addVersionStampAtEnd(wr.toStringRef());
+}
+
+const KeyRange serverTagHistoryRangeFor( UID serverID ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( serverTagHistoryKeys.begin );
+	wr << serverID;
+	return prefixRange(wr.toStringRef());
+}
+
+const KeyRange serverTagHistoryRangeBefore( UID serverID, Version version ) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes( serverTagHistoryKeys.begin );
+	wr << serverID;
+	version = bigEndian64(version);
+	
+	Key versionStr = makeString( 8 );
+	uint8_t* data = mutateString( versionStr );
+	memcpy(data, &version, 8);
+
+	return KeyRangeRef( wr.toStringRef(), versionStr.withPrefix(wr.toStringRef()) );
 }
 
 const Value serverTagValue( Tag tag ) {
@@ -133,10 +174,31 @@ UID decodeServerTagKey( KeyRef const& key ) {
 	return serverID;
 }
 
+Version decodeServerTagHistoryKey( KeyRef const& key ) {
+	Version parsedVersion;
+	memcpy(&parsedVersion, key.substr(key.size()-10).begin(), sizeof(Version));
+	parsedVersion = bigEndian64(parsedVersion);
+	return parsedVersion;
+}
+
 Tag decodeServerTagValue( ValueRef const& value ) {
 	Tag s;
 	BinaryReader reader( value, IncludeVersion() );
-	reader >> s;
+	if( reader.protocolVersion() < 0x0FDB00A560010001LL ) {
+		int16_t id;
+		reader >> id;
+		if(id == invalidTagOld) {
+			s = invalidTag;
+		} else if(id == txsTagOld) {
+			s = txsTag;
+		} else {
+			ASSERT(id >= 0);
+			s.id = id;
+			s.locality = tagLocalityUpgraded;
+		}
+	} else {
+		reader >> s;
+	}
 	return s;
 }
 
@@ -148,7 +210,7 @@ const Key serverTagConflictKeyFor( Tag tag ) {
 }
 
 const Value serverTagMaxValue( Tag tag ) {
-	BinaryWriter wr(Unversioned());
+	BinaryWriter wr(Unversioned()); //This has to be unversioned because we are using an atomic op to max it
 	wr << tag;
 	return wr.toStringRef();
 }
@@ -156,6 +218,53 @@ const Value serverTagMaxValue( Tag tag ) {
 Tag decodeServerTagMaxValue( ValueRef const& value ) {
 	Tag s;
 	BinaryReader reader( value, Unversioned() );
+	reader >> s;
+	return s;
+}
+
+Tag decodeServerTagMaxValueOld( ValueRef const& value ) {
+	Tag s;
+	BinaryReader reader( value, Unversioned() );
+	int16_t id;
+	reader >> id;
+	if(id == invalidTagOld) {
+		s = invalidTag;
+	} else if(id == txsTagOld) {
+		s = txsTag;
+	} else {
+		ASSERT(id >= 0);
+		s.id = id;
+		s.locality = tagLocalityUpgraded;
+	}
+	return s;
+}
+
+const KeyRangeRef tagLocalityListKeys(
+	LiteralStringRef("\xff/tagLocalityList/"),
+	LiteralStringRef("\xff/tagLocalityList0") );
+const KeyRef tagLocalityListPrefix = tagLocalityListKeys.begin;
+
+const Key tagLocalityListKeyFor( Optional<Value> dcID ) {
+	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	wr.serializeBytes( tagLocalityListKeys.begin );
+	wr << dcID;
+	return wr.toStringRef();
+}
+
+const Value tagLocalityListValue( int8_t const& tagLocality ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << tagLocality;
+	return wr.toStringRef();
+}
+Optional<Value> decodeTagLocalityListKey( KeyRef const& key ) {
+	Optional<Value> dcID;
+	BinaryReader rd( key.removePrefix(tagLocalityListKeys.begin), AssumeVersion(currentProtocolVersion) );
+	rd >> dcID;
+	return dcID;
+}
+int8_t decodeTagLocalityListValue( ValueRef const& value ) {
+	int8_t s;
+	BinaryReader reader( value, IncludeVersion() );
 	reader >> s;
 	return s;
 }

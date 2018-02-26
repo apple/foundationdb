@@ -34,8 +34,24 @@ void DatabaseConfiguration::resetInternal() {
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
-	storagePolicy = IRepPolicyRef();
-	tLogPolicy = IRepPolicyRef();
+	primaryDcId = remoteDcId = Optional<Standalone<StringRef>>();
+	tLogPolicy = storagePolicy = remoteTLogPolicy = satelliteTLogPolicy = IRepPolicyRef();
+
+	remoteDesiredTLogCount = satelliteDesiredTLogCount = desiredLogRouterCount = -1;
+	remoteTLogReplicationFactor = satelliteTLogReplicationFactor = satelliteTLogWriteAntiQuorum = satelliteTLogUsableDcs = 0;
+	primarySatelliteDcIds.clear();
+	remoteSatelliteDcIds.clear();
+}
+
+void parse( std::vector<Optional<Standalone<StringRef>>>* dcs, ValueRef const& v ) {
+	int lastBegin = 0;
+	for(int i = 0; i < v.size(); i++) {
+		if(v[i] == ',') {
+			dcs->push_back(v.substr(lastBegin,i));
+			lastBegin = i + 1;
+		}
+	}
+	dcs->push_back(v.substr(lastBegin));
 }
 
 void parse( int* i, ValueRef const& v ) {
@@ -49,8 +65,18 @@ void parseReplicationPolicy(IRepPolicyRef* policy, ValueRef const& v) {
 }
 
 void DatabaseConfiguration::setDefaultReplicationPolicy() {
-	storagePolicy = IRepPolicyRef(new PolicyAcross(storageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
-	tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	if(!storagePolicy) {
+		storagePolicy = IRepPolicyRef(new PolicyAcross(storageTeamSize, "zoneid", IRepPolicyRef(new PolicyOne())));
+	}
+	if(!tLogPolicy) {
+		tLogPolicy = IRepPolicyRef(new PolicyAcross(tLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	}
+	if(remoteTLogReplicationFactor > 0 && !remoteTLogPolicy) {
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	}
+	if(satelliteTLogReplicationFactor > 0 && !satelliteTLogPolicy) {
+		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(satelliteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+	}
 }
 
 bool DatabaseConfiguration::isValid() const {
@@ -69,8 +95,18 @@ bool DatabaseConfiguration::isValid() const {
 		autoResolverCount >= 1 &&
 		autoDesiredTLogCount >= 1 &&
 		storagePolicy &&
-		tLogPolicy
-		;
+		tLogPolicy &&
+		getDesiredRemoteLogs() >= 1 &&
+		getDesiredLogRouters() >= 1 &&
+		remoteTLogReplicationFactor >= 0 &&
+		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && primaryDcId.present() && remoteDcId.present() && durableStorageQuorum == storageTeamSize ) ) &&
+		primaryDcId.present() == remoteDcId.present() &&
+		getDesiredSatelliteLogs() >= 1 &&
+		satelliteTLogReplicationFactor >= 0 &&
+		satelliteTLogWriteAntiQuorum >= 0 &&
+		satelliteTLogUsableDcs >= 0 &&
+		( satelliteTLogReplicationFactor == 0 || ( satelliteTLogPolicy && primarySatelliteDcIds.size() && remoteSatelliteDcIds.size() && remoteTLogReplicationFactor > 0 ) ) &&
+		primarySatelliteDcIds.size() == remoteSatelliteDcIds.size();
 }
 
 std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
@@ -107,8 +143,77 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 		else
 			result["storage_engine"] = "custom";
 
+		if(primaryDcId.present()) {
+			result["primary_dc"] = printable(primaryDcId.get());
+		}
+		if(remoteDcId.present()) {
+			result["remote_dc"] = printable(remoteDcId.get());
+		}
+		if(primarySatelliteDcIds.size()) {
+			std::string primaryDcStr = "";
+			bool first = true;
+			for(auto& it : primarySatelliteDcIds) {
+				if(it.present()) {
+					if(!first) {
+						primaryDcStr += ",";
+						first = false;
+					}
+					primaryDcStr += printable(it.get());
+				}
+			}
+			result["primary_satellite_dcs"] = primaryDcStr;
+		}
+		if(remoteSatelliteDcIds.size()) {
+			std::string remoteDcStr = "";
+			bool first = true;
+			for(auto& it : remoteSatelliteDcIds) {
+				if(it.present()) {
+					if(!first) {
+						remoteDcStr += ",";
+						first = false;
+					}
+					remoteDcStr += printable(it.get());
+				}
+			}
+			result["remote_satellite_dcs"] = remoteDcStr;
+		}
+
+		if(satelliteTLogReplicationFactor == 1 && satelliteTLogUsableDcs == 1 && satelliteTLogWriteAntiQuorum == 0) {
+			result["satellite_redundancy_mode"] = "one_satellite_single";
+		} else if(satelliteTLogReplicationFactor == 2 && satelliteTLogUsableDcs == 1 && satelliteTLogWriteAntiQuorum == 0) {
+			result["satellite_redundancy_mode"] = "one_satellite_double";
+		} else if(satelliteTLogReplicationFactor == 3 && satelliteTLogUsableDcs == 1 && satelliteTLogWriteAntiQuorum == 0) {
+			result["satellite_redundancy_mode"] = "one_satellite_triple";
+		} else if(satelliteTLogReplicationFactor == 4 && satelliteTLogUsableDcs == 2 && satelliteTLogWriteAntiQuorum == 0) {
+			result["satellite_redundancy_mode"] = "two_satellite_safe";
+		} else if(satelliteTLogReplicationFactor == 4 && satelliteTLogUsableDcs == 2 && satelliteTLogWriteAntiQuorum == 2) {
+			result["satellite_redundancy_mode"] = "two_satellite_fast";
+		} else if(satelliteTLogReplicationFactor == 0) {
+			result["satellite_redundancy_mode"] = "none";
+		} else {
+			result["satellite_redundancy_mode"] = "custom";
+		}
+
+		if( remoteTLogReplicationFactor == 1 ) {
+			result["remote_redundancy_mode"] = "remote_single";
+		} else if( remoteTLogReplicationFactor == 2 ) {
+			result["remote_redundancy_mode"] = "remote_double";
+		} else if( remoteTLogReplicationFactor == 3 ) {
+			result["remote_redundancy_mode"] = "remote_triple";
+		} else if(remoteTLogReplicationFactor == 0) {
+			result["remote_redundancy_mode"] = "none";
+		} else {
+			result["remote_redundancy_mode"] = "custom";
+		}
+
 		if( desiredTLogCount != -1 )
 			result["logs"] = format("%d", desiredTLogCount);
+
+		if( desiredTLogCount != -1 )
+			result["remote_logs"] = format("%d", remoteDesiredTLogCount);
+
+		if( desiredTLogCount != -1 )
+			result["satellite_logs"] = format("%d", satelliteDesiredTLogCount);
 
 		if( masterProxyCount != -1 )
 			result["proxies"] = format("%d", masterProxyCount);
@@ -151,6 +256,19 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);
 	else if (ck == LiteralStringRef("log_replication_policy")) parseReplicationPolicy(&tLogPolicy, value);
+	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
+	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
+	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
+	else if (ck == LiteralStringRef("satellite_log_policy")) parseReplicationPolicy(&satelliteTLogPolicy, value);
+	else if (ck == LiteralStringRef("satellite_logs")) parse(&satelliteDesiredTLogCount, value);
+	else if (ck == LiteralStringRef("satellite_log_replicas")) parse(&satelliteTLogReplicationFactor, value);
+	else if (ck == LiteralStringRef("satellite_anti_quorum")) parse(&satelliteTLogWriteAntiQuorum, value);
+	else if (ck == LiteralStringRef("satellite_usable_dcs")) parse(&satelliteTLogUsableDcs, value);
+	else if (ck == LiteralStringRef("primary_dc")) primaryDcId = value;
+	else if (ck == LiteralStringRef("remote_dc")) remoteDcId = value;
+	else if (ck == LiteralStringRef("primary_satellite_dcs")) parse(&primarySatelliteDcIds, value);
+	else if (ck == LiteralStringRef("remote_satellite_dcs")) parse(&remoteSatelliteDcIds, value);
+	else if (ck == LiteralStringRef("log_routers")) parse(&desiredLogRouterCount, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect
 }

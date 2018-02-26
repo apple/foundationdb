@@ -42,13 +42,33 @@ struct DatabaseConfiguration {
 
 	std::string toString() const;
 	std::map<std::string, std::string> toMap() const;
+	int expectedLogSets() {
+		int result = 1;
+		if( satelliteTLogReplicationFactor > 0) {
+			result++;
+		}
+		if( remoteTLogReplicationFactor > 0) {
+			result++;
+		}
+		return result;
+	}
 
 	// SOMEDAY: think about changing storageTeamSize to durableStorageQuorum
-	int32_t minMachinesRequired() const { return std::max(tLogReplicationFactor, storageTeamSize); }
-	int32_t maxMachineFailuresTolerated() const { return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, durableStorageQuorum - 1); }
+	int32_t minDatacentersRequired() const {
+		if(!primaryDcId.present()) return 1;
+		return 2 + primarySatelliteDcIds.size() + remoteSatelliteDcIds.size();
+	}
+	int32_t minMachinesRequiredPerDatacenter() const { return std::max( satelliteTLogReplicationFactor/std::max(1,satelliteTLogUsableDcs), std::max( remoteTLogReplicationFactor, std::max(tLogReplicationFactor, storageTeamSize) ) ); }
 
-	// Redundancy Levels
-	IRepPolicyRef storagePolicy;
+	//Killing an entire datacenter counts as killing one machine in modes that support it
+	int32_t maxMachineFailuresTolerated() const {
+		if(remoteTLogReplicationFactor > 0 && satelliteTLogReplicationFactor > 0) {
+			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, satelliteTLogReplicationFactor - 1 - satelliteTLogWriteAntiQuorum), durableStorageQuorum - 1);
+		} else if(satelliteTLogReplicationFactor > 0) {
+			return std::min(tLogReplicationFactor + satelliteTLogReplicationFactor - 2 - tLogWriteAntiQuorum - satelliteTLogWriteAntiQuorum, durableStorageQuorum - 1);
+		}
+		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, durableStorageQuorum - 1);
+	}
 
 	// MasterProxy Servers
 	int32_t masterProxyCount;
@@ -59,17 +79,35 @@ struct DatabaseConfiguration {
 	int32_t autoResolverCount;
 
 	// TLogs
+	IRepPolicyRef tLogPolicy;
 	int32_t desiredTLogCount;
 	int32_t autoDesiredTLogCount;
 	int32_t tLogWriteAntiQuorum;
 	int32_t tLogReplicationFactor;
 	KeyValueStoreType tLogDataStoreType;
-	IRepPolicyRef	tLogPolicy;
+	Optional<Standalone<StringRef>> primaryDcId;
 
-	// Storage servers
+	// Storage Servers
+	IRepPolicyRef storagePolicy;
 	int32_t durableStorageQuorum;
 	int32_t storageTeamSize;
 	KeyValueStoreType storageServerStoreType;
+
+	// Remote TLogs
+	int32_t remoteDesiredTLogCount;
+	int32_t remoteTLogReplicationFactor;
+	int32_t desiredLogRouterCount;
+	IRepPolicyRef remoteTLogPolicy;
+	Optional<Standalone<StringRef>> remoteDcId;
+
+	// Satellite TLogs
+	IRepPolicyRef satelliteTLogPolicy;
+	int32_t satelliteDesiredTLogCount;
+	int32_t satelliteTLogReplicationFactor;
+	int32_t satelliteTLogWriteAntiQuorum;
+	int32_t satelliteTLogUsableDcs;
+	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
+	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 
 	// Excluded servers (no state should be here)
 	bool isExcludedServer( NetworkAddress ) const;
@@ -78,6 +116,9 @@ struct DatabaseConfiguration {
 	int32_t getDesiredProxies() const { if(masterProxyCount == -1) return autoMasterProxyCount; return masterProxyCount; }
 	int32_t getDesiredResolvers() const { if(resolverCount == -1) return autoResolverCount; return resolverCount; }
 	int32_t getDesiredLogs() const { if(desiredTLogCount == -1) return autoDesiredTLogCount; return desiredTLogCount; }
+	int32_t getDesiredSatelliteLogs() const { if(satelliteDesiredTLogCount == -1) return autoDesiredTLogCount; return satelliteDesiredTLogCount; }
+	int32_t getDesiredRemoteLogs() const { if(remoteDesiredTLogCount == -1) return autoDesiredTLogCount; return remoteDesiredTLogCount; }
+	int32_t getDesiredLogRouters() const { if(desiredLogRouterCount == -1) return getDesiredRemoteLogs(); return desiredLogRouterCount; }
 
 	bool operator == ( DatabaseConfiguration const& rhs ) const {
 		const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();
@@ -92,9 +133,7 @@ struct DatabaseConfiguration {
 		if (ar.isDeserializing) {
 			for(auto c=rawConfiguration.begin(); c!=rawConfiguration.end(); ++c)
 				setInternal(c->key, c->value);
-			if(!storagePolicy || !tLogPolicy) {
-				setDefaultReplicationPolicy();
-			}
+			setDefaultReplicationPolicy();
 		}
 	}
 
@@ -103,9 +142,7 @@ struct DatabaseConfiguration {
 		this->rawConfiguration = rawConfig;
 		for(auto c=rawConfiguration.begin(); c!=rawConfiguration.end(); ++c)
 			setInternal(c->key, c->value);
-		if(!storagePolicy || !tLogPolicy) {
-			setDefaultReplicationPolicy();
-		}
+		setDefaultReplicationPolicy();
 	}
 
 private:
