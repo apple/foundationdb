@@ -69,7 +69,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 			out[p+key] = value;
 		}
 
-		if( key == "primary_dc" || key == "remote_dc" || key == "primary_satellite_dcs" || key == "remote_satellite_dcs" ) {
+		if( key == "primary_dc" || key == "remote_dcs" || key == "primary_satellite_dcs" || key == "remote_satellite_dcs" ) {
 			out[p+key] = value;
 		}
 

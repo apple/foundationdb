@@ -745,7 +745,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		db.primaryDcId = LiteralStringRef("0");
-		db.remoteDcId = LiteralStringRef("1");	
+		db.remoteDcIds.resize(1);
+		db.remoteDcIds[0] = LiteralStringRef("1");	
 	}
 
 	if(generateFearless) {
@@ -836,7 +837,7 @@ std::string SimulationConfig::toString() {
 
 	if(db.primaryDcId.present()) {
 		config << " primary_dc=" << db.primaryDcId.get().printable();
-		config << " remote_dc=" << db.remoteDcId.get().printable();
+		config << " remote_dcs=" << db.remoteDcIds[0].get().printable();
 	}
 
 	if(db.primarySatelliteDcIds.size()) {
@@ -868,7 +869,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.primaryDcId = simconfig.db.primaryDcId;
 	g_simulator.hasRemoteReplication = simconfig.db.remoteTLogReplicationFactor > 0;
 	g_simulator.remoteTLogPolicy = simconfig.db.remoteTLogPolicy;
-	g_simulator.remoteDcId = simconfig.db.remoteDcId;
+	if(simconfig.db.remoteDcIds.size()) g_simulator.remoteDcId = simconfig.db.remoteDcIds[0];
 	g_simulator.hasSatelliteReplication = simconfig.db.satelliteTLogReplicationFactor > 0;
 	g_simulator.satelliteTLogPolicy = simconfig.db.satelliteTLogPolicy;
 	g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.satelliteTLogWriteAntiQuorum;

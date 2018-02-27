@@ -174,7 +174,7 @@ Future<Void> dataDistribution(
 	Reference<ILogSystem> const& logSystem,
 	Version const& recoveryCommitVersion,
 	std::vector<Optional<Key>> const& primaryDcId,
-	std::vector<Optional<Key>> const& remoteDcId,
+	std::vector<Optional<Key>> const& remoteDcIds,
 	double* const& lastLimited);
 
 Future<Void> dataDistributionTracker(

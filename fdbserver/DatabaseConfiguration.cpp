@@ -34,7 +34,8 @@ void DatabaseConfiguration::resetInternal() {
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
-	primaryDcId = remoteDcId = Optional<Standalone<StringRef>>();
+	primaryDcId = Optional<Standalone<StringRef>>();
+	remoteDcIds.clear();
 	tLogPolicy = storagePolicy = remoteTLogPolicy = satelliteTLogPolicy = IRepPolicyRef();
 
 	remoteDesiredTLogCount = satelliteDesiredTLogCount = desiredLogRouterCount = -1;
@@ -99,8 +100,9 @@ bool DatabaseConfiguration::isValid() const {
 		getDesiredRemoteLogs() >= 1 &&
 		getDesiredLogRouters() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
-		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && primaryDcId.present() && remoteDcId.present() && durableStorageQuorum == storageTeamSize ) ) &&
-		primaryDcId.present() == remoteDcId.present() &&
+		remoteDcIds.size() < 2 &&
+		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && primaryDcId.present() && remoteDcIds.size() && durableStorageQuorum == storageTeamSize ) ) &&
+		primaryDcId.present() == remoteDcIds.size() &&
 		getDesiredSatelliteLogs() >= 1 &&
 		satelliteTLogReplicationFactor >= 0 &&
 		satelliteTLogWriteAntiQuorum >= 0 &&
@@ -146,8 +148,19 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 		if(primaryDcId.present()) {
 			result["primary_dc"] = printable(primaryDcId.get());
 		}
-		if(remoteDcId.present()) {
-			result["remote_dc"] = printable(remoteDcId.get());
+		if(remoteDcIds.size()) {
+			std::string remoteDcStr = "";
+			bool first = true;
+			for(auto& it : remoteDcIds) {
+				if(it.present()) {
+					if(!first) {
+						remoteDcStr += ",";
+						first = false;
+					}
+					remoteDcStr += printable(it.get());
+				}
+			}
+			result["remote_dcs"] = remoteDcStr;
 		}
 		if(primarySatelliteDcIds.size()) {
 			std::string primaryDcStr = "";
@@ -265,7 +278,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("satellite_anti_quorum")) parse(&satelliteTLogWriteAntiQuorum, value);
 	else if (ck == LiteralStringRef("satellite_usable_dcs")) parse(&satelliteTLogUsableDcs, value);
 	else if (ck == LiteralStringRef("primary_dc")) primaryDcId = value;
-	else if (ck == LiteralStringRef("remote_dc")) remoteDcId = value;
+	else if (ck == LiteralStringRef("remote_dcs")) parse(&remoteDcIds, value);
 	else if (ck == LiteralStringRef("primary_satellite_dcs")) parse(&primarySatelliteDcIds, value);
 	else if (ck == LiteralStringRef("remote_satellite_dcs")) parse(&remoteSatelliteDcIds, value);
 	else if (ck == LiteralStringRef("log_routers")) parse(&desiredLogRouterCount, value);

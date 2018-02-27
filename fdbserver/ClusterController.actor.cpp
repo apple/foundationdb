@@ -530,10 +530,10 @@ public:
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 		id_used[masterProcessId]++;
 		id_used[clusterControllerProcessId]++;
-		ASSERT(dcId == req.configuration.primaryDcId || dcId == req.configuration.remoteDcId);
+		ASSERT(req.configuration.remoteDcIds.size() == 1 && ( dcId == req.configuration.primaryDcId || dcId == req.configuration.remoteDcIds[0] ) );
 		std::set<Optional<Key>> primaryDC;
-		primaryDC.insert(dcId == req.configuration.primaryDcId ? req.configuration.primaryDcId : req.configuration.remoteDcId);
-		result.remoteDcId = dcId == req.configuration.primaryDcId ? req.configuration.remoteDcId : req.configuration.primaryDcId;
+		primaryDC.insert(dcId == req.configuration.primaryDcId ? req.configuration.primaryDcId : req.configuration.remoteDcIds[0]);
+		result.remoteDcId = dcId == req.configuration.primaryDcId ? req.configuration.remoteDcIds[0] : req.configuration.primaryDcId;
 
 		if(req.recruitSeedServers) {
 			auto primaryStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, dcId );
@@ -601,7 +601,7 @@ public:
 				setPrimaryDesired = true;
 				vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(req.configuration.primaryDcId);
-				dcPriority.push_back(req.configuration.remoteDcId);
+				dcPriority.push_back(req.configuration.remoteDcIds[0]);
 				desiredDcIds.set(dcPriority);
 				if(reply.isError()) {
 					throw reply.getError();
@@ -614,16 +614,16 @@ public:
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
-				auto reply = findWorkersForConfiguration(req, req.configuration.remoteDcId);
+				auto reply = findWorkersForConfiguration(req, req.configuration.remoteDcIds[0]);
 				if(!setPrimaryDesired) {
 					vector<Optional<Key>> dcPriority;
-					dcPriority.push_back(req.configuration.remoteDcId);
+					dcPriority.push_back(req.configuration.remoteDcIds[0]);
 					dcPriority.push_back(req.configuration.primaryDcId);
 					desiredDcIds.set(dcPriority);
 				}
 				if(reply.isError()) {
 					throw reply.getError();
-				} else if(req.configuration.remoteDcId == clusterControllerDcId) {
+				} else if(req.configuration.remoteDcIds[0] == clusterControllerDcId) {
 					return reply.get();
 				}
 				throw;
@@ -735,7 +735,7 @@ public:
 
 				vector<Optional<Key>> dcPriority;
 				dcPriority.push_back(db.config.primaryDcId);
-				dcPriority.push_back(db.config.remoteDcId);
+				dcPriority.push_back(db.config.remoteDcIds[0]);
 				desiredDcIds.set(dcPriority);
 			} catch( Error &e ) {
 				if(e.code() != error_code_no_more_servers) {
@@ -835,8 +835,8 @@ public:
 		std::set<Optional<Key>> satelliteDCs;
 		std::set<Optional<Key>> remoteDC;
 		if(db.config.primaryDcId.present()) {
-			primaryDC.insert(clusterControllerDcId == db.config.primaryDcId ? db.config.primaryDcId : db.config.remoteDcId);
-			remoteDC.insert(clusterControllerDcId == db.config.primaryDcId ? db.config.remoteDcId : db.config.primaryDcId);
+			primaryDC.insert(clusterControllerDcId == db.config.primaryDcId ? db.config.primaryDcId : db.config.remoteDcIds[0]);
+			remoteDC.insert(clusterControllerDcId == db.config.primaryDcId ? db.config.remoteDcIds[0] : db.config.primaryDcId);
 			if(db.config.satelliteTLogReplicationFactor > 0) {
 				if( clusterControllerDcId == db.config.primaryDcId ) {
 					satelliteDCs.insert( db.config.primarySatelliteDcIds.begin(), db.config.primarySatelliteDcIds.end() );

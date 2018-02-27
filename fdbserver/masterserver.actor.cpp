@@ -173,7 +173,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
 	std::vector<Optional<Key>> primaryDcId;
-	std::vector<Optional<Key>> remoteDcId;
+	std::vector<Optional<Key>> remoteDcIds;
 	bool hasConfiguration;
 
 	ServerCoordinators coordinators;
@@ -290,7 +290,7 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, RecruitFromConfigur
 
 ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfigurationReply recr, Reference<ILogSystem> oldLogSystem, vector<Standalone<CommitTransactionRef>>* initialConfChanges ) {
 	if(self->configuration.remoteTLogReplicationFactor > 0) {
-		state Optional<Key> primaryDcId = recr.remoteDcId == self->configuration.remoteDcId ? self->configuration.primaryDcId : self->configuration.remoteDcId;
+		state Optional<Key> primaryDcId = recr.remoteDcId == self->configuration.remoteDcIds[0] ? self->configuration.primaryDcId : self->configuration.remoteDcIds[0];
 		if( !self->dcId_locality.count(primaryDcId) ) {
 			TraceEvent(SevWarnAlways, "UnknownPrimaryDCID", self->dbgid).detail("found", self->dcId_locality.count(primaryDcId)).detail("primaryId", printable(primaryDcId));
 			int8_t loc = self->getNextLocality();
@@ -551,10 +551,10 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 			RecruitFromConfigurationRequest( self->configuration, self->lastEpochEnd==0 ) ) ) );
 
 	self->primaryDcId.clear();
-	self->remoteDcId.clear();
+	self->remoteDcIds.clear();
 	if(recruits.remoteDcId.present()) {
-		self->primaryDcId.push_back(recruits.remoteDcId == self->configuration.remoteDcId ? self->configuration.primaryDcId : self->configuration.remoteDcId);
-		self->remoteDcId.push_back(recruits.remoteDcId);
+		self->primaryDcId.push_back(recruits.remoteDcId == self->configuration.remoteDcIds[0] ? self->configuration.primaryDcId : self->configuration.remoteDcIds[0]);
+		self->remoteDcIds.push_back(recruits.remoteDcId);
 	}
 	
 	TraceEvent("MasterRecoveryState", self->dbgid)
@@ -1253,7 +1253,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	{
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
-		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcId, &lastLimited ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
+		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
 		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->dbName, self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
 	}
 

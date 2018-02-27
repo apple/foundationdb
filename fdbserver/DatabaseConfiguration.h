@@ -98,7 +98,7 @@ struct DatabaseConfiguration {
 	int32_t remoteTLogReplicationFactor;
 	int32_t desiredLogRouterCount;
 	IRepPolicyRef remoteTLogPolicy;
-	Optional<Standalone<StringRef>> remoteDcId;
+	std::vector<Optional<Standalone<StringRef>>> remoteDcIds;
 
 	// Satellite TLogs
 	IRepPolicyRef satelliteTLogPolicy;
