@@ -18,6 +18,18 @@
  * limitations under the License.
  */
 
+
+"use strict";
+
+var util = require('util');
+
+var buffer = require('./bufferConversion');
+var future = require('./future');
+var transactional = require('./retryDecorator');
+var tuple = require('./tuple');
+var Subspace = require('./subspace');
+var fdbUtil = require('./fdbUtil');
+
 /*************
  * Utilities *
  *************/

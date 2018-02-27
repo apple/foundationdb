@@ -1,3 +1,5 @@
+#encoding:BINARY
+
 #
 # directory_extension.rb
 #
@@ -18,7 +20,6 @@
 # limitations under the License.
 #
 
-#encoding:BINARY
 require 'fdb'
 
 module DirectoryExtension
