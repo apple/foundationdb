@@ -1654,6 +1654,7 @@ void populateAtomicOpMap() {
 	optionInfo["BIT_OR"] = FDBMutationType::FDB_MUTATION_TYPE_BIT_OR;
 	optionInfo["XOR"] = FDBMutationType::FDB_MUTATION_TYPE_XOR;
 	optionInfo["BIT_XOR"] = FDBMutationType::FDB_MUTATION_TYPE_BIT_XOR;
+	optionInfo["APPEND_IF_FITS"] = FDBMutationType::FDB_MUTATION_TYPE_APPEND_IF_FITS;
 	optionInfo["MAX"] = FDBMutationType::FDB_MUTATION_TYPE_MAX;
 	optionInfo["MIN"] = FDBMutationType::FDB_MUTATION_TYPE_MIN;
 	optionInfo["SET_VERSIONSTAMPED_KEY"] = FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY;
