@@ -735,9 +735,8 @@ public:
 		// These should not happen
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
-		std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
 
-		return updateErrorInfo(cx, e, msg);
+		return updateErrorInfo(cx, e, details);
 	}
 };
 #endif
