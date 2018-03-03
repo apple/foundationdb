@@ -126,6 +126,26 @@ struct LogSystemConfig {
 		return results;
 	}
 
+	std::vector<std::pair<UID, NetworkAddress>> allSharedLogs() const {
+		typedef std::pair<UID, NetworkAddress> IdAddrPair;
+		std::vector<IdAddrPair> results;
+		for (auto &tLog : tLogs) {
+			if (tLog.present())
+				results.push_back(IdAddrPair(tLog.interf().getSharedTLogID(), tLog.interf().address()));
+		}
+
+		for (auto &oldLog : oldTLogs) {
+			for (auto &tLog : oldLog.tLogs) {
+				if (tLog.present())
+					results.push_back(IdAddrPair(tLog.interf().getSharedTLogID(), tLog.interf().address()));
+			}
+		}
+		uniquify(results);
+		// This assert depends on the fact that uniquify will sort the elements based on <UID, NetworkAddr> order
+		ASSERT_WE_THINK(std::unique(results.begin(), results.end(), [](IdAddrPair &x, IdAddrPair &y) { return x.first == y.first; }) == results.end());
+		return results;
+	}
+
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
