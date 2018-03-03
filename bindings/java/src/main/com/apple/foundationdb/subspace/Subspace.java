@@ -200,6 +200,23 @@ public class Subspace {
 	}
 
 	/**
+	 * Deprecated. Use {@link #packVersionstampedKey(Tuple) packVersionstampedKey()} instead. Because
+	 * the serialization formats are different for versionstamped keys and values, this method was
+	 * deprecated to encourage developers to choose appropriately between
+	 * {@link #packVersionstampedKey(Tuple) packVersionstampedKey()} and
+	 * {@link #packVersionstampedValue(Tuple)} packVersionstampedValue()}.
+	 *
+	 * @param tuple the {@code Tuple} to be packed
+	 * @return the key encoding the specified tuple in this {@code Subspace}
+	 * @throws IllegalArgumentException if {@code tuple} does not contain exactly one incomplete {@link Versionstamp}
+	 * @deprecated Since 5.2.0, replaced with {@link #packVersionstampedKey(Tuple) packVersionstampedKey()}
+	 */
+	@Deprecated
+	public byte[] packWithVersionstamp(Tuple tuple) {
+		return packVersionstampedKey(tuple);
+	}
+
+	/**
 	 * Gets the key encoding the specified tuple in this {@code Subspace} for use with
 	 * {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
 	 * There must be exactly one incomplete {@link Versionstamp} included in the given {@link Tuple}. It will
@@ -213,8 +230,22 @@ public class Subspace {
 	 * @return the key encoding the specified tuple in this {@code Subspace}
 	 * @throws IllegalArgumentException if {@code tuple} does not contain exactly one incomplete {@link Versionstamp}
 	 */
-	public byte[] packWithVersionstamp(Tuple tuple) {
-		return tuple.packWithVersionstamp(rawPrefix);
+	public byte[] packVersionstampedKey(Tuple tuple) {
+		return tuple.packVersionstampedKey(rawPrefix);
+	}
+
+	/**
+	 * Gets the key encoding the specified tuple in this {@code Subspace} for use with
+	 * {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_VALUE MutationType.SET_VERSIONSTAMPED_VALUE}.
+	 * This works just like {@link #packVersionstampedKey(Tuple) packVersionstampedKey()} except that
+	 * the final serialization format is different.
+	 *
+	 * @param tuple the {@code Tuple} to be packed
+	 * @return the key encoding the specified tuple in this {@code Subspace}
+	 * @throws IllegalArgumentException if {@code tuple} does not contain exactly one incomplete {@link Versionstamp}
+	 */
+	public byte[] packVersionstampedValue(Tuple tuple) {
+		return tuple.packVersionstampedValue(rawPrefix);
 	}
 
 	/**

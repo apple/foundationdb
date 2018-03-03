@@ -303,16 +303,49 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
+	 * Deprecated. Use {@link #packVersionstampedKey() packVersionstampedKey()} instead. Because
+	 *  versionstamped keys and versionstamped values are serialized differently, this method was deprecated
+	 *  to encourage developers to choose appropriately between
+	 *  {@link #packVersionstampedKey() packVersionstampedKey()} and
+	 *  {@link #packVersionstampedValue() packVersionstampedValue}.
+	 *
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
+	 * @deprecated Since 5.2.0, replaced with {@link #packVersionstampedKey() packVersionstampedKey()}
+	 */
+	@Deprecated
+	public byte[] packWithVersionstamp() {
+		return packWithVersionstamp(null);
+	}
+
+	/**
+	 * Deprecated. Use {@link #packVersionstampedKey(byte[]) packVersionstampedKey()} instead. Because
+	 *  versionstamped keys and versionstamped values are serialized differently, this method was deprecated
+	 *  to encourage developers to choose appropriately between
+	 *  {@link #packVersionstampedKey(byte[]) packVersionstampedKey()} and
+	 *  {@link #packVersionstampedValue(byte[]) packVersionstampedValue}.
+	 *
+	 * @param prefix additional byte-array prefix to prepend to serialized bytes.
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
+	 * @deprecated Since 5.2.0, replaced with {@link #packVersionstampedValue(byte[]) packVersionstampedKey()}
+	 */
+	@Deprecated
+	public byte[] packWithVersionstamp(byte[] prefix) {
+		return packVersionstampedKey(prefix);
+	}
+
+	/**
 	 * Get an encoded representation of this {@code Tuple} for use with
 	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_KEY MutationType.SET_VERSIONSTAMPED_KEY}.
-	 *  This works the same as the {@link #packWithVersionstamp(byte[]) one-paramter version of this method},
+	 *  This works the same as the {@link #packVersionstampedKey(byte[]) one-paramter version of this method},
 	 *  but it does not add any prefix to the array.
 	 *
 	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
 	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
 	 */
-	public byte[] packWithVersionstamp() {
-		return packWithVersionstamp(null);
+	public byte[] packVersionstampedKey() {
+		return packVersionstampedKey(null);
 	}
 
 	/**
@@ -332,8 +365,42 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
 	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
 	 */
-	public byte[] packWithVersionstamp(byte[] prefix) {
-		return TupleUtil.packWithVersionstamp(elements, prefix);
+	public byte[] packVersionstampedKey(byte[] prefix) {
+		return TupleUtil.packWithVersionstamp(elements, prefix, false);
+	}
+
+	/**
+	 * Get an encoded representation of this {@code Tuple} for use with
+	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_VALUE_POS MutationType.SET_VERSIONSTAMPED_VALUE_POS}.
+	 *  This works the same as the {@link #packVersionstampedValue(byte[]) one-paramter version of this method},
+	 *  but it does not add any prefix to the array.
+	 *
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
+	 */
+	public byte[] packVersionstampedValue() {
+		return packVersionstampedValue(null);
+	}
+
+	/**
+	 * Get an encoded representation of this {@code Tuple} for use with
+	 *  {@link com.apple.foundationdb.MutationType#SET_VERSIONSTAMPED_VALUE_POS MutationType.SET_VERSIONSTAMPED_VALUE_POS}.
+	 *  There must be exactly one incomplete {@link Versionstamp} instance within this
+	 *  {@code Tuple} or this will throw an {@link IllegalArgumentException}.
+	 *  Each element is encoded to {@code byte}s and concatenated, the prefix
+	 *  is then prepended to the array, and then the index of the serialized incomplete
+	 *  {@link Versionstamp} is appended as a little-endian integer. This can then be passed
+	 *  as the value to
+	 *  {@link com.apple.foundationdb.Transaction#mutate(com.apple.foundationdb.MutationType, byte[], byte[]) Transaction.mutate()}
+	 *  with the {@code SET_VERSIONSTAMPED_VALUE_POS} {@link com.apple.foundationdb.MutationType}, and the transaction's
+	 *  version will then be filled in at commit time.
+	 *
+	 * @param prefix additional byte-array prefix to prepend to serialized bytes.
+	 * @return a serialized representation of this {@code Tuple} for use with versionstamp ops.
+	 * @throws IllegalArgumentException if there is not exactly one incomplete {@link Versionstamp} included in this {@code Tuple}
+	 */
+	public byte[] packVersionstampedValue(byte[] prefix) {
+		return TupleUtil.packWithVersionstamp(elements, prefix, true);
 	}
 
 	/**

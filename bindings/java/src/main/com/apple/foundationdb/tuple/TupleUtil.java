@@ -578,7 +578,7 @@ class TupleUtil {
 		}
 	}
 
-	static byte[] packWithVersionstamp(List<Object> items, byte[] prefix) {
+	static byte[] packWithVersionstamp(List<Object> items, byte[] prefix, boolean forValue) {
 		List<byte[]> encoded = new ArrayList<byte[]>(2 * items.size() + (prefix == null ? 1 : 2));
 		EncodeResult result = encodeAll(items, prefix, encoded);
 		if(result.versionPos < 0) {
@@ -587,7 +587,11 @@ class TupleUtil {
 			if(result.versionPos > 0xffff) {
 				throw new IllegalArgumentException("Tuple has incomplete version at position " + result.versionPos + " which is greater than the maximum " + 0xffff);
 			}
-			encoded.add(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort((short)result.versionPos).array());
+			if (forValue) {
+				encoded.add(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(result.versionPos).array());
+			} else {
+				encoded.add(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort((short)result.versionPos).array());
+			}
 			return ByteArrayUtil.join(null, encoded);
 		}
 	}

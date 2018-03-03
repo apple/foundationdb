@@ -374,7 +374,7 @@ def _encode(value, nested=False):
 #  * if there is exactly one incomplete versionstamp member, it returns the tuple with the
 #    two extra version bytes and the position of the version start
 #  * if there is more than one incomplete versionstamp member, it throws an error
-def _pack_maybe_with_versionstamp(t, prefix=None):
+def _pack_maybe_with_versionstamp(t, prefix=None, for_value=False):
     if not isinstance(t, tuple):
         raise Exception("fdbtuple pack() expects a tuple, got a " + str(type(t)))
 
@@ -384,7 +384,10 @@ def _pack_maybe_with_versionstamp(t, prefix=None):
     if version_pos >= 0:
         version_pos += len(prefix) if prefix is not None else 0
         bytes_list.extend(child_bytes)
-        bytes_list.append(struct.pack('<H', version_pos))
+        if for_value:
+            bytes_list.append(struct.pack('<L', version_pos))
+        else:
+            bytes_list.append(struct.pack('<H', version_pos))
     else:
         bytes_list.extend(child_bytes)
 
@@ -399,12 +402,22 @@ def pack(t, prefix=None):
     return res
 
 
-# packs the specified tuple into a key for versionstamp operations
-def pack_with_versionstamp(t, prefix=None):
-    res, version_pos = _pack_maybe_with_versionstamp(t, prefix)
+# packs the specified tuple into a key or value for versionstamp operations
+def pack_with_versionstamp(t, prefix=None, for_value=False):
+    res, version_pos = _pack_maybe_with_versionstamp(t, prefix=prefix, for_value=for_value)
     if version_pos < 0:
         raise ValueError("No incomplete versionstamp included in tuple pack with versionstamp")
     return res
+
+
+# packs the specified tuple into a key for versionstamp operations
+def pack_versionstamped_key(t, prefix=None):
+    return pack_with_versionstamp(t, prefix, for_value=False)
+
+
+# packs the specified tuple into a value for versionstamp operations
+def pack_versionstamped_value(t, prefix=None):
+    return pack_with_versionstamp(t, prefix, for_value=True)
 
 
 # unpacks the specified key into a tuple
