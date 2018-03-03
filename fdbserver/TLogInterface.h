@@ -32,6 +32,7 @@ struct TLogInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	LocalityData locality;
 	UID uniqueID;
+	UID sharedTLogID;
 	RequestStream< struct TLogPeekRequest > peekMessages;
 	RequestStream< struct TLogPopRequest > popMessages;
 
@@ -42,8 +43,11 @@ struct TLogInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
 	
-	TLogInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	TLogInterface() { }
+	TLogInterface(UID _sharedTLogID, LocalityData _locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(_sharedTLogID), locality(_locality) {}
+	TLogInterface(UID _uniqueID, UID _sharedTLogID, LocalityData _locality) : uniqueID(_uniqueID), sharedTLogID(_sharedTLogID), locality(_locality) {}
 	UID id() const { return uniqueID; }
+	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().address; }
@@ -57,7 +61,7 @@ struct TLogInterface {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & uniqueID & locality & peekMessages & popMessages 
+		ar & uniqueID & sharedTLogID & locality & peekMessages & popMessages
 		   & commit & lock & getQueuingMetrics & confirmRunning & waitFailure & recoveryFinished;
 	}
 };
