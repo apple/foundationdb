@@ -1119,8 +1119,7 @@ ACTOR Future<Void> rejoinMasters( TLogData* self, TLogInterface tli, DBRecoveryC
 		if( registerWithMaster.isReady() ) {
 			if ( self->dbInfo->get().master.id() != lastMasterID) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our TLogInterface
-				TLogRejoinRequest req;
-				req.myInterface = tli;
+				TLogRejoinRequest req(tli);
 				TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
 				choose {
 					when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.tlogRejoin.getReply( req ) ) ) ) {
@@ -1341,9 +1340,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state std::vector<Future<ErrorOr<Void>>> removed;
 
 	if(fFormat.get().get() == LiteralStringRef("FoundationDB/LogServer/2/2")) {
-		TLogInterface recruited;
-		recruited.uniqueID = self->dbgid;
-		recruited.locality = locality;
+		TLogInterface recruited(self->dbgid, self->dbgid, locality);
 		recruited.initEndpoints();
 
 		DUMPTOKEN( recruited.peekMessages );
@@ -1374,9 +1371,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		UID id2 = BinaryReader::fromStringRef<UID>( fRecoverCounts.get()[idx].key.removePrefix(persistRecoveryCountKeys.begin), Unversioned() );
 		ASSERT(id1 == id2);
 
-		TLogInterface recruited;
-		recruited.uniqueID = id1;
-		recruited.locality = locality;
+		TLogInterface recruited(id1, id1, locality);
 		recruited.initEndpoints();
 
 		DUMPTOKEN( recruited.peekMessages );
@@ -1679,7 +1674,7 @@ ACTOR Future<Void> recoverFromLogSystem( TLogData* self, Reference<LogData> logD
 }
 
 ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, LocalityData locality ) {
-	state TLogInterface recruited;
+	state TLogInterface recruited(self->dbgid, locality);
 	recruited.locality = locality;
 	recruited.initEndpoints();
 
@@ -1758,7 +1753,8 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 	state Future<Void> error = actorCollection( self.sharedActors.getFuture() );
 
 	TraceEvent("SharedTlog", tlogId);
-
+	// FIXME: Pass the worker id instead of stubbing it
+	startRole(tlogId, UID(), "SharedTLog");
 	try {
 		if(restoreFromDisk) {
 			Void _ = wait( restorePersistentState( &self, locality, oldLog, recovered, tlogRequests ) );
@@ -1787,6 +1783,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		}
 	} catch (Error& e) {
 		TraceEvent("TLogError", tlogId).error(e, true);
+		endRole(tlogId, "SharedTLog", "Error", true);
 		if(recovered.canBeSet()) recovered.send(Void());
 
 		while(!tlogRequests.isEmpty()) {
