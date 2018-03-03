@@ -44,8 +44,8 @@ struct TLogInterface {
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
 	
 	TLogInterface() { }
-	TLogInterface(UID _sharedTLogID, LocalityData _locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(_sharedTLogID), locality(_locality) {}
-	TLogInterface(UID _uniqueID, UID _sharedTLogID, LocalityData _locality) : uniqueID(_uniqueID), sharedTLogID(_sharedTLogID), locality(_locality) {}
+	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
 	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }

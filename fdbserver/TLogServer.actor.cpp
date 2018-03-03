@@ -1371,7 +1371,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		UID id2 = BinaryReader::fromStringRef<UID>( fRecoverCounts.get()[idx].key.removePrefix(persistRecoveryCountKeys.begin), Unversioned() );
 		ASSERT(id1 == id2);
 
-		TLogInterface recruited(id1, id1, locality);
+		TLogInterface recruited(id1, self->dbgid, locality);
 		recruited.initEndpoints();
 
 		DUMPTOKEN( recruited.peekMessages );
