@@ -3578,10 +3578,16 @@ public:
 
 					if(snapshotProgress) {
 						state int64_t snapshotInterval;
-						state Version snapshotBeginVersion; state Version snapshotTargetEndVersion;
-						state Optional<Version> latestSnapshotEndVersion; state Optional<Version> latestLogEndVersion;
-						state Optional<int64_t> logBytesWritten; state Optional<int64_t> rangeBytesWritten; state Optional<int64_t> latestSnapshotEndVersionTimestamp;
-						state Optional<int64_t> latestLogEndVersionTimestamp; state Optional<int64_t> snapshotBeginVersionTimestamp; state Optional<int64_t> snapshotTargetEndVersionTimestamp;
+						state Version snapshotBeginVersion;
+						state Version snapshotTargetEndVersion;
+						state Optional<Version> latestSnapshotEndVersion;
+						state Optional<Version> latestLogEndVersion;
+						state Optional<int64_t> logBytesWritten;
+						state Optional<int64_t> rangeBytesWritten;
+						state Optional<int64_t> latestSnapshotEndVersionTimestamp;
+						state Optional<int64_t> latestLogEndVersionTimestamp;
+						state Optional<int64_t> snapshotBeginVersionTimestamp;
+						state Optional<int64_t> snapshotTargetEndVersionTimestamp;
 						state bool stopWhenDone;
 
 						Void _ = wait( store(config.snapshotBeginVersion().getOrThrow(tr), snapshotBeginVersion)
