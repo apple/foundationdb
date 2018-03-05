@@ -26,7 +26,7 @@ PACKAGE_CONTENTS := $(addprefix bin/, $(PACKAGE_BINARIES)) $(addprefix bin/, $(a
 
 packages: TGZ FDBSERVERAPI
 
-TGZ: $(PACKAGE_CONTENTS) versions.target lib/libfdb_java.so
+TGZ: $(PACKAGE_CONTENTS) versions.target lib/libfdb_java.$(DLEXT)
 	@echo "Archiving      tgz"
 	@mkdir -p packages
 	@rm -f packages/FoundationDB-$(PLATFORM)-*.tar.gz
