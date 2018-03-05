@@ -169,15 +169,19 @@ struct LogSystemConfig {
 	std::vector<std::pair<UID, NetworkAddress>> allSharedLogs() const {
 		typedef std::pair<UID, NetworkAddress> IdAddrPair;
 		std::vector<IdAddrPair> results;
-		for (auto &tLog : tLogs) {
-			if (tLog.present())
-				results.push_back(IdAddrPair(tLog.interf().getSharedTLogID(), tLog.interf().address()));
+		for (auto &tLogSet : tLogs) {
+			for (auto &tLog : tLogSet.tLogs) {
+				if (tLog.present())
+					results.push_back(IdAddrPair(tLog.interf().getSharedTLogID(), tLog.interf().address()));
+			}
 		}
 
 		for (auto &oldLog : oldTLogs) {
-			for (auto &tLog : oldLog.tLogs) {
-				if (tLog.present())
-					results.push_back(IdAddrPair(tLog.interf().getSharedTLogID(), tLog.interf().address()));
+			for (auto &tLogSet : oldLog.tLogs) {
+				for (auto &tLog : tLogSet.tLogs) {
+					if (tLog.present())
+						results.push_back(IdAddrPair(tLog.interf().getSharedTLogID(), tLog.interf().address()));
+				}
 			}
 		}
 		uniquify(results);
