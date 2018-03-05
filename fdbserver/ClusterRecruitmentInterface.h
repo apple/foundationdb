@@ -35,6 +35,7 @@
 struct ClusterControllerFullInterface {
 	ClusterInterface clientInterface;
 	RequestStream< struct RecruitFromConfigurationRequest > recruitFromConfiguration;
+	RequestStream< struct RecruitRemoteFromConfigurationRequest > recruitRemoteFromConfiguration;
 	RequestStream< struct RecruitStorageRequest > recruitStorage;
 	RequestStream< struct RegisterWorkerRequest > registerWorker;
 	RequestStream< struct GetWorkersRequest > getWorkers;
@@ -48,6 +49,7 @@ struct ClusterControllerFullInterface {
 	void initEndpoints() {
 		clientInterface.initEndpoints();
 		recruitFromConfiguration.getEndpoint( TaskClusterController );
+		recruitRemoteFromConfiguration.getEndpoint( TaskClusterController );
 		recruitStorage.getEndpoint( TaskClusterController );
 		registerWorker.getEndpoint( TaskClusterController );
 		getWorkers.getEndpoint( TaskClusterController );
@@ -58,7 +60,7 @@ struct ClusterControllerFullInterface {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & clientInterface & recruitFromConfiguration & recruitStorage & registerWorker & getWorkers & registerMaster & getServerDBInfo;
+		ar & clientInterface & recruitFromConfiguration & recruitRemoteFromConfiguration & recruitStorage & registerWorker & getWorkers & registerMaster & getServerDBInfo;
 	}
 };
 
@@ -79,13 +81,40 @@ struct RecruitFromConfigurationRequest {
 
 struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> tLogs;
+	vector<WorkerInterface> satelliteTLogs;
 	vector<WorkerInterface> proxies;
 	vector<WorkerInterface> resolvers;
 	vector<WorkerInterface> storageServers;
+	Optional<Key> remoteDcId;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & proxies & resolvers & storageServers;
+		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & remoteDcId;
+	}
+};
+
+struct RecruitRemoteFromConfigurationRequest {
+	DatabaseConfiguration configuration;
+	Optional<Key> dcId;
+	ReplyPromise< struct RecruitRemoteFromConfigurationReply > reply;
+
+	RecruitRemoteFromConfigurationRequest() {}
+	explicit RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId)
+		: configuration(configuration), dcId(dcId) {}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		ar & configuration & dcId & reply;
+	}
+};
+
+struct RecruitRemoteFromConfigurationReply {
+	vector<WorkerInterface> remoteTLogs;
+	vector<WorkerInterface> logRouters;
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		ar & remoteTLogs & logRouters;
 	}
 };
 
@@ -102,44 +131,44 @@ struct RecruitStorageReply {
 struct RecruitStorageRequest {
 	std::vector<Optional<Standalone<StringRef>>> excludeMachines;	//< Don't recruit any of these machines
 	std::vector<AddressExclusion> excludeAddresses;		//< Don't recruit any of these addresses
-	std::vector<Optional<Standalone<StringRef>>> excludeDCs;		//< Don't recruit from any of these data centers
+	std::vector<Optional<Standalone<StringRef>>> includeDCs;
 	bool criticalRecruitment;							//< True if machine classes are to be ignored
 	ReplyPromise< RecruitStorageReply > reply;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & excludeMachines & excludeAddresses & excludeDCs & criticalRecruitment & reply;
+		ar & excludeMachines & excludeAddresses & includeDCs & criticalRecruitment & reply;
 	}
 };
 
 struct RegisterWorkerReply {
 	ProcessClass processClass;
-	bool isExcluded;
+	ClusterControllerPriorityInfo priorityInfo;
 
-	RegisterWorkerReply() {}
-	RegisterWorkerReply(ProcessClass processClass, bool isExcluded) : processClass(processClass), isExcluded(isExcluded) {}
+	RegisterWorkerReply() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	RegisterWorkerReply(ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo) : processClass(processClass), priorityInfo(priorityInfo) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & processClass & isExcluded;
+		ar & processClass & priorityInfo;
 	}
 };
 
 struct RegisterWorkerRequest {
 	WorkerInterface wi;
-	ProcessClass processClass;
 	ProcessClass initialClass;
-	bool isExcluded;
+	ProcessClass processClass;
+	ClusterControllerPriorityInfo priorityInfo;
 	Generation generation;
 	ReplyPromise<RegisterWorkerReply> reply;
 
-	RegisterWorkerRequest() {}
-	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, bool isExcluded, Generation generation) : 
-	wi(wi), initialClass(initialClass), processClass(processClass), isExcluded(isExcluded), generation(generation) {}
+	RegisterWorkerRequest() : priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown) {}
+	RegisterWorkerRequest(WorkerInterface wi, ProcessClass initialClass, ProcessClass processClass, ClusterControllerPriorityInfo priorityInfo, Generation generation) : 
+	wi(wi), initialClass(initialClass), processClass(processClass), priorityInfo(priorityInfo), generation(generation) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & wi & initialClass & processClass & isExcluded & generation & reply;
+		ar & wi & initialClass & processClass & priorityInfo & generation & reply;
 	}
 };
 

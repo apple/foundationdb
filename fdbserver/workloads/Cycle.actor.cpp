@@ -164,7 +164,6 @@ struct CycleWorkload : TestWorkload {
 		return true;
 	}
 	ACTOR Future<bool> cycleCheck( Database cx, CycleWorkload* self, bool ok ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "cycleCheck");
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure").detail("Reason", "Rate below desired rate").detail("Details", format("%.2f", self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
 				.detail("TransactionsAchieved", self->transactions.getMetric().value())

@@ -165,6 +165,9 @@ public:
 	double ALTERNATIVES_FAILURE_MAX_DELAY;
 	double ALTERNATIVES_FAILURE_MIN_DELAY;
 	double ALTERNATIVES_FAILURE_DELAY_RATIO;
+	double FUTURE_VERSION_INITIAL_BACKOFF;
+	double FUTURE_VERSION_MAX_BACKOFF;
+	double FUTURE_VERSION_BACKOFF_GROWTH;
 
 	FlowKnobs(bool randomize = false, bool isSimulated = false);
 };

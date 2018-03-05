@@ -26,9 +26,9 @@
 
 struct ProcessClass {
 	// This enum is stored in restartInfo.ini for upgrade tests, so be very careful about changing the existing items!
-	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, InvalidClass = -1 };
-	enum Fitness { BestFit, GoodFit, BestOtherFit, UnsetFit, WorstFit, ExcludeFit, NeverAssign };
-	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, ClusterController };
+	enum ClassType { UnsetClass, StorageClass, TransactionClass, ResolutionClass, TesterClass, ProxyClass, MasterClass, StatelessClass, LogClass, ClusterControllerClass, LogRouterClass, InvalidClass = -1 };
+	enum Fitness { BestFit, GoodFit, BestOtherFit, UnsetFit, WorstFit, ExcludeFit, NeverAssign }; //cannot be larger than 7 because of leader election mask
+	enum ClusterRole { Storage, TLog, Proxy, Master, Resolver, LogRouter, ClusterController };
 	enum ClassSource { CommandLineSource, AutoSource, DBSource, InvalidSource = -1 };
 	int16_t _class;
 	int16_t _source;
@@ -46,6 +46,7 @@ public:
 		else if (s=="unset") _class = UnsetClass;
 		else if (s=="stateless") _class = StatelessClass;
 		else if (s=="log") _class = LogClass;
+		else if (s=="router") _class = LogRouterClass;
 		else if (s=="cluster_controller") _class = ClusterControllerClass;
 		else _class = InvalidClass;
 	}
@@ -60,6 +61,7 @@ public:
 		else if (classStr=="unset") _class = UnsetClass;
 		else if (classStr=="stateless") _class = StatelessClass;
 		else if (classStr=="log") _class = LogClass;
+		else if (classStr=="router") _class = LogRouterClass;
 		else if (classStr=="cluster_controller") _class = ClusterControllerClass;
 		else _class = InvalidClass;
 
@@ -89,6 +91,7 @@ public:
 			case TesterClass: return "test";
 			case StatelessClass: return "stateless";
 			case LogClass: return "log";
+			case LogRouterClass: return "router";
 			case ClusterControllerClass: return "cluster_controller";
 			default: return "invalid";
 		}

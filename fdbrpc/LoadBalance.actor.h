@@ -51,16 +51,16 @@ struct ModelHolder : NonCopyable, public ReferenceCounted<ModelHolder> {
 		}
 	}
 
-	void release(bool clean, double penalty, bool measureLatency = true) {
+	void release(bool clean, bool futureVersion, double penalty, bool measureLatency = true) {
 		if(model && !released) {
 			released = true;
 			double latency = (clean || measureLatency) ? now() - startTime : 0.0;
-			model->endRequest(token, latency, penalty, delta, clean);
+			model->endRequest(token, latency, penalty, delta, clean, futureVersion);
 		}
 	}
 
 	~ModelHolder() { 
-		release(false, -1.0, false);
+		release(false, false, -1.0, false);
 	}
 };
 
@@ -81,18 +81,19 @@ Optional<LoadBalancedReply> getLoadBalancedReply(void*);
 // Throws an error if the request returned an error that should bubble out
 // Returns false if we got an error that should result in reissuing the request
 template <class T>
-bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce) {
+bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, bool atMostOnce, bool triedAllOptions) {
 	int errCode = result.isError() ? result.getError().code() : error_code_success;
 	bool maybeDelivered = errCode == error_code_broken_promise || errCode == error_code_request_maybe_delivered;
 	bool receivedResponse = result.present() || (!maybeDelivered && errCode != error_code_process_behind);
+	bool futureVersion = errCode == error_code_future_version || errCode == error_code_process_behind;
 
 	Optional<LoadBalancedReply> loadBalancedReply;
 	if(!result.isError()) {
 		loadBalancedReply = getLoadBalancedReply(&result.get());
 	}
 
-	holder->release(receivedResponse, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
-				
+	holder->release(receivedResponse, futureVersion, loadBalancedReply.present() ? loadBalancedReply.get().penalty : -1.0);
+	
 	if(result.present()) {
 		return true;
 	}
@@ -105,11 +106,15 @@ bool checkAndProcessResult(ErrorOr<T> result, Reference<ModelHolder> holder, boo
 		throw request_maybe_delivered();
 	}
 
+	if(triedAllOptions && errCode == error_code_process_behind) {
+		throw future_version();
+	}
+
 	return false;
 }
 
 ACTOR template <class Request>
-Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream, Request request, double backoff, Future<Void> requestUnneeded, QueueModel *model, bool isFirstRequest, bool atMostOnce) {
+Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* stream, Request request, double backoff, Future<Void> requestUnneeded, QueueModel *model, bool isFirstRequest, bool atMostOnce, bool triedAllOptions) {
 	if(backoff > 0.0) {
 		Void _ = wait(delay(backoff) || requestUnneeded);
 	}
@@ -121,7 +126,7 @@ Future<Optional<REPLY_TYPE(Request)>> makeRequest(RequestStream<Request> const* 
 	state Reference<ModelHolder> holder(new ModelHolder(model, stream->getEndpoint().token.first()));
 
 	ErrorOr<REPLY_TYPE(Request)> result = wait(stream->tryGetReply(request));
-	if(checkAndProcessResult(result, holder, atMostOnce)) {
+	if(checkAndProcessResult(result, holder, atMostOnce, triedAllOptions)) {
 		return result.get();	
 	}
 	else {
@@ -181,26 +186,32 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		double nextMetric = 1e9;
 		double bestTime = 1e9;
 		double nextTime = 1e9;
-		for(int i=0; i<alternatives->countBest(); i++) {
+		for(int i=0; i<alternatives->size(); i++) {
+			if(bestMetric < 1e8 && i == alternatives->countBest()) {
+				break;
+			}
+			
 			RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
 			if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
 				auto& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
-				double thisMetric = qd.smoothOutstanding.smoothTotal();
-				double thisTime = qd.latency;
+				if(now() > qd.failedUntil) {
+					double thisMetric = qd.smoothOutstanding.smoothTotal();
+					double thisTime = qd.latency;
 				
-				if(thisMetric < bestMetric) {
-					if(i != bestAlt) {
-						nextAlt = bestAlt;
-						nextMetric = bestMetric;
-						nextTime = bestTime;
+					if(thisMetric < bestMetric) {
+						if(i != bestAlt) {
+							nextAlt = bestAlt;
+							nextMetric = bestMetric;
+							nextTime = bestTime;
+						}
+						bestAlt = i;
+						bestMetric = thisMetric;
+						bestTime = thisTime;
+					} else if( thisMetric < nextMetric ) {
+						nextAlt = i;
+						nextMetric = thisMetric;
+						nextTime = thisTime;
 					}
-					bestAlt = i;
-					bestMetric = thisMetric;
-					bestTime = thisTime;
-				} else if( thisMetric < nextMetric ) {
-					nextAlt = i;
-					nextMetric = thisMetric;
-					nextTime = thisTime;
 				}
 			}
 		}
@@ -209,13 +220,15 @@ Future< REPLY_TYPE(Request) > loadBalance(
 				RequestStream<Request> const* thisStream = &alternatives->get( i, channel );
 				if (!IFailureMonitor::failureMonitor().getState( thisStream->getEndpoint() ).failed) {
 					auto& qd = model->getMeasurement(thisStream->getEndpoint().token.first());
-					double thisMetric = qd.smoothOutstanding.smoothTotal();
-					double thisTime = qd.latency;
+					if(now() > qd.failedUntil) {
+						double thisMetric = qd.smoothOutstanding.smoothTotal();
+						double thisTime = qd.latency;
 				
-					if( thisMetric < nextMetric ) {
-						nextAlt = i;
-						nextMetric = thisMetric;
-						nextTime = thisTime;
+						if( thisMetric < nextMetric ) {
+							nextAlt = i;
+							nextMetric = thisMetric;
+							nextTime = thisTime;
+						}
 					}
 				}
 			}
@@ -238,6 +251,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 
 	state int numAttempts = 0;
 	state double backoff = 0;
+	state bool triedAllOptions = false;
 	loop {
 		// Find an alternative, if any, that is not failed, starting with nextAlt
 		state RequestStream<Request> const* stream = NULL;
@@ -252,6 +266,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			if (!IFailureMonitor::failureMonitor().getState( stream->getEndpoint() ).failed && (!firstRequestEndpoint.present() || stream->getEndpoint().token.first() != firstRequestEndpoint.get()))
 				break;
 			nextAlt = (nextAlt+1) % alternatives->size();
+			if(nextAlt == startAlt) triedAllOptions = true;
 			stream=NULL;
 		}
 
@@ -304,7 +319,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			firstRequestEndpoint = Optional<uint64_t>();
 		} else if( firstRequest.isValid() ) {
 			//Issue a second request, the first one is taking a long time.
-			secondRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, false, atMostOnce);
+			secondRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, false, atMostOnce, triedAllOptions);
 			state bool firstFinished = false;
 
 			loop {
@@ -347,7 +362,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 			}
 		} else {
 			//Issue a request, if it takes too long to get a reply, go around the loop
-			firstRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, true, atMostOnce);
+			firstRequest = makeRequest(stream, request, backoff, requestFinished.getFuture(), model, true, atMostOnce, triedAllOptions);
 			firstRequestEndpoint = stream->getEndpoint().token.first();
 
 			loop {
@@ -387,6 +402,7 @@ Future< REPLY_TYPE(Request) > loadBalance(
 		}
 
 		nextAlt = (nextAlt+1) % alternatives->size();
+		if(nextAlt == startAlt) triedAllOptions = true;
 		resetReply(request, taskID);
 		secondDelay = Never();
 	}

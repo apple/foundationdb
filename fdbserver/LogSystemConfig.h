@@ -55,74 +55,114 @@ protected:
 	Optional<Interface> iface;
 };
 
-struct OldTLogConf {
-	vector<OptionalInterface<TLogInterface>> tLogs;
+enum { HasBestPolicyNone = 0, HasBestPolicyId = 1 };
+
+struct TLogSet {
+	std::vector<OptionalInterface<TLogInterface>> tLogs;
+	std::vector<OptionalInterface<TLogInterface>> logRouters;
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
-	IRepPolicyRef	tLogPolicy;
-	Version epochEnd;
+	IRepPolicyRef tLogPolicy;
+	int8_t locality;
+	bool isLocal;
+	int32_t hasBestPolicy;
 
-	OldTLogConf() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), epochEnd(0) {}
+	TLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(-99) {}
 
 	std::string toString() const {
-		return format("anti: %d replication: %d tLogs: %s  tlocalities: %s",
-		tLogWriteAntiQuorum, tLogReplicationFactor, epochEnd, describe(tLogs).c_str(), describe(tLogLocalities).c_str()); }
+		return format("anti: %d replication: %d local: %d best: %d routers: %d tLogs: %s locality: %d", tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, hasBestPolicy, logRouters.size(), describe(tLogs).c_str(), locality);
+	}
 
-	bool operator == ( const OldTLogConf& rhs ) const {
-		bool bIsEqual = true;
-		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum) {
-			bIsEqual = false;
+	bool operator == ( const TLogSet& rhs ) const {
+		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || hasBestPolicy != rhs.hasBestPolicy || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality) {
+			return false;
 		}
-		else if (tLogReplicationFactor != rhs.tLogReplicationFactor) {
-			bIsEqual = false;
+		if ((tLogPolicy && !rhs.tLogPolicy) || (!tLogPolicy && rhs.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != rhs.tLogPolicy->info()))) {
+			return false;
 		}
-		else if (tLogs.size() != rhs.tLogs.size()) {
-			bIsEqual = false;
-		}
-		if (bIsEqual) {
-			for(int j = 0; j < tLogs.size(); j++ ) {
-				if (tLogs[j].id() != rhs.tLogs[j].id()) {
-					bIsEqual = false;
-					break;
-				}
-				else if (tLogs[j].present() != rhs.tLogs[j].present()) {
-					bIsEqual = false;
-					break;
-				}
-				else if (tLogs[j].present() && tLogs[j].interf().commit.getEndpoint().token != rhs.tLogs[j].interf().commit.getEndpoint().token ) {
-					bIsEqual = false;
-					break;
-				}
+		for(int j = 0; j < tLogs.size(); j++ ) {
+			if (tLogs[j].id() != rhs.tLogs[j].id() || tLogs[j].present() != rhs.tLogs[j].present() || ( tLogs[j].present() && tLogs[j].interf().commit.getEndpoint().token != rhs.tLogs[j].interf().commit.getEndpoint().token ) ) {
+				return false;
 			}
 		}
-		return bIsEqual;
+		return true;
+	}
+
+	bool isEqualIds(TLogSet const& r) const {
+		if (tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor || isLocal != r.isLocal || hasBestPolicy != r.hasBestPolicy || tLogs.size() != r.tLogs.size() || locality != r.locality) {
+			return false;
+		}
+		if ((tLogPolicy && !r.tLogPolicy) || (!tLogPolicy && r.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != r.tLogPolicy->info()))) {
+			return false;
+		}
+		for(int i = 0; i < tLogs.size(); i++) {
+			if( tLogs[i].id() != r.tLogs[i].id() ) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & epochEnd;
+		ar & tLogs & logRouters & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & hasBestPolicy & locality;
+	}
+};
+
+struct OldTLogConf {
+	std::vector<TLogSet> tLogs;
+	Version epochEnd;
+
+	OldTLogConf() : epochEnd(0) {}
+
+	std::string toString() const {
+		return format("end: %d %s", epochEnd, describe(tLogs).c_str()); 
+	}
+
+	bool operator == ( const OldTLogConf& rhs ) const {
+		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd;
+	}
+
+	bool isEqualIds(OldTLogConf const& r) const {
+		if(tLogs.size() != r.tLogs.size()) {
+			return false;
+		}
+		for(int i = 0; i < tLogs.size(); i++) {
+			if(!tLogs[i].isEqualIds(r.tLogs[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	template <class Ar>
+	void serialize( Ar& ar ) {
+		ar & tLogs & epochEnd;
 	}
 };
 
 struct LogSystemConfig {
 	int logSystemType;
-	std::vector<OptionalInterface<TLogInterface>> tLogs;
-	std::vector< LocalityData > tLogLocalities;
+	std::vector<TLogSet> tLogs;
 	std::vector<OldTLogConf> oldTLogs;
-	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
-	IRepPolicyRef	tLogPolicy;
-	//LogEpoch epoch;
+	int expectedLogSets;
+	int minRouters;
 
-	LogSystemConfig() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), logSystemType(0) {}
+	LogSystemConfig() : logSystemType(0), minRouters(0), expectedLogSets(0) {}
 
-	std::string toString() const { return format("type: %d anti: %d replication: %d tLogs: %s oldGenerations: %d tlocalities: %s",
-		logSystemType, tLogWriteAntiQuorum, tLogReplicationFactor, describe(tLogs).c_str(), oldTLogs.size(), describe(tLogLocalities).c_str()); }
+	std::string toString() const { 
+		return format("type: %d oldGenerations: %d %s", logSystemType, oldTLogs.size(), describe(tLogs).c_str());
+	}
 
 	std::vector<TLogInterface> allPresentLogs() const {
 		std::vector<TLogInterface> results;
-		for( int i = 0; i < tLogs.size(); i++ )
-			if( tLogs[i].present() )
-				results.push_back(tLogs[i].interf());
+		for( int i = 0; i < tLogs.size(); i++ ) {
+			for( int j = 0; j < tLogs[i].tLogs.size(); j++ ) {
+				if( tLogs[i].tLogs[j].present() ) {
+					results.push_back(tLogs[i].tLogs[j].interf());
+				}
+			}
+		}
 		return results;
 	}
 
@@ -149,60 +189,38 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		if (logSystemType != r.logSystemType || tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor || tLogs.size() != r.tLogs.size() || oldTLogs.size() != r.oldTLogs.size())
-			return false;
-		else if ((tLogPolicy && !r.tLogPolicy) || (!tLogPolicy && r.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != r.tLogPolicy->info())))
-			return false;
-		for(int i = 0; i < tLogs.size(); i++ ) {
-			if( tLogs[i].id() != r.tLogs[i].id() || tLogs[i].present() != r.tLogs[i].present() )
-				return false;
-			if( tLogs[i].present() && tLogs[i].interf().commit.getEndpoint().token != r.tLogs[i].interf().commit.getEndpoint().token )
-				return false;
-		}
-		for(int i = 0; i < oldTLogs.size(); i++ ) {
-			if (oldTLogs[i] != r.oldTLogs[i])
-				return false;
-		}
-		return true;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && minRouters == r.minRouters && expectedLogSets == r.expectedLogSets;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
-		if(logSystemType!=r.logSystemType || tLogWriteAntiQuorum!=r.tLogWriteAntiQuorum || tLogReplicationFactor!=r.tLogReplicationFactor ||
-		tLogs.size() != r.tLogs.size() || oldTLogs.size() != r.oldTLogs.size())
-			return false;
-		else if ((tLogPolicy && !r.tLogPolicy) || (!tLogPolicy && r.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != r.tLogPolicy->info()))) {
-			return false;
-		}
-		for(int i = 0; i < tLogs.size(); i++ ) {
-			if( tLogs[i].id() != r.tLogs[i].id() )
-				return false;
-		}
-
-		for(int i = 0; i < oldTLogs.size(); i++ ) {
-			if (oldTLogs[i].tLogWriteAntiQuorum != r.oldTLogs[i].tLogWriteAntiQuorum || oldTLogs[i].tLogReplicationFactor != r.oldTLogs[i].tLogReplicationFactor || oldTLogs[i].tLogs.size() != r.oldTLogs[i].tLogs.size())
-				return false;
-
-			for(int j = 0; j < oldTLogs[i].tLogs.size(); j++ ) {
-				if( oldTLogs[i].tLogs[j].id() != r.oldTLogs[i].tLogs[j].id() )
-					return false;
+		for( auto& i : r.tLogs ) {
+			for( auto& j : tLogs ) {
+				if( i.isEqualIds(j) ) {
+					return true;
+				}
 			}
 		}
-		return true;
+		return false;
 	}
 
 	bool isNextGenerationOf(LogSystemConfig const& r) const {
-		if( !oldTLogs.size() || oldTLogs[0].tLogWriteAntiQuorum!=r.tLogWriteAntiQuorum || oldTLogs[0].tLogReplicationFactor!=r.tLogReplicationFactor || oldTLogs[0].tLogs.size() != r.tLogs.size())
+		if( !oldTLogs.size() ) {
 			return false;
-		for(int i = 0; i < oldTLogs[0].tLogs.size(); i++ ) {
-			if( oldTLogs[0].tLogs[i].id() != r.tLogs[i].id() )
-				return false;
 		}
-		return true;
+
+		for( auto& i : r.tLogs ) {
+				for( auto& j : oldTLogs[0].tLogs ) {
+				if( i.isEqualIds(j) ) {
+					return true;
+				}
+			}
+		}
+		return false;
 	}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & logSystemType & tLogs & oldTLogs & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities;
+		ar & logSystemType & tLogs & oldTLogs & minRouters & expectedLogSets;
 	}
 };
 

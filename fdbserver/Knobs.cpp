@@ -259,6 +259,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( SIM_SHUTDOWN_TIMEOUT,                                   10 );
 	init( SHUTDOWN_TIMEOUT,                                      600 ); if( randomize && BUGGIFY ) SHUTDOWN_TIMEOUT = 60.0;
 	init( MASTER_SPIN_DELAY,                                     1.0 ); if( randomize && BUGGIFY ) MASTER_SPIN_DELAY = 10.0;
+	init( CC_CHANGE_DELAY,                                       0.1 );
 	init( WAIT_FOR_GOOD_RECRUITMENT_DELAY,                       0.1 );
 	init( ATTEMPT_RECRUITMENT_DELAY,                           0.035 );
 	init( WORKER_FAILURE_TIME,                                   1.0 ); if( randomize && BUGGIFY ) WORKER_FAILURE_TIME = 10.0;
@@ -266,6 +267,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( INCOMPATIBLE_PEERS_LOGGING_INTERVAL,                   600 ); if( randomize && BUGGIFY ) INCOMPATIBLE_PEERS_LOGGING_INTERVAL = 60.0;
 	init( EXPECTED_MASTER_FITNESS,             ProcessClass::GoodFit );
 	init( EXPECTED_TLOG_FITNESS,               ProcessClass::GoodFit );
+	init( EXPECTED_LOG_ROUTER_FITNESS,         ProcessClass::GoodFit );
 	init( EXPECTED_PROXY_FITNESS,              ProcessClass::GoodFit );
 	init( EXPECTED_RESOLVER_FITNESS,           ProcessClass::GoodFit );
 	init( RECRUITMENT_TIMEOUT,                                   600 ); if( randomize && BUGGIFY ) RECRUITMENT_TIMEOUT = g_random->coinflip() ? 60.0 : 1.0;
@@ -282,7 +284,6 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MOVE_KEYS_KRM_LIMIT_BYTES,                             1e5 ); if( randomize && BUGGIFY ) MOVE_KEYS_KRM_LIMIT_BYTES = 5e4; //This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an attempt to read a key range map
 	init( SKIP_TAGS_GROWTH_RATE,                                 2.0 );
 	init( MAX_SKIP_TAGS,                                         100 );
-
 
 	//FdbServer
 	bool longReboots = randomize && BUGGIFY;
