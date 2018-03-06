@@ -1,0 +1,11 @@
+.out
+.dist
+.DS_Store
+
+_templates/buildinfo.html
+
+# Vim
+*.swp
+
+# Intellij IDEA
+.idea/
