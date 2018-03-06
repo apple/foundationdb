@@ -1103,25 +1103,9 @@ ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database 
 static StatusObject configurationFetcher(Optional<DatabaseConfiguration> conf, ServerCoordinators coordinators, std::set<std::string> *incomplete_reasons) {
 	StatusObject statusObj;
 	try {
-		StatusArray coordinatorLeaderServersArr;
-		vector< ClientLeaderRegInterface > coordinatorLeaderServers = coordinators.clientLeaderServers;
-		int count = coordinatorLeaderServers.size();
-		statusObj["coordinators_count"] = count;
-
 		if(conf.present()) {
 			DatabaseConfiguration configuration = conf.get();
-			std::map<std::string, std::string> configMap = configuration.toMap();
-			for (auto it = configMap.begin(); it != configMap.end(); it++) {
-				if (it->first == "redundancy_mode")
-				{
-					StatusObject redundancyStatusObj;
-					redundancyStatusObj["factor"] = it->second;
-					statusObj["redundancy"] = redundancyStatusObj;
-				}
-				else {
-					statusObj[it->first] = it->second;
-				}
-			}
+			statusObj = configuration.toJSON();
 
 			StatusArray excludedServersArr;
 			std::set<AddressExclusion> excludedServers = configuration.getExcludedServers();
@@ -1131,31 +1115,11 @@ static StatusObject configurationFetcher(Optional<DatabaseConfiguration> conf, S
 				excludedServersArr.push_back(statusObj);
 			}
 			statusObj["excluded_servers"] = excludedServersArr;
-
-			if (configuration.masterProxyCount != -1)
-				statusObj["proxies"] = configuration.getDesiredProxies();
-			else if (configuration.autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES)
-				statusObj["auto_proxies"] = configuration.autoMasterProxyCount;
-
-			if (configuration.resolverCount != -1)
-				statusObj["resolvers"] = configuration.getDesiredResolvers();
-			else if (configuration.autoResolverCount != CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS)
-				statusObj["auto_resolvers"] = configuration.autoResolverCount;
-
-			if (configuration.desiredTLogCount != -1)
-				statusObj["logs"] = configuration.getDesiredLogs();
-			else if (configuration.autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS)
-				statusObj["auto_logs"] = configuration.autoDesiredTLogCount;
-
-			statusObj["remote_logs"] = configuration.remoteDesiredTLogCount;
-
-			if(configuration.storagePolicy) {
-				statusObj["storage_policy"] = configuration.storagePolicy->info();
-			}
-			if(configuration.tLogPolicy) {
-				statusObj["tlog_policy"] = configuration.tLogPolicy->info();
-			}
 		}
+		StatusArray coordinatorLeaderServersArr;
+		vector< ClientLeaderRegInterface > coordinatorLeaderServers = coordinators.clientLeaderServers;
+		int count = coordinatorLeaderServers.size();
+		statusObj["coordinators_count"] = count;
 	}
 	catch (Error &e){
 		incomplete_reasons->insert("Could not retrieve all configuration status information.");

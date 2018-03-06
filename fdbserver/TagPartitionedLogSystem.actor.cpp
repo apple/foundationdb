@@ -1100,11 +1100,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogs[0]->hasBestPolicy = HasBestPolicyId;
 		logSystem->tLogs[0]->locality = primaryLocality;
 
-		if(configuration.satelliteTLogReplicationFactor > 0) {
+		RegionInfo region = configuration.getRegion(recr.dcId);
+
+		if(region.satelliteTLogReplicationFactor > 0) {
 			logSystem->tLogs.push_back( Reference<LogSet>( new LogSet() ) );
-			logSystem->tLogs[1]->tLogWriteAntiQuorum = configuration.satelliteTLogWriteAntiQuorum;
-			logSystem->tLogs[1]->tLogReplicationFactor = configuration.satelliteTLogReplicationFactor;
-			logSystem->tLogs[1]->tLogPolicy = configuration.satelliteTLogPolicy;
+			logSystem->tLogs[1]->tLogWriteAntiQuorum = region.satelliteTLogWriteAntiQuorum;
+			logSystem->tLogs[1]->tLogReplicationFactor = region.satelliteTLogReplicationFactor;
+			logSystem->tLogs[1]->tLogPolicy = region.satelliteTLogPolicy;
 			logSystem->tLogs[1]->isLocal = true;
 			logSystem->tLogs[1]->hasBestPolicy = HasBestPolicyNone;
 			logSystem->tLogs[1]->locality = -99;
@@ -1164,7 +1166,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state std::vector<Future<Void>> recoveryComplete;
 
-		if(configuration.satelliteTLogReplicationFactor > 0) {
+		if(region.satelliteTLogReplicationFactor > 0) {
 			state vector<Future<TLogInterface>> satelliteInitializationReplies;
 			vector< InitializeTLogRequest > sreqs( recr.satelliteTLogs.size() );
 

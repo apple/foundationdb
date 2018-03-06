@@ -85,11 +85,11 @@ struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> proxies;
 	vector<WorkerInterface> resolvers;
 	vector<WorkerInterface> storageServers;
-	Optional<Key> remoteDcId;
+	Optional<Key> dcId;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & remoteDcId;
+		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & dcId;
 	}
 };
 

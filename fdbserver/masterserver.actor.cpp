@@ -290,28 +290,28 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, RecruitFromConfigur
 
 ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfigurationReply recr, Reference<ILogSystem> oldLogSystem, vector<Standalone<CommitTransactionRef>>* initialConfChanges ) {
 	if(self->configuration.remoteTLogReplicationFactor > 0) {
-		state Optional<Key> primaryDcId = recr.remoteDcId == self->configuration.remoteDcIds[0] ? self->configuration.primaryDcId : self->configuration.remoteDcIds[0];
-		if( !self->dcId_locality.count(primaryDcId) ) {
-			TraceEvent(SevWarnAlways, "UnknownPrimaryDCID", self->dbgid).detail("found", self->dcId_locality.count(primaryDcId)).detail("primaryId", printable(primaryDcId));
+		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
+		if( !self->dcId_locality.count(recr.dcId) ) {
+			TraceEvent(SevWarnAlways, "UnknownPrimaryDCID", self->dbgid).detail("found", self->dcId_locality.count(recr.dcId)).detail("primaryId", printable(recr.dcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
-			tr.set(tr.arena(), tagLocalityListKeyFor(primaryDcId), tagLocalityListValue(loc));
+			tr.set(tr.arena(), tagLocalityListKeyFor(recr.dcId), tagLocalityListValue(loc));
 			initialConfChanges->push_back(tr);
-			self->dcId_locality[primaryDcId] = loc;
+			self->dcId_locality[recr.dcId] = loc;
 		}
 
-		if( !self->dcId_locality.count(recr.remoteDcId) ) {
-			TraceEvent(SevWarnAlways, "UnknownRemoteDCID", self->dbgid).detail("remoteFound", self->dcId_locality.count(recr.remoteDcId)).detail("remoteId", printable(recr.remoteDcId));
+		if( !self->dcId_locality.count(remoteDcId) ) {
+			TraceEvent(SevWarnAlways, "UnknownRemoteDCID", self->dbgid).detail("remoteFound", self->dcId_locality.count(remoteDcId)).detail("remoteId", printable(remoteDcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
-			tr.set(tr.arena(), tagLocalityListKeyFor(recr.remoteDcId), tagLocalityListValue(loc));
+			tr.set(tr.arena(), tagLocalityListKeyFor(remoteDcId), tagLocalityListValue(loc));
 			initialConfChanges->push_back(tr);
-			self->dcId_locality[recr.remoteDcId] = loc;
+			self->dcId_locality[remoteDcId] = loc;
 		}
 
-		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, recr.remoteDcId ) ) );
+		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId ) ) );
 
-		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[primaryDcId], self->dcId_locality[recr.remoteDcId] ) );
+		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[recr.dcId], self->dcId_locality[remoteDcId] ) );
 		self->logSystem = newLogSystem;
 	} else {
 		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, tagLocalitySpecial, tagLocalitySpecial ) );
@@ -552,9 +552,9 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 
 	self->primaryDcId.clear();
 	self->remoteDcIds.clear();
-	if(recruits.remoteDcId.present()) {
-		self->primaryDcId.push_back(recruits.remoteDcId == self->configuration.remoteDcIds[0] ? self->configuration.primaryDcId : self->configuration.remoteDcIds[0]);
-		self->remoteDcIds.push_back(recruits.remoteDcId);
+	if(recruits.dcId.present()) {
+		self->primaryDcId.push_back(recruits.dcId);
+		self->remoteDcIds.push_back(recruits.dcId.get() == self->configuration.regions[0].dcId ? self->configuration.regions[1].dcId : self->configuration.regions[0].dcId);
 	}
 	
 	TraceEvent("MasterRecoveryState", self->dbgid)
@@ -1014,7 +1014,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		state Future<Void> changed = self->logSystem->onCoreStateChanged();
 		ASSERT( newState.tLogs[0].tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum && newState.tLogs[0].tLogReplicationFactor == self->configuration.tLogReplicationFactor );
 
-		state bool finalUpdate = !newState.oldTLogData.size() && newState.tLogs.size() == self->configuration.expectedLogSets();
+		state bool finalUpdate = !newState.oldTLogData.size() && newState.tLogs.size() == self->configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		Void _ = wait( self->cstate.write(newState, finalUpdate) );
 
 		if( finalUpdate ) {
