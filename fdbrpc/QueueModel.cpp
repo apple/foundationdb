@@ -21,7 +21,7 @@
 #include "QueueModel.h"
 #include "LoadBalance.h"
 
-void QueueModel::endRequest( uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion ) {
+void QueueModel::endRequest( uint64_t id, double latency, double penalty, double delta, bool clean ) {
 	auto& d = data[id];
 	d.smoothOutstanding.addDelta(-delta);
 
@@ -29,17 +29,6 @@ void QueueModel::endRequest( uint64_t id, double latency, double penalty, double
 		d.latency = latency;
 	} else {
 		d.latency = std::max(d.latency, latency);
-	}
-
-	if(futureVersion) {
-		if(now() > d.increaseBackoffTime) {
-			d.futureVersionBackoff = std::min( d.futureVersionBackoff * FLOW_KNOBS->FUTURE_VERSION_BACKOFF_GROWTH, FLOW_KNOBS->FUTURE_VERSION_MAX_BACKOFF );
-			d.increaseBackoffTime = now() + d.futureVersionBackoff;
-		}
-		d.failedUntil = now() + d.futureVersionBackoff;
-	} else if(clean) {
-		d.futureVersionBackoff = FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF;
-		d.increaseBackoffTime = 0.0;
 	}
 
 	if(penalty > 0) {

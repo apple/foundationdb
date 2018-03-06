@@ -61,7 +61,6 @@ enum {
 
 struct IDataDistributionTeam {
 	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() = 0;
-	virtual int size() = 0;
 	virtual vector<UID> const& getServerIDs() = 0;
 	virtual void addDataInFlightToTeam( int64_t delta ) = 0;
 	virtual int64_t getDataInFlightToTeam() = 0;
@@ -79,7 +78,6 @@ struct IDataDistributionTeam {
 	virtual bool isOptimal() = 0;
 	virtual bool isWrongConfiguration() = 0;
 	virtual void setWrongConfiguration(bool) = 0;
-	virtual void addServers(const vector<UID> &servers) = 0;
 
 	std::string getDesc() {
 		const auto& servers = getLastKnownServerInterfaces();
@@ -98,11 +96,10 @@ struct GetTeamRequest {
 	bool preferLowerUtilization;
 	double inflightPenalty;
 	std::vector<UID> sources;
-	std::vector<UID> completeSources;
 	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty( inflightPenalty ) {}
+	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty(inflightPenalty) {}
 };
 
 struct GetMetricsRequest {
@@ -173,8 +170,6 @@ Future<Void> dataDistribution(
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges,
 	Reference<ILogSystem> const& logSystem,
 	Version const& recoveryCommitVersion,
-	std::vector<Optional<Key>> const& primaryDcId,
-	std::vector<Optional<Key>> const& remoteDcId,
 	double* const& lastLimited);
 
 Future<Void> dataDistributionTracker(
@@ -185,14 +180,13 @@ Future<Void> dataDistributionTracker(
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
-	Reference<AsyncVar<bool>> const& zeroHealthyTeams,
 	UID const& masterId);
 
 Future<Void> dataDistributionQueue(
 	Database const& cx,
 	PromiseStream<RelocateShard> const& input,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
-	vector<TeamCollectionInterface> const& teamCollection,
+	TeamCollectionInterface const& teamCollection,
 	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	MoveKeysLock const& lock,
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,

@@ -242,10 +242,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 					bool hasExtraStores = wait( self->checkForExtraDataStores(cx, self) );
 
 					//Check that each machine is operating as its desired class
-					//FIXME: re-enable
-					//bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
-					//if(!usingDesiredClasses)
-					//	self->testFailure("Cluster has machine(s) not using requested classes");
+					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
+					if(!usingDesiredClasses)
+						self->testFailure("Cluster has machine(s) not using requested classes");
 
 					bool workerListCorrect = wait( self->checkWorkerList(cx, self) );
 					if(!workerListCorrect)
@@ -1049,7 +1048,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 	{
 		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
-		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
 			if( !configuration.isExcludedServer(workers[i].first.address()) &&
@@ -1063,18 +1061,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 				}
 				if( !found ) {
 					TraceEvent("ConsistencyCheck_NoStorage").detail("Address", workers[i].first.address());
-					missingStorage.insert(workers[i].first.locality.dcId());
+					self->testFailure("No storage server on worker");
+					return false;
 				}
 			}
 		}
-
-		if((!configuration.primaryDcId.present() && missingStorage.size()) ||
-			(configuration.primaryDcId.present() && configuration.remoteTLogReplicationFactor == 0 && missingStorage.count(configuration.primaryDcId) && missingStorage.count(configuration.remoteDcId)) ||
-			(configuration.primaryDcId.present() && configuration.remoteTLogReplicationFactor > 0 && (missingStorage.count(configuration.primaryDcId) || missingStorage.count(configuration.remoteDcId)))) {
-			self->testFailure("No storage server on worker");
-			return false;
-		}
-
 		return true;
 	}
 

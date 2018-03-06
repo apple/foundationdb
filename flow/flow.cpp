@@ -157,21 +157,6 @@ StringRef strinc(StringRef const& str, Arena& arena) {
 	return r;
 }
 
-StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena) {
-	int16_t size = str.size();
-	uint8_t* s = new (arena) uint8_t[size + 12];
-	memcpy(s, str.begin(), size);
-	memset(&s[size], 0, 10);
-	memcpy(&s[size+10], &size, 2);
-	return StringRef(s,size + 12);
-}
-
-Standalone<StringRef> addVersionStampAtEnd(StringRef const& str) {
-	Standalone<StringRef> r;
-	((StringRef &)r) = addVersionStampAtEnd(str, r.arena());
-	return r;
-}
-
 bool buggifyActivated = false;
 std::map<std::pair<std::string,int>, int> SBVars;
 

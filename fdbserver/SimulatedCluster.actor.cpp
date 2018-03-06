@@ -588,7 +588,10 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 	ini.SetMultiKey();
 
 	try {
+		int dataCenters = atoi(ini.GetValue("META", "dataCenters"));
+		int killableMachines = atoi(ini.GetValue("META", "killableMachines"));
 		int machineCount = atoi(ini.GetValue("META", "machineCount"));
+		int machinesNeededForProgress = atoi(ini.GetValue("META", "machinesNeededForProgress"));
 		int processesPerMachine = atoi(ini.GetValue("META", "processesPerMachine"));
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
@@ -631,6 +634,11 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 				processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine") );
 		}
 
+		g_simulator.killableMachines = killableMachines;
+		g_simulator.neededDatacenters = dataCenters;
+		g_simulator.maxCoordinatorsInDatacenter = ((desiredCoordinators-1)/dataCenters) + 1;
+		g_simulator.killableDatacenters = 0;
+		g_simulator.machinesNeededForProgress = machinesNeededForProgress;
 		g_simulator.desiredCoordinators = desiredCoordinators;
 		g_simulator.processesPerMachine = processesPerMachine;
 	}
@@ -639,6 +647,11 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 	}
 
 	TraceEvent("RestartSimulatorSettings")
+		.detail("killableMachines", g_simulator.killableMachines)
+		.detail("neededDatacenters", g_simulator.neededDatacenters)
+		.detail("killableDatacenters", g_simulator.killableDatacenters)
+		.detail("machinesNeededForProgress", g_simulator.machinesNeededForProgress)
+		.detail("maxCoordinatorsInDatacenter", g_simulator.maxCoordinatorsInDatacenter)
 		.detail("desiredCoordinators", g_simulator.desiredCoordinators)
 		.detail("processesPerMachine", g_simulator.processesPerMachine);
 
@@ -685,8 +698,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	bool generateFearless = false; //FIXME: g_random->random01() < 0.5;
-	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
+	datacenters = g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);
@@ -696,12 +708,13 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("memory");
 	}
 
-	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt(0,6), 3));
+	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt( 0, 6 ), 3));
+	//replication_type = 1;  //ahm
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
-		int storage_servers = g_random->randomInt(1, generateFearless ? 4 : 5);
-		int replication_factor = g_random->randomInt(1, generateFearless ? 4 : 5);
+		int storage_servers = g_random->randomInt(1,5);
+		int replication_factor = g_random->randomInt(1,5);
 		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d storage_quorum:=%d "
@@ -722,7 +735,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		break;
 	}
 	case 3: {
-		if( datacenters == 1 || generateFearless ) {
+		if( datacenters == 1 ) {
 			TEST( true );  // Simulated cluster running in triple redundancy mode
 			set_config("triple");
 		}
@@ -743,50 +756,13 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		ASSERT(false);  // Programmer forgot to adjust cases.
 	}
 
-	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
-		db.primaryDcId = LiteralStringRef("0");
-		db.remoteDcId = LiteralStringRef("1");	
-	}
-
-	if(generateFearless) {
-		db.primarySatelliteDcIds.resize(1);
-		db.primarySatelliteDcIds[0] = LiteralStringRef("2");
-		db.remoteSatelliteDcIds.resize(1);
-		db.remoteSatelliteDcIds[0] = LiteralStringRef("3");
-
-		//FIXME: random setups
-		set_config("remote_single");
-		set_config("one_satellite_single");
-
-		db.remoteDesiredTLogCount = 1; 
-		db.desiredLogRouterCount = 1;
-		db.satelliteDesiredTLogCount = 1;
-	}
-	
-	if(generateFearless) {
-		machine_count = 12;
-	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
-		machine_count = 9;
-	} else {
-		//datacenters+2 so that the configure database workload can configure into three_data_hall
-		machine_count = std::max(datacenters+2, ((db.minDatacentersRequired() > 1) ? datacenters : 1) * std::max(3, db.minMachinesRequiredPerDatacenter()));
-		machine_count = g_random->randomInt( machine_count, std::max(machine_count+1, extraDB ? 6 : 10) );
-	}
-
-	//because we protect a majority of coordinators from being killed, it is better to run with low numbers of coordinators to prevent too many processes from being protected
-	coordinators = BUGGIFY ? g_random->randomInt(1, machine_count+1) : 1;
-
+	machine_count = g_random->randomInt( std::max( 2+datacenters, db.minMachinesRequired() ), extraDB ? 6 : 10 );
 	if(minimumReplication > 1 && datacenters == 3) {
 		//low latency tests in 3 data hall mode need 2 other data centers with 2 machines each to avoid waiting for logs to recover.
 		machine_count = std::max( machine_count, 6);
-		coordinators = 3;
 	}
-
-	if(generateFearless) {
-		processes_per_machine = 1;
-	} else {
-		processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
-	}
+	processes_per_machine = g_random->randomInt(1, (extraDB ? 14 : 28)/machine_count + 2 );
+	coordinators = BUGGIFY ? g_random->randomInt(1, machine_count+1) : std::min( machine_count, db.maxMachineFailuresTolerated()*2 + 1 );
 }
 
 std::string SimulationConfig::toString() {
@@ -803,52 +779,9 @@ std::string SimulationConfig::toString() {
 		config << " " << "storage_quorum:=" << db.durableStorageQuorum;
 	}
 
-	if(dbconfig["remote_redundancy_mode"] != "none") {
-		if (dbconfig["remote_redundancy_mode"] != "custom") {
-			config << " " << dbconfig["remote_redundancy_mode"];
-		} else {
-			config << " " << "remote_log_replicas:=" << db.remoteTLogReplicationFactor;
-		}
-	}
-
-	if(dbconfig["satellite_redundancy_mode"] != "none") {
-		if (dbconfig["satellite_redundancy_mode"] != "custom") {
-			config << " " << dbconfig["satellite_redundancy_mode"];
-		} else {
-			config << " " << "satellite_log_replicas:=" << db.satelliteTLogReplicationFactor;
-			config << " " << "satellite_anti_quorum:=" << db.satelliteTLogWriteAntiQuorum;
-			config << " " << "satellite_usable_dcs:=" << db.satelliteTLogUsableDcs;
-		}
-	}
-
 	config << " logs=" << db.getDesiredLogs();
 	config << " proxies=" << db.getDesiredProxies();
 	config << " resolvers=" << db.getDesiredResolvers();
-
-	if(db.remoteTLogReplicationFactor > 0) {
-		config << " remote_logs=" << db.getDesiredRemoteLogs();
-		config << " log_routers=" << db.getDesiredLogRouters();
-	}
-
-	if(db.satelliteTLogReplicationFactor > 0) {
-		config << " satellite_logs=" << db.getDesiredSatelliteLogs();
-	}
-
-	if(db.primaryDcId.present()) {
-		config << " primary_dc=" << db.primaryDcId.get().printable();
-		config << " remote_dc=" << db.remoteDcId.get().printable();
-	}
-
-	if(db.primarySatelliteDcIds.size()) {
-		config << " primary_satellite_dcs=" << db.primarySatelliteDcIds[0].get().printable();
-		for(int i = 1; i < db.primarySatelliteDcIds.size(); i++) {
-			config << "," << db.primarySatelliteDcIds[i].get().printable();
-		}
-		config << " remote_satellite_dcs=" << db.remoteSatelliteDcIds[0].get().printable();
-		for(int i = 1; i < db.remoteSatelliteDcIds.size(); i++) {
-			config << "," << db.remoteSatelliteDcIds[i].get().printable();
-		}
-	}
 
 	config << " " << dbconfig["storage_engine"];
 	return config.str();
@@ -865,20 +798,9 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;
 	g_simulator.tLogPolicy = simconfig.db.tLogPolicy;
 	g_simulator.tLogWriteAntiQuorum = simconfig.db.tLogWriteAntiQuorum;
-	g_simulator.primaryDcId = simconfig.db.primaryDcId;
-	g_simulator.hasRemoteReplication = simconfig.db.remoteTLogReplicationFactor > 0;
-	g_simulator.remoteTLogPolicy = simconfig.db.remoteTLogPolicy;
-	g_simulator.remoteDcId = simconfig.db.remoteDcId;
-	g_simulator.hasSatelliteReplication = simconfig.db.satelliteTLogReplicationFactor > 0;
-	g_simulator.satelliteTLogPolicy = simconfig.db.satelliteTLogPolicy;
-	g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.satelliteTLogWriteAntiQuorum;
-	g_simulator.primarySatelliteDcIds = simconfig.db.primarySatelliteDcIds;
-	g_simulator.remoteSatelliteDcIds = simconfig.db.remoteSatelliteDcIds;
-
-	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
-	ASSERT(!g_simulator.hasRemoteReplication || g_simulator.remoteTLogPolicy);
-	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
-	TraceEvent("simulatorConfig").detail("ConfigString", startingConfigString);
+	ASSERT(g_simulator.storagePolicy);
+	ASSERT(g_simulator.tLogPolicy);
+	TraceEvent("simulatorConfig").detail("tLogPolicy", g_simulator.tLogPolicy->info()).detail("storagePolicy", g_simulator.storagePolicy->info()).detail("tLogWriteAntiQuorum", g_simulator.tLogWriteAntiQuorum).detail("ConfigString", startingConfigString);
 
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;
@@ -922,8 +844,8 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	int assignedMachines = 0, nonVersatileMachines = 0;
 	for( int dc = 0; dc < dataCenters; dc++ ) {
-		//FIXME: test unset dcID
-		Optional<Standalone<StringRef>> dcUID = StringRef(format("%d", dc));
+		Optional<Standalone<StringRef>> dcUID;
+		if ((dc > 0) || (g_random->random01() > 0.01)) dcUID = StringRef(format("%d", dc));
 		std::vector<UID> machineIdentities;
 		int machines = machineCount / dataCenters + (dc < machineCount % dataCenters); // add remainder of machines to first datacenter
 		int dcCoordinators = coordinatorCount / dataCenters + (dc < coordinatorCount%dataCenters);
@@ -938,7 +860,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			if(assignClasses) {
 				if(assignedMachines < 4)
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 2), ProcessClass::CommandLineSource); //Unset or Storage
-				else if(assignedMachines == 4 && !g_simulator.hasRemoteReplication && !g_simulator.hasSatelliteReplication)
+				else if(assignedMachines == 4)
 					processClass = ProcessClass((ProcessClass::ClassType) (g_random->randomInt(0, 2) * ProcessClass::ResolutionClass), ProcessClass::CommandLineSource); //Unset or Resolution
 				else
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 3), ProcessClass::CommandLineSource); //Unset, Storage, or Transaction
@@ -975,12 +897,21 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	}
 
 	g_simulator.desiredCoordinators = coordinatorCount;
+	g_simulator.killableMachines = simconfig.db.maxMachineFailuresTolerated();
+	g_simulator.neededDatacenters = 1;
+	g_simulator.killableDatacenters = 0;
 	g_simulator.physicalDatacenters = dataCenters;
+	g_simulator.maxCoordinatorsInDatacenter = ((coordinatorCount-1)/dataCenters) + 1;
+	g_simulator.machinesNeededForProgress = simconfig.db.minMachinesRequired() + nonVersatileMachines;
 	g_simulator.processesPerMachine = processesPerMachine;
 
 	TraceEvent("SetupSimulatorSettings")
+		.detail("killableMachines", g_simulator.killableMachines)
+		.detail("neededDatacenters", g_simulator.neededDatacenters)
+		.detail("killableDatacenters", g_simulator.killableDatacenters)
+		.detail("machinesNeededForProgress", g_simulator.machinesNeededForProgress)
+		.detail("maxCoordinatorsInDatacenter", g_simulator.maxCoordinatorsInDatacenter)
 		.detail("desiredCoordinators", g_simulator.desiredCoordinators)
-		.detail("physicalDatacenters", g_simulator.physicalDatacenters)
 		.detail("processesPerMachine", g_simulator.processesPerMachine);
 
 	// SOMEDAY: add locality for testers to simulate network topology
@@ -1021,12 +952,21 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.testerCount = testerCount;
 
 	TraceEvent("SimulatedClusterStarted")
+		.detail("KillableMachines", g_simulator.killableMachines)
 		.detail("DataCenters", dataCenters)
+		.detail("NeededDataCenters", g_simulator.neededDatacenters)
 		.detail("ServerMachineCount", machineCount)
+		.detail("ServersNeededForProgress", g_simulator.machinesNeededForProgress)
 		.detail("ProcessesPerServer", processesPerMachine)
 		.detail("SSLEnabled", sslEnabled)
 		.detail("ClassesAssigned", assignClasses)
-		.detail("StartingConfiguration", pStartingConfiguration->toString());
+		.detail("StartingConfiguration", pStartingConfiguration->toString())
+		//.detail("TesterCount", testerCount)
+		;
+
+	// FIXME
+	/*Void _ = wait( DatabaseContext::configureDatabase( *pZookeeper, ClusterInterface::DEFAULT, mode ) );
+	Void _ = wait( DatabaseContext::configureDatabase( *pZookeeper, ClusterInterface::ALL, mode ) );*/
 }
 
 void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication) {

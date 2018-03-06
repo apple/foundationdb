@@ -75,6 +75,7 @@ struct ChangeConfigWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> ChangeConfigClient( Database cx, ChangeConfigWorkload *self) {
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "ChangeConfig");
 		Void _ = wait( delay( self->minDelayBeforeChange + g_random->random01() * ( self->maxDelayBeforeChange - self->minDelayBeforeChange ) ) );
 
 		state bool extraConfigureBefore = g_random->random01() < 0.5;

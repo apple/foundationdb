@@ -195,6 +195,9 @@
     </ActorCompiler>
     <ActorCompiler Include="TagPartitionedLogSystem.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
+    <ActorCompiler Include="workloads\RestartRecovery.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\UnitTests.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -250,13 +253,7 @@
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
-    <ActorCompiler Include="LogRouter.actor.cpp" />
-    <ActorCompiler Include="workloads\SlowTaskWorkload.actor.cpp">
-      <Filter>workloads</Filter>
-    </ActorCompiler>
-    <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
-      <Filter>workloads</Filter>
-    </ActorCompiler>
+    <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ActorCompiler Include="workloads\LowLatency.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -269,7 +266,6 @@
     <ActorCompiler Include="workloads\DiskDurability.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
-    <ActorCompiler Include="OldTLogServer.actor.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SkipList.cpp" />

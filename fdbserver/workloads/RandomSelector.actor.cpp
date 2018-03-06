@@ -69,6 +69,7 @@ struct RandomSelectorWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> randomSelectorSetup( Database cx, RandomSelectorWorkload* self ) {
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "randomSelector");
 		state Value myValue = StringRef(format("%d", g_random->randomInt( 0, 10000000 ) ) );
 		state Transaction tr(cx);
 		state std::string clientID;

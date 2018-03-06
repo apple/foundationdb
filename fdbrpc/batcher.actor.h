@@ -39,13 +39,6 @@ void logOnReceive(CommitTransactionRequest x) {
 		g_traceBatch.addEvent("CommitDebug", x.debugID.get().first(), "MasterProxyServer.batcher");
 }
 
-template <class X>
-bool firstInBatch(X x) { return false; }
-
-bool firstInBatch(CommitTransactionRequest x) {
-	return x.firstInBatch();
-}
-
 ACTOR template <class X>
 Future<Void> batcher(PromiseStream<std::vector<X>> out, FutureStream<X> in, double avgMinDelay, double* avgMaxDelay, double emptyBatchTimeout, int maxCount, int desiredBytes, int maxBytes, Optional<PromiseStream<Void>> batchStartedStream, int taskID = TaskDefaultDelay, Counter* counter = 0)
 {
@@ -80,8 +73,7 @@ Future<Void> batcher(PromiseStream<std::vector<X>> out, FutureStream<X> in, doub
 					}
 
 					int bytes = getBytes( x );
-					bool first = firstInBatch( x );
-					if((batchBytes + bytes > maxBytes || first) && batch.size()) {
+					if(batchBytes + bytes > maxBytes && batch.size()) {
 						out.send(batch);
 						lastBatch = now();
 						if(batchStartedStream.present())

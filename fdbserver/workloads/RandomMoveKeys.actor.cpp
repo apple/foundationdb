@@ -53,6 +53,7 @@ struct MoveKeysWorkload : TestWorkload {
 		if( self->enabled ) {
 			// Get the database configuration so as to use proper team size
 			state Transaction tr(cx);
+			state Future<Void> disabler = disableConnectionFailuresAfter(300, "moveKeys");
 			loop {
 				try {
 					Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, 1000) );
@@ -134,7 +135,7 @@ struct MoveKeysWorkload : TestWorkload {
 			
 		try {
 			state Promise<Void> signal;
-			Void _ = wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, 
+			Void _ = wait( moveKeys( cx, keys, destinationTeamIDs, lock, 
 										self->configuration.durableStorageQuorum, 
 										signal, &fl1, &fl2, relocateShardInterval.pairID ) );
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
@@ -174,10 +175,6 @@ struct MoveKeysWorkload : TestWorkload {
 		state double lastTime = now();
 
 		ASSERT( self->configuration.storageTeamSize > 0 );
-
-		if(self->configuration.remoteTLogReplicationFactor > 0) { //FIXME: add support for generating random teams across DCs
-			return Void();
-		}
 
 		loop { 
 			try {

@@ -195,6 +195,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> loadAndRun( Database db, FuzzApiCorrectnessWorkload* self ) {
 		state double startTime = now();
 		state Reference<IDatabase> cx = wait( unsafeThreadFutureToFuture( ThreadSafeDatabase::createFromExistingDatabase(db) ) );
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "FuzzApi");
 		try {
 		loop {
 			state int i = 0;

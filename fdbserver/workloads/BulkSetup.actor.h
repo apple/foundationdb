@@ -206,6 +206,7 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 		int keySaveIncrement = 0, double keyCheckInterval = 0.1 ) {
 
 	state vector<pair<uint64_t,uint64_t>> jobs;
+	state Future<Void> disabler = disableConnectionFailuresAfter(300, "BulkSetup");
 	state uint64_t startNode = (nodeCount * workload->clientId) / workload->clientCount;
 	state uint64_t endNode = (nodeCount * (workload->clientId+1)) / workload->clientCount;
 
