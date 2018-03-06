@@ -52,7 +52,6 @@
     <ActorCompiler Include="Resolver.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
-    <ActorCompiler Include="LogRouter.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
@@ -131,6 +130,7 @@
     <ActorCompiler Include="workloads\MetricLogging.actor.cpp" />
     <ActorCompiler Include="workloads\RYWPerformance.actor.cpp" />
     <ActorCompiler Include="workloads\RYWDisable.actor.cpp" />
+    <ActorCompiler Include="workloads\RestartRecovery.actor.cpp" />
     <ActorCompiler Include="workloads\UnitTests.actor.cpp" />
     <ActorCompiler Include="workloads\WorkerErrors.actor.cpp" />
     <ActorCompiler Include="workloads\MemoryLifetime.actor.cpp" />

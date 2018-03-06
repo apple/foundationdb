@@ -122,6 +122,7 @@ struct AtomicOpsWorkload : TestWorkload {
 
 	ACTOR Future<Void> _setup( Database cx, AtomicOpsWorkload* self ) {
 		state int g = 0;
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "AtomicOps");
 		for(; g < 100; g++) {
 			state ReadYourWritesTransaction tr(cx);
 			loop {

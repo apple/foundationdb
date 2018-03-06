@@ -76,12 +76,11 @@ struct DataDistributionTracker {
 	PromiseStream<RelocateShard> output;
 
 	Promise<Void> readyToStart;
-	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
-	DataDistributionTracker(Database cx, UID masterId, Promise<Void> const& readyToStart, PromiseStream<RelocateShard> const& output, Reference<AsyncVar<bool>> anyZeroHealthyTeams)
+	DataDistributionTracker(Database cx, UID masterId, Promise<Void> const& readyToStart, PromiseStream<RelocateShard> const& output)
 		: cx(cx), masterId( masterId ), dbSizeEstimate( new AsyncVar<int64_t>() ),
 			maxShardSize( new AsyncVar<Optional<int64_t>>() ),
-			sizeChanges(false), readyToStart(readyToStart), output( output ), anyZeroHealthyTeams(anyZeroHealthyTeams) {}
+			sizeChanges(false), readyToStart(readyToStart), output( output ) {}
 
 	~DataDistributionTracker()
 	{
@@ -287,7 +286,7 @@ struct HasBeenTrueFor : NonCopyable {
 	Future<Void> set() {
 		if( !trigger.isValid() ) {
 			cleared = Promise<Void>();
-			trigger = delayJittered( enough, TaskDataDistribution - 1 ) || cleared.getFuture();
+			trigger = delay( enough, TaskDataDistribution - 1 ) || cleared.getFuture();
 		}
 		return trigger;
 	}
@@ -488,17 +487,14 @@ ACTOR Future<Void> shardEvaluator(
 							getBandwidthStatus( stats ) == BandwidthStatusLow;
 
 	// Every invocation must set this or clear it
-	if(shouldMerge && !self->anyZeroHealthyTeams->get()) {
+	if (shouldMerge) {
 		auto whenLongEnough = wantsToMerge->set();
 		if( !wantsToMerge->hasBeenTrueForLongEnough() ) {
 			onChange = onChange || whenLongEnough;
 		}
-	} else {
-		wantsToMerge->clear();
-		if(shouldMerge) {
-			onChange = onChange || self->anyZeroHealthyTeams->onChange();
-		}
 	}
+	else
+		wantsToMerge->clear();
 
 	/*TraceEvent("ShardEvaluator", self->masterId)
 		.detail("TrackerId", trackerID)
@@ -506,7 +502,7 @@ ACTOR Future<Void> shardEvaluator(
 		.detail("ShouldMerge", shouldMerge)
 		.detail("HasBeenTrueLongEnough", wantsToMerge->hasBeenTrueForLongEnough());*/
 
-	if(!self->anyZeroHealthyTeams->get() && wantsToMerge->hasBeenTrueForLongEnough()) {
+	if(wantsToMerge->hasBeenTrueForLongEnough()) {
 		onChange = onChange || shardMerger( self, trackerID, keys, shardSize );
 	}
 	if( shouldSplit ) {
@@ -697,10 +693,9 @@ ACTOR Future<Void> dataDistributionTracker(
 	PromiseStream<GetMetricsRequest> getShardMetrics,
 	FutureStream<Promise<int64_t>> getAverageShardBytes,
 	Promise<Void> readyToStart,
-	Reference<AsyncVar<bool>> anyZeroHealthyTeams,
 	UID masterId)
 {
-	state DataDistributionTracker self(cx, masterId, readyToStart, output, anyZeroHealthyTeams);
+	state DataDistributionTracker self(cx, masterId, readyToStart, output);
 	state Future<Void> loggingTrigger = Void();
 	try {
 		Void _ = wait( trackInitialShards( &self, initData, shardsAffectedByTeamFailure ) );

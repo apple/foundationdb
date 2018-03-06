@@ -65,11 +65,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs" || key == "log_routers") && isInteger(value) ) {
-			out[p+key] = value;
-		}
-
-		if( key == "primary_dc" || key == "remote_dc" || key == "primary_satellite_dcs" || key == "remote_satellite_dcs" ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers") && isInteger(value) ) {
 			out[p+key] = value;
 		}
 
@@ -94,7 +90,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	std::string redundancy, log_replicas;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
-	
+
 	bool redundancySpecified = true;
 	if (mode == "single") {
 		redundancy="1";
@@ -151,94 +147,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		policyWriter = BinaryWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, tLogPolicy);
 		out[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
-		return out;
-	}
 
-	std::string remote_redundancy, remote_log_replicas;
-	IRepPolicyRef remoteTLogPolicy;
-	bool remoteRedundancySpecified = true;
-	if (mode == "remote_none") {
-		remote_redundancy="0";
-		remote_log_replicas="0";
-		remoteTLogPolicy = IRepPolicyRef();
-	} else if (mode == "remote_single") {
-		remote_redundancy="1";
-		remote_log_replicas="1";
-		remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
-	} else if(mode == "remote_double") {
-		remote_redundancy="2";
-		remote_log_replicas="2";
-		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "remote_triple") {
-		remote_redundancy="3";
-		remote_log_replicas="3";
-		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "remote_three_data_hall") {
-		remote_redundancy="3";
-		remote_log_replicas="4";
-		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
-		));
-	} else
-		remoteRedundancySpecified = false;
-	if (remoteRedundancySpecified) {
-		out[p+"remote_storage_replicas"] =
-			out[p+"remote_storage_quorum"] = remote_redundancy;
-		out[p+"remote_log_replicas"] = remote_log_replicas;
-
-		BinaryWriter policyWriter(IncludeVersion());
-		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
-		out[p+"remote_log_policy"] = policyWriter.toStringRef().toString();
-		return out;
-	}
-
-	std::string satellite_log_replicas, satellite_anti_quorum, satellite_usable_dcs;
-	IRepPolicyRef satelliteTLogPolicy;
-	bool satelliteRedundancySpecified = true;
-	if (mode == "satellite_none") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="0";
-		satellite_log_replicas="0";
-		satelliteTLogPolicy = IRepPolicyRef();
-	} else if (mode == "one_satellite_single") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="1";
-		satellite_log_replicas="1";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyOne());
-	} else if(mode == "one_satellite_double") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="1";
-		satellite_log_replicas="2";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "one_satellite_triple") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="1";
-		satellite_log_replicas="3";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "two_satellite_safe") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="2";
-		satellite_log_replicas="4";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
-		));
-	} else if(mode == "two_satellite_fast") {
-		satellite_anti_quorum="2";
-		satellite_usable_dcs="2";
-		satellite_log_replicas="4";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
-		));
-	} else
-		satelliteRedundancySpecified = false;
-	if (satelliteRedundancySpecified) {
-		out[p+"satellite_anti_quorum"] = satellite_anti_quorum;
-		out[p+"satellite_usable_dcs"] = satellite_usable_dcs;
-		out[p+"satellite_log_replicas"] = satellite_log_replicas;
-
-		BinaryWriter policyWriter(IncludeVersion());
-		serializeReplicationPolicy(policyWriter, satelliteTLogPolicy);
-		out[p+"satellite_log_policy"] = policyWriter.toStringRef().toString();
 		return out;
 	}
 
@@ -248,15 +157,13 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& modeTokens, std::map<std::string, std::string>& outConf ) {
 	for(auto it : modeTokens) {
 		std::string mode = it.toString();
+
 		auto m = configForToken( mode );
-		if( !m.size() ) {
-			TraceEvent(SevWarnAlways, "UnknownOption").detail("option", mode);
+		if( !m.size() )
 			return ConfigurationResult::UNKNOWN_OPTION;
-		}
 
 		for( auto t = m.begin(); t != m.end(); ++t ) {
 			if( outConf.count( t->first ) ) {
-				TraceEvent(SevWarnAlways, "ConflictingOption").detail("option", printable(StringRef(t->first)));
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
@@ -278,6 +185,7 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
 	}
+
 	return ConfigurationResult::SUCCESS;
 }
 
@@ -745,6 +653,10 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuorumChange> change ) {
 	state Transaction tr(cx);
 	state int retries = 0;
+
+	//quorum changes do not balance coordinators evenly across datacenters
+	if(g_network->isSimulated())
+		g_simulator.maxCoordinatorsInDatacenter = g_simulator.killableMachines + 1;
 
 	loop {
 		try {

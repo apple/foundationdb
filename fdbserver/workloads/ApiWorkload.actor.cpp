@@ -46,6 +46,7 @@ Future<Void> ApiWorkload::clearKeyspace() {
 }
 
 ACTOR Future<Void> setup(Database cx, ApiWorkload *self) {
+	state Future<Void> disabler = disableConnectionFailuresAfter(300, "ApiWorkload");
 	self->transactionFactory = Reference<TransactionFactoryInterface>(new TransactionFactory<FlowTransactionWrapper<Transaction>, const Database>(cx, cx, false));
 
 	//Clear keyspace before running

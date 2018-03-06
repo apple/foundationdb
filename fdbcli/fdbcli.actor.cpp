@@ -730,7 +730,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						std::string description;
 						if (recoveryState.get("name", name) &&
 							recoveryState.get("description", description) &&
-							name != "fully_recovered" && name != "remote_recovered")
+							name != "fully_recovered")
 						{
 							fatalRecoveryState = true;
 

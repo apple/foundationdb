@@ -54,7 +54,6 @@ Future<Void> moveKeys(
 	Database const& occ,
 	KeyRange const& keys,
 	vector<UID> const& destinationTeam,
-	vector<UID> const& healthyDestinations,
 	MoveKeysLock const& lock,
 	int const& durableStorageQuorum,
 	Promise<Void> const& dataMovementComplete,

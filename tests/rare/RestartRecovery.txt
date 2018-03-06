@@ -1,0 +1,14 @@
+testTitle=DDBalance_test
+    testName=DDBalance
+    testDuration=60.0
+    transactionsPerSecond=250.0
+    binCount=1000
+    writesPerTransaction=5
+    keySpaceDriftFactor=10
+    moversPerClient=10
+    actorsPerClient=100
+    nodes=100000
+    connectionFailuresDisableDuration=100000
+
+    testName=RestartRecovery
+    killAt=30.0

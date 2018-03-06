@@ -74,25 +74,15 @@ struct CommitID {
 };
 
 struct CommitTransactionRequest {
-	enum { 
-		FLAG_IS_LOCK_AWARE = 0x1,
-		FLAG_FIRST_IN_BATCH = 0x2
-	};
-
-	bool isLockAware() const { return flags & FLAG_IS_LOCK_AWARE; }
-	bool firstInBatch() const { return flags & FLAG_FIRST_IN_BATCH; }
-	
 	Arena arena;
 	CommitTransactionRef transaction;
-	ReplyPromise<CommitID> reply;
-	uint32_t flags;
+	ReplyPromise<CommitID> reply;		
 	Optional<UID> debugID;
-
-	CommitTransactionRequest() : flags(0) {}
+	bool isLockAware;
 
 	template <class Ar> 
 	void serialize(Ar& ar) { 
-		ar & transaction & reply & arena & flags & debugID;
+		ar & transaction & reply & arena & debugID & isLockAware;
 	}
 };
 
@@ -189,27 +179,23 @@ struct GetRawCommittedVersionRequest {
 struct GetStorageServerRejoinInfoReply {
 	Version version;
 	Tag tag;
-	Optional<Tag> newTag;
-	bool newLocality;
-	vector<pair<Version, Tag>> history;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & version & tag & newTag & newLocality & history;
+		ar & version & tag;
 	}
 };
 
 struct GetStorageServerRejoinInfoRequest {
 	UID id;
-	Optional<Value> dcId;
 	ReplyPromise< GetStorageServerRejoinInfoReply > reply;
 
 	GetStorageServerRejoinInfoRequest() {}
-	explicit GetStorageServerRejoinInfoRequest( UID const& id, Optional<Value> const& dcId ) : id(id), dcId(dcId) {}
+	explicit GetStorageServerRejoinInfoRequest(UID const& id ) : id(id) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & id & dcId & reply;
+		ar & id & reply;
 	}
 };
 

@@ -54,6 +54,7 @@ struct BackupToDBAbort : TestWorkload {
 
 	ACTOR static Future<Void> _setup(BackupToDBAbort* self, Database cx) {
 		state DatabaseBackupAgent backupAgent(cx);
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "BackupToDBAbort");
 		try {
 			TraceEvent("BDBA_Submit1");
 			Void _ = wait( backupAgent.submitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), self->backupRanges, false, StringRef(), StringRef(), true) );
@@ -72,6 +73,7 @@ struct BackupToDBAbort : TestWorkload {
 
 	ACTOR static Future<Void> _start(BackupToDBAbort* self, Database cx) {
 		state DatabaseBackupAgent backupAgent(cx);
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "BackupToDBAbort");
 
 		TraceEvent("BDBA_Start").detail("delay", self->abortDelay);
 		Void _ = wait(delay(self->abortDelay));

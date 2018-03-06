@@ -91,6 +91,7 @@ struct SidebandWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> persistInterface( SidebandWorkload *self, Database cx ) {
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "Sideband");
 		state Transaction tr(cx);
 		BinaryWriter wr(IncludeVersion()); wr << self->interf;
 		state Standalone<StringRef> serializedInterface = wr.toStringRef();

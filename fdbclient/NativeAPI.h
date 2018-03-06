@@ -150,7 +150,6 @@ struct TransactionOptions {
 	bool debugDump : 1;
 	bool lockAware : 1;
 	bool readOnly : 1;
-	bool firstInBatch : 1;
 
 	TransactionOptions() {
 		reset();

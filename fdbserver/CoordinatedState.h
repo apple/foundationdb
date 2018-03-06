@@ -60,7 +60,6 @@ private:
 class MovableCoordinatedState : NonCopyable {
 public:
 	MovableCoordinatedState( class ServerCoordinators const& );
-	void operator=(MovableCoordinatedState&& av);
 	~MovableCoordinatedState();
 
 	Future<Value> read();

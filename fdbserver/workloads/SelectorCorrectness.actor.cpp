@@ -67,6 +67,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> SelectorCorrectnessSetup( Database cx, SelectorCorrectnessWorkload* self ) {
+		state Future<Void> disabler = disableConnectionFailuresAfter(300, "SelectorCorrectness");
 		state Value myValue = StringRef(format( "%010d", g_random->randomInt( 0, 10000000 ) ));
 		state Transaction tr(cx);
 

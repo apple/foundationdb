@@ -90,8 +90,7 @@ struct StorageInfo : NonCopyable, public ReferenceCounted<StorageInfo> {
 
 struct ServerCacheInfo {
 	std::vector<Tag> tags;
-	std::vector<Reference<StorageInfo>> src_info;
-	std::vector<Reference<StorageInfo>> dest_info;
+	std::vector<Reference<StorageInfo>> info;
 };
 
 struct GetValueReply : public LoadBalancedReply {
