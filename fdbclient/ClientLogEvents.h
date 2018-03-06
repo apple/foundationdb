@@ -37,6 +37,7 @@ namespace FdbClientLogEvents {
 
 	struct Event {
 		Event(EventType t, double ts) : type(t), startTs(ts) { }
+		Event() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) { return ar & type & startTs; }
 
@@ -48,6 +49,7 @@ namespace FdbClientLogEvents {
 
 	struct EventGetVersion : public Event {
 		EventGetVersion(double ts, double lat) : Event(GET_VERSION_LATENCY, ts), latency(lat) { }
+		EventGetVersion() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
