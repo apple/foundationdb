@@ -617,7 +617,7 @@ ACTOR Future<Void> setPeekGetMore(ILogSystem::SetPeekCursor* self, LogMessageVer
 			if(bestSetValid) {
 				self->localityGroup.clear();
 				for( int i = 0; i < self->serverCursors[self->bestSet].size(); i++) {
-					if(!self->serverCursors[self->bestSet][i]->isActive()) {
+					if(!self->serverCursors[self->bestSet][i]->isActive() && self->serverCursors[self->bestSet][i]->version() <= self->messageVersion) {
 						self->localityGroup.add(self->logSets[self->bestSet]->tLogLocalities[i]);
 					}
 				}
