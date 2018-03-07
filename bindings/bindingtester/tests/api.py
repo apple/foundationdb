@@ -18,7 +18,6 @@
 # limitations under the License.
 #
 
-import ctypes
 import random
 import struct
 
@@ -169,7 +168,7 @@ class ApiTest(Test):
         op_choices += resets
 
         idempotent_atomic_ops = [u'BIT_AND', u'BIT_OR', u'MAX', u'MIN', u'BYTE_MIN', u'BYTE_MAX']
-        atomic_ops = idempotent_atomic_ops + [u'ADD', u'BIT_XOR']
+        atomic_ops = idempotent_atomic_ops + [u'ADD', u'BIT_XOR', u'APPEND_IF_FITS']
 
         if args.concurrency > 1:
             self.max_keys = random.randint(100, 1000)

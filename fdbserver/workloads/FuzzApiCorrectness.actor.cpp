@@ -862,7 +862,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair( error_code_key_too_large, ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) ),
 				std::make_pair( error_code_value_too_large, ExceptionContract::requiredIf(value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) ),
 				std::make_pair( error_code_invalid_mutation_type, ExceptionContract::requiredIf(
-							!isValidMutationType(op) || !isAtomicOp((MutationRef::Type) op) || op == MutationRef::AppendIfFits ) ),
+							!isValidMutationType(op) || !isAtomicOp((MutationRef::Type) op)) ),
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
 							(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::requiredIf(
