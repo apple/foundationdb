@@ -999,7 +999,6 @@ ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
 	if(g_network->isSimulated()) {
 		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
 		g_simulator.hasRemoteReplication = false;
-		g_simulator.hasSatelliteReplication = false;
 		ConfigurationResult::Type _ = wait( changeConfig( cx, "remote_none" ) );
 		if (g_network->isSimulated() && g_simulator.extraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
