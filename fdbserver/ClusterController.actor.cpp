@@ -511,7 +511,7 @@ public:
 			result.remoteTLogs.push_back(remoteLogs[i].first);
 		}
 
-		auto logRouters = getWorkersForRoleInDatacenter( req.dcId, ProcessClass::LogRouter, req.configuration.getDesiredLogRouters(), req.configuration, id_used );
+		auto logRouters = getWorkersForRoleInDatacenter( req.dcId, ProcessClass::LogRouter, req.logRouterCount, req.configuration, id_used );
 		for(int i = 0; i < logRouters.size(); i++) {
 			result.logRouters.push_back(logRouters[i].first);
 		}
@@ -594,6 +594,9 @@ public:
 		for(int i = 0; i < proxies.size(); i++)
 			result.proxies.push_back(proxies[i].first);
 
+		auto logRouters = getWorkersForRoleInDatacenter( remoteDcId, ProcessClass::LogRouter, req.configuration.getDesiredLogRouters(), req.configuration, id_used );
+		result.logRouterCount = logRouters.size() ? logRouters.size() : 1;
+
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 			( RoleFitness(tlogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
 			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(satelliteLogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId)) ) ||
@@ -642,6 +645,7 @@ public:
 			}
 		} else {
 			RecruitFromConfigurationReply result;
+			result.logRouterCount = 0;
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[masterProcessId]++;
 			id_used[clusterControllerProcessId]++;

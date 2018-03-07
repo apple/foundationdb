@@ -1007,6 +1007,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	{
 		TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
 		state RecruitRemoteFromConfigurationReply remoteWorkers = wait( fRemoteWorkers );
+
+		if(remoteWorkers.logRouters.size() != self->minRouters) {
+			TraceEvent("RemoteLogRecruitment_MismatchedLogRouters").detail("minRouters", self->minRouters).detail("workers", remoteWorkers.logRouters.size());
+			throw master_recovery_failed();
+		}
 		
 		state Reference<LogSet> logSet = Reference<LogSet>( new LogSet() );
 		logSet->tLogReplicationFactor = configuration.remoteTLogReplicationFactor;
@@ -1078,7 +1083,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			recoveryComplete.push_back( transformErrors( throwErrorOr( logSet->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor( TLogRecoveryFinishedRequest(), SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		
 		self->remoteRecoveryComplete = waitForAll(recoveryComplete);
-		logSet->logRouters.resize(remoteWorkers.remoteTLogs.size());
 		self->tLogs.push_back( logSet );
 		TraceEvent("RemoteLogRecruitment_CompletingRecovery");
 		return Void();
@@ -1114,7 +1118,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		if(configuration.remoteTLogReplicationFactor > 0) {
-			logSystem->minRouters = configuration.getDesiredLogRouters();
+			logSystem->minRouters = recr.logRouterCount;
 			logSystem->expectedLogSets++;
 		} else {
 			logSystem->minRouters = 0;
