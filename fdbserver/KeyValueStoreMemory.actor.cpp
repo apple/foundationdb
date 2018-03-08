@@ -86,7 +86,8 @@ public:
 		int64_t availableSize = std::min(getAvailableSize(), diskQueueBytes.free / 4 - uncommittedBytes);
 		int64_t totalSize = std::min(memoryLimit, diskQueueBytes.total / 4 - uncommittedBytes);
 
-		return StorageBytes(std::max((int64_t)0, availableSize), std::max((int64_t)0, totalSize), diskQueueBytes.used, diskQueueBytes.available);
+		return StorageBytes(std::max((int64_t)0, availableSize), std::max((int64_t)0, totalSize), diskQueueBytes.used,
+		    std::max((int64_t)0, std::min(diskQueueBytes.available, availableSize)));
 	}
 
 	void semiCommit() {
