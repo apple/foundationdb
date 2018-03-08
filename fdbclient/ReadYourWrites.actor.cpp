@@ -1479,7 +1479,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	if(key >= getMaxWriteKey())
 		throw key_outside_legal_range();
 
-	if(!isValidMutationType(operationType) || !isAtomicOp((MutationRef::Type) operationType) || operationType == MutationRef::AppendIfFits)
+	if(!isValidMutationType(operationType) || !isAtomicOp((MutationRef::Type) operationType))
 		throw invalid_mutation_type();
 
 	if(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT))
