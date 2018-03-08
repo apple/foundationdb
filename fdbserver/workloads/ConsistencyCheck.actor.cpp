@@ -682,6 +682,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state Key lastSampleKey;
 				state Key lastStartSampleKey;
 				state int64_t totalReadAmount = 0;
+				state int64_t rangeBytes = 0;
 
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
 
@@ -725,6 +726,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 							{
 								state GetKeyValuesReply current = rangeResult.get();
 								totalReadAmount += current.data.expectedSize();
+								if (j == 0) {
+									rangeBytes += current.data.expectedSize();
+								}
 								//If we haven't encountered a valid storage server yet, then mark this as the baseline to compare against
 								if(firstValidServer == -1)
 									firstValidServer = j;
@@ -910,6 +914,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 							throw;
 					}
 				}
+
+				TraceEvent("ConsistencyCheck_CheckedRange").detail("Range", printable(range)).detail("Bytes", rangeBytes);
 
 				canSplit = canSplit && sampledBytes - splitBytes >= shardBounds.min.bytes && sampledBytes > splitBytes;
 
