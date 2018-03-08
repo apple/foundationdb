@@ -69,7 +69,6 @@ public:
 
 	Reference<ProxyInfo> getMasterProxies();
 	Future<Reference<ProxyInfo>> getMasterProxiesFuture();
-	Future<Reference<ProxyInfo>> getMasterProxiesOrNever();
 	Future<Void> onMasterProxiesChanged();
 
 	// Update the watch counter for the database
