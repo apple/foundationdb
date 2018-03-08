@@ -327,7 +327,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 }
 
 // Read keyservers, return unique set of teams
-ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Database cx, UID masterId, MoveKeysLock moveKeysLock ) {
+ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Database cx, UID masterId, MoveKeysLock moveKeysLock, std::vector<Optional<Key>> remoteDcIds ) {
 	state Reference<InitialDataDistribution> result = Reference<InitialDataDistribution>(new InitialDataDistribution);
 	state Key beginKey = allKeys.begin;
 
@@ -335,8 +335,12 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 
 	state Transaction tr( cx );
 
+	state std::map<UID, Optional<Key>> server_dc;
+	state std::map<vector<UID>, std::pair<vector<UID>, vector<UID>>> team_cache;
+
 	//Get the server list in its own try/catch block since it modifies result.  We don't want a subsequent failure causing entries to be duplicated
 	loop {
+		server_dc.clear();
 		succeeded = false;
 		try {
 			result->mode = 1;
@@ -364,6 +368,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 			for( int i = 0; i < serverList.get().size(); i++ ) {
 				auto ssi = decodeServerListValue( serverList.get()[i].value );
 				result->allServers.push_back( std::make_pair(ssi, id_data[ssi.locality.processId()].processClass) );
+				server_dc[ssi.id()] = ssi.locality.dcId();
 			}
 
 			break;
@@ -392,17 +397,56 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 
 				// for each range
 				for(int i = 0; i < keyServers.size() - 1; i++) {
-					KeyRangeRef keys( keyServers[i].key, keyServers[i+1].key );
+					ShardInfo info( keyServers[i].key );
 					decodeKeyServersValue( keyServers[i].value, src, dest );
-					std::pair<vector<UID>,vector<UID>> teams;
-					for(int j=0; j<src.size(); j++)
-						teams.first.push_back(src[j]);
-					for(int j=0; j<dest.size(); j++)
-						teams.second.push_back(dest[j]);
-					result->shards.push_back( keyRangeWith(keys, teams) );
-					result->teams.insert( teams.first );
-					if (dest.size())
-						result->teams.insert( teams.second );
+					if(remoteDcIds.size()) {
+						auto srcIter = team_cache.find(src);
+						if(srcIter == team_cache.end()) {
+							for(auto& id : src) {
+								auto& dc = server_dc[id];
+								if(std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+									info.remoteSrc.push_back(id);
+								} else {
+									info.primarySrc.push_back(id);
+								}
+							}
+							result->primaryTeams.insert( info.primarySrc );
+							result->remoteTeams.insert( info.remoteSrc );
+							team_cache[src] = std::make_pair(info.primarySrc, info.remoteSrc);
+						} else {
+							info.primarySrc = srcIter->second.first;
+							info.remoteSrc = srcIter->second.second;
+						}
+						if(dest.size()) {
+							info.hasDest = true;
+							auto destIter = team_cache.find(dest);
+							if(destIter == team_cache.end()) {
+								for(auto& id : dest) {
+									auto& dc = server_dc[id];
+									if(std::find(remoteDcIds.begin(), remoteDcIds.end(), dc) != remoteDcIds.end()) {
+										info.remoteDest.push_back(id);
+									} else {
+										info.primaryDest.push_back(id);
+									}
+								}
+								result->primaryTeams.insert( info.primaryDest );
+								result->remoteTeams.insert( info.remoteDest );
+								team_cache[dest] = std::make_pair(info.primaryDest, info.remoteDest);
+							} else {
+								info.primaryDest = destIter->second.first;
+								info.remoteDest = destIter->second.second;
+							}
+						}
+					} else {
+						info.primarySrc = src;
+						result->primaryTeams.insert( src );
+						if (dest.size()) {
+							info.hasDest = true;
+							info.primaryDest = dest;
+							result->primaryTeams.insert( dest );
+						}
+					}
+					result->shards.push_back( info );
 				}
 
 				ASSERT(keyServers.size() > 0);
@@ -420,7 +464,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 	}
 
 	// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
-	result->shards.push_back( keyRangeWith(KeyRangeRef(allKeys.end,allKeys.end), std::pair<vector<UID>, vector<UID>>()) );
+	result->shards.push_back( ShardInfo(allKeys.end) );
 
 	return result;
 }
@@ -480,6 +524,7 @@ struct DDTeamCollection {
 
 	std::vector<Optional<Key>> includedDCs;
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs;
+	bool primary;
 	DDTeamCollection(
 		Database const& cx,
 		UID masterId,
@@ -490,12 +535,12 @@ struct DDTeamCollection {
 		std::vector<Optional<Key>> includedDCs,
 		Optional<std::vector<Optional<Key>>> otherTrackedDCs,
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges,
-		Future<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams )
+		Future<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary )
 		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
 		 configuration(configuration), serverChanges(serverChanges),
 		 initialFailureReactionDelay( delay( BUGGIFY ? 0 : SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution  ) ), healthyTeamCount( 0 ),
 		 initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
-		 unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs), zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true)
+		 unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs), zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary)
 	{
 		TraceEvent("DDTrackerStarting", masterId)
 			.detail( "State", "Inactive" )
@@ -759,8 +804,14 @@ struct DDTeamCollection {
 			}
 		}
 
-		for(auto t = initTeams.teams.begin(); t != initTeams.teams.end(); ++t) {
-			addTeam(t->begin(), t->end() );
+		if(primary) {
+			for(auto t = initTeams.primaryTeams.begin(); t != initTeams.primaryTeams.end(); ++t) {
+				addTeam(t->begin(), t->end() );
+			}
+		} else {
+			for(auto t = initTeams.remoteTeams.begin(); t != initTeams.remoteTeams.end(); ++t) {
+				addTeam(t->begin(), t->end() );
+			}
 		}
 
 		addSubsetOfEmergencyTeams();
@@ -830,9 +881,6 @@ struct DDTeamCollection {
 			}
 		}
 
-		if(newTeamServers.empty()) {
-			return;
-		}
 		Reference<TCTeamInfo> teamInfo( new TCTeamInfo( newTeamServers ) );
 		TraceEvent("TeamCreation", masterId).detail("Team", teamInfo->getDesc());
 		teamInfo->tracker = teamTracker( this, teamInfo );
@@ -1290,20 +1338,20 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
 				if( self->initialFailureReactionDelay.isReady() && !self->zeroHealthyTeams->get() ) {
-					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( team->getServerIDs() );
+					vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team(team->getServerIDs(), self->primary) );
 
 					for(int i=0; i<shards.size(); i++) {
 						int maxPriority = team->getPriority();
 						auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
 						for( int t=0; t<teams.size(); t++) {
-							ASSERT( teams[t].size() );
+							ASSERT( teams[t].servers.size() );
 
-							if( self->server_info.count( teams[t][0] ) ) {
-								auto& info = self->server_info[teams[t][0]];
+							if( self->server_info.count( teams[t].servers[0] ) ) {
+								auto& info = self->server_info[teams[t].servers[0]];
 
 								bool found = false;
 								for( int i = 0; i < info->teams.size(); i++ ) {
-									if( info->teams[i]->serverIDs == teams[t] ) {
+									if( info->teams[i]->serverIDs == teams[t].servers ) {
 										maxPriority = std::max( maxPriority, info->teams[i]->getPriority() );
 										found = true;
 										break;
@@ -1826,9 +1874,10 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs,
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
 	Future<Void> readyToStart,
-	Reference<AsyncVar<bool>> zeroHealthyTeams )
+	Reference<AsyncVar<bool>> zeroHealthyTeams,
+	bool primary)
 {
-	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, configuration, includedDCs, otherTrackedDCs, serverChanges, readyToStart, zeroHealthyTeams );
+	state DDTeamCollection self( cx, masterId, lock, output, shardsAffectedByTeamFailure, configuration, includedDCs, otherTrackedDCs, serverChanges, readyToStart, zeroHealthyTeams, primary );
 	state Future<Void> loggingTrigger = Void();
 	state PromiseStream<Void> serverRemoved;
 	state Future<Void> interfaceChanges;
@@ -2113,9 +2162,9 @@ ACTOR Future<Void> dataDistribution(
 				TraceEvent("DDInitTakingMoveKeysLock", mi.id());
 				state MoveKeysLock lock = wait( takeMoveKeysLock( cx, mi.id() ) );
 				TraceEvent("DDInitTookMoveKeysLock", mi.id());
-				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, mi.id(), lock) );
+				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, mi.id(), lock, configuration.remoteTLogReplicationFactor > 0 ? remoteDcIds : std::vector<Optional<Key>>() ) );
 				if(initData->shards.size() > 1) {
-					TraceEvent("DDInitGotInitialDD", mi.id()).detail("b", printable(initData->shards.end()[-2].begin)).detail("e", printable(initData->shards.end()[-2].end)).detail("src", describe(initData->shards.end()[-2].value.first)).detail("dest", describe(initData->shards.end()[-2].value.second)).trackLatest("InitialDD");
+					TraceEvent("DDInitGotInitialDD", mi.id()).detail("b", printable(initData->shards.end()[-2].key)).detail("e", printable(initData->shards.end()[-1].key)).detail("src", describe(initData->shards.end()[-2].primarySrc)).detail("dest", describe(initData->shards.end()[-2].primaryDest)).trackLatest("InitialDD");
 				} else {
 					TraceEvent("DDInitGotInitialDD", mi.id()).detail("b","").detail("e", "").detail("src", "[no items]").detail("dest", "[no items]").trackLatest("InitialDD");
 				}
@@ -2168,13 +2217,29 @@ ACTOR Future<Void> dataDistribution(
 
 			Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure( new ShardsAffectedByTeamFailure );
 
+			for(int s=0; s<initData->shards.size() - 1; s++) {
+				KeyRangeRef keys = KeyRangeRef(initData->shards[s].key, initData->shards[s+1].key);
+				shardsAffectedByTeamFailure->defineShard(keys);
+				std::vector<ShardsAffectedByTeamFailure::Team> teams;
+				teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[s].primarySrc, true));
+				if(configuration.remoteTLogReplicationFactor > 0) {
+					teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[s].remoteSrc, false));
+				}
+				shardsAffectedByTeamFailure->moveShard(keys, teams);
+				if(initData->shards[s].hasDest) {
+					// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
+					// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
+					output.send( RelocateShard( keys, PRIORITY_RECOVER_MOVE ) );
+				}
+			}
+
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( popOldTags( cx, logSystem, recoveryCommitVersion) );
-			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, shardsAffectedByTeamFailure, output, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, getShardMetrics, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, configuration.durableStorageQuorum, lastLimited ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[0], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, primaryDcId, configuration.remoteTLogReplicationFactor > 0 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0] ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[0], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, primaryDcId, configuration.remoteTLogReplicationFactor > 0 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
 			if (configuration.remoteTLogReplicationFactor > 0) {
-				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[1], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[1] ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
+				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[1], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[1], false ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
 			}
 
 			Void _ = wait( waitForAll( actors ) );
@@ -2215,7 +2280,8 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 		{},
 		PromiseStream<std::pair<UID, Optional<StorageServerInterface>>>(),
 		Future<Void>(Void()),
-		Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) )
+		Reference<AsyncVar<bool>>( new AsyncVar<bool>(true) ),
+		true
 	);
 
 	for(int id = 1; id <= processCount; id++) {

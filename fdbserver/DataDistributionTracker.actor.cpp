@@ -598,9 +598,7 @@ void restartShardTrackers( DataDistributionTracker* self, KeyRangeRef keys, Opti
 	}
 }
 
-ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self,
-									  Reference<InitialDataDistribution> initData,
-									  Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure)
+ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self, Reference<InitialDataDistribution> initData)
 {
 	TraceEvent("TrackInitialShards", self->masterId).detail("InitialShardCount", initData->shards.size());
 
@@ -608,35 +606,9 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker *self,
 	//SOMEDAY: Figure out what this priority should actually be
 	Void _ = wait( delay( 0.0, TaskDataDistribution ) );
 
-	state int lastBegin = -1;
-	state vector<UID> last;
-
 	state int s;
-	for(s=0; s<initData->shards.size(); s++) {
-		state InitialDataDistribution::Team src = initData->shards[s].value.first;
-		auto& dest = initData->shards[s].value.second;
-		if (dest.size()) {
-			// This shard is already in flight.  Ideally we should use dest in sABTF and generate a dataDistributionRelocator directly in
-			// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
-			self->output.send( RelocateShard( initData->shards[s], PRIORITY_RECOVER_MOVE ) );
-		}
-
-		// The following clause was here for no remembered reason.  It was removed, however, because on resumption of stopped
-		//  clusters (of size 3) it was grouping all the the shards in the system into one, and then splitting them all back out,
-		//  causing unecessary data distribution.
-		//if (s==0 || s+1==initData.shards.size() || lastBegin<0 || src != last || initData.shards[s].begin == keyServersPrefix) {
-			// end current run, start a new shardTracker
-			// relies on the dummy shard at allkeysend
-
-			if (lastBegin >= 0) {
-				state KeyRangeRef keys( initData->shards[lastBegin].begin, initData->shards[s].begin );
-				restartShardTrackers( self, keys );
-				shardsAffectedByTeamFailure->defineShard( keys );
-				shardsAffectedByTeamFailure->moveShard( keys, last );
-			}
-			lastBegin = s;
-			last = src;
-		//}
+	for(s=0; s<initData->shards.size()-1; s++) {
+		restartShardTrackers( self, KeyRangeRef( initData->shards[s].key, initData->shards[s+1].key ) );
 		Void _ = wait( yield( TaskDataDistribution ) );
 	}
 
@@ -692,7 +664,6 @@ ACTOR Future<Void> fetchShardMetrics( DataDistributionTracker* self, GetMetricsR
 ACTOR Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> initData,
 	Database cx,
-	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	PromiseStream<RelocateShard> output,
 	PromiseStream<GetMetricsRequest> getShardMetrics,
 	FutureStream<Promise<int64_t>> getAverageShardBytes,
@@ -703,7 +674,7 @@ ACTOR Future<Void> dataDistributionTracker(
 	state DataDistributionTracker self(cx, masterId, readyToStart, output, anyZeroHealthyTeams);
 	state Future<Void> loggingTrigger = Void();
 	try {
-		Void _ = wait( trackInitialShards( &self, initData, shardsAffectedByTeamFailure ) );
+		Void _ = wait( trackInitialShards( &self, initData ) );
 		initData = Reference<InitialDataDistribution>();
 
 		loop choose {
@@ -731,9 +702,7 @@ ACTOR Future<Void> dataDistributionTracker(
 
 vector<KeyRange> ShardsAffectedByTeamFailure::getShardsFor( Team team ) {
 	vector<KeyRange> r;
-	for(auto it = team_shards.lower_bound( std::pair<Team,KeyRange>( team, KeyRangeRef() ) );
-			it != team_shards.end() && it->first == team;
-			++it)
+	for(auto it = team_shards.lower_bound( std::pair<Team,KeyRange>( team, KeyRangeRef() ) ); it != team_shards.end() && it->first == team; ++it)
 		r.push_back( it->second );
 	return r;
 }
@@ -742,20 +711,20 @@ int ShardsAffectedByTeamFailure::getNumberOfShards( UID ssID ) {
 	return storageServerShards[ssID];
 }
 
-vector<vector<UID>> ShardsAffectedByTeamFailure::getTeamsFor( KeyRangeRef keys ) {
+vector<ShardsAffectedByTeamFailure::Team> ShardsAffectedByTeamFailure::getTeamsFor( KeyRangeRef keys ) {
 	return shard_teams[keys.begin];
 }
 
 void ShardsAffectedByTeamFailure::erase(Team team, KeyRange const& range) {
 	if(team_shards.erase( std::pair<Team,KeyRange>(team, range) ) > 0) {
-		for(auto uid = team.begin(); uid != team.end(); ++uid)
+		for(auto uid = team.servers.begin(); uid != team.servers.end(); ++uid)
 			storageServerShards[*uid]--;
 	}
 }
 
 void ShardsAffectedByTeamFailure::insert(Team team, KeyRange const& range) {
 	if(team_shards.insert( std::pair<Team,KeyRange>( team, range ) ).second) {
-		for(auto uid = team.begin(); uid != team.end(); ++uid)
+		for(auto uid = team.servers.begin(); uid != team.servers.end(); ++uid)
 			storageServerShards[*uid]++;
 	}
 }
@@ -787,7 +756,7 @@ void ShardsAffectedByTeamFailure::defineShard( KeyRangeRef keys ) {
 	check();
 }
 
-void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, Team destinationTeam ) {
+void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, std::vector<Team> destinationTeams ) {
 	/*TraceEvent("ShardsAffectedByTeamFailureMove")
 		.detail("KeyBegin", printable(keys.begin))
 		.detail("KeyEnd", printable(keys.end))
@@ -795,31 +764,36 @@ void ShardsAffectedByTeamFailure::moveShard( KeyRangeRef keys, Team destinationT
 		.detail("NewTeam", describe(destinationTeam));*/
 
 	auto ranges = shard_teams.intersectingRanges( keys );
-	std::vector< std::pair<Team,KeyRange> > modifiedShards;
+	std::vector< std::pair<std::vector<Team>,KeyRange> > modifiedShards;
 	for(auto it = ranges.begin(); it != ranges.end(); ++it) {
 		if( keys.contains( it->range() ) ) {
-			// erase the many teams that were assiciated with this one shard
+			// erase the many teams that were associated with this one shard
 			for(auto t = it->value().begin(); t != it->value().end(); ++t) {
 				erase(*t, it->range());
 			}
 
 			// save this modification for later insertion
-			modifiedShards.push_back( std::pair<Team,KeyRange>( destinationTeam, it->range() ) );
+			modifiedShards.push_back( std::pair<std::vector<Team>,KeyRange>( destinationTeams, it->range() ) );
 		} else {
 			// for each range that touches this move, add our team as affecting this range
-			insert(destinationTeam, it->range());
+			for(auto& team : destinationTeams) {
+				insert(team, it->range());
 
-			// if we are not in the list of teams associated with this shard, add us in
-			auto& teams = it->value();
-			if( std::find( teams.begin(), teams.end(), destinationTeam ) == teams.end() )
-				teams.push_back( destinationTeam );
+				// if we are not in the list of teams associated with this shard, add us in
+				auto& teams = it->value();
+				if( std::find( teams.begin(), teams.end(), team ) == teams.end() ) {
+					teams.push_back( team );
+				}
+			}
 		}
 	}
 
 	// we cannot modify the KeyRangeMap while iterating through it, so add saved modifications now
 	for( int i = 0; i < modifiedShards.size(); i++ ) {
-		insert(modifiedShards[i].first, modifiedShards[i].second);
-		shard_teams.insert( modifiedShards[i].second, vector<Team>( 1, modifiedShards[i].first ) );
+		for( auto& t : modifiedShards[i].first) {
+			insert(t, modifiedShards[i].second);
+		}
+		shard_teams.insert( modifiedShards[i].second, modifiedShards[i].first );
 	}
 
 	check();
@@ -838,11 +812,11 @@ void ShardsAffectedByTeamFailure::check() {
 		auto rs = shard_teams.ranges();
 		for(auto i = rs.begin(); i != rs.end(); ++i)
 			for(vector<Team>::iterator t = i->value().begin(); t != i->value().end(); ++t)
-				if (!team_shards.count( make_pair( *t, i->range() ) )) {
+				if (!team_shards.count( std::make_pair( *t, i->range() ) )) {
 					std::string teamDesc, shards;
-					for(int k=0; k<t->size(); k++)
-						teamDesc += format("%llx ", (*t)[k].first());
-					for(auto x = team_shards.lower_bound( make_pair( *t, KeyRangeRef() ) ); x != team_shards.end() && x->first == *t; ++x)
+					for(int k=0; k<t->servers.size(); k++)
+						teamDesc += format("%llx ", t->servers[k].first());
+					for(auto x = team_shards.lower_bound( std::make_pair( *t, KeyRangeRef() ) ); x != team_shards.end() && x->first == *t; ++x)
 						shards += printable(x->second.begin) + "-" + printable(x->second.end) + ",";
 					TraceEvent(SevError,"SATFInvariantError2")
 						.detail("KB", printable(i->begin()))
