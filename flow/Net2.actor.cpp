@@ -412,15 +412,15 @@ private:
 		boost::system::error_code error;
 		socket.close(error);
 		if (error)
-			TraceEvent(SevWarn, "N2_CloseError", id).detail("Message", error.value());
+			TraceEvent(SevWarn, "N2_CloseError", id).detail("Message", error.value()).suppressFor(1.0);
 	}
 
 	void onReadError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_ReadError", id).detail("Message", error.value());
+		TraceEvent(SevWarn, "N2_ReadError", id).detail("Message", error.value()).suppressFor(1.0);
 		closeSocket();
 	}
 	void onWriteError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_WriteError", id).detail("Message", error.value());
+		TraceEvent(SevWarn, "N2_WriteError", id).detail("Message", error.value()).suppressFor(1.0);
 		closeSocket();
 	}
 };

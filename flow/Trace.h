@@ -203,7 +203,7 @@ struct TraceEvent {
 #endif
 
 struct TraceInterval {
-	TraceInterval( const char* type ) : count(-1), type(type) {}
+	TraceInterval( const char* type ) : count(-1), type(type), severity(SevInfo) {}
 
 	TraceInterval& begin();
 	TraceInterval& end() { return *this; }
@@ -211,6 +211,7 @@ struct TraceInterval {
 	const char* type;
 	UID pairID;
 	int count;
+	Severity severity;
 };
 
 struct LatestEventCache {

@@ -611,7 +611,6 @@ struct DDTeamCollection {
 				}
 
 				if( foundExact || (req.wantsTrueBest && bestOption.present() ) ) {
-					TraceEvent("getTeam").detail("wantsVariety", req.wantsNewServers).detail("bestOption", bestOption.get()->getDesc());
 					ASSERT( bestOption.present() );
 					req.reply.send( bestOption );
 					return Void();
@@ -1708,7 +1707,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection *self, Reference<AsyncVar<
 			for(auto s = self->server_info.begin(); s != self->server_info.end(); ++s) {
 				auto serverStatus = self->server_status.get( s->second->lastKnownInterface.id() );
 				if( serverStatus.excludeOnRecruit() ) {
-					TraceEvent("DDRecruitExcl1").detail("Excluding", s->second->lastKnownInterface.address());
+					TraceEvent(SevDebug, "DDRecruitExcl1").detail("Excluding", s->second->lastKnownInterface.address());
 					auto addr = s->second->lastKnownInterface.address();
 					exclusions.insert( AddressExclusion( addr.ip, addr.port ) );
 				}
@@ -1720,7 +1719,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection *self, Reference<AsyncVar<
 			auto excl = self->excludedServers.getKeys();
 			for(auto& s : excl)
 				if (self->excludedServers.get(s)) {
-					TraceEvent("DDRecruitExcl2").detail("Excluding", s.toString());
+					TraceEvent(SevDebug, "DDRecruitExcl2").detail("Excluding", s.toString());
 					exclusions.insert( s );
 				}
 			rsr.criticalRecruitment = self->healthyTeamCount == 0;
