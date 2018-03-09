@@ -564,16 +564,13 @@ public:
 		// Force is required if there is not a restorable snapshot which both
 		//   - begins at or after expireEndVersion
 		//   - ends at or before restorableBeginVersion
-		bool forceNeeded = true;
+		state bool forceNeeded = true;
 		for(KeyspaceSnapshotFile &s : desc.snapshots) {
 			if(s.restorable.orDefault(false) && s.beginVersion >= expireEndVersion && s.endVersion <= restorableBeginVersion) {
 				forceNeeded = false;
 				break;
 			}
 		}
-
-		if(forceNeeded && !force)
-			throw backup_cannot_expire();
 
 		// Get metadata
 		state Optional<Version> expiredEnd;
@@ -604,52 +601,94 @@ public:
 				newLogBeginVersion = expireEndVersion;
 			}
 			else {
-				// If the last log overlaps the expiredEnd then use the log's begin version
+				// If the last log overlaps the expiredEnd then use the log's begin version and move the expiredEnd
+				// back to match it.
 				if(last.endVersion > expireEndVersion) {
 					newLogBeginVersion = last.beginVersion;
 					logs.pop_back();
+					expireEndVersion = newLogBeginVersion.get();
 				}
 			}
 		}
 
-		// If we have a new log begin version then potentially update the property but definitely set
-		// expireEndVersion to the new log begin because we will only be deleting files up to but not
-		// including that version.
-		if(newLogBeginVersion.present()) {
-			expireEndVersion = newLogBeginVersion.get();
-			// If the new version is greater than the existing one or the
-			// existing one is not present then write the new value
-			if(logBegin.orDefault(0) < newLogBeginVersion.get()) {
-				Void _ = wait(bc->logBeginVersion().set(newLogBeginVersion.get()));
-			}
-		}
-		else {
-			// Otherwise, if the old logBeginVersion is present and older than expireEndVersion then clear it because
-			// it refers to a version in a range we're about to delete and apparently continuity through
-			// expireEndVersion is broken.
-			if(logBegin.present() && logBegin.get() < expireEndVersion)
-				Void _ = wait(bc->logBeginVersion().clear());
-		}
+		// Make a list of files to delete
+		state std::vector<std::string> toDelete;
 
-		// Delete files
-		state std::vector<Future<Void>> deletes;
-
+		// Move filenames out of vector then destroy it to save memory
 		for(auto const &f : logs) {
-			deletes.push_back(bc->deleteFile(f.fileName));
+			toDelete.push_back(std::move(f.fileName));
 		}
+		logs.clear();
 
+		// Move filenames out of vector then destroy it to save memory
 		for(auto const &f : ranges) {
 			// Must recheck version because list returns data up to and including the given endVersion
 			if(f.version < expireEndVersion)
-				deletes.push_back(bc->deleteFile(f.fileName));
+				toDelete.push_back(std::move(f.fileName));
 		}
+		ranges.clear();
 
 		for(auto const &f : desc.snapshots) {
 			if(f.endVersion < expireEndVersion)
-				deletes.push_back(bc->deleteFile(f.fileName));
+				toDelete.push_back(std::move(f.fileName));
+		}
+		desc = BackupDescription();
+
+		// If some files to delete were found AND force is needed AND the force option is NOT set, then fail
+		if(!toDelete.empty() && forceNeeded && !force)
+			throw backup_cannot_expire();
+
+		// We are about to start deleting files, at which point no data prior to the expire end version can be 
+		// safely assumed to exist. The [logBegin, logEnd) range from the container's metadata describes
+		// a range of log versions which can be assumed to exist, so if the range of data being deleted overlaps
+		// that range then the metadata range must be updated.
+
+		// If we're expiring the entire log range described by the metadata then clear both metadata values
+		if(logEnd.present() && logEnd.get() < expireEndVersion) {
+			if(logBegin.present())
+				Void _ = wait(bc->logBeginVersion().clear());
+			if(logEnd.present())
+				Void _ = wait(bc->logEndVersion().clear());
+		}
+		else {
+			// If we are expiring to a point within the metadata range then update the begin if we have a new
+			// log begin version (which we should!) or clear the metadata range if we do not (which would be
+			// repairing the metadata from an incorrect state)
+			if(logBegin.present() && logBegin.get() < expireEndVersion) {
+				if(newLogBeginVersion.present()) {
+					Void _ = wait(bc->logBeginVersion().set(newLogBeginVersion.get()));
+				}
+				else {
+					if(logBegin.present())
+						Void _ = wait(bc->logBeginVersion().clear());
+					if(logEnd.present())
+						Void _ = wait(bc->logEndVersion().clear());
+				}
+			}
 		}
 
-		Void _ = wait(waitForAll(deletes));
+		// Delete files, but limit parallelism because the file list could use a lot of memory and the corresponding
+		// delete actor states would use even more if they all existed at the same time.
+		state std::list<Future<Void>> deleteFutures;
+
+		while(!toDelete.empty() || !deleteFutures.empty()) {
+
+			// While there are files to delete and budget in the deleteFutures list, start a delete
+			while(!toDelete.empty() && deleteFutures.size() < CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES) {
+				deleteFutures.push_back(bc->deleteFile(toDelete.back()));
+				toDelete.pop_back();
+			}
+
+			// Wait for deletes to finish until there are only targetDeletesInFlight remaining.
+			// If there are no files left to start then this value is 0, otherwise it is one less
+			// than the delete concurrency limit.
+			state int targetFuturesSize = toDelete.empty() ? 0 : (CLIENT_KNOBS->BACKUP_CONCURRENT_DELETES - 1);
+
+			while(deleteFutures.size() > targetFuturesSize) {
+				Void _ = wait(deleteFutures.front());
+				deleteFutures.pop_front();
+			}
+		}
 
 		// Update the expiredEndVersion property.
 		Void _ = wait(bc->expiredEndVersion().set(expireEndVersion));
