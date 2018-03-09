@@ -702,7 +702,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 
 			destination->addDataInFlightToTeam( +metrics.bytes );
 
-			TraceEvent("RelocateShardHasDestination", masterId)
+			TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", masterId)
 				.detail("PairId", relocateShardInterval.pairID)
 				.detail("DestinationTeam", destination->getDesc());
 

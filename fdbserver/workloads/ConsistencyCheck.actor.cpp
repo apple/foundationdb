@@ -682,7 +682,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 				state Key lastSampleKey;
 				state Key lastStartSampleKey;
 				state int64_t totalReadAmount = 0;
-				state int64_t rangeBytes = 0;
 
 				state KeySelector begin = firstGreaterOrEqual(range.begin);
 
@@ -726,9 +725,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 							{
 								state GetKeyValuesReply current = rangeResult.get();
 								totalReadAmount += current.data.expectedSize();
-								if (j == 0) {
-									rangeBytes += current.data.expectedSize();
-								}
 								//If we haven't encountered a valid storage server yet, then mark this as the baseline to compare against
 								if(firstValidServer == -1)
 									firstValidServer = j;
@@ -841,7 +837,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 							else if(!isRelocating)
 							{
 								TraceEvent("ConsistencyCheck_StorageServerUnavailable").detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
+									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token).suppressFor(1.0);
 
 								//All shards should be available in quiscence
 								if(self->performQuiescentChecks)
@@ -915,8 +911,6 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 				}
 
-				TraceEvent("ConsistencyCheck_CheckedRange").detail("Range", printable(range)).detail("Bytes", rangeBytes);
-
 				canSplit = canSplit && sampledBytes - splitBytes >= shardBounds.min.bytes && sampledBytes > splitBytes;
 
 				//Update the size of all storage servers containing this shard
@@ -983,7 +977,9 @@ struct ConsistencyCheckWorkload : TestWorkload
 				}
 			}
 
-			TraceEvent("ConsistencyCheck_ReadRange").detail("range", printable(range)).detail("bytesRead", bytesReadInRange);
+			if(bytesReadInRange > 0) {
+				TraceEvent("ConsistencyCheck_ReadRange").detail("range", printable(range)).detail("bytesRead", bytesReadInRange);
+			}
 		}
 
 		//SOMEDAY: when background data distribution is implemented, include this test
