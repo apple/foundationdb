@@ -632,6 +632,7 @@ public:
 			if(f.endVersion < expireEndVersion)
 				toDelete.push_back(std::move(f.fileName));
 		}
+		desc = BackupDescription();
 
 		// If some files to delete were found AND force is needed AND the force option is NOT set, then fail
 		if(!toDelete.empty() && forceNeeded && !force)
