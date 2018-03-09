@@ -128,7 +128,11 @@ ifeq ($(PLATFORM),linux)
   CLEAN_TARGETS += fdb_java_release_clean
 
   ifneq ($(FATJAR),)
-	packages/fdb-java-$(JARVER).jar: $(MAC_OBJ_JAVA) $(WINDOWS_OBJ_JAVA)
+    ifneq ($(NOWINDOWS),)
+      packages/fdb-java-$(JARVER).jar: $(MAC_OBJ_JAVA)
+    else
+      packages/fdb-java-$(JARVER).jar: $(MAC_OBJ_JAVA) $(WINDOWS_OBJ_JAVA)
+    endif
   endif
 
   bindings/java/pom.xml: bindings/java/pom.xml.in $(ALL_MAKEFILES) versions.target
@@ -149,7 +153,9 @@ ifeq ($(PLATFORM),linux)
 	@mkdir -p packages/jar_regular/lib/windows/amd64
 	@mkdir -p packages/jar_regular/lib/osx/x86_64
 	@cp $(MAC_OBJ_JAVA) packages/jar_regular/lib/osx/x86_64/libfdb_java.jnilib
+    ifeq ($(NOWINDOWS),)
 	@cp $(WINDOWS_OBJ_JAVA) packages/jar_regular/lib/windows/amd64/fdb_java.dll
+    endif
   endif
 	@cd packages/jar_regular && jar cf $(TOPDIR)/$@ *
 	@rm -r packages/jar_regular
@@ -192,8 +198,8 @@ ifeq ($(PLATFORM),linux)
   packages_clean: fdb_java_release_clean
 
   ifneq ($(FATJAR),)
-	MAC_OBJ_JAVA := lib/libfdb_java.jnilib-$(VERSION_ID)
-	WINDOWS_OBJ_JAVA := lib/fdb_java.dll-$(VERSION_ID)
+    MAC_OBJ_JAVA := lib/libfdb_java.jnilib-$(VERSION_ID)
+    WINDOWS_OBJ_JAVA := lib/fdb_java.dll-$(VERSION_ID)
   endif
 
 else ifeq ($(PLATFORM),osx)
