@@ -35,6 +35,49 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
+static std::string boolToYesOrNo(bool val) { return val ? std::string("Yes") : std::string("No"); }
+
+static std::string versionToString(Optional<Version> version) {
+	if (version.present())
+		return std::to_string(version.get());
+	else
+		return "N/A";
+}
+
+static std::string timeStampToString(Optional<int64_t> ts) {
+	if (!ts.present())
+		return "N/A";
+	time_t curTs = ts.get();
+	char buffer[128];
+	struct tm* timeinfo;
+	timeinfo = localtime(&curTs);
+	strftime(buffer, 128, "%D %T", timeinfo);
+	return std::string(buffer);
+}
+
+static Future<Optional<int64_t>> getTimestampFromVersion(Optional<Version> ver, Reference<ReadYourWritesTransaction> tr) {
+	if (!ver.present())
+		return Optional<int64_t>();
+
+	return timeKeeperEpochsFromVersion(ver.get(), tr);
+}
+
+// Time format :
+// <= 59 seconds
+// <= 59.99 minutes
+// <= 23.99 hours
+// N.NN days
+std::string secondsToTimeFormat(int64_t seconds) {
+	if (seconds >= 86400)
+		return format("%.2f day(s)", seconds / 86400.0);
+	else if (seconds >= 3600)
+		return format("%.2f hour(s)", seconds / 3600.0);
+	else if (seconds >= 60)
+		return format("%.2f minute(s)", seconds / 60.0);
+	else
+		return format("%ld second(s)", seconds);
+}
+
 const Key FileBackupAgent::keyLastRestorable = LiteralStringRef("last_restorable");
 
 // For convenience
@@ -177,9 +220,8 @@ public:
 		// These should not happen
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
-		std::string msg = format("ERROR: %s (%s)", details.c_str(), e.what());
 
-		return updateErrorInfo(cx, e, msg);
+		return updateErrorInfo(cx, e, details);
 	}
 
 	Key mutationLogPrefix() {
@@ -790,7 +832,7 @@ namespace fileBackup {
 	// servers to catch and log to the appropriate config any error that execute/finish didn't catch and log.
 	struct RestoreTaskFuncBase : TaskFuncBase {
 		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return RestoreConfig(task).logError(cx, error, format("Task '%s' UID '%s' %s failed", task->params[Task::reservedTaskParamKeyType].printable().c_str(), task->key.printable().c_str(), toString(task).c_str()));
+			return RestoreConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
 		}
 		virtual std::string toString(Reference<Task> task)
 		{
@@ -800,7 +842,7 @@ namespace fileBackup {
 
 	struct BackupTaskFuncBase : TaskFuncBase {
 		virtual Future<Void> handleError(Database cx, Reference<Task> task, Error const &error) {
-			return BackupConfig(task).logError(cx, error, format("Task '%s' UID '%s' %s failed", task->params[Task::reservedTaskParamKeyType].printable().c_str(), task->key.printable().c_str(), toString(task).c_str()));
+			return BackupConfig(task).logError(cx, error, format("'%s' on '%s'", error.what(), task->params[Task::reservedTaskParamKeyType].printable().c_str()));
 		}
 		virtual std::string toString(Reference<Task> task)
 		{
@@ -3538,17 +3580,50 @@ public:
 						state int64_t snapshotInterval;
 						state Version snapshotBeginVersion;
 						state Version snapshotTargetEndVersion;
+						state Optional<Version> latestSnapshotEndVersion;
+						state Optional<Version> latestLogEndVersion;
+						state Optional<int64_t> logBytesWritten;
+						state Optional<int64_t> rangeBytesWritten;
+						state Optional<int64_t> latestSnapshotEndVersionTimestamp;
+						state Optional<int64_t> latestLogEndVersionTimestamp;
+						state Optional<int64_t> snapshotBeginVersionTimestamp;
+						state Optional<int64_t> snapshotTargetEndVersionTimestamp;
+						state bool stopWhenDone;
 
 						Void _ = wait( store(config.snapshotBeginVersion().getOrThrow(tr), snapshotBeginVersion)
 									&& store(config.snapshotTargetEndVersion().getOrThrow(tr), snapshotTargetEndVersion)
 									&& store(config.snapshotIntervalSeconds().getOrThrow(tr), snapshotInterval)
-								);
+									&& store(config.logBytesWritten().get(tr), logBytesWritten)
+									&& store(config.rangeBytesWritten().get(tr), rangeBytesWritten)
+									&& store(config.latestLogEndVersion().get(tr), latestLogEndVersion)
+									&& store(config.latestSnapshotEndVersion().get(tr), latestSnapshotEndVersion)
+									&& store(config.stopWhenDone().getOrThrow(tr), stopWhenDone) 
+									);
+
+						Void _ = wait( store(getTimestampFromVersion(latestSnapshotEndVersion, tr), latestSnapshotEndVersionTimestamp)
+									&& store(getTimestampFromVersion(latestLogEndVersion, tr), latestLogEndVersionTimestamp)
+									&& store(timeKeeperEpochsFromVersion(snapshotBeginVersion, tr), snapshotBeginVersionTimestamp)
+									&& store(timeKeeperEpochsFromVersion(snapshotTargetEndVersion, tr), snapshotTargetEndVersionTimestamp)
+									);
 
 						statusText += format("Snapshot interval is %lld seconds.  ", snapshotInterval);
 						if(backupState == BackupAgentBase::STATE_DIFFERENTIAL)
 							statusText += format("Current snapshot progress target is %3.2f%% (>100%% means the snapshot is supposed to be done)\n", 100.0 * (recentReadVersion - snapshotBeginVersion) / (snapshotTargetEndVersion - snapshotBeginVersion)) ;
 						else
 							statusText += "The initial snapshot is still running.\n";
+						
+						statusText += format("\nDetails:\n LogBytes written - %ld\n RangeBytes written - %ld\n "
+											 "Last complete log version and timestamp        - %s, %s\n "
+											 "Last complete snapshot version and timestamp   - %s, %s\n "
+											 "Current Snapshot start version and timestamp   - %s, %s\n "
+											 "Expected snapshot end version and timestamp    - %s, %s\n "
+											 "Backup supposed to stop at next snapshot completion - %s\n",
+											 logBytesWritten.orDefault(0), rangeBytesWritten.orDefault(0),
+											 versionToString(latestLogEndVersion).c_str(), timeStampToString(latestLogEndVersionTimestamp).c_str(),
+											 versionToString(latestSnapshotEndVersion).c_str(), timeStampToString(latestSnapshotEndVersionTimestamp).c_str(),
+											 versionToString(snapshotBeginVersion).c_str(), timeStampToString(snapshotBeginVersionTimestamp).c_str(),
+											 versionToString(snapshotTargetEndVersion).c_str(), timeStampToString(snapshotTargetEndVersionTimestamp).c_str(),
+											 boolToYesOrNo(stopWhenDone).c_str());
 					}
 
 					// Append the errors, if requested
@@ -3559,8 +3634,7 @@ public:
 
 						for(auto &e : errors) {
 							Version v = e.second.second;
-							std::string msg = format("%s (%lld seconds ago)\n", e.second.first.c_str(),
-														(recentReadVersion - v) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND);
+							std::string msg = format("%s ago : %s\n", secondsToTimeFormat((recentReadVersion - v) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND).c_str(), e.second.first.c_str());
 
 							// If error version is at or more recent than the latest restorable version then it could be inhibiting progress
 							if(v >= latestRestorableVersion.orDefault(0)) {
@@ -3571,10 +3645,16 @@ public:
 							}
 						}
 
-						if(!recentErrors.empty())
-							statusText += "Errors possibly preventing progress:\n" + recentErrors;
+						if (!recentErrors.empty()) {
+							if (latestRestorableVersion.present())
+								statusText += format("Recent Errors (since latest restorable point %s ago)\n",
+														secondsToTimeFormat((recentReadVersion - latestRestorableVersion.get()) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND).c_str())
+											  + recentErrors;
+							else
+								statusText += "Recent Errors (since initialization)\n" + recentErrors;
+						}
 						if(!pastErrors.empty())
-							statusText += "Older errors:\n" + pastErrors;
+							statusText += "Older Errors\n" + pastErrors;
 					}
 				}
 

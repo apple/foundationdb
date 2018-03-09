@@ -343,27 +343,26 @@ ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	}
 }
 
-ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, StorageServerInterface ssi, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit ) {
+ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer, KeyValueStoreType storeType, std::string filename, UID id, LocalityData locality, Reference<AsyncVar<ServerDBInfo>> db, std::string folder, ActorCollection* filesClosed, int64_t memoryLimit ) {
 	loop {
 		ErrorOr<Void> e = wait( errorOr( prevStorageServer) );
 		if (!e.isError()) return Void();
 		else if (e.getError().code() != error_code_please_reboot) throw e.getError();
 
-		TraceEvent("StorageServerRequestedReboot", ssi.id());
+		TraceEvent("StorageServerRequestedReboot", id);
 
 		//if (BUGGIFY) Void _ = wait(delay(1.0)); // This does the same thing as zombie()
 		// We need a new interface, since the new storageServer will do replaceInterface().  And we need to destroy
 		// the old one so the failure detector will know it is gone.
-		StorageServerInterface ssi_new;
-		ssi_new.uniqueID = ssi.uniqueID;
-		ssi_new.locality = ssi.locality;
-		ssi = ssi_new;
+		StorageServerInterface ssi;
+		ssi.uniqueID = id;
+		ssi.locality = locality;
 		ssi.initEndpoints();
 		auto* kv = openKVStore( storeType, filename, ssi.uniqueID, memoryLimit );
 		Future<Void> kvClosed = kv->onClosed();
 		filesClosed->add( kvClosed );
 		prevStorageServer = storageServer( kv, ssi, db, folder, Promise<Void>() );
-		prevStorageServer = handleIOErrors( prevStorageServer, kv, ssi.id(), kvClosed );
+		prevStorageServer = handleIOErrors( prevStorageServer, kv, id, kvClosed );
 	}
 }
 
@@ -610,7 +609,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				Future<Void> f = storageServer( kv, recruited, dbInfo, folder, recovery );
 				recoveries.push_back(recovery.getFuture());
 				f =  handleIOErrors( f, kv, s.storeID, kvClosed );
-				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited, dbInfo, folder, &filesClosed, memoryLimit );
+				f = storageServerRollbackRebooter( f, s.storeType, s.filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit );
 				errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), f ) );
 			} else if( s.storedComponent == DiskStore::TLogData ) {
 				IKeyValueStore* kv = openKVStore( s.storeType, s.filename, s.storeID, memoryLimit, validateDataFiles );
@@ -763,7 +762,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					Future<Void> s = storageServer( data, recruited, req.seedTag, storageReady, dbInfo, folder );
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady( req.reqId, s );
-					s = storageServerRollbackRebooter( s, req.storeType, filename, recruited, dbInfo, folder, &filesClosed, memoryLimit );
+					s = storageServerRollbackRebooter( s, req.storeType, filename, recruited.id(), recruited.locality, dbInfo, folder, &filesClosed, memoryLimit );
 					errorForwarders.add( forwardError( errors, "StorageServer", recruited.id(), s ) );
 				} else
 					forwardPromise( req.reply, storageCache.get( req.reqId ) );
