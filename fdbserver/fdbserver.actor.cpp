@@ -1314,6 +1314,16 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
+		if(role == ConsistencyCheck) {
+			if(publicAddressStr != "") {
+				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
+				printHelpTeaser(argv[0]);
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
+			publicAddress = NetworkAddress(publicIP, ::getpid());
+		}
+
 		if (listenAddressStr == "public")
 			listenAddress = publicAddress;
 		else {

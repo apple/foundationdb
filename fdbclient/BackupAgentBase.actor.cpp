@@ -328,7 +328,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 	KeyRangeRef range, bool terminator, bool systemAccess, bool lockAware) {
 	state KeySelector begin = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state Transaction tr(cx);
 	state FlowLock::Releaser releaser;
 
 	loop{
@@ -336,16 +336,16 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware)
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			//add lock
 			releaser.release();
 			Void _ = wait(lock->take(TaskDefaultYield, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT));
 			releaser = FlowLock::Releaser(*lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
-			state Standalone<RangeResultRef> values = wait(tr->getRange(begin, end, limits));
+			state Standalone<RangeResultRef> values = wait(tr.getRange(begin, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			if(values.size() > 1 && BUGGIFY) {
@@ -359,7 +359,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 			releaser.remaining -= values.expectedSize(); //its the responsibility of the caller to release after this point
 			ASSERT(releaser.remaining >= 0);
 
-			results.send(RangeResultWithVersion(values, tr->getReadVersion().get()));
+			results.send(RangeResultWithVersion(values, tr.getReadVersion().get()));
 
 			if (values.size() > 0)
 				begin = firstGreaterThan(values.end()[-1].key);
@@ -373,21 +373,21 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RangeResultWithVersi
 		catch (Error &e) {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
 				throw;
-			tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
+			tr = Transaction(cx);
 		}
 	}
 }
 
 ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Future<Void> active, Reference<FlowLock> lock,
 	KeyRangeRef range, std::function< std::pair<uint64_t, uint32_t>(Key key) > groupBy,
-	bool terminator, bool systemAccess, bool lockAware, std::function< Future<Void>(Reference<ReadYourWritesTransaction> tr) > withEachFunction)
+	bool terminator, bool systemAccess, bool lockAware)
 {
 	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
 	state KeySelector end = firstGreaterOrEqual(range.end);
 
 	state RCGroup rcGroup = RCGroup();
 	state uint64_t skipGroup(ULLONG_MAX);
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	state Transaction tr(cx);
 	state FlowLock::Releaser releaser;
 
 	loop{
@@ -395,14 +395,11 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
 			if (systemAccess)
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			if (lockAware)
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state Future<Void> withEach = Void();
-			if (withEachFunction) withEach = withEachFunction(tr);
-
-			state Standalone<RangeResultRef> rangevalue = wait(tr->getRange(nextKey, end, limits));
+			state Standalone<RangeResultRef> rangevalue = wait(tr.getRange(nextKey, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			if(rangevalue.size() > 1 && BUGGIFY) {
@@ -412,8 +409,6 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 				if(g_random->random01() < 0.5)
 					Void _ = wait(delay(6.0));
 			}
-
-			Void _ = wait(withEach);
 
 			//add lock
 			Void _ = wait(active);
@@ -427,7 +422,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 				//TraceEvent("log_readCommitted").detail("groupKey", groupKey).detail("skipGroup", skipGroup).detail("nextKey", printable(nextKey.key)).detail("end", printable(end.key)).detail("valuesize", value.size()).detail("index",index++).detail("size",s.value.size());
 				if (groupKey != skipGroup){
 					if (rcGroup.version == -1){
-						rcGroup.version = tr->getReadVersion().get();
+						rcGroup.version = tr.getReadVersion().get();
 						rcGroup.groupKey = groupKey;
 					}
 					else if (rcGroup.groupKey != groupKey) {
@@ -444,7 +439,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 						skipGroup = rcGroup.groupKey;
 
 						rcGroup = RCGroup();
-						rcGroup.version = tr->getReadVersion().get();
+						rcGroup.version = tr.getReadVersion().get();
 						rcGroup.groupKey = groupKey;
 					}
 					rcGroup.items.push_back_deep(rcGroup.items.arena(), s);
@@ -469,94 +464,13 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 		catch (Error &e) {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
 				throw;
-			Void _ = wait(tr->onError(e));
+			Void _ = wait(tr.onError(e));
 		}
 	}
 }
 
-ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Reference<FlowLock> lock,
-	KeyRangeRef range, std::function< std::pair<uint64_t, uint32_t>(Key key) > groupBy)
-{
-	state KeySelector nextKey = firstGreaterOrEqual(range.begin);
-	state KeySelector end = firstGreaterOrEqual(range.end);
-
-	state RCGroup rcGroup = RCGroup();
-	state uint64_t skipGroup(ULLONG_MAX);
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state FlowLock::Releaser releaser;
-
-	loop{
-		try {
-			state GetRangeLimits limits(CLIENT_KNOBS->ROW_LIMIT_UNLIMITED, (g_network->isSimulated() && !g_simulator.speedUpSimulation) ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
-
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			state Standalone<RangeResultRef> rangevalue = wait(tr->getRange(nextKey, end, limits));
-
-			// When this buggify line is enabled, if there are more than 1 result then use half of the results
-			if(rangevalue.size() > 1 && BUGGIFY) {
-				rangevalue.resize(rangevalue.arena(), rangevalue.size() / 2);
-				rangevalue.more = true;
-				// Half of the time wait for this tr to expire so that the next read is at a different version
-				if(g_random->random01() < 0.5)
-					Void _ = wait(delay(6.0));
-			}
-
-			releaser.release();
-			Void _ = wait(lock->take(TaskDefaultYield, rangevalue.expectedSize() + rcGroup.items.expectedSize()));
-			releaser = FlowLock::Releaser(*lock, rangevalue.expectedSize() + rcGroup.items.expectedSize());
-
-			int index(0);
-			for (auto & s : rangevalue){
-				uint64_t groupKey = groupBy(s.key).first;
-				//TraceEvent("log_readCommitted").detail("groupKey", groupKey).detail("skipGroup", skipGroup).detail("nextKey", printable(nextKey.key)).detail("end", printable(end.key)).detail("valuesize", value.size()).detail("index",index++).detail("size",s.value.size());
-				if (groupKey != skipGroup){
-					if (rcGroup.version == -1){
-						rcGroup.version = tr->getReadVersion().get();
-						rcGroup.groupKey = groupKey;
-					}
-					else if (rcGroup.groupKey != groupKey) {
-						//TraceEvent("log_readCommitted").detail("sendGroup0", rcGroup.groupKey).detail("itemSize", rcGroup.items.size()).detail("data_length",rcGroup.items[0].value.size());
-						state uint32_t len(0);
-						for (size_t j = 0; j < rcGroup.items.size(); ++j) {
-							len += rcGroup.items[j].value.size();
-						}
-						//TraceEvent("SendGroup").detail("groupKey", rcGroup.groupKey).detail("version", rcGroup.version).detail("length", len).detail("releaser.remaining", releaser.remaining);
-						releaser.remaining -= rcGroup.items.expectedSize(); //its the responsibility of the caller to release after this point
-						ASSERT(releaser.remaining >= 0);
-						results.send(rcGroup);
-						nextKey = firstGreaterThan(rcGroup.items.end()[-1].key);
-						skipGroup = rcGroup.groupKey;
-
-						rcGroup = RCGroup();
-						rcGroup.version = tr->getReadVersion().get();
-						rcGroup.groupKey = groupKey;
-					}
-					rcGroup.items.push_back_deep(rcGroup.items.arena(), s);
-				}
-			}
-
-			if (!rangevalue.more) {
-				if (rcGroup.version != -1){
-					releaser.remaining -= rcGroup.items.expectedSize(); //its the responsibility of the caller to release after this point
-					ASSERT(releaser.remaining >= 0);
-					//TraceEvent("log_readCommitted").detail("sendGroup1", rcGroup.groupKey).detail("itemSize", rcGroup.items.size()).detail("data_length", rcGroup.items[0].value.size());
-					results.send(rcGroup);
-				}
-
-				results.sendError(end_of_stream());
-				return Void();
-			}
-
-			nextKey = firstGreaterThan(rangevalue.end()[-1].key);
-		}
-		catch (Error &e) {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_future_version)
-				throw;
-			Void _ = wait(tr->onError(e));
-		}
-	}
+Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Reference<FlowLock> lock, KeyRangeRef range, std::function< std::pair<uint64_t, uint32_t>(Key key) > groupBy) {
+	return readCommitted(cx, results, Void(), lock, range, groupBy, true, true, true);
 }
 
 ACTOR Future<int> dumpData(Database cx, PromiseStream<RCGroup> results, Reference<FlowLock> lock, Key uid, Key addPrefix, Key removePrefix, RequestStream<CommitTransactionRequest> commit,

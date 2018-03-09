@@ -110,7 +110,7 @@ javadoc: $(JAVA_SOURCES) bindings/java/src/main/overview.html
 		-windowtitle "FoundationDB Java Client API" \
 		-doctitle "FoundationDB Java Client API" \
 		-link "http://docs.oracle.com/javase/8/docs/api" \
-		com.apple.foundationdb.org.apple.foundationdb.async com.apple.foundationdb.tuple com.apple.foundationdb.directory com.apple.foundationdb.subspace
+		com.apple.foundationdb com.apple.foundationdb.async com.apple.foundationdb.tuple com.apple.foundationdb.directory com.apple.foundationdb.subspace
 
 javadoc_clean:
 	@rm -rf $(JAVADOC_DIR)/javadoc

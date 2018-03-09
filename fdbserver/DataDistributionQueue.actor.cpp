@@ -920,7 +920,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			//FIXME: do not add data in flight to servers that were already in the src.
 			destination.addDataInFlightToTeam(+metrics.bytes);
 
-			TraceEvent("RelocateShardHasDestination", masterId)
+			TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", masterId)
 				.detail("PairId", relocateShardInterval.pairID)
 				.detail("DestinationTeam", destination.getDesc());
 
