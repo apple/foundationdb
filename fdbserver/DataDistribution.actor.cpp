@@ -623,7 +623,6 @@ struct DDTeamCollection {
 				}
 
 				if( foundExact || (req.wantsTrueBest && bestOption.present() ) ) {
-					TraceEvent("getTeam").detail("wantsVariety", req.wantsNewServers).detail("bestOption", bestOption.get()->getDesc());
 					ASSERT( bestOption.present() );
 					req.reply.send( bestOption );
 					return Void();

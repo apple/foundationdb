@@ -792,8 +792,21 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 
 			if (programStarts.count(address)) {
 				auto const& psxml = programStarts.at(address);
-				int64_t memLimit = parseInt64(extractAttribute(psxml, "MemoryLimit"));
-				memoryObj["limit_bytes"] = memLimit;
+
+				if(psxml.size() > 0) {
+					int64_t memLimit = parseInt64(extractAttribute(psxml, "MemoryLimit"));
+					memoryObj["limit_bytes"] = memLimit;
+
+					std::string version;
+					if (tryExtractAttribute(psxml, LiteralStringRef("Version"), version)) {
+						statusObj["version"] = version;
+					}
+
+					std::string commandLine;
+					if (tryExtractAttribute(psxml, LiteralStringRef("CommandLine"), commandLine)) {
+						statusObj["command_line"] = commandLine;
+					}
+				}
 			}
 
 			// if this process address is in the machine metrics
@@ -813,9 +826,10 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 
 			StatusArray messages;
 
-			if (errors.count(address) && errors[address].size())
+			if (errors.count(address) && errors[address].size()) {
 				// returns status object with type and time of error
 				messages.push_back(getError(errors.at(address)));
+			}
 
 			// string of address used so that other fields of a NetworkAddress are not compared
 			std::string strAddress = address.toString();
@@ -839,18 +853,6 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 
 			// Get roles for the worker's address as an array of objects
 			statusObj["roles"] = roles.getStatusForAddress(address);
-
-			if (programStarts.count(address)) {
-				auto const& psxml = programStarts.at(address);
-
-				std::string version;
-				if (tryExtractAttribute(psxml, LiteralStringRef("Version"), version))
-					statusObj["version"] = version;
-
-				std::string commandLine;
-				if (tryExtractAttribute(psxml, LiteralStringRef("CommandLine"), commandLine))
-					statusObj["command_line"] = commandLine;
-			}
 
 			if (configuration.present()){
 				statusObj["excluded"] = configuration.get().isExcludedServer(address);

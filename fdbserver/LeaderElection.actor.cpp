@@ -82,6 +82,10 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 	state bool iAmLeader = false;
 	state UID prevChangeID;
 
+	if( asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController) > ProcessClass::UnsetFit || asyncIsExcluded->get() ) {
+		Void _ = wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
+	}
+
 	nominees->set( vector<Optional<LeaderInfo>>( coordinators.clientLeaderServers.size() ) );
 
 	myInfo.serializedInfo = proposedSerializedInterface;
