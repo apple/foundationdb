@@ -809,8 +809,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				req.reply.send(recruited);
 			}
 			when( InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture()) ) {
-				TLogInterface recruited;
-				recruited.locality = locality;
+				TLogInterface recruited(locality);
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
