@@ -232,11 +232,23 @@ struct VersionStampWorkload : TestWorkload {
 			state KeyRangeRef range(prefix, endOfRange);
 			state Standalone<StringRef> committedVersionStamp;
 			state Version committedVersion;
+
+			bool useVersionstampPos = (g_random->random01() < 0.5);
+			state MutationRef::Type valueMutation;
+			state Value versionStampValue;
+			if(useVersionstampPos) {
+				versionStampValue = LiteralStringRef("\x00\x00\x00\x00").withPrefix(value);
+				valueMutation = MutationRef::SetVersionstampedValuePos;
+			} else {
+				versionStampValue = value;
+				valueMutation = MutationRef::SetVersionstampedValue;
+			}
+
 			loop{
 				state bool error = false;
 				//TraceEvent("VST_commit_begin").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("clear", printable(range));
 				try {
-					tr.atomicOp(key, value, MutationRef::SetVersionstampedValue);
+					tr.atomicOp(key, versionStampValue, valueMutation);
 					tr.clear(range);
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
