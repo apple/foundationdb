@@ -58,11 +58,12 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		agentRequest = getOption(options, LiteralStringRef("simDrAgents"), true);
 		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 
-		beforePrefix = g_random->random01() < 0.5;
+		// Use sharedRandomNumber if shareLogRange is true so that we can ensure backup and DR both backup the same range
+		beforePrefix = shareLogRange ? (sharedRandomNumber & 1) : (g_random->random01() < 0.5);
+
 		if (beforePrefix) {
 			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
 			backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xff"));
-
 		}
 		else {
 			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\x00\x00\x01"));
@@ -76,13 +77,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		UID randomID = g_nondeterministic_random->randomUniqueID();
 
 		if (shareLogRange) {
-			if (g_random->random01() < 0.5) {
-				backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-			} else if (g_random->random01() < 0.75) {
-				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, LiteralStringRef("\x7f")));
-			} else {
-				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(LiteralStringRef("\x7f"), normalKeys.end));
-			}
+			if (beforePrefix)
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, LiteralStringRef("\xfe\xff\xfe")));
+			else
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(strinc(LiteralStringRef("\x00\x00\x01")), normalKeys.end));
 		} else if(backupRangesCount <= 0) {
 			if (beforePrefix)
 				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, std::min(backupPrefix, extraPrefix)));

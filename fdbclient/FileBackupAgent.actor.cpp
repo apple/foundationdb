@@ -1497,7 +1497,7 @@ namespace fileBackup {
 									.detail("ScheduledVersion", scheduledVersion)
 									.detail("BeginKey", range.begin.printable())
 									.detail("EndKey", range.end.printable())
-									.suppressFor(2, true);
+									.suppressFor(2);
 							}
 							else {
 								// This shouldn't happen because if the transaction was already done or if another execution
@@ -1792,39 +1792,6 @@ namespace fileBackup {
 			}
 		} Params;
 
-		ACTOR static Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, bool backupDone, Version beginVersion, Version endVersion) {
-			if (endVersion <= beginVersion)
-				return Void();
-
-			state Version currBeginVersion = beginVersion;
-			state Version currEndVersion;
-			state bool clearVersionHistory = false;
-
-			while (currBeginVersion < endVersion) {
-				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-				
-				loop{
-					try {
-						currEndVersion = std::min(currBeginVersion + CLIENT_KNOBS->CLEAR_LOG_RANGE_COUNT * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE, endVersion);
-						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-						if (backupDone && currEndVersion == endVersion) {
-							clearVersionHistory = true;
-						}
-						Void _ = wait(clearLogRanges(tr, clearVersionHistory, logUidValue, destUidValue, currBeginVersion, currEndVersion));
-						Void _ = wait(tr->commit());
-						currBeginVersion = currEndVersion;
-						break;
-					} catch (Error &e) {
-						Void _ = wait(tr->onError(e));
-					}
-				}
-			}
-
-			return Void();
-		}
-
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 			Void _ = wait(checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version));
@@ -2025,10 +1992,7 @@ namespace fileBackup {
 			state BackupConfig backup(task);
 			state UID uid = backup.getUid();
 
-			state Key configPath = uidPrefixKey(logRangesRange.begin, uid);
-
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
-			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 			state Key destUidValue = wait(backup.destUidValue().getOrThrow(tr));
 			Key _ = wait(EraseLogRangeTaskFunc::addTask(tr, taskBucket, backup.getUid(), TaskCompletionKey::noSignal(), true, destUidValue));
 			
@@ -3579,10 +3543,7 @@ public:
 			// Cancel all backup tasks through tag
 			Void _ = wait(tag.cancel(tr));
 
-			Key configPath = uidPrefixKey(logRangesRange.begin, config.getUid());
-
 			tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
-			tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 
 			state Key destUidValue = wait(config.destUidValue().getOrThrow(tr));
 			state Version endVersion = wait(tr->getReadVersion());
@@ -3627,9 +3588,6 @@ public:
 		// Cancel backup task through tag
 		Void _ = wait(tag.cancel(tr));
 
-		Key configPath = uidPrefixKey(logRangesRange.begin, config.getUid());
-
-		tr->clear(KeyRangeRef(configPath, strinc(configPath)));
 		Key _ = wait(fileBackup::EraseLogRangeTaskFunc::addTask(tr, backupAgent->taskBucket, config.getUid(), TaskCompletionKey::noSignal(), true, destUidValue));
 
 		config.stateEnum().set(tr, EBackupState::STATE_ABORTED);

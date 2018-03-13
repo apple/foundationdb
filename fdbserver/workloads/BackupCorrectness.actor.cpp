@@ -61,13 +61,11 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		UID randomID = g_nondeterministic_random->randomUniqueID();
 
 		if (shareLogRange) {
-			if (g_random->random01() < 0.5) {
-				backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-			} else if (g_random->random01() < 0.75) {
-				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, LiteralStringRef("\x7f")));
-			} else {
-				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(LiteralStringRef("\x7f"), normalKeys.end));
-			}
+			bool beforePrefix = sharedRandomNumber & 1;
+			if (beforePrefix)
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, LiteralStringRef("\xfe\xff\xfe")));
+			else
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(strinc(LiteralStringRef("\x00\x00\x01")), normalKeys.end));
 		} else if (backupRangesCount <= 0) {
 			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
 		} else {
