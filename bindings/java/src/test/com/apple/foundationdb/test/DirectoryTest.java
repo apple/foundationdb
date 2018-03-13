@@ -34,7 +34,7 @@ import com.apple.foundationdb.directory.DirectorySubspace;
 public class DirectoryTest {
 	public static void main(String[] args) throws Exception {
 		try {
-			FDB fdb = FDB.selectAPIVersion(510);
+			FDB fdb = FDB.selectAPIVersion(520);
 			try(Database db = fdb.open()) {
 				runTests(db);
 			}
