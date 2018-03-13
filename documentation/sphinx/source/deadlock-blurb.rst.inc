@@ -1,0 +1,1 @@
+.. note:: Because of a `bug in the Linux kernel <https://bugzilla.kernel.org/show_bug.cgi?id=43260>`_, **FoundationDB might deadlock when running on Ubuntu 12.04 or 12.10** using the default ext4 filesystem. This was fixed in the 3.7 kernel (released 12/10/2012) thanks to the `hard work of Dmitry Monakhov <http://lkml.indiana.edu/hypermail/linux/kernel/1210.0/03434.html>`_.
