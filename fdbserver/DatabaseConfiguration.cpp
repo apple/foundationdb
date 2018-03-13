@@ -128,7 +128,7 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	if(remoteTLogReplicationFactor > 0 && !remoteTLogPolicy) {
 		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(remoteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
 	}
-	for(auto r : regions) {
+	for(auto& r : regions) {
 		if(r.satelliteTLogReplicationFactor > 0 && !r.satelliteTLogPolicy) {
 			r.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(r.satelliteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
 		}
@@ -163,7 +163,7 @@ bool DatabaseConfiguration::isValid() const {
 	std::set<Key> dcIds;
 	std::set<int> priorities;
 	dcIds.insert(Key());
-	for(auto r : regions) {
+	for(auto& r : regions) {
 		if( !(!dcIds.count(r.dcId) &&
 			!priorities.count(r.priority) &&
 			r.satelliteTLogReplicationFactor >= 0 &&
@@ -174,7 +174,7 @@ bool DatabaseConfiguration::isValid() const {
 		}
 		dcIds.insert(r.dcId);
 		priorities.insert(r.priority);
-		for(auto s : r.satellites) {
+		for(auto& s : r.satellites) {
 			if(dcIds.count(s.dcId)) {
 				return false;
 			}
@@ -244,7 +244,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 		if(regions.size()) {
 			StatusArray regionArr;
-			for( auto r : regions) {
+			for(auto& r : regions) {
 				StatusObject dcObj;
 				dcObj["id"] = r.dcId.toString();
 				dcObj["priority"] = r.priority;
@@ -272,7 +272,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 				if(r.satellites.size()) {
 					StatusArray satellitesArr;
-					for(auto s : r.satellites) {
+					for(auto& s : r.satellites) {
 						StatusObject satObj;
 						satObj["id"] = s.dcId.toString();
 						satObj["priority"] = s.priority;
