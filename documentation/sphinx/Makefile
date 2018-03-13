@@ -14,9 +14,6 @@ GIT_HEAD_REF	:= $(shell git rev-parse --short HEAD)
 GIT_BRANCH	:= $(shell git symbolic-ref --short HEAD)
 GIT_REPO_URL	:= $(shell git config --get remote.origin.url)
 
-USER ?= $(shell whoami)
-MD5SUM ?= md5sum
-
 # You can set these variables from the command line.
 #VERSIONOPTS	:= -D version=$(VERSION) -D release=$(RELEASE)
 SPHINXOPTS	:=  -c .
