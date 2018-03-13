@@ -70,7 +70,7 @@ struct UnitTestWorkload : TestWorkload {
 				tests.push_back(t);
 			}
 		}
-		fprintf(stdout, "Found %d tests\n", tests.size());
+		fprintf(stdout, "Found %lu tests\n", tests.size());
 		g_random->randomShuffle(tests);
 		if (self->testRunLimit > 0 && tests.size() > self->testRunLimit) 
 			tests.resize(self->testRunLimit);
