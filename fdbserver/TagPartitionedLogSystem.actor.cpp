@@ -969,7 +969,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->tLogs = logServers;
 				logSystem->oldLogData = oldLogData;
 				logSystem->logSystemType = prevState.logSystemType;
-				logSystem->rejoins = rejoins;
+				logSystem->rejoins = holdWhile( tLogReply, rejoins );
 				logSystem->epochEndVersion = end.get();
 				logSystem->knownCommittedVersion = knownCommittedVersion;
 
