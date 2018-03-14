@@ -243,7 +243,7 @@ void runTests(struct ResultSet *rs) {
 int main(int argc, char **argv) {
 	srand(time(NULL));
 	struct ResultSet *rs = newResultSet();
-	checkError(fdb_select_api_version(510), "select API version", rs);
+	checkError(fdb_select_api_version(520), "select API version", rs);
 	printf("Running RYW Benchmark test at client version: %s\n", fdb_get_client_version());
 
 	keys = generateKeys(numKeys, keySize);

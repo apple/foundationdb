@@ -61,6 +61,12 @@ USERID := $(shell id -u)
 USER := $(shell whoami)
 PROCESSID := $(shell echo "$$$$")
 
+ifeq ($(PLATFORM),osx)
+  MD5SUM=md5
+else
+  MD5SUM=md5sum
+endif
+
 
 #
 # Define the Java Variables
