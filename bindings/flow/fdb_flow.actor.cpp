@@ -140,8 +140,13 @@ namespace FDB {
 	API::API(int version) : version(version) {}
 
 	API* API::selectAPIVersion(int apiVersion) {
-		if(API::instance && apiVersion != API::instance->version) {
-			throw api_version_already_set();
+		if(API::instance) {
+			if(apiVersion != API::instance->version) {
+				throw api_version_already_set();
+			}
+			else {
+				return API::instance;
+			}
 		}
 
 		if(apiVersion < 500 || apiVersion > FDB_API_VERSION) {
@@ -150,11 +155,21 @@ namespace FDB {
 
 		throw_on_error( fdb_select_api_version_impl(apiVersion, FDB_API_VERSION) );
 
-		if(!API::instance) {
-			API::instance = new API(apiVersion);
-		}
-
+		API::instance = new API(apiVersion);
 		return API::instance;
+	}
+
+	bool API::isAPIVersionSelected() {
+		return API::instance != NULL;
+	}
+
+	API* API::getInstance() {
+		if(API::instance == NULL) {
+			throw api_version_unset();
+		}
+		else {
+			return API::instance;
+		}
 	}
 
 	void API::setupNetwork() {
@@ -181,6 +196,10 @@ namespace FDB {
 		throw_on_error( fdb_future_get_cluster( f.f, &c ) );
 
 		return Reference<Cluster>( new Cluster(c) );
+	}
+
+	int API::getAPIVersion() const {
+		return version;
 	}
 
 	Reference<DatabaseContext> Cluster::createDatabase() {

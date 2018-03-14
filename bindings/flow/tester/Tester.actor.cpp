@@ -1510,6 +1510,25 @@ struct UnitTestsFunc : InstructionFunc {
 		ASSERT(data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(1020)));
 		ASSERT(!data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(10)));
 
+		ASSERT(API::isAPIVersionSelected());
+		state API *fdb = API::getInstance();
+		ASSERT(fdb->getAPIVersion() <= FDB_API_VERSION);
+		try {
+			API::selectAPIVersion(fdb->getAPIVersion() + 1);
+			ASSERT(false);
+		}
+		catch(Error &e) {
+			ASSERT(e.code() == error_code_api_version_already_set);
+		}
+		try {
+			API::selectAPIVersion(fdb->getAPIVersion() - 1);
+			ASSERT(false);
+		}
+		catch(Error &e) {
+			ASSERT(e.code() == error_code_api_version_already_set);
+		}
+		API::selectAPIVersion(fdb->getAPIVersion());
+
 		state Reference<Transaction> tr(new Transaction(data->db));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
@@ -1682,7 +1701,17 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		// This is "our" network
 		g_network = newNet2(NetworkAddress(), false);
 
+		ASSERT(!API::isAPIVersionSelected());
+		try {
+			API::getInstance();
+		}
+		catch(Error& e) {
+			ASSERT(e.code() == error_code_api_version_unset);
+		}
+
 		API *fdb = API::selectAPIVersion(apiVersion);
+		ASSERT(API::isAPIVersionSelected());
+		ASSERT(fdb->getAPIVersion() == apiVersion);
 		//fdb->setNetworkOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE);
 
 		// We have to start the fdb_flow network and thread separately!
