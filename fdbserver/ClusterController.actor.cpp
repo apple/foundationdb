@@ -511,7 +511,7 @@ public:
 			result.remoteTLogs.push_back(remoteLogs[i].first);
 		}
 
-		auto logRouters = getWorkersForRoleInDatacenter( req.dcId, ProcessClass::LogRouter, req.configuration.getDesiredLogRouters(), req.configuration, id_used );
+		auto logRouters = getWorkersForRoleInDatacenter( req.dcId, ProcessClass::LogRouter, req.logRouterCount, req.configuration, id_used );
 		for(int i = 0; i < logRouters.size(); i++) {
 			result.logRouters.push_back(logRouters[i].first);
 		}
@@ -530,18 +530,32 @@ public:
 		std::map< Optional<Standalone<StringRef>>, int> id_used;
 		id_used[masterProcessId]++;
 		id_used[clusterControllerProcessId]++;
-		ASSERT(dcId == req.configuration.primaryDcId || dcId == req.configuration.remoteDcId);
-		std::set<Optional<Key>> primaryDC;
-		primaryDC.insert(dcId == req.configuration.primaryDcId ? req.configuration.primaryDcId : req.configuration.remoteDcId);
-		result.remoteDcId = dcId == req.configuration.primaryDcId ? req.configuration.remoteDcId : req.configuration.primaryDcId;
 
+		ASSERT(dcId.present());
+		
+		std::set<Optional<Key>> primaryDC;
+		primaryDC.insert(dcId);
+		result.dcId = dcId;
+		
+		Optional<Key> remoteDcId;
+		RegionInfo region;
+		for(auto& r : req.configuration.regions) {
+			if(r.dcId != dcId.get()) {
+				ASSERT(!remoteDcId.present());
+				remoteDcId = r.dcId;
+			} else {
+				ASSERT(region.dcId == StringRef());
+				region = r;
+			}
+		}
+		
 		if(req.recruitSeedServers) {
 			auto primaryStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, dcId );
 			for(int i = 0; i < primaryStorageServers.size(); i++)
 				result.storageServers.push_back(primaryStorageServers[i].first);
 
 			if(req.configuration.remoteTLogReplicationFactor > 0) {
-				auto remoteStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, result.remoteDcId );
+				auto remoteStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, remoteDcId );
 				for(int i = 0; i < remoteStorageServers.size(); i++)
 					result.storageServers.push_back(remoteStorageServers[i].first);
 			}
@@ -553,15 +567,13 @@ public:
 		}
 
 		std::vector<std::pair<WorkerInterface, ProcessClass>> satelliteLogs;
-		if(req.configuration.satelliteTLogReplicationFactor > 0) {
+		if(region.satelliteTLogReplicationFactor > 0) {
 			std::set<Optional<Key>> satelliteDCs;
-			if( dcId == req.configuration.primaryDcId ) {
-				satelliteDCs.insert( req.configuration.primarySatelliteDcIds.begin(), req.configuration.primarySatelliteDcIds.end() );
-			} else {
-				satelliteDCs.insert( req.configuration.remoteSatelliteDcIds.begin(), req.configuration.remoteSatelliteDcIds.end() );
+			for(auto& s : region.satellites) {
+				satelliteDCs.insert(s.dcId);
 			}
 			//FIXME: recruitment does not respect usable_dcs, a.k.a if usable_dcs is 1 we should recruit all tlogs in one data center
-			satelliteLogs = getWorkersForTlogs( req.configuration, req.configuration.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(), req.configuration.satelliteTLogPolicy, id_used, false, satelliteDCs );
+			satelliteLogs = getWorkersForTlogs( req.configuration, region.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(dcId), region.satelliteTLogPolicy, id_used, false, satelliteDCs );
 
 			for(int i = 0; i < satelliteLogs.size(); i++) {
 				result.satelliteTLogs.push_back(satelliteLogs[i].first);
@@ -582,9 +594,12 @@ public:
 		for(int i = 0; i < proxies.size(); i++)
 			result.proxies.push_back(proxies[i].first);
 
+		auto logRouters = getWorkersForRoleInDatacenter( remoteDcId, ProcessClass::LogRouter, req.configuration.getDesiredLogRouters(), req.configuration, id_used );
+		result.logRouterCount = logRouters.size() ? logRouters.size() : 1;
+
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 			( RoleFitness(tlogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
-			  ( req.configuration.satelliteTLogReplicationFactor > 0 && RoleFitness(satelliteLogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs()) ) ||
+			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(satelliteLogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId)) ) ||
 			  RoleFitness(proxies, ProcessClass::Proxy) > RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies()) ||
 			  RoleFitness(resolvers, ProcessClass::Resolver) > RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers()) ) ) {
 			return operation_failed();
@@ -594,18 +609,18 @@ public:
 	}
 
 	RecruitFromConfigurationReply findWorkersForConfiguration( RecruitFromConfigurationRequest const& req ) {
-		if(req.configuration.primaryDcId.present()) {
+		if(req.configuration.regions.size() > 1) {
 			bool setPrimaryDesired = false;
 			try {
-				auto reply = findWorkersForConfiguration(req, req.configuration.primaryDcId);
+				auto reply = findWorkersForConfiguration(req, req.configuration.regions[0].dcId);
 				setPrimaryDesired = true;
 				vector<Optional<Key>> dcPriority;
-				dcPriority.push_back(req.configuration.primaryDcId);
-				dcPriority.push_back(req.configuration.remoteDcId);
+				dcPriority.push_back(req.configuration.regions[0].dcId);
+				dcPriority.push_back(req.configuration.regions[1].dcId);
 				desiredDcIds.set(dcPriority);
 				if(reply.isError()) {
 					throw reply.getError();
-				} else if(req.configuration.primaryDcId == clusterControllerDcId) {
+				} else if(clusterControllerDcId.present() && req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
 					return reply.get();
 				}
 				throw no_more_servers();
@@ -614,22 +629,23 @@ public:
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
-				auto reply = findWorkersForConfiguration(req, req.configuration.remoteDcId);
+				auto reply = findWorkersForConfiguration(req, req.configuration.regions[1].dcId);
 				if(!setPrimaryDesired) {
 					vector<Optional<Key>> dcPriority;
-					dcPriority.push_back(req.configuration.remoteDcId);
-					dcPriority.push_back(req.configuration.primaryDcId);
+					dcPriority.push_back(req.configuration.regions[1].dcId);
+					dcPriority.push_back(req.configuration.regions[0].dcId);
 					desiredDcIds.set(dcPriority);
 				}
 				if(reply.isError()) {
 					throw reply.getError();
-				} else if(req.configuration.remoteDcId == clusterControllerDcId) {
+				} else if(clusterControllerDcId.present() && req.configuration.regions[1].dcId == clusterControllerDcId.get()) {
 					return reply.get();
 				}
 				throw;
 			}
 		} else {
 			RecruitFromConfigurationReply result;
+			result.logRouterCount = 0;
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[masterProcessId]++;
 			id_used[clusterControllerProcessId]++;
@@ -714,28 +730,30 @@ public:
 	}
 
 	void checkPrimaryDC() {
-		if(db.config.primaryDcId.present() && db.config.primaryDcId != clusterControllerDcId) {
+		if(db.config.regions.size() && clusterControllerDcId.present() && db.config.regions[0].dcId != clusterControllerDcId.get()) {
 			try {
 				std::map< Optional<Standalone<StringRef>>, int> id_used;
-				getWorkerForRoleInDatacenter(db.config.primaryDcId, ProcessClass::ClusterController, ProcessClass::ExcludeFit, db.config, id_used, true);
-				getWorkerForRoleInDatacenter(db.config.primaryDcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, true);
+				getWorkerForRoleInDatacenter(db.config.regions[0].dcId, ProcessClass::ClusterController, ProcessClass::ExcludeFit, db.config, id_used, true);
+				getWorkerForRoleInDatacenter(db.config.regions[0].dcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, true);
 			
 				std::set<Optional<Key>> primaryDC;
-				primaryDC.insert(db.config.primaryDcId);
+				primaryDC.insert(db.config.regions[0].dcId);
 				getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true, primaryDC);
 			
-				if(db.config.satelliteTLogReplicationFactor > 0) {
+				if(db.config.regions[0].satelliteTLogReplicationFactor > 0) {
 					std::set<Optional<Key>> satelliteDCs;
-					satelliteDCs.insert( db.config.primarySatelliteDcIds.begin(), db.config.primarySatelliteDcIds.end() );
-					getWorkersForTlogs(db.config, db.config.satelliteTLogReplicationFactor, db.config.getDesiredSatelliteLogs(), db.config.satelliteTLogPolicy, id_used, true, satelliteDCs);
+					for(auto &s : db.config.regions[0].satellites) {
+						satelliteDCs.insert(s.dcId);
+					}
+					getWorkersForTlogs(db.config, db.config.regions[0].satelliteTLogReplicationFactor, db.config.getDesiredSatelliteLogs(db.config.regions[0].dcId), db.config.regions[0].satelliteTLogPolicy, id_used, true, satelliteDCs);
 				}
 
-				getWorkerForRoleInDatacenter( db.config.primaryDcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
-				getWorkerForRoleInDatacenter( db.config.primaryDcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
+				getWorkerForRoleInDatacenter( db.config.regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
+				getWorkerForRoleInDatacenter( db.config.regions[0].dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
 
 				vector<Optional<Key>> dcPriority;
-				dcPriority.push_back(db.config.primaryDcId);
-				dcPriority.push_back(db.config.remoteDcId);
+				dcPriority.push_back(db.config.regions[0].dcId);
+				dcPriority.push_back(db.config.regions[1].dcId);
 				desiredDcIds.set(dcPriority);
 			} catch( Error &e ) {
 				if(e.code() != error_code_no_more_servers) {
@@ -834,33 +852,42 @@ public:
 		std::set<Optional<Key>> primaryDC;
 		std::set<Optional<Key>> satelliteDCs;
 		std::set<Optional<Key>> remoteDC;
-		if(db.config.primaryDcId.present()) {
-			primaryDC.insert(clusterControllerDcId == db.config.primaryDcId ? db.config.primaryDcId : db.config.remoteDcId);
-			remoteDC.insert(clusterControllerDcId == db.config.primaryDcId ? db.config.remoteDcId : db.config.primaryDcId);
-			if(db.config.satelliteTLogReplicationFactor > 0) {
-				if( clusterControllerDcId == db.config.primaryDcId ) {
-					satelliteDCs.insert( db.config.primarySatelliteDcIds.begin(), db.config.primarySatelliteDcIds.end() );
+
+		RegionInfo region;
+		if(db.config.regions.size() > 1 && clusterControllerDcId.present()) {
+			primaryDC.insert(clusterControllerDcId);
+			for(auto& r : db.config.regions) {
+				if(r.dcId != clusterControllerDcId.get()) {
+					ASSERT(remoteDC.empty());
+					remoteDC.insert(r.dcId);
 				} else {
-					satelliteDCs.insert( db.config.remoteSatelliteDcIds.begin(), db.config.remoteSatelliteDcIds.end() );
+					ASSERT(region.dcId == StringRef());
+					region = r;
+				}
+			}
+
+			if(region.satelliteTLogReplicationFactor > 0) {
+				for(auto &s : region.satellites) {
+					satelliteDCs.insert(s.dcId);
 				}
 			}
 		}
 
 		// Check tLog fitness
 		RoleFitness oldTLogFit(tlogs, ProcessClass::TLog);
-		RoleFitness newTLotFit(getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true, primaryDC), ProcessClass::TLog);
+		RoleFitness newTLogFit(getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true, primaryDC), ProcessClass::TLog);
 
-		if(oldTLogFit < newTLotFit) return false;
+		if(oldTLogFit < newTLogFit) return false;
 
 		RoleFitness oldSatelliteTLogFit(satellite_tlogs, ProcessClass::TLog);
-		RoleFitness newSatelliteTLotFit(db.config.satelliteTLogReplicationFactor > 0 ? getWorkersForTlogs(db.config, db.config.satelliteTLogReplicationFactor, db.config.getDesiredSatelliteLogs(), db.config.satelliteTLogPolicy, id_used, true, satelliteDCs) : satellite_tlogs, ProcessClass::TLog);
+		RoleFitness newSatelliteTLogFit(region.satelliteTLogReplicationFactor > 0 ? getWorkersForTlogs(db.config, region.satelliteTLogReplicationFactor, db.config.getDesiredSatelliteLogs(clusterControllerDcId), region.satelliteTLogPolicy, id_used, true, satelliteDCs) : satellite_tlogs, ProcessClass::TLog);
 
-		if(oldSatelliteTLogFit < newSatelliteTLotFit) return false;
+		if(oldSatelliteTLogFit < newSatelliteTLogFit) return false;
 
 		RoleFitness oldRemoteTLogFit(remote_tlogs, ProcessClass::TLog);
-		RoleFitness newRemoteTLotFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForTlogs(db.config, db.config.remoteTLogReplicationFactor, db.config.getDesiredRemoteLogs(), db.config.remoteTLogPolicy, id_used, true, remoteDC) : remote_tlogs, ProcessClass::TLog);
+		RoleFitness newRemoteTLogFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForTlogs(db.config, db.config.remoteTLogReplicationFactor, db.config.getDesiredRemoteLogs(), db.config.remoteTLogPolicy, id_used, true, remoteDC) : remote_tlogs, ProcessClass::TLog);
 
-		if(oldRemoteTLogFit < newRemoteTLotFit) return false;
+		if(oldRemoteTLogFit < newRemoteTLogFit) return false;
 
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter);
 		RoleFitness newLogRoutersFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, db.config.getDesiredLogRouters(), db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
@@ -882,11 +909,11 @@ public:
 
 		if(oldInFit.betterFitness(newInFit)) return false;
 
-		if(oldTLogFit > newTLotFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLotFit || oldRemoteTLogFit > newRemoteTLotFit || oldLogRoutersFit > newLogRoutersFit) {
+		if(oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
 			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", mworker.fitness)
-				.detail("oldTLogFitC", oldTLogFit.count).detail("newTLotFitC", newTLotFit.count)
-				.detail("oldTLogWorstFitT", oldTLogFit.worstFit).detail("newTLotWorstFitT", newTLotFit.worstFit)
-				.detail("oldTLogBestFitT", oldTLogFit.bestFit).detail("newTLotBestFitT", newTLotFit.bestFit)
+				.detail("oldTLogFitC", oldTLogFit.count).detail("newTLogFitC", newTLogFit.count)
+				.detail("oldTLogWorstFitT", oldTLogFit.worstFit).detail("newTLogWorstFitT", newTLogFit.worstFit)
+				.detail("oldTLogBestFitT", oldTLogFit.bestFit).detail("newTLogBestFitT", newTLogFit.bestFit)
 				.detail("oldInFitW", oldInFit.worstFit).detail("newInFitW", newInFit.worstFit)
 				.detail("oldInFitB", oldInFit.bestFit).detail("newInFitB", newInFit.bestFit)
 				.detail("oldInFitC", oldInFit.count).detail("newInFitC", newInFit.count);

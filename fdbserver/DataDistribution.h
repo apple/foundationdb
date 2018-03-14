@@ -120,7 +120,23 @@ struct TeamCollectionInterface {
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
 public:
 	ShardsAffectedByTeamFailure() {}
-	typedef vector<UID> Team;  // sorted
+	
+	struct Team {
+		vector<UID> servers;  // sorted
+		bool primary;
+
+		Team() : primary(true) {}
+		Team(vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
+
+		bool operator < ( const Team& r ) const {
+			if( servers == r.servers ) return primary < r.primary;
+			return servers < r.servers; 
+		}
+		bool operator == ( const Team& r ) const {
+			return servers == r.servers && primary == r.primary;
+		}
+	};
+
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
 	//   relocate the right shards when a team is degraded.
 
@@ -138,9 +154,9 @@ public:
 
 	int getNumberOfShards( UID ssID );
 	vector<KeyRange> getShardsFor( Team team );
-	vector<vector<UID>> getTeamsFor( KeyRangeRef keys );
+	vector<Team> getTeamsFor( KeyRangeRef keys );
 	void defineShard( KeyRangeRef keys );
-	void moveShard( KeyRangeRef keys, Team destinationTeam );
+	void moveShard( KeyRangeRef keys, std::vector<Team> destinationTeam );
 	void check();
 private:
 	struct OrderByTeamKey {
@@ -159,12 +175,23 @@ private:
 	void insert(Team team, KeyRange const& range);
 };
 
+struct ShardInfo {
+	Key key;
+	vector<UID> primarySrc;
+	vector<UID> remoteSrc;
+	vector<UID> primaryDest;
+	vector<UID> remoteDest;
+	bool hasDest;
+
+	explicit ShardInfo(Key key) : key(key), hasDest(false) {}
+};
+
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
-	typedef vector<UID> Team;  // sorted
 	int mode;
 	vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
-	std::set< Team > teams;
-	vector<KeyRangeWith<std::pair<Team, Team>>> shards;
+	std::set<vector<UID>> primaryTeams;
+	std::set<vector<UID>> remoteTeams;
+	vector<ShardInfo> shards;
 };
 
 Future<Void> dataDistribution(
@@ -174,13 +201,12 @@ Future<Void> dataDistribution(
 	Reference<ILogSystem> const& logSystem,
 	Version const& recoveryCommitVersion,
 	std::vector<Optional<Key>> const& primaryDcId,
-	std::vector<Optional<Key>> const& remoteDcId,
+	std::vector<Optional<Key>> const& remoteDcIds,
 	double* const& lastLimited);
 
 Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> const& initData,
 	Database const& cx,
-	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	PromiseStream<RelocateShard> const& output,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,

@@ -69,8 +69,13 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 			out[p+key] = value;
 		}
 
-		if( key == "primary_dc" || key == "remote_dc" || key == "primary_satellite_dcs" || key == "remote_satellite_dcs" ) {
-			out[p+key] = value;
+		if( key == "regions" ) {
+			json_spirit::mValue mv;
+			json_spirit::read_string( value, mv );
+			
+			StatusObject regionObj;
+			regionObj["regions"] = mv;
+			out[p+key] = BinaryWriter::toValue(regionObj, IncludeVersion()).toString();
 		}
 
 		return out;
@@ -173,7 +178,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		remote_redundancy="3";
 		remote_log_replicas="3";
 		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "remote_three_data_hall") {
+	} else if(mode == "remote_three_data_hall") { //FIXME: not tested in simulation
 		remote_redundancy="3";
 		remote_log_replicas="4";
 		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
@@ -182,63 +187,11 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else
 		remoteRedundancySpecified = false;
 	if (remoteRedundancySpecified) {
-		out[p+"remote_storage_replicas"] =
-			out[p+"remote_storage_quorum"] = remote_redundancy;
 		out[p+"remote_log_replicas"] = remote_log_replicas;
 
 		BinaryWriter policyWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
 		out[p+"remote_log_policy"] = policyWriter.toStringRef().toString();
-		return out;
-	}
-
-	std::string satellite_log_replicas, satellite_anti_quorum, satellite_usable_dcs;
-	IRepPolicyRef satelliteTLogPolicy;
-	bool satelliteRedundancySpecified = true;
-	if (mode == "satellite_none") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="0";
-		satellite_log_replicas="0";
-		satelliteTLogPolicy = IRepPolicyRef();
-	} else if (mode == "one_satellite_single") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="1";
-		satellite_log_replicas="1";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyOne());
-	} else if(mode == "one_satellite_double") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="1";
-		satellite_log_replicas="2";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "one_satellite_triple") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="1";
-		satellite_log_replicas="3";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "two_satellite_safe") {
-		satellite_anti_quorum="0";
-		satellite_usable_dcs="2";
-		satellite_log_replicas="4";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
-		));
-	} else if(mode == "two_satellite_fast") {
-		satellite_anti_quorum="2";
-		satellite_usable_dcs="2";
-		satellite_log_replicas="4";
-		satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
-		));
-	} else
-		satelliteRedundancySpecified = false;
-	if (satelliteRedundancySpecified) {
-		out[p+"satellite_anti_quorum"] = satellite_anti_quorum;
-		out[p+"satellite_usable_dcs"] = satellite_usable_dcs;
-		out[p+"satellite_log_replicas"] = satellite_log_replicas;
-
-		BinaryWriter policyWriter(IncludeVersion());
-		serializeReplicationPolicy(policyWriter, satelliteTLogPolicy);
-		out[p+"satellite_log_policy"] = policyWriter.toStringRef().toString();
 		return out;
 	}
 

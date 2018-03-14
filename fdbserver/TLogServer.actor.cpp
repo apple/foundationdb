@@ -367,7 +367,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;
 	TLogData* tLogData;
-	Future<Void> recovery;
 	Promise<Void> recoveryComplete;
 	Version unrecoveredBefore;
 
@@ -377,7 +376,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	explicit LogData(TLogData* tLogData, TLogInterface interf, Optional<Tag> remoteTag) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), logSystem(new AsyncVar<Reference<ILogSystem>>()),
 			// These are initialized differently on init() or recovery
-			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), recovery(Void()), unrecoveredBefore(0)
+			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(0)
 	{
 		startRole(interf.id(), UID(), "TLog");
 
@@ -1450,7 +1449,6 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInt
 	state Future<Void> warningCollector = timeoutWarningCollector( warningCollectorInput.getFuture(), 1.0, "TLogQueueCommitSlow", self->dbgid );
 	state Future<Void> error = actorCollection( logData->addActor.getFuture() );
 
-	logData->addActor.send( logData->recovery );
 	logData->addActor.send( waitFailureServer( tli.waitFailure.getFuture()) );
 	logData->addActor.send( logData->removed );
 	//FIXME: update tlogMetrics to include new information, or possibly only have one copy for the shared instance
@@ -1940,7 +1938,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 				throw worker_removed();
 			}
 
-			logData->recovery = respondToRecovered( recruited, logData->recoveryComplete, recoverFromLogSystem( self, logData, req.recoverFrom, req.recoverAt, req.knownCommittedVersion, req.recoverTags, copyComplete ) );
+			logData->addActor.send( respondToRecovered( recruited, logData->recoveryComplete, recoverFromLogSystem( self, logData, req.recoverFrom, req.recoverAt, req.knownCommittedVersion, req.recoverTags, copyComplete ) ) );
 			Void _ = wait(copyComplete.getFuture() || logData->removed );
 		} else {
 			// Brand new tlog, initialization has already been done by caller

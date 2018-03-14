@@ -660,9 +660,6 @@ struct SimulationConfig {
 	int machine_count;  // Total, not per DC.
 	int processes_per_machine;
 	int coordinators;
-
-	std::string toString();
-
 private:
 	void generateNormalConfig(int minimumReplication);
 };
@@ -685,7 +682,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	bool generateFearless = false; //FIXME: g_random->random01() < 0.5;
+	bool generateFearless = false; //FIXME g_random->random01() < 0.5;
 	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
@@ -744,23 +741,104 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	}
 
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
-		db.primaryDcId = LiteralStringRef("0");
-		db.remoteDcId = LiteralStringRef("1");	
-	}
+		StatusObject primaryObj;
+		primaryObj["id"] = "0";
+		primaryObj["priority"] = 1;
 
-	if(generateFearless) {
-		db.primarySatelliteDcIds.resize(1);
-		db.primarySatelliteDcIds[0] = LiteralStringRef("2");
-		db.remoteSatelliteDcIds.resize(1);
-		db.remoteSatelliteDcIds[0] = LiteralStringRef("3");
+		StatusObject remoteObj;
+		remoteObj["id"] = "1";
+		remoteObj["priority"] = 0;
+		if(generateFearless) {
+			StatusObject primarySatelliteObj;
+			primarySatelliteObj["id"] = "2";
+			primarySatelliteObj["priority"] = 1;
+			StatusArray primarySatellitesArr;
+			primarySatellitesArr.push_back(primarySatelliteObj);
+			primaryObj["satellites"] = primarySatellitesArr;
 
-		//FIXME: random setups
-		set_config("remote_single");
-		set_config("one_satellite_single");
+			StatusObject remoteSatelliteObj;
+			remoteSatelliteObj["id"] = "3";
+			remoteSatelliteObj["priority"] = 1;
+			StatusArray remoteSatellitesArr;
+			remoteSatellitesArr.push_back(remoteSatelliteObj);
+			remoteObj["satellites"] = remoteSatellitesArr;
 
-		db.remoteDesiredTLogCount = 1; 
-		db.desiredLogRouterCount = 1;
-		db.satelliteDesiredTLogCount = 1;
+			int satellite_replication_type = 2;//FIXME: g_random->randomInt(0,5);
+			switch (satellite_replication_type) {
+			case 0: {
+				TEST( true );  // Simulated cluster using custom satellite redundancy mode
+				break;
+			}
+			case 1: {
+				TEST( true );  // Simulated cluster using no satellite redundancy mode
+				break;
+			}
+			case 2: {
+				TEST( true );  // Simulated cluster using single satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
+				break;
+			}
+			case 3: {
+				TEST( true );  // Simulated cluster using double satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
+				break;
+			}
+			case 4: {
+				TEST( true );  // Simulated cluster using triple satellite redundancy mode
+				primaryObj["satellite_redundancy_mode"] = "one_satellite_triple";
+				remoteObj["satellite_redundancy_mode"] = "one_satellite_triple";
+				break;
+			}
+			default:
+				ASSERT(false);  // Programmer forgot to adjust cases.
+			}
+
+			if (g_random->random01() < 0.25) {
+				int logs = g_random->randomInt(1,7);
+				primaryObj["satellite_logs"] = logs;
+				remoteObj["satellite_logs"] = logs;
+			}
+			
+			int remote_replication_type = 2;//FIXME: g_random->randomInt(0,5);
+			switch (remote_replication_type) {
+			case 0: {
+				TEST( true );  // Simulated cluster using custom remote redundancy mode
+				break;
+			}
+			case 1: {
+				TEST( true );  // Simulated cluster using no remote redundancy mode
+				break;
+			}
+			case 2: {
+				TEST( true );  // Simulated cluster using single remote redundancy mode
+				set_config("remote_single");
+				break;
+			}
+			case 3: {
+				TEST( true );  // Simulated cluster using double remote redundancy mode
+				set_config("remote_double");
+				break;
+			}
+			case 4: {
+				TEST( true );  // Simulated cluster using triple remote redundancy mode
+				set_config("remote_triple");
+				break;
+			}
+			default:
+				ASSERT(false);  // Programmer forgot to adjust cases.
+			}
+
+			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
+			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
+		}
+
+		StatusArray regionArr;
+		regionArr.push_back(primaryObj);
+		regionArr.push_back(remoteObj);
+
+		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 	}
 	
 	if(generateFearless) {
@@ -789,96 +867,55 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	}
 }
 
-std::string SimulationConfig::toString() {
-	std::stringstream config;
-	std::map<std::string, std::string>&& dbconfig = db.toMap();
-	config << "new";
-
-	if (dbconfig["redundancy_mode"] != "custom") {
-		config << " " << dbconfig["redundancy_mode"];
-	} else {
-		config << " " << "log_replicas:=" << db.tLogReplicationFactor;
-		config << " " << "log_anti_quorum:=" << db.tLogWriteAntiQuorum;
-		config << " " << "storage_replicas:=" << db.storageTeamSize;
-		config << " " << "storage_quorum:=" << db.durableStorageQuorum;
-	}
-
-	if(dbconfig["remote_redundancy_mode"] != "none") {
-		if (dbconfig["remote_redundancy_mode"] != "custom") {
-			config << " " << dbconfig["remote_redundancy_mode"];
-		} else {
-			config << " " << "remote_log_replicas:=" << db.remoteTLogReplicationFactor;
-		}
-	}
-
-	if(dbconfig["satellite_redundancy_mode"] != "none") {
-		if (dbconfig["satellite_redundancy_mode"] != "custom") {
-			config << " " << dbconfig["satellite_redundancy_mode"];
-		} else {
-			config << " " << "satellite_log_replicas:=" << db.satelliteTLogReplicationFactor;
-			config << " " << "satellite_anti_quorum:=" << db.satelliteTLogWriteAntiQuorum;
-			config << " " << "satellite_usable_dcs:=" << db.satelliteTLogUsableDcs;
-		}
-	}
-
-	config << " logs=" << db.getDesiredLogs();
-	config << " proxies=" << db.getDesiredProxies();
-	config << " resolvers=" << db.getDesiredResolvers();
-
-	if(db.remoteTLogReplicationFactor > 0) {
-		config << " remote_logs=" << db.getDesiredRemoteLogs();
-		config << " log_routers=" << db.getDesiredLogRouters();
-	}
-
-	if(db.satelliteTLogReplicationFactor > 0) {
-		config << " satellite_logs=" << db.getDesiredSatelliteLogs();
-	}
-
-	if(db.primaryDcId.present()) {
-		config << " primary_dc=" << db.primaryDcId.get().printable();
-		config << " remote_dc=" << db.remoteDcId.get().printable();
-	}
-
-	if(db.primarySatelliteDcIds.size()) {
-		config << " primary_satellite_dcs=" << db.primarySatelliteDcIds[0].get().printable();
-		for(int i = 1; i < db.primarySatelliteDcIds.size(); i++) {
-			config << "," << db.primarySatelliteDcIds[i].get().printable();
-		}
-		config << " remote_satellite_dcs=" << db.remoteSatelliteDcIds[0].get().printable();
-		for(int i = 1; i < db.remoteSatelliteDcIds.size(); i++) {
-			config << "," << db.remoteSatelliteDcIds[i].get().printable();
-		}
-	}
-
-	config << " " << dbconfig["storage_engine"];
-	return config.str();
-}
-
 void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseFolder,
 							int* pTesterCount, Optional<ClusterConnectionString> *pConnString,
 							Standalone<StringRef> *pStartingConfiguration, int extraDB, int minimumReplication)
 {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(extraDB, minimumReplication);
-	std::string startingConfigString = simconfig.toString();
+	StatusObject startingConfigJSON = simconfig.db.toJSON(true);
+	std::string startingConfigString = "new";
+	for( auto kv : startingConfigJSON) {
+		startingConfigString += " ";
+		if( kv.second.type() == json_spirit::int_type ) {
+			startingConfigString += kv.first + ":=" + format("%d", kv.second.get_int()); 
+		} else if( kv.second.type() == json_spirit::str_type ) {
+			startingConfigString += kv.second.get_str(); 
+		} else if( kv.second.type() == json_spirit::array_type ) {
+			startingConfigString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none); 
+		} else {
+			ASSERT(false);
+		}
+	}
 
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;
 	g_simulator.tLogPolicy = simconfig.db.tLogPolicy;
 	g_simulator.tLogWriteAntiQuorum = simconfig.db.tLogWriteAntiQuorum;
-	g_simulator.primaryDcId = simconfig.db.primaryDcId;
 	g_simulator.hasRemoteReplication = simconfig.db.remoteTLogReplicationFactor > 0;
 	g_simulator.remoteTLogPolicy = simconfig.db.remoteTLogPolicy;
-	g_simulator.remoteDcId = simconfig.db.remoteDcId;
-	g_simulator.hasSatelliteReplication = simconfig.db.satelliteTLogReplicationFactor > 0;
-	g_simulator.satelliteTLogPolicy = simconfig.db.satelliteTLogPolicy;
-	g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.satelliteTLogWriteAntiQuorum;
-	g_simulator.primarySatelliteDcIds = simconfig.db.primarySatelliteDcIds;
-	g_simulator.remoteSatelliteDcIds = simconfig.db.remoteSatelliteDcIds;
 
+	if(simconfig.db.regions.size() == 2) {
+		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
+		g_simulator.remoteDcId = simconfig.db.regions[1].dcId;
+		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0 && simconfig.db.regions[0].satelliteTLogPolicy == simconfig.db.regions[1].satelliteTLogPolicy;
+		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
+		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
+
+		for(auto s : simconfig.db.regions[0].satellites) {
+			g_simulator.primarySatelliteDcIds.push_back(s.dcId);
+		}
+		for(auto s : simconfig.db.regions[1].satellites) {
+			g_simulator.remoteSatelliteDcIds.push_back(s.dcId);
+		}
+	} else {
+		g_simulator.hasSatelliteReplication = false;
+		g_simulator.satelliteTLogWriteAntiQuorum = 0;
+	}
+		
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
 	ASSERT(!g_simulator.hasRemoteReplication || g_simulator.remoteTLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
-	TraceEvent("simulatorConfig").detail("ConfigString", startingConfigString);
+	TraceEvent("simulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
 
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;
@@ -918,7 +955,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	*pConnString = conn;
 
-	TraceEvent("SimulatedConnectionString").detail("String", conn.toString()).detail("ConfigString", startingConfigString);
+	TraceEvent("SimulatedConnectionString").detail("String", conn.toString()).detail("ConfigString", printable(StringRef(startingConfigString)));
 
 	int assignedMachines = 0, nonVersatileMachines = 0;
 	for( int dc = 0; dc < dataCenters; dc++ ) {

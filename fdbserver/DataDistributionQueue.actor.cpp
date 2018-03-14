@@ -837,6 +837,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 	state bool signalledTransferComplete = false;
 	state UID masterId = self->mi.id();
 	state ParallelTCInfo destination;
+	state std::vector<ShardsAffectedByTeamFailure::Team> destinationTeams;
 	state ParallelTCInfo healthyDestinations;
 	state bool anyHealthy = false;
 	state int durableStorageQuorum = 0;
@@ -865,6 +866,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				state int tciIndex = 0;
 				state bool foundTeams = true;
 				destination.clear();
+				destinationTeams.clear();
 				healthyDestinations.clear();
 				anyHealthy = false;
 				durableStorageQuorum = 0;
@@ -883,6 +885,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					Optional<Reference<IDataDistributionTeam>> bestTeam = wait(brokenPromiseToNever(self->teamCollections[tciIndex].getTeam.getReply(req)));
 					if (bestTeam.present()) {
 						destination.addTeam(bestTeam.get());
+						destinationTeams.push_back(ShardsAffectedByTeamFailure::Team(bestTeam.get()->getServerIDs(), tciIndex == 0));
 						if(bestTeam.get()->isHealthy()) {
 							healthyDestinations.addTeam(bestTeam.get());
 							anyHealthy = true;
@@ -912,7 +915,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				Void _ = wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
 			}
 
-			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destination.getServerIDs());
+			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 
 			//FIXME: do not add data in flight to servers that were already in the src.
 			destination.addDataInFlightToTeam(+metrics.bytes);
@@ -1009,12 +1012,12 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 	}
 }
 
-ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<IDataDistributionTeam> sourceTeam, Reference<IDataDistributionTeam> destTeam ) {
+ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<IDataDistributionTeam> sourceTeam, Reference<IDataDistributionTeam> destTeam, bool primary ) {
 	if(g_network->isSimulated() && g_simulator.speedUpSimulation) {
 		return false;
 	}
 
-	std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( sourceTeam->getServerIDs() );
+	std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team( sourceTeam->getServerIDs(), primary ) );
 
 	if( !shards.size() )
 		return false;
@@ -1028,7 +1031,7 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 		return false;
 
 	//verify the shard is still in sabtf
-	std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( sourceTeam->getServerIDs() );
+	std::vector<KeyRange> shards = self->shardsAffectedByTeamFailure->getShardsFor( ShardsAffectedByTeamFailure::Team( sourceTeam->getServerIDs(), primary ) );
 	for( int i = 0; i < shards.size(); i++ ) {
 		if( moveShard == shards[i] ) {
 			TraceEvent(priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ? "BgDDMountainChopper" : "BgDDValleyFiller", self->mi.id())
@@ -1057,7 +1060,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 				if( randomTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF ) {
 					state Optional<Reference<IDataDistributionTeam>> loadedTeam = wait( brokenPromiseToNever( self->teamCollections[teamCollectionIndex].getTeam.getReply( GetTeamRequest( true, true, false ) ) ) );
 					if( loadedTeam.present() ) {
-						bool moved = wait( rebalanceTeams( self, PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.get(), randomTeam.get() ) );
+						bool moved = wait( rebalanceTeams( self, PRIORITY_REBALANCE_OVERUTILIZED_TEAM, loadedTeam.get(), randomTeam.get(), teamCollectionIndex == 0 ) );
 						if(moved) {
 							resetCount = 0;
 						} else {
@@ -1092,7 +1095,7 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 				state Optional<Reference<IDataDistributionTeam>> unloadedTeam = wait( brokenPromiseToNever( self->teamCollections[teamCollectionIndex].getTeam.getReply( GetTeamRequest( true, true, true ) ) ) );
 				if( unloadedTeam.present() ) {
 					if( unloadedTeam.get()->getMinFreeSpaceRatio() > SERVER_KNOBS->FREE_SPACE_RATIO_DD_CUTOFF ) {
-						bool moved = wait( rebalanceTeams( self, PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(), unloadedTeam.get() ) );
+						bool moved = wait( rebalanceTeams( self, PRIORITY_REBALANCE_UNDERUTILIZED_TEAM, randomTeam.get(), unloadedTeam.get(), teamCollectionIndex == 0 ) );
 						if(moved) {
 							resetCount = 0;
 						} else {

@@ -43,7 +43,8 @@ struct TLogInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
 	
-	TLogInterface() { }
+	TLogInterface() {}
+	explicit TLogInterface(LocalityData locality) : uniqueID( g_random->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
 	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
 	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
@@ -61,6 +62,7 @@ struct TLogInterface {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
+		ASSERT(ar.isDeserializing || uniqueID != UID());
 		ar & uniqueID & sharedTLogID & locality & peekMessages & popMessages
 		   & commit & lock & getQueuingMetrics & confirmRunning & waitFailure & recoveryFinished;
 	}

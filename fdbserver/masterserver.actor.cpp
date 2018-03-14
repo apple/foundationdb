@@ -173,7 +173,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	DatabaseConfiguration originalConfiguration;
 	DatabaseConfiguration configuration;
 	std::vector<Optional<Key>> primaryDcId;
-	std::vector<Optional<Key>> remoteDcId;
+	std::vector<Optional<Key>> remoteDcIds;
 	bool hasConfiguration;
 
 	ServerCoordinators coordinators;
@@ -290,28 +290,28 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, RecruitFromConfigur
 
 ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfigurationReply recr, Reference<ILogSystem> oldLogSystem, vector<Standalone<CommitTransactionRef>>* initialConfChanges ) {
 	if(self->configuration.remoteTLogReplicationFactor > 0) {
-		state Optional<Key> primaryDcId = recr.remoteDcId == self->configuration.remoteDcId ? self->configuration.primaryDcId : self->configuration.remoteDcId;
-		if( !self->dcId_locality.count(primaryDcId) ) {
-			TraceEvent(SevWarnAlways, "UnknownPrimaryDCID", self->dbgid).detail("found", self->dcId_locality.count(primaryDcId)).detail("primaryId", printable(primaryDcId));
+		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
+		if( !self->dcId_locality.count(recr.dcId) ) {
+			TraceEvent(SevWarnAlways, "UnknownPrimaryDCID", self->dbgid).detail("found", self->dcId_locality.count(recr.dcId)).detail("primaryId", printable(recr.dcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
-			tr.set(tr.arena(), tagLocalityListKeyFor(primaryDcId), tagLocalityListValue(loc));
+			tr.set(tr.arena(), tagLocalityListKeyFor(recr.dcId), tagLocalityListValue(loc));
 			initialConfChanges->push_back(tr);
-			self->dcId_locality[primaryDcId] = loc;
+			self->dcId_locality[recr.dcId] = loc;
 		}
 
-		if( !self->dcId_locality.count(recr.remoteDcId) ) {
-			TraceEvent(SevWarnAlways, "UnknownRemoteDCID", self->dbgid).detail("remoteFound", self->dcId_locality.count(recr.remoteDcId)).detail("remoteId", printable(recr.remoteDcId));
+		if( !self->dcId_locality.count(remoteDcId) ) {
+			TraceEvent(SevWarnAlways, "UnknownRemoteDCID", self->dbgid).detail("remoteFound", self->dcId_locality.count(remoteDcId)).detail("remoteId", printable(remoteDcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
-			tr.set(tr.arena(), tagLocalityListKeyFor(recr.remoteDcId), tagLocalityListValue(loc));
+			tr.set(tr.arena(), tagLocalityListKeyFor(remoteDcId), tagLocalityListValue(loc));
 			initialConfChanges->push_back(tr);
-			self->dcId_locality[recr.remoteDcId] = loc;
+			self->dcId_locality[remoteDcId] = loc;
 		}
 
-		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, recr.remoteDcId ) ) );
+		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.logRouterCount ) ) );
 
-		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[primaryDcId], self->dcId_locality[recr.remoteDcId] ) );
+		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[recr.dcId], self->dcId_locality[remoteDcId] ) );
 		self->logSystem = newLogSystem;
 	} else {
 		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, tagLocalitySpecial, tagLocalitySpecial ) );
@@ -551,10 +551,10 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 			RecruitFromConfigurationRequest( self->configuration, self->lastEpochEnd==0 ) ) ) );
 
 	self->primaryDcId.clear();
-	self->remoteDcId.clear();
-	if(recruits.remoteDcId.present()) {
-		self->primaryDcId.push_back(recruits.remoteDcId == self->configuration.remoteDcId ? self->configuration.primaryDcId : self->configuration.remoteDcId);
-		self->remoteDcId.push_back(recruits.remoteDcId);
+	self->remoteDcIds.clear();
+	if(recruits.dcId.present()) {
+		self->primaryDcId.push_back(recruits.dcId);
+		self->remoteDcIds.push_back(recruits.dcId.get() == self->configuration.regions[0].dcId ? self->configuration.regions[1].dcId : self->configuration.regions[0].dcId);
 	}
 	
 	TraceEvent("MasterRecoveryState", self->dbgid)
@@ -1014,7 +1014,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		state Future<Void> changed = self->logSystem->onCoreStateChanged();
 		ASSERT( newState.tLogs[0].tLogWriteAntiQuorum == self->configuration.tLogWriteAntiQuorum && newState.tLogs[0].tLogReplicationFactor == self->configuration.tLogReplicationFactor );
 
-		state bool finalUpdate = !newState.oldTLogData.size() && newState.tLogs.size() == self->configuration.expectedLogSets();
+		state bool finalUpdate = !newState.oldTLogData.size() && newState.tLogs.size() == self->configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		Void _ = wait( self->cstate.write(newState, finalUpdate) );
 
 		if( finalUpdate ) {
@@ -1253,7 +1253,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	{
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
-		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcId, &lastLimited ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
+		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
 		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->dbName, self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
 	}
 

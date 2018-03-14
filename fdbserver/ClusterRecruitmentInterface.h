@@ -85,26 +85,27 @@ struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> proxies;
 	vector<WorkerInterface> resolvers;
 	vector<WorkerInterface> storageServers;
-	Optional<Key> remoteDcId;
+	int logRouterCount;
+	Optional<Key> dcId;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & remoteDcId;
+		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & dcId & logRouterCount;
 	}
 };
 
 struct RecruitRemoteFromConfigurationRequest {
 	DatabaseConfiguration configuration;
 	Optional<Key> dcId;
+	int logRouterCount;
 	ReplyPromise< struct RecruitRemoteFromConfigurationReply > reply;
 
 	RecruitRemoteFromConfigurationRequest() {}
-	explicit RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId)
-		: configuration(configuration), dcId(dcId) {}
+	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration, Optional<Key> const& dcId, int logRouterCount) : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & configuration & dcId & reply;
+		ar & configuration & dcId & logRouterCount & reply;
 	}
 };
 
