@@ -1,7 +1,7 @@
-#include "flow/actorcompiler.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbclient/NativeAPI.h"
 #include "workloads.h"
+#include "fdbserver/ServerDBInfo.h"
+#include "fdbclient/ManagementAPI.h"
+#include "fdbclient/RunTransaction.actor.h"
 
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
@@ -11,8 +11,8 @@ static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_laten
 FF               - 2 bytes \xff\x02
 SSSSSSSSSS       - 10 bytes Version Stamp
 RRRRRRRRRRRRRRRR - 16 bytes Transaction id
-NNNN             - 4 Bytes Chunk number
-TTTT             - 4 Bytes Total number of chunks
+NNNN             - 4 Bytes Chunk number (Big Endian)
+TTTT             - 4 Bytes Total number of chunks (Big Endian)
 */
 StringRef sampleTrInfoKey = LiteralStringRef("\xff\x02/fdbClientInfo/client_latency/SSSSSSSSSS/RRRRRRRRRRRRRRRR/NNNNTTTT/");
 static const auto chunkNumStartIndex = sampleTrInfoKey.toString().find('N');
@@ -21,31 +21,71 @@ static const int chunkFormatSize = 4;
 static const auto trIdStartIndex = sampleTrInfoKey.toString().find('R');
 static const int trIdFormatSize = 16;
 
-// Checks TransactionInfo format for current protocol version.
+
+// Checks TransactionInfo format
 bool checkTxInfoEntryFormat(BinaryReader &reader) {
 	// Check protocol version
 	uint64_t protocolVersion;
 	reader >> protocolVersion;
-	if (protocolVersion != currentProtocolVersion) {
-		TraceEvent(SevError, "ClientTransactionProfilingVersionMismatch").detail("currentProtocolVersion", currentProtocolVersion).detail("entryProtocolVersion", protocolVersion);
-		return false;
+	reader.setProtocolVersion(protocolVersion);
+
+	while (reader.empty()) {
+		// Get EventType and timestamp
+		FdbClientLogEvents::EventType event;
+		reader >> event;
+		double timeStamp;
+		reader >> timeStamp;
+
+		switch (event)
+		{
+		case FdbClientLogEvents::GET_VERSION_LATENCY:
+		{
+			FdbClientLogEvents::EventGetVersion gv;
+			reader >> gv;
+			break;
+		}
+		case FdbClientLogEvents::GET_LATENCY:
+		{
+			FdbClientLogEvents::EventGet g;
+			reader >> g;
+			break;
+		}
+		case FdbClientLogEvents::GET_RANGE_LATENCY:
+		{
+			FdbClientLogEvents::EventGetRange gr;
+			reader >> gr;
+			break;
+		}
+		case FdbClientLogEvents::COMMIT_LATENCY:
+		{
+			FdbClientLogEvents::EventCommit c;
+			reader >> c;
+			break;
+		}
+		case FdbClientLogEvents::ERROR_GET:
+		{
+			FdbClientLogEvents::EventGetError ge;
+			reader >> ge;
+			break;
+		}
+		case FdbClientLogEvents::ERROR_GET_RANGE:
+		{
+			FdbClientLogEvents::EventGetRangeError gre;
+			reader >> gre;
+			break;
+		}
+		case FdbClientLogEvents::ERROR_COMMIT:
+		{
+			FdbClientLogEvents::EventCommitError ce;
+			reader >> ce;
+			break;
+		}
+		default:
+			TraceEvent(SevError, "ClientTransactionProfilingUnknownEvent").detail("EventType", event);
+			return false;
+		}
 	}
 
-	// Get EventType and timestamp
-	FdbClientLogEvents::EventType event;
-	reader >> event;
-	double timeStamp;
-	reader >> timeStamp;
-
-	switch (event)
-	{
-	case FdbClientLogEvents::GET_VERSION_LATENCY:
-		FdbClientLogEvents::EventGetVersion getVersion();
-		break;
-	default:
-		// TODO: return false;
-		break;
-	}
 	return true;
 }
 
@@ -58,7 +98,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	{
 		if (clientId == 0) {
 			samplingProbability = getOption(options, LiteralStringRef("samplingProbability"), g_random->random01() / 10); //rand range 0 - 0.1
-			trInfoSizeLimit = getOption(options, LiteralStringRef("trInfoSizeLimit"), g_random->randomInt(1024, 10 * 1024 * 1024)); // 1024 bytes - 10 MB
+			trInfoSizeLimit = getOption(options, LiteralStringRef("trInfoSizeLimit"), g_random->randomInt(100 * 1024, 10 * 1024 * 1024)); // 100 KB - 10 MB
 			TraceEvent(SevInfo, "ClientTransactionProfilingSetup").detail("samplingProbability", samplingProbability).detail("trInfoSizeLimit", trInfoSizeLimit);
 		}
 	}
@@ -67,8 +107,8 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 	virtual Future<Void> setup(Database const& cx) {
 		if (clientId == 0) {
-			const_cast<ClientKnobs *>(CLIENT_KNOBS)->CSI_SAMPLING_PROBABILITY = samplingProbability;
-			const_cast<ClientKnobs *>(CLIENT_KNOBS)->CSI_SIZE_LIMIT = trInfoSizeLimit;
+			const_cast<ClientKnobs *>(CLIENT_KNOBS)->CSI_STATUS_DELAY = 2.0; // 2 seconds
+			return changeProfilingParameters(cx, trInfoSizeLimit, samplingProbability);
 		}
 		return Void();
 	}
@@ -78,11 +118,11 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 	}
 
 	int getNumChunks(KeyRef key) {
-		return BinaryReader::fromStringRef<int>(key.substr(numChunksStartIndex, chunkFormatSize), Unversioned());
+		return bigEndian32(BinaryReader::fromStringRef<int>(key.substr(numChunksStartIndex, chunkFormatSize), Unversioned()));
 	}
 
 	int getChunkNum(KeyRef key) {
-		return BinaryReader::fromStringRef<int>(key.substr(chunkNumStartIndex, chunkFormatSize), Unversioned());
+		return bigEndian32(BinaryReader::fromStringRef<int>(key.substr(chunkNumStartIndex, chunkFormatSize), Unversioned()));
 	}
 
 	std::string getTrId(KeyRef key) {
@@ -134,26 +174,51 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		return true;
 	}
 
+	ACTOR Future<Void> changeProfilingParameters(Database cx, int64_t sizeLimit, double sampleProbability) {
+
+		Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void>
+						{
+							tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+							tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+							tr->set(fdbClientInfoTxnSampleRate, BinaryWriter::toValue(sampleProbability, Unversioned()));
+							tr->set(fdbClientInfoTxnSizeLimit, BinaryWriter::toValue(sizeLimit, Unversioned()));
+							return Void();
+						}
+					 ));
+		return Void();
+	}
+
 	ACTOR Future<bool> _check(Database cx, ClientTransactionProfileCorrectnessWorkload* self) {
-		const_cast<ClientKnobs *>(CLIENT_KNOBS)->CSI_SAMPLING_PROBABILITY = 0; // Disable sampling
-		// Wait for any client transaction profiler data to be flushed
+		Void _ = wait(self->changeProfilingParameters(cx, self->trInfoSizeLimit, 0));  // Disable sampling
+		// FIXME: Better way to ensure that all client profile data has been flushed to the database
 		Void _ = wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
 
-		state Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 		state Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 		state int64_t counter;
 		state Standalone<RangeResultRef> txInfoEntries;
+		Optional<Value> ctrValue = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> 
+																											{ 
+																												tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+																												tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+																												return tr->get(clientLatencyAtomicCtr); 
+																											}
+																											));
+		counter = ctrValue.present() ? BinaryReader::fromStringRef<int64_t>(ctrValue.get(), Unversioned()) : 0;
+		state Key clientLatencyName = CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 
-		loop{
+		state KeySelector begin = firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
+		state KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
+		loop {
 			state Transaction tr(cx);
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> ctrValue = wait(tr.get(clientLatencyAtomicCtr));
-				counter = ctrValue.present() ? BinaryReader::fromStringRef<int64_t>(ctrValue.get(), Unversioned()) : 0;
-				Standalone<RangeResultRef> kvRange = wait(tr.getRange(KeyRangeRef(clientLatencyName, strinc(clientLatencyName)), CLIENT_KNOBS->TOO_MANY));
-				txInfoEntries = kvRange;
-				break;
+				state Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, 10));
+				if (kvRange.empty())
+					break;
+				txInfoEntries.arena().dependsOn(kvRange.arena());
+				txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
+				begin = firstGreaterThan(kvRange.back().key);
 			}
 			catch (Error& e) {
 				Void _ = wait(tr.onError(e));
@@ -165,11 +230,13 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		for (auto &kv : txInfoEntries) {
 			contentsSize += kv.key.size() + kv.value.size();
 		}
-		if (counter != contentsSize) {
-			TraceEvent(SevError, "ClientTransactionProfilingIncorrectCtrVal").detail("counter", counter).detail("contentsSize", contentsSize);
-			return false;
-		}
+		// FIXME: Find a way to check that contentsSize is not greater than a certain limit.
+		//if (counter != contentsSize) {
+		//	TraceEvent(SevError, "ClientTransactionProfilingIncorrectCtrVal").detail("counter", counter).detail("contentsSize", contentsSize);
+		//	return false;
+		//}
 		TraceEvent(SevInfo, "ClientTransactionProfilingCtrval").detail("counter", counter);
+		TraceEvent(SevInfo, "ClientTransactionProfilingContentsSize").detail("contentsSize", contentsSize);
 
 		// Check if the data format is as expected
 		return self->checkTxInfoEntriesFormat(txInfoEntries);

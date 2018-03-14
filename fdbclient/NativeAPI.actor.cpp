@@ -364,7 +364,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 				for (int i = 0; i < num_chunks; i++) {
 					TrInfoChunk chunk;
 					BinaryWriter chunkBW(Unversioned());
-					chunkBW << i+1 << num_chunks;
+					chunkBW << bigEndian32(i+1) << bigEndian32(num_chunks);
 					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + std::string(2, '\x00'));
 					int16_t pos = littleEndian16(clientLatencyName.size());
 					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int16_t), &pos, sizeof(int16_t));
@@ -430,7 +430,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
 			// Hence destroy the transacation before sleeping to give a chance for the actor to be cleanedup if the Database is destroyed by the user.
 			tr = Transaction();
-			Void _ = wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+			Void _ = wait(delay(*(const_cast<volatile double *>(&CLIENT_KNOBS->CSI_STATUS_DELAY)))); // CSI_STATUS_DELAY is modified by ClientTransactionProfileCorrectnessWorkload
 		}
 		catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
