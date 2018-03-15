@@ -80,16 +80,14 @@ Here’s a simple implementation of multimaps with multisets as described:
         }
         
         private static void addHelp(TransactionContext tcx, final byte[] key, final long amount){
-            tcx.run(new Function<Transaction,Void>() {
-                public Void apply(Transaction tr){
-                    ByteBuffer b = ByteBuffer.allocate(8);
-                    b.order(ByteOrder.LITTLE_ENDIAN);
-                    b.putLong(amount);
-                    
-                    tr.mutate(MutationType.ADD, key, b.array());
-                    
-                    return null;
-                }
+            tcx.run(tr -> {
+                ByteBuffer b = ByteBuffer.allocate(8);
+                b.order(ByteOrder.LITTLE_ENDIAN);
+                b.putLong(amount);
+                
+                tr.mutate(MutationType.ADD, key, b.array());
+                
+                return null;
             });
         }
         
@@ -102,66 +100,56 @@ Here’s a simple implementation of multimaps with multisets as described:
         
         public static void add(TransactionContext tcx, final String index, 
                                 final Object value){
-            tcx.run(new Function<Transaction,Void>() {
-                public Void apply(Transaction tr){
-                    addHelp(tr, multi.subspace(Tuple.from(index,value)).getKey(),1l);
-                    return null;
-                }
+            tcx.run(tr -> {
+                addHelp(tr, multi.subspace(Tuple.from(index,value)).getKey(),1l);
+                return null;
             });
         }
         
         public static void subtract(TransactionContext tcx, final String index,
                                     final Object value){
-            tcx.run(new Function<Transaction,Void>() {
-                public Void apply(Transaction tr){
-                    Future<byte[]> v = tr.get(multi.subspace(
-                                            Tuple.from(index,value)).getKey());
-                    
-                    if(v.get() != null &&  getLong(v.get()) > 1l){
-                        addHelp(tr, multi.subspace(Tuple.from(index,value)).getKey(), -1l);
-                    } else {
-                        tr.clear(multi.subspace(Tuple.from(index,value)).getKey());
-                    }
-                    return null;
+            tcx.run(tr -> {
+                Future<byte[]> v = tr.get(multi.subspace(
+                                        Tuple.from(index,value)).getKey());
+                
+                if(v.get() != null &&  getLong(v.get()) > 1l){
+                    addHelp(tr, multi.subspace(Tuple.from(index,value)).getKey(), -1l);
+                } else {
+                    tr.clear(multi.subspace(Tuple.from(index,value)).getKey());
                 }
+                return null;
             });
         }
         
         public static ArrayList<Object> get(TransactionContext tcx, final String index){
-            return tcx.run(new Function<Transaction,ArrayList<Object> >() {
-                public ArrayList<Object> apply(Transaction tr){
-                    ArrayList<Object> vals = new ArrayList<Object>();
-                    for(KeyValue kv : tr.getRange(multi.subspace(
-                                        Tuple.from(index)).range())){
-                        vals.add(multi.unpack(kv.getKey()).get(1));
-                    }
-                    return vals;
+            return tcx.run(tr -> {
+                ArrayList<Object> vals = new ArrayList<Object>();
+                for(KeyValue kv : tr.getRange(multi.subspace(
+                                    Tuple.from(index)).range())){
+                    vals.add(multi.unpack(kv.getKey()).get(1));
                 }
+                return vals;
             });
         }
         
         public static HashMap<Object,Long> getCounts(TransactionContext tcx, 
                                                     final String index){
-            return tcx.run(new Function<Transaction,HashMap<Object,Long> >() {
-                public HashMap<Object,Long> apply(Transaction tr){
-                    HashMap<Object,Long> vals = new HashMap<Object,Long>();
-                    for(KeyValue kv : tr.getRange(multi.subspace(
-                                            Tuple.from(index)).range())){
-                        vals.put(multi.unpack(kv.getKey()).get(1), 
-                                getLong(kv.getValue()));
-                    }
-                    return vals;
+            return tcx.run(tr -> {
+                HashMap<Object,Long> vals = new HashMap<Object,Long>();
+                for(KeyValue kv : tr.getRange(multi.subspace(
+                                        Tuple.from(index)).range())){
+                    vals.put(multi.unpack(kv.getKey()).get(1), 
+                            getLong(kv.getValue()));
                 }
+                return vals;
             });
         }
         
         public static boolean isElement(TransactionContext tcx, final String index,
                                     final Object value){
-            return tcx.run(new Function<Transaction,Boolean>() {
-                public Boolean apply(Transaction tr){
-                    return tr.get(multi.subspace(
-                            Tuple.from(index, value)).getKey()).get() != null;
-                }
+            return tcx.run(tr -> {
+                return tr.get(multi.subspace(
+                        Tuple.from(index, value)).getKey()).get() != null;
             });
         }
     }
