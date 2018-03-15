@@ -98,7 +98,7 @@ After running this command, you can check that it completed successfully by usin
       Machines               - 3
       Memory availability    - 4.1 GB per process on machine with least available
       Fault Tolerance        - 0 machines
-      Server time            - Wed Oct  8 14:41:34 2014
+      Server time            - Thu Mar 15 14:41:34 2018
 
     Data:
       Replication health     - Healthy
@@ -126,7 +126,7 @@ After running this command, you can check that it completed successfully by usin
       10.0.4.2:4500
       10.0.4.3:4500
 
-    Client time: Thu Nov 20 09:50:45 2014
+    Client time: Thu Mar 15 14:41:34 2018
     
 The list of coordinators verifies that the coordinator change succeeded. A few things might cause this process to not go smoothly:
 
