@@ -2,12 +2,12 @@
 Performance
 ###########
 
-FoundationDB uses commodity hardware to provide your applications with millions of database operations per penny.
+FoundationDB uses commodity hardware to provide high throughputs and low latencies to your application at a variety of scales.
     
 Scaling
 =======
 
-FoundationDB has an unmatched ability to scale linearly as you add more cores to a cluster.
+FoundationDB scales linearly with the number of cores in a cluster over a wide range of sizes.
 
 .. image:: /images/scaling.png
 
@@ -16,6 +16,8 @@ Here, a cluster of commodity hardware scales to **8.2 million** operations/sec d
 The scaling graph uses a 24-machine EC2 c3.8xlarge cluster in which each machine has a 16-core processor. We ran a FoundationDB server process on each core, yielding a 384-process cluster for the largest test, and scaled the cluster down for each smaller test.
 
 Scaling is the ability to efficiently deliver operations at different scales. For FoundationDB, the relevant operations are reads and writes, measured in operations per sec. Scale is measured in the number of processes, which will usually track the number of available cores. FoundationDB offers scalability from partial utilization of a single core on a single machine to full utilization of dozens of powerful multi-core machines in a cluster.
+
+See our :ref:`known limitations <cluster-size>` for details about the limits of cluster scalability.
 
 Latency
 =======
@@ -42,9 +44,9 @@ For FoundationDB, the significant latencies are those experienced by a Foundatio
 
 * **Transaction start**. This latency will be experienced as part of the first read in a transaction as the read version is obtained. It will typically be a few milliseconds under moderate load, but under high write loads FoundationDB tries to concentrate most transaction latency here.
 
-* **Reads**. Individual reads should take under 1 ms with moderate loads. If a transaction performs many reads by waiting for each to complete before starting the next, however, these small latencies can add up. You can thus reduce total latency (and potentially conflicts) by doing as many of your reads as possible in parallel. FoundationDB supports non-blocking reads, so it's easy to perform reads without waiting on them. 
+* **Reads**. Individual reads should take under 1 ms with moderate loads. If a transaction performs many reads by waiting for each to complete before starting the next, however, these small latencies can add up. You can thus reduce total latency (and potentially :ref:`conflicts <conflict-ranges>`) by doing as many of your reads as possible in parallel. FoundationDB supports non-blocking reads, so it's easy to perform reads without waiting on them. 
 
-* **Commit**. Transactions that perform writes must be committed, and the commit will not succeed until the transaction is durable with full replication. This latency will average under 3 ms with moderate loads. Only a small part of this latency impacts transaction conflicts.
+* **Commit**. Transactions that perform writes must be committed, and the commit will not succeed until the transaction is durable with full replication. This latency will average under 3 ms with moderate loads. Only a small part of this latency impacts transaction :ref:`conflicts <conflict-ranges>`.
         
 Throughput (per core)
 =====================
@@ -102,3 +104,5 @@ A lot of things affect the simple first-order model of performance you see here.
 * Not all CPUs are the same speed.
 * To keep up with the performance modeled above, your disk subsystem will need to do a little over 1 IOPS per write, and about 1 IOPS per (uncached) read.
 * Network performance tuning at the operating system level can be very important for both latency and throughput, especially in larger clusters.
+* Running DR and/or backup requires applying each mutation multiple times and will reduce throughput.
+* See our :ref:`known-limitations <known limitations>` for other considerations which may affect performance.
