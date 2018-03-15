@@ -113,6 +113,12 @@ godoc: fdb_go_path $(GO_SRC)
 	@(sed -i -e 's_a href="tuple/"_a href="fdb.tuple.html"_' $(GODOC_DIR)/godoc/fdb.html)
 	@(sed -i -e 's_a href="subspace/"_a href="fdb.subspace.html"_' $(GODOC_DIR)/godoc/fdb.html)
 	@(sed -i -e 's_a href="directory/"_a href="fdb.directory.html"_' $(GODOC_DIR)/godoc/fdb.html)
+	
+	@(sed -i -e 's_a href="/pkg/builtin_a href="https://godoc.org/pkg/builtin_g;s_a href="/src/github.com/apple/foundationdb_a href="https://github.com/apple/foundationdb/tree/master_g;s_a href="/pkg/github.com/apple/foundationdb/bindings/go/src/fdb/_a href="./fdb.html_g' $(GODOC_DIR)/godoc/fdb.html)
+	@(sed -i -e 's_a href="/pkg/builtin_a href="https://godoc.org/pkg/builtin_g;s_a href="/src/github.com/apple/foundationdb_a href="https://github.com/apple/foundationdb/tree/master_g;s_a href="/pkg/github.com/apple/foundationdb/bindings/go/src/fdb/_a href="./fdb.html_g' $(GODOC_DIR)/godoc/fdb.directory.html)
+	@(sed -i -e 's_a href="/pkg/builtin_a href="https://godoc.org/pkg/builtin_g;s_a href="/src/github.com/apple/foundationdb_a href="https://github.com/apple/foundationdb/tree/master_g;s_a href="/pkg/github.com/apple/foundationdb/bindings/go/src/fdb/_a href="./fdb.html_g' $(GODOC_DIR)/godoc/fdb.subspace.html)
+	@(sed -i -e 's_a href="/pkg/builtin_a href="https://godoc.org/pkg/builtin_g;s_a href="/src/github.com/apple/foundationdb_a href="https://github.com/apple/foundationdb/tree/master_g;s_a href="/pkg/github.com/apple/foundationdb/bindings/go/src/fdb/_a href="./fdb.html_g' $(GODOC_DIR)/godoc/fdb.tuple.html)
+
 
 godoc_clean:
 	@echo "Cleaning Go Documentation"
