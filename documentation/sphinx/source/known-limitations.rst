@@ -20,28 +20,6 @@ Design limitations
 
 These limitations come from fundamental design decisions and are unlikely to change in the short term. Applications using FoundationDB should plan to work around these limitations. See :doc:`anti-features` for related discussion of our design approach to the FoundationDB core.
 
-.. _long-transactions:
-
-Long transactions
------------------
-
-FoundationDB currently does not support transactions running for over five seconds. In particular, after 5 seconds from the first read in a transaction:
-
-* subsequent reads that go to the database will usually raise a ``past_version`` :doc:`error <api-error-codes>` (although reads cached by the client will not);
-* a commit with any write will raise a ``past_version`` or ``not_committed`` :doc:`error <api-error-codes>`.
-
-Clients need to avoid these cases. For the design reasons behind this limitation, see the discussion in :doc:`anti-features`.
-
-.. admonition:: Workarounds
-
-    The effect of long and large transactions can be achieved using short and small transactions with a variety of techniques, depending on the desired behavior:
-
-    * If an application wants long transactions because of an external process in the loop, it can perform optimistic validation itself at a higher layer.
-    * If it needs long-running read snapshots, it can perform versioning in a layer.
-    * If it needs large bulk inserts, it can use a level of indirection to swap in the inserted data quickly.
-
-    As with all data modeling problems, please ask for help on the community site (or via e-mail) with your specific needs.
-
 .. _large-transactions:
 
 Large transactions
@@ -90,11 +68,35 @@ The current version of FoundationDB resolves key selectors with large offsets in
 
     The RankedSet layer provides a data structure in which large offsets and counting operations require only O(log N) time. It is a good choice for applications such as large leaderboards that require such functionality.
 
+Not a security boundary
+-----------------------
+
+Anyone who can connect to a FoundationDB cluster can read and write every key in the database. There is no user-level access control. External protections must be put into place to protect your database.
 
 Current limitations
 ===================
 
 These limitations do not reflect fundamental aspects of our design and are likely be resolved or mitigated in future versions. Administrators should be aware of these issues, but longer-term application development should be less driven by them.
+
+.. _long-transactions:
+
+Long running transactions
+-------------------------
+
+FoundationDB currently does not support transactions running for over five seconds. In particular, after 5 seconds from the first read in a transaction:
+
+* subsequent reads that go to the database will usually raise a ``transaction_too_old`` :doc:`error <api-error-codes>` (although reads cached by the client will not);
+* a commit with any write will raise a ``transaction_too_old`` or ``not_committed`` :doc:`error <api-error-codes>`.
+
+Long running read/write transactions are a design limitation, see the discussion in :doc:`anti-features`.
+
+.. admonition:: Workarounds
+
+    The effect of long and large transactions can be achieved using short and small transactions with a variety of techniques, depending on the desired behavior:
+
+    * If an application wants long transactions because of an external process in the loop, it can perform optimistic validation itself at a higher layer.
+    * If it needs long-running read snapshots, it can perform versioning in a layer.
+    * If it needs large bulk inserts, it can use a level of indirection to swap in the inserted data quickly.
 
 Cluster size
 ------------
@@ -114,5 +116,7 @@ FoundationDB load balances reads across the servers with replicas of the data be
 .. admonition:: Workarounds
 
     If data is accessed exceptionally frequently, an application could avoid this limitation by storing such data in multiple subspaces, effectively increasing its replication factor.
+
+
 
 

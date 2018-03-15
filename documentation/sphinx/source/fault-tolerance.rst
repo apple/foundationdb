@@ -23,10 +23,12 @@ Any distributed system faces some basic probabilistic constraints. For example, 
 
 FoundationDB improves these probabilities by selecting "teams" of machines on which to distribute data. Instead of putting each chunk of data on a different set of machines, each machine can participate in multiple teams. In the above example, by selecting only 450 teams of 4 machines that each chunk of data can be on, the chance of data unavailability is reduced to about 0.5%.
 
+The number of machines in each team is based on the replication mode, the total number of teams increases with the size of the cluster.
+
 Independence assumptions
 ========================
 
-As a further refinement, FoundationDB can be made aware that certain machines might tend to fail together. For example, every machine in a rack might share a network and power connection. If either failed, then the entire rack of machines would fail. We use this knowledge when choosing teams, taking care not to place any two machines in a team that would have a tendency to fail together. Pieces of data can then be intelligently distributed across racks or even datacenters, so that characteristic multimachine failures (for example, based on rack configuration) do not cause service interruption or data loss. Using this method, FoundationDB can continuously operate through a failure of an entire datacenter.
+As a further refinement, FoundationDB can be made aware that certain machines might tend to fail together by specifying the locality of each process. For example, every machine in a rack might share a network and power connection. If either failed, then the entire rack of machines would fail. We use this knowledge when choosing teams, taking care not to place any two machines in a team that would have a tendency to fail together. Pieces of data can then be intelligently distributed across racks or even datacenters, so that characteristic multimachine failures (for example, based on rack configuration) do not cause service interruption or data loss. Our ``three_data_hall`` and ``multi_dc`` configurations use this technique to continuously operate through a failure of a data hall or datacenter respectively.
 
 Other types of failure
 ======================
