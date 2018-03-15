@@ -37,7 +37,7 @@ import (
 // as a panic from any FoundationDB API function whose name ends with OrPanic.
 //
 // You may compare the Code field of an Error against the list of FoundationDB
-// error codes at https://foundationdb.org/documentation/api-error-codes.html,
+// error codes at https://www.foundationdb.org/documentation/api-error-codes.html,
 // but generally an Error should be passed to (Transaction).OnError. When using
 // (Database).Transact, non-fatal errors will be retried automatically.
 type Error struct {

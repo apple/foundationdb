@@ -38,7 +38,7 @@ def getOrValidateAddress(address):
     if address is None:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(('foundationdb.org', 80))
+            s.connect(('www.foundationdb.org', 80))
             return s.getsockname()[0]
         except Exception as e:
             print 'ERROR: Could not determine an address'
