@@ -11,7 +11,7 @@ FoundationDB scales linearly with the number of cores in a cluster over a wide r
 
 .. image:: /images/scaling.png
 
-Here, a cluster of commodity hardware scales to **8.2 million** operations/sec doing a 90% read and 10% write workload.
+Here, a cluster of commodity hardware scales to **8.2 million** operations/sec doing a 90% read and 10% write workload with 16 byte keys and values between 8 and 100 bytes.
 
 The scaling graph uses a 24-machine EC2 c3.8xlarge cluster in which each machine has a 16-core processor. We ran a FoundationDB server process on each core, yielding a 384-process cluster for the largest test, and scaled the cluster down for each smaller test.
 
@@ -55,7 +55,7 @@ FoundationDB provides good throughput for the full range of read and write workl
 
 .. image:: /images/throughput.png
 
-FoundationDB offers two :ref:`storage engines <configuration-storage-engine>`, optimized for distinct use cases, both of which write to disk before reporting transactions committed. For each storage engine, the graph shows throughput of a single FoundationDB process running on a **single core** with saturating read/write workloads ranging from 100% reads to 100% writes. Throughput for the unmixed workloads is about:
+FoundationDB offers two :ref:`storage engines <configuration-storage-engine>`, optimized for distinct use cases, both of which write to disk before reporting transactions committed. For each storage engine, the graph shows throughput of a single FoundationDB process running on a **single core** with saturating read/write workloads ranging from 100% reads to 100% writes, all with 16 byte keys and values between 8 and 100 bytes. Throughput for the unmixed workloads is about:
 
 ========= ========== ==============
 workload  ssd engine memory engine
@@ -81,7 +81,7 @@ FoundationDB is designed to achieve great performance under high concurrency fro
 
 .. image:: /images/concurrency.png
 
-Its asynchronous design allows it to handle very high concurrency, and for a typical workload with 90% reads and 10% writes, maximum throughput is reached at about 200 concurrent operations, achieved with **20** concurrent transactions per FoundationDB process for a workload using 10 ops/transaction.
+Its asynchronous design allows it to handle very high concurrency, and for a typical workload with 90% reads and 10% writes, maximum throughput is reached at about 200 concurrent operations. This number of operations was achieved with **20** concurrent transactions per FoundationDB process each running 10 operations with 16 byte keys and values between 8 and 100 bytes.
 
 The concurrency graph uses a single FoundationDB server process on a single core (E3-1240).
 
