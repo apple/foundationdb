@@ -79,7 +79,7 @@ bool testFuzzActor( Future<int>(*actor)(FutureStream<int> const&, PromiseStream<
 			}
 		}
 		if (outCount+1 != expectedOutput.size()) {
-			printf("\tERROR: %s output length incorrect: %d != expected %lu\n", desc, outCount+1, expectedOutput.size());
+			printf("\tERROR: %s output length incorrect: %d != expected %zu\n", desc, outCount+1, expectedOutput.size());
 			if (trial) printf("\t\tResult was inconsistent between runs!\n");
 			ok = false;
 			//return false;
