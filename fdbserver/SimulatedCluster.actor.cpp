@@ -748,6 +748,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		StatusObject remoteObj;
 		remoteObj["id"] = "1";
 		remoteObj["priority"] = 0;
+
+		bool needsRemote = generateFearless;
 		if(generateFearless) {
 			StatusObject primarySatelliteObj;
 			primarySatelliteObj["id"] = "2";
@@ -810,6 +812,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				break;
 			}
 			case 1: {
+				needsRemote = false;
 				TEST( true );  // Simulated cluster using no remote redundancy mode
 				break;
 			}
@@ -838,7 +841,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 
 		StatusArray regionArr;
 		regionArr.push_back(primaryObj);
-		regionArr.push_back(remoteObj);
+		if(needsRemote || g_random->random01() < 0.5) {
+			regionArr.push_back(remoteObj);
+		}
 
 		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 	}
