@@ -37,17 +37,10 @@ The rise of mobile computing has led to the model of *disconnected operation* in
 
 While a central server running FoundationDB could be used as a database for a mobile application to connect and sync to from time to time, FoundationDB's core does not itself directly provide disconnected operation. Because it would sacrifice ACID properties, we believe that in those applications where disconnected operation is needed, the database is the wrong tier to implement it.
 
-Long-running transactions
-=========================
+Long-running read/write transactions
+====================================
 
 FoundationDB aims to provide low latencies across a range of metrics. Transaction latencies, in particular, are typically under 15 milliseconds. Some applications require very large operations that require several seconds or more, several orders of magnitude larger than our usual transaction latency. Large operations of this kind are best approached in FoundationDB by decomposition into a set of smaller transactions.
 
-FoundationDB does not support *long-running transactions*, currently defined as those 
-:ref:`lasting over five seconds <long-transactions>`. The system employs multiversion concurrency control and maintains older versions of the database for a five second period. A transaction that is kept open longer will not be able to commit. If you have a requirement to support large operations, we would be happy to assist you to implement a decomposition strategy within a layer.
-
-Content delivery networks (CDN)
-===============================
-
-A *content delivery network* (CDN) employs geographically dispersed datacenters to serve data with high performance to similarly dispersed end-users. While FoundationDB does support multiple datacenters, it has not been designed as a CDN. The FoundationDB core does not locate data in a geographically aware manner and does not aim to provide low write latencies (e.g., under 5 milliseconds) over large geographic distances.
-
-In FoundationDB's configuration for multiple datacenters, each datacenter contains a complete, up-to-date copy of the database. Each client will have a primary datacenter, with other datacenters acting in a secondary mode to support minimal downtime if a datacenter becomes unavailable.
+FoundationDB does not support *long-running read/write transactions*, currently defined as those 
+:ref:`lasting over five seconds <long-transactions>`. The system employs multiversion concurrency control and maintains conflict information for a five second period. A transaction that is kept open longer will not be able to commit.
