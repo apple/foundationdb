@@ -682,7 +682,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	bool generateFearless = false; //FIXME g_random->random01() < 0.5;
+	bool generateFearless = true; //FIXME g_random->random01() < 0.5;
 	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
@@ -763,9 +763,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			remoteSatellitesArr.push_back(remoteSatelliteObj);
 			remoteObj["satellites"] = remoteSatellitesArr;
 
-			int satellite_replication_type = 2;//FIXME: g_random->randomInt(0,5);
+			int satellite_replication_type = g_random->randomInt(0,5);
 			switch (satellite_replication_type) {
 			case 0: {
+				//FIXME: implement
 				TEST( true );  // Simulated cluster using custom satellite redundancy mode
 				break;
 			}
@@ -801,9 +802,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				remoteObj["satellite_logs"] = logs;
 			}
 			
-			int remote_replication_type = 2;//FIXME: g_random->randomInt(0,5);
+			int remote_replication_type = g_random->randomInt(0,5);
 			switch (remote_replication_type) {
 			case 0: {
+				//FIXME: implement
 				TEST( true );  // Simulated cluster using custom remote redundancy mode
 				break;
 			}
@@ -906,6 +908,15 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		}
 		for(auto s : simconfig.db.regions[1].satellites) {
 			g_simulator.remoteSatelliteDcIds.push_back(s.dcId);
+		}
+	} else if(simconfig.db.regions.size() == 1) {
+		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
+		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
+		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
+		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
+
+		for(auto s : simconfig.db.regions[0].satellites) {
+			g_simulator.primarySatelliteDcIds.push_back(s.dcId);
 		}
 	} else {
 		g_simulator.hasSatelliteReplication = false;

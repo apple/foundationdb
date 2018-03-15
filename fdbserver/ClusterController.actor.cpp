@@ -643,6 +643,17 @@ public:
 				}
 				throw;
 			}
+		} else if(req.configuration.regions.size() == 1) {
+			vector<Optional<Key>> dcPriority;
+			dcPriority.push_back(req.configuration.regions[0].dcId);
+			desiredDcIds.set(dcPriority);
+			auto reply = findWorkersForConfiguration(req, req.configuration.regions[0].dcId);
+			if(reply.isError()) {
+				throw reply.getError();
+			} else if(clusterControllerDcId.present() && req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
+				return reply.get();
+			}
+			throw no_more_servers();
 		} else {
 			RecruitFromConfigurationReply result;
 			result.logRouterCount = 0;
@@ -730,7 +741,7 @@ public:
 	}
 
 	void checkPrimaryDC() {
-		if(db.config.regions.size() && clusterControllerDcId.present() && db.config.regions[0].dcId != clusterControllerDcId.get()) {
+		if(db.config.regions.size() > 1 && clusterControllerDcId.present() && db.config.regions[0].dcId != clusterControllerDcId.get()) {
 			try {
 				std::map< Optional<Standalone<StringRef>>, int> id_used;
 				getWorkerForRoleInDatacenter(db.config.regions[0].dcId, ProcessClass::ClusterController, ProcessClass::ExcludeFit, db.config, id_used, true);
@@ -854,7 +865,7 @@ public:
 		std::set<Optional<Key>> remoteDC;
 
 		RegionInfo region;
-		if(db.config.regions.size() > 1 && clusterControllerDcId.present()) {
+		if(db.config.regions.size() && clusterControllerDcId.present()) {
 			primaryDC.insert(clusterControllerDcId);
 			for(auto& r : db.config.regions) {
 				if(r.dcId != clusterControllerDcId.get()) {
