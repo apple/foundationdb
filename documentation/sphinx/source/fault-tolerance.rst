@@ -23,7 +23,7 @@ Any distributed system faces some basic probabilistic constraints. For example, 
 
 FoundationDB improves these probabilities by selecting "teams" of machines on which to distribute data. Instead of putting each chunk of data on a different set of machines, each machine can participate in multiple teams. In the above example, by selecting only 450 teams of 4 machines that each chunk of data can be on, the chance of data unavailability is reduced to about 0.5%.
 
-The number of machines in each team is based on the replication mode, the total number of teams increases with the size of the cluster.
+The number of machines in each team is based on the replication mode; the total number of teams increases with the size of the cluster.
 
 Independence assumptions
 ========================
