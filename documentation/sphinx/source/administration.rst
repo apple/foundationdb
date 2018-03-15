@@ -239,7 +239,7 @@ The ``status`` command displays general information about the FoundationDB clust
       Machines               - 3
       Memory availability    - 4.1 GB per process on machine with least available
       Fault Tolerance        - 0 machines
-      Server time            - Wed Oct  8 14:41:34 2014
+      Server time            - Thu Mar 15 14:41:34 2018
 
     Data:
       Replication health     - Healthy
@@ -257,7 +257,7 @@ The ``status`` command displays general information about the FoundationDB clust
       Transactions committed - 0 Hz
       Conflict rate          - 0 Hz
 
-    Client time: Thu Nov 20 09:50:45 2014
+    Client time: Thu Mar 15 14:41:34 2018
 
 The summary fields are interpreted as follows:
 
@@ -320,7 +320,7 @@ The ``status`` command can provide detailed statistics about the cluster and the
       Machines               - 3
       Memory availability    - 4.1 GB per process on machine with least available
       Fault Tolerance        - 0 machines
-      Server time            - Wed Oct  8 14:41:34 2014
+      Server time            - Thu Mar 15 14:41:34 2018
 
     Data:
       Replication health     - Healthy
@@ -348,7 +348,7 @@ The ``status`` command can provide detailed statistics about the cluster and the
       10.0.4.2:4500
       10.0.4.3:4500
 
-    Client time: Thu Nov 20 09:56:52 2014
+    Client time: Thu Mar 15 14:41:34 2018
 
 Several details about individual FoundationDB processes are displayed in a list format in parenthesis after the IP address and port:
 

@@ -63,7 +63,7 @@ To verify that the local FoundationDB database is operational, open the command 
     Machines               - 1
     Memory availability    - 4.1 GB per process on machine with least available
     Fault Tolerance        - 0 machines
-    Server time            - Wed Oct  8 14:41:34 2014
+    Server time            - Thu Mar 15 14:41:34 2018
     
   Data:
     Replication health     - Healthy
@@ -81,7 +81,7 @@ To verify that the local FoundationDB database is operational, open the command 
     Transactions committed - 0 Hz
     Conflict rate          - 0 Hz
 
-  Client time: Thu Nov 20 09:56:52 2014
+  Client time: Thu Mar 15 14:41:34 2018
 
 If these steps were successful you have installed and validated FoundationDB. You can now start using the database!
 
