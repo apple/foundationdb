@@ -40,7 +40,7 @@ Clients can create transactional watches on keys to ensure that they are notifie
 Atomic Operations
 -----------------
 
-FoundationDB includes support for specific "atomic operations" (e.g. Add) within a transaction to manipulate the value of a key without requiring the client to actually read the value. This makes these operations "zero-latency" and enables a variety of advanced data structures to be implemented more efficiently as layers.
+FoundationDB includes support for specific "atomic operations" (e.g. Add) within a transaction to manipulate the value of a key without requiring the client to actually read the value. This makes these operations low-latency and enables a variety of advanced data structures to be implemented more efficiently as layers.
 
 OLTP and OLAP
 -------------
@@ -82,7 +82,7 @@ FoundationDB uses multiversion concurrency control to provide transactionally is
 Concurrent Connections
 ----------------------
 
-FoundationDB is not slowed by large numbers of concurrent client connections. Because it uses a threadless communications and concurrency model, FoundationDB does not have to create a thread per connection. This allows full performance even with hundreds of thousands of in-flight requests.
+FoundationDB is able to handle large numbers of concurrent client connections. Because it uses a threadless communications and concurrency model, FoundationDB does not have to create a thread per connection. This allows full performance even with hundreds of thousands of in-flight requests.
 
 Interactive Transactions
 ------------------------
@@ -100,7 +100,7 @@ A FoundationDB database can start on a single machine and be expanded to a clust
 Datacenter Failover
 -------------------
 
-FoundationDB can be configured to run multiple live redundant clusters in geographically diverse datacenters. Each datacenter contains a complete and fully up-to-date copy of all data in the system, allowing for minimal downtime even when an entire datacenter becomes unavailable.
+FoundationDB can be configured to run multiple geographically diverse datacenters through our Multi DC mode. Each piece of data is replicated into three data centers, and clients can read data from their local data center at low latencies. In the event of a data center failure, the two remaining data centers will continue accepting writes, allowing for minimal downtime.
 
 Self Tuning
 -----------
