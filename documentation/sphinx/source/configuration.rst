@@ -103,7 +103,8 @@ After running this command, you can check that it completed successfully by usin
     Data:
       Replication health     - Healthy
       Moving data            - 0.000 GB
-      Sum of key-value sizes - 0 MB
+      Sum of key-value sizes - 8 MB
+      Disk space used        - 103 MB
 
     Operating space:
       Storage server         - 1.0 GB free on most full server
@@ -115,6 +116,10 @@ After running this command, you can check that it completed successfully by usin
       Transactions started   - 2 Hz
       Transactions committed - 0 Hz
       Conflict rate          - 0 Hz
+
+    Backup and DR:
+      Running backups        - 0
+      Running DRs            - 0
 
     Process performance details:
       10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; 2.5 GB / 4.1 GB RAM  )

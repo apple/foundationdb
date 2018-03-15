@@ -244,7 +244,8 @@ The ``status`` command displays general information about the FoundationDB clust
     Data:
       Replication health     - Healthy
       Moving data            - 0.000 GB
-      Sum of key-value sizes - 0 MB
+      Sum of key-value sizes - 8 MB
+      Disk space used        - 103 MB
 
     Operating space:
       Storage server         - 1.0 GB free on most full server
@@ -256,6 +257,10 @@ The ``status`` command displays general information about the FoundationDB clust
       Transactions started   - 2 Hz
       Transactions committed - 0 Hz
       Conflict rate          - 0 Hz
+
+    Backup and DR:
+      Running backups        - 0
+      Running DRs            - 0
 
     Client time: Thu Mar 15 14:41:34 2018
 
@@ -273,6 +278,7 @@ Server time             Timestamp from the server
 Replication health      A qualitative estimate of the health of data replication
 Moving data             Amount of data currently in movement between machines
 Sum of key-value sizes	Estimated total size of keys and values stored (not including any overhead or replication)
+Disk space used         Sum of space used across all nodes in the cluster
 Storage server          Free space for storage on the server with least available. For ``ssd`` storage engine, includes only disk; for ``memory`` storage engine, includes both RAM and disk.
 Log server              Free space for log server on the server with least available.
 Read rate               The current number of reads per second
@@ -280,6 +286,8 @@ Write rate              The current number of writes per second
 Transaction started     The current number of transactions started per second
 Transaction committed   The current number of transactions committed per second
 Conflict rate           The current number of conflicts per second
+Running backups         Number of backups currently running. Different backups could be backing up to different prefixes and/or to different targets.
+Running DRs             Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters.
 ====================== ==========================================================================================================
 
 The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking:
@@ -325,7 +333,8 @@ The ``status`` command can provide detailed statistics about the cluster and the
     Data:
       Replication health     - Healthy
       Moving data            - 0.000 GB
-      Sum of key-value sizes - 0 MB
+      Sum of key-value sizes - 8 MB
+      Disk space used        - 103 MB
 
     Operating space:
       Storage server         - 1.0 GB free on most full server
@@ -337,6 +346,10 @@ The ``status`` command can provide detailed statistics about the cluster and the
       Transactions started   - 2 Hz
       Transactions committed - 0 Hz
       Conflict rate          - 0 Hz
+
+    Backup and DR:
+      Running backups        - 0
+      Running DRs            - 0
 
     Process performance details:
       10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; 2.5 GB / 4.1 GB RAM  )
