@@ -118,5 +118,3 @@ FoundationDB load balances reads across the servers with replicas of the data be
     If data is accessed exceptionally frequently, an application could avoid this limitation by storing such data in multiple subspaces, effectively increasing its replication factor.
 
 
-
-
