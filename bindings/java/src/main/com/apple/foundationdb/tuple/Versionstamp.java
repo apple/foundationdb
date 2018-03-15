@@ -57,7 +57,7 @@ import java.util.Arrays;
  *
  * <pre>
  * <code>
- *  {@code CompletableFuture<byte[]>} trVersionFuture = db.run((Transaction tr) -> {
+ *  CompletableFuture&lt;byte[]&gt; trVersionFuture = db.run((Transaction tr) -&gt; {
  *       // The incomplete Versionstamp will be overwritten with tr's version information when committed.
  *       Tuple t = Tuple.from("prefix", Versionstamp.incomplete());
  *       tr.mutate(MutationType.SET_VERSIONSTAMPED_KEY, t.packWithVersionstamp(), new byte[0]);
@@ -66,7 +66,7 @@ import java.util.Arrays;
  *
  *   byte[] trVersion = trVersionFuture.get();
  *
- *   Versionstamp v = db.run((Transaction tr) -> {
+ *   Versionstamp v = db.run((Transaction tr) -&gt; {
  *       Subspace subspace = new Subspace(Tuple.from("prefix"));
  *       byte[] serialized = tr.getRange(subspace.range(), 1).iterator().next().getKey();
  *       Tuple t = subspace.unpack(serialized);
