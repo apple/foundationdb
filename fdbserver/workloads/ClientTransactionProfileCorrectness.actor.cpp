@@ -29,7 +29,7 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 	reader >> protocolVersion;
 	reader.setProtocolVersion(protocolVersion);
 
-	while (reader.empty()) {
+	while (!reader.empty()) {
 		// Get EventType and timestamp
 		FdbClientLogEvents::EventType event;
 		reader >> event;

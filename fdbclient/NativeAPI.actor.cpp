@@ -430,7 +430,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
 			// Hence destroy the transacation before sleeping to give a chance for the actor to be cleanedup if the Database is destroyed by the user.
 			tr = Transaction();
-			Void _ = wait(delay(*(const_cast<volatile double *>(&CLIENT_KNOBS->CSI_STATUS_DELAY)))); // CSI_STATUS_DELAY is modified by ClientTransactionProfileCorrectnessWorkload
+			Void _ = wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
 		}
 		catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
