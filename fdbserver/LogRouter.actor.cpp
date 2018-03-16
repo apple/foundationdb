@@ -83,11 +83,6 @@ struct LogRouterData {
 	LogRouterData(UID dbgid, Tag routerTag, int logSet) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()) {}
 };
 
-struct TagsAndMessage {
-	StringRef message;
-	std::vector<Tag> tags;
-};
-
 void commitMessages( LogRouterData* self, Version version, const std::vector<TagsAndMessage>& taggedMessages ) {
 	if(!taggedMessages.size()) {
 		return;

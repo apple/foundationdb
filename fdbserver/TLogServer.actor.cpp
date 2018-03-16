@@ -49,25 +49,46 @@ struct TLogQueueEntryRef {
 	Version version;
 	Version knownCommittedVersion;
 	StringRef messages;
-	VectorRef< TagMessagesRef > tags;
 
 	TLogQueueEntryRef() : version(0), knownCommittedVersion(0) {}
 	TLogQueueEntryRef(Arena &a, TLogQueueEntryRef const &from)
-	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id), messages(a, from.messages), tags(a, from.tags) {
+	  : version(from.version), knownCommittedVersion(from.knownCommittedVersion), id(from.id), messages(a, from.messages) {
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		if( ar.protocolVersion() >= 0x0FDB00A460010001) {
-			ar & version & messages & tags & knownCommittedVersion & id;
-		} else if(ar.isDeserializing) {
-			ar & version & messages & tags;
-			knownCommittedVersion = 0;
-			id = UID();
-		}
+		ar & version & messages & knownCommittedVersion & id;
 	}
 	size_t expectedSize() const {
-		return messages.expectedSize() + tags.expectedSize();
+		return messages.expectedSize();
+	}
+};
+
+struct AlternativeTLogQueueEntryRef {
+	UID id;
+	Version version;
+	Version knownCommittedVersion;
+	std::vector<TagsAndMessage>* alternativeMessages;
+
+	AlternativeTLogQueueEntryRef() : version(0), knownCommittedVersion(0), alternativeMessages(NULL) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ASSERT(!ar.isDeserializing && alternativeMessages);
+		uint32_t msgSize = expectedSize();
+		ar & version & msgSize;
+		for(auto& msg : *alternativeMessages) {
+			ar.serializeBytes( msg.message );
+		}
+		ar & knownCommittedVersion & id;
+	}
+
+	uint32_t expectedSize() const {
+		uint32_t msgSize = 0;
+		for(auto& msg : *alternativeMessages) {
+			msgSize += msg.message.size();
+		}
+		return msgSize;
 	}
 };
 
@@ -94,7 +115,8 @@ public:
 		return readNext( this );
 	}
 
-	void push( TLogQueueEntryRef const& qe ) {
+	template <class T>
+	void push( T const& qe ) {
 		BinaryWriter wr( Unversioned() );  // outer framing is not versioned
 		wr << uint32_t(0);
 		IncludeVersion().write(wr);  // payload is versioned
@@ -316,7 +338,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 					self->version_messages.pop_front();
 				}
 
-				int64_t bytesErased = (messagesErased * sizeof(std::pair<Version, LengthPrefixedStringRef>) * SERVER_KNOBS->VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS) >> 10;
+				int64_t bytesErased = messagesErased * SERVER_KNOBS->VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
 				tlogData->bytesDurable += bytesErased;
 				*gBytesErased += bytesErased;
 				Void _ = wait(yield(taskID));
@@ -671,11 +693,6 @@ ACTOR Future<Void> updateStorageLoop( TLogData* self ) {
 	}
 }
 
-struct TagsAndMessage {
-	StringRef message;
-	std::vector<Tag> tags;
-};
-
 void commitMessages( Reference<LogData> self, Version version, const std::vector<TagsAndMessage>& taggedMessages, int64_t& bytesInput ) {
 	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.  Find a
 	// way to do the memory allocation right as we receive the messages in the network layer.
@@ -728,13 +745,13 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 				if (tag != txsTag) {
 					expectedBytes += tsm->value.version_messages.back().second.expectedSize();
 				}
-			}
 
-			// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used to store this data in a std::deque.
-			// In practice, this number is probably something like 528/512 ~= 1.03, but this could vary based on the implementation.
-			// There will also be a fixed overhead per std::deque, but its size should be trivial relative to the size of the TLog
-			// queue and can be thought of as increasing the capacity of the queue slightly.
-			addedBytes += (sizeof(std::pair<Version, LengthPrefixedStringRef>) * SERVER_KNOBS->VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS) >> 10;
+				// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used to store this data in a std::deque.
+				// In practice, this number is probably something like 528/512 ~= 1.03, but this could vary based on the implementation.
+				// There will also be a fixed overhead per std::deque, but its size should be trivial relative to the size of the TLog
+				// queue and can be thought of as increasing the capacity of the queue slightly.
+				addedBytes += SERVER_KNOBS->VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
+			}
 		}
 		
 		msgSize -= msg.message.size();
@@ -749,99 +766,26 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 	//TraceEvent("TLogPushed", self->dbgid).detail("Bytes", addedBytes).detail("MessageBytes", messages.size()).detail("Tags", tags.size()).detail("expectedBytes", expectedBytes).detail("mCount", mCount).detail("tCount", tCount);
 }
 
-void commitMessages( Reference<LogData> self, Version version, Arena arena, StringRef messages, VectorRef< TagMessagesRef > tags, int64_t& bytesInput) {
-	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.  Find a
-	// way to do the memory allocation right as we receive the messages in the network layer.
-
-	int64_t addedBytes = 0;
-	int64_t expectedBytes = 0;
-
-	if(!messages.size()) {
-		return;
-	}
-
-	StringRef messages1;  // the first block of messages, if they aren't all stored contiguously.  otherwise empty
-
-	// Grab the last block in the blocks list so we can share its arena
-	// We pop all of the elements of it to create a "fresh" vector that starts at the end of the previous vector
-	Standalone<VectorRef<uint8_t>> block;
-	if(self->messageBlocks.empty()) {
-		block = Standalone<VectorRef<uint8_t>>();
-		block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, messages.size()));
-	}
-	else {
-		block = self->messageBlocks.back().second;
-	}
-
-	block.pop_front(block.size());
-
-	// If the current batch of messages doesn't fit entirely in the remainder of the last block in the list
-	if(messages.size() + block.size() > block.capacity()) {
-		// Find how many messages will fit
-		LengthPrefixedStringRef r((uint32_t*)messages.begin());
-		uint8_t const* end = messages.begin() + block.capacity() - block.size();
-		while(r.toStringRef().end() <= end) {
-			r = LengthPrefixedStringRef( (uint32_t*)r.toStringRef().end() );
+void commitMessages( Reference<LogData> self, Version version, Arena arena, StringRef messages, int64_t& bytesInput ) {
+	ArenaReader rd( arena, messages, Unversioned() );
+	int32_t messageLength, rawLength;
+	uint16_t tagCount;
+	uint32_t sub;
+	std::vector<TagsAndMessage> msgs;
+	while(!rd.empty()) {
+		TagsAndMessage tagsAndMsg;
+		rd.checkpoint();
+		rd >> messageLength >> sub >> tagCount;
+		tagsAndMsg.tags.resize(tagCount);
+		for(int i = 0; i < tagCount; i++) {
+			rd >> tagsAndMsg.tags[i];
 		}
-
-		// Fill up the rest of this block
-		int bytes = (uint8_t*)r.getLengthPtr()-messages.begin();
-		if (bytes) {
-			TEST(true); // Splitting commit messages across multiple blocks
-			messages1 = StringRef(block.end(), bytes);
-			block.append(block.arena(), messages.begin(), bytes);
-			self->messageBlocks.push_back( std::make_pair(version, block) );
-			addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
-			messages = messages.substr(bytes);
-		}
-
-		// Make a new block
-		block = Standalone<VectorRef<uint8_t>>();
-		block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, messages.size()));
+		rawLength = messageLength + sizeof(messageLength);
+		rd.rewind();
+		tagsAndMsg.message = StringRef((uint8_t const*)rd.readBytes(rawLength), rawLength);
+		msgs.push_back(std::move(tagsAndMsg));
 	}
-
-	// Copy messages into block
-	ASSERT(messages.size() <= block.capacity() - block.size());
-	block.append(block.arena(), messages.begin(), messages.size());
-	self->messageBlocks.push_back( std::make_pair(version, block) );
-	addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
-	messages = StringRef(block.end()-messages.size(), messages.size());
-
-	for(auto tag = tags.begin(); tag != tags.end(); ++tag) {
-		int64_t tagMessages = 0;
-
-		auto tsm = self->tag_data.find(tag->tag);
-		if (tsm == self->tag_data.end()) {
-			tsm = self->tag_data.insert( mapPair(std::move(Tag(tag->tag)), LogData::TagData(Version(0), true, true, tag->tag) ), false );
-		}
-
-		if (version >= tsm->value.popped) {
-			for(int m = 0; m < tag->messageOffsets.size(); ++m) {
-				int offs = tag->messageOffsets[m];
-				uint8_t const* p = offs < messages1.size() ? messages1.begin() + offs : messages.begin() + offs - messages1.size();
-				tsm->value.version_messages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)p)));
-				if(tsm->value.version_messages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
-					TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", tsm->value.version_messages.back().second.expectedSize());
-				}
-				if (tag->tag != txsTag)
-					expectedBytes += tsm->value.version_messages.back().second.expectedSize();
-
-				++tagMessages;
-			}
-		}
-
-		// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used to store this data in a std::deque.
-		// In practice, this number is probably something like 528/512 ~= 1.03, but this could vary based on the implementation.
-		// There will also be a fixed overhead per std::deque, but its size should be trivial relative to the size of the TLog
-		// queue and can be thought of as increasing the capacity of the queue slightly.
-		addedBytes += (tagMessages * sizeof(std::pair<Version, LengthPrefixedStringRef>) * SERVER_KNOBS->VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS) >> 10;
-	}
-
-	self->version_sizes[version] = make_pair(expectedBytes, expectedBytes);
-	self->bytesInput += addedBytes;
-	bytesInput += addedBytes;
-
-	//TraceEvent("TLogPushed", self->dbgid).detail("Bytes", addedBytes).detail("MessageBytes", messages.size()).detail("Tags", tags.size()).detail("expectedBytes", expectedBytes).detail("mCount", mCount).detail("tCount", tCount);
+	commitMessages(self, version, msgs, bytesInput);
 }
 
 Version poppedVersion( Reference<LogData> self, Tag tag) {
@@ -1147,14 +1091,13 @@ ACTOR Future<Void> tLogCommit(
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
 		TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
-		commitMessages(logData, req.version, req.arena, req.messages, req.tags, self->bytesInput);
+		commitMessages(logData, req.version, req.arena, req.messages, self->bytesInput);
 
 		// Log the changes to the persistent queue, to be committed by commitQueue()
 		TLogQueueEntryRef qe;
 		qe.version = req.version;
 		qe.knownCommittedVersion = req.knownCommittedVersion;
 		qe.messages = req.messages;
-		qe.tags = req.tags;
 		qe.id = logData->logId;
 		self->persistentQueue->push( qe );
 
@@ -1416,25 +1359,19 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 		}
 
 		Version ver = 0;
-		Arena arena;
-		BinaryWriter wr(Unversioned());
-		Map<Tag, TagMessagesRef> tag_offsets;
+		std::vector<TagsAndMessage> messages;
 		while (true) {
 			bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					VectorRef<TagMessagesRef> r;
-					for(auto& t : tag_offsets)
-						r.push_back( arena, t.value );
-					commitMessages(logData, ver, arena, wr.toStringRef(), r, self->bytesInput);
+					commitMessages(logData, ver, messages, self->bytesInput);
 
 					// Log the changes to the persistent queue, to be committed by commitQueue()
-					TLogQueueEntryRef qe;
+					AlternativeTLogQueueEntryRef qe;
 					qe.version = ver;
 					qe.knownCommittedVersion = 0;
-					qe.messages = wr.toStringRef();
-					qe.tags = r;
+					qe.alternativeMessages = &messages;
 					qe.id = logData->logId;
 					self->persistentQueue->push( qe );
 
@@ -1450,21 +1387,15 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 				}
 				lastVer = ver;
 				ver = r->version().version;
-				tag_offsets = Map<Tag, TagMessagesRef>();
-				wr = BinaryWriter(Unversioned());
-				arena = Arena();
 
 				if (!foundMessage) {
 					ver--;
 					if(ver > logData->version.get()) {
-						commitMessages(logData, ver, arena, StringRef(), VectorRef<TagMessagesRef>(), self->bytesInput);
-
 						// Log the changes to the persistent queue, to be committed by commitQueue()
 						TLogQueueEntryRef qe;
 						qe.version = ver;
 						qe.knownCommittedVersion = 0;
 						qe.messages = StringRef();
-						qe.tags = VectorRef<TagMessagesRef>();
 						qe.id = logData->logId;
 						self->persistentQueue->push( qe );
 
@@ -1482,23 +1413,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 				}
 			}
 
-			StringRef msg = r->getMessage();
-			auto tags = r->getTags();
-			for(auto tag : tags) {
-				auto it = tag_offsets.find(tag);
-				if (it == tag_offsets.end()) {
-					it = tag_offsets.insert(mapPair( tag, TagMessagesRef() ));
-					it->value.tag = it->key;
-				}
-				it->value.messageOffsets.push_back( arena, wr.getLength() );
-			}
-
-			//FIXME: do not reserialize tag data
-			wr << uint32_t( msg.size() + sizeof(uint32_t) + sizeof(uint16_t) + tags.size()*sizeof(Tag) ) << r->version().sub << uint16_t(tags.size());
-			for(auto t : tags) {
-				wr << t;
-			}
-			wr.serializeBytes( msg );
+			messages.push_back( TagsAndMessage(r->getMessageWithTags(), r->getTags()) );
 			r->nextMessage();
 		}
 
@@ -1719,7 +1634,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 					if(logData) {
 						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, qe.knownCommittedVersion);
 						if( qe.version > logData->version.get() ) {
-							commitMessages(logData, qe.version, qe.arena(), qe.messages, qe.tags, self->bytesInput);
+							commitMessages(logData, qe.version, qe.arena(), qe.messages, self->bytesInput);
 							logData->version.set( qe.version );
 							logData->queueCommittedVersion.set( qe.version );
 

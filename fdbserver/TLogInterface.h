@@ -200,18 +200,17 @@ struct TLogCommitRequest {
 	Arena arena;
 	Version prevVersion, version, knownCommittedVersion;
 
-	StringRef messages;  // Each message prefixed by a 4-byte length
-	VectorRef< TagMessagesRef > tags;
+	StringRef messages;// Each message prefixed by a 4-byte length
 
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, StringRef messages, VectorRef< TagMessagesRef > tags, Optional<UID> debugID ) 
-		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), messages(messages), tags(tags), debugID(debugID) {}
+	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, StringRef messages, Optional<UID> debugID ) 
+		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), messages(messages), debugID(debugID) {}
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & prevVersion & version & knownCommittedVersion & messages & tags & reply & arena & debugID;
+		ar & prevVersion & version & knownCommittedVersion & messages & reply & arena & debugID;
 	}
 };
 

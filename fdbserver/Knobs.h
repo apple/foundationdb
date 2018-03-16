@@ -50,6 +50,7 @@ public:
 	double TLOG_PEEK_DELAY;
 	int LEGACY_TLOG_UPGRADE_ENTRIES_PER_VERSION;
 	int VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS; // Multiplicative factor to bound total space used to store a version message (measured in 1/1024ths, e.g. a value of 2048 yields a factor of 2).
+	int64_t VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
 	double TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	int64_t TLOG_MESSAGE_BLOCK_BYTES;
 	int64_t MAX_MESSAGE_SIZE;

@@ -66,6 +66,14 @@ static const Tag txsTag {tagLocalitySpecial, 1};
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
+struct TagsAndMessage {
+	StringRef message;
+	std::vector<Tag> tags;
+
+	TagsAndMessage() {}
+	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+};
+
 struct KeyRangeRef;
 struct KeyValueRef;
 

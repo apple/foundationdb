@@ -569,15 +569,12 @@ struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
 	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
-		int totalSize = 0;
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
-				totalSize += log.tLogs.size();
+				for(int i = 0; i < log.tLogs.size(); i++) {
+					messagesWriter.push_back( BinaryWriter( AssumeVersion(currentProtocolVersion) ) );
+				}
 			}
-		}
-		tags.resize( totalSize );
-		for(int i = 0; i < tags.size(); i++) {
-			messagesWriter.push_back( BinaryWriter( AssumeVersion(currentProtocolVersion) ) );
 		}
 	}
 
@@ -601,9 +598,6 @@ struct LogPushData : NonCopyable {
 		}
 		uint32_t subseq = this->subsequence++;
 		for(int loc : msg_locations) {
-			for(auto& tag : prev_tags)
-				addTagToLoc( tag, loc );
-
 			messagesWriter[loc] << uint32_t(rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size()) << subseq << uint16_t(prev_tags.size());
 			for(auto& tag : prev_tags)
 				messagesWriter[loc] << tag;
@@ -625,9 +619,6 @@ struct LogPushData : NonCopyable {
 		
 		uint32_t subseq = this->subsequence++;
 		for(int loc : msg_locations) {
-			for(auto& tag : prev_tags)
-				addTagToLoc( tag, loc );
-
 			// FIXME: memcpy after the first time
 			BinaryWriter& wr = messagesWriter[loc];
 			int offset = wr.getLength();
@@ -644,28 +635,12 @@ struct LogPushData : NonCopyable {
 	StringRef getMessages(int loc) {
 		return StringRef( arena, messagesWriter[loc].toStringRef() );  // FIXME: Unnecessary copy!
 	}
-	VectorRef<TagMessagesRef> getTags(int loc) {
-		VectorRef<TagMessagesRef> r;
-		for(auto& t : tags[loc])
-			r.push_back( arena, t.value );
-		return r;
-	}
 
 private:
-	void addTagToLoc( Tag tag, int loc ) {
-		auto it = tags[loc].find(tag);
-		if (it == tags[loc].end()) {
-			it = tags[loc].insert(mapPair( tag, TagMessagesRef() ));
-			it->value.tag = it->key;
-		}
-		it->value.messageOffsets.push_back( arena, messagesWriter[loc].getLength() );
-	}
-
 	Reference<ILogSystem> logSystem;
 	Arena arena;
 	vector<Tag> next_message_tags;
 	vector<Tag> prev_tags;
-	vector<Map<Tag, TagMessagesRef>> tags;
 	vector<BinaryWriter> messagesWriter;
 	vector<int> msg_locations;
 	uint32_t subsequence;
