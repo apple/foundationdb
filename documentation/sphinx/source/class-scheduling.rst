@@ -62,7 +62,7 @@ Requirements
 ------------
 
 We'll need to let users list available classes and track which students have signed up for which classes. Here's a first cut at the functions we'll need to implement::
-            
+
     available_classes()      # returns list of classes
     signup(studentID, class) # signs up a student for a class
     drop(studentID, class)   # drops a student from a class
@@ -73,13 +73,13 @@ Data model
 ----------
 
 First, we need to design a :doc:`data model <data-modeling>`. A data model is just a method for storing our application data using keys and values in FoundationDB. We seem to have two main types of data: (1) a list of classes and (2) a record of which students will attend which classes. Let's keep attending data like this::
-            
+
     # ('attends', student, class) = ''
 
 We'll just store the key with a blank value to indicate that a student is signed up for a particular class. For this application, we're going to think about a key-value pair's key as a :ref:`tuple <data-modeling-tuples>`. Encoding a tuple of data elements into a key is a very common pattern for an ordered key-value store.
 
 We'll keep data about classes like this::
-            
+
     # ('class', class_name) = seats_available
 
 Similarly, each such key will represent an available class. We'll use ``seats_available`` to record the number of seats available.
@@ -139,9 +139,9 @@ Making some sample classes
 Let's make some sample classes and put them in the ``class_names`` variable. The Python ``itertools`` module is used to make individual classes from combinations of class types, levels, and times::
 
     import itertools
-            
+
     # Generate 1,620 classes like '9:00 chem for dummies'
-    levels = ['intro', 'for dummies', 'remedial', '101', 
+    levels = ['intro', 'for dummies', 'remedial', '101',
               '201', '301', 'mastery', 'lab', 'seminar']
     types = ['chem', 'bio', 'cs', 'geometry', 'calc',
              'alg', 'film', 'music', 'art', 'dance']
@@ -152,7 +152,7 @@ Let's make some sample classes and put them in the ``class_names`` variable. The
 Initializing the database
 -------------------------
 We initialize the database with our class list::
-            
+
     @fdb.transactional
     def init(tr):
         del tr[scheduling.range(())]  # Clear the directory
@@ -176,7 +176,7 @@ Signing up for a class
 ----------------------
 
 We finally get to the crucial function. A student has decided on a class (by name) and wants to sign up. The ``signup`` function will take a student (``s``) and a class (``c``)::
-            
+
     @fdb.transactional
     def signup(tr, s, c):
         rec = attends.pack((s, c))
@@ -199,7 +199,7 @@ Of course, to actually drop the student from the class, we need to be able to de
 Done?
 -----
 
-We report back to the project leader that our application is done---students can sign up for, drop, and list classes. Unfortunately, we learn that there has been a bit of scope creep in the mean time. Popular classes are getting over-subscribed, and our application is going to need to enforce the class size constraint as students add and drop classes.
+We report back to the project leader that our application is done---students can sign up for, drop, and list classes. Unfortunately, we learn that a new problem has been discovered: popular classes are being over-subscribed. Our application now needs to enforce the class size constraint as students add and drop classes.
 
 Seats are limited!
 ------------------
@@ -211,7 +211,7 @@ Let's go back to the data model. Remember that we stored the number of seats in 
 
     @fdb.transactional
     def available_classes(tr):
-        return [fdb.tuple.unpack(k)[2] for k, v in tr[course.range(())] 
+        return [course.unpack(k)[0] for k, v in tr[course.range(())]
                 if int(v)]
 
 This is easy -- we simply add a condition to check that the value is non-zero. Let's check out ``signup`` next:
@@ -291,7 +291,7 @@ Fortunately, we decided on a data model that keeps all of the attending records 
 Composing transactions
 ----------------------
 
-Oh, just one last feature, we're told. We have students that are trying to switch from one popular class to another. By the time they drop one class to free up a slot for themselves, the open slot in the other class is gone. By the time they see this and try to re-add their old class, that slot is gone too! So, can we make it so that a student can switch from one class to another without this worry? 
+Oh, just one last feature, we're told. We have students that are trying to switch from one popular class to another. By the time they drop one class to free up a slot for themselves, the open slot in the other class is gone. By the time they see this and try to re-add their old class, that slot is gone too! So, can we make it so that a student can switch from one class to another without this worry?
 
 Fortunately, we have FoundationDB, and this sounds an awful lot like the transactional property of atomicity---the all-or-nothing behavior that we already rely on. All we need to do is to *compose* the ``drop`` and ``signup`` functions into a new ``switch`` function. This makes the ``switch`` function exceptionally easy::
 
@@ -309,7 +309,7 @@ Also note that, if an exception is raised, for example, in ``signup``, the excep
 Are we done?
 ------------
 
-Yep, we're done. Fortunately, our UI team built an awesome UI while we were working on our back end, and we are ready to deploy. If you want to see this entire application in one place plus some multithreaded testing code to simulate concurrency, look at the :ref:`tutorial-appendix`, below.
+Yep, we’re done and ready to deploy. If you want to see this entire application in one place plus some multithreaded testing code to simulate concurrency, look at the :ref:`tutorial-appendix`, below.
 
 Deploying and scaling
 ---------------------
@@ -321,7 +321,7 @@ Next steps
 
 * See :doc:`data-modeling` for guidance on using tuple and subspaces to enable effective storage and retrieval of data.
 * See :doc:`developer-guide` for general guidance on development using FoundationDB.
-* See the :doc:`API References <api-reference>` for detailed API documentation. 
+* See the :doc:`API References <api-reference>` for detailed API documentation.
 
 .. _tutorial-appendix:
 
@@ -355,7 +355,7 @@ Here's the code for the scheduling tutorial::
         tr[course.pack((c,))] = bytes(100)
 
     # Generate 1,620 classes like '9:00 chem for dummies'
-    levels = ['intro', 'for dummies', 'remedial', '101', 
+    levels = ['intro', 'for dummies', 'remedial', '101',
               '201', '301', 'mastery', 'lab', 'seminar']
     types = ['chem', 'bio', 'cs', 'geometry', 'calc',
              'alg', 'film', 'music', 'art', 'dance']
@@ -377,7 +377,7 @@ Here's the code for the scheduling tutorial::
 
     @fdb.transactional
     def available_classes(tr):
-        return [course.unpack(k)[0] for k, v in tr[course.range(())] 
+        return [course.unpack(k)[0] for k, v in tr[course.range(())]
                 if int(v)]
 
 
