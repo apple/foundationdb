@@ -671,6 +671,84 @@ ACTOR Future<Void> updateStorageLoop( TLogData* self ) {
 	}
 }
 
+struct TagsAndMessage {
+	StringRef message;
+	std::vector<Tag> tags;
+};
+
+void commitMessages( Reference<LogData> self, Version version, const std::vector<TagsAndMessage>& taggedMessages, int64_t& bytesInput ) {
+	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.  Find a
+	// way to do the memory allocation right as we receive the messages in the network layer.
+
+	int64_t addedBytes = 0;
+	int64_t expectedBytes = 0;
+
+	if(!taggedMessages.size()) {
+		return;
+	}
+
+	int msgSize = 0;
+	for(auto& i : taggedMessages) {
+		msgSize += i.message.size();
+	}
+
+	// Grab the last block in the blocks list so we can share its arena
+	// We pop all of the elements of it to create a "fresh" vector that starts at the end of the previous vector
+	Standalone<VectorRef<uint8_t>> block;
+	if(self->messageBlocks.empty()) {
+		block = Standalone<VectorRef<uint8_t>>();
+		block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
+	}
+	else {
+		block = self->messageBlocks.back().second;
+	}
+
+	block.pop_front(block.size());
+
+	for(auto& msg : taggedMessages) {
+		if(msg.message.size() > block.capacity() - block.size()) {
+			self->messageBlocks.push_back( std::make_pair(version, block) );
+			addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
+			block = Standalone<VectorRef<uint8_t>>();
+			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
+		}
+
+		block.append(block.arena(), msg.message.begin(), msg.message.size());
+		for(auto& tag : msg.tags) {
+			auto tsm = self->tag_data.find(tag);
+			if (tsm == self->tag_data.end()) {
+				tsm = self->tag_data.insert( mapPair(std::move(Tag(tag)), LogData::TagData(Version(0), true, true, tag) ), false );
+			}
+
+			if (version >= tsm->value.popped) {
+				tsm->value.version_messages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size()))));
+				if(tsm->value.version_messages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
+					TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", tsm->value.version_messages.back().second.expectedSize());
+				}
+				if (tag != txsTag) {
+					expectedBytes += tsm->value.version_messages.back().second.expectedSize();
+				}
+			}
+
+			// The factor of VERSION_MESSAGES_OVERHEAD is intended to be an overestimate of the actual memory used to store this data in a std::deque.
+			// In practice, this number is probably something like 528/512 ~= 1.03, but this could vary based on the implementation.
+			// There will also be a fixed overhead per std::deque, but its size should be trivial relative to the size of the TLog
+			// queue and can be thought of as increasing the capacity of the queue slightly.
+			addedBytes += (sizeof(std::pair<Version, LengthPrefixedStringRef>) * SERVER_KNOBS->VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS) >> 10;
+		}
+		
+		msgSize -= msg.message.size();
+	}
+	self->messageBlocks.push_back( std::make_pair(version, block) );
+	addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
+
+	self->version_sizes[version] = make_pair(expectedBytes, expectedBytes);
+	self->bytesInput += addedBytes;
+	bytesInput += addedBytes;
+
+	//TraceEvent("TLogPushed", self->dbgid).detail("Bytes", addedBytes).detail("MessageBytes", messages.size()).detail("Tags", tags.size()).detail("expectedBytes", expectedBytes).detail("mCount", mCount).detail("tCount", tCount);
+}
+
 void commitMessages( Reference<LogData> self, Version version, Arena arena, StringRef messages, VectorRef< TagMessagesRef > tags, int64_t& bytesInput) {
 	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.  Find a
 	// way to do the memory allocation right as we receive the messages in the network layer.

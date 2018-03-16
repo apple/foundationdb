@@ -464,7 +464,7 @@ public:
 	}
 
 	template <class VersionOptions>
-	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena) {
+	ArenaReader( Arena const& arena, const StringRef& input, VersionOptions vo ) : m_pool(arena), check(NULL) {
 		begin = (const char*)input.begin();
 		end = begin + input.size();
 		vo.read(*this);
@@ -477,8 +477,18 @@ public:
 
 	bool empty() const { return begin == end; }
 
+	void checkpoint() {
+		check = begin;
+	}
+
+	void rewind() {
+		ASSERT(check != NULL);
+		begin = check;
+		check = NULL;
+	}
+
 private:
-	const char *begin, *end;
+	const char *begin, *end, *check;
 	Arena m_pool;
 	uint64_t m_protocolVersion;
 };

@@ -83,19 +83,27 @@ struct LogRouterData {
 	LogRouterData(UID dbgid, Tag routerTag, int logSet) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()) {}
 };
 
-void commitMessages( LogRouterData* self, Version version, Arena arena, StringRef messages, VectorRef< TagMessagesRef > tags) {
-	if(!messages.size()) {
+struct TagsAndMessage {
+	StringRef message;
+	std::vector<Tag> tags;
+};
+
+void commitMessages( LogRouterData* self, Version version, const std::vector<TagsAndMessage>& taggedMessages ) {
+	if(!taggedMessages.size()) {
 		return;
 	}
 
-	StringRef messages1;  // the first block of messages, if they aren't all stored contiguously.  otherwise empty
+	int msgSize = 0;
+	for(auto& i : taggedMessages) {
+		msgSize += i.message.size();
+	}
 
 	// Grab the last block in the blocks list so we can share its arena
 	// We pop all of the elements of it to create a "fresh" vector that starts at the end of the previous vector
 	Standalone<VectorRef<uint8_t>> block;
 	if(self->messageBlocks.empty()) {
 		block = Standalone<VectorRef<uint8_t>>();
-		block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, messages.size()));
+		block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 	}
 	else {
 		block = self->messageBlocks.back().second;
@@ -103,56 +111,31 @@ void commitMessages( LogRouterData* self, Version version, Arena arena, StringRe
 
 	block.pop_front(block.size());
 
-	// If the current batch of messages doesn't fit entirely in the remainder of the last block in the list
-	if(messages.size() + block.size() > block.capacity()) {
-		// Find how many messages will fit
-		LengthPrefixedStringRef r((uint32_t*)messages.begin());
-		uint8_t const* end = messages.begin() + block.capacity() - block.size();
-		while(r.toStringRef().end() <= end) {
-			r = LengthPrefixedStringRef( (uint32_t*)r.toStringRef().end() );
-		}
-
-		// Fill up the rest of this block
-		int bytes = (uint8_t*)r.getLengthPtr()-messages.begin();
-		if (bytes) {
-			TEST(true); // Splitting commit messages across multiple blocks
-			messages1 = StringRef(block.end(), bytes);
-			block.append(block.arena(), messages.begin(), bytes);
+	for(auto& msg : taggedMessages) {
+		if(msg.message.size() > block.capacity() - block.size()) {
 			self->messageBlocks.push_back( std::make_pair(version, block) );
-			messages = messages.substr(bytes);
+			block = Standalone<VectorRef<uint8_t>>();
+			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 		}
 
-		// Make a new block
-		block = Standalone<VectorRef<uint8_t>>();
-		block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, messages.size()));
-	}
+		block.append(block.arena(), msg.message.begin(), msg.message.size());
+		for(auto& tag : msg.tags) {
+			auto tsm = self->tag_data.find(tag);
+			if (tsm == self->tag_data.end()) {
+				tsm = self->tag_data.insert( mapPair(std::move(Tag(tag)), LogRouterData::TagData(Version(0), tag) ), false );
+			}
 
-	// Copy messages into block
-	ASSERT(messages.size() <= block.capacity() - block.size());
-	block.append(block.arena(), messages.begin(), messages.size());
-	self->messageBlocks.push_back( std::make_pair(version, block) );
-	messages = StringRef(block.end()-messages.size(), messages.size());
-
-	for(auto tag = tags.begin(); tag != tags.end(); ++tag) {
-		int64_t tagMessages = 0;
-
-		auto tsm = self->tag_data.find(tag->tag);
-		if (tsm == self->tag_data.end()) {
-			tsm = self->tag_data.insert( mapPair(std::move(Tag(tag->tag)), LogRouterData::TagData(Version(0), tag->tag) ), false );
-		}
-
-		if (version >= tsm->value.popped) {
-			for(int m = 0; m < tag->messageOffsets.size(); ++m) {
-				int offs = tag->messageOffsets[m];
-				uint8_t const* p = offs < messages1.size() ? messages1.begin() + offs : messages.begin() + offs - messages1.size();
-				tsm->value.version_messages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)p)));
+			if (version >= tsm->value.popped) {
+				tsm->value.version_messages.push_back(std::make_pair(version, LengthPrefixedStringRef((uint32_t*)(block.end() - msg.message.size()))));
 				if(tsm->value.version_messages.back().second.expectedSize() > SERVER_KNOBS->MAX_MESSAGE_SIZE) {
 					TraceEvent(SevWarnAlways, "LargeMessage").detail("Size", tsm->value.version_messages.back().second.expectedSize());
 				}
-				++tagMessages;
 			}
 		}
+		
+		msgSize -= msg.message.size();
 	}
+	self->messageBlocks.push_back( std::make_pair(version, block) );
 }
 
 ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
@@ -181,59 +164,37 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 		}
 
 		Version ver = 0;
-		Arena arena;
-		BinaryWriter wr(Unversioned());
-		Map<Tag, TagMessagesRef> tag_offsets;
+		std::vector<TagsAndMessage> messages;
 		while (true) {
 			bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					VectorRef<TagMessagesRef> r;
-					for(auto& t : tag_offsets)
-						r.push_back( arena, t.value );
-					commitMessages(self, ver, arena, wr.toStringRef(), r);
+					commitMessages(self, ver, messages);
 					self->version.set( ver );
 					//TraceEvent("LogRouterVersion").detail("ver",ver);
 				}
 				lastVer = ver;
 				ver = r->version().version;
-				tag_offsets.clear();
-				wr = BinaryWriter(Unversioned());
-				arena = Arena();
+				messages.clear();
 
 				if (!foundMessage) {
 					ver--; //ver is the next possible version we will get data for
 					if(ver > self->version.get()) {
-						commitMessages(self, ver, arena, StringRef(), VectorRef<TagMessagesRef>());
 						self->version.set( ver );
 					}
 					break;
 				}
 			}
 
-			StringRef msg = r->getMessage();
-			auto originalTags = r->getTags();
+			TagsAndMessage tagAndMsg;
+			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
-			//FIXME: do we add txsTags?
-			self->logSystem->get()->addRemoteTags(self->logSet, originalTags, tags);
-
+			self->logSystem->get()->addRemoteTags(self->logSet, r->getTags(), tags);
 			for(auto t : tags) {
-				Tag fullTag(tagLocalityRemoteLog, t);
-				auto it = tag_offsets.find(fullTag);
-				if (it == tag_offsets.end()) {
-					it = tag_offsets.insert(mapPair( fullTag, TagMessagesRef() ));
-					it->value.tag = it->key;
-				}
-				it->value.messageOffsets.push_back( arena, wr.getLength() );
+				tagAndMsg.tags.push_back(Tag(tagLocalityRemoteLog, t));
 			}
-
-			//FIXME: do not reserialize tags
-			wr << uint32_t( msg.size() + sizeof(uint32_t) +sizeof(uint16_t) + originalTags.size()*sizeof(Tag) ) << r->version().sub << uint16_t(originalTags.size());
-			for(auto t : originalTags) {
-				wr << t;
-			}
-			wr.serializeBytes( msg );
+			messages.push_back(std::move(tagAndMsg));
 
 			r->nextMessage();
 		}
