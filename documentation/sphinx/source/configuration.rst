@@ -234,15 +234,19 @@ Contains settings applicable to all processes (e.g. fdbserver, backup_agent). Th
     logdir = /var/log/foundationdb
     # logsize = 10MiB
     # maxlogssize = 100MiB
-    # machine_id = 
-    # datacenter_id = 
     # class = 
     # memory = 8GiB
     # storage_memory = 1GiB
+    # locality_machineid = 
+    # locality_zoneid = 
+    # locality_data_hall = 
+    # locality_dcid = 
+    # io_trust_seconds = 20
 
 Contains default parameters for all fdbserver processes on this machine. These same options can be overridden for individual processes in their respective ``[fdbserver.<ID>]`` sections. In this section, the ID of the individual fdbserver can be substituted by using the ``$ID`` variable in the value. For example, ``public_address = auto:$ID`` makes each fdbserver listen on a port equal to its ID.
 
 .. note:: |multiplicative-suffixes|
+.. note:: In general locality id's are used to specify the location of processes which in turn is used to determine fault and replication domains.
 
 * ``command``: The location of the ``fdbserver`` binary.
 * ``public_address``: The publicly visible IP:Port of the process. If ``auto``, the address will be the one used to communicate with the coordination servers.
@@ -251,11 +255,14 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``logdir``: A writable directory (by root or by the user set in the [fdbmonitor] section) where FoundationDB will store log files.
 * ``logsize``: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.
 * ``maxlogssize``: Delete the oldest log file when the total size of all log files exceeds the specified size. If set to 0B, old log files will not be deleted. The default value is 100MiB.
-* ``machine_id``: Machine identifier key. Processes that share a key are considered non-unique for the purposes of data replication. By default, processes on a machine determine a unique key to share. This does not generally need to be set. The ID can be up to 16 hexadecimal digits.
-* ``datacenter_id``: Data center identifier key. All processes physically located in a data center should share the id. If unset, defaults to a special "default" data center. If you are depending on data center based replication this must be set on all processes. The ID can be up to 16 hexadecimal digits.
 * ``class``: Machine class specifying the roles that will be taken in the cluster. Valid options are ``storage``, ``transaction``, ``resolution``. See :ref:`configuration-large-cluster-performance` for machine class recommendations in large clusters.
 * ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage_memory`` parameter is increased, the ``memory`` parameter should be increased by an equal amount.
 * ``storage_memory``: Maximum memory used for data storage. This paramenter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory``, you should also increase the ``memory`` parameter by the same amount.
+* ``locality_machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
+* ``locality_zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
+* ``locality_dcid``: Data center identifier key. All processes physically located in a data center should share the id. No default value. If you are depending on data center based replication this must be set on all processes.
+* ``locality_data_hall``: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.
+* ``io_trust_seconds``: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.
 
 ``[fdbserver.<ID>]`` section(s)
 ---------------------------------
