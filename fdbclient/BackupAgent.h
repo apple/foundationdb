@@ -57,7 +57,6 @@ public:
 	static const Key keyBeginKey;
 	static const Key keyEndKey;
 	static const Key destUid;
-	static const Key backupDone;
 	static const Key backupStartVersion;
 
 	static const Key keyTagName;
@@ -421,7 +420,7 @@ bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
 Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
-Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, bool backupDone, Version beginVersion, Version endVersion, bool checkBackupUid = false, Version backupUid = 0);
+Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> beginVersion = Optional<Version>(), Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
 std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key);
 Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
