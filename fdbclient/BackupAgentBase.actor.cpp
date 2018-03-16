@@ -36,7 +36,6 @@ const Key BackupAgentBase::keyLastUid = LiteralStringRef("last_uid");
 const Key BackupAgentBase::keyBeginKey = LiteralStringRef("beginKey");
 const Key BackupAgentBase::keyEndKey = LiteralStringRef("endKey");
 const Key BackupAgentBase::destUid = LiteralStringRef("destUid");
-const Key BackupAgentBase::backupDone = LiteralStringRef("backupDone");
 const Key BackupAgentBase::backupStartVersion = LiteralStringRef("backupStartVersion");
 
 const Key BackupAgentBase::keyTagName = LiteralStringRef("tagname");
@@ -625,10 +624,6 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 }
 
 ACTOR Future<Void> _clearLogRanges(Reference<ReadYourWritesTransaction> tr, bool clearVersionHistory, Key logUidValue, Key destUidValue, Version beginVersion, Version endVersion) {
-	if (!destUidValue.size()) {
-		return Void();
-	}
-
 	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 	state Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -652,9 +647,7 @@ ACTOR Future<Void> _clearLogRanges(Reference<ReadYourWritesTransaction> tr, bool
 		return Void();
 	}
 
-	// If clear version history is required, then we need to clear log ranges up to next smallest version which might be greater than endVersion
-	// If size of backupVersions is greater than 1, we can definitely find a version less than INTMAX_MAX, otherwise we clear all log ranges without calling getLogRanges()
-	Version nextSmallestVersion = clearVersionHistory ? INTMAX_MAX : endVersion;
+	Version nextSmallestVersion = endVersion;
 	bool clearLogRangesRequired = true;
 
 	// More than one backup/DR with the same range
@@ -710,20 +703,34 @@ Future<Void> clearLogRanges(Reference<ReadYourWritesTransaction> tr, bool clearV
 	return _clearLogRanges(tr, clearVersionHistory, logUidValue, destUidValue, beginVersion, endVersion);
 }
 
-ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUidValue, bool backupDone, Version beginVersion, Version endVersion, bool checkBackupUid, Version backupUid) {
-	if (endVersion <= beginVersion)
+ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> beginVersion, Optional<Version> endVersion, bool checkBackupUid, Version backupUid) {
+	if ((beginVersion.present() && endVersion.present() && endVersion.get() <= beginVersion.get()) || !destUidValue.size())
 		return Void();
 
-	state Version currBeginVersion = beginVersion;
+	state Version currBeginVersion;
+	state Version endVersionValue;
 	state Version currEndVersion;
-	state bool clearVersionHistory = false;
+	state bool clearVersionHistory;
 
-	while (currBeginVersion < endVersion) {
+	ASSERT(beginVersion.present() == endVersion.present());
+	if (beginVersion.present()) {
+		currBeginVersion = beginVersion.get();
+		endVersionValue = endVersion.get();
+		clearVersionHistory = false;
+	} else {
+		// If beginVersion and endVersion are not presented, it means backup is done and we need to clear version history.
+		// Set currBeginVersion to INTMAX_MAX and it will be set to the correct version in clearLogRanges().
+		// Set endVersionValue to INTMAX_MAX since we need to clear log ranges up to next smallest version.
+		currBeginVersion = endVersionValue = currEndVersion = INTMAX_MAX;
+		clearVersionHistory = true;
+	}
+
+
+	while (currBeginVersion < endVersionValue || clearVersionHistory) {
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 		
 		loop{
 			try {
-				currEndVersion = std::min(currBeginVersion + CLIENT_KNOBS->CLEAR_LOG_RANGE_COUNT * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE, endVersion);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
@@ -734,12 +741,17 @@ ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUi
 						return Void();
 				}
 
-				if (backupDone && currEndVersion == endVersion) {
-					clearVersionHistory = true;
+				if (!clearVersionHistory) {
+					currEndVersion = std::min(currBeginVersion + CLIENT_KNOBS->CLEAR_LOG_RANGE_COUNT * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE, endVersionValue);
 				}
 
 				Void _ = wait(clearLogRanges(tr, clearVersionHistory, logUidValue, destUidValue, currBeginVersion, currEndVersion));
 				Void _ = wait(tr->commit());
+
+				if (clearVersionHistory) {
+					return Void();
+				}
+
 				currBeginVersion = currEndVersion;
 				break;
 			} catch (Error &e) {
@@ -751,6 +763,6 @@ ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUi
 	return Void();
 }
 
-Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, bool backupDone, Version beginVersion, Version endVersion, bool checkBackupUid, Version backupUid) {
-	return _eraseLogData(cx, logUidValue, destUidValue, backupDone, beginVersion, endVersion, checkBackupUid, backupUid);
+Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> beginVersion, Optional<Version> endVersion, bool checkBackupUid, Version backupUid) {
+	return _eraseLogData(cx, logUidValue, destUidValue, beginVersion, endVersion, checkBackupUid, backupUid);
 }
