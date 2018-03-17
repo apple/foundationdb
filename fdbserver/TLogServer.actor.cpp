@@ -1818,13 +1818,8 @@ ACTOR Future<Void> recoverTagFromLogSystem( TLogData* self, Reference<LogData> l
 					break;
 			}
 
-			// FIXME: This logic duplicates stuff in LogPushData::addMessage(), and really would be better in PeekResults or somewhere else.  Also unnecessary copying.
-			StringRef msg = r->getMessage();
-			auto tags = r->getTags();
-			wr << uint32_t( msg.size() + sizeof(uint32_t) + sizeof(uint16_t) + tags.size()*sizeof(Tag) ) << r->version().sub << uint16_t(tags.size());
-			for(auto t : tags) {
-				wr << t;
-			}
+			// FIXME: Unnecessary copying.
+			StringRef msg = r->getMessageWithTags();
 			wr.serializeBytes( msg );
 			r->nextMessage();
 		}
