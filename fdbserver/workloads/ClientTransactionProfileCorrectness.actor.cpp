@@ -35,49 +35,56 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 		reader >> event;
 		double timeStamp;
 		reader >> timeStamp;
-
+		ASSERT(timeStamp < now() && timeStamp >(now() - 86400));
 		switch (event)
 		{
 		case FdbClientLogEvents::GET_VERSION_LATENCY:
 		{
 			FdbClientLogEvents::EventGetVersion gv;
 			reader >> gv;
+			ASSERT(gv.latency < 10000);
 			break;
 		}
 		case FdbClientLogEvents::GET_LATENCY:
 		{
 			FdbClientLogEvents::EventGet g;
 			reader >> g;
+			ASSERT(g.latency < 10000 && g.valueSize < CLIENT_KNOBS->VALUE_SIZE_LIMIT && g.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 			break;
 		}
 		case FdbClientLogEvents::GET_RANGE_LATENCY:
 		{
 			FdbClientLogEvents::EventGetRange gr;
 			reader >> gr;
+			ASSERT(gr.latency < 10000 && gr.rangeSize < 1000000000 && gr.startKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gr.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 			break;
 		}
 		case FdbClientLogEvents::COMMIT_LATENCY:
 		{
 			FdbClientLogEvents::EventCommit c;
 			reader >> c;
+			ASSERT(c.latency < 10000 && c.commitBytes < CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT && c.numMutations < 1000000);
 			break;
 		}
 		case FdbClientLogEvents::ERROR_GET:
 		{
 			FdbClientLogEvents::EventGetError ge;
 			reader >> ge;
+			ASSERT(ge.errCode < 10000 && ge.key.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 			break;
 		}
 		case FdbClientLogEvents::ERROR_GET_RANGE:
 		{
 			FdbClientLogEvents::EventGetRangeError gre;
 			reader >> gre;
+			ASSERT(gre.errCode < 10000 && gre.startKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT && gre.endKey.size() < CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 			break;
 		}
 		case FdbClientLogEvents::ERROR_COMMIT:
 		{
 			FdbClientLogEvents::EventCommitError ce;
 			reader >> ce;
+			ASSERT(ce.errCode < 10000);
 			break;
 		}
 		default:
