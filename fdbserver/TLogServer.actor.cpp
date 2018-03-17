@@ -1387,6 +1387,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, Ta
 				}
 				lastVer = ver;
 				ver = r->version().version;
+				messages.clear();
 
 				if (!foundMessage) {
 					ver--;
