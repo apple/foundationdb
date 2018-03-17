@@ -33,7 +33,7 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 
-enum { tagLocalitySpecial = -100, tagLocalityLogRouter = -1, tagLocalityRemoteLog = -2, tagLocalityUpgraded = -3};
+enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4}; //The TLog and LogRouter require these number to be as compact as possible
 
 #pragma pack(push, 1)
 struct Tag {
