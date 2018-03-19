@@ -179,17 +179,15 @@ Here’s a basic implementation of the recipe.
         }
 
         public static Object insertDoc(TransactionContext tcx, final Map<Object,Object> doc){
-            return tcx.run(new Function<Transaction,Object>() {
-                public Object apply(Transaction tr){
-                    if(!doc.containsKey("doc_id")){
-                        doc.put("doc_id", getNewID(tr));
-                    }
-                    for(Tuple t : toTuples(doc)){
-                        tr.set(docSpace.pack(Tuple.from(doc.get("doc_id")).addAll(t.popBack())), 
-                                Tuple.from(t.get(t.size() - 1)).pack());
-                    }
-                    return doc.get("doc_id");
+            return tcx.run(tr -> {
+                if(!doc.containsKey("doc_id")){
+                    doc.put("doc_id", getNewID(tr));
                 }
+                for(Tuple t : toTuples(doc)){
+                    tr.set(docSpace.pack(Tuple.from(doc.get("doc_id")).addAll(t.popBack())), 
+                            Tuple.from(t.get(t.size() - 1)).pack());
+                }
+                return doc.get("doc_id");
             });
         }
         
@@ -198,43 +196,38 @@ Here’s a basic implementation of the recipe.
         }
         
         public static Object getDoc(TransactionContext tcx, final Object ID, final Tuple prefix){
-            return tcx.run(new Function<Transaction,Object>() {
-                public Object apply(Transaction tr){
-                    Future<byte[]> v = tr.get(docSpace.pack(Tuple.from(ID).addAll(prefix)));
-                    if(v.get() != null){
-                        // One single item.
-                        ArrayList<Tuple> vals = new ArrayList<Tuple>();
-                        vals.add(prefix.addAll(Tuple.fromBytes(v.get())));
-                        return fromTuples(vals);
-                    } else {
-                        // Multiple items.
-                        ArrayList<Tuple> vals =  new ArrayList<Tuple>();
-                        for(KeyValue kv : tr.getRange(docSpace.range(Tuple.from(ID).addAll(prefix)))){
-                            vals.add(docSpace.unpack(kv.getKey()).popFront().addAll(Tuple.fromBytes(kv.getValue())));
-                        }
-                        return fromTuples(vals);
+            return tcx.run(tr -> {
+                Future<byte[]> v = tr.get(docSpace.pack(Tuple.from(ID).addAll(prefix)));
+                if(v.get() != null){
+                    // One single item.
+                    ArrayList<Tuple> vals = new ArrayList<Tuple>();
+                    vals.add(prefix.addAll(Tuple.fromBytes(v.get())));
+                    return fromTuples(vals);
+                } else {
+                    // Multiple items.
+                    ArrayList<Tuple> vals =  new ArrayList<Tuple>();
+                    for(KeyValue kv : tr.getRange(docSpace.range(Tuple.from(ID).addAll(prefix)))){
+                        vals.add(docSpace.unpack(kv.getKey()).popFront().addAll(Tuple.fromBytes(kv.getValue())));
                     }
+                    return fromTuples(vals);
                 }
             });
         }
         
         private static int getNewID(TransactionContext tcx){
-            return tcx.run(new Function<Transaction,Integer>() {
-                @SuppressWarnings("unused")
-                public Integer apply(Transaction tr){
-                    boolean found = false;
-                    int newID;
-                    do {
-                        newID = (int)(Math.random()*100000000);
-                        found = true;
-                        for(KeyValue kv : tr.getRange(docSpace.range(Tuple.from(newID)))){
-                            // If not empty, this is false.
-                            found = false;
-                            break;
-                        }
-                    } while(!found);
-                    return newID;
-                }
+            return tcx.run(tr -> {
+                boolean found = false;
+                int newID;
+                do {
+                    newID = (int)(Math.random()*100000000);
+                    found = true;
+                    for(KeyValue kv : tr.getRange(docSpace.range(Tuple.from(newID)))){
+                        // If not empty, this is false.
+                        found = false;
+                        break;
+                    }
+                } while(!found);
+                return newID;
             });
         }
     }

@@ -76,7 +76,8 @@ At this point and after each subsequent step, it is a good idea to test the data
   Data:
     Replication health     - Healthy
     Moving data            - 0.000 GB
-    Sum of key-value sizes - 0 MB
+    Sum of key-value sizes - 8 MB
+    Disk space used        - 103 MB
 
   Operating space:
     Storage server         - 1.0 GB free on most full server
@@ -88,6 +89,10 @@ At this point and after each subsequent step, it is a good idea to test the data
     Transactions started   - 2 Hz
     Transactions committed - 0 Hz
     Conflict rate          - 0 Hz
+
+  Backup and DR:
+    Running backups        - 0
+    Running DRs            - 0
 
   Client time: Thu Mar 15 14:41:34 2018
 
