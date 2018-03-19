@@ -42,7 +42,6 @@ rm -rf %{buildroot}
 mkdir -p %{buildroot}
 tar -xzf %{_sourcedir}/install-files.tar.gz -C %{buildroot}
 ifdef(`RHEL6', `rm -r %{buildroot}/lib/systemd', `rm -r %{buildroot}/etc/rc.d')
-ifdef(`RHEL6', `', `rm %{buildroot}/usr/lib/foundationdb/argparse.py')
 
 %pre server
 # This should be ensured by the foundationdb-clients package, but it can't hurt...
@@ -119,8 +118,6 @@ exit 0
 ifdef(`RHEL6', `/etc/rc.d/init.d/foundationdb', `/lib/systemd/system/foundationdb.service')
 /usr/sbin/*
 /usr/lib/foundationdb/fdbmonitor
-ifdef(`RHEL6', `/usr/lib/foundationdb/argparse.py')
-/usr/lib/foundationdb/make_public.py
 
 %files clients
 %defattr(-,root,root)

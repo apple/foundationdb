@@ -34,17 +34,7 @@ We recommend changing the configuration file once and copying to other machines 
 Make FoundationDB externally accessible
 =======================================
 
-By default, FoundationDB installs on a single server in a locally accessible mode suitable for development --- only clients on the same machine will be able to access the database. To allow external access, you will have to make your :ref:`cluster file <foundationdb-cluster-file>` public.
-
-Choose a machine to be the starting machine for your cluster. The database on this machine will be the one that we grow to span the cluster. Use the ``/usr/lib/foundationdb/make_public.py`` script on that server to update your cluster file to use a public interface. For example:: 
-
-    user@host1$ sudo /usr/lib/foundationdb/make_public.py
-    /etc/foundationdb/fdb.cluster is now using address 10.0.1.1
-
-By default, the script will pick a local network interface that can access the internet. To specify the address manually, use the ``-a`` flag and choose an address that is accessible by all machines in the cluster as well as by all intended clients.::
-
-    user@host1$ sudo /usr/lib/foundationdb/make_public.py -a 10.0.1.1
-    /etc/foundationdb/fdb.cluster is now using address 10.0.1.1
+By default, FoundationDB installs on a single server in a locally accessible mode suitable for development --- only clients on the same machine will be able to access the database. To allow external access, you will have to make your :ref:`cluster file <foundationdb-cluster-file>` use a publicly-accessible IP address for your machine. This can be done by changing references to the localhost IP (127.0.0.1) to an IP of one of your machine's public interfaces. If you are specifying the public address of your fdbserver processes with the ``auto`` option (which is what is done by default), than you must restart the fdbserver processes and clients on other machines should now be able to connect to the cluster. If you have manually specified the public IP on startup within the ``foundationdb.conf`` file, then you will also need to change the public address to the new IP before restarting. Depending on your networking configuration, you might need to change the listen address to 0.0.0.0 to instruct it to listen on all addresses.
 
 .. _test-the-database:
 
@@ -141,7 +131,7 @@ There is also a convenience option, ``coordinators auto``, that will automatical
 
 .. note:: |coordinators-auto|
 
-You can also change the cluster ``description``, as decribed in :ref:`configuration-setting-cluster-description`.
+You can also change the cluster ``description``, as described in :ref:`configuration-setting-cluster-description`.
 
 Next steps
 ==========

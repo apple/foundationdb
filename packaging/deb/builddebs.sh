@@ -22,8 +22,6 @@ install -m 0664 packaging/foundationdb.conf $SERVERDIR/etc/foundationdb
 install -m 0755 packaging/deb/foundationdb-init $SERVERDIR/etc/init.d/foundationdb
 install -m 0755 bin/fdbserver $SERVERDIR/usr/sbin
 install -m 0755 bin/fdbmonitor $SERVERDIR/usr/lib/foundationdb
-install -m 0755 packaging/make_public.py $SERVERDIR/usr/lib/foundationdb
-install -m 0644 packaging/argparse.py $SERVERDIR/usr/lib/foundationdb
 dos2unix -q -n README.md $SERVERDIR/usr/share/doc/foundationdb-server/README
 chmod 0644 $SERVERDIR/usr/share/doc/foundationdb-server/README
 

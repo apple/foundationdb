@@ -27,11 +27,6 @@ Mark Adler, Robert Važan (CRC-32C [Castagnoli] for C++ and .NET)
 
 	3. This notice may not be removed or altered from any source distribution.
 
-Steven J. Bethard (argparse.py from https://code.google.com/p/argparse/)
-	argparse is licensed under the Python license, see:
-	https://code.google.com/p/argparse/source/browse/LICENSE.txt and
-	https://code.google.com/p/argparse/source/browse/doc/source/Python-License.txt
-
 Russ Cox (asm.S from libcoroutine)
 	This software was developed as part of a project at MIT.
 
