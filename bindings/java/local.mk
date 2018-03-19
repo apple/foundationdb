@@ -38,13 +38,14 @@ else
 endif
 
 ifeq ($(PLATFORM),linux)
-  fdb_java_CFLAGS += -I/usr/lib/jvm/java-8-openjdk-amd64/include -I/usr/lib/jvm/java-8-openjdk-amd64/include/linux
+  JAVA_HOME ?= /usr/lib/jvm/java-8-openjdk-amd64
+  fdb_java_CFLAGS += -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux
   fdb_java_LDFLAGS += -static-libgcc
 
   java_ARCH := amd64
 else ifeq ($(PLATFORM),osx)
-  # FIXME: Surely there is a better way to grab the JNI headers on any version of macOS.
-  fdb_java_CFLAGS += -I/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.11.sdk/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers
+  JAVA_HOME ?= $(shell /usr/libexec/java_home || /Library/Java/JavaVirtualMachines/jdk1.8.0_112.jdk/Contents/Home)
+  fdb_java_CFLAGS += -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/darwin
 
   java_ARCH := x86_64
 endif
