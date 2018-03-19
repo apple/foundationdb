@@ -65,8 +65,17 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs" || key == "log_routers") && isInteger(value) ) {
 			out[p+key] = value;
+		}
+
+		if( key == "regions" ) {
+			json_spirit::mValue mv;
+			json_spirit::read_string( value, mv );
+			
+			StatusObject regionObj;
+			regionObj["regions"] = mv;
+			out[p+key] = BinaryWriter::toValue(regionObj, IncludeVersion()).toString();
 		}
 
 		return out;
@@ -90,7 +99,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	std::string redundancy, log_replicas;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
-
+	
 	bool redundancySpecified = true;
 	if (mode == "single") {
 		redundancy="1";
@@ -147,7 +156,42 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		policyWriter = BinaryWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, tLogPolicy);
 		out[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
+		return out;
+	}
 
+	std::string remote_redundancy, remote_log_replicas;
+	IRepPolicyRef remoteTLogPolicy;
+	bool remoteRedundancySpecified = true;
+	if (mode == "remote_none") {
+		remote_redundancy="0";
+		remote_log_replicas="0";
+		remoteTLogPolicy = IRepPolicyRef();
+	} else if (mode == "remote_single") {
+		remote_redundancy="1";
+		remote_log_replicas="1";
+		remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
+	} else if(mode == "remote_double") {
+		remote_redundancy="2";
+		remote_log_replicas="2";
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+	} else if(mode == "remote_triple") {
+		remote_redundancy="3";
+		remote_log_replicas="3";
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+	} else if(mode == "remote_three_data_hall") { //FIXME: not tested in simulation
+		remote_redundancy="3";
+		remote_log_replicas="4";
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+	} else
+		remoteRedundancySpecified = false;
+	if (remoteRedundancySpecified) {
+		out[p+"remote_log_replicas"] = remote_log_replicas;
+
+		BinaryWriter policyWriter(IncludeVersion());
+		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
+		out[p+"remote_log_policy"] = policyWriter.toStringRef().toString();
 		return out;
 	}
 
@@ -157,13 +201,15 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& modeTokens, std::map<std::string, std::string>& outConf ) {
 	for(auto it : modeTokens) {
 		std::string mode = it.toString();
-
 		auto m = configForToken( mode );
-		if( !m.size() )
+		if( !m.size() ) {
+			TraceEvent(SevWarnAlways, "UnknownOption").detail("option", mode);
 			return ConfigurationResult::UNKNOWN_OPTION;
+		}
 
 		for( auto t = m.begin(); t != m.end(); ++t ) {
 			if( outConf.count( t->first ) ) {
+				TraceEvent(SevWarnAlways, "ConflictingOption").detail("option", printable(StringRef(t->first)));
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
@@ -185,7 +231,6 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
 	}
-
 	return ConfigurationResult::SUCCESS;
 }
 
@@ -653,10 +698,6 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuorumChange> change ) {
 	state Transaction tr(cx);
 	state int retries = 0;
-
-	//quorum changes do not balance coordinators evenly across datacenters
-	if(g_network->isSimulated())
-		g_simulator.maxCoordinatorsInDatacenter = g_simulator.killableMachines + 1;
 
 	loop {
 		try {

@@ -77,9 +77,10 @@ struct GetRateInfoReply {
 
 struct TLogRejoinRequest {
 	TLogInterface myInterface;
-	DBRecoveryCount recoveryCount;
 	ReplyPromise<bool> reply;   // false means someone else registered, so we should re-register.  true means this master is recovered, so don't send again to the same master.
 
+	TLogRejoinRequest() { }
+	explicit TLogRejoinRequest(const TLogInterface &interf) : myInterface(interf) { }
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ar & myInterface & reply;

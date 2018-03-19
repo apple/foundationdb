@@ -23,7 +23,7 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 510
+ #define FDB_API_VERSION 520
  #include <foundationdb/fdb_c.h>
  #include <stdlib.h>
 */
@@ -109,7 +109,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // library, an error will be returned. APIVersion must be called prior to any
 // other functions in the fdb package.
 //
-// Currently, this package supports API versions 200 through 510.
+// Currently, this package supports API versions 200 through 520.
 //
 // Warning: When using the multi-version client API, setting an API version that
 // is not supported by a particular client library will prevent that client from
@@ -117,7 +117,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // the API version of your application after upgrading your client until the
 // cluster has also been upgraded.
 func APIVersion(version int) error {
-	headerVersion := 510
+	headerVersion := 520
 
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
@@ -129,7 +129,7 @@ func APIVersion(version int) error {
 		return errAPIVersionAlreadySet
 	}
 
-	if version < 200 || version > 510 {
+	if version < 200 || version > 520 {
 		return errAPIVersionNotSupported
 	}
 

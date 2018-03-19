@@ -195,7 +195,6 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 	ACTOR Future<Void> loadAndRun( Database db, FuzzApiCorrectnessWorkload* self ) {
 		state double startTime = now();
 		state Reference<IDatabase> cx = wait( unsafeThreadFutureToFuture( ThreadSafeDatabase::createFromExistingDatabase(db) ) );
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "FuzzApi");
 		try {
 		loop {
 			state int i = 0;
@@ -862,7 +861,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair( error_code_key_too_large, ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) ),
 				std::make_pair( error_code_value_too_large, ExceptionContract::requiredIf(value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) ),
 				std::make_pair( error_code_invalid_mutation_type, ExceptionContract::requiredIf(
-							!isValidMutationType(op) || !isAtomicOp((MutationRef::Type) op) || op == MutationRef::AppendIfFits ) ),
+							!isValidMutationType(op) || !isAtomicOp((MutationRef::Type) op)) ),
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
 							(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::requiredIf(

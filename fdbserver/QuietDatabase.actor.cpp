@@ -346,32 +346,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 	return Void();
 }
 
-//Waits for f to complete. If simulated, disables connection failures after waiting a specified amount of time
-ACTOR Future<Void> disableConnectionFailuresAfter( Future<Void> f, double disableTime, std::string context ) {
-	if(!g_network->isSimulated()) {
-		Void _ = wait(f);
-		return Void();
-	}
-
-	choose {
-		when(Void _ = wait(f)) {
-			return Void();
-		}
-		when(Void _ = wait(delay(disableTime))) {
-			g_simulator.speedUpSimulation = true;
-			g_simulator.connectionFailuresDisableDuration = 1e6;
-			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
-		}
-	}
-
-	Void _ = wait(f);
-	return Void();
-}
-
-
 Future<Void> quietDatabase( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, std::string phase, int64_t dataInFlightGate,
 	int64_t maxTLogQueueGate, int64_t maxStorageServerQueueGate, int64_t maxDataDistributionQueueSize ) {
-
-	Future<Void> quiet = waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate, maxDataDistributionQueueSize);
-	return disableConnectionFailuresAfter(quiet, 300.0, "QuietDatabase" + phase);
+	return waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate, maxDataDistributionQueueSize);
 }

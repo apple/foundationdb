@@ -248,14 +248,16 @@ void serializeReplicationPolicy(Ar& ar, IRepPolicyRef& policy) {
 			pointer->serialize(ar);
 			policy = IRepPolicyRef(pointer);
 		}
+		else if(name == LiteralStringRef("None")) {
+			policy = IRepPolicyRef();
+		}
 		else {
 			TraceEvent(SevError, "SerializingInvalidPolicyType")
 				.detailext("PolicyName", name);
 		}
 	}
 	else {
-		ASSERT(policy);
-		std::string name = policy->name();
+		std::string name = policy ? policy->name() : "None";
 		Standalone<StringRef> nameRef = StringRef(name);
 		ar & nameRef;
 		if(name == "One") {
@@ -267,6 +269,7 @@ void serializeReplicationPolicy(Ar& ar, IRepPolicyRef& policy) {
 		else if(name == "And") {
 			((PolicyAnd*)policy.getPtr())->serialize(ar);
 		}
+		else if(name == "None") {}
 		else {
 			TraceEvent(SevError, "SerializingInvalidPolicyType")
 				.detail("PolicyName", name);

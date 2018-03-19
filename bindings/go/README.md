@@ -8,7 +8,7 @@ This package requires:
 - Go 1.1+ with CGO enabled
 - FoundationDB C API 2.0.x, 3.0.x, or 4.x.y (part of the [FoundationDB clients package](https://www.foundationdb.org/downloads/fdb-c/))
 
-Use of this package requires the selection of a FoundationDB API version at runtime. This package currently supports FoundationDB API versions 200-510.
+Use of this package requires the selection of a FoundationDB API version at runtime. This package currently supports FoundationDB API versions 200-520.
 
 To build this package, in the top level of this repository run:
 

@@ -411,7 +411,7 @@ struct Peer : NonCopyable {
 					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true).suppressFor(1.0);
 				}
 				else {
-					TraceEvent(ok ? SevInfo : SevError, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 				}
 
 				if (conn) {
@@ -486,15 +486,6 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 			throw platform_error();
 		}
-		else if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
-				.detail("FromPeer", peerAddress.toString())
-				.detail("Length", (int)packetLen)
-				.suppressFor(1.0);
-
-			if(g_network->isSimulated())
-				transport->warnAlwaysForLargePacket = false;
-		}
 
 		if (e-p<packetLen) break;
 		ASSERT( packetLen >= sizeof(UID) );
@@ -543,6 +534,17 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 		UID token; reader >> token;
 
 		++transport->countPacketsReceived;
+
+		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
+			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+				.detail("FromPeer", peerAddress.toString())
+				.detail("Length", (int)packetLen)
+				.detail("Token", token)
+				.suppressFor(1.0);
+
+			if(g_network->isSimulated())
+				transport->warnAlwaysForLargePacket = false;
+		}
 
 		deliver( transport, Endpoint( peerAddress, token ), std::move(reader), true );
 
@@ -907,6 +909,8 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 			TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
 				.detail("ToPeer", destination.address)
 				.detail("Length", (int)len)
+				.detail("Token", destination.token)
+				.backtrace()
 				.suppressFor(1.0);
 
 			if(g_network->isSimulated())

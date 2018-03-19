@@ -59,9 +59,6 @@ struct SaveAndKillWorkload : TestWorkload {
 		ini.SetUnicode();
 		ini.LoadFile(self->restartInfo.c_str());
 
-		ini.SetValue("META", "killableMachines", format("%d", g_simulator.killableMachines).c_str());
-		ini.SetValue("META", "dataCenters", format("%d", g_simulator.neededDatacenters).c_str());
-		ini.SetValue("META", "machinesNeededForProgress", format("%d", g_simulator.machinesNeededForProgress).c_str());
 		ini.SetValue("META", "processesPerMachine", format("%d", g_simulator.processesPerMachine).c_str());
 		ini.SetValue("META", "desiredCoordinators", format("%d", g_simulator.desiredCoordinators).c_str());
 		ini.SetValue("META", "connectionString",  g_simulator.connectionString.c_str());

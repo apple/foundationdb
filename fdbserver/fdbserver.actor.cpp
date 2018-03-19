@@ -1314,6 +1314,16 @@ int main(int argc, char* argv[]) {
 			flushAndExit(FDB_EXIT_ERROR);
 		}
 
+		if(role == ConsistencyCheck) {
+			if(publicAddressStr != "") {
+				fprintf(stderr, "ERROR: Public address cannot be specified for consistency check processes\n");
+				printHelpTeaser(argv[0]);
+				flushAndExit(FDB_EXIT_ERROR);
+			}
+			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
+			publicAddress = NetworkAddress(publicIP, ::getpid());
+		}
+
 		if (listenAddressStr == "public")
 			listenAddress = publicAddress;
 		else {
@@ -1594,9 +1604,15 @@ int main(int argc, char* argv[]) {
 		} else if (role == MultiTester) {
 			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, testOnServers ? TEST_ON_SERVERS : TEST_ON_TESTERS, minTesterCount, testFile, StringRef(), localities ) );
 			g_network->run();
-		} else if (role == Test || role == ConsistencyCheck) {
+		} else if (role == Test) {
 			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
-			f = stopAfter( runTests( connectionFile, role == ConsistencyCheck ? TEST_TYPE_CONSISTENCY_CHECK : TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile, StringRef(), localities ) );
+			f = stopAfter( runTests( connectionFile, TEST_TYPE_FROM_FILE, TEST_HERE, 1, testFile, StringRef(), localities ) );
+			g_network->run();
+		} else if (role == ConsistencyCheck) {
+			setupSlowTaskProfiler();
+
+			auto m = startSystemMonitor(dataFolder, zoneId, zoneId);
+			f = stopAfter( runTests( connectionFile, TEST_TYPE_CONSISTENCY_CHECK, TEST_HERE, 1, testFile, StringRef(), localities ) );
 			g_network->run();
 		} else if (role == CreateTemplateDatabase) {
 			createTemplateDatabase();

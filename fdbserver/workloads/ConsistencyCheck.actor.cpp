@@ -242,9 +242,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 					bool hasExtraStores = wait( self->checkForExtraDataStores(cx, self) );
 
 					//Check that each machine is operating as its desired class
-					bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
-					if(!usingDesiredClasses)
-						self->testFailure("Cluster has machine(s) not using requested classes");
+					//FIXME: re-enable
+					//bool usingDesiredClasses = wait(self->checkUsingDesiredClasses(cx, self));
+					//if(!usingDesiredClasses)
+					//	self->testFailure("Cluster has machine(s) not using requested classes");
 
 					bool workerListCorrect = wait( self->checkWorkerList(cx, self) );
 					if(!workerListCorrect)
@@ -1050,6 +1051,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 	{
 		state vector<std::pair<WorkerInterface, ProcessClass>> workers = wait( getWorkers( self->dbInfo ) );
 		state vector<StorageServerInterface> storageServers = wait( getStorageServers( cx ) );
+		std::set<Optional<Key>> missingStorage;
 
 		for( int i = 0; i < workers.size(); i++ ) {
 			if( !configuration.isExcludedServer(workers[i].first.address()) &&
@@ -1063,11 +1065,18 @@ struct ConsistencyCheckWorkload : TestWorkload
 				}
 				if( !found ) {
 					TraceEvent("ConsistencyCheck_NoStorage").detail("Address", workers[i].first.address());
-					self->testFailure("No storage server on worker");
-					return false;
+					missingStorage.insert(workers[i].first.locality.dcId());
 				}
 			}
 		}
+
+		if((!configuration.regions.size() && missingStorage.size()) ||
+			(configuration.regions.size() && configuration.remoteTLogReplicationFactor == 0 && missingStorage.count(configuration.regions[0].dcId) && missingStorage.count(configuration.regions[1].dcId)) ||
+			(configuration.regions.size() && configuration.remoteTLogReplicationFactor > 0 && (missingStorage.count(configuration.regions[0].dcId) || missingStorage.count(configuration.regions[1].dcId)))) {
+			self->testFailure("No storage server on worker");
+			return false;
+		}
+
 		return true;
 	}
 

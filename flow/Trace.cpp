@@ -615,46 +615,46 @@ bool TraceEvent::isEnabled( const char* type, Severity severity ) {
 	return !suppress.count(s);
 }
 
-TraceEvent::TraceEvent( const char* type, UID id ) : type(type), id(id) {
+TraceEvent::TraceEvent( const char* type, UID id ) : id(id) {
 	init(SevInfo, type);
 	detail("ID", id);
 }
 
-TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : type(type), id(id) {
+TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : id(id) {
 	init(severity, type);
 	detail("ID", id);
 }
 
-TraceEvent::TraceEvent(const char* type, const StringRef& zoneId) : type(type) {
+TraceEvent::TraceEvent(const char* type, const StringRef& zoneId) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
 	init(SevInfo, type);
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent(Severity severity, const char* type, const StringRef& zoneId) : type(type) {
+TraceEvent::TraceEvent(Severity severity, const char* type, const StringRef& zoneId) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
 	init(severity, type);
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent(const char* type, const Optional<Standalone<StringRef>>& zoneId) : type(type) {
+TraceEvent::TraceEvent(const char* type, const Optional<Standalone<StringRef>>& zoneId) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
 	init(SevInfo, type);
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent(Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId) : type(type) {
+TraceEvent::TraceEvent(Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL, 0);
 	init(severity, type);
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : type(""), id(id) {
+TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id) {
 	init(interval.severity, interval);
 	detail("ID", id);
 }
 
-TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : type(""), id(id) {
+TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : id(id) {
 	init(severity, interval);
 	detail("ID", id);
 }
@@ -670,6 +670,9 @@ bool TraceEvent::init( Severity severity, TraceInterval& interval ) {
 }
 
 bool TraceEvent::init( Severity severity, const char* type ) {
+	ASSERT(*type != '\0');
+
+	this->type = type;
 	this->severity = severity;
 	tmpEventMetric = new DynamicEventMetric(MetricNameRef());
 	tmpEventMetric->setField("Severity", (int64_t)severity);
@@ -911,7 +914,7 @@ TraceEvent::~TraceEvent() {
 				TraceEvent::eventCounts[severity/10]++;
 
 				// Log Metrics
-				if(g_traceLog.logTraceEventMetrics && *type != '\0' && isNetworkThread()) {
+				if(g_traceLog.logTraceEventMetrics && isNetworkThread()) {
 					// Get the persistent Event Metric representing this trace event and push the fields (details) accumulated in *this to it and then log() it.
 					// Note that if the event metric is disabled it won't actually be logged BUT any new fields added to it will be registered.
 					// If the event IS logged, a timestamp will be returned, if not then 0.  Either way, pass it through to be used if possible

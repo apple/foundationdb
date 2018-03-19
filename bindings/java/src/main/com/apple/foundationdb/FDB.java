@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   This call is required before using any other part of the API. The call allows
  *   an error to be thrown at this point to prevent client code from accessing a later library
  *   with incorrect assumptions from the current version. The API version documented here is version
- *   {@code 510}.<br><br>
+ *   {@code 520}.<br><br>
  *  FoundationDB encapsulates multiple versions of its interface by requiring
  *   the client to explicitly specify the version of the API it uses. The purpose
  *   of this design is to allow you to upgrade the server, client libraries, or
@@ -150,8 +150,8 @@ public class FDB {
 		}
 		if(version < 510)
 			throw new IllegalArgumentException("API version not supported (minimum 510)");
-		if(version > 510)
-			throw new IllegalArgumentException("API version not supported (maximum 510)");
+		if(version > 520)
+			throw new IllegalArgumentException("API version not supported (maximum 520)");
 
 		Select_API_version(version);
 		FDB fdb = new FDB(version);
@@ -180,7 +180,7 @@ public class FDB {
 
 	/**
 	 * Connects to the cluster specified by the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
 	 *  If the FoundationDB network has not been started, it will be started in the course of this call
 	 *  as if {@link FDB#startNetwork()} had been called.
 	 *
@@ -199,9 +199,9 @@ public class FDB {
 	 *  {@link #startNetwork()} had been called.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
@@ -220,9 +220,9 @@ public class FDB {
 	 *  are produced from using the resulting {@link Cluster}.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 * @param e used to run the FDB network thread
 	 *
@@ -245,7 +245,7 @@ public class FDB {
 
 	/**
 	 * Initializes networking, connects with the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
 	 *  and opens the database.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
@@ -259,9 +259,9 @@ public class FDB {
 	 *  and opens the database.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
@@ -275,9 +275,9 @@ public class FDB {
 	 *  and opens the database.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 * @param e the {@link Executor} to use to execute asynchronous callbacks
 	 *

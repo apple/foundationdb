@@ -41,7 +41,7 @@ def _add_symbols(module, symbols):
 
 
 def api_version(ver):
-    header_version = 510
+    header_version = 520
 
     if '_version' in globals():
         if globals()['_version'] != ver:
