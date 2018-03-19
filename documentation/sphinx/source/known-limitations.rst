@@ -98,6 +98,8 @@ Long running read/write transactions are a design limitation, see the discussion
     * If it needs long-running read snapshots, it can perform versioning in a layer.
     * If it needs large bulk inserts, it can use a level of indirection to swap in the inserted data quickly.
 
+.. _cluster-size:
+
 Cluster size
 ------------
 
