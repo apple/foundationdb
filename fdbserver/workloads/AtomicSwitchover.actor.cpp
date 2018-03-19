@@ -176,8 +176,8 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		TraceEvent("AS_Done");
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator.backupAgents == ISimulator::BackupToDB) {
-			g_simulator.backupAgents = ISimulator::NoBackupAgents;
+		if (g_simulator.drAgents == ISimulator::BackupToDB) {
+			g_simulator.drAgents = ISimulator::NoBackupAgents;
 		}
 
 		return Void();
