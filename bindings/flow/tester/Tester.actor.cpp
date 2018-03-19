@@ -1574,7 +1574,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 		try {
 			if(LOG_INSTRUCTIONS) {
 				if(op != LiteralStringRef("SWAP") && op != LiteralStringRef("PUSH")) {
-					printf("%lu. %s\n", idx, tupleToString(opTuple).c_str());
+					printf("%zu. %s\n", idx, tupleToString(opTuple).c_str());
 					fflush(stdout);
 				}
 			}
