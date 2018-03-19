@@ -5,12 +5,43 @@ Downloads
 Client & Server Packages
 ========================
 
-FoundationDB packages are available on Artifactory for the following operating systems:
+macOS
+-----
 
-* `macOS <https://www.foundationdb.org/downloads/5.1.0/release/osx/>`_. Supported on macOS >= 10.7. Installs client and (optionally) server.
-* `Ubuntu <https://www.foundationdb.org/downloads/5.1.0/release/ubuntu/>`_.  The server depends on the client. Supported on 64-bit Ubuntu >= 12.04, but beware of the Linux kernel bug in Ubuntu 12.x.
-* `RHEL/CentOS EL6 <https://www.foundationdb.org/downloads/5.1.0/release/rhel6/>`_. The server depends on the client. Supported on 64-bit RHEL/CentOS (6.x).
-* `RHEL/CentOS EL7 <https://www.foundationdb.org/downloads/5.1.0/release/rhel7/>`_. The server depends on the client. Supported on 64-bit RHEL/CentOS (7.x).
+The macOS installation package is supported on macOS 10.7+. It includes the client and (optionally) the server.
+
+* `FoundationDB-5.1.0.pkg <https://www.foundationdb.org/downloads/5.1.0/macOS/installers/FoundationDB-5.1.0.pkg>`_
+
+Ubuntu
+------
+
+The Ubuntu packages are supported on 64-bit Ubuntu 12.04+, but beware of the Linux kernel bug in Ubuntu 12.x.
+
+* `foundationdb-clients-5.1.0-1_amd64.deb <https://www.foundationdb.org/downloads/5.1.0/ubuntu/installers/foundationdb-clients_5.1.0-1_amd64.deb>`_ 
+* `foundationdb-server-5.1.0-1_amd64.deb <https://www.foundationdb.org/downloads/5.1.0/ubuntu/installers/foundationdb-server_5.1.0-1_amd64.deb>`_ (depends on the clients package)
+
+RHEL/CentOS EL6
+---------------
+
+The RHEL/CentOS EL6 packages are supported on 64-bit RHEL/CentOS 6.x.
+
+* `foundationdb-clients-5.1.0-1.el6.x86_64.rpm <https://www.foundationdb.org/downloads/5.1.0/rhel6/installers/foundationdb-clients-5.1.0-1.el6.x86_64.rpm>`_ 
+* `foundationdb-server-5.1.0-1.el6.x86_64.rpm <https://www.foundationdb.org/downloads/5.1.0/rhel6/installers/foundationdb-server-5.1.0-1.el6.x86_64.rpm>`_ (depends on the clients package)
+
+RHEL/CentOS EL7
+---------------
+
+The RHEL/CentOS EL7 packages are supported on 64-bit RHEL/CentOS 7.x.
+
+* `foundationdb-clients-5.1.0-1.el7.x86_64.rpm <https://www.foundationdb.org/downloads/5.1.0/rhel7/installers/foundationdb-clients-5.1.0-1.el7.x86_64.rpm>`_
+* `foundationdb-server-5.1.0-1.el7.x86_64.rpm <https://www.foundationdb.org/downloads/5.1.0/rhel7/installers/foundationdb-server-5.1.0-1.el7.x86_64.rpm>`_ (depends on the clients package)
+
+Windows
+-------
+
+The Windows installer is supported on 64-bit Windows XP and later. It includes the client and (optionally) the server.
+
+* `foundationdb-5.1.0-x64.msi <https://www.foundationdb.org/downloads/5.1.0/windows/installers/foundationdb-5.1.0-x64.msi>`_
 
 API Language Bindings
 =====================
@@ -23,27 +54,24 @@ FoundationDB's C bindings are installed with the FoundationDB client binaries. Y
 Python 2.7 - 3.4
 ----------------
 
-The FoundationDB Python API is installed as part of your FoundationDB installation.
+On macOS and Windows, the FoundationDB Python API bindings are installed as part of your FoundationDB installation.
 
-If you need to use the FoundationDB Python API from other Python installations or paths, download the `package <https://www.foundationdb.org/downloads/5.1.0/release/python/>`_.
+If you need to use the FoundationDB Python API from other Python installations or paths, download the Python package:
 
-Ruby 1.9.3/3.0.2
-----------------
+* `foundationdb-5.1.0.tar.gz <https://www.foundationdb.org/downloads/5.1.0/bindings/python/foundationdb-5.1.0.tar.gz>`_
 
-Download the `gem <https://www.foundationdb.org/downloads/5.1.0/release/ruby/>`_.
-
-Java JRE 1.8+
--------------
-
-Download the `jar and javadoc.jar <https://www.foundationdb.org/downloads/5.1.0/release/java/>`_.
-
-Node 0.8.x/0.10.x
+Ruby 1.9.3/2.0.0+
 -----------------
 
-Download the `node package <https://www.foundationdb.org/downloads/5.1.0/release/nodejs/>`_.
+* `fdb-5.1.0.gem <https://www.foundationdb.org/downloads/5.1.0/bindings/ruby/fdb-5.1.0.gem>`_
 
+Java 8+
+-------
+
+* `fdb-java-5.1.0.jar <https://www.foundationdb.org/downloads/5.1.0/bindings/java/fdb-java-5.1.0.jar>`_
+* `fdb-java-5.1.0-javadoc.jar <https://www.foundationdb.org/downloads/5.1.0/bindings/java/fdb-java-5.1.0-javadoc.jar>`_
 
 Go 1.1+
 -------
 
-The FoundationDB Go package is available on `github <https://github.com/apple/foundationdb/tree/master/bindings/go>`_
+The FoundationDB Go package is available on `GitHub <https://github.com/apple/foundationdb/tree/master/bindings/go>`_.
