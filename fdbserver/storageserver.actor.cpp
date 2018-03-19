@@ -3414,7 +3414,7 @@ Possibilities:
 void versionedMapTest() {
 	VersionedMap<int,int> vm;
 
-	printf("SS Ptree node is %lu bytes\n", sizeof( StorageServer::VersionedData::PTreeT ) );
+	printf("SS Ptree node is %zu bytes\n", sizeof( StorageServer::VersionedData::PTreeT ) );
 
 	const int NSIZE = sizeof(VersionedMap<int,int>::PTreeT);
 	const int ASIZE = NSIZE<=64 ? 64 : NextPowerOfTwo<NSIZE>::Result;
