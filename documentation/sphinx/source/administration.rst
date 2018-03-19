@@ -24,7 +24,7 @@ Starting and stopping
 
 After installation, FoundationDB is set to start automatically. You can manually start and stop the database with the commands shown below.
 
-These commands start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` , ``backup-agent`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
+These commands start and stop the master ``fdbmonitor`` process, which in turn starts ``fdbserver`` and ``backup-agent`` processes.  See :ref:`administration_fdbmonitor` for details.
 
 Linux
 -----
@@ -272,8 +272,8 @@ The summary fields are interpreted as follows:
 Redundancy mode         The currently configured redundancy mode (see the section :ref:`configuration-choosing-redundancy-mode`)
 Storage engine          The currently configured storage engine (see the section :ref:`configuration-configuring-storage-subsystem`)
 Coordinators            The number of FoundationDB coordination servers
-Desired Proxies 	Number of proxies desired.If replication mode is 3 then default number of proxies is 3
-Desired Logs 		Number of logs desired.If replication mode is 3 then default number of logs is 3
+Desired Proxies         Number of proxies desired. If replication mode is 3 then default number of proxies is 3
+Desired Logs            Number of logs desired. If replication mode is 3 then default number of logs is 3
 FoundationDB processes  Number of FoundationDB processes participating in the cluster
 Machines                Number of physical machines running at least one FoundationDB process that is participating in the cluster
 Memory availability     RAM per process on machine with least available (see details below)
@@ -291,8 +291,8 @@ Write rate              The current number of writes per second
 Transaction started     The current number of transactions started per second
 Transaction committed   The current number of transactions committed per second
 Conflict rate           The current number of conflicts per second
-Running backups         Determines if backup is running for this cluster.If it displays 1 then it is running backup and if it displays 0 then it is not running backup
-Running DRs		Determines if the cluster is primary or secondary cluster.If it displays '1 as primary' then  it is primary cluster and if it displays '1 as secondary' then it is secondary cluster
+Running backups         Number of backups currently running. Different backups could be backing up to different prefixes and/or to different targets. 
+Running DRs             Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters. 
 ====================== ==========================================================================================================
 
 The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking:
@@ -355,98 +355,98 @@ Workload:
   Conflict rate          - 0 Hz
 
 Process performance details:
-  10.214.189.44:4689     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
-  10.214.189.44:4690     (  1% cpu;  2% machine; 0.010 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.189.44:4691     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.189.44:4692     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.189.44:4693     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.189.44:4694     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.189.44:4695     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.189.44:4696     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.189.44:4697     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.189.44:4698     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.189.44:4699     (  1% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.189.44:4700     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.189.44:4701     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.189.44:4702     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.189.44:4703     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-  10.214.189.44:4704     ( 12% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-  10.214.189.44:4705     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.3 GB / 7.4 GB RAM  )
-  10.214.190.100:4689    (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
-  10.214.190.100:4690    ( 15% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4691    (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4692    (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4693    (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4694    ( 18% cpu;  3% machine; 0.124 Gbps; 18% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4695    (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4696    (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4697    (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4698    (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4699    (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4700    (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4701    (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.190.100:4702    (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.190.100:4703    (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-  10.214.190.100:4704    ( 11% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-  10.214.190.100:4705    (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
-  10.214.193.108:4689    ( 14% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 3.0 GB / 7.4 GB RAM  )
-  10.214.193.108:4690    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
-  10.214.193.108:4691    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
-  10.214.193.108:4692    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.193.108:4693    (  7% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.193.108:4694    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.193.108:4695    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.193.108:4696    (  2% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.193.108:4697    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.193.108:4698    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.193.108:4699    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.193.108:4700    (  2% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.193.108:4701    (  2% cpu;  3% machine; 0.284 Gbps;  3% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.193.108:4702    (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.193.108:4703    (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
-  10.214.193.108:4704    (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
-  10.214.193.108:4705    (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
-  10.214.202.60:4689     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
-  10.214.202.60:4690     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4691     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4692     (  2% cpu;  4% machine; 0.065 Gbps; 16% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4693     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.202.60:4694     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4695     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4696     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4697     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4698     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4699     ( 24% cpu;  4% machine; 0.065 Gbps; 15% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4700     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
-  10.214.202.60:4701     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.202.60:4702     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.202.60:4703     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
-  10.214.202.60:4704     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
-  10.214.202.60:4705     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4689     (  6% cpu;  2% machine; 0.076 Gbps;  7% disk IO; 3.2 GB / 7.4 GB RAM  )
-  10.214.203.88:4690     (  2% cpu;  2% machine; 0.076 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4691     (  1% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4692     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4693     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.203.88:4694     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.203.88:4695     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4696     (  2% cpu;  2% machine; 0.076 Gbps;  6% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4697     ( 31% cpu;  2% machine; 0.076 Gbps;  8% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.203.88:4698     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4699     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-  10.214.203.88:4700     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4701     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4702     (  0% cpu;  2% machine; 0.076 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
-  10.214.203.88:4703     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-  10.214.203.88:4704     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-  10.214.203.88:4705     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4500     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4501     (  1% cpu;  2% machine; 0.010 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4502     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4503     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4504     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4505     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4506     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4507     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4508     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4509     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4510     (  1% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4511     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4512     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4513     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4514     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4515     ( 12% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4516     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.3 GB / 7.4 GB RAM  )
+  10.0.4.2:4500     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4501     ( 15% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4502     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4503     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4504     (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4505     ( 18% cpu;  3% machine; 0.124 Gbps; 18% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4506     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4507     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4508     (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4509     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4510     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4511     (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4512     (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.2:4513     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4514     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4515     ( 11% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4516     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4500     ( 14% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 3.0 GB / 7.4 GB RAM  )
+  10.0.4.3:4501     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.3:4502     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.3:4503     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4504     (  7% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4505     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4506     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4507     (  2% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4508     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4509     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4510     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4511     (  2% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4512     (  2% cpu;  3% machine; 0.284 Gbps;  3% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4513     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4514     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.3:4515     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.3:4516     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.4:4500     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4501     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4502     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4503     (  2% cpu;  4% machine; 0.065 Gbps; 16% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4504     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.4:4505     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4506     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4507     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4508     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4509     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4510     ( 24% cpu;  4% machine; 0.065 Gbps; 15% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4511     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.4:4512     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.4:4513     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4514     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4515     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4516     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4500     (  6% cpu;  2% machine; 0.076 Gbps;  7% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4501     (  2% cpu;  2% machine; 0.076 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4502     (  1% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4503     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4504     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4505     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4506     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4507     (  2% cpu;  2% machine; 0.076 Gbps;  6% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4508     ( 31% cpu;  2% machine; 0.076 Gbps;  8% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4509     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4510     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4511     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4512     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4513     (  0% cpu;  2% machine; 0.076 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4514     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4515     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4516     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
 
 Coordination servers:
-  10.214.189.44:4689  (reachable)
-  10.214.190.100:4689  (reachable)
-  10.214.193.108:4689  (reachable)
-  10.214.202.60:4689  (reachable)
-  10.214.203.88:4689  (reachable)
+  10.0.4.1:4500  (reachable)
+  10.0.4.2:4500  (reachable)
+  10.0.4.3:4500  (reachable)
+  10.0.4.4:4500  (reachable)
+  10.0.4.5:4500  (reachable)
 
 Client time: 03/19/18 08:59:37
 Several details about individual FoundationDB processes are displayed in a list format in parenthesis after the IP address and port:
@@ -479,7 +479,7 @@ To make configuring, starting, stopping, and restarting ``fdbserver`` processes 
 
 During normal operation, ``fdbmonitor`` is transparent, and you interact with it only by modifying the configuration in :ref:`foundationdb.conf <foundationdb-conf>` and perhaps occasionally by :ref:`starting and stopping <administration-running-foundationdb>` it manually. If some problem prevents an ``fdbserver`` or ``backup-agent`` process from starting or causes it to stop unexpectedly, ``fdbmonitor`` will log errors to the system log.
 
-If kill_on_configuration_change parameter is unset or set to `true` in foundationdb.conf then fdbmonitor will restart on changes automatically.If  this parameter is set to `false` it will not restart on changes.
+If kill_on_configuration_change parameter is unset or set to `true` in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to `false` it will not restart on changes.
 
 .. _administration-managing-trace-files:
 
@@ -529,7 +529,7 @@ Using the ``memory`` storage engine, both memory and disk space need to be consi
 Running out of storage space
 ----------------------------
 
-FoundationDB is aware of the free storage space on each node. It attempts to distribute data equally on all the nodes  so that no node runs out of space before the others. The database attempts to gracefully stop writes as storage space decreases to 100 MB, refusing to start new transactions with priorities other than ``SYSTEM_IMMEDIATE``. This lower bound on free space leaves space to allow you to use ``SYSTEM_IMMEDIATE`` transactions to remove data.
+FoundationDB is aware of the free storage space on each node. It attempts to distribute data equally on all the nodes so that no node runs out of space before the others. The database attempts to gracefully stop writes as storage space decreases to 100 MB, refusing to start new transactions with priorities other than ``SYSTEM_IMMEDIATE``. This lower bound on free space leaves space to allow you to use ``SYSTEM_IMMEDIATE`` transactions to remove data.
 
 The measure of free space depends on the storage engine. For the memory storage engine, which is the default after installation, total space is limited to the lesser of the ``storage_memory`` configuration parameter (1 GB in the default configuration) or a fraction of the free disk space.
 
