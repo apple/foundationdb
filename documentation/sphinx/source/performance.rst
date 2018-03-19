@@ -46,7 +46,7 @@ For FoundationDB, the significant latencies are those experienced by a Foundatio
 
 * **Reads**. Individual reads should take under 1 ms with moderate loads. If a transaction performs many reads by waiting for each to complete before starting the next, however, these small latencies can add up. You can thus reduce total latency (and potentially :ref:`conflicts <conflict-ranges>`) by doing as many of your reads as possible in parallel. FoundationDB supports non-blocking reads, so it's easy to perform reads without waiting on them. 
 
-* **Commit**. Transactions that perform writes must be committed, and the commit will not succeed until the transaction is durable with full replication. This latency will average under 3 ms with moderate loads. Only a small part of this latency impacts transaction :ref:`conflicts <conflict-ranges>`.
+* **Commit**. Transactions that perform writes must be committed, and the commit will not succeed until the transaction is durable with full replication. This latency should average under 3 ms with moderate loads. Only a small part of this latency impacts transaction :ref:`conflicts <conflict-ranges>`.
         
 Throughput (per core)
 =====================
