@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), extraDB(NULL) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
@@ -298,6 +298,7 @@ public:
 	double connectionFailuresDisableDuration;
 	bool speedUpSimulation;
 	BackupAgentType backupAgents;
+	BackupAgentType drAgents;
 
 	virtual flowGlobalType global(int id) { return getCurrentProcess()->global(id); };
 	virtual void setGlobal(size_t id, flowGlobalType v) { getCurrentProcess()->setGlobal(id,v); };
