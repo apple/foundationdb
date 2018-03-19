@@ -21,7 +21,7 @@
 # FoundationDB Python API
 
 """Documentation for this API can be found at
-https://foundationdb.org/documentation/api-python.html"""
+https://www.foundationdb.org/documentation/api-python.html"""
 
 
 def open(*args, **kwargs):

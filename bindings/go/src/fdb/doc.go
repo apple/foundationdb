@@ -25,12 +25,12 @@ Package fdb provides an interface to FoundationDB databases (version 2.0 or high
 
 To build and run programs using this package, you must have an installed copy of
 the FoundationDB client libraries (version 2.0.0 or later), available for Linux,
-Windows and OS X at https://files.foundationdb.org/fdb-c/.
+Windows and OS X at https://www.foundationdb.org/downloads/fdb-c/.
 
 This documentation specifically applies to the FoundationDB Go binding. For more
 extensive guidance to programming with FoundationDB, as well as API
 documentation for the other FoundationDB interfaces, please see
-https://foundationdb.org/documentation/index.html.
+https://www.foundationdb.org/documentation/index.html.
 
 Basic Usage
 
@@ -198,7 +198,7 @@ operations perform different transformations. Like other database operations, an
 atomic operation is used within a transaction.
 
 For more information on atomic operations in FoundationDB, please see
-https://foundationdb.org/documentation/developer-guide.html#atomic-operations. The
+https://www.foundationdb.org/documentation/developer-guide.html#atomic-operations. The
 operands to atomic operations in this API must be provided as appropriately
 encoded byte slices. To convert a Go type to a byte slice, see the binary
 package.

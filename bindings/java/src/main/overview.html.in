@@ -19,7 +19,7 @@ pom.xml like: <br>
 }
 </pre>
 Alternatively, simply download the JAR from
-<a href="https://files.foundationdb.org/fdb-java/">Artifactory</a>
+<a href="https://www.foundationdb.org/downloads/fdb-java/">Artifactory</a>
 and add it to your classpath.<br>
 <br>
 <h3>Getting started</h3>

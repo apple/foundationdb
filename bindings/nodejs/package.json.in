@@ -4,7 +4,7 @@
         "registry": "https://registry.npmjs.org"
     },
     "version": "VERSION",
-    "author": "FoundationDB <fdbopensource@apple.com> (http://foundationdb.org)",
+    "author": "FoundationDB <fdb-dist@apple.com> (https://www.foundationdb.org)",
     "description": "Node.js bindings for the FoundationDB database",
     "keywords": [ "FoundationDB", "database", "NoSQL", "ACID" ],
     "homepage": "http://17.199.145.104",

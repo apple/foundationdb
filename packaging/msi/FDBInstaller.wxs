@@ -390,7 +390,7 @@
     </InstallExecuteSequence>
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT"
-              Value="Thank you for installing FoundationDB. For documentation, please visit https://foundationdb.org/documentation.
+              Value="Thank you for installing FoundationDB. For documentation, please visit https://www.foundationdb.org/documentation.
 
 To allow path variables to update, please restart your IDE and any open terminal sessions." />
     <UIRef Id='WixUI_FeatureTree' />
