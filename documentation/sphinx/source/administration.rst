@@ -97,8 +97,6 @@ This automatic determination of a cluster file makes it easy to write code using
 
 .. warning:: A cluster file must have the :ref:`required permissions <cluster_file_permissions>` in order to be used.
 
-.. warning:: If an explicitly provided file has been set to an invalid value (such as an empty value, a file that does not exist, or a file that is not a valid cluster file), an error will result. FoundationDB will not fall back to another file.
-
 .. warning:: If ``FDB_CLUSTER_FILE`` is read and has been set to an invalid value (such as an empty value, a file that does not exist, or a file that is not a valid cluster file), an error will result. FoundationDB will not fall back to another file.
 
 .. _cluster_file_permissions:
@@ -428,7 +426,7 @@ FoundationDB's storage space requirements depend on which storage engine is used
 
 Using the ``ssd`` storage engine, data is stored in B-trees that add some overhead.
 
-* For key-value pairs larger than about 100 bytes, overhead should usually be less than 2x per replica. In a triple-replicated configuration, the raw capacity required might be 5x the size of the data. However, SSDs often require over-provisioning (e.g. keeping the drive less than 75% full) for best performance, so 10x would be a reasonable number. For example, 100GB of raw key-values would require 1TB of raw capacity.
+* For key-value pairs larger than about 100 bytes, overhead should usually be less than 2x per replica. In a triple-replicated configuration, the raw capacity required might be 5x the size of the data. However, SSDs often require over-provisioning (e.g. keeping the drive less than 75% full) for best performance, so 7x would be a reasonable number. For example, 100GB of raw key-values would require 700GB of raw capacity.
 
 * For very small key-value pairs, the overhead can be a large factor but not usually more than about 40 bytes per replica. Therefore, with triple replication and SSD over-provisioning, allowing 200 bytes of raw storage capacity for each very small key-value pair would be a reasonable guess. For example, 1 billion very small key-value pairs would require 200GB of raw storage.
 
@@ -536,6 +534,11 @@ Stop and restart all application clients to reload the upgraded FoundationDB dyn
 
 Version-specific notes on upgrading
 ===================================
+
+Upgrading from 5.1.x
+--------------------
+
+Upgrades from 5.0.x will keep all your old data and configuration settings. 5.1 has a new backup format so backups will need to be restarted after upgrading.
 
 Upgrading from 5.0.x
 --------------------
