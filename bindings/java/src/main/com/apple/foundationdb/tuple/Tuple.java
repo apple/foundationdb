@@ -389,10 +389,11 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Construct a new {@code Tuple} with elements decoded from a supplied {@code byte} array.
+	 *  The passed byte array must not be {@code null}.
 	 *
-	 * @param bytes encoded {@code Tuple} source. Must not be {@code null}
+	 * @param bytes encoded {@code Tuple} source
 	 *
-	 * @return a newly constructed object.
+	 * @return a newly constructed object
 	 */
 	public static Tuple fromBytes(byte[] bytes) {
 		return fromBytes(bytes, 0, bytes.length);
@@ -400,10 +401,13 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 
 	/**
 	 * Construct a new {@code Tuple} with elements decoded from a supplied {@code byte} array.
+	 *  The passed byte array must not be {@code null}.
 	 *
-	 * @param bytes encoded {@code Tuple} source. Must not be {@code null}
+	 * @param bytes encoded {@code Tuple} source
+	 * @param offset starting offset of byte array of encoded data
+     * @param length length of encoded data within the source
 	 *
-	 * @return a newly constructed object.
+	 * @return a newly constructed object
 	 */
 	public static Tuple fromBytes(byte[] bytes, int offset, int length) {
 		Tuple t = new Tuple();
