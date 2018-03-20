@@ -39,7 +39,7 @@ import com.apple.foundationdb.tuple.Tuple;
  * Transactions group operations into a unit with the properties of atomicity, isolation, and
  *  durability. Transactions also provide the ability to maintain an application's invariants or
  *  integrity constraints, supporting the property of consistency. Together these properties are
- *  known as <a href="/developer-guide.html#acid" target="_blank">acid</a>.<br>
+ *  known as <a href="/developer-guide.html#acid" target="_blank">ACID</a>.<br>
  *  <br>
  * Transactions are also causally consistent: once a transaction has been successfully committed,
  *  all subsequently created transactions will see the modifications made by it.
