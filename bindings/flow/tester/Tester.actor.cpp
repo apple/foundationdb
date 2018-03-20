@@ -1704,6 +1704,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		ASSERT(!API::isAPIVersionSelected());
 		try {
 			API::getInstance();
+			ASSERT(false);
 		}
 		catch(Error& e) {
 			ASSERT(e.code() == error_code_api_version_unset);
