@@ -369,6 +369,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		Impl: Check tag_data->popped (after all waits)
 	*/
 
+	AsyncTrigger stopCommit;
 	bool stopped, initialized;
 	DBRecoveryCount recoveryCount;
 
@@ -1188,7 +1189,14 @@ ACTOR Future<Void> tLogCommit(
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.AfterTLogCommit");
 	}
 	// Send replies only once all prior messages have been received and committed.
-	Void _ = wait( timeoutWarning( logData->queueCommittedVersion.whenAtLeast( req.version ), 0.1, warningCollectorInput ) );
+	state Future<Void> stopped = logData->stopCommit.onTrigger();
+	Void _ = wait( timeoutWarning( logData->queueCommittedVersion.whenAtLeast( req.version ) || stopped, 0.1, warningCollectorInput ) );
+
+	if(stopped.isReady()) {
+		ASSERT(logData->stopped);
+		req.reply.sendError( tlog_stopped() );
+		return Void();
+	}
 
 	if(req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
@@ -1971,6 +1979,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		if(!it.second->recoveryComplete.isSet()) {
 			it.second->recoveryComplete.sendError(end_of_stream());
 		}
+		it.second->stopCommit.trigger();
 	}
 
 	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag) );
