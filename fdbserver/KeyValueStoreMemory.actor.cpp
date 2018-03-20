@@ -83,11 +83,12 @@ public:
 		int64_t uncommittedBytes = queue.totalSize() + transactionSize;
 
 		//Check that we have enough space in memory and on disk
-		int64_t availableSize = std::min(getAvailableSize(), diskQueueBytes.free / 4 - uncommittedBytes);
+		int64_t freeSize = std::min(getAvailableSize(), diskQueueBytes.free / 4 - uncommittedBytes);
+		int64_t availableSize = std::min(getAvailableSize(), diskQueueBytes.available / 4 - uncommittedBytes);
 		int64_t totalSize = std::min(memoryLimit, diskQueueBytes.total / 4 - uncommittedBytes);
 
-		return StorageBytes(std::max((int64_t)0, availableSize), std::max((int64_t)0, totalSize), diskQueueBytes.used,
-		    std::max((int64_t)0, std::min(diskQueueBytes.available, availableSize)));
+		return StorageBytes(std::max((int64_t)0, freeSize), std::max((int64_t)0, totalSize), diskQueueBytes.used,
+		    std::max((int64_t)0, availableSize));
 	}
 
 	void semiCommit() {
