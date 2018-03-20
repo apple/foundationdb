@@ -499,7 +499,7 @@ To upgrade a FoundationDB cluster, you must install the updated version of Found
 Install updated client binaries
 -------------------------------
 
-Apart from patch version upgrades, you should install the new client binary on all your clients to ensure they can reconnect after the upgrade. See :ref:`multi-version-client-api` for more information. Running ``status json`` will show you which versions clients are connecting with so you can verify before upgrading that clients are correctly configured.
+Apart from patch version upgrades, you should install the new client binary on all your clients and restart them to ensure they can reconnect after the upgrade. See :ref:`multi-version-client-api` for more information. Running ``status json`` will show you which versions clients are connecting with so you can verify before upgrading that clients are correctly configured.
 
 Stage the packages
 ------------------
