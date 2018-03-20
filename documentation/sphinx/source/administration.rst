@@ -277,7 +277,7 @@ Desired Logs            Number of logs desired. If replication mode is 3 then de
 FoundationDB processes  Number of FoundationDB processes participating in the cluster
 Machines                Number of physical machines running at least one FoundationDB process that is participating in the cluster
 Memory availability     RAM per process on machine with least available (see details below)
-Retransmissions rate	Ratio of retransmitted packets to the total number of packets.
+Retransmissions rate    Ratio of retransmitted packets to the total number of packets.
 Fault tolerance         Maximum number of machines that can fail without losing data or availability (number for losing data will be reported separately if lower)
 Server time             Timestamp from the server
 Replication health      A qualitative estimate of the health of data replication
@@ -291,8 +291,8 @@ Write rate              The current number of writes per second
 Transaction started     The current number of transactions started per second
 Transaction committed   The current number of transactions committed per second
 Conflict rate           The current number of conflicts per second
-Running backups         Number of backups currently running. Different backups could be backing up to different prefixes and/or to different targets. 
-Running DRs             Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters. 
+Running backups         Number of backups currently running. Different backups could be backing up to different prefixes and/or to different targets.
+Running DRs             Number of DRs currently running. Different DRs could be streaming different prefixes and/or to different DR clusters.
 ====================== ==========================================================================================================
 
 The "Memory availability" is a conservative estimate of the minimal RAM available to any ``fdbserver`` process across all machines in the cluster. This value is calculated in two steps. Memory available per process is first calculated *for each machine* by taking:
