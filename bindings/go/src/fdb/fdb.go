@@ -180,7 +180,7 @@ func MustAPIVersion(version int) {
 	}
 }
 
-// MustGetAPIVersion is like GetAPIVersoin but panics if the API version
+// MustGetAPIVersion is like GetAPIVersion but panics if the API version
 // has not yet been set.
 func MustGetAPIVersion() int {
 	apiVersion, err := GetAPIVersion()

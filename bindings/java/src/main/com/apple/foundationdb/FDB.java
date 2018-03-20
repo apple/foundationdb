@@ -126,9 +126,10 @@ public class FDB {
 	/**
 	 * Determines if the API version has already been selected. That is, this
 	 *  will return {@code true} if the user has already called
-	 *  {@link #selectAPIVersion(int) selectAPIVersion()}.
+	 *  {@link #selectAPIVersion(int) selectAPIVersion()} and that call
+	 *  has completed successfully.
 	 *
-	 * @return
+	 * @return {@code true} if an API version has been selected and {@code false} otherwise
 	 */
 	public static boolean isAPIVersionSelected() {
 		return singleton != null;

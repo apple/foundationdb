@@ -712,6 +712,7 @@ public class AsyncStackTester {
 		}
 		try {
 			FDB.instance();
+			throw new IllegalStateException("Able to get API instance before selecting API version");
 		}
 		catch(FDBException e) {
 			if(e.getCode() != 2200) {
