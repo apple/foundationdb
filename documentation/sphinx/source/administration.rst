@@ -436,6 +436,8 @@ Using the ``memory`` storage engine, both memory and disk space need to be consi
 
 * Disk space usage is about 8x the original data size. The memory storage engine interleaves a snapshot on disk with a transaction log, with the resulting snapshot 2x the data size. A snapshot can't be dropped from its log until the next snapshot is completely written, so 2 snapshots must be kept at 4x the data size. The two-file durable queue can't overwrite data in one file until all the data in the other file has been dropped, resulting in 8x the data size. Finally, it should be noted that disk space is not reclaimed when key-value pairs are cleared.
 
+For either storage engine, there is possible additional overhead when running backup or DR. In usual operation, the overhead is negligible but if backup is unable to write or a secondary cluster is unavailable, mutation logs will build up until copying can resume, occupying space in your cluster.
+
 Running out of storage space
 ----------------------------
 
@@ -455,7 +457,7 @@ Datacenters
 
 FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the :ref:`redundancy mode <configuration-choosing-redundancy-mode>` to ``three_datacenter`` and that you set the ``datacenter_id`` parameter for all FoundationDB processes in :ref:`foundationdb.conf <foundationdb-conf>`.
 
-If you specify the ``-a`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
+If you specify the ``--datacenter_id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
 
 .. _administration-removing:
 
@@ -494,12 +496,15 @@ To upgrade a FoundationDB cluster, you must install the updated version of Found
 
 .. warning:: |development-use-only-warning|
 
+Install updated client binaries
+-------------------------------
+
+Apart from patch version upgrades, you should install the new client binary on all your clients to ensure they can reconnect after the upgrade. See :ref:`multi-version-client-api` for more information. Running ``status json`` will show you which versions clients are connecting with so you can verify before upgrading that clients are correctly configured.
+
 Stage the packages
 ------------------
 
 Go to :doc:`downloads` and select Ubuntu or RHEL/CentOS, as appropriate for your system. Download both the client and server packages and copy them to each machine in your cluster.
-
-.. warning:: |upgrade-client-server-warning|
 
 Perform the upgrade
 -------------------
@@ -525,10 +530,10 @@ Test the database
 
 Test the database to verify that it is operating normally by running ``fdbcli`` and :ref:`reviewing the cluster status <administration-monitoring-cluster-status>`.
 
-Restart your application clients
---------------------------------
+Remove old client library versions
+----------------------------------
 
-Stop and restart all application clients to reload the upgraded FoundationDB dynamic libraries.
+You can now remove old client library versions from your clients. This is only to stop creating unnecessary connections.
 
 .. _version-specific-upgrading:
 
