@@ -32,7 +32,7 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
  *  {@link Transaction#getRange(KeySelector, KeySelector) getRange()}.<br>
  * <br>
  * For more about how key selectors work in practice, see
- * <a href="/foundationdb/developer-guide.html#key-selectors" target="_blank">the KeySelector documentation</a>.
+ * <a href="/developer-guide.html#key-selectors" target="_blank">the KeySelector documentation</a>.
  * <br>
  * <br>
  * Generally one of the following static methods should be used to construct a {@code KeySelector}:
@@ -119,7 +119,7 @@ public class KeySelector {
 	 *  poor choice for iterating through a large range. (Instead, use the keys
 	 *  returned from a range query operation
 	 *  themselves to create a new beginning {@code KeySelector}.) For more information see
-	 *  <a href="/foundationdb/developer-guide.html#key-selectors" target="_blank">the KeySelector documentation</a>.
+	 *  <a href="/developer-guide.html#key-selectors" target="_blank">the KeySelector documentation</a>.
 	 *
 	 * @param offset the number of keys to offset the {@code KeySelector}. This number can be
 	 *  negative.

@@ -69,7 +69,7 @@ cross-language support for storing and retrieving typed data from the
 binary data that FoundationDB supports. And, just as importantly, data packed into 
 {@code Tuple}s and used as keys sort in predictable and useful ways. See the 
 {@link com.apple.foundationdb.tuple Tuple class documentation} for information about use in Java
-and <a href="/foundationdb/data-modeling.html#tuples">general Tuple documentation</a>
+and <a href="/data-modeling.html#data-modeling-tuples">general Tuple documentation</a>
 for information about how Tuples sort and can be used to efficiently model data.
 <br>
 <h3>FoundationDB {@link com.apple.foundationdb.directory Directory API}</h3>
