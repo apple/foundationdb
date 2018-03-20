@@ -98,7 +98,7 @@ $(GO_DEST)/fdb/generated.go: fdb_go_path fdb_go_fmt_check lib/libfdb_c.$(DLEXT) 
 	@echo "Building       $@"
 	@go run bindings/go/src/_util/translate_fdb_options.go < fdbclient/vexillographer/fdb.options > $@
 
-godoc: fdb_go_path $(GO_SRC)
+godoc: fdb_go_path $(GO_SRC) $(GO_DEST)/fdb/generated.go
 	@echo "Generating Go Documentation"
 	@rm -rf $(GODOC_DIR)/godoc
 	@mkdir -p $(GODOC_DIR)/godoc
