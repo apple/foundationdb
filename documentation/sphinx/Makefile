@@ -2,7 +2,6 @@
 #
 # local vars:
 PROJECT_NAME	:= foundationdb-docs
-#VERSION		:= $(shell cat version)
 
 GIT_HEAD_REF	:= $(shell git rev-parse --short HEAD)
 GIT_BRANCH	:= $(shell git symbolic-ref --short HEAD)
