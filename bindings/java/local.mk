@@ -44,7 +44,7 @@ ifeq ($(PLATFORM),linux)
 
   java_ARCH := amd64
 else ifeq ($(PLATFORM),osx)
-  JAVA_HOME ?= $(shell /usr/libexec/java_home || /Library/Java/JavaVirtualMachines/jdk1.8.0_112.jdk/Contents/Home)
+  JAVA_HOME ?= $(shell /usr/libexec/java_home)
   fdb_java_CFLAGS += -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/darwin
 
   java_ARCH := x86_64
