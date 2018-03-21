@@ -96,38 +96,32 @@ In this example, we’re storing user data based on user ID but sometimes need t
         // TODO These three methods (setUser, getUser, and getUserIDsInRegion)
         // are all in the recipe book.
         public static void setUser(TransactionContext tcx, final String ID, final String name, final String zipcode){
-            tcx.run(new Function<Transaction,Void>() {
-                public Void apply(Transaction tr){
-                    tr.set(main.pack(Tuple.from(ID,zipcode)), Tuple.from(name).pack());
-                    tr.set(index.pack(Tuple.from(zipcode,ID)), Tuple.from().pack());
-                    return null;
-                }
+            tcx.run(tr -> 
+                tr.set(main.pack(Tuple.from(ID,zipcode)), Tuple.from(name).pack());
+                tr.set(index.pack(Tuple.from(zipcode,ID)), Tuple.from().pack());
+                return null;
             });
         }
         
         // Normal lookup.
         public static String getUser(TransactionContext tcx, final String ID){
-            return tcx.run(new Function<Transaction,String>() {
-                public String apply(Transaction tr){
-                    for(KeyValue kv : tr.getRange(main.subspace(Tuple.from(ID)).range(), 1)){
-                        // Return user with correct ID (if exists).
-                        return Tuple.fromBytes(kv.getValue()).getString(0);
-                    }
-                    return "";
+            return tcx.run(tr -> {
+                for(KeyValue kv : tr.getRange(main.subspace(Tuple.from(ID)).range(), 1)){
+                    // Return user with correct ID (if exists).
+                    return Tuple.fromBytes(kv.getValue()).getString(0);
                 }
+                return "";
             });
         }
         
         // Index lookup.
         public static ArrayList<String> getUserIDsInRegion(TransactionContext tcx, final String zipcode){
-            return tcx.run(new Function<Transaction,ArrayList<String>>() {
-                public ArrayList<String> apply(Transaction tr){
-                    ArrayList<String> IDs = new ArrayList<String>();
-                    for(KeyValue kv : tr.getRange(index.subspace(Tuple.from(zipcode)).range())){
-                        IDs.add(index.unpack(kv.getKey()).getString(1));
-                    }
-                    return IDs;
+            return tcx.run(tr -> {
+                ArrayList<String> IDs = new ArrayList<String>();
+                for(KeyValue kv : tr.getRange(index.subspace(Tuple.from(zipcode)).range())){
+                    IDs.add(index.unpack(kv.getKey()).getString(1));
                 }
+                return IDs;
             });
         }
     }

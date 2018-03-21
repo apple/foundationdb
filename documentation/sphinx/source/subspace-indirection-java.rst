@@ -45,12 +45,10 @@ The client performs transactions on data in the subspace current in the usual ma
     final DirectorySubspace newspace = workspace.getNew().get();
     try {
         clearSubspace(db, newspace);
-        db.run(new Function<Transaction,Void>() {
-            public Void apply(Transaction tr){
-                tr.set(newspace.pack(Tuple.from(3)),Tuple.from("c").pack());
-                tr.set(newspace.pack(Tuple.from(4)), Tuple.from("d").pack());
-                return null;
-            }
+        db.run(tr -> {
+            tr.set(newspace.pack(Tuple.from(3)),Tuple.from("c").pack());
+            tr.set(newspace.pack(Tuple.from(4)), Tuple.from("d").pack());
+            return null;
         });
     } finally {
         // Asynchronous operation--wait until result is reached.
@@ -87,16 +85,12 @@ Here's a simple Workspace class for swapping in a new workspace supporting the b
             return dir.createOrOpen(this.db, PathUtil.from("new"));
         }
         public Future<DirectorySubspace> replaceWithNew() {
-            return this.db.runAsync(new Function<Transaction,Future<DirectorySubspace>>() {
-                public Future<DirectorySubspace> apply(final Transaction tr){
-                    return dir.remove(tr, PathUtil.from("current")) // Clear the old current.
-                    .flatMap(new Function<Void,Future<DirectorySubspace>>() {
-                        public Future<DirectorySubspace> apply(Void arg0) {
-                        // Replace the old directory with the new one.
-                            return dir.move(tr, PathUtil.from("new"), PathUtil.from("current"));
-                        }
-                    });
-                }
+            return this.db.runAsync(tr -> {
+                return dir.remove(tr, PathUtil.from("current")) // Clear the old current.
+                .flatMap(() -> {
+                    // Replace the old directory with the new one.
+                    return dir.move(tr, PathUtil.from("new"), PathUtil.from("current"));
+                });
             });
         }
     }

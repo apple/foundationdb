@@ -265,11 +265,11 @@ def _decode(v, pos):
     elif code == UUID_CODE:
         return uuid.UUID(bytes=v[pos + 1:pos + 17]), pos + 17
     elif code == FALSE_CODE:
-        if hasattr(fdb, "_version") and fdb._version < 500:
+        if fdb.is_api_version_selected() and fdb.get_api_version() < 500:
             raise ValueError("Invalid API version " + str(fdb._version) + " for boolean types")
         return False, pos + 1
     elif code == TRUE_CODE:
-        if hasattr(fdb, "_version") and fdb._version < 500:
+        if fdb.is_api_version_selected() and fdb.get_api_version() < 500:
             raise ValueError("Invalid API version " + str(fdb._version) + " for boolean types")
         return True, pos + 1
     elif code == VERSIONSTAMP_CODE:

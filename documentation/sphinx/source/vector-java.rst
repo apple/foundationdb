@@ -83,20 +83,16 @@ Here’s the basic pattern:
         }
         
         public static Object get(TransactionContext tcx, final long index){
-            return tcx.run(new Function<Transaction,Object>() {
-                public Object apply(Transaction tr){
-                    return Tuple.fromBytes(tr.get(vector.pack(
-                                    Tuple.from(index))).get()).get(0);
-                }
+            return tcx.run(tr -> {
+                return Tuple.fromBytes(tr.get(vector.pack(
+                                Tuple.from(index))).get()).get(0);
             });
         }
         
         public static void set(TransactionContext tcx, final long index, final Object value){
-            tcx.run(new Function<Transaction,Void>() {
-                public Void apply(Transaction tr){
-                    tr.set(vector.pack(Tuple.from(index)), Tuple.from(value).pack());
-                    return null;
-                }
+            tcx.run(tr -> {
+                tr.set(vector.pack(Tuple.from(index)), Tuple.from(value).pack());
+                return null;
             });
         }
     }

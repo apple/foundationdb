@@ -21,7 +21,7 @@
 # FoundationDB Python API
 
 """Documentation for this API can be found at
-https://foundationdb.org/documentation/api-python.html"""
+https://www.foundationdb.org/documentation/api-python.html"""
 
 
 def open(*args, **kwargs):
@@ -38,6 +38,17 @@ def transactional(*args, **kwargs):
 def _add_symbols(module, symbols):
     for symbol in symbols:
         globals()[symbol] = getattr(module, symbol)
+
+
+def is_api_version_selected():
+    return '_version' in globals()
+
+
+def get_api_version():
+    if is_api_version_selected():
+        return globals()['_version']
+    else:
+        raise RuntimeError('API version is not set')
 
 
 def api_version(ver):

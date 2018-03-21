@@ -80,87 +80,75 @@ Here’s a simple implementation of the basic table pattern:
         
         public static void setCell(TransactionContext tcx, final String row, 
                                     final String column, final Object value){
-            tcx.run(new Function<Transaction, Void>() {
-                public Void apply(Transaction tr){
-                    tr.set(rowIndex.subspace(Tuple.from(row, column)).getKey(),
-                            pack(value));
-                    tr.set(colIndex.subspace(Tuple.from(column,row)).getKey(), 
-                            pack(value));
-                    
-                    return null;
-                }
+            tcx.run(tr -> {
+                tr.set(rowIndex.subspace(Tuple.from(row, column)).getKey(),
+                        pack(value));
+                tr.set(colIndex.subspace(Tuple.from(column,row)).getKey(), 
+                        pack(value));
+                
+                return null;
             });
         }
         
         public static Object getCell(TransactionContext tcx, final String row,
                                     final String column){
-            return tcx.run(new Function<Transaction, Object>() {
-                public Object apply(Transaction tr){
-                    return unpack(tr.get(rowIndex.subspace(
-                            Tuple.from(row,column)).getKey()).get());
-                }
+            return tcx.run(tr -> {
+                return unpack(tr.get(rowIndex.subspace(
+                        Tuple.from(row,column)).getKey()).get());
             });
         }
         
         public static void setRow(TransactionContext tcx, final String row,
                                     final Map<String,Object> cols){
-            tcx.run(new Function<Transaction, Void>() {
-                public Void apply(Transaction tr){
-                    tr.clear(rowIndex.subspace(Tuple.from(row)).range());
-                    
-                    for(Map.Entry<String,Object> cv : cols.entrySet()){
-                        setCell(tr, row, cv.getKey(), cv.getValue());
-                    }
-                    return null;
+            tcx.run(tr -> {
+                tr.clear(rowIndex.subspace(Tuple.from(row)).range());
+                
+                for(Map.Entry<String,Object> cv : cols.entrySet()){
+                    setCell(tr, row, cv.getKey(), cv.getValue());
                 }
+                return null;
             });
         }
         
         public static void setColumn(TransactionContext tcx, final String column,
                                         final Map<String,Object> rows){
-            tcx.run(new Function<Transaction,Void>() {
-                public Void apply(Transaction tr){
-                    tr.clear(colIndex.subspace(Tuple.from(column)).range());
-                    for(Map.Entry<String,Object> rv : rows.entrySet()){
-                        setCell(tr, rv.getKey(), column, rv.getValue());
-                    }
-                    return null;
+            tcx.run(tr -> {
+                tr.clear(colIndex.subspace(Tuple.from(column)).range());
+                for(Map.Entry<String,Object> rv : rows.entrySet()){
+                    setCell(tr, rv.getKey(), column, rv.getValue());
                 }
+                return null;
             });
         }
         
         public static TreeMap<String,Object> getRow(TransactionContext tcx,
                                                     final String row){
-            return tcx.run(new Function<Transaction,TreeMap<String,Object> >() {
-                public TreeMap<String,Object> apply(Transaction tr){
-                    TreeMap<String,Object> cols = new TreeMap<String,Object>();
-                    
-                    for(KeyValue kv : tr.getRange(
-                            rowIndex.subspace(Tuple.from(row)).range())){
-                        cols.put(rowIndex.unpack(kv.getKey()).getString(1),
-                                unpack(kv.getValue()));
-                    }
-                    
-                    return cols;
+            return tcx.run(tr -> {
+                TreeMap<String,Object> cols = new TreeMap<String,Object>();
+                
+                for(KeyValue kv : tr.getRange(
+                        rowIndex.subspace(Tuple.from(row)).range())){
+                    cols.put(rowIndex.unpack(kv.getKey()).getString(1),
+                            unpack(kv.getValue()));
                 }
+                
+                return cols;
             });
         }
         
         
         public static TreeMap<String,Object> getColumn(TransactionContext tcx,
                                                     final String column){
-            return tcx.run(new Function<Transaction,TreeMap<String,Object> >() {
-                public TreeMap<String,Object> apply(Transaction tr){
-                    TreeMap<String,Object> rows = new TreeMap<String,Object>();
-                    
-                    for(KeyValue kv : tr.getRange(
-                            colIndex.subspace(Tuple.from(column)).range())){
-                        rows.put(colIndex.unpack(kv.getKey()).getString(1),
-                                unpack(kv.getValue()));
-                    }
-                    
-                    return rows;
+            return tcx.run(tr -> {
+                TreeMap<String,Object> rows = new TreeMap<String,Object>();
+                
+                for(KeyValue kv : tr.getRange(
+                        colIndex.subspace(Tuple.from(column)).range())){
+                    rows.put(colIndex.unpack(kv.getKey()).getString(1),
+                            unpack(kv.getValue()));
                 }
+                
+                return rows;
             });
         }
     }

@@ -81,7 +81,7 @@ public class FDB {
 
 	public static final ExecutorService DEFAULT_EXECUTOR;
 
-	final int apiVersion;
+	private final int apiVersion;
 	private volatile boolean netStarted = false;
 	private volatile boolean netStopped = false;
 	volatile boolean warnOnUnclosed = true;
@@ -124,6 +124,37 @@ public class FDB {
 	}
 
 	/**
+	 * Determines if the API version has already been selected. That is, this
+	 *  will return {@code true} if the user has already called
+	 *  {@link #selectAPIVersion(int) selectAPIVersion()} and that call
+	 *  has completed successfully.
+	 *
+	 * @return {@code true} if an API version has been selected and {@code false} otherwise
+	 */
+	public static boolean isAPIVersionSelected() {
+		return singleton != null;
+	}
+
+	/**
+	 * Return the instance of the FDB API singleton. This method will always return
+	 *  a non-{@code null} value for the singleton, but if the
+	 *  {@link #selectAPIVersion(int) selectAPIVersion()} method has not yet been
+	 *  called, it will throw an {@link FDBException} indicating that an API
+	 *  version has not yet been set.
+	 *
+	 * @return the FoundationDB API object
+	 * @throws FDBException if {@link #selectAPIVersion(int) selectAPIVersion()} has not been called
+	 */
+	public static FDB instance() throws FDBException {
+		if(singleton != null) {
+			return singleton;
+		}
+		else {
+			throw new FDBException("API version is not set", 2200);
+		}
+	}
+
+	/**
 	 * Select the version for the client API. An exception will be thrown if the
 	 *  requested version is not supported by this implementation of the API. As
 	 *  only one version can be selected for the lifetime of the JVM, the result
@@ -142,7 +173,7 @@ public class FDB {
 	 */
 	public static synchronized FDB selectAPIVersion(final int version) throws FDBException {
 		if(singleton != null) {
-			if(version != singleton.apiVersion) {
+			if(version != singleton.getAPIVersion()) {
 				throw new IllegalArgumentException(
 						"FoundationDB API already started at different version");
 			}
@@ -169,18 +200,21 @@ public class FDB {
 		this.warnOnUnclosed = warnOnUnclosed;
 	}
 
-	// Singleton is initialized to null and only set once by a call to selectAPIVersion
-	static FDB getInstance() {
-		if(singleton != null) {
-			return singleton;
-		}
-
-		throw new IllegalStateException("API version has not been selected");
+	/**
+	 * Returns the API version that was selected by the {@link #selectAPIVersion(int) selectAPIVersion()}
+	 *  call. This can be used to guard different parts of client code against different versions
+	 *  of the FoundationDB API to allow for libraries using FoundationDB to be compatible across
+	 *  several versions.
+	 *
+	 * @return the FoundationDB API version that has been loaded
+	 */
+	public int getAPIVersion() {
+		return apiVersion;
 	}
 
 	/**
 	 * Connects to the cluster specified by the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
 	 *  If the FoundationDB network has not been started, it will be started in the course of this call
 	 *  as if {@link FDB#startNetwork()} had been called.
 	 *
@@ -199,9 +233,9 @@ public class FDB {
 	 *  {@link #startNetwork()} had been called.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
@@ -220,9 +254,9 @@ public class FDB {
 	 *  are produced from using the resulting {@link Cluster}.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 * @param e used to run the FDB network thread
 	 *
@@ -245,7 +279,7 @@ public class FDB {
 
 	/**
 	 * Initializes networking, connects with the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
 	 *  and opens the database.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
@@ -259,9 +293,9 @@ public class FDB {
 	 *  and opens the database.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
@@ -275,9 +309,9 @@ public class FDB {
 	 *  and opens the database.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 * @param e the {@link Executor} to use to execute asynchronous callbacks
 	 *
