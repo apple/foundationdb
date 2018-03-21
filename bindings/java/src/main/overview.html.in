@@ -5,7 +5,7 @@ This documents the client API for using FoundationDB from Java.<br>
 <h3>Installation</h3>
 FoundationDB's Java bindings rely on native libraries that are installed as part of the 
 FoundationDB client binaries installation (see 
-<a href="/foundationdb/api-general.html#installing-client-binaries" target="_blank">
+<a href="/api-general.html#installing-client-binaries" target="_blank">
 Installing FoundationDB client binaries</a>). The FoundationDB Java bindings are available
 through Artifactory. To use them in your Maven-enabled project, add a dependency to your 
 pom.xml like: <br>
@@ -19,7 +19,7 @@ pom.xml like: <br>
 }
 </pre>
 Alternatively, simply download the JAR from
-<a href="https://files.foundationdb.org/fdb-java/">Artifactory</a>
+<a href="https://www.foundationdb.org/downloads/fdb-java/">Artifactory</a>
 and add it to your classpath.<br>
 <br>
 <h3>Getting started</h3>
@@ -30,7 +30,7 @@ With this API object you can then open {@link com.apple.foundationdb.Cluster Clu
 {@link com.apple.foundationdb.Database Database}s and start using
 {@link com.apple.foundationdb.Transaction Transaction}s.
 Here we give an example. The example relies on a cluster file at the
-<a href="/foundationdb/api-general.html#default-cluster-file">default location</a> 
+<a href="/administration.html#default-cluster-file">default location</a> 
 for your platform and a running server.<br>
 <br>
 <pre>

@@ -55,19 +55,17 @@ The spatial index will use a pair of subspaces: one, ``z_label``, to give us eff
 .. code-block:: java
 
     public void setLocation(TransactionContext tcx, final String label, final long[] pos){
-        tcx.run(new Function<Transaction,Void>() {
-            public Void apply(Transaction tr){
-                long z = xyToZ(pos);
-                long previous;
-                // Read labelZ.subspace(Tuple.from(label)) to find previous z.
-                if(/* there is a previous z */){
-                    tr.clear(labelZ.pack(Tuple.from(label,previous)));
-                    tr.clear(zLabel.pack(Tuple.from(previous,label)));
-                }
-                tr.set(labelZ.pack(Tuple.from(label,z)),Tuple.from().pack());
-                tr.set(zLabel.pack(Tuple.from(z,label)),Tuple.from().pack());
-                return null;
+        tcx.run(tr -> {
+            long z = xyToZ(pos);
+            long previous;
+            // Read labelZ.subspace(Tuple.from(label)) to find previous z.
+            if(/* there is a previous z */){
+                tr.clear(labelZ.pack(Tuple.from(label,previous)));
+                tr.clear(zLabel.pack(Tuple.from(previous,label)));
             }
+            tr.set(labelZ.pack(Tuple.from(label,z)),Tuple.from().pack());
+            tr.set(zLabel.pack(Tuple.from(z,label)),Tuple.from().pack());
+            return null;
         });
     }
 

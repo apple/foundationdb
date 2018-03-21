@@ -56,32 +56,30 @@ Here’s a basic function that successively reads sub-ranges of a size determine
 .. code-block:: java
 
     public static void getRangeLimited(TransactionContext tcx, final KeySelector begin, final KeySelector end){
-        tcx.run(new Function<Transaction,Void>() {
-            public Void apply(Transaction tr){
-                boolean keysToCheck = true;
-                ArrayList<Tuple> keysFound = new ArrayList<Tuple>();
-                KeySelector n_begin = new KeySelector(begin.getKey(),true,begin.getOffset());
-                while(keysToCheck){
-                    keysToCheck = false;
-                    for(KeyValue kv : tr.getRange(n_begin, end, LIMIT)){
-                        keysToCheck = true;
-                        Tuple t = Tuple.fromBytes(kv.getKey());
-                        if(keysFound.size() == 0 
-                                || !t.equals(keysFound.get(keysFound.size()-1))){
-                            keysFound.add(t);
-                        }
-                    }
-                    if(keysToCheck){
-                        n_begin = KeySelector.firstGreaterThan(keysFound.get(keysFound.size()-1).pack());
-                        ArrayList<Object> readableFound = new ArrayList<Object>();
-                        for(Tuple t : keysFound){
-                            readableFound.add(t.get(1));
-                        }
-                        System.out.println(readableFound);
-                        keysFound = new ArrayList<Tuple>();
+        tcx.run(tr -> {
+            boolean keysToCheck = true;
+            ArrayList<Tuple> keysFound = new ArrayList<Tuple>();
+            KeySelector n_begin = new KeySelector(begin.getKey(),true,begin.getOffset());
+            while(keysToCheck){
+                keysToCheck = false;
+                for(KeyValue kv : tr.getRange(n_begin, end, LIMIT)){
+                    keysToCheck = true;
+                    Tuple t = Tuple.fromBytes(kv.getKey());
+                    if(keysFound.size() == 0 
+                            || !t.equals(keysFound.get(keysFound.size()-1))){
+                        keysFound.add(t);
                     }
                 }
-                return null;
+                if(keysToCheck){
+                    n_begin = KeySelector.firstGreaterThan(keysFound.get(keysFound.size()-1).pack());
+                    ArrayList<Object> readableFound = new ArrayList<Object>();
+                    for(Tuple t : keysFound){
+                        readableFound.add(t.get(1));
+                    }
+                    System.out.println(readableFound);
+                    keysFound = new ArrayList<Tuple>();
+                }
             }
+            return null;
         });
     }

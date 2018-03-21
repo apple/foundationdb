@@ -80,7 +80,7 @@ The multi-version client API adds a new ``cluster_version_changed`` error that i
 
 .. warning:: Setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.
 
-.. warning:: You should avoid including multiple protocol-compatible clients in the external client libraries list. While the client will still work, it will consume more resources than necessary. Additionally, different patch releases of the same version (e.g. ``x.y.z`` and ``x.y.w``) are generally protocol compatible, and including multiple may result in not using the most recent compatible client.    
+.. warning:: You should avoid including multiple protocol-compatible clients in the external client libraries list. While the client will still work, it will consume more resources than necessary. Additionally, different patch releases of the same version (e.g. ``x.y.z`` and ``x.y.w``) are protocol compatible, and including multiple may result in not using the most recent compatible client.    
 
 .. note:: It is recommended that you not include more external clients than necessary. For example, a client that has been upgraded to a newer version than its cluster may need to include a single external client that matches the version of the cluster, but it generally won't require a copy of every prior version.
 
