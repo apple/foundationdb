@@ -7,12 +7,7 @@ FoundationDB |version|
 Overview
 ========
 
-FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs :doc:`ACID transactions <transaction-manifesto>` for all operations. It is especially well-suited for read/write workloads but also has excellent :doc:`performance <performance>` for write-intensive workloads. Users interact with the database using a :doc:`API language binding <api-reference>`.
-
-Local Development
-=================
-
-FoundationDB runs on clusters in Apple data centers, but you can :doc:`begin local development <local-dev>` now.
+FoundationDB is a distributed database designed to handle large volumes of structured data across clusters of commodity servers. It organizes data as an ordered key-value store and employs :doc:`ACID transactions <transaction-manifesto>` for all operations. It is especially well-suited for read/write workloads but also has excellent :doc:`performance <performance>` for write-intensive workloads. Users interact with the database using a :doc:`API language binding <api-reference>`. You can :doc:`begin local development <local-dev>` today.
 
 Documentation
 =============
@@ -40,6 +35,8 @@ The latest changes are detailed in :doc:`release-notes`. The documentation has t
 * :doc:`api-reference` give a detailed description of the API for each language.
 
 * :doc:`tutorials` provide simple examples of client design using FoundationDB.
+
+* :doc:`administration` contains documentation on administering FoundationDB.
 
 .. toctree::
    :maxdepth: 1

@@ -21,7 +21,7 @@ You can invoke ``fdbcli`` at the command line simply by typing it. For example::
     The database is available.
 
     Welcome to the fdbcli. For help, type `help'.
-    fdb> 
+    fdb>
 
 This will result in ``fdbcli`` connecting to the :ref:`default cluster file <default-cluster-file>` (``/etc/foundationdb/fdb.cluster`` for Linux.) You can also specify a cluster file as an argument to ``fdbcli`` using the ``-C`` option. For further information, see :ref:`specifying-a-cluster-file`.
 
@@ -59,7 +59,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [proxies=<N>] [resolvers=<N>] [logs=<N>]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|multi_dc] [ssd|memory] [proxies=<N>] [resolvers=<N>] [logs=<N>]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -71,8 +71,8 @@ Redundancy modes define storage requirements, required cluster size, and resilie
 * ``single``
 * ``double``
 * ``triple``
-* ``three_datacenter``
 * ``three_data_hall``
+* ``multi_dc``
 
 For descriptions of redundacy modes, see :ref:`configuration-choosing-redundancy-mode`.
 
@@ -127,7 +127,7 @@ For more information on excluding servers, see :ref:`removing-machines-from-a-cl
 
 exit
 ----
-      
+
 The ``exit`` command exits ``fdbcli``.
 
 get
@@ -180,7 +180,7 @@ The following options are available for use with the ``option`` command:
 
 ``ACCESS_SYSTEM_KEYS`` - Allows this transaction to read and modify system keys (those that start with the byte ``0xFF``).
 
-``CAUSAL_READ_RISKY`` - The read version will be committed. It will usually will be the latest committed but might not be in the event of a fault or partition.
+``CAUSAL_READ_RISKY`` - In the event of a fault or partition, the read version returned may not the last committed version potentially causing you to read outdated data.
 
 ``CAUSAL_WRITE_RISKY`` - The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault.
 

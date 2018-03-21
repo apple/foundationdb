@@ -71,12 +71,13 @@ At this point and after each subsequent step, it is a good idea to test the data
     Machines               - 1
     Memory availability    - 4.1 GB per process on machine with least available
     Fault Tolerance        - 0 machines
-    Server time            - Wed Oct  8 14:41:34 2014
+    Server time            - Thu Mar 15 14:41:34 2018
     
   Data:
     Replication health     - Healthy
     Moving data            - 0.000 GB
-    Sum of key-value sizes - 0 MB
+    Sum of key-value sizes - 8 MB
+    Disk space used        - 103 MB
 
   Operating space:
     Storage server         - 1.0 GB free on most full server
@@ -89,7 +90,11 @@ At this point and after each subsequent step, it is a good idea to test the data
     Transactions committed - 0 Hz
     Conflict rate          - 0 Hz
 
-  Client time: Thu Nov 20 09:50:45 2014
+  Backup and DR:
+    Running backups        - 0
+    Running DRs            - 0
+
+  Client time: Thu Mar 15 14:41:34 2018
 
 .. note:: If the database is not operational the status command will provide diagnostic information to help you resolve the issue. For more help, please post a question (and the results of the status command) on the `community forums <https://forums.foundationdb.org>`_.
 
