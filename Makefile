@@ -150,6 +150,7 @@ clean: $(CLEAN_TARGETS) docpreview_clean
 	@rm -rf $(DEPSDIR)
 	@rm -rf lib/libstdc++.a
 	@rm -rf bin/coverage.*.xml
+	@rm -f packages/cie-foundationdb-backup_$(VERSION)-$(PKGRELEASE).tar.gz packages/cie-foundationdb-client_$(VERSION)-$(PKGRELEASE).tar.gz packages/cie-foundationdb-python_$(VERSION)-$(PKGRELEASE).tar.gz packages/cie-foundationdb-server_$(VERSION)-$(PKGRELEASE).tar.gz
 
 targets:
 	@echo "Available targets:"
@@ -180,13 +181,13 @@ docpreview: javadoc godoc
 docpreview_clean:
 	CLEAN_TARGETS= $(MAKE) -C documentation docpreview_clean
 
-packages/foundationdb-docs-$(VERSION)-$(PKGRELEASE).tar.gz: FORCE javadoc godoc
+packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc godoc
 	TARGETS= $(MAKE) -C documentation docpackage
 	@mkdir -p packages
-	@rm -f packages/foundationdb-docs-$(VERSION)-$(PKGRELEASE).tar.gz
-	@cp documentation/sphinx/.dist/foundationdb-docs-$(VERSION)-$(PKGRELEASE).tar.gz packages/foundationdb-docs-$(VERSION)-$(PKGRELEASE).tar.gz
+	@rm -f packages/foundationdb-docs-$(VERSION).tar.gz
+	@cp documentation/sphinx/.dist/foundationdb-docs-$(VERSION).tar.gz packages/foundationdb-docs-$(VERSION)-$(PKGRELEASE).tar.gz
 
-docpackage: packages/foundationdb-docs-$(VERSION)-$(PKGRELEASE).tar.gz
+docpackage: packages/foundationdb-docs-$(VERSION).tar.gz
 
 FORCE:
 

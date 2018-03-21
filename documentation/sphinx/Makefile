@@ -102,5 +102,5 @@ livehtml: html
 # removed html prerequisite because it is previously explictly invoked
 package:
 	mkdir -p $(DISTDIR)
-	rm -f $(DISTDIR)/$(PROJECT_NAME)-$(VERSION)-$(PKGRELEASE).tar.gz
-	cd $(BUILDDIR)/html && tar czf $(DISTDIR)/$(PROJECT_NAME)-$(VERSION)-$(PKGRELEASE).tar.gz .
+	rm -f $(DISTDIR)/$(PROJECT_NAME)-$(VERSION).tar.gz
+	cd $(BUILDDIR)/html && tar czf $(DISTDIR)/$(PROJECT_NAME).tar.gz .
