@@ -521,7 +521,7 @@ Guidelines for setting process class
 
 In a FoundationDB cluster, each of the ``fdbserver`` processes perform different tasks. Each process is recruited to do a particular task based on its process ``class``. For example, processes with ``class=storage`` are given preference to be recruited for doing storage server tasks, ``class=transaction`` are for log server processes and ``class=stateless`` are for stateless processes like proxies, resolvers, etc.,
 
-The recommended minimum number of ``class=transaction`` (log server) processes is 8 (active) + 2 (standby) and the recommended minimum number for ``class=stateless`` processes is 4 (proxy) + 1 (resolver) + 1 (Cluster Controller) + 1 (Master) + 2 (standby). It is better to spread the transaction and stateless processes across as many machines as possible.
+The recommended minimum number of ``class=transaction`` (log server) processes is 8 (active) + 2 (standby) and the recommended minimum number for ``class=stateless`` processes is 4 (proxy) + 1 (resolver) + 1 (cluster controller) + 1 (master) + 2 (standby). It is better to spread the transaction and stateless processes across as many machines as possible.
 
 ``fdbcli`` is used to set the desired number of processes of a particular process type. To do so, you would issue the ``fdbcli`` commands::
 
