@@ -43,6 +43,7 @@ public interface ReadTransactionContext {
 	 *
 	 * @param retryable the block of logic to execute against a {@link ReadTransaction}
 	 *  in this context
+	 * @param <T> the return type of {@code retryable}
 	 *
 	 * @return a result of the last call to {@code retryable}
 	 */
@@ -56,6 +57,7 @@ public interface ReadTransactionContext {
 	 *
 	 * @param retryable the block of logic to execute against a {@link ReadTransaction}
 	 *  in this context
+	 * @param <T> the return type of {@code retryable}
 	 *
 	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
 	 *  to {@code retryable}
