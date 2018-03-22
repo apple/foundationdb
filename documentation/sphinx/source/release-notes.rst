@@ -2,6 +2,59 @@
 Release Notes
 #############
 
+5.1.4
+=====
+
+Fixes
+-----
+
+* The master would recover twice when a new cluster controller was elected. <rdar://problem/38305649>
+* The cluster controller could be elected on a storage process after restarting all processes in a cluster. <rdar://problem/37946424>
+* Allow backup expiration to succeed if the backup is too new to be restorable. <rdar://problem/38237313>
+* Process metric collection in status could sometimes fail. <rdar://problem/38311829>
+
+5.1.3
+=====
+
+Fixes
+-----
+
+* The backup agents ran out of memory when heavily loaded. <rdar://problem/37509745>
+* Storage servers were not marked as failed until after their files were deleted. <rdar://problem/38266562>
+* The consistency check requested too many shards in the same request from the proxy. <rdar://problem/37326268>
+* Client knobs for blob send/receive were reversed in meaning. <rdar://problem/37945529>
+* fdbbackup status provides more information on reported errors. <rdar://problem/36200858> <rdar://problem/37461836>
+
+5.1.2
+=====
+
+Fixes
+-----
+
+* Backup did not incrementally delete mutations from the mutation log. <rdar://problem/37609229>
+* fdbcli status misreported completed backup/DR as running. <rdar://problem/37608661>
+* Stopped producing the "fdbblob" alias for fdbbackup. <rdar://problem/37244632>
+
+5.1.1
+=====
+
+Fixes
+-----
+
+* Bindings: Disposing a transaction during a commit resulted in a broken promise from ``get_versionstamp``. <rdar://problem/35835272>
+* Bindings: Calling ``create_cluster`` before initializing the network would result in a crash. <rdar://problem/35563243>
+* Latest restorable version of a running backup was not being updated in backup layer status. <rdar://problem/37288715>
+* Backup layer status would sometimes show an error or an incorrect value for the recent blob bandwidth metric. <rdar://problem/37288943>
+* Backup deletions were not deleting all of the files related to the backup. <rdar://problem/37756550>
+* The cluster controller was sharing a process with the master even when better locations existed. <rdar://problem/37318611>
+* Blob credentials files were being opened in read-write mode.
+* Sometimes fdbbackup did not write log files even when ``--log`` was passed on the command line. <rdar://problem/36259384>
+
+Performance
+-----------
+
+* Backup file uploads will respond to server-side throttling in the middle of a chunk upload rather than only between chunks. <rdar://problem/37245992>
+
 5.1.0
 =====
 

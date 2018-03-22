@@ -36,6 +36,8 @@ The latest changes are detailed in :doc:`release-notes`. The documentation has t
 
 * :doc:`tutorials` provide simple examples of client design using FoundationDB.
 
+* :doc:`administration` contains documentation on administering FoundationDB.
+
 .. toctree::
    :maxdepth: 1
    :titlesonly:

@@ -180,13 +180,13 @@ docpreview: javadoc godoc
 docpreview_clean:
 	CLEAN_TARGETS= $(MAKE) -C documentation docpreview_clean
 
-packages/foundationdb-docs-$(VERSION)-SNAPSHOT.tar.gz: FORCE javadoc godoc
+packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc godoc
 	TARGETS= $(MAKE) -C documentation docpackage
 	@mkdir -p packages
-	@rm -f packages/foundationdb-docs-SNAPSHOT.tar.gz
-	@cp documentation/sphinx/.dist/foundationdb-docs-$(VERSION)-SNAPSHOT.tar.gz packages/foundationdb-docs-$(VERSION)-SNAPSHOT.tar.gz
+	@rm -f packages/foundationdb-docs-$(VERSION).tar.gz
+	@cp documentation/sphinx/.dist/foundationdb-docs-$(VERSION).tar.gz packages/foundationdb-docs-$(VERSION).tar.gz
 
-docpackage: packages/foundationdb-docs-$(VERSION)-SNAPSHOT.tar.gz
+docpackage: packages/foundationdb-docs-$(VERSION).tar.gz
 
 FORCE:
 

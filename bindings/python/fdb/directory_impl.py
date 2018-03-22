@@ -75,7 +75,7 @@ class HighContentionAllocator (object):
                     count = tr.snapshot[self.counters[start]]
 
                 if count != None:
-                    count = struct.unpack("<q", str(count))[0]
+                    count = struct.unpack("<q", bytes(count))[0]
                 else:
                     count = 0
 

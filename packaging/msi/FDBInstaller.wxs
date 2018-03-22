@@ -297,7 +297,7 @@
       <Feature Id='FeatureClient' Title='FoundationDB Clients'
                Description='Installs the FoundationDB command line interface, client library (required by all bindings) and C header files.'
                Level='1' Absent='disallow' AllowAdvertise='no' TypicalDefault='install'>
-        <!-- This is the equivalent of the 'clients' package on linux, except without Python -->
+        <!-- This is the equivalent of the 'clients' package on linux -->
         <ComponentRef Id='CreateClusterFileDir'/>  <!-- In a client only install, we don't make any files here, but want it to be easy to drop fdb.cluster here -->
         <ComponentRef Id='PathAddition'/>
         <ComponentRef Id='InstallPathEnvVar'/>

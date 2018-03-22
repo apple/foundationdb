@@ -105,4 +105,4 @@ A lot of things affect the simple first-order model of performance you see here.
 * To keep up with the performance modeled above, your disk subsystem will need to do a little over 1 IOPS per write, and about 1 IOPS per (uncached) read.
 * Network performance tuning at the operating system level can be very important for both latency and throughput, especially in larger clusters.
 * Running DR and/or backup requires applying each mutation multiple times and then reading those mutations from the database. Using either feature will reduce throughput.
-* See our :ref:`known-limitations <known limitations>` for other considerations which may affect performance.
+* See our :ref:`known limitations <known-limitations>` for other considerations which may affect performance.
