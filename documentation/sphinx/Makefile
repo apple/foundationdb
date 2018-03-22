@@ -103,4 +103,4 @@ livehtml: html
 package:
 	mkdir -p $(DISTDIR)
 	rm -f $(DISTDIR)/$(PROJECT_NAME)-$(VERSION).tar.gz
-	cd $(BUILDDIR)/html && tar czf $(DISTDIR)/$(PROJECT_NAME).tar.gz .
+	cd $(BUILDDIR)/html && tar czf $(DISTDIR)/$(PROJECT_NAME)-$(VERSION).tar.gz .
