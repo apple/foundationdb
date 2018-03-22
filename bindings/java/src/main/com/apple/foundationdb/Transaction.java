@@ -34,12 +34,12 @@ import com.apple.foundationdb.tuple.Tuple;
  *  the underlying database if and when the transaction is committed. Read operations do see the
  *  effects of previous write operations on the same transaction. Committing a transaction usually
  *  succeeds in the absence of
- *  <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">conflicts</a>.<br>
+ *  <a href="/developer-guide.html#developer-guide-transaction-conflicts" target="_blank">conflicts</a>.<br>
  *  <br>
  * Transactions group operations into a unit with the properties of atomicity, isolation, and
  *  durability. Transactions also provide the ability to maintain an application's invariants or
  *  integrity constraints, supporting the property of consistency. Together these properties are
- *  known as <a href="/foundationdb/developer-guide.html#acid" target="_blank">ACID</a>.<br>
+ *  known as <a href="/developer-guide.html#acid" target="_blank">ACID</a>.<br>
  *  <br>
  * Transactions are also causally consistent: once a transaction has been successfully committed,
  *  all subsequently created transactions will see the modifications made by it.
@@ -49,7 +49,7 @@ import com.apple.foundationdb.tuple.Tuple;
  * <br>
  * Keys and values in FoundationDB are byte arrays. To encode other data types, see the
  *  {@link Tuple Tuple API} and
- *  <a href="/foundationdb/data-modeling.html#tuples" target="_blank">tuple layer documentation</a>.<br>
+ *  <a href="/data-modeling.html#data-modeling-tuples" target="_blank">tuple layer documentation</a>.<br>
  * <br>
  * When used as a {@link TransactionContext}, the methods {@code run()} and
  *  {@code runAsync()} on a {@code Transaction} will simply attempt the operations
@@ -79,11 +79,11 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	/**
 	 * Return special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
 	 * Snapshot reads selectively relax FoundationDB's isolation property, reducing
-	 * <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
+	 * <a href="/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
 	 * but making reasoning about concurrency harder.<br>
 	 * <br>
 	 * For more information about how to use snapshot reads correctly, see
-	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 * <a href="/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
 	 */
 	ReadTransaction snapshot();
 
