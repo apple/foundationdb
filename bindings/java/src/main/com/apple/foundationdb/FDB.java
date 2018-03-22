@@ -363,11 +363,13 @@ public class FDB {
 	 * event loop is a blocking operation that is not
 	 * expected to terminate until the program is complete. This will therefore consume an
 	 * entire thread from {@code e} if {@code e} is a thread pool or will completely block
-	 * operation of a single threaded {@code Executor}.<br>
+	 * the single thread of a single-threaded {@code Executor}.<br>
 	 * <br>
 	 * Manual configuration of the networking engine can be achieved through calls on
 	 *  {@link NetworkOptions}. These options should be set before a call
 	 *  to this method.
+	 *
+	 * @param e the {@link Executor} to use to execute network operations on
 	 *
 	 * @see NetworkOptions
 	 *
