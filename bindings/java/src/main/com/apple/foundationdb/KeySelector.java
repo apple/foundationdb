@@ -70,8 +70,8 @@ public class KeySelector {
 	 * @param key the base key to reference
 	 * @param orEqual {@code true} if the key selector should resolve to
 	 *                {@code key} (if {@code key} is present) before accounting for the offset
-	 * @param offset the offset (in number of keys) from the first resolved to key that
-	 *               the key selector should finally resolve to
+	 * @param offset the offset (in number of keys) that the selector will advance after
+	 *               resolving to a key based on the {@code key} and {@code orEqual} parameters
 	 */
 	public KeySelector(byte[] key, boolean orEqual, int offset) {
 		this.key = key;

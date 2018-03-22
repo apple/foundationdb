@@ -188,7 +188,7 @@ import com.apple.foundationdb.async.CloneableException;
  *  {@link #isMaybeCommitted() may be committed} or not). To handle these cases, clients
  *  are generally advised to make their database operations idempotent and to place
  *  their operations within retry loops. The FDB Java API provides some default retry loops
- *  within the {@link Database} interface. See the discussion within the documenation of
+ *  within the {@link Database} interface. See the discussion within the documentation of
  *  {@link Database#runAsync(Function) Database.runAsync()} for more details.
  *
  * @see com.apple.foundationdb.Transaction#onError(Throwable) Transaction.onError()

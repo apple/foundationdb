@@ -463,10 +463,10 @@ public class AsyncUtil {
 
 	/**
 	 * Composes an asynchronous task with an exception-handler that returns a {@link CompletableFuture}
-	 *  of the same type. This will return a {@link CompletableFuture} that will have the
-	 *  same return value as {@code task} if {@code task} completes normally and will
-	 *  have the same result as the future returned by {@code fn} given the exception
-	 *  resulting from {@code task} if {@code task} completes exceptionally.
+	 *  of the same type. If {@code task} completes normally, this will return a {@link CompletableFuture}
+	 *  with the same value as {@code task}. If {@code task} completes exceptionally,
+	 *  this will call {@code fn} with the exception returned by {@code task} and return
+	 *  the result of the {@link CompletableFuture} returned by that function.
 	 *
 	 * @param task the asynchronous process to handle exceptions from
 	 * @param fn a function mapping exceptions from {@code task} to a {@link CompletableFuture} of the same
