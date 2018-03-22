@@ -393,7 +393,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *
 	 * @param bytes encoded {@code Tuple} source
 	 *
-	 * @return a newly constructed object
+	 * @return a new {@code Tuple} constructed by deserializing the provided {@code byte} array
 	 */
 	public static Tuple fromBytes(byte[] bytes) {
 		return fromBytes(bytes, 0, bytes.length);
@@ -405,9 +405,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *
 	 * @param bytes encoded {@code Tuple} source
 	 * @param offset starting offset of byte array of encoded data
-     * @param length length of encoded data within the source
+	 * @param length length of encoded data within the source
 	 *
-	 * @return a newly constructed object
+	 * @return a new {@code Tuple} constructed by deserializing the specified slice of the provided {@code byte} array
 	 */
 	public static Tuple fromBytes(byte[] bytes, int offset, int length) {
 		Tuple t = new Tuple();
@@ -418,7 +418,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Gets the number of elements in this {@code Tuple}.
 	 *
-	 * @return the count of elements
+	 * @return the number of elements in this {@code Tuple}
 	 */
 	public int size() {
 		return this.elements.size();
@@ -441,6 +441,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the item to return
 	 *
 	 * @return the item at {@code index} as a {@code long}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link Number}
+	 * @throws NullPointerException if the element at {@code index} is {@code null}
 	 */
 	public long getLong(int index) {
 		Object o = this.elements.get(index);
@@ -457,6 +460,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the element to return
 	 *
 	 * @return the item at {@code index} as a {@code byte[]}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link Number}
 	 */
 	public byte[] getBytes(int index) {
 		Object o = this.elements.get(index);
@@ -474,6 +479,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the element to return
 	 *
 	 * @return the item at {@code index} as a {@code String}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link String}
 	 */
 	public String getString(int index) {
 		Object o = this.elements.get(index);
@@ -493,6 +500,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the element to return
 	 *
 	 * @return the item at {@code index} as a {@link BigInteger}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link Number}
 	 */
 	public BigInteger getBigInteger(int index) {
 		Object o = this.elements.get(index);
@@ -513,6 +522,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the item to return
 	 *
 	 * @return the item at {@code index} as a {@code float}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link Number}
 	 */
 	public float getFloat(int index) {
 		Object o = this.elements.get(index);
@@ -529,6 +540,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the item to return
 	 *
 	 * @return the item at {@code index} as a {@code double}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link Number}
 	 */
 	public double getDouble(int index) {
 		Object o = this.elements.get(index);
@@ -545,6 +558,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the item to return
 	 *
 	 * @return the item at {@code index} as a {@code boolean}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link Boolean}
+	 * @throws NullPointerException if the element at {@code index} is {@code null}
 	 */
 	public boolean getBoolean(int index) {
 		Object o = this.elements.get(index);
@@ -562,6 +578,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the item to return
 	 *
 	 * @return the item at {@code index} as a {@link UUID}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link UUID}
 	 */
 	public UUID getUUID(int index) {
 		Object o = this.elements.get(index);
@@ -577,7 +595,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *
 	 * @param index the location of the item to return
 	 *
-	 * @return the item at {@code index} as a {@link UUID}
+	 * @return the item at {@code index} as a {@link Versionstamp}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link Versionstamp}
 	 */
 	public Versionstamp getVersionstamp(int index) {
 		Object o = this.elements.get(index);
@@ -594,6 +614,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the item to return
 	 *
 	 * @return the item at {@code index} as a {@link List}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@link List}
+	 *         or a {@code Tuple}
 	 */
 	public List<Object> getNestedList(int index) {
 		Object o = this.elements.get(index);
@@ -618,6 +641,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @param index the location of the item to return
 	 *
 	 * @return the item at {@code index} as a {@link List}
+	 *
+	 * @throws ClassCastException if the element at {@code index} is not a {@code Tuple}
+	 *         or a {@link Tuple}
 	 */
 	public Tuple getNestedTuple(int index) {
 		Object o = this.elements.get(index);
@@ -646,7 +672,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Creates a new {@code Tuple} with the first item of this {@code Tuple} removed.
 	 *
-	 * @return a newly created {@code Tuple}
+	 * @return a newly created {@code Tuple} without the first item of this {@code Tuple}
+	 *
+	 * @throws IllegalStateException if this {@code Tuple} is empty
 	 */
 	public Tuple popFront() {
 		if(elements.size() == 0)
@@ -663,7 +691,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	/**
 	 * Creates a new {@code Tuple} with the last item of this {@code Tuple} removed.
 	 *
-	 * @return a newly created {@code Tuple}
+	 * @return a newly created {@code Tuple} without the last item of this {@code Tuple}
+	 *
+	 * @throws IllegalStateException if this {@code Tuple} is empty
 	 */
 	public Tuple popBack() {
 		if(elements.size() == 0)
@@ -688,8 +718,8 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *   Range r = t.range();</pre>
 	 * {@code r} includes all tuples ("a", "b", ...)
 	 *
-	 * @return the keyspace range containing all {@code Tuple}s that have this {@code Tuple}
-	 *  as a prefix.
+	 * @return the range of keys containing all {@code Tuple}s that have this {@code Tuple}
+	 *  as a prefix
 	 */
 	public Range range() {
 		byte[] p = pack();
@@ -732,7 +762,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * Returns a hash code value for this {@code Tuple}.
 	 * {@inheritDoc}
 	 *
-	 * @return a hashcode
+	 * @return a hash code for this {@code Tuple} that can be used by hash tables
 	 */
 	@Override
 	public int hashCode() {
@@ -745,7 +775,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  {@link Tuple#compareTo(Tuple) compareTo()} would return {@code 0}.
 	 *
 	 * @return {@code true} if {@code obj} is a {@code Tuple} and their binary representation
-	 *  is identical.
+	 *  is identical
 	 */
 	@Override
 	public boolean equals(Object o) {
@@ -758,9 +788,14 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	}
 
 	/**
-	 * Returns a string representing this {@code Tuple}.
+	 * Returns a string representing this {@code Tuple}. This contains human-readable
+	 *  representations of all of the elements of this {@code Tuple}. For most elements,
+	 *  this means using that object's default string representation. For byte-arrays,
+	 *  this means using {@link ByteArrayUtil#printable(byte[]) ByteArrayUtil.printable()}
+	 *  to produce a byte-string where most printable ASCII code points have been
+	 *  rendered as characters.
 	 *
-	 * @return a string
+	 * @return a human-readable {@link String} representation of this {@code Tuple}
 	 */
 	@Override
 	public String toString() {
@@ -801,9 +836,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
 	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
 	 *
-	 * @param items the elements from which to create the {@code Tuple}.
+	 * @param items the elements from which to create the {@code Tuple}
 	 *
-	 * @return a newly created {@code Tuple}
+	 * @return a new {@code Tuple} with the given items as its elements
 	 */
 	public static Tuple fromItems(Iterable<? extends Object> items) {
 		Tuple t = new Tuple();
@@ -821,7 +856,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *
 	 * @param items the elements from which to create the {@code Tuple}.
 	 *
-	 * @return a newly created {@code Tuple}
+	 * @return a new {@code Tuple} with the given items as its elements
 	 */
 	public static Tuple fromList(List<? extends Object> items) {
 		return new Tuple(items);
@@ -831,11 +866,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * Efficiently creates a new {@code Tuple} from a {@link Stream} of objects. The
 	 *  elements must follow the type guidelines from {@link Tuple#addObject(Object) add},
 	 *  and so can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
-	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
+	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s. Note that this
+	 *  class will consume all elements from the {@link Stream}.
 	 *
-	 * @param items the {@link Stream} of items from which to create the {@code Tuple}.
+	 * @param items the {@link Stream} of items from which to create the {@code Tuple}
 	 *
-	 * @return a newly created {@code Tuple}
+	 * @return a new {@code Tuple} with the given items as its elements
 	 */
 	public static Tuple fromStream(Stream<? extends Object> items) {
 		Tuple t = new Tuple();
@@ -849,9 +885,9 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 *  can only be {@link String}s, {@code byte[]}s, {@link Number}s, {@link UUID}s,
 	 *  {@link Boolean}s, {@link List}s, {@code Tuple}s, or {@code null}s.
 	 *
-	 * @param items the elements from which to create the {@code Tuple}.
+	 * @param items the elements from which to create the {@code Tuple}
 	 *
-	 * @return a newly created {@code Tuple}
+	 * @return a new {@code Tuple} with the given items as its elements
 	 */
 	public static Tuple from(Object... items) {
 		return fromList(Arrays.asList(items));
