@@ -150,7 +150,6 @@ clean: $(CLEAN_TARGETS) docpreview_clean
 	@rm -rf $(DEPSDIR)
 	@rm -rf lib/libstdc++.a
 	@rm -rf bin/coverage.*.xml
-	@rm -f packages/cie-foundationdb-backup_$(VERSION)-$(PKGRELEASE).tar.gz packages/cie-foundationdb-client_$(VERSION)-$(PKGRELEASE).tar.gz packages/cie-foundationdb-python_$(VERSION)-$(PKGRELEASE).tar.gz packages/cie-foundationdb-server_$(VERSION)-$(PKGRELEASE).tar.gz
 
 targets:
 	@echo "Available targets:"
