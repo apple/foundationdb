@@ -76,15 +76,17 @@ struct VersionStampWorkload : TestWorkload {
 	}
 
 	Key versionStampKeyForIndex(uint64_t index) {
-		Key result = makeString(38);
+		Key result = makeString(40);
 		uint8_t* data = mutateString(result);
-		memset(&data[0], 'V', 38);
+		memset(&data[0], 'V', 40);
 
 		double d = double(index) / nodeCount;
 		emplaceIndex(data, 4, *(int64_t*)&d);
 
-		data[38 - 2] = 24 + vsKeyPrefix.size();
-		data[38 - 1] = 0;
+		data[40 - 4] = 24 + vsKeyPrefix.size();
+		data[40 - 3] = 0;
+		data[40 - 2] = 0;
+		data[40 - 1] = 0;
 		return result.withPrefix(vsKeyPrefix);
 	}
 
@@ -234,21 +236,13 @@ struct VersionStampWorkload : TestWorkload {
 			state Version committedVersion;
 
 			bool useVersionstampPos = (g_random->random01() < 0.5);
-			state MutationRef::Type valueMutation;
-			state Value versionStampValue;
-			if(useVersionstampPos) {
-				versionStampValue = LiteralStringRef("\x00\x00\x00\x00").withPrefix(value);
-				valueMutation = MutationRef::SetVersionstampedValuePos;
-			} else {
-				versionStampValue = value;
-				valueMutation = MutationRef::SetVersionstampedValue;
-			}
+			state Value versionStampValue = value.withSuffix(LiteralStringRef("\x00\x00\x00\x00"));
 
 			loop{
 				state bool error = false;
 				//TraceEvent("VST_commit_begin").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("clear", printable(range));
 				try {
-					tr.atomicOp(key, versionStampValue, valueMutation);
+					tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
 					tr.clear(range);
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();

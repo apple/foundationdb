@@ -940,8 +940,8 @@ public:
 						std::swap(itCopy->value[i--], itCopy->value.back());
 					itCopy->value.pop_back();
 				} else if( !valueKnown || 
-					       (itCopy->value[i]->setPresent && (itCopy->value[i]->setValue.present() != val.present() || (val.present() && itCopy->value[i]->setValue.get() != val.get()))) ||
-					       (itCopy->value[i]->valuePresent && (itCopy->value[i]->value.present() != val.present() || (val.present() && itCopy->value[i]->value.get() != val.get()))) ) {
+						   (itCopy->value[i]->setPresent && (itCopy->value[i]->setValue.present() != val.present() || (val.present() && itCopy->value[i]->setValue.get() != val.get()))) ||
+						   (itCopy->value[i]->valuePresent && (itCopy->value[i]->value.present() != val.present() || (val.present() && itCopy->value[i]->value.get() != val.get()))) ) {
 					itCopy->value[i]->onChangeTrigger.send(Void());
 					if( i < itCopy->value.size() - 1 )
 						std::swap(itCopy->value[i--], itCopy->value.back());
@@ -1423,7 +1423,6 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::Min:
 					case MutationRef::SetVersionstampedKey:
 					case MutationRef::SetVersionstampedValue:
-					case MutationRef::SetVersionstampedValuePos:
 					case MutationRef::ByteMin:
 					case MutationRef::ByteMax:
 					case MutationRef::MinV2:
@@ -1488,6 +1487,26 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	if(operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
 
+	if (tr.apiVersionAtLeast(510)) {
+		if (operationType == MutationRef::Min)
+			operationType = MutationRef::MinV2;
+		else if (operationType == MutationRef::And)
+			operationType = MutationRef::AndV2;
+	}
+
+	KeyRef k;
+	if(!tr.apiVersionAtLeast(520) && operationType == MutationRef::SetVersionstampedKey) {
+		k = key.withSuffix( LiteralStringRef("\x00\x00"), arena );
+	} else {
+		k = KeyRef( arena, key );
+	}
+	ValueRef v;
+	if(!tr.apiVersionAtLeast(520) && operationType == MutationRef::SetVersionstampedValue) {
+		v = operand.withSuffix( LiteralStringRef("\x00\x00\x00\x00"), arena );
+	} else {
+		v = ValueRef( arena, operand );
+	}
+
 	if(operationType == MutationRef::SetVersionstampedKey) {
 		KeyRangeRef range = getVersionstampKeyRange(arena, key, getMaxReadKey()); // this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		if(!options.readYourWritesDisabled) {
@@ -1496,10 +1515,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		}
 	}
 
-	if(operationType == MutationRef::SetVersionstampedValue && operand.size() < 10)
-		throw client_invalid_operation();
-
-	if(operationType == MutationRef::SetVersionstampedValuePos) {
+	if(operationType == MutationRef::SetVersionstampedValue) {
 		if(operand.size() < 4)
 			throw client_invalid_operation();
 		int32_t pos;
@@ -1508,20 +1524,10 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 		if (pos < 0 || pos + 10 > operand.size() - 4)
 			throw client_invalid_operation();
 	}
-		
-	if (tr.apiVersionAtLeast(510)) {
-		if (operationType == MutationRef::Min)
-			operationType = MutationRef::MinV2;
-		else if (operationType == MutationRef::And)
-			operationType = MutationRef::AndV2;
-	}
 
 	if(options.readYourWritesDisabled) {
-		return tr.atomicOp(key, operand, (MutationRef::Type) operationType, addWriteConflict);
+		return tr.atomicOp(k, v, (MutationRef::Type) operationType, addWriteConflict);
 	}
-
-	KeyRef k = KeyRef( arena, key );
-	ValueRef v = ValueRef( arena, operand );
 
 	writes.mutate(k, (MutationRef::Type) operationType, v, addWriteConflict);
 	RYWImpl::triggerWatches(this, key, Optional<ValueRef>(), false);

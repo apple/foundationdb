@@ -308,7 +308,7 @@ struct UnreadableWorkload : TestWorkload {
 			setMap[normalKeys.end] = ValueRef();
 
 			for (; opCount < 500; opCount++) {
-				int r = g_random->randomInt(0, 20);
+				int r = g_random->randomInt(0, 19);
 				if (r <= 10) {
 					key = RandomTestImpl::getRandomKey(arena);
 					value = RandomTestImpl::getRandomValue(arena);
@@ -341,13 +341,6 @@ struct UnreadableWorkload : TestWorkload {
 					//TraceEvent("RYWT_setVersionstampValue").detail("key", printable(key));
 				}
 				else if (r == 15) {
-					key = RandomTestImpl::getRandomKey(arena);
-					value = RandomTestImpl::getRandomVersionstampValuePos(arena);
-					tr.atomicOp(key, value, MutationRef::SetVersionstampedValuePos);
-					unreadableMap.insert(key, true);
-					//TraceEvent("RYWT_setVersionstampValuePos").detail("key", printable(key));
-				}
-				else if (r == 16) {
 					key = RandomTestImpl::getRandomVersionstampKey(arena);
 					value = RandomTestImpl::getRandomValue(arena);
 					tr.atomicOp(key, value, MutationRef::SetVersionstampedKey);
@@ -355,7 +348,7 @@ struct UnreadableWorkload : TestWorkload {
 					unreadableMap.insert(range, true);
 					//TraceEvent("RYWT_setVersionstampKey").detail("range", printable(range));
 				}
-				else if (r == 17) {
+				else if (r == 16) {
 					range = RandomTestImpl::getRandomRange(arena);
 					snapshot = g_random->random01() < 0.05;
 					reverse = g_random->random01() < 0.5;
@@ -385,7 +378,7 @@ struct UnreadableWorkload : TestWorkload {
 						setMap[normalKeys.end] = ValueRef();
 					}
 				}
-				else if (r == 18) {
+				else if (r == 17) {
 					begin = RandomTestImpl::getRandomKeySelector(arena);
 					end = RandomTestImpl::getRandomKeySelector(arena);
 					limit = g_random->randomInt(1, 100);   // maximum number of results to return from the db
@@ -432,7 +425,7 @@ struct UnreadableWorkload : TestWorkload {
 						setMap[normalKeys.end] = ValueRef();
 					}		
 				}
-				else if (r == 19) {
+				else if (r == 18) {
 					key = RandomTestImpl::getRandomKey(arena);
 					snapshot = g_random->random01() < 0.05;
 

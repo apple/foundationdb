@@ -65,7 +65,7 @@ class OperationStack {
 		bool isDependent() const {
 			if( !size() )
 				return false;
-			return singletonOperation.type != MutationRef::SetValue && singletonOperation.type != MutationRef::ClearRange && singletonOperation.type != MutationRef::SetVersionstampedValue && singletonOperation.type != MutationRef::SetVersionstampedValuePos && singletonOperation.type != MutationRef::SetVersionstampedKey;
+			return singletonOperation.type != MutationRef::SetValue && singletonOperation.type != MutationRef::ClearRange && singletonOperation.type != MutationRef::SetVersionstampedValue && singletonOperation.type != MutationRef::SetVersionstampedKey;
 		}
 		const RYWMutation& top() const { return hasVector() ? optionalOperations.get().back() : singletonOperation; }
 		RYWMutation& operator[] (int n) { return (n==0) ? singletonOperation : optionalOperations.get()[n-1]; }
@@ -142,8 +142,8 @@ public:
 		bool following_conflict = it.entry().following_keys_conflict;
 		bool is_conflict = addConflict || it.is_conflict_range();
 		bool following_unreadable = it.entry().following_keys_unreadable;
-		bool is_unreadable = it.is_unreadable() || operation == MutationRef::SetVersionstampedValue || operation == MutationRef::SetVersionstampedValuePos || operation == MutationRef::SetVersionstampedKey;
-		bool is_dependent = operation != MutationRef::SetValue && operation != MutationRef::SetVersionstampedValue && operation!= MutationRef::SetVersionstampedValuePos && operation != MutationRef::SetVersionstampedKey;
+		bool is_unreadable = it.is_unreadable() || operation == MutationRef::SetVersionstampedValue ||  operation == MutationRef::SetVersionstampedKey;
+		bool is_dependent = operation != MutationRef::SetValue && operation != MutationRef::SetVersionstampedValue && operation != MutationRef::SetVersionstampedKey;
 
 		if (it.entry().key != key) {
 			if( it.is_cleared_range() && is_dependent ) {
