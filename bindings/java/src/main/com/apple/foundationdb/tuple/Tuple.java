@@ -643,7 +643,7 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	 * @return the item at {@code index} as a {@link List}
 	 *
 	 * @throws ClassCastException if the element at {@code index} is not a {@code Tuple}
-	 *         or a {@link Tuple}
+	 *         or a {@link List}
 	 */
 	public Tuple getNestedTuple(int index) {
 		Object o = this.elements.get(index);
