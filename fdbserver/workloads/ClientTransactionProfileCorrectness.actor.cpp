@@ -35,7 +35,6 @@ bool checkTxInfoEntryFormat(BinaryReader &reader) {
 		reader >> event;
 		double timeStamp;
 		reader >> timeStamp;
-		ASSERT(timeStamp < now() && timeStamp >(now() - 86400));
 		switch (event)
 		{
 		case FdbClientLogEvents::GET_VERSION_LATENCY:
@@ -152,7 +151,9 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 			}
 			else {
 				if (chunkNum == 1) { // First chunk
-					ASSERT(trInfoChunks.find(trId) == trInfoChunks.end());
+					// Remove any entry if already present. There are scenarios (eg., commit_unknown_result) where a transaction info
+					// may be logged multiple times
+					trInfoChunks.erase(trId);
 					trInfoChunks.insert(std::pair < std::string, std::vector<ValueRef> >(trId, {kv.value}));
 				}
 				else {
@@ -162,7 +163,16 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 						TraceEvent(SevInfo, "ClientTransactionProfilingSomeChunksMissing").detail("trId", trId);
 					}
 					else {
-						trInfoChunks.find(trId)->second.push_back(kv.value);
+						// Check if it is the expected chunk. Otherwise discard the whole transaction entry.
+						// There are scenarios (eg., when deletion is happening) where some chunks get missed.
+						if (chunkNum != trInfoChunks.find(trId)->second.size() + 1) {
+							TraceEvent(SevInfo, "ClientTransactionProfilingChunksMissing").detail("trId", trId);
+							trInfoChunks.erase(trId);
+						}
+						else {
+							trInfoChunks.find(trId)->second.push_back(kv.value);
+						}
+						
 					}
 				}
 				if (chunkNum == numChunks && trInfoChunks.find(trId) != trInfoChunks.end()) {
@@ -177,7 +187,6 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 				}
 			}
 		}
-		ASSERT(trInfoChunks.empty());
 		return true;
 	}
 
