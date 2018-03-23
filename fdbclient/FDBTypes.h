@@ -33,7 +33,7 @@ typedef StringRef KeyRef;
 typedef StringRef ValueRef;
 typedef int64_t Generation;
 
-enum { tagLocalitySpecial = -100, tagLocalityLogRouter = -1, tagLocalityRemoteLog = -2, tagLocalityUpgraded = -3};
+enum { tagLocalitySpecial = -1, tagLocalityLogRouter = -2, tagLocalityRemoteLog = -3, tagLocalityUpgraded = -4}; //The TLog and LogRouter require these number to be as compact as possible
 
 #pragma pack(push, 1)
 struct Tag {
@@ -65,6 +65,14 @@ static const Tag invalidTag {tagLocalitySpecial, 0};
 static const Tag txsTag {tagLocalitySpecial, 1};
 
 enum { txsTagOld = -1, invalidTagOld = -100 };
+
+struct TagsAndMessage {
+	StringRef message;
+	std::vector<Tag> tags;
+
+	TagsAndMessage() {}
+	TagsAndMessage(StringRef message, const std::vector<Tag>& tags) : message(message), tags(tags) {}
+};
 
 struct KeyRangeRef;
 struct KeyValueRef;

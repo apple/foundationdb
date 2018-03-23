@@ -878,7 +878,7 @@ TraceEvent::~TraceEvent() {
 	try {
 		if (enabled) {
 			// TRACE_EVENT_THROTTLER
-			if (severity > SevDebug && isNetworkThread()) {
+			if (!g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
 				if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t *)type, strlen(type)))) {
 					TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
 					// Throttle Msg

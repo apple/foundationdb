@@ -1070,9 +1070,10 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 		}
 
-		if((!configuration.regions.size() && missingStorage.size()) ||
-			(configuration.regions.size() && configuration.remoteTLogReplicationFactor == 0 && missingStorage.count(configuration.regions[0].dcId) && missingStorage.count(configuration.regions[1].dcId)) ||
-			(configuration.regions.size() && configuration.remoteTLogReplicationFactor > 0 && (missingStorage.count(configuration.regions[0].dcId) || missingStorage.count(configuration.regions[1].dcId)))) {
+		if(( configuration.regions.size() == 0 && missingStorage.size()) ||
+			(configuration.regions.size() == 1 && missingStorage.count(configuration.regions[0].dcId)) ||
+			(configuration.regions.size() == 2 && configuration.remoteTLogReplicationFactor == 0 && missingStorage.count(configuration.regions[0].dcId) && missingStorage.count(configuration.regions[1].dcId)) ||
+			(configuration.regions.size() == 2 && configuration.remoteTLogReplicationFactor > 0 && (missingStorage.count(configuration.regions[0].dcId) || missingStorage.count(configuration.regions[1].dcId)))) {
 			self->testFailure("No storage server on worker");
 			return false;
 		}

@@ -152,30 +152,35 @@ struct ILogSystem {
 
 		virtual void setProtocolVersion( uint64_t version ) = 0;
 
-		//if hasMessage() returns true, getMessage() or reader() can be called.
+		//if hasMessage() returns true, getMessage(), getMessageWithTags(), or reader() can be called.
 		//does not modify the cursor
 		virtual bool hasMessage() = 0;
 
 		//pre: only callable if hasMessage() returns true
 		//return the tags associated with the message for teh current sequence
-		virtual std::vector<Tag> getTags() = 0;
+		virtual const std::vector<Tag>& getTags() = 0;
 
 		//pre: only callable if hasMessage() returns true
-		//returns the arena containing the contents of getMessage() and reader()
+		//returns the arena containing the contents of getMessage(), getMessageWithTags(), and reader()
 		virtual Arena& arena() = 0;
 
 		//pre: only callable if hasMessage() returns true
 		//returns an arena reader for the next message
-		//caller cannot call both getMessage() and reader()
+		//caller cannot call getMessage(), getMessageWithTags(), and reader()
 		//the caller must advance the reader before calling nextMessage()
 		virtual ArenaReader* reader() = 0;
 
 		//pre: only callable if hasMessage() returns true
-		//caller cannot call both getMessage() and reader()
+		//caller cannot call getMessage(), getMessageWithTags(), and reader()
 		//return the contents of the message for the current sequence
 		virtual StringRef getMessage() = 0;
 
-		//pre: only callable after getMessage() or reader()
+		//pre: only callable if hasMessage() returns true
+		//caller cannot call getMessage(), getMessageWithTags(), and reader()
+		//return the contents of the message for the current sequence
+		virtual StringRef getMessageWithTags() = 0;
+
+		//pre: only callable after getMessage(), getMessageWithTags(), or reader()
 		//post: hasMessage() and version() have been updated
 		//hasMessage() will never return false "in the middle" of a version (that is, if it does return false, version().subsequence will be zero)  < FIXME: Can we lose this property?
 		virtual void nextMessage() = 0;
@@ -223,7 +228,7 @@ struct ILogSystem {
 		ArenaReader rd;
 		LogMessageVersion messageVersion, end;
 		Version poppedVersion;
-		int32_t messageLength;
+		int32_t messageLength, rawLength;
 		std::vector<Tag> tags;
 		bool hasMsg;
 		Future<Void> more;
@@ -237,7 +242,7 @@ struct ILogSystem {
 
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
 
-		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, bool hasMsg, Version poppedVersion, Tag tag );
+		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
 
@@ -253,7 +258,9 @@ struct ILogSystem {
 
 		virtual StringRef getMessage();
 
-		virtual std::vector<Tag> getTags();
+		virtual StringRef getMessageWithTags();
+
+		virtual const std::vector<Tag>& getTags();
 
 		virtual void advanceTo(LogMessageVersion n);
 
@@ -316,7 +323,9 @@ struct ILogSystem {
 
 		virtual StringRef getMessage();
 
-		virtual std::vector<Tag> getTags();
+		virtual StringRef getMessageWithTags();
+
+		virtual const std::vector<Tag>& getTags();
 
 		virtual void advanceTo(LogMessageVersion n);
 
@@ -374,7 +383,9 @@ struct ILogSystem {
 
 		virtual StringRef getMessage();
 
-		virtual std::vector<Tag> getTags();
+		virtual StringRef getMessageWithTags();
+
+		virtual const std::vector<Tag>& getTags();
 
 		virtual void advanceTo(LogMessageVersion n);
 
@@ -420,7 +431,9 @@ struct ILogSystem {
 
 		virtual StringRef getMessage();
 
-		virtual std::vector<Tag> getTags();
+		virtual StringRef getMessageWithTags();
+
+		virtual const std::vector<Tag>& getTags();
 
 		virtual void advanceTo(LogMessageVersion n);
 
@@ -556,15 +569,12 @@ struct LogPushData : NonCopyable {
 	// Log subsequences have to start at 1 (the MergedPeekCursor relies on this to make sure we never have !hasMessage() in the middle of data for a version
 
 	explicit LogPushData(Reference<ILogSystem> logSystem) : logSystem(logSystem), subsequence(1) {
-		int totalSize = 0;
 		for(auto& log : logSystem->getLogSystemConfig().tLogs) {
 			if(log.isLocal) {
-				totalSize += log.tLogs.size();
+				for(int i = 0; i < log.tLogs.size(); i++) {
+					messagesWriter.push_back( BinaryWriter( AssumeVersion(currentProtocolVersion) ) );
+				}
 			}
-		}
-		tags.resize( totalSize );
-		for(int i = 0; i < tags.size(); i++) {
-			messagesWriter.push_back( BinaryWriter( AssumeVersion(currentProtocolVersion) ) );
 		}
 	}
 
@@ -588,9 +598,6 @@ struct LogPushData : NonCopyable {
 		}
 		uint32_t subseq = this->subsequence++;
 		for(int loc : msg_locations) {
-			for(auto& tag : prev_tags)
-				addTagToLoc( tag, loc );
-
 			messagesWriter[loc] << uint32_t(rawMessageWithoutLength.size() + sizeof(subseq) + sizeof(uint16_t) + sizeof(Tag)*prev_tags.size()) << subseq << uint16_t(prev_tags.size());
 			for(auto& tag : prev_tags)
 				messagesWriter[loc] << tag;
@@ -612,9 +619,6 @@ struct LogPushData : NonCopyable {
 		
 		uint32_t subseq = this->subsequence++;
 		for(int loc : msg_locations) {
-			for(auto& tag : prev_tags)
-				addTagToLoc( tag, loc );
-
 			// FIXME: memcpy after the first time
 			BinaryWriter& wr = messagesWriter[loc];
 			int offset = wr.getLength();
@@ -631,28 +635,12 @@ struct LogPushData : NonCopyable {
 	StringRef getMessages(int loc) {
 		return StringRef( arena, messagesWriter[loc].toStringRef() );  // FIXME: Unnecessary copy!
 	}
-	VectorRef<TagMessagesRef> getTags(int loc) {
-		VectorRef<TagMessagesRef> r;
-		for(auto& t : tags[loc])
-			r.push_back( arena, t.value );
-		return r;
-	}
 
 private:
-	void addTagToLoc( Tag tag, int loc ) {
-		auto it = tags[loc].find(tag);
-		if (it == tags[loc].end()) {
-			it = tags[loc].insert(mapPair( tag, TagMessagesRef() ));
-			it->value.tag = it->key;
-		}
-		it->value.messageOffsets.push_back( arena, messagesWriter[loc].getLength() );
-	}
-
 	Reference<ILogSystem> logSystem;
 	Arena arena;
 	vector<Tag> next_message_tags;
 	vector<Tag> prev_tags;
-	vector<Map<Tag, TagMessagesRef>> tags;
 	vector<BinaryWriter> messagesWriter;
 	vector<int> msg_locations;
 	uint32_t subsequence;

@@ -346,7 +346,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for(int loc=0; loc< it->logServers.size(); loc++) {
 					Future<Void> commitMessage = reportTLogCommitErrors(
 							it->logServers[loc]->get().interf().commit.getReply(
-								TLogCommitRequest( data.getArena(), prevVersion, version, knownCommittedVersion, data.getMessages(location), data.getTags(location), debugID ), TaskTLogCommitReply ),
+								TLogCommitRequest( data.getArena(), prevVersion, version, knownCommittedVersion, data.getMessages(location), debugID ), TaskTLogCommitReply ),
 							getDebugID());
 					actors.add(commitMessage);
 					tLogCommitResults.push_back(commitMessage);
@@ -969,7 +969,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->tLogs = logServers;
 				logSystem->oldLogData = oldLogData;
 				logSystem->logSystemType = prevState.logSystemType;
-				logSystem->rejoins = rejoins;
+				logSystem->rejoins = holdWhile( tLogReply, rejoins );
 				logSystem->epochEndVersion = end.get();
 				logSystem->knownCommittedVersion = knownCommittedVersion;
 

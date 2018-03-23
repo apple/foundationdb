@@ -761,6 +761,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		StatusObject remoteObj;
 		remoteObj["id"] = "1";
 		remoteObj["priority"] = 0;
+
+		bool needsRemote = generateFearless;
 		if(generateFearless) {
 			StatusObject primarySatelliteObj;
 			primarySatelliteObj["id"] = "2";
@@ -776,9 +778,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			remoteSatellitesArr.push_back(remoteSatelliteObj);
 			remoteObj["satellites"] = remoteSatellitesArr;
 
-			int satellite_replication_type = 2;//FIXME: g_random->randomInt(0,5);
+			int satellite_replication_type = g_random->randomInt(0,5);
 			switch (satellite_replication_type) {
 			case 0: {
+				//FIXME: implement
 				TEST( true );  // Simulated cluster using custom satellite redundancy mode
 				break;
 			}
@@ -814,13 +817,15 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				remoteObj["satellite_logs"] = logs;
 			}
 			
-			int remote_replication_type = 2;//FIXME: g_random->randomInt(0,5);
+			int remote_replication_type = g_random->randomInt(0,5);
 			switch (remote_replication_type) {
 			case 0: {
+				//FIXME: implement
 				TEST( true );  // Simulated cluster using custom remote redundancy mode
 				break;
 			}
 			case 1: {
+				needsRemote = false;
 				TEST( true );  // Simulated cluster using no remote redundancy mode
 				break;
 			}
@@ -849,7 +854,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 
 		StatusArray regionArr;
 		regionArr.push_back(primaryObj);
-		regionArr.push_back(remoteObj);
+		if(needsRemote || g_random->random01() < 0.5) {
+			regionArr.push_back(remoteObj);
+		}
 
 		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 	}
@@ -919,6 +926,15 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		}
 		for(auto s : simconfig.db.regions[1].satellites) {
 			g_simulator.remoteSatelliteDcIds.push_back(s.dcId);
+		}
+	} else if(simconfig.db.regions.size() == 1) {
+		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
+		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
+		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
+		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
+
+		for(auto s : simconfig.db.regions[0].satellites) {
+			g_simulator.primarySatelliteDcIds.push_back(s.dcId);
 		}
 	} else {
 		g_simulator.hasSatelliteReplication = false;

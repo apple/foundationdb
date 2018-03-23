@@ -554,7 +554,9 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 	self->remoteDcIds.clear();
 	if(recruits.dcId.present()) {
 		self->primaryDcId.push_back(recruits.dcId);
-		self->remoteDcIds.push_back(recruits.dcId.get() == self->configuration.regions[0].dcId ? self->configuration.regions[1].dcId : self->configuration.regions[0].dcId);
+		if(self->configuration.regions.size() > 1) {
+			self->remoteDcIds.push_back(recruits.dcId.get() == self->configuration.regions[0].dcId ? self->configuration.regions[1].dcId : self->configuration.regions[0].dcId);
+		}
 	}
 	
 	TraceEvent("MasterRecoveryState", self->dbgid)

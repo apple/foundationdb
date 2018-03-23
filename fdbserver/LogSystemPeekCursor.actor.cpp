@@ -29,8 +29,8 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInter
 	//TraceEvent("SPC_starting", randomID).detail("tag", tag.toString()).detail("begin", begin).detail("end", end).backtrace();
 }
 
-ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, bool hasMsg, Version poppedVersion, Tag tag )
-			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageLength(messageLength), hasMsg(hasMsg), randomID(g_random->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), parallelGetMore(false)
+ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag )
+			: results(results), tag(tag), rd(results.arena, results.messages, Unversioned()), messageVersion(messageVersion), end(end), messageLength(messageLength), rawLength(rawLength), hasMsg(hasMsg), randomID(g_random->randomUniqueID()), poppedVersion(poppedVersion), returnIfBlocked(false), sequence(0), parallelGetMore(false)
 {
 	//TraceEvent("SPC_clone", randomID);
 	this->results.maxKnownVersion = 0;
@@ -41,7 +41,7 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, Lo
 }
 
 Reference<ILogSystem::IPeekCursor> ILogSystem::ServerPeekCursor::cloneNoMore() {
-	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageLength, hasMsg, poppedVersion, tag ) );
+	return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( results, messageVersion, end, messageLength, rawLength, hasMsg, poppedVersion, tag ) );
 }
 
 void ILogSystem::ServerPeekCursor::setProtocolVersion( uint64_t version ) {
@@ -87,12 +87,14 @@ void ILogSystem::ServerPeekCursor::nextMessage() {
 	}
 
 	uint16_t tagCount;
+	rd.checkpoint();
 	rd >> messageLength >> messageVersion.sub >> tagCount;
 	tags.resize(tagCount);
 	for(int i = 0; i < tagCount; i++) {
 		rd >> tags[i];
 	}
-	messageLength -= (sizeof(messageVersion.sub) + sizeof(tagCount) +tagCount*sizeof(Tag));
+	rawLength = messageLength + sizeof(messageLength);
+	messageLength -= (sizeof(messageVersion.sub) + sizeof(tagCount) + tagCount*sizeof(Tag));
 	hasMsg = true;
 	//TraceEvent("SPC_nextMessageB", randomID).detail("messageVersion", messageVersion.toString());
 }
@@ -102,7 +104,12 @@ StringRef ILogSystem::ServerPeekCursor::getMessage() {
 	return StringRef( (uint8_t const*)rd.readBytes(messageLength), messageLength);
 }
 
-std::vector<Tag> ILogSystem::ServerPeekCursor::getTags() {
+StringRef ILogSystem::ServerPeekCursor::getMessageWithTags() {
+	rd.rewind();
+	return StringRef( (uint8_t const*)rd.readBytes(rawLength), rawLength);
+}
+
+const std::vector<Tag>& ILogSystem::ServerPeekCursor::getTags() {
 	return tags;
 }
 
@@ -358,7 +365,10 @@ void ILogSystem::MergedPeekCursor::nextMessage() {
 
 StringRef ILogSystem::MergedPeekCursor::getMessage() { return serverCursors[currentCursor]->getMessage(); }
 
-std::vector<Tag> ILogSystem::MergedPeekCursor::getTags() {
+StringRef ILogSystem::MergedPeekCursor::getMessageWithTags() { return serverCursors[currentCursor]->getMessageWithTags(); }
+
+
+const std::vector<Tag>& ILogSystem::MergedPeekCursor::getTags() {
 	return serverCursors[currentCursor]->getTags();
 }
 
@@ -590,7 +600,9 @@ void ILogSystem::SetPeekCursor::nextMessage() {
 
 StringRef ILogSystem::SetPeekCursor::getMessage() { return serverCursors[currentSet][currentCursor]->getMessage(); }
 
-std::vector<Tag> ILogSystem::SetPeekCursor::getTags() {
+StringRef ILogSystem::SetPeekCursor::getMessageWithTags() { return serverCursors[currentSet][currentCursor]->getMessageWithTags(); }
+
+const std::vector<Tag>& ILogSystem::SetPeekCursor::getTags() {
 	return serverCursors[currentSet][currentCursor]->getTags();
 }
 
@@ -735,7 +747,11 @@ StringRef ILogSystem::MultiCursor::getMessage() {
 	return cursors.back()->getMessage();
 }
 
-std::vector<Tag> ILogSystem::MultiCursor::getTags() {
+StringRef ILogSystem::MultiCursor::getMessageWithTags() {
+	return cursors.back()->getMessageWithTags();
+}
+
+const std::vector<Tag>& ILogSystem::MultiCursor::getTags() {
 	return cursors.back()->getTags();
 }
 
