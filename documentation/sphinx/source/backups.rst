@@ -34,9 +34,9 @@ There are 6 command line tools for working with backups:
     This tool allows listing, deleting, and getting information on backups that are located in a blob store instance (which have Backup URLs starting with blobstore://).
 
 ``fdbdr``
-    This command line tool is used to control the process of backing up to another FoundationDB cluster. It can ``start``, ``switch``, or ``abort`` a backup. It can also get the ``status`` of an ongoing backup. It controls ``db_agent`` processes using the database and never does any work itself.
+    This command line tool is used to control the process of backing up to another FoundationDB cluster. It can ``start``, ``switch``, or ``abort`` a backup. It can also get the ``status`` of an ongoing backup. It controls ``dr_agent`` processes using the database and never does any work itself.
 
-``db_agent``
+``dr_agent``
     The database backup agent does the actual work of a the backup: reading data (and logs) from the source database and writing it to the destination database.  Any number of agents pointed at the same database will cooperate to perform the backup.
 
 By default, the FoundationDB packages are configured to start a single ``backup_agent`` process on each FoundationDB server. If you want to perform a backup to a network drive or blob store instance that is accessible to every server, you can immediately use the ``fdbbackup start`` command from any machine with access to your cluster to start the backup::
