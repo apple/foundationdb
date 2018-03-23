@@ -682,7 +682,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	bool generateFearless = true; //FIXME g_random->random01() < 0.5;
+	bool generateFearless = false; //FIXME g_random->random01() < 0.5;
 	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
