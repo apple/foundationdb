@@ -21,14 +21,24 @@
 # FoundationDB Ruby API
 
 # Documentation for this API can be found at
-# https://foundationdb.org/documentation/api-ruby.html
+# https://www.foundationdb.org/documentation/api-ruby.html
 
 module FDB
   @@chosen_version = -1
+  def self.is_api_version_selected?()
+    @@chosen_version >= 0
+  end
+  def self.get_api_version()
+    if self.is_api_version_selected?()
+      return @@chosen_version
+    else
+      raise "FDB API version not selected"
+    end
+  end
   def self.api_version(version)
     header_version = 520
-    if @@chosen_version >= 0
-      if@@chosen_version != version
+    if self.is_api_version_selected?()
+      if @@chosen_version != version
         raise "FDB API already loaded at version #{@@chosen_version}."
       end
       return

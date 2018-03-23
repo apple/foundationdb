@@ -94,8 +94,8 @@ int64_t getQueueSize( Standalone<StringRef> md ) {
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;
 
-	sscanf(extractAttribute(md.toString(), "bytesInput").c_str(), "%f %f %lld", &inputRate, &inputRoughness, &inputBytes);
-	sscanf(extractAttribute(md.toString(), "bytesDurable").c_str(), "%f %f %lld", &durableRate, &durableRoughness, &durableBytes);
+	sscanf(extractAttribute(md.toString(), "bytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
+	sscanf(extractAttribute(md.toString(), "bytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
 
 	return inputBytes - durableBytes;
 }

@@ -31,7 +31,7 @@
  *  used for the corresponding subspace. In effect, directories provide
  *  a level of indirection for access to subspaces.<br>
  *  <br>
- *  See <a href="/foundationdb/developer-guide.html#developer-guide-directories">general
+ *  See <a href="/developer-guide.html#developer-guide-directories">general
  *   directory documentation</a> for information about how directories work and
  *   interact with other parts of the built-in keyspace management features.
  */

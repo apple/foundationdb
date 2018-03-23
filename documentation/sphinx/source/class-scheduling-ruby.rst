@@ -19,27 +19,27 @@ Open a Ruby interactive interpreter and import the FoundationDB API module::
 
     $ irb
     > require 'fdb'
-    => true 
+    => true
 
 Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions::
 
     > FDB.api_version 510
-    => nil 
+    => nil
 
 Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the :ref:`default cluster file <default-cluster-file>`. ::
 
     > @db = FDB.open
-    => #<FDB::Database:0x007fc2309751e0 @dpointer=#<FFI::Pointer address=0x007fc231c139c0>, @options=#<FDB::DatabaseOptions:0x007fc230975168 @setfunc=#<Proc:0x007fc230975190@/Users/stephenpimentel/.rvm/gems/ruby-2.0.0-p247/gems/fdb-1.0.0/lib/fdbimpl.rb:510 (lambda)>>>
+    => #<FDB::Database:0x007fc2309751e0 @dpointer=#<FFI::Pointer address=0x007fc231c139c0>, @options=#<FDB::DatabaseOptions:0x007fc230975168 @setfunc=#<Proc:0x007fc230975190@/Users/someone/.rvm/gems/ruby-2.0.0-p247/gems/fdb-1.0.0/lib/fdbimpl.rb:510 (lambda)>>>
 
 We are ready to use the database. In Ruby, using the ``[]`` operator on the database object is a convenient syntax for performing a read or write on the database. First, let's simply write a key-value pair::
 
     > @db['hello'] = 'world'
-    => "world" 
+    => "world"
 
 When this command returns without exception, the modification is durably stored in FoundationDB! Under the covers, this function creates a transaction with a single modification. We'll see later how to do multiple operations in a single transaction. For now, let's read back the data::
 
     >>> print 'hello ', @db['hello']
-    hello world => nil 
+    hello world => nil
 
 If this is all working, it looks like we are ready to start building a real application. For reference, here's the full code for "hello world":
 
@@ -60,7 +60,7 @@ Requirements
 ------------
 
 We'll need to let users list available classes and track which students have signed up for which classes. Here's a first cut at the functions we'll need to implement::
-            
+
     available_classes()      # returns list of classes
     signup(studentID, class) # signs up a student for a class
     drop(studentID, class)   # drops a student from a class
@@ -71,13 +71,13 @@ Data model
 ----------
 
 First, we need to design a :doc:`data model <data-modeling>`. A data model is just a method for storing our application data using keys and values in FoundationDB. We seem to have two main types of data: (1) a list of classes and (2) a record of which students will attend which classes. Let's keep attending data like this::
-            
+
     # ['attends', student, class] = ''
 
 We'll just store the key with a blank value to indicate that a student is signed up for a particular class. For this application, we're going to think about a key-value pair's key as a :ref:`tuple <data-modeling-tuples>`. Encoding a tuple of data elements into a key is a very common pattern for an ordered key-value store.
 
 We'll keep data about classes like this::
-            
+
     # ['class', class_name] = seats_available
 
 Similarly, each such key will represent an available class. We'll use ``seats_available`` to record the number of seats available.
@@ -131,7 +131,7 @@ Let's make some sample classes and put them in the ``@class_names`` variable. We
 .. code-block:: ruby
 
     # Generate 1,620 classes like '9:00 chem for dummies'
-    levels = ['intro', 'for dummies', 'remedial', '101', 
+    levels = ['intro', 'for dummies', 'remedial', '101',
               '201', '301', 'mastery', 'lab', 'seminar']
     types = ['chem', 'bio', 'cs', 'geometry', 'calc',
              'alg', 'film', 'music', 'art', 'dance']
@@ -144,7 +144,7 @@ Initializing the database
 We initialize the database with our class list:
 
 .. code-block:: ruby
-            
+
     def init(db_or_tr)
         db_or_tr.transact do |tr|
             tr.clear_range_start_with(FDB::Tuple.pack(['attends']))
@@ -179,7 +179,7 @@ Signing up for a class
 We finally get to the crucial function. A student has decided on a class (by name) and wants to sign up. The ``signup`` function will take a student (``s``) and a class (``c``):
 
 .. code-block:: ruby
-            
+
     def signup(db_or_tr, s, c)
         db_or_tr.transact do |tr|
             rec = FDB::Tuple.pack(['attends', s, c])
@@ -208,7 +208,7 @@ Of course, to actually drop the student from the class, we need to be able to de
 Done?
 -----
 
-We report back to the project leader that our application is done---students can sign up for, drop, and list classes. Unfortunately, we learn that there has been a bit of scope creep in the mean time. Popular classes are getting over-subscribed, and our application is going to need to enforce the class size constraint as students add and drop classes.
+We report back to the project leader that our application is done---students can sign up for, drop, and list classes. Unfortunately, we learn that a new problem has been discovered: popular classes are being over-subscribed. Our application now needs to enforce the class size constraint as students add and drop classes.
 
 Seats are limited!
 ------------------
@@ -237,7 +237,7 @@ This is easy -- we simply add a condition to check that the value is non-zero. L
             end
 
             seats_left = tr[FDB::Tuple.pack(['class', c])].to_i
-            if seats_left == 0 
+            if seats_left == 0
                 raise 'No remaining seats'
             end
 
@@ -301,13 +301,13 @@ Of course, as soon as our new version of the system goes live, we hear of a tric
             end
 
             seats_left = tr[FDB::Tuple.pack(['class', c])].to_i
-            if seats_left == 0 
+            if seats_left == 0
                 raise 'No remaining seats'
             end
 
             r = FDB::Tuple.range(['attends', s])
             classes = tr.get_range(r[0], r[1])
-            if classes.count == 5 
+            if classes.count == 5
                 raise 'Too many classes'
             end
 
@@ -321,7 +321,7 @@ Fortunately, we decided on a data model that keeps all of the attending records 
 Composing transactions
 ----------------------
 
-Oh, just one last feature, we're told. We have students that are trying to switch from one popular class to another. By the time they drop one class to free up a slot for themselves, the open slot in the other class is gone. By the time they see this and try to re-add their old class, that slot is gone too! So, can we make it so that a student can switch from one class to another without this worry? 
+Oh, just one last feature, we're told. We have students that are trying to switch from one popular class to another. By the time they drop one class to free up a slot for themselves, the open slot in the other class is gone. By the time they see this and try to re-add their old class, that slot is gone too! So, can we make it so that a student can switch from one class to another without this worry?
 
 Fortunately, we have FoundationDB, and this sounds an awful lot like the transactional property of atomicity---the all-or-nothing behavior that we already rely on. All we need to do is to *compose* the ``drop`` and ``signup`` functions into a new ``switch`` function. This makes the ``switch`` function exceptionally easy:
 
@@ -343,7 +343,7 @@ Also note that, if an exception is raised, for example, in ``signup``, the excep
 Are we done?
 ------------
 
-Yep, we're done. Fortunately, our UI team built an awesome UI while we were working on our back end, and we are ready to deploy. If you want to see this entire application in one place plus some multithreaded testing code to simulate concurrency, look at the :ref:`class-sched-ruby-appendix`, below.
+Yep, we’re done and ready to deploy. If you want to see this entire application in one place plus some multithreaded testing code to simulate concurrency, look at the :ref:`class-sched-ruby-appendix`, below.
 
 Deploying and scaling
 ---------------------
@@ -355,7 +355,7 @@ Next steps
 
 * See :doc:`data-modeling` for guidance on using tuple and subspaces to enable effective storage and retrieval of data.
 * See :doc:`developer-guide` for general guidance on development using FoundationDB.
-* See the :doc:`API References <api-reference>` for detailed API documentation. 
+* See the :doc:`API References <api-reference>` for detailed API documentation.
 
 .. _class-sched-ruby-appendix:
 
@@ -387,7 +387,7 @@ Here's the code for the scheduling tutorial:
     end
 
     # Generate 1,620 classes like '9:00 chem for dummies'
-    levels = ['intro', 'for dummies', 'remedial', '101', 
+    levels = ['intro', 'for dummies', 'remedial', '101',
               '201', '301', 'mastery', 'lab', 'seminar']
     types = ['chem', 'bio', 'cs', 'geometry', 'calc',
              'alg', 'film', 'music', 'art', 'dance']
@@ -420,13 +420,13 @@ Here's the code for the scheduling tutorial:
             end
 
             seats_left = tr[FDB::Tuple.pack(['class', c])].to_i
-            if seats_left == 0 
+            if seats_left == 0
                 raise 'No remaining seats'
             end
 
             r = FDB::Tuple.range(['attends', s])
             classes = tr.get_range(r[0], r[1])
-            if classes.count == 5 
+            if classes.count == 5
                 raise 'Too many classes'
             end
 

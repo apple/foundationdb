@@ -29,7 +29,7 @@
 // As a best practice, API clients should use at least one subspace for
 // application data. For general guidance on subspace usage, see the Subspaces
 // section of the Developer Guide
-// (https://foundationdb.org/documentation/developer-guide.html#developer-guide-sub-keyspaces).
+// (https://www.foundationdb.org/documentation/developer-guide.html#developer-guide-sub-keyspaces).
 package subspace
 
 import (

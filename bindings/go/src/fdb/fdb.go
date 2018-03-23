@@ -152,6 +152,25 @@ func APIVersion(version int) error {
 	return nil
 }
 
+// Determines if an API version has already been selected, i.e., if
+// APIVersion or MustAPIVersion have already been called.
+func IsAPIVersionSelected() bool {
+	return apiVersion != 0
+}
+
+// Returns the API version that has been selected through APIVersion
+// or MustAPIVersion. If the version has already been selected, then
+// the first value returned is the API version and the error is
+// nil. If the API version has not yet been set, then the error
+// will be non-nil.
+func GetAPIVersion() (int, error) {
+	if IsAPIVersionSelected() {
+		return apiVersion, nil
+	} else {
+		return 0, errAPIVersionUnset
+	}
+}
+
 // MustAPIVersion is like APIVersion but panics if the API version is not
 // supported.
 func MustAPIVersion(version int) {
@@ -159,6 +178,16 @@ func MustAPIVersion(version int) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+// MustGetAPIVersion is like GetAPIVersion but panics if the API version
+// has not yet been set.
+func MustGetAPIVersion() int {
+	apiVersion, err := GetAPIVersion()
+	if err != nil {
+		panic(err)
+	}
+	return apiVersion
 }
 
 var apiVersion int

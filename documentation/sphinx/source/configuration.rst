@@ -10,7 +10,7 @@ This document contains *reference* information for configuring a new FoundationD
 
 .. note:: In FoundationDB, a "cluster" refers to one or more FoundationDB processes spread across one or more physical machines that together host a FoundationDB database.
 
-To plan an externally accessible cluster, you need to understand some basic aspects of the system. You can start by reviewing the :ref:`system requirements <system-requirements>`, then how to :ref:`choose <configuration-choosing-coordination-servers>` and :ref:`change coordination servers <configuration-changing-coordination-servers>`. Next, you should look at the :ref:`configuration file <foundationdb-conf>`, which controls most other aspects of the system. Then, you should understand how to :ref:`choose a redundancy mode <configuration-choosing-redundancy-mode>` and :ref:`configure the storage subsystem <configuration-configuring-storage-subsystem>`. Finally, there are some configurations you can adjust to improve performance if your :ref:`cluster is large <configuration-large-cluster-performance>`.
+To plan an externally accessible cluster, you need to understand some basic aspects of the system. You can start by reviewing the :ref:`system requirements <system-requirements>`, then how to :ref:`choose <configuration-choosing-coordination-servers>` and :ref:`change coordination servers <configuration-changing-coordination-servers>`. Next, you should look at the :ref:`configuration file <foundationdb-conf>`, which controls most other aspects of the system. Then, you should understand how to :ref:`choose a redundancy mode <configuration-choosing-redundancy-mode>` and :ref:`configure the storage subsystem <configuration-configuring-storage-subsystem>`. Finally, there are some guidelines for setting :ref:`process class configurations <guidelines-process-class-config>`.
 
 .. _system-requirements:
 
@@ -98,12 +98,13 @@ After running this command, you can check that it completed successfully by usin
       Machines               - 3
       Memory availability    - 4.1 GB per process on machine with least available
       Fault Tolerance        - 0 machines
-      Server time            - Wed Oct  8 14:41:34 2014
+      Server time            - Thu Mar 15 14:41:34 2018
 
     Data:
       Replication health     - Healthy
       Moving data            - 0.000 GB
-      Sum of key-value sizes - 0 MB
+      Sum of key-value sizes - 8 MB
+      Disk space used        - 103 MB
 
     Operating space:
       Storage server         - 1.0 GB free on most full server
@@ -116,6 +117,10 @@ After running this command, you can check that it completed successfully by usin
       Transactions committed - 0 Hz
       Conflict rate          - 0 Hz
 
+    Backup and DR:
+      Running backups        - 0
+      Running DRs            - 0
+
     Process performance details:
       10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; 2.5 GB / 4.1 GB RAM  )
       10.0.4.2:4500       ( 1% cpu;  2% machine; 0.004 Gbps;  0% disk; 2.5 GB / 4.1 GB RAM  )
@@ -126,7 +131,7 @@ After running this command, you can check that it completed successfully by usin
       10.0.4.2:4500
       10.0.4.3:4500
 
-    Client time: Thu Nov 20 09:50:45 2014
+    Client time: Thu Mar 15 14:41:34 2018
     
 The list of coordinators verifies that the coordinator change succeeded. A few things might cause this process to not go smoothly:
 
@@ -229,15 +234,19 @@ Contains settings applicable to all processes (e.g. fdbserver, backup_agent). Th
     logdir = /var/log/foundationdb
     # logsize = 10MiB
     # maxlogssize = 100MiB
-    # machine_id = 
-    # datacenter_id = 
     # class = 
     # memory = 8GiB
     # storage_memory = 1GiB
+    # locality_machineid = 
+    # locality_zoneid = 
+    # locality_data_hall = 
+    # locality_dcid = 
+    # io_trust_seconds = 20
 
 Contains default parameters for all fdbserver processes on this machine. These same options can be overridden for individual processes in their respective ``[fdbserver.<ID>]`` sections. In this section, the ID of the individual fdbserver can be substituted by using the ``$ID`` variable in the value. For example, ``public_address = auto:$ID`` makes each fdbserver listen on a port equal to its ID.
 
 .. note:: |multiplicative-suffixes|
+.. note:: In general locality id's are used to specify the location of processes which in turn is used to determine fault and replication domains.
 
 * ``command``: The location of the ``fdbserver`` binary.
 * ``public_address``: The publicly visible IP:Port of the process. If ``auto``, the address will be the one used to communicate with the coordination servers.
@@ -246,11 +255,14 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``logdir``: A writable directory (by root or by the user set in the [fdbmonitor] section) where FoundationDB will store log files.
 * ``logsize``: Roll over to a new log file after the current log file reaches the specified size. The default value is 10MiB.
 * ``maxlogssize``: Delete the oldest log file when the total size of all log files exceeds the specified size. If set to 0B, old log files will not be deleted. The default value is 100MiB.
-* ``machine_id``: Machine identifier key. Processes that share a key are considered non-unique for the purposes of data replication. By default, processes on a machine determine a unique key to share. This does not generally need to be set. The ID can be up to 16 hexadecimal digits.
-* ``datacenter_id``: Data center identifier key. All processes physically located in a data center should share the id. If unset, defaults to a special "default" data center. If you are depending on data center based replication this must be set on all processes. The ID can be up to 16 hexadecimal digits.
-* ``class``: Machine class specifying the roles that will be taken in the cluster. Valid options are ``storage``, ``transaction``, ``resolution``. See :ref:`configuration-large-cluster-performance` for machine class recommendations in large clusters.
+* ``class``: Process class specifying the roles that will be taken in the cluster. Recommended options are ``storage``, ``transaction``, ``stateless``. See :ref:`guidelines-process-class-config` for process class config recommendations.
 * ``memory``: Maximum memory used by the process. The default value is 8GiB. When specified without a unit, MiB is assumed. This parameter does not change the memory allocation of the program. Rather, it sets a hard limit beyond which the process will kill itself and be restarted. The default value of 8GiB is double the intended memory usage in the default configuration (providing an emergency buffer to deal with memory leaks or similar problems). It is *not* recommended to decrease the value of this parameter below its default value. It may be *increased* if you wish to allocate a very large amount of storage engine memory or cache. In particular, when the ``storage_memory`` parameter is increased, the ``memory`` parameter should be increased by an equal amount.
 * ``storage_memory``: Maximum memory used for data storage. This paramenter is used *only* with memory storage engine, not the ssd storage engine. The default value is 1GiB. When specified without a unit, MB is assumed. Clusters will be restricted to using this amount of memory per process for purposes of data storage. Memory overhead associated with storing the data is counted against this total. If you increase the ``storage_memory``, you should also increase the ``memory`` parameter by the same amount.
+* ``locality_machineid``: Machine identifier key. All processes on a machine should share a unique id. By default, processes on a machine determine a unique id to share. This does not generally need to be set.
+* ``locality_zoneid``: Zone identifier key.  Processes that share a zone id are considered non-unique for the purposes of data replication. If unset, defaults to machine id.
+* ``locality_dcid``: Data center identifier key. All processes physically located in a data center should share the id. No default value. If you are depending on data center based replication this must be set on all processes.
+* ``locality_data_hall``: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.
+* ``io_trust_seconds``: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.
 
 ``[fdbserver.<ID>]`` section(s)
 ---------------------------------
@@ -502,27 +514,22 @@ When creating a partition for use with FoundationDB using the standard Linux fdi
 
 For an SSD with a single partition, the partition should typically begin at sector 2048 (512 byte sectors yields 1024 KiB alignment).
 
-.. _configuration-large-cluster-performance:
+.. _guidelines-process-class-config:
 
-Large cluster performance
-=========================
+Guidelines for setting process class
+====================================
 
-.. note:: For small-to-medium clusters (32 processes or fewer), FoundationDB's default behavior generally provides the best performance, and you should ignore this section. Further configuration is recommended only for large clusters (> 32 processes) or if you have special latency requirements.
+In a FoundationDB cluster, each of the ``fdbserver`` processes perform different tasks. Each process is recruited to do a particular task based on its process ``class``. For example, processes with ``class=storage`` are given preference to be recruited for doing storage server tasks, ``class=transaction`` are for log server processes and ``class=stateless`` are for stateless processes like proxies, resolvers, etc.,
 
-In a FoundationDB cluster, each of the ``fdbserver`` processes perform different tasks. FoundationDB automatically assigns each machine in the cluster a ``class`` that specifies the tasks it will perform. For large clusters, FoundationDB also provides the ability to tune cluster performance by manually assigning the ``class`` of some machines.
+The recommended minimum number of ``class=transaction`` (log server) processes is 8 (active) + 2 (standby) and the recommended minimum number for ``class=stateless`` processes is 4 (proxy) + 1 (resolver) + 1 (cluster controller) + 1 (master) + 2 (standby). It is better to spread the transaction and stateless processes across as many machines as possible.
 
-To assign machine classes manually, set the ``class=transaction`` parameter in :ref:`foundationdb.conf <foundationdb-conf>` on all processes on selected machines. The ratio of total processes to ``class``-specified processes should be about 8:1. For example, if you have 64 processes on 16 machines, you would set ``class=transaction`` for 8 processes on 2 machines.
+``fdbcli`` is used to set the desired number of processes of a particular process type. To do so, you would issue the ``fdbcli`` commands::
 
-For large clusters with high write workloads (greater than 100,000 writes/second), you can increase performance by increasing the number of proxies, resolvers, and log servers. These are set using ``fdbcli`` in equal (1:1:1) proportions among the processes on machines set to ``class=transaction``.
+  fdb> configure proxies=5
+  fdb> configure logs=8
 
-For example, if you have 384 processes on 96 machines, and a workload greater than 100,000 writes per second, you would set ``class=transaction`` for 48 processes on 12 machines. Of the latter, you would set 16 processes on 4 machines each as *proxies*, *resolvers*, and *log servers*. To do so, you would issue the ``fdbcli`` commands::
+.. note:: In the present release, the default value for proxies and log servers is 3 and for resolvers is 1. You should not set the value of a process type to less than its default.
 
-  fdb> configure proxies=16
-  fdb> configure resolvers=16
-  fdb> configure logs=16
-
-.. note:: In the present release, the default value for proxies and log servers is 3 and for resolvers is 1. The ratios discussed above are guidelines; regardless of them, you should not set the value of a process type to less than its default. For example, on clusters ranging from 36 to 60 processes with high write workloads, you may choose to increase the number of resolvers to 2. In this case, you would nevertheless leave the number of proxies and log servers at their default values of 3.
-
-.. warning:: The conflict-resolution algorithm used by FoundationDB is conservative: it guarantees that no conflicting transactions will be committed, but it may fail to commit some transactions that theoretically could have been. The effects of this conservatism may increase as you increase the number of proxies. It is therefore important to employ the recommended techniques for :ref:`minimizing conflicts <developer-guide-transaction-conflicts>` when increasing the number of proxies.
+.. warning:: The conflict-resolution algorithm used by FoundationDB is conservative: it guarantees that no conflicting transactions will be committed, but it may fail to commit some transactions that theoretically could have been. The effects of this conservatism may increase as you increase the number of resolvers. It is therefore important to employ the recommended techniques for :ref:`minimizing conflicts <developer-guide-transaction-conflicts>` when increasing the number of resolvers.
 
 You can contact us on the `community forums <https://forums.foundationdb.org>`_ if you are interested in more details or if you are benchmarking or performance-tuning on large clusters. Also see our `performance benchmarks </performance>`_ for a baseline of how a well-configured cluster should perform.

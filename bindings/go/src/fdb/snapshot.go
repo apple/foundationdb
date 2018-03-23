@@ -28,7 +28,7 @@ package fdb
 // transaction conflicts but making it harder to reason about concurrency.
 //
 // For more information on snapshot reads, see
-// https://foundationdb.org/documentation/developer-guide.html#snapshot-reads.
+// https://www.foundationdb.org/documentation/developer-guide.html#snapshot-reads.
 type Snapshot struct {
 	*transaction
 }

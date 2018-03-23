@@ -2,20 +2,12 @@
 #
 # local vars:
 PROJECT_NAME	:= foundationdb-docs
-#VERSION		:= $(shell cat version)
-
-ifeq ($(RELEASE_BUILD),true)
-RELEASE		:= $(VERSION)
-else
-RELEASE		:= $(VERSION)-SNAPSHOT
-endif
 
 GIT_HEAD_REF	:= $(shell git rev-parse --short HEAD)
 GIT_BRANCH	:= $(shell git symbolic-ref --short HEAD)
 GIT_REPO_URL	:= $(shell git config --get remote.origin.url)
 
 # You can set these variables from the command line.
-#VERSIONOPTS	:= -D version=$(VERSION) -D release=$(RELEASE)
 SPHINXOPTS	:=  -c .
 PAPER		=
 ROOTDIR		:= $(CURDIR)
@@ -110,4 +102,5 @@ livehtml: html
 # removed html prerequisite because it is previously explictly invoked
 package:
 	mkdir -p $(DISTDIR)
-	cd $(BUILDDIR)/html && tar czf $(DISTDIR)/$(PROJECT_NAME)-$(RELEASE).tar.gz .
+	rm -f $(DISTDIR)/$(PROJECT_NAME)-$(VERSION).tar.gz
+	cd $(BUILDDIR)/html && tar czf $(DISTDIR)/$(PROJECT_NAME)-$(VERSION).tar.gz .

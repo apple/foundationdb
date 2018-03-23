@@ -752,6 +752,33 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 		db.Options().SetLocationCacheSize(100001)
 		db.Options().SetMaxWatches(10001)
 
+		if !fdb.IsAPIVersionSelected() {
+			log.Fatal("API version should be selected")
+		}
+		apiVersion := fdb.MustGetAPIVersion()
+		if apiVersion == 0 {
+			log.Fatal("API version is 0")
+		}
+		e1 := fdb.APIVersion(apiVersion + 1)
+		if e1 != nil {
+			fdbE := e1.(fdb.Error)
+			if fdbE.Code != 2201 {
+				panic(e1)
+			}
+		} else {
+			log.Fatal("Was not stopped from selecting two API versions")
+		}
+		e2 := fdb.APIVersion(apiVersion - 1)
+		if e2 != nil {
+			fdbE := e2.(fdb.Error)
+			if fdbE.Code != 2201 {
+				panic(e2)
+			}
+		} else {
+			log.Fatal("Was not stopped from selecting two API versions")
+		}
+		fdb.MustAPIVersion(apiVersion)
+
 		_, e := db.Transact(func(tr fdb.Transaction) (interface{}, error) {
 			tr.Options().SetPrioritySystemImmediate()
 			tr.Options().SetPriorityBatch()
@@ -835,9 +862,16 @@ func main() {
 		log.Fatal(e)
 	}
 
+	if fdb.IsAPIVersionSelected() {
+		log.Fatal("API version already selected")
+	}
+
 	e = fdb.APIVersion(apiVersion)
 	if e != nil {
 		log.Fatal(e)
+	}
+	if fdb.MustGetAPIVersion() != apiVersion {
+		log.Fatal("API version not equal to value selected")
 	}
 
 	db, e = fdb.Open(clusterFile, []byte("DB"))

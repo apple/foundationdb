@@ -60,15 +60,6 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("UptimeSeconds", now() - machineState.monitorStartTime)
 				.detail("Memory", currentStats.processMemory)
 				.detail("ResidentMemory", currentStats.processResidentMemory)
-				.DETAILALLOCATORMEMUSAGE(16)
-				.DETAILALLOCATORMEMUSAGE(32)
-				.DETAILALLOCATORMEMUSAGE(64)
-				.DETAILALLOCATORMEMUSAGE(128)
-				.DETAILALLOCATORMEMUSAGE(256)
-				.DETAILALLOCATORMEMUSAGE(512)
-				.DETAILALLOCATORMEMUSAGE(1024)
-				.DETAILALLOCATORMEMUSAGE(2048)
-				.DETAILALLOCATORMEMUSAGE(4096)
 				.detail("MbpsSent", ((netData.bytesSent - statState->networkState.bytesSent) * 8e-6) / currentStats.elapsed)
 				.detail("MbpsReceived", ((netData.bytesReceived - statState->networkState.bytesReceived) * 8e-6) / currentStats.elapsed)
 				.detail("DiskTotalBytes", currentStats.processDiskTotalBytes)
@@ -96,6 +87,25 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("AIO_CollectCount", netData.countAIOCollect - statState->networkState.countAIOCollect)
 				.detail("AIO_SubmitLagMS", 1e3 * (g_network->networkMetrics.secSquaredSubmit - statState->networkMetricsState.secSquaredSubmit) / currentStats.elapsed)
 				.detail("AIO_DiskStallMS", 1e3 * (g_network->networkMetrics.secSquaredDiskStall - statState->networkMetricsState.secSquaredDiskStall) / currentStats.elapsed)
+				.detail("CurrentConnections", netData.countConnEstablished - netData.countConnClosedWithError - netData.countConnClosedWithoutError)
+				.detail("ConnectionsEstablished", (double) (netData.countConnEstablished - statState->networkState.countConnEstablished) / currentStats.elapsed)
+				.detail("ConnectionsClosed", ((netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) + (netData.countConnClosedWithoutError - statState->networkState.countConnClosedWithoutError)) / currentStats.elapsed)
+				.detail("ConnectionErrors", (netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) / currentStats.elapsed)
+				.trackLatest(eventName.c_str());
+
+			TraceEvent("MemoryMetrics")
+				.DETAILALLOCATORMEMUSAGE(16)
+				.DETAILALLOCATORMEMUSAGE(32)
+				.DETAILALLOCATORMEMUSAGE(64)
+				.DETAILALLOCATORMEMUSAGE(128)
+				.DETAILALLOCATORMEMUSAGE(256)
+				.DETAILALLOCATORMEMUSAGE(512)
+				.DETAILALLOCATORMEMUSAGE(1024)
+				.DETAILALLOCATORMEMUSAGE(2048)
+				.DETAILALLOCATORMEMUSAGE(4096);
+
+			TraceEvent n("NetworkMetrics");
+			n
 				.detail("N2_CantSleep", netData.countCantSleep - statState->networkState.countCantSleep)
 				.detail("N2_WontSleep", netData.countWontSleep - statState->networkState.countWontSleep)
 				.detail("N2_Yields", netData.countYields - statState->networkState.countYields)
@@ -113,18 +123,14 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("N2_WriteProbes", netData.countWriteProbes - statState->networkState.countWriteProbes)
 				.detail("N2_PacketsRead", netData.countPacketsReceived - statState->networkState.countPacketsReceived)
 				.detail("N2_PacketsGenerated", netData.countPacketsGenerated - statState->networkState.countPacketsGenerated)
-				.detail("N2_WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock)
-				.detail("CurrentConnections", netData.countConnEstablished - netData.countConnClosedWithError - netData.countConnClosedWithoutError)
-				.detail("ConnectionsEstablished", (double) (netData.countConnEstablished - statState->networkState.countConnEstablished) / currentStats.elapsed)
-				.detail("ConnectionsClosed", ((netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) + (netData.countConnClosedWithoutError - statState->networkState.countConnClosedWithoutError)) / currentStats.elapsed)
-				.detail("ConnectionErrors", (netData.countConnClosedWithError - statState->networkState.countConnClosedWithError) / currentStats.elapsed)
-				.trackLatest(eventName.c_str());
-			for(int i=0; i<NetworkMetrics::SLOW_EVENT_BINS; i++)
+				.detail("N2_WouldBlock", netData.countWouldBlock - statState->networkState.countWouldBlock);
+
+			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++)
 				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i])
-					e.detail( format("N2_SlowTask%dM", 1<<i).c_str(), c );
-			for(int i=0; i<NetworkMetrics::PRIORITY_BINS; i++)
+					n.detail(format("N2_SlowTask%dM", 1 << i).c_str(), c);
+			for (int i = 0; i<NetworkMetrics::PRIORITY_BINS; i++)
 				if (double x = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i])
-					e.detail( format("N2_S2Pri%d", g_network->networkMetrics.priorityBins[i]).c_str(), x );
+					n.detail(format("N2_S2Pri%d", g_network->networkMetrics.priorityBins[i]).c_str(), x);
 		}
 
 		if(machineMetrics) {

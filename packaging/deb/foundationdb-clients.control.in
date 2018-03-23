@@ -5,8 +5,8 @@ Priority: optional
 Architecture: amd64
 Conflicts: foundationdb (<< 0.1.4)
 Depends: libc6 (>= 2.11), adduser
-Maintainer: FoundationDB <fdbdist@apple.com>
-Homepage: https://foundationdb.org
+Maintainer: FoundationDB <fdb-dist@apple.com>
+Homepage: https://www.foundationdb.org
 Description: FoundationDB clients and library
  FoundationDB is a scalable, fault-tolerant, ordered key-value store
  with full ACID transactions.

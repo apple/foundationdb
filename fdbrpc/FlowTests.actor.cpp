@@ -989,7 +989,7 @@ TEST_CASE("flow/flow/perf/actor patterns")
 			ASSERT(out2[i].isReady());
 		}
 		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-		printf("sizeof(CheeseWaitActorActor) == %lu\n", sizeof(CheeseWaitActorActor));
+		printf("sizeof(CheeseWaitActorActor) == %zu\n", sizeof(CheeseWaitActorActor));
 	}
 
 	{
