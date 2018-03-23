@@ -86,12 +86,14 @@ For blob store backup locations, the Backup URL format is
     blobstore://<api_key>[:<secret>]@<hostname>[:<port>]/<name>[?<param>=<value>[&<param>=<value>]...]
 
       <api_key> - API key to use for authentication
-      <secret> - API key's secret.  Optional.  If unspecified, secret will be looked up in blob credential sources.
+      <secret> - API key's secret.  Optional.
       <hostname> - Remote hostname or IP address to connect to
       <port> - Remote port to connect to.  Optional.  Default is 80.
       <name> - Name of backup.  It can contain '/' characters, to place backups into a folder-like structure.
       
       <param>=<value> - Optional URL parameters.  See below for details.
+
+If <secret> is not specified, it will be looked up in :ref:`blob credential sources<blob-credential-files>`.
 
 An example blob store Backup URL would be ``blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400``.
 
@@ -125,6 +127,30 @@ Here is a complete list of valid parameters:
 
  *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined
 
+.. _blob-credential-files:
+
+Blob Credential Files
+==============================
+
+In order to help safeguard blob store credentials, the <SECRET> can optionally be omitted from blobstore:// URLs on the command line.  Omitted secrets will be resolved at connect time using 1 or more Blob Credential files.
+
+Blob Credential files can be specified on the command line (via --blob_credentials <FILE>) or via the environment variable FDB_BLOB_CREDENTIALS which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.
+
+At connect time, the specified files are read in order and the first matching account specification (user@host)
+will be used to obtain the secret key.
+
+The Blob Credential File format is JSON with the following schema:
+
+::
+
+  {
+    "accounts" : {
+      "user@host" :   { "secret" : "SECRETKEY" },
+      "user2@host2" : { "secret" : "SECRETKEY2" }
+    }
+  }
+
+
 ``fdbbackup`` command line tool
 ===============================
 
@@ -136,7 +162,7 @@ The ``fdbbackup`` command line tool is used to control backup jobs or to manage 
 
    user@host$ fdbbackup [-h] <SUBCOMMAND> <SUBCOMMAND_OPTIONS>
 
-The following options apply to multiple subcommands:
+The following options apply to most subcommands:
 
 ``-C <CLUSTER_FILE>``
   Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
@@ -146,7 +172,10 @@ The following options apply to multiple subcommands:
 
 ``-t <TAG>``
   A "tag" is a named slot in which a backup task executes.  Backups on different named tags make progress and are controlled independently, though their executions are handled by the same set of backup agent processes.  Any number of unique backup tags can be active at once.  It the tag is not specified, the default tag name "default" is used.
- 
+
+``--blob_credentials <FILE>``
+  Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
+
 .. _backup-start:
 
 .. program:: fdbbackup start
@@ -325,12 +354,18 @@ The following options apply to all commands:
 ``-C <CLUSTER_FILE>``
   Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
 
+``--blob_credentials <FILE>``
+  Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
+
 .. _restore-start:
 
 ``start``
 ---------
 
 The ``start`` command will start a new restore on the specified (or default) tag.  The command will fail if a tag is already in use by an active restore.
+
+::
+    user@host$ fdbrestore start -r <BACKUP_URL> [OPTIONS]
 
 ``-r <BACKUP_URL>``
   Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the ``backup_agent`` processes for the cluster.
@@ -370,7 +405,7 @@ The ``wait`` command will wait for the restore on the specified (or default) tag
 ``status``
 ----------
 
-The ``status`` command will print a detailed status report for either one tag (if a tag is specified) or for all tags.
+The ``status`` command will print a detailed status report on restore job progress.  If a tag is specified, it will only show status for that specific tag, otherwise status for all tags will be shown.
 
 ``backup_agent`` command line tool
 ==================================
@@ -391,6 +426,9 @@ The ``status`` command will print a detailed status report for either one tag (i
   Specify the path to the ``fdb.cluster`` file that should be used to connect to the FoundationDB cluster you want to back up.
  
   If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
+
+``--blob_credentials <FILE>``
+  Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
 
 .. _fdbdr-intro:
 
