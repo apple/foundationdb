@@ -239,7 +239,66 @@ The ``delete`` subcommand will delete the specified backup.
 
 .. warning:: If you cancel a delete operation while it is in progress the specified backup is in an unknown state and is likely no longer usable.  Repeat the delete command to finish deleting the backup.
 
-        
+.. program:: fdbbackup expire
+
+``expire``
+----------
+
+The ``expire`` subcommand will remove data from a backup prior to some point in time referred to as the 'cutoff'.
+
+::
+
+   user@host$ fdbbackup expire -d <BACKUP_URL> <CUTOFF> [<RESTORABILITY>] [--force]
+
+The expiration CUTOFF must be specified by one of the two following arguments:
+   
+  ``--expire_before_timestamp <DATETIME>``
+    Specifies the expiration cutoff to DATETIME.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY-MM-DD.HH:MI:SS" in UTC.
+
+  ``--expire_before_version <VERSION>``
+    Specifies the cutoff by a database commit version.
+
+Optionally, the user can specify a minimum RESTORABILITY guarauntee with one of the following options.
+
+  ``--restorable_after_timestamp <DATETIME>``
+    Specifies that the backup must be restorable to DATETIME and later.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY-MM-DD.HH:MI:SS" in UTC.
+
+  ``--restorable_after_version <VERSION>``
+    Specifies that the backup must be restorable as of VERSION and later.
+
+``-f`` or ``--force``
+  If the designated cutoff will result in removal of data such that the backup's restorability would be reduced to either unrestorable or less restorable than the optional restorability requirement then the --force option must be given or the result will be an error and no action will be taken.
+
+.. program:: fdbbackup describe
+
+``describe``
+----------
+
+The ``describe`` subcommand will analyze the given backup and print a summary of the snapshot and mutation data versions it contains as well as the version range of restorability the backup can currently provide.
+
+::
+
+   user@host$ fdbbackup describe -d <BACKUP_URL> [--version_timestamps] [-C <CLUSTER_FILE>] 
+
+``--version_timestamps``
+  If the originating cluster is still available and is passed on the command line, this option can be specified in order for all versions in the output to also be converted to timestamps for better human readability.
+
+
+.. program:: fdbbackup list
+
+``list``
+----------
+
+The ``list`` subcommand will list the backups at a given 'base' or shortened Backup URL.
+
+::
+
+   user@host$ fdbbackup list -b <BASE_URL>
+
+``-b <BASE_URL>`` or ``--base_url <BASE_URL>``
+  This a shortened Backup URL which looks just like a Backup URL but without the backup name so that the list command will discover and list all of the backups under that base URL.
+
+
 ``fdbrestore`` command line tool
 ================================
 
