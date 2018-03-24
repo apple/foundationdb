@@ -7,7 +7,7 @@
     The ``description`` is a logical description of the database using alphanumeric characters (a-z, A-Z, 0-9) and underscores.
 
 .. |cluster-file-rule2| replace::
-    The ``ID`` is an arbitrary value containing alphanumeric characters (a-z, A-Z, 0-9). We recommend using a random eight-character identifier (such as the output of ``mktemp -u XXXXXXXX``).
+    The ``ID`` is an arbitrary value containing alphanumeric characters (a-z, A-Z, 0-9). We recommend using a random eight-character identifier (such as the output of ``mktemp -u XXXXXXXX``). Note that the ``ID`` will change when coordinators change.
 
 .. |cluster-file-rule3| replace::
     The list of ``IP:PORT`` pairs specify the set of coordination servers. A majority of these servers must be available for the database to be operational so they should be chosen carefully. The number of coordination servers should therefore be odd and must be more than one to support fault-tolerance. We recommend using five coordination servers when using ``triple`` mode to maintain the ability to tolerate two simultaneous machine failures.

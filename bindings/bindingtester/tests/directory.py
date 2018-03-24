@@ -340,9 +340,9 @@ class DirectoryTest(Test):
         # errors += directory_util.check_for_duplicate_prefixes(db, self.prefix_log)
         return errors
 
-    def get_result_specfications(self):
+    def get_result_specifications(self):
         return [
-            ResultSpecification(self.stack, key_start_index=1, ordering_index=1),
+            ResultSpecification(self.stack_subspace, key_start_index=1, ordering_index=1),
             ResultSpecification(self.directory_log, ordering_index=0),
             ResultSpecification(self.subspace_log, ordering_index=0)
         ]

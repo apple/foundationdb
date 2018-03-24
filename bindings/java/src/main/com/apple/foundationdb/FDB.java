@@ -180,7 +180,7 @@ public class FDB {
 
 	/**
 	 * Connects to the cluster specified by the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.
 	 *  If the FoundationDB network has not been started, it will be started in the course of this call
 	 *  as if {@link FDB#startNetwork()} had been called.
 	 *
@@ -199,9 +199,9 @@ public class FDB {
 	 *  {@link #startNetwork()} had been called.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@code Cluster}.
@@ -220,9 +220,9 @@ public class FDB {
 	 *  are produced from using the resulting {@link Cluster}.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 * @param e used to run the FDB network thread
 	 *
@@ -245,7 +245,7 @@ public class FDB {
 
 	/**
 	 * Initializes networking, connects with the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
 	 *  and opens the database.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
@@ -259,9 +259,9 @@ public class FDB {
 	 *  and opens the database.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 *
 	 * @return a {@code CompletableFuture} that will be set to a FoundationDB {@link Database}
@@ -275,9 +275,9 @@ public class FDB {
 	 *  and opens the database.
 	 *
 	 * @param clusterFilePath the
-	 *  <a href="/foundationdb/api-general.html#foundationdb-cluster-file" target="_blank">cluster file</a>
+	 *  <a href="/administration.html#foundationdb-cluster-file" target="_blank">cluster file</a>
 	 *  defining the FoundationDB cluster. This can be {@code null} if the
-	 *  <a href="/foundationdb/api-general.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
+	 *  <a href="/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>
 	 *  is to be used.
 	 * @param e the {@link Executor} to use to execute asynchronous callbacks
 	 *
@@ -329,11 +329,13 @@ public class FDB {
 	 * event loop is a blocking operation that is not
 	 * expected to terminate until the program is complete. This will therefore consume an
 	 * entire thread from {@code e} if {@code e} is a thread pool or will completely block
-	 * operation of a single threaded {@code Executor}.<br>
+	 * the single thread of a single-threaded {@code Executor}.<br>
 	 * <br>
 	 * Manual configuration of the networking engine can be achieved through calls on
 	 *  {@link NetworkOptions}. These options should be set before a call
 	 *  to this method.
+	 *
+	 * @param e the {@link Executor} to use to execute network operations on
 	 *
 	 * @see NetworkOptions
 	 *

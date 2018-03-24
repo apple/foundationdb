@@ -97,8 +97,6 @@ This automatic determination of a cluster file makes it easy to write code using
 
 .. warning:: A cluster file must have the :ref:`required permissions <cluster_file_permissions>` in order to be used.
 
-.. warning:: If an explicitly provided file has been set to an invalid value (such as an empty value, a file that does not exist, or a file that is not a valid cluster file), an error will result. FoundationDB will not fall back to another file.
-
 .. warning:: If ``FDB_CLUSTER_FILE`` is read and has been set to an invalid value (such as an empty value, a file that does not exist, or a file that is not a valid cluster file), an error will result. FoundationDB will not fall back to another file.
 
 .. _cluster_file_permissions:
@@ -225,44 +223,46 @@ Use the ``status`` command of ``fdbcli`` to determine if the cluster is up and r
     The database is available.
 
     Welcome to the fdbcli. For help, type `help'.
-    fdb> status
+fdb> status
 
-The ``status`` command displays general information about the FoundationDB cluster::
+Configuration:
+  Redundancy mode        - triple
+  Storage engine         - ssd-2
+  Coordinators           - 5
+  Desired Proxies        - 5
+  Desired Logs           - 8
 
-    Configuration:
-      Redundancy mode        - triple
-      Storage engine         - ssd
-      Coordinators           - 3
+Cluster:
+  FoundationDB processes - 272
+  Machines               - 16
+  Memory availability    - 14.5 GB per process on machine with least available
+  Retransmissions rate   - 20 Hz
+  Fault Tolerance        - 2 machines
+  Server time            - 03/19/18 08:51:52
 
-    Cluster:
-      FoundationDB processes - 3
-      Machines               - 3
-      Memory availability    - 4.1 GB per process on machine with least available
-      Fault Tolerance        - 0 machines
-      Server time            - Thu Mar 15 14:41:34 2018
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 3.298 TB
+  Disk space used        - 15.243 TB
 
-    Data:
-      Replication health     - Healthy
-      Moving data            - 0.000 GB
-      Sum of key-value sizes - 8 MB
-      Disk space used        - 103 MB
+Operating space:
+  Storage server         - 1656.2 GB free on most full server
+  Log server             - 1794.7 GB free on most full server
 
-    Operating space:
-      Storage server         - 1.0 GB free on most full server
-      Log server             - 1.0 GB free on most full server
+Workload:
+  Read rate              - 55990 Hz
+  Write rate             - 14946 Hz
+  Transactions started   - 6321 Hz
+  Transactions committed - 1132 Hz
+  Conflict rate          - 0 Hz
 
-    Workload:
-      Read rate              - 2 Hz
-      Write rate             - 0 Hz
-      Transactions started   - 2 Hz
-      Transactions committed - 0 Hz
-      Conflict rate          - 0 Hz
+Backup and DR:
+  Running backups        - 1
+  Running DRs            - 1 as primary
 
-    Backup and DR:
-      Running backups        - 0
-      Running DRs            - 0
-
-    Client time: Thu Mar 15 14:41:34 2018
+Client time: 03/19/18 08:51:51
+    
 
 The summary fields are interpreted as follows:
 
@@ -270,15 +270,18 @@ The summary fields are interpreted as follows:
 Redundancy mode         The currently configured redundancy mode (see the section :ref:`configuration-choosing-redundancy-mode`)
 Storage engine          The currently configured storage engine (see the section :ref:`configuration-configuring-storage-subsystem`)
 Coordinators            The number of FoundationDB coordination servers
+Desired Proxies         Number of proxies desired. If replication mode is 3 then default number of proxies is 3
+Desired Logs            Number of logs desired. If replication mode is 3 then default number of logs is 3
 FoundationDB processes  Number of FoundationDB processes participating in the cluster
 Machines                Number of physical machines running at least one FoundationDB process that is participating in the cluster
 Memory availability     RAM per process on machine with least available (see details below)
+Retransmissions rate    Ratio of retransmitted packets to the total number of packets.
 Fault tolerance         Maximum number of machines that can fail without losing data or availability (number for losing data will be reported separately if lower)
 Server time             Timestamp from the server
 Replication health      A qualitative estimate of the health of data replication
 Moving data             Amount of data currently in movement between machines
 Sum of key-value sizes	Estimated total size of keys and values stored (not including any overhead or replication)
-Disk space used         Sum of space used across all nodes in the cluster
+Disk space used         Overall disk space used by the cluster
 Storage server          Free space for storage on the server with least available. For ``ssd`` storage engine, includes only disk; for ``memory`` storage engine, includes both RAM and disk.
 Log server              Free space for log server on the server with least available.
 Read rate               The current number of reads per second
@@ -318,58 +321,139 @@ The ``status`` command can provide detailed statistics about the cluster and the
     Welcome to the fdbcli. For help, type `help'.
     fdb> status details
 
-    Configuration:
-      Redundancy mode        - triple
-      Storage engine         - ssd
-      Coordinators           - 3
 
-    Cluster:
-      FoundationDB processes - 3
-      Machines               - 3
-      Memory availability    - 4.1 GB per process on machine with least available
-      Fault Tolerance        - 0 machines
-      Server time            - Thu Mar 15 14:41:34 2018
+Configuration:
+  Redundancy mode        - triple
+  Storage engine         - ssd-2
+  Coordinators           - 5
 
-    Data:
-      Replication health     - Healthy
-      Moving data            - 0.000 GB
-      Sum of key-value sizes - 8 MB
-      Disk space used        - 103 MB
+Cluster:
+  FoundationDB processes - 85
+  Machines               - 5
+  Memory availability    - 7.4 GB per process on machine with least available
+  Retransmissions rate   - 5 Hz
+  Fault Tolerance        - 2 machines
+  Server time            - 03/19/18 08:59:37
 
-    Operating space:
-      Storage server         - 1.0 GB free on most full server
-      Log server             - 1.0 GB free on most full server
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 87.068 GB
+  Disk space used        - 327.819 GB
 
-    Workload:
-      Read rate              - 2 Hz
-      Write rate             - 0 Hz
-      Transactions started   - 2 Hz
-      Transactions committed - 0 Hz
-      Conflict rate          - 0 Hz
+Operating space:
+  Storage server         - 888.2 GB free on most full server
+  Log server             - 897.3 GB free on most full server
 
-    Backup and DR:
-      Running backups        - 0
-      Running DRs            - 0
+Workload:
+  Read rate              - 117 Hz
+  Write rate             - 0 Hz
+  Transactions started   - 43 Hz
+  Transactions committed - 1 Hz
+  Conflict rate          - 0 Hz
 
-    Process performance details:
-      10.0.4.1:4500       ( 3% cpu;  2% machine; 0.004 Gbps;  0% disk; 2.5 GB / 4.1 GB RAM  )
-      10.0.4.2:4500       ( 1% cpu;  2% machine; 0.004 Gbps;  0% disk; 2.5 GB / 4.1 GB RAM  )
-      10.0.4.3:4500       ( 1% cpu;  2% machine; 0.004 Gbps;  0% disk; 2.5 GB / 4.1 GB RAM  )
+Process performance details:
+  10.0.4.1:4500     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4501     (  1% cpu;  2% machine; 0.010 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4502     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4503     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4504     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4505     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4506     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4507     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4508     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4509     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4510     (  1% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4511     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4512     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4513     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4514     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4515     ( 12% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4516     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.3 GB / 7.4 GB RAM  )
+  10.0.4.2:4500     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4501     ( 15% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4502     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4503     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4504     (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4505     ( 18% cpu;  3% machine; 0.124 Gbps; 18% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4506     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4507     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4508     (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4509     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4510     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4511     (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4512     (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.2:4513     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4514     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4515     ( 11% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4516     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4500     ( 14% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 3.0 GB / 7.4 GB RAM  )
+  10.0.4.3:4501     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.3:4502     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.3:4503     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4504     (  7% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4505     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4506     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4507     (  2% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4508     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4509     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4510     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4511     (  2% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4512     (  2% cpu;  3% machine; 0.284 Gbps;  3% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4513     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4514     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.3:4515     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.3:4516     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.4:4500     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4501     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4502     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4503     (  2% cpu;  4% machine; 0.065 Gbps; 16% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4504     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.4:4505     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4506     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4507     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4508     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4509     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4510     ( 24% cpu;  4% machine; 0.065 Gbps; 15% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4511     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.4:4512     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.4:4513     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4514     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4515     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4516     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4500     (  6% cpu;  2% machine; 0.076 Gbps;  7% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4501     (  2% cpu;  2% machine; 0.076 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4502     (  1% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4503     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4504     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4505     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4506     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4507     (  2% cpu;  2% machine; 0.076 Gbps;  6% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4508     ( 31% cpu;  2% machine; 0.076 Gbps;  8% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4509     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4510     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4511     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4512     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4513     (  0% cpu;  2% machine; 0.076 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4514     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4515     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4516     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
 
-    Coordination servers:
-      10.0.4.1:4500
-      10.0.4.2:4500
-      10.0.4.3:4500
+Coordination servers:
+  10.0.4.1:4500  (reachable)
+  10.0.4.2:4500  (reachable)
+  10.0.4.3:4500  (reachable)
+  10.0.4.4:4500  (reachable)
+  10.0.4.5:4500  (reachable)
 
-    Client time: Thu Mar 15 14:41:34 2018
-
+Client time: 03/19/18 08:59:37
 Several details about individual FoundationDB processes are displayed in a list format in parenthesis after the IP address and port:
 
 ======= =========================================================================
 cpu	    CPU utilization of the individual process
 machine	CPU utilization of the machine the process is running on (over all cores)
 Gbps	Total input + output network traffic, in Gbps
-disk	Percentage busy time of the disk subsystem on which the data resides
+disk IO	Percentage busy time of the disk subsystem on which the data resides
 REXMIT! Displayed only if there have been more than 10 TCP segments retransmitted in last 5s
 RAM     Total physical memory used by process / memory available per process
 ======= =========================================================================
@@ -392,6 +476,8 @@ To make configuring, starting, stopping, and restarting ``fdbserver`` processes 
 .. note:: |conf-file-change-detection|
 
 During normal operation, ``fdbmonitor`` is transparent, and you interact with it only by modifying the configuration in :ref:`foundationdb.conf <foundationdb-conf>` and perhaps occasionally by :ref:`starting and stopping <administration-running-foundationdb>` it manually. If some problem prevents an ``fdbserver`` or ``backup-agent`` process from starting or causes it to stop unexpectedly, ``fdbmonitor`` will log errors to the system log.
+
+If kill_on_configuration_change parameter is unset or set to `true` in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to `false` it will not restart on changes.
 
 .. _administration-managing-trace-files:
 
@@ -428,7 +514,7 @@ FoundationDB's storage space requirements depend on which storage engine is used
 
 Using the ``ssd`` storage engine, data is stored in B-trees that add some overhead.
 
-* For key-value pairs larger than about 100 bytes, overhead should usually be less than 2x per replica. In a triple-replicated configuration, the raw capacity required might be 5x the size of the data. However, SSDs often require over-provisioning (e.g. keeping the drive less than 75% full) for best performance, so 10x would be a reasonable number. For example, 100GB of raw key-values would require 1TB of raw capacity.
+* For key-value pairs larger than about 100 bytes, overhead should usually be less than 2x per replica. In a triple-replicated configuration, the raw capacity required might be 5x the size of the data. However, SSDs often require over-provisioning (e.g. keeping the drive less than 75% full) for best performance, so 7x would be a reasonable number. For example, 100GB of raw key-values would require 700GB of raw capacity.
 
 * For very small key-value pairs, the overhead can be a large factor but not usually more than about 40 bytes per replica. Therefore, with triple replication and SSD over-provisioning, allowing 200 bytes of raw storage capacity for each very small key-value pair would be a reasonable guess. For example, 1 billion very small key-value pairs would require 200GB of raw storage.
 
@@ -438,10 +524,12 @@ Using the ``memory`` storage engine, both memory and disk space need to be consi
 
 * Disk space usage is about 8x the original data size. The memory storage engine interleaves a snapshot on disk with a transaction log, with the resulting snapshot 2x the data size. A snapshot can't be dropped from its log until the next snapshot is completely written, so 2 snapshots must be kept at 4x the data size. The two-file durable queue can't overwrite data in one file until all the data in the other file has been dropped, resulting in 8x the data size. Finally, it should be noted that disk space is not reclaimed when key-value pairs are cleared.
 
+For either storage engine, there is possible additional overhead when running backup or DR. In usual operation, the overhead is negligible but if backup is unable to write or a secondary cluster is unavailable, mutation logs will build up until copying can resume, occupying space in your cluster.
+
 Running out of storage space
 ----------------------------
 
-FoundationDB is aware of the free storage space on each node. It attempts to load all nodes equally so that no node runs out of space before the others. The database attempts to gracefully stop writes as storage space decreases to 100 MB, refusing to start new transactions with priorities other than ``SYSTEM_IMMEDIATE``. This lower bound on free space leaves space to allow you to use ``SYSTEM_IMMEDIATE`` transactions to remove data.
+FoundationDB is aware of the free storage space on each node. It attempts to distribute data equally on all the nodes so that no node runs out of space before the others. The database attempts to gracefully stop writes as storage space decreases to 100 MB, refusing to start new transactions with priorities other than ``SYSTEM_IMMEDIATE``. This lower bound on free space leaves space to allow you to use ``SYSTEM_IMMEDIATE`` transactions to remove data.
 
 The measure of free space depends on the storage engine. For the memory storage engine, which is the default after installation, total space is limited to the lesser of the ``storage_memory`` configuration parameter (1 GB in the default configuration) or a fraction of the free disk space.
 
@@ -450,14 +538,14 @@ If the disk is rapidly filled by other programs, trace files, etc., FoundationDB
 Virtual machines
 ----------------
 
-Processes running in different VMs on a single machine will appear to FoundationDB as being hardware isolated. FoundationDB takes pains to assure that data replication is protected from hardware-correlated failures. If FoundationDB is run in multiple VMs on a single machine this protection will be subverted. An administrator can inform FoundationDB of this hardware sharing, however, by specifying a machine ID using the ``machine_id`` parameter in :ref:`foundationdb.conf <foundationdb-conf>`. All processes on VMs that share hardware should specify the same ``machine_id``.
+Processes running in different VMs on a single machine will appear to FoundationDB as being hardware isolated. FoundationDB takes pains to assure that data replication is protected from hardware-correlated failures. If FoundationDB is run in multiple VMs on a single machine this protection will be subverted. An administrator can inform FoundationDB of this hardware sharing, however, by specifying a machine ID using the ``locality_machineid`` parameter in :ref:`foundationdb.conf <foundationdb-conf>`. All processes on VMs that share hardware should specify the same ``locality_machineid``.
 
 Datacenters
 ------------
 
-FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the :ref:`redundancy mode <configuration-choosing-redundancy-mode>` to ``three_datacenter`` and that you set the ``datacenter_id`` parameter for all FoundationDB processes in :ref:`foundationdb.conf <foundationdb-conf>`.
+FoundationDB is datacenter aware and supports operation across datacenters. In a multiple-datacenter configuration, it is recommended that you set the :ref:`redundancy mode <configuration-choosing-redundancy-mode>` to ``three_datacenter`` and that you set the ``locality_dcid`` parameter for all FoundationDB processes in :ref:`foundationdb.conf <foundationdb-conf>`.
 
-If you specify the ``-a`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
+If you specify the ``--datacenter_id`` option to any FoundationDB process in your cluster, you should specify it to all such processes. Processes which do not have a specified datacenter ID on the command line are considered part of a default "unset" datacenter. FoundationDB will incorrectly believe that these processes are failure-isolated from other datacenters, which can reduce performance and fault tolerance.
 
 .. _administration-removing:
 
@@ -496,12 +584,15 @@ To upgrade a FoundationDB cluster, you must install the updated version of Found
 
 .. warning:: |development-use-only-warning|
 
+Install updated client binaries
+-------------------------------
+
+Apart from patch version upgrades, you should install the new client binary on all your clients and restart them to ensure they can reconnect after the upgrade. See :ref:`multi-version-client-api` for more information. Running ``status json`` will show you which versions clients are connecting with so you can verify before upgrading that clients are correctly configured.
+
 Stage the packages
 ------------------
 
 Go to :doc:`downloads` and select Ubuntu or RHEL/CentOS, as appropriate for your system. Download both the client and server packages and copy them to each machine in your cluster.
-
-.. warning:: |upgrade-client-server-warning|
 
 Perform the upgrade
 -------------------
@@ -527,15 +618,20 @@ Test the database
 
 Test the database to verify that it is operating normally by running ``fdbcli`` and :ref:`reviewing the cluster status <administration-monitoring-cluster-status>`.
 
-Restart your application clients
---------------------------------
+Remove old client library versions
+----------------------------------
 
-Stop and restart all application clients to reload the upgraded FoundationDB dynamic libraries.
+You can now remove old client library versions from your clients. This is only to stop creating unnecessary connections.
 
 .. _version-specific-upgrading:
 
 Version-specific notes on upgrading
 ===================================
+
+Upgrading from 5.1.x
+--------------------
+
+Upgrades from 5.0.x will keep all your old data and configuration settings. 5.1 has a new backup format so backups will need to be restarted after upgrading.
 
 Upgrading from 5.0.x
 --------------------

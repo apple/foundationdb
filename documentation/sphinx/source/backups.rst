@@ -50,7 +50,7 @@ There are 5 command line tools for working with Backup and DR operations:
 ``fdbdr``
     This command line tool is used to control (but not execute) DR jobs - backups from one database to anothher.  It can ``start``, ``abort`` a DR job, or ``switch`` the DR direction.  It can also get the ``status`` of a running DR job.  
 
-``db_agent``
+``dr_agent``
     The database backup agent is a daemon that actually executes the work of the DR jobs, writing snapshot and log data to the destination database.  Any number of agents pointed at the same databases will cooperate to perform the backup.
 
 By default, the FoundationDB packages are configured to start a single ``backup_agent`` process on each FoundationDB server. If you want to perform a backup to a network drive or blob store instance that is accessible to every server, you can immediately use the ``fdbbackup start`` command from any machine with access to your cluster to start the backup

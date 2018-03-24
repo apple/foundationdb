@@ -83,6 +83,8 @@ public class Cluster extends NativeObjectWrapper {
 	/**
 	 * Creates a connection to a specific database on an <i>FDB</i> cluster.
 	 *
+	 * @param e the {@link Executor} to use when executing asynchronous callbacks for the database
+	 *
 	 * @return a {@code Future} that will be set to a {@code Database} upon
 	 *         successful connection.
 	 */
