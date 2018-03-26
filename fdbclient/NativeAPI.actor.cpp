@@ -370,8 +370,8 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 					BinaryWriter chunkBW(Unversioned());
 					chunkBW << bigEndian32(i+1) << bigEndian32(num_chunks);
 					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + std::string(4, '\x00'));
-					int16_t pos = littleEndian16(clientLatencyName.size());
-					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int16_t), &pos, sizeof(int16_t));
+					int32_t pos = littleEndian32(clientLatencyName.size());
+					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int32_t), &pos, sizeof(int32_t));
 					if (i == num_chunks - 1) {
 						chunk.value = ValueRef(static_cast<uint8_t *>(bw.getData()) + (i * value_size_limit), bw.getLength() - (i * value_size_limit));
 					}
