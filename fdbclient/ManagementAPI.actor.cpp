@@ -105,31 +105,20 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		redundancy="3";
 		log_replicas="3";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "two_datacenter") {
-		redundancy="3";
-		log_replicas="3";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
 	} else if(mode == "three_datacenter") {
-		redundancy="3";
-		log_replicas="3";
-		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAnd({
-			IRepPolicyRef(new PolicyAcross(3, "dcid", IRepPolicyRef(new PolicyOne()))),
-			IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())))
-		}));
-	} else if(mode == "three_data_hall") {
-		redundancy="3";
-		log_replicas="4";
-		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "data_hall", IRepPolicyRef(new PolicyOne())));
-		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
-			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
-		));
-	} else if(mode == "multi_dc") {
 		redundancy="6";
 		log_replicas="4";
 		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "dcid",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
 		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+	} else if(mode == "three_data_hall") {
+		redundancy="3";
+		log_replicas="4";
+		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "data_hall", IRepPolicyRef(new PolicyOne())));
+		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
 	} else
@@ -303,12 +292,9 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 	} else if( result.old_replication == "triple" || result.old_replication == "fast_recovery_triple" ) {
 		storage_replication = 3;
 		log_replication = 3;
-	} else if( result.old_replication == "two_datacenter" ) {
-		storage_replication = 3;
-		log_replication = 3;
 	} else if( result.old_replication == "three_datacenter" ) {
-		storage_replication = 3;
-		log_replication = 3;
+		storage_replication = 6;
+		log_replication = 4;
 	} else
 		return ConfigureAutoResult();
 
