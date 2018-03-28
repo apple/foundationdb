@@ -141,6 +141,7 @@ struct TraceLog {
 	int file_length;
 	int buffer_length;
 	bool opened;
+	int64_t preopenOverflowCount;
 	std::string basename;
 	std::string logGroup;
 
@@ -338,7 +339,7 @@ struct TraceLog {
 		}
 	};
 
-	TraceLog() : buffer_length(0), file_length(0), opened(false), barriers(new BarrierList), logTraceEventMetrics(false) {}
+	TraceLog() : buffer_length(0), file_length(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false) {}
 
 	bool isOpen() const { return opened; }
 
@@ -363,6 +364,10 @@ struct TraceLog {
 		writer->post(a);
 
 		opened = true;
+		if(preopenOverflowCount > 0) {
+			TraceEvent(SevWarn, "TraceLogPreopenOverflow").detail("OverflowEventCount", preopenOverflowCount);
+			preopenOverflowCount = 0;
+		}
 	}
 
 	static void extractTraceFileNameInfo(std::string const& filename, std::string &root, int &index) {
@@ -396,6 +401,11 @@ struct TraceLog {
 
 	void write( const void* data, int length ) {
 		MutexHolder hold(mutex);
+		if(!isOpen() && (preopenOverflowCount > 0 || buffer_length + length > FLOW_KNOBS->TRACE_LOG_MAX_PREOPEN_BUFFER)) {
+			++preopenOverflowCount;
+			return;
+		}
+
 		// FIXME: What if we are using way too much memory for buffer?
 		buffer.push_back_deep( buffer.arena(), StringRef((const uint8_t*)data,length) );
 		buffer_length += length;
@@ -609,7 +619,6 @@ bool traceFileIsOpen() {
 
 bool TraceEvent::isEnabled( const char* type, Severity severity ) {
 	//if (!g_traceLog.isOpen()) return false;
-	if( !g_network ) return false;
 	if( severity < FLOW_KNOBS->MIN_TRACE_SEVERITY) return false;
 	StringRef s( (const uint8_t*)type, strlen(type) );
 	return !suppress.count(s);
@@ -681,8 +690,16 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 	if (isEnabled(type, severity)) {
 		enabled = true;
 		buffer[sizeof(buffer)-1]=0;
-		NetworkAddress local = g_network->isSimulated() ? g_network->getLocalAddress() : g_traceLog.localAddress;
-		double time = g_trace_clock == TRACE_CLOCK_NOW ? now() : timer();
+		NetworkAddress local = (g_network && g_network->isSimulated()) ? g_network->getLocalAddress() : g_traceLog.localAddress;
+
+		double time;
+		if(g_trace_clock == TRACE_CLOCK_NOW) {
+			time = g_network ? now() : 0;
+		}
+		else {
+			time = timer();
+		}
+
 		writef( "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\"",
 			(int)severity, time, type,
 			(local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port );
@@ -908,11 +925,12 @@ TraceEvent::~TraceEvent() {
 				backtrace();
 				severity = SevError;
 			}
-			if (g_traceLog.isOpen()) {
-				writef("/>\r\n");
-				g_traceLog.write( buffer, length );
-				TraceEvent::eventCounts[severity/10]++;
 
+			writef("/>\r\n");
+			TraceEvent::eventCounts[severity/10]++;
+			g_traceLog.write( buffer, length );
+
+			if (g_traceLog.isOpen()) {
 				// Log Metrics
 				if(g_traceLog.logTraceEventMetrics && isNetworkThread()) {
 					// Get the persistent Event Metric representing this trace event and push the fields (details) accumulated in *this to it and then log() it.
