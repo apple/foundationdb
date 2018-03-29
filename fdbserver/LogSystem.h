@@ -46,8 +46,10 @@ public:
 	bool isLocal;
 	int32_t hasBestPolicy;
 	int8_t locality;
+	int32_t logRouterCount;
+	Version startVersion;
 
-	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(-99) {}
+	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityInvalid), logRouterCount(0), startVersion(invalidVersion) {}
 
 	int bestLocationFor( Tag tag ) {
 		if(hasBestPolicy == HasBestPolicyNone) {
@@ -288,6 +290,7 @@ struct ILogSystem {
 	};
 
 	struct MergedPeekCursor : IPeekCursor, ReferenceCounted<MergedPeekCursor> {
+		LocalityGroup localityGroup;
 		vector< Reference<IPeekCursor> > serverCursors;
 		std::vector< std::pair<LogMessageVersion, int> > sortedVersions;
 		Tag tag;
@@ -298,10 +301,11 @@ struct ILogSystem {
 		UID randomID;
 		int tLogReplicationFactor;
 		IRepPolicyRef tLogPolicy;
+		std::vector< LocalityData > tLogLocalities;
 
-		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore );
-
-		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion );
+		MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin );
+		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
+		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
 
 		// if server_cursors[c]->hasMessage(), then nextSequence <= server_cursors[c]->sequence() and there are no messages known to that server with sequences in [nextSequence,server_cursors[c]->sequence())
 
@@ -315,7 +319,7 @@ struct ILogSystem {
 
 		void calcHasMessage();
 
-		void updateMessage();
+		void updateMessage(bool usePolicy);
 
 		virtual bool hasMessage();
 
@@ -483,14 +487,20 @@ struct ILogSystem {
 		// Returns when the preceding changes are durable.  (Later we will need multiple return signals for diffferent durability levels)
 		// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any subsequent epoch (but may become visible in this epoch)
 
-	//Future<PeekResults> peek( int64_t begin_epoch, int64_t begin_seq, int tag );
 	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, bool parallelGetMore = false ) = 0;
 		// Returns (via cursor interface) a stream of messages with the given tag and message versions >= (begin, 0), ordered by message version
 		// If pop was previously or concurrently called with upTo > begin, the cursor may not return all such messages.  In that case cursor->popped() will
 		// be greater than begin to reflect that.
 
+	virtual Reference<IPeekCursor> peek( Version begin, std::vector<Tag> tags, bool parallelGetMore = false ) = 0;
+		// Same contract as peek(), but for a set of tags
+
 	virtual Reference<IPeekCursor> peekSingle( Version begin, Tag tag, vector<pair<Version,Tag>> history = vector<pair<Version,Tag>>() ) = 0;
 		// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is correspondingly less expensive)
+
+	virtual Reference<IPeekCursor> peekLogRouter( Version begin, Tag tag, UID logRouterID ) = 0;
+		// Same contract as peek(), but can only peek from the logs elected in the same generation. 
+		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
 	virtual void pop( Version upTo, Tag tag ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)

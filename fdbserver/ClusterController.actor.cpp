@@ -518,7 +518,7 @@ public:
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 			( ( RoleFitness(remoteLogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ) ||
-			  ( RoleFitness(logRouters, ProcessClass::LogRouter) > RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.configuration.getDesiredLogRouters()) ) ) ) {
+			  ( RoleFitness(logRouters, ProcessClass::LogRouter) > RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.logRouterCount) ) ) ) {
 			throw operation_failed();
 		}
 
@@ -594,8 +594,10 @@ public:
 		for(int i = 0; i < proxies.size(); i++)
 			result.proxies.push_back(proxies[i].first);
 
-		auto logRouters = getWorkersForRoleInDatacenter( remoteDcId, ProcessClass::LogRouter, req.configuration.getDesiredLogRouters(), req.configuration, id_used );
-		result.logRouterCount = logRouters.size() ? logRouters.size() : 1;
+		auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, id_used );
+		for(int i = 0; i < oldLogRouters.size(); i++) {
+			result.oldLogRouters.push_back(oldLogRouters[i].first);
+		}
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 			( RoleFitness(tlogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
@@ -656,7 +658,6 @@ public:
 			throw no_more_servers();
 		} else {
 			RecruitFromConfigurationReply result;
-			result.logRouterCount = 0;
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[masterProcessId]++;
 			id_used[clusterControllerProcessId]++;
@@ -700,6 +701,11 @@ public:
 							result.resolvers.push_back(resolvers[i].first);
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].first);
+
+						auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, used );
+						for(int i = 0; i < oldLogRouters.size(); i++) {
+							result.oldLogRouters.push_back(oldLogRouters[i].first);
+						}
 						break;
 					} else {
 						if(fitness < bestFitness) {
@@ -901,7 +907,7 @@ public:
 		if(oldRemoteTLogFit < newRemoteTLogFit) return false;
 
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter);
-		RoleFitness newLogRoutersFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, db.config.getDesiredLogRouters(), db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
+		RoleFitness newLogRoutersFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newTLogFit.count, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
 
 		if(oldLogRoutersFit < newLogRoutersFit) return false;
 

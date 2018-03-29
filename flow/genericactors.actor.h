@@ -849,6 +849,7 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 
 ACTOR template <class T>
 Future<Void> smartQuorum( std::vector<Future<T>> results, int required, double extraSeconds, int taskID = TaskDefaultDelay ) {
+	if (results.empty()) return Void();
 	Void _ = wait(quorum(results, required));
 	choose {
 		when (Void _ = wait(quorum(results, (int)results.size()))) {return Void();}

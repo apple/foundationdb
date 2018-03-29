@@ -309,7 +309,7 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 			self->dcId_locality[remoteDcId] = loc;
 		}
 
-		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.logRouterCount ) ) );
+		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.tLogs.size() ) ) );
 
 		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[recr.dcId], self->dcId_locality[remoteDcId] ) );
 		self->logSystem = newLogSystem;
@@ -545,10 +545,16 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 			.detail("DesiredResolvers", self->configuration.getDesiredResolvers())
 			.detail("storeType", self->configuration.storageServerStoreType)
 			.trackLatest("MasterRecoveryState");
+	
+	//FIXME: we only need log routers for the same locality as the master
+	int maxLogRouters = 0;
+	for(auto& tLogs : self->cstate.prevDBState.tLogs) {
+		maxLogRouters = std::max(maxLogRouters, tLogs.logRouterCount);
+	}
 
 	state RecruitFromConfigurationReply recruits = wait(
 		brokenPromiseToNever( self->clusterController.recruitFromConfiguration.getReply(
-			RecruitFromConfigurationRequest( self->configuration, self->lastEpochEnd==0 ) ) ) );
+			RecruitFromConfigurationRequest( self->configuration, self->lastEpochEnd==0, maxLogRouters ) ) ) );
 
 	self->primaryDcId.clear();
 	self->remoteDcIds.clear();
@@ -585,7 +591,7 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	// Recover transaction state store
 	if(self->txnStateStore) self->txnStateStore->close();
 	self->txnStateLogAdapter = openDiskQueueAdapter( oldLogSystem, txsTag );
-	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false );
+	self->txnStateStore = keyValueStoreLogSystem( self->txnStateLogAdapter, self->dbgid, self->memoryLimit, false, false );
 
 	// Versionstamped operations (particularly those applied from DR) define a minimum commit version
 	// that we may recover to, as they embed the version in user-readable data and require that no

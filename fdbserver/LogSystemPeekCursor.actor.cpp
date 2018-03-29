@@ -256,8 +256,14 @@ LogMessageVersion ILogSystem::ServerPeekCursor::version() { return messageVersio
 
 Version ILogSystem::ServerPeekCursor::popped() { return poppedVersion; }
 
-ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore )
-	: bestServer(bestServer), readQuorum(readQuorum), tag(tag), currentCursor(0), hasNextMessage(false), messageVersion(begin), randomID(g_random->randomUniqueID()) {
+ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin )
+	: serverCursors(serverCursors), bestServer(-1), readQuorum(serverCursors.size()), tag(invalidTag), currentCursor(0), hasNextMessage(false), messageVersion(begin), randomID(g_random->randomUniqueID()), tLogReplicationFactor(0) {
+	
+	sortedVersions.resize(serverCursors.size());
+}
+
+ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector< LocalityData > const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor )
+	: bestServer(bestServer), readQuorum(readQuorum), tag(tag), currentCursor(0), hasNextMessage(false), messageVersion(begin), randomID(g_random->randomUniqueID()), tLogLocalities(tLogLocalities), tLogPolicy(tLogPolicy), tLogReplicationFactor(tLogReplicationFactor) {
 	for( int i = 0; i < logServers.size(); i++ ) {
 		Reference<ILogSystem::ServerPeekCursor> cursor( new ILogSystem::ServerPeekCursor( logServers[i], tag, begin, end, bestServer >= 0, parallelGetMore ) );
 		//TraceEvent("MPC_starting", randomID).detail("cursor", cursor->randomID).detail("end", end);
@@ -266,8 +272,9 @@ ILogSystem::MergedPeekCursor::MergedPeekCursor( std::vector<Reference<AsyncVar<O
 	sortedVersions.resize(serverCursors.size());
 }
 
-ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion )
-	: serverCursors(serverCursors), bestServer(bestServer), readQuorum(readQuorum), currentCursor(0), hasNextMessage(false), messageVersion(messageVersion), nextVersion(nextVersion), randomID(g_random->randomUniqueID()) {
+ILogSystem::MergedPeekCursor::MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, std::vector< LocalityData > const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor )
+	: serverCursors(serverCursors), bestServer(bestServer), readQuorum(readQuorum), currentCursor(0), hasNextMessage(false), messageVersion(messageVersion), nextVersion(nextVersion), randomID(g_random->randomUniqueID()), tLogLocalities(tLogLocalities), tLogPolicy(tLogPolicy), tLogReplicationFactor(tLogReplicationFactor) {
+	sortedVersions.resize(serverCursors.size());
 	calcHasMessage();
 }
 
@@ -276,7 +283,7 @@ Reference<ILogSystem::IPeekCursor> ILogSystem::MergedPeekCursor::cloneNoMore() {
 	for( auto it : serverCursors ) {
 		cursors.push_back(it->cloneNoMore());
 	}
-	return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( cursors, messageVersion, bestServer, readQuorum, nextVersion ) );
+	return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( cursors, messageVersion, bestServer, readQuorum, nextVersion, tLogLocalities, tLogPolicy, tLogReplicationFactor ) );
 }
 
 void ILogSystem::MergedPeekCursor::setProtocolVersion( uint64_t version ) {
@@ -310,10 +317,14 @@ void ILogSystem::MergedPeekCursor::calcHasMessage() {
 	}
 
 	hasNextMessage = false;
-	updateMessage();
+	updateMessage(false);
+
+	if(!hasNextMessage && tLogPolicy) {
+		updateMessage(true);
+	}
 }
 
-void ILogSystem::MergedPeekCursor::updateMessage() {
+void ILogSystem::MergedPeekCursor::updateMessage(bool usePolicy) {
 	loop {
 		bool advancedPast = false;
 		sortedVersions.clear();
@@ -323,14 +334,30 @@ void ILogSystem::MergedPeekCursor::updateMessage() {
 			sortedVersions.push_back(std::pair<LogMessageVersion, int>(serverCursor->version(), i));
 		}
 
-		std::nth_element(sortedVersions.begin(), sortedVersions.end()-readQuorum, sortedVersions.end());
-		messageVersion = sortedVersions[sortedVersions.size()-readQuorum].first;
+		if(usePolicy) {
+			ASSERT(tLogPolicy);
+			localityGroup.clear();
+			std::sort(sortedVersions.begin(), sortedVersions.end());
+
+			for(auto sortedVersion : sortedVersions) {
+				auto& locality = tLogLocalities[sortedVersion.second];
+				localityGroup.add(locality);
+
+				if( localityGroup.size() >= tLogReplicationFactor && localityGroup.validate(tLogPolicy) ) {
+					messageVersion = sortedVersion.first;
+					break;
+				}
+			}
+		} else {
+			std::nth_element(sortedVersions.begin(), sortedVersions.end()-readQuorum, sortedVersions.end());
+			messageVersion = sortedVersions[sortedVersions.size()-readQuorum].first;
+		}
 
 		for(int i = 0; i < serverCursors.size(); i++) {
 			auto& c = serverCursors[i];
 			auto start = c->version();
 			c->advanceTo(messageVersion);
-			if( start < messageVersion && messageVersion < c->version() ) {
+			if( start <= messageVersion && messageVersion < c->version() ) {
 				advancedPast = true;
 				TEST(true); //Merge peek cursor advanced past desired sequence
 			}
@@ -563,7 +590,7 @@ void ILogSystem::SetPeekCursor::updateMessage(int logIdx, bool usePolicy) {
 			for (auto& c : cursors) {
 				auto start = c->version();
 				c->advanceTo(messageVersion);
-				if( start < messageVersion && messageVersion < c->version() ) {
+				if( start <= messageVersion && messageVersion < c->version() ) {
 					advancedPast = true;
 					TEST(true); //Merge peek cursor advanced past desired sequence
 				}

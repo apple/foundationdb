@@ -3230,16 +3230,16 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	self.folder = folder;
 
 	try {
-		self.storage.makeNewStorageServerDurable();
-		Void _ = wait( self.storage.commit() );
-
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait( addStorageServer(self.cx, ssi) ); // Might throw recruitment_failed in case of simultaneous master failure
 			self.tag = verAndTag.second;
-			self.setInitialVersion( verAndTag.first-1 ); // FIXME: Can this be 0 now?  Should we get a corresponding updatePos?
+			self.setInitialVersion( verAndTag.first-1 );
 		} else {
 			self.tag = seedTag;
 		}
+
+		self.storage.makeNewStorageServerDurable();
+		Void _ = wait( self.storage.commit() );
 
 		TraceEvent("StorageServerInit", ssi.id()).detail("Version", self.version.get()).detail("SeedTag", seedTag.toString());
 		recruitReply.send(ssi);
@@ -3309,8 +3309,9 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 							}
 							self->allHistory = self->history;
 
+							TraceEvent("SSTag", self->thisServerID).detail("myTag", self->tag.toString());
 							for(auto it : self->history) {
-								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString()).detail("myTag", self->tag.toString());
+								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString());
 							}
 
 							if(self->history.size() && BUGGIFY) {

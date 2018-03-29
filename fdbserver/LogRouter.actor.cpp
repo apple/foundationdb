@@ -75,7 +75,7 @@ struct LogRouterData {
 	UID dbgid;
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	NotifiedVersion version;
-	Version minPopped;
+	NotifiedVersion minPopped;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Tag routerTag;
 	int logSet;
@@ -167,7 +167,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 				when( Void _ = wait( dbInfoChange ) ) { //FIXME: does this actually happen?
 					if(r) tagPopped = std::max(tagPopped, r->popped());
 					if( self->logSystem->get() )
-						r = self->logSystem->get()->peekSingle( tagAt, tag );
+						r = self->logSystem->get()->peekLogRouter( tagAt, tag, self->dbgid );
 					else
 						r = Reference<ILogSystem::IPeekCursor>();
 					dbInfoChange = self->logSystem->onChange();
@@ -175,13 +175,14 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 			}
 		}
 
-		Version ver = 0;
-		std::vector<TagsAndMessage> messages;
+		state Version ver = 0;
+		state std::vector<TagsAndMessage> messages;
 		while (true) {
-			bool foundMessage = r->hasMessage();
+			state bool foundMessage = r->hasMessage();
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
+					Void _ = wait(self->minPopped.whenAtLeast(ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS));
 					commitMessages(self, ver, messages);
 					self->version.set( ver );
 					//TraceEvent("LogRouterVersion").detail("ver",ver);
@@ -321,6 +322,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 		self->logSystem->get()->pop(minPopped, self->routerTag);
 	}
 	req.reply.send(Void());
+	self->minPopped.set(minPopped);
 	return Void();
 }
 
@@ -340,12 +342,7 @@ ACTOR Future<Void> logRouterCore(
 	loop choose {
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			if( db->get().recoveryState >= RecoveryState::FULLY_RECOVERED && logSet < db->get().logSystemConfig.tLogs.size() &&
-					std::count( db->get().logSystemConfig.tLogs[logSet].logRouters.begin(), db->get().logSystemConfig.tLogs[logSet].logRouters.end(), interf.id() ) ) {
-				logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
-			} else {
-				logRouterData.logSystem->set(Reference<ILogSystem>());
-			}
+			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {
 			addActor.send( logRouterPeekMessages( &logRouterData, req ) );
@@ -359,9 +356,26 @@ ACTOR Future<Void> logRouterCore(
 
 ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t recoveryCount, TLogInterface myInterface, int logSet) {
 	loop{
-		if ( ( (db->get().recoveryCount > recoveryCount && db->get().recoveryState != 0) || (db->get().recoveryCount == recoveryCount && db->get().recoveryState == 7) ) &&
-			( logSet >= db->get().logSystemConfig.expectedLogSets || ( logSet < db->get().logSystemConfig.tLogs.size() &&
-			!std::count(db->get().logSystemConfig.tLogs[logSet].logRouters.begin(), db->get().logSystemConfig.tLogs[logSet].logRouters.end(), myInterface.id()) ) )) {
+		bool isDisplaced = ( (db->get().recoveryCount > recoveryCount && db->get().recoveryState != 0) || (db->get().recoveryCount == recoveryCount && db->get().recoveryState == 7) );
+		if(isDisplaced) {
+			for(auto& log : db->get().logSystemConfig.tLogs) {
+				if( std::count( log.logRouters.begin(), log.logRouters.end(), myInterface.id() ) ) {
+					isDisplaced = false;
+					break;
+				}
+			}
+		}
+		if(isDisplaced) {
+			for(auto& old : db->get().logSystemConfig.oldTLogs) {
+				for(auto& log : old.tLogs) {
+					 if( std::count( log.logRouters.begin(), log.logRouters.end(), myInterface.id() ) ) {
+						isDisplaced = false;
+						break;
+					 }
+				}
+			}
+		}
+		if (isDisplaced) {
 			throw worker_removed();
 		}
 		Void _ = wait(db->onChange());

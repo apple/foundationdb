@@ -743,11 +743,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		StatusObject primaryObj;
 		primaryObj["id"] = "0";
-		primaryObj["priority"] = 1;
+		primaryObj["priority"] = 0;
 
 		StatusObject remoteObj;
 		remoteObj["id"] = "1";
-		remoteObj["priority"] = 0;
+		remoteObj["priority"] = 1;
 
 		bool needsRemote = generateFearless;
 		if(generateFearless) {
@@ -836,7 +836,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			}
 
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
-			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 		}
 
 		StatusArray regionArr;

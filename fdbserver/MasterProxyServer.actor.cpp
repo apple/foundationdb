@@ -762,7 +762,7 @@ ACTOR Future<Void> commitBatch(
 		}
 	}
 
-	LogSystemDiskQueueAdapter::CommitMessage msg = wait(storeCommits.back().first); // Should just be doing yields
+	state LogSystemDiskQueueAdapter::CommitMessage msg = wait(storeCommits.back().first); // Should just be doing yields
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.AfterStoreCommits");
@@ -777,14 +777,11 @@ ACTOR Future<Void> commitBatch(
 		firstMessage = false;
 	}
 
-	self->logSystem->pop(msg.popTo, txsTag);
-
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMaxCommittedVersion( UID(), commitVersion );  //< Is this valid?
 
 	//TraceEvent("ProxyPush", self->dbgid).detail("PrevVersion", prevVersion).detail("Version", commitVersion)
-	//	.detail("TransactionsSubmitted", trs.size()).detail("TransactionsCommitted", commitCount)
-	//	.detail("txsBytes", msg.message.size()).detail("TxsPopTo", msg.popTo);
+	//	.detail("TransactionsSubmitted", trs.size()).detail("TransactionsCommitted", commitCount).detail("TxsPopTo", msg.popTo);
 
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMaxCommittedVersion(UID(), commitVersion);
@@ -800,6 +797,8 @@ ACTOR Future<Void> commitBatch(
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
 	Void _ = wait(loggingComplete);
 	Void _ = wait(yield());
+
+	self->logSystem->pop(msg.popTo, txsTag);
 
 	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)	
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
@@ -1184,7 +1183,7 @@ ACTOR Future<Void> masterProxyServerCore(
 
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get());
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, false);
-	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true);
+	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true);
 	onError = onError || commitData.logSystem->onError();
 
 	addActor.send(transactionStarter(proxy, master, db, addActor, &commitData));
