@@ -125,6 +125,16 @@ class Instruction:
         self.stack.push(self.index, val)
 
 
+def test_fdb_transactional_generator(db):
+    try:
+        @fdb.transactional
+        def function_that_yields(tr):
+            yield 0
+        assert fdb.get_api_version() < 620, "Generators post-6.2.0 should throw"
+    except ValueError as e:
+        pass
+
+
 def test_db_options(db):
     db.options.set_max_watches(100001)
     db.options.set_datacenter_id("dc_id")

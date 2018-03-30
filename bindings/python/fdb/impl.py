@@ -22,16 +22,17 @@
 
 import ctypes
 import ctypes.util
+import datetime
 import functools
+import inspect
+import multiprocessing
+import os
+import platform
+import sys
 import threading
 import traceback
-import inspect
-import datetime
-import platform
-import os
-import sys
-import multiprocessing
 
+import fdb
 from fdb import six
 
 _network_thread = None
@@ -203,7 +204,9 @@ def transactional(*tr_args, **tr_kwargs):
 
     It is important to note that the wrapped method may be called
     multiple times in the event of a commit failure, until the commit
-    succeeds.
+    succeeds.  This restriction requires that the wrapped function
+    may not be a generator, or a function that returns a closure that
+    contains the `tr` object.
 
     If given a Transaction, the Transaction will be passed into the
     wrapped code, and WILL NOT be committed at completion of the
@@ -247,7 +250,6 @@ def transactional(*tr_args, **tr_kwargs):
                     except FDBError as e:
                         yield asyncio.From(tr.on_error(e.code))
         else:
-
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
                 if isinstance(args[index], TransactionRead):
@@ -268,6 +270,9 @@ def transactional(*tr_args, **tr_kwargs):
                         committed = True
                     except FDBError as e:
                         tr.on_error(e.code).wait()
+
+                    if fdb.get_api_version() >= 620 and isinstance(ret, types.GeneratorType):
+                        raise ValueError("Generators can not be wrapped with fdb.transactional")
 
                     # now = datetime.datetime.now()
                     # td = now - last
