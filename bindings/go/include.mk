@@ -49,7 +49,7 @@ GO_PACKAGE_OBJECTS := $(addprefix $(GO_PACKAGE_OUTDIR)/,$(GO_PACKAGES:=.a))
 
 GO_SRC := $(shell find $(CURDIR)/bindings/go/src -name '*.go')
 
-fdb_go: $(GO_PACKAGE_OBJECTS) $(GO_SRC) fdb_go_fmt_check
+fdb_go: $(GO_PACKAGE_OBJECTS) $(GO_SRC) fdb_go_fmt_check $(CURDIR)/bindings/go/src/fdb/generated.go
 
 fdb_go_fmt: $(GO_SRC)
 	@echo "Formatting     fdb_go"
@@ -97,6 +97,6 @@ $(GO_PACKAGE_OUTDIR)/fdb.a: $(GO_DEST)/.stamp lib/libfdb_c.$(DLEXT) $(GO_SRC) $(
 	@echo "Compiling      fdb"
 	@go install $(GO_IMPORT_PATH)/fdb
 
-$(GO_DEST)/fdb/generated.go: $(GO_DEST)/.stamp bindings/go/src/_util/translate_fdb_options.go fdbclient/vexillographer/fdb.options
+$(CURDIR)/bindings/go/src/fdb/generated.go: $(GO_DEST)/.stamp bindings/go/src/_util/translate_fdb_options.go fdbclient/vexillographer/fdb.options
 	@echo "Building       $@"
 	@go run bindings/go/src/_util/translate_fdb_options.go < fdbclient/vexillographer/fdb.options > $@
