@@ -1847,7 +1847,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 		if (req.recoverFrom.logSystemType == 2) {
 			bool found = false;
-			if(req.locality == tagLocalityInvalid || req.locality == tagLocalitySpecial) {
+			if(req.locality == tagLocalityInvalid || req.locality == tagLocalitySpecial || req.locality == tagLocalityUpgraded) {
 				logData->unrecoveredBefore = req.knownCommittedVersion;
 				found = true;
 			}

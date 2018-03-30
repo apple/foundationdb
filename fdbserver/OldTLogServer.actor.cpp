@@ -858,9 +858,9 @@ namespace oldTLog {
 				int32_t messageLength;
 				uint32_t subVersion;
 				rd >> messageLength >> subVersion;
-				messageLength += sizeof(uint16_t);
-				messages << messageLength << subVersion << uint16_t(0);
-				messageLength -= (sizeof(subVersion) + sizeof(uint16_t));
+				messageLength += sizeof(uint16_t) + sizeof(Tag);
+				messages << messageLength << subVersion << uint16_t(1) << req.tag;
+				messageLength -= (sizeof(subVersion) + sizeof(uint16_t) + sizeof(Tag));
 				messages.serializeBytes(rd.readBytes(messageLength), messageLength);
 			}
 		}
@@ -934,9 +934,9 @@ namespace oldTLog {
 					int32_t messageLength;
 					uint32_t subVersion;
 					rd >> messageLength >> subVersion;
-					messageLength += sizeof(uint16_t);
-					messages << messageLength << subVersion << uint16_t(0);
-					messageLength -= (sizeof(subVersion) + sizeof(uint16_t));
+					messageLength += sizeof(uint16_t) + sizeof(Tag);
+					messages << messageLength << subVersion << uint16_t(1) << req.tag;
+					messageLength -= (sizeof(subVersion) + sizeof(uint16_t) + sizeof(Tag));
 					messages.serializeBytes(rd.readBytes(messageLength), messageLength);
 				}
 			}

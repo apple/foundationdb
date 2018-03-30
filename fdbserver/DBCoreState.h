@@ -46,7 +46,7 @@ struct CoreTLogSet {
 	int32_t logRouterCount;
 	Version startVersion;
 
-	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalitySpecial), logRouterCount(0), startVersion(invalidVersion) {}
+	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityUpgraded), logRouterCount(0), startVersion(invalidVersion) {}
 
 	bool operator == (CoreTLogSet const& rhs) const { 
 		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal && hasBestPolicy == rhs.hasBestPolicy &&

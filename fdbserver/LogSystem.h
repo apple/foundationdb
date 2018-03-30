@@ -302,8 +302,10 @@ struct ILogSystem {
 		int tLogReplicationFactor;
 		IRepPolicyRef tLogPolicy;
 		std::vector< LocalityData > tLogLocalities;
+		bool collectTags;
+		std::vector<Tag> tags;
 
-		MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin );
+		MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin, bool collectTags );
 		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
 		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
 

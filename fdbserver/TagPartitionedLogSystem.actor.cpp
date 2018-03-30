@@ -421,7 +421,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		} else {
 			int bestSet = -1;
 			for(int t = 0; t < tLogs.size(); t++) {
-				if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial || (tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
+				if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded || (tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
 					bestSet = t;
 					break;
 				}
@@ -437,7 +437,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				for(int i = 0; i < oldLogData.size() && begin < oldLogData[i].epochEnd; i++) {
 					int bestOldSet = -1;
 					for(int t = 0; t < oldLogData[i].tLogs.size(); t++) {
-						if(oldLogData[i].tLogs[t]->hasBestPolicy && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || (oldLogData[i].tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
+						if(oldLogData[i].tLogs[t]->hasBestPolicy && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded || (oldLogData[i].tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
 							bestOldSet = t;
 							break;
 						}
@@ -465,13 +465,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for(auto tag : tags) {
 			cursors.push_back(peek(begin, tag, parallelGetMore));
 		}
-		return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(cursors, begin) );
+		return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(cursors, begin, oldLogData.size() && oldLogData[0].tLogs.size() && oldLogData[0].tLogs[0]->locality == tagLocalityUpgraded) );
 	}
 
 	Reference<IPeekCursor> peekLocal( Tag tag, Version begin, Version end ) {
 		int bestSet = -1;
 		for(int t = 0; t < tLogs.size(); t++) {
-			if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial || (tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
+			if(tLogs[t]->hasBestPolicy && (tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalitySpecial || tLogs[t]->locality == tagLocalityUpgraded || (tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
 				bestSet = t;
 				break;
 			}
@@ -491,7 +491,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for(int i = 0; i < oldLogData.size() && begin < oldLogData[i].epochEnd; i++) {
 				int bestOldSet = -1;
 				for(int t = 0; t < oldLogData[i].tLogs.size(); t++) {
-					if(oldLogData[i].tLogs[t]->hasBestPolicy && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || (oldLogData[i].tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
+					if(oldLogData[i].tLogs[t]->hasBestPolicy && (oldLogData[i].tLogs[t]->locality == tag.locality || tag.locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalitySpecial || oldLogData[i].tLogs[t]->locality == tagLocalityUpgraded || (oldLogData[i].tLogs[t]->isLocal && tag.locality == tagLocalityLogRouter))) {
 						bestOldSet = t;
 						break;
 					}
