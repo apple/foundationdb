@@ -14,6 +14,6 @@ The following documents give detailed descriptions of the API for each language:
    api-ruby
    Node.js API <api-node>
    Java API <relative://javadoc/index.html>
-   Go API <relative://godoc/fdb.html>
+   Go API <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>
    api-c
    api-error-codes
