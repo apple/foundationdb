@@ -465,7 +465,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for(auto tag : tags) {
 			cursors.push_back(peek(begin, tag, parallelGetMore));
 		}
-		return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(cursors, begin, oldLogData.size() && oldLogData[0].tLogs.size() && oldLogData[0].tLogs[0]->locality == tagLocalityUpgraded) );
+		return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(cursors, begin, tLogs.size() && tLogs[0]->locality == tagLocalityUpgraded) );
 	}
 
 	Reference<IPeekCursor> peekLocal( Tag tag, Version begin, Version end ) {
