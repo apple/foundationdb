@@ -74,6 +74,7 @@ struct InitializeTLogRequest {
 	Version knownCommittedVersion;
 	LogEpoch epoch;
 	std::vector<Tag> recoverTags;
+	std::vector<Tag> allTags;
 	KeyValueStoreType storeType;
 	Tag remoteTag;
 	int8_t locality;
@@ -85,7 +86,7 @@ struct InitializeTLogRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & remoteTag & locality & isPrimary & reply;
+		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & allTags & storeType & remoteTag & locality & isPrimary & reply;
 	}
 };
 

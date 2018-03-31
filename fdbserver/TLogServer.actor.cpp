@@ -1884,8 +1884,8 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			logData->queueCommittedVersion.set( logData->unrecoveredBefore );
 			logData->version.set( logData->unrecoveredBefore );
 
-			logData->unpoppedRecoveredTags = req.recoverTags.size();
-			Void _ = wait( initPersistentState( self, logData, std::numeric_limits<Version>::max(), req.recoverTags ) || logData->removed );
+			logData->unpoppedRecoveredTags = req.allTags.size();
+			Void _ = wait( initPersistentState( self, logData, std::numeric_limits<Version>::max(), req.allTags ) || logData->removed );
 
 			TraceEvent("TLogRecover", self->dbgid).detail("logId", logData->logId).detail("at", req.recoverAt).detail("known", req.knownCommittedVersion).detail("unrecovered", logData->unrecoveredBefore).detail("tags", describe(req.recoverTags)).detail("locality", req.locality);
 
@@ -1895,16 +1895,16 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 			state Future<Void> updater = updateLogSystem(self, logData, req.recoverFrom, logData->logSystem);
 
-			if(req.isPrimary && logData->unrecoveredBefore < req.knownCommittedVersion) {
+			if(req.isPrimary && logData->unrecoveredBefore < req.knownCommittedVersion && !logData->stopped) {
 				std::vector<Tag> tags;
 				tags.push_back(logData->remoteTag);
-				Void _ = wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.knownCommittedVersion));
+				Void _ = wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.knownCommittedVersion) || logData->removed);
 			}
 
 			TraceEvent("TLogPullComplete", self->dbgid).detail("logId", logData->logId);
 
-			if(req.isPrimary && !req.recoverTags.empty()) {
-				Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion, req.recoverAt));
+			if(req.isPrimary && !req.recoverTags.empty() && !logData->stopped) {
+				Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion, req.recoverAt) || logData->removed);
 			}
 
 			if(req.isPrimary && logData->version.get() < req.recoverAt && !logData->stopped) {
@@ -1923,6 +1923,18 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 				self->prevVersion = logData->version.get();
 				logData->version.set( req.recoverAt );
+			}
+
+			//PullAsyncData will add tags that were popped in the previous generation,
+			//so we need to pop all tags that did not have data at the recovery version.
+			std::set<Tag> allTags(req.allTags.begin(), req.allTags.end());
+			for(int tag_locality = 0; tag_locality < logData->tag_data.size(); tag_locality++) {
+				for(int tag_id = 0; tag_id < logData->tag_data[tag_locality].size(); tag_id++) {
+					auto data = logData->tag_data[tag_locality][tag_id];
+					if(data && !allTags.count(data->tag)) {
+						tLogPop(self, TLogPopRequest(req.recoverAt, data->tag), logData);
+					}
+				}
 			}
 
 			TraceEvent("TLogPull2Complete", self->dbgid).detail("logId", logData->logId);

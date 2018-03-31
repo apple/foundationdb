@@ -74,7 +74,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	bool hasRemoteServers;
 
 	Optional<Version> epochEndVersion;
-	std::set< Tag > epochEndTags;
+	std::set<Tag> epochEndTags;
 	Version knownCommittedVersion;
 	LocalityData locality;
 	std::map< std::pair<UID, Tag>, Version > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
@@ -1276,6 +1276,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		
 		vector< InitializeTLogRequest > remoteTLogReqs( remoteWorkers.remoteTLogs.size() );
 
+		std::vector<Tag> allTags(self->epochEndTags.begin(), self->epochEndTags.end());
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = remoteRecruitmentID;
@@ -1287,20 +1288,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.remoteTag = Tag(tagLocalityRemoteLog, i);
 			req.locality = remoteLocality;
 			req.isPrimary = false;
+			req.allTags = allTags;
 		}
 
 		logSet->tLogLocalities.resize( remoteWorkers.remoteTLogs.size() );
 		logSet->logServers.resize( remoteWorkers.remoteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 		logSet->updateLocalitySet(remoteWorkers.remoteTLogs);
 		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
-
-		vector<int> locations;
-		for( Tag tag : oldLogSystem->epochEndTags ) {
-			locations.clear();
-			logSet->getPushLocations( vector<Tag>(1, tag), locations, 0 );
-			for(int loc : locations)
-				remoteTLogReqs[ loc ].recoverTags.push_back( tag );
-		}
 
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ )
 			remoteTLogInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor( remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
@@ -1389,6 +1383,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state vector<Future<TLogInterface>> initializationReplies;
 		vector< InitializeTLogRequest > reqs( recr.tLogs.size() );
 
+		std::vector<Tag> allTags(logSystem->epochEndTags.begin(), logSystem->epochEndTags.end());
 		for( int i = 0; i < recr.tLogs.size(); i++ ) {
 			InitializeTLogRequest &req = reqs[i];
 			req.recruitmentID = recruitmentID;
@@ -1400,6 +1395,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.locality = primaryLocality;
 			req.remoteTag = Tag(tagLocalityRemoteLog, i);
 			req.isPrimary = true;
+			req.allTags = allTags;
 		}
 
 		logSystem->tLogs[0]->tLogLocalities.resize( recr.tLogs.size() );
@@ -1437,6 +1433,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.locality = tagLocalityInvalid;
 				req.remoteTag = Tag();
 				req.isPrimary = true;
+				req.allTags = allTags;
 			}
 
 			logSystem->tLogs[1]->tLogLocalities.resize( recr.satelliteTLogs.size() );
