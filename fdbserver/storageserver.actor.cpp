@@ -264,6 +264,7 @@ public:
 	Tag tag;
 	vector<pair<Version,Tag>> history;
 	vector<pair<Version,Tag>> allHistory;
+	Version poppedAllAfter;
 	std::map<Version, Arena> freeable;  // for each version, an Arena that must be held until that version is < oldestVersion
 	Arena lastArena;
 
@@ -281,6 +282,11 @@ public:
 
 	void popVersion(Version v, bool popAllTags = false) {
 		if(logSystem) {
+			if(v > poppedAllAfter) {
+				popAllTags = true;
+				poppedAllAfter = std::numeric_limits<Version>::max();
+			}
+
 			vector<pair<Version,Tag>>* hist = &history;
 			vector<pair<Version,Tag>> allHistoryCopy;
 			if(popAllTags) {
@@ -449,7 +455,8 @@ public:
 			debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now())
+			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), 
+			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max())
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
@@ -2480,8 +2487,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			}
 		}
 
-		if(ver != invalidVersion) data->lastVersionWithData = ver;
-		ver = cloneCursor2->version().version - 1;
+		if(ver != invalidVersion) {
+			data->lastVersionWithData = ver;
+		} else {
+			ver = cloneCursor2->version().version - 1;
+		}
 		if(injectedChanges) data->lastVersionWithData = ver;
 
 		data->updateEagerReads = NULL;
@@ -3134,6 +3144,9 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 				if( self->db->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
 					self->logSystem = ILogSystem::fromServerDBInfo( self->thisServerID, self->db->get() );
 					if (self->logSystem) {
+						if(self->logSystem->getLogSystemConfig().oldTLogs.size()) {
+							self->poppedAllAfter = self->logSystem->getLogSystemConfig().oldTLogs[0].epochEnd;
+						}
 						self->logCursor = self->logSystem->peekSingle( self->version.get() + 1, self->tag, self->history );
 						self->popVersion( self->durableVersion.get() + 1, true );
 					}
@@ -3294,16 +3307,20 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 						tr.atomicOp( serverMaxTagKeyFor(rep.newTag.get().locality), serverTagMaxValue(rep.newTag.get()), MutationRef::Max );
 					}
 
-					if(rep.history.size() && rep.history.back().first <= self->version.get()) {
+					if(rep.history.size() && rep.history.back().first < self->version.get()) {
 						tr.clear(serverTagHistoryRangeBefore(ssi.id(), self->version.get()));
 					}
 
 					choose {
 						when ( Void _ = wait( tr.commit() ) ) {
 							self->history = rep.history;
+							while(self->history.size() && self->history.back().first < self->version.get() ) {
+								self->history.pop_back();
+							}
+
 							if(rep.newTag.present()) {
 								self->tag = rep.newTag.get();
-								self->history.push_back(std::make_pair(tr.getCommittedVersion(), rep.tag));
+								self->history.insert(self->history.begin(), std::make_pair(tr.getCommittedVersion(), rep.tag));
 							} else {
 								self->tag = rep.tag;
 							}

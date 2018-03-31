@@ -1108,6 +1108,12 @@ ACTOR static Future<Void> readRequestServer(
 									usedTags.push_back(t.id);
 								}
 							}
+							for( auto& kv : commitData->txnStateStore->readRange(serverTagHistoryKeys).get() ) {
+								Tag t = decodeServerTagValue( kv.value );
+								if(t.locality == locality) {
+									usedTags.push_back(t.id);
+								}
+							}
 							std::sort(usedTags.begin(), usedTags.end());
 
 							int usedIdx = 0;
