@@ -243,39 +243,23 @@ struct ILogSystem {
 		Future<Void> interfaceChanged;
 
 		ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore );
-
 		ServerPeekCursor( TLogPeekReply const& results, LogMessageVersion const& messageVersion, LogMessageVersion const& end, int32_t messageLength, int32_t rawLength, bool hasMsg, Version poppedVersion, Tag tag );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
-
 		virtual void setProtocolVersion( uint64_t version );
-
 		virtual Arena& arena();
-
 		virtual ArenaReader* reader();
-
 		virtual bool hasMessage();
-
 		virtual void nextMessage();
-
 		virtual StringRef getMessage();
-
 		virtual StringRef getMessageWithTags();
-
 		virtual const std::vector<Tag>& getTags();
-
 		virtual void advanceTo(LogMessageVersion n);
-
 		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
-
 		virtual Future<Void> onFailed();
-
 		virtual bool isActive();
-
 		virtual bool isExhausted();
-
 		virtual LogMessageVersion version();
-
 		virtual Version popped();
 
 		virtual void addref() {
@@ -311,42 +295,23 @@ struct ILogSystem {
 		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
 		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
 
-		// if server_cursors[c]->hasMessage(), then nextSequence <= server_cursors[c]->sequence() and there are no messages known to that server with sequences in [nextSequence,server_cursors[c]->sequence())
-
 		virtual Reference<IPeekCursor> cloneNoMore();
-
 		virtual void setProtocolVersion( uint64_t version );
-
 		virtual Arena& arena();
-
 		virtual ArenaReader* reader();
-
 		void calcHasMessage();
-
 		void updateMessage(bool usePolicy);
-
 		virtual bool hasMessage();
-
 		virtual void nextMessage();
-
 		virtual StringRef getMessage();
-
 		virtual StringRef getMessageWithTags();
-
 		virtual const std::vector<Tag>& getTags();
-
 		virtual void advanceTo(LogMessageVersion n);
-
 		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
-
 		virtual Future<Void> onFailed();
-
 		virtual bool isActive();
-
 		virtual bool isExhausted();
-
 		virtual LogMessageVersion version();
-
 		virtual Version popped();
 
 		virtual void addref() {
@@ -374,39 +339,22 @@ struct ILogSystem {
 		SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, int bestSet, int bestServer, Tag tag, Version begin, Version end, bool parallelGetMore );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
-
 		virtual void setProtocolVersion( uint64_t version );
-
 		virtual Arena& arena();
-
 		virtual ArenaReader* reader();
-
 		void calcHasMessage();
-
 		void updateMessage(int logIdx, bool usePolicy);
-
 		virtual bool hasMessage();
-
 		virtual void nextMessage();
-
 		virtual StringRef getMessage();
-
 		virtual StringRef getMessageWithTags();
-
 		virtual const std::vector<Tag>& getTags();
-
 		virtual void advanceTo(LogMessageVersion n);
-
 		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
-
 		virtual Future<Void> onFailed();
-
 		virtual bool isActive();
-
 		virtual bool isExhausted();
-
 		virtual LogMessageVersion version();
-
 		virtual Version popped();
 
 		virtual void addref() {
@@ -426,35 +374,20 @@ struct ILogSystem {
 		MultiCursor( std::vector<Reference<IPeekCursor>> cursors, std::vector<LogMessageVersion> epochEnds );
 
 		virtual Reference<IPeekCursor> cloneNoMore();
-
 		virtual void setProtocolVersion( uint64_t version );
-
 		virtual Arena& arena();
-
 		virtual ArenaReader* reader();
-
 		virtual bool hasMessage();
-
 		virtual void nextMessage();
-
 		virtual StringRef getMessage();
-
 		virtual StringRef getMessageWithTags();
-
 		virtual const std::vector<Tag>& getTags();
-
 		virtual void advanceTo(LogMessageVersion n);
-
 		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
-
 		virtual Future<Void> onFailed();
-
 		virtual bool isActive();
-
 		virtual bool isExhausted();
-
 		virtual LogMessageVersion version();
-
 		virtual Version popped();
 
 		virtual void addref() {
@@ -554,6 +487,9 @@ struct ILogSystem {
 	virtual Tag getRandomRouterTag() = 0;
 
 	virtual void stopRejoins() = 0;
+
+	virtual const std::set<Tag>& getEpochEndTags() = 0;
+		// Returns the list of tags recovered from the previous generation of logs. This is not initialized on log systems created with fromServerDBInfo, fromLogSystemConfig, or fromOldLogSystemConfig.
 };
 
 struct LengthPrefixedStringRef {

@@ -840,7 +840,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Tag(tagLocalityLogRouter, g_random->randomInt(0, logRouterCount));
 	}
 
-	std::set< Tag > const& getEpochEndTags() const { return epochEndTags; }
+	virtual const std::set<Tag>& getEpochEndTags() { 
+		return epochEndTags; 
+	}
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
 		state Future<Void> waitFailure;
@@ -1328,6 +1330,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state UID recruitmentID = g_random->randomUniqueID();
 		logSystem->logSystemType = 2;
 		logSystem->expectedLogSets = 1;
+		logSystem->epochEndTags = oldLogSystem->getEpochEndTags();
 		
 		logSystem->tLogs.push_back( Reference<LogSet>( new LogSet() ) );
 		logSystem->tLogs[0]->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;

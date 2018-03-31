@@ -718,7 +718,6 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer( Database cx, StorageServ
 			KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(tag));
 			tr.addReadConflictRange( conflictRange );
 			tr.addWriteConflictRange( conflictRange );
-			tr.atomicOp( serverMaxTagKeyFor(locality), serverTagMaxValue(tag), MutationRef::Max );
 
 			Void _ = wait( tr.commit() );
 			return std::make_pair(tr.getCommittedVersion(), tag);
@@ -879,9 +878,6 @@ void seedShardServers(
 	for(int s=0; s<servers.size(); s++) {
 		tr.set(arena, serverTagKeyFor(servers[s].id()), serverTagValue(server_tag[servers[s].id()]));
 		tr.set(arena, serverListKeyFor(servers[s].id()), serverListValue(servers[s]));
-	}
-	for(auto it : dcId_locality) {
-		tr.set(arena, serverMaxTagKeyFor(it.second.locality), serverTagMaxValue(Tag(it.second.locality, it.second.id-1)));
 	}
 
 	std::vector<UID> serverIds;

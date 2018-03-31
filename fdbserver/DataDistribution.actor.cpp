@@ -2022,31 +2022,6 @@ static std::set<int> const& normalDDQueueErrors() {
 	return s;
 }
 
-ACTOR Future<Void> popOldTags( Transaction* tr, Reference<ILogSystem> logSystem, Version recoveryCommitVersion, int8_t tagLocality, std::vector<Tag> tags ) {
-	Optional<Standalone<StringRef>> val = wait( tr->get( tagLocality == tagLocalityUpgraded ? serverTagMaxOldKey : serverMaxTagKeyFor(tagLocality) ) );
-	if(!val.present())
-		return Void();
-
-	state Tag maxTag = tagLocality == tagLocalityUpgraded ? decodeServerTagMaxValueOld(val.get()) : decodeServerTagMaxValue( val.get() );
-
-	TraceEvent("PopOldTags").detail("maxTag", maxTag.toString());
-
-	std::set<Tag> unusedTags;
-	for(uint16_t i = 0; i <= maxTag.id; i++)
-		unusedTags.insert(Tag(tagLocality, i));
-
-	for(Tag& t : tags) {
-		if(t.locality == tagLocality) {
-			unusedTags.erase(t);
-		}
-	}
-
-	for(auto tag : unusedTags)
-		logSystem->pop(recoveryCommitVersion, tag);
-
-	return Void();
-}
-
 ACTOR Future<Void> popOldTags( Database cx, Reference<ILogSystem> logSystem, Version recoveryCommitVersion ) {
 	state Transaction tr(cx);
 
@@ -2055,29 +2030,26 @@ ACTOR Future<Void> popOldTags( Database cx, Reference<ILogSystem> logSystem, Ver
 
 	loop {
 		try {
-			state Future<Standalone<RangeResultRef>> fTagLocalities = tr.getRange( tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY );
 			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY );
 			state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY );
 
-			Void _ = wait( success(fTagLocalities) && success(fTags) && success(fHistoryTags) );
+			Void _ = wait( success(fTags) && success(fHistoryTags) );
 
-			state std::vector<Future<Void>> popActors;
-			state std::vector<Tag> tags;
+			state std::set<Tag> tags;
 
 			for(auto& kv : fTags.get()) {
-				tags.push_back(decodeServerTagValue( kv.value ));
+				tags.insert(decodeServerTagValue( kv.value ));
 			}
 
 			for(auto& kv : fHistoryTags.get()) {
-				tags.push_back(decodeServerTagValue( kv.value ));
+				tags.insert(decodeServerTagValue( kv.value ));
 			}
 
-			//FIXME: we have to check the old locality indefinately, because we can never be sure when pops have succeeded, we can remove this code when we no longer need to support upgrades from 5.X to 6.0
-			popActors.push_back(popOldTags(&tr, logSystem, recoveryCommitVersion, tagLocalityUpgraded, tags));
-			for(auto& kv : fTagLocalities.get()) {
-				popActors.push_back(popOldTags(&tr, logSystem, recoveryCommitVersion, decodeTagLocalityListValue(kv.value), tags));
+			for(auto tag : logSystem->getEpochEndTags()) {
+				if(!tags.count(tag)) {
+					logSystem->pop(recoveryCommitVersion, tag);
+				}
 			}
-			Void _ = wait( waitForAll(popActors) );
 			return Void();
 		} catch( Error &e ) {
 			Void _ = wait( tr.onError(e) );

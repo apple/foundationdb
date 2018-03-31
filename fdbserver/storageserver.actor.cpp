@@ -3304,7 +3304,6 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 						tr.setOption(FDBTransactionOptions::FIRST_IN_BATCH);
 						tr.set( serverTagKeyFor(ssi.id()), serverTagValue(rep.newTag.get()) );
 						tr.atomicOp( serverTagHistoryKeyFor(ssi.id()), serverTagValue(rep.tag), MutationRef::SetVersionstampedKey );
-						tr.atomicOp( serverMaxTagKeyFor(rep.newTag.get().locality), serverTagMaxValue(rep.newTag.get()), MutationRef::Max );
 					}
 
 					if(rep.history.size() && rep.history.back().first < self->version.get()) {
