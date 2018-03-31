@@ -1287,7 +1287,7 @@ ACTOR Future<Void> respondToRecovered( TLogInterface tli, Promise<Void> recovery
 		}
 		finishedRecovery = false;
 	}
-
+	TraceEvent("TLogRespondToRecovered", tli.id()).detail("finished", finishedRecovery);
 	loop {
 		TLogRecoveryFinishedRequest req = waitNext( tli.recoveryFinished.getFuture() );
 		if(finishedRecovery) {
@@ -1907,7 +1907,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 				Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion, req.recoverAt));
 			}
 
-			if(req.isPrimary && logData->version.get() < req.recoverAt) {
+			if(req.isPrimary && logData->version.get() < req.recoverAt && !logData->stopped) {
 				// Log the changes to the persistent queue, to be committed by commitQueue()
 				TLogQueueEntryRef qe;
 				qe.version = req.recoverAt;
