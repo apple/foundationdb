@@ -26,7 +26,7 @@ CLEAN_TARGETS += fdb_node_clean fdb_node_npm_clean
 NODE_VERSIONS := 0.8.22 0.10.0
 
 NODE_DIST_URL ?= https://nodejs.org/dist
-NODE_REGISTRY_URL ?= https://registry.npmjs.org/
+NODE_REGISTRY_URL ?= http://registry.npmjs.org/
 
 ifeq ($(RELEASE),true)
   NPMVER = $(VERSION)
