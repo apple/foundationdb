@@ -1748,6 +1748,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection *self, Reference<AsyncVar<
 				}
 				when( Void _ = wait( self->restartRecruiting.onTrigger() ) ) {}
 			}
+			Void _ = wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
 				throw;
