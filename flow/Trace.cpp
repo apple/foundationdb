@@ -931,7 +931,7 @@ TraceEvent::~TraceEvent() {
 	} catch( Error &e ) {
 		TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
 		delete tmpEventMetric;
-		throw;
+		ASSERT_ABORT(false);
 	}
 	delete tmpEventMetric;
 }

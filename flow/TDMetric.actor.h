@@ -1293,6 +1293,9 @@ public:
 	}
 };
 
+template<class T>
+const StringRef ContinuousMetric<T>::metricType;
+
 typedef ContinuousMetric<int64_t> Int64Metric;
 typedef Int64Metric VersionMetric;
 typedef ContinuousMetric<bool> BoolMetric;

@@ -35,7 +35,7 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 		Event stopped;
 		static thread_local IThreadPoolReceiver* threadUserObject;
 		explicit Thread(ThreadPool *pool, IThreadPoolReceiver *userObject) : pool(pool), userObject(userObject) {}
-		~Thread() { ASSERT(!userObject); }
+		~Thread() { ASSERT_ABORT(!userObject); }
 
 		void run() {
 			deprioritizeThread();

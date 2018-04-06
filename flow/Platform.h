@@ -53,8 +53,14 @@
 #error Compiling on unknown platform
 #endif
 
-#if defined(__linux__) && ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
-#error GCC 4.5.0 or later required on this platform
+#if defined(__linux__)
+#  if defined(__clang__)
+#    if ((__clang_major__ * 100 + __clang_minor__) < 303)
+#      error Clang 3.3 or later is required on this platform
+#    endif
+#  elif ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) < 40500)
+#    error GCC 4.5.0 or later required on this platform
+#  endif
 #endif
 
 #if defined(_WIN32) && (_MSC_VER < 1600)
