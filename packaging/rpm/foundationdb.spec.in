@@ -2,9 +2,9 @@ Name: foundationdb
 Version: FDBVERSION
 Release: FDBRELEASE
 Group: Applications/Databases
-License: FoundationDB Community License Agreement (https://foundationdb.org/license)
-URL: https://foundationdb.org
-Packager: FoundationDB <fdbdist@apple.com>
+License: FoundationDB Community License Agreement (https://www.foundationdb.org/license)
+URL: https://www.foundationdb.org
+Packager: FoundationDB <fdb-dist@apple.com>
 BuildArch: x86_64
 Summary: Ordered key-value store with full ACID transactions
 Vendor: FoundationDB
@@ -133,6 +133,5 @@ ifdef(`RHEL6', `/usr/lib/foundationdb/argparse.py')
 /usr/bin/fdbdr
 /usr/bin/fdbbackup
 /usr/bin/fdbrestore
-/usr/bin/fdbblob
 /usr/lib64/libfdb_c.so
 /usr/include/*

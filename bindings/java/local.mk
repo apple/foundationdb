@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -38,13 +38,14 @@ else
 endif
 
 ifeq ($(PLATFORM),linux)
-  fdb_java_CFLAGS += -I/usr/lib/jvm/java-8-openjdk-amd64/include -I/usr/lib/jvm/java-8-openjdk-amd64/include/linux
+  JAVA_HOME ?= /usr/lib/jvm/java-8-openjdk-amd64
+  fdb_java_CFLAGS += -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/linux
   fdb_java_LDFLAGS += -static-libgcc
 
   java_ARCH := amd64
 else ifeq ($(PLATFORM),osx)
-  # FIXME: Surely there is a better way to grab the JNI headers on any version of macOS.
-  fdb_java_CFLAGS += -I/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX10.11.sdk/System/Library/Frameworks/JavaVM.framework/Versions/A/Headers
+  JAVA_HOME ?= $(shell /usr/libexec/java_home)
+  fdb_java_CFLAGS += -I$(JAVA_HOME)/include -I$(JAVA_HOME)/include/darwin
 
   java_ARCH := x86_64
 endif
@@ -110,7 +111,7 @@ javadoc: $(JAVA_SOURCES) bindings/java/src/main/overview.html
 		-windowtitle "FoundationDB Java Client API" \
 		-doctitle "FoundationDB Java Client API" \
 		-link "http://docs.oracle.com/javase/8/docs/api" \
-		com.apple.foundationdb.org.apple.foundationdb.async com.apple.foundationdb.tuple com.apple.foundationdb.directory com.apple.foundationdb.subspace
+		com.apple.foundationdb com.apple.foundationdb.async com.apple.foundationdb.tuple com.apple.foundationdb.directory com.apple.foundationdb.subspace
 
 javadoc_clean:
 	@rm -rf $(JAVADOC_DIR)/javadoc

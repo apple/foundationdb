@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,7 +23,7 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 510
+ #define FDB_API_VERSION 520
  #include <foundationdb/fdb_c.h>
 */
 import "C"
@@ -70,7 +70,7 @@ type Transaction struct {
 
 type transaction struct {
 	ptr *C.FDBTransaction
-	db Database
+	db  Database
 }
 
 // TransactionOptions is a handle with which to set options that affect a
@@ -110,7 +110,7 @@ func (t Transaction) GetDatabase() Database {
 //
 // See the Transactor interface for an example of using Transact with
 // Transaction and Database objects.
-func (t Transaction) Transact(f func (Transaction) (interface{}, error)) (r interface{}, e error) {
+func (t Transaction) Transact(f func(Transaction) (interface{}, error)) (r interface{}, e error) {
 	defer panicToError(&e)
 
 	r, e = f(t)
@@ -171,7 +171,7 @@ func (t Transaction) SetReadVersion(version int64) {
 // but making it harder to reason about concurrency.
 //
 // For more information on snapshot reads, see
-// https://foundationdb.org/documentation/developer-guide.html#using-snapshot-reads.
+// https://www.foundationdb.org/documentation/developer-guide.html#using-snapshot-reads.
 func (t Transaction) Snapshot() Snapshot {
 	return Snapshot{t.transaction}
 }
@@ -196,7 +196,7 @@ func (t Transaction) OnError(e Error) FutureNil {
 // As with other client/server databases, in some failure scenarios a client may
 // be unable to determine whether a transaction succeeded. For more information,
 // see
-// https://foundationdb.org/documentation/developer-guide.html#developer-guide-unknown-results.
+// https://www.foundationdb.org/documentation/developer-guide.html#developer-guide-unknown-results.
 func (t Transaction) Commit() FutureNil {
 	return &futureNil{newFuture(C.fdb_transaction_commit(t.ptr))}
 }
@@ -260,11 +260,11 @@ func (t *transaction) getRange(r Range, options RangeOptions, snapshot bool) Ran
 	f := t.doGetRange(r, options, snapshot, 1)
 	begin, end := r.FDBRangeKeySelectors()
 	return RangeResult{
-		t: t,
-		sr: SelectorRange{begin, end},
-		options: options,
+		t:        t,
+		sr:       SelectorRange{begin, end},
+		options:  options,
 		snapshot: snapshot,
-		f: &f,
+		f:        &f,
 	}
 }
 
@@ -396,13 +396,13 @@ func addConflictRange(t *transaction, er ExactRange, crtype conflictRangeType) e
 // conflict.
 //
 // For more information on conflict ranges, see
-// https://foundationdb.org/documentation/developer-guide.html#conflict-ranges.
+// https://www.foundationdb.org/documentation/developer-guide.html#conflict-ranges.
 func (t Transaction) AddReadConflictRange(er ExactRange) error {
 	return addConflictRange(t.transaction, er, conflictRangeTypeRead)
 }
 
 func copyAndAppend(orig []byte, b byte) []byte {
-	ret := make([]byte, len(orig) + 1)
+	ret := make([]byte, len(orig)+1)
 	copy(ret, orig)
 	ret[len(orig)] = b
 	return ret
@@ -413,7 +413,7 @@ func copyAndAppend(orig []byte, b byte) []byte {
 // this key could cause the transaction to fail with a conflict.
 //
 // For more information on conflict ranges, see
-// https://foundationdb.org/documentation/developer-guide.html#conflict-ranges.
+// https://www.foundationdb.org/documentation/developer-guide.html#conflict-ranges.
 func (t Transaction) AddReadConflictKey(key KeyConvertible) error {
 	return addConflictRange(t.transaction, KeyRange{key, Key(copyAndAppend(key.FDBKey(), 0x00))}, conflictRangeTypeRead)
 }
@@ -424,7 +424,7 @@ func (t Transaction) AddReadConflictKey(key KeyConvertible) error {
 // conflict.
 //
 // For more information on conflict ranges, see
-// https://foundationdb.org/documentation/developer-guide.html#conflict-ranges.
+// https://www.foundationdb.org/documentation/developer-guide.html#conflict-ranges.
 func (t Transaction) AddWriteConflictRange(er ExactRange) error {
 	return addConflictRange(t.transaction, er, conflictRangeTypeWrite)
 }
@@ -434,7 +434,7 @@ func (t Transaction) AddWriteConflictRange(er ExactRange) error {
 // read this key could fail with a conflict.
 //
 // For more information on conflict ranges, see
-// https://foundationdb.org/documentation/developer-guide.html#conflict-ranges.
+// https://www.foundationdb.org/documentation/developer-guide.html#conflict-ranges.
 func (t Transaction) AddWriteConflictKey(key KeyConvertible) error {
 	return addConflictRange(t.transaction, KeyRange{key, Key(copyAndAppend(key.FDBKey(), 0x00))}, conflictRangeTypeWrite)
 }

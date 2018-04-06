@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -51,7 +51,7 @@ using namespace boost::asio::ip;
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A551040001LL;
+uint64_t currentProtocolVersion        = 0x0FDB00A551060001LL;
 uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -412,15 +412,15 @@ private:
 		boost::system::error_code error;
 		socket.close(error);
 		if (error)
-			TraceEvent(SevWarn, "N2_CloseError", id).detail("Message", error.value());
+			TraceEvent(SevWarn, "N2_CloseError", id).detail("Message", error.value()).suppressFor(1.0);
 	}
 
 	void onReadError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_ReadError", id).detail("Message", error.value());
+		TraceEvent(SevWarn, "N2_ReadError", id).detail("Message", error.value()).suppressFor(1.0);
 		closeSocket();
 	}
 	void onWriteError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_WriteError", id).detail("Message", error.value());
+		TraceEvent(SevWarn, "N2_WriteError", id).detail("Message", error.value()).suppressFor(1.0);
 		closeSocket();
 	}
 };
@@ -835,7 +835,7 @@ Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr ) {
 }
 
 ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *self, std::string host, std::string service) {
-	state Promise<std::vector<NetworkAddress>> result;
+	Promise<std::vector<NetworkAddress>> result;
 
 	self->tcpResolver.async_resolve(tcp::resolver::query(host, service), [=](const boost::system::error_code &ec, tcp::resolver::iterator iter) {
 		if(ec) {

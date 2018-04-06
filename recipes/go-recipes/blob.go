@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,11 +21,11 @@
 package main
 
 import (
+	"fmt"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
-	"fmt"
 )
 
 const CHUNK_SIZE int = 5
@@ -34,10 +34,12 @@ func write_blob(t fdb.Transactor, blob_subspace subspace.Subspace, blob []byte) 
 
 	_, err = t.Transact(func(tr fdb.Transaction) (interface{}, error) {
 
-		if len(blob) == 0 { return nil, nil }
+		if len(blob) == 0 {
+			return nil, nil
+		}
 
-		for i := 0; i < len(blob); i+=CHUNK_SIZE {
-			if i + CHUNK_SIZE <= len(blob) {
+		for i := 0; i < len(blob); i += CHUNK_SIZE {
+			if i+CHUNK_SIZE <= len(blob) {
 				tr.Set(blob_subspace.Pack(tuple.Tuple{i}), blob[i:i+CHUNK_SIZE])
 			} else {
 				tr.Set(blob_subspace.Pack(tuple.Tuple{i}), blob[i:])
@@ -54,7 +56,7 @@ func read_blob(t fdb.ReadTransactor, blob_subspace subspace.Subspace) ([]byte, e
 
 		var blob []byte
 
-		ri := rtr.GetRange(blob_subspace, fdb.RangeOptions{}).Iterator();
+		ri := rtr.GetRange(blob_subspace, fdb.RangeOptions{}).Iterator()
 
 		for ri.Advance() {
 
@@ -76,7 +78,7 @@ func read_blob(t fdb.ReadTransactor, blob_subspace subspace.Subspace) ([]byte, e
 }
 
 func main() {
-	fdb.MustAPIVersion(510)
+	fdb.MustAPIVersion(520)
 
 	db := fdb.MustOpenDefault()
 

@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -862,7 +862,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair( error_code_key_too_large, ExceptionContract::requiredIf(key.size() > (key.startsWith(systemKeys.begin) ? CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT : CLIENT_KNOBS->KEY_SIZE_LIMIT)) ),
 				std::make_pair( error_code_value_too_large, ExceptionContract::requiredIf(value.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT) ),
 				std::make_pair( error_code_invalid_mutation_type, ExceptionContract::requiredIf(
-							!isValidMutationType(op) || !isAtomicOp((MutationRef::Type) op) || op == MutationRef::AppendIfFits ) ),
+							!isValidMutationType(op) || !isAtomicOp((MutationRef::Type) op)) ),
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
 							(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::requiredIf(

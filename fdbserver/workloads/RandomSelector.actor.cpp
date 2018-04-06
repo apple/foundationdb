@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -138,7 +138,7 @@ struct RandomSelectorWorkload : TestWorkload {
 
 			try {
 				for(i = 0; i < g_random->randomInt(self->minOperationsPerTransaction,self->maxOperationsPerTransaction+1); i++) {
-					j = g_random->randomInt(0,15);
+					j = g_random->randomInt(0,16);
 					if( j < 3 ) {
 						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
 						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
@@ -237,30 +237,30 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					}
-					//else if( j < 8 ) {
-					//	myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
-					//	myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
-					//	myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
-					//	//TraceEvent("RYOWappendIfFits").detail("Key",myKeyA).detail("Value", myValue);
-					//	trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::AppendIfFits);
-					//			
-					//	loop {
-					//		try {
-					//			tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
-					//			tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AppendIfFits);
-					//			Void _ = wait( tr.commit() );
-					//			break;
-					//		} catch (Error& e) {
-					//			error = e;
-					//			Void _ = wait( tr.onError(e) );
-					//			if(error.code() == error_code_commit_unknown_result) {
-					//				Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
-					//				if (thing.present()) break;
-					//			}
-					//		}
-					//	}
-					//}
 					else if( j < 8 ) {
+						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
+						myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
+						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
+						//TraceEvent("RYOWappendIfFits").detail("Key",myKeyA).detail("Value", myValue);
+						trRYOW.atomicOp(StringRef(clientID + "b/" + myKeyA), myValue, MutationRef::AppendIfFits);
+
+						loop {
+							try {
+								tr.set(StringRef(clientID + "z/" + myRandomIDKey), StringRef());
+								tr.atomicOp(StringRef(clientID + "d/" + myKeyA), myValue, MutationRef::AppendIfFits);
+								Void _ = wait( tr.commit() );
+								break;
+							} catch (Error& e) {
+								error = e;
+								Void _ = wait( tr.onError(e) );
+								if(error.code() == error_code_commit_unknown_result) {
+									Optional<Value> thing = wait(tr.get(StringRef(clientID+"z/"+myRandomIDKey)));
+									if (thing.present()) break;
+								}
+							}
+						}
+					}
+					else if( j < 9 ) {
 						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
 						myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
 						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
@@ -283,7 +283,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					}
-					else if( j < 9 ) {
+					else if( j < 10 ) {
 						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
 						myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
 						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
@@ -306,7 +306,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					}
-					else if( j < 10 ) {
+					else if( j < 11 ) {
 						myKeyA = format( "%010d", g_random->randomInt( 0, self->maxKeySpace+1 ) );
 						myRandomIDKey = format( "%010d", g_random->randomInt(0, 1000000000) );
 						myValue = format("%d", g_random->randomInt( 0, 10000000 ) );
@@ -329,7 +329,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					}
-					else if (j < 11) {
+					else if (j < 12) {
 						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
 						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
 						myValue = format("%d", g_random->randomInt(0, 10000000));
@@ -353,7 +353,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					}
-					else if (j < 12) {
+					else if (j < 13) {
 						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
 						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
 						myValue = format("%d", g_random->randomInt(0, 10000000));
@@ -377,7 +377,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					}
-					else if (j < 13) {
+					else if (j < 14) {
 						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
 						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
 						myValue = format("%d", g_random->randomInt(0, 10000000));
@@ -401,7 +401,7 @@ struct RandomSelectorWorkload : TestWorkload {
 							}
 						}
 					}
-					else if (j < 14) {
+					else if (j < 15) {
 						myKeyA = format("%010d", g_random->randomInt(0, self->maxKeySpace + 1));
 						myRandomIDKey = format("%010d", g_random->randomInt(0, 1000000000));
 						myValue = format("%d", g_random->randomInt(0, 10000000));

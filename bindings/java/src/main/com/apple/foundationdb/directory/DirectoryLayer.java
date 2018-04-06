@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -55,7 +55,7 @@ import com.apple.foundationdb.tuple.Tuple;
  *     to manage its subspaces.
  *
  *     For general guidance on directory usage, see the discussion in the
- *     <a href="/foundationdb/developer-guide.html#developer-guide-directories" target="_blank">Developer Guide</a>.
+ *     <a href="/developer-guide.html#developer-guide-directories" target="_blank">Developer Guide</a>.
  * </p>
  * <p>
  *     Directories are identified by hierarchical paths analogous to the paths

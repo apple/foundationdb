@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,13 +21,13 @@
 package main
 
 import (
-	"log"
 	"fmt"
-	"math/rand"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
+	"log"
+	"math/rand"
 )
 
 func clear_subspace(trtr fdb.Transactor, sub subspace.Subspace) error {
@@ -44,7 +44,9 @@ func _pack(t interface{}) []byte {
 
 func _unpack(t []byte) tuple.Tuple {
 	i, e := tuple.Unpack(t)
-	if e != nil {return nil}
+	if e != nil {
+		return nil
+	}
 	return i
 }
 
@@ -61,26 +63,38 @@ func (prty Priority) Push(trtr fdb.Transactor, value interface{}, priority int) 
 
 func (prty Priority) _NextCount(trtr fdb.Transactor, priority int) int {
 	res, err := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
-		kr, e := fdb.PrefixRange(prty.PrioritySS.Pack( tuple.Tuple{priority} ))
-		if e != nil {return nil, e}
+		kr, e := fdb.PrefixRange(prty.PrioritySS.Pack(tuple.Tuple{priority}))
+		if e != nil {
+			return nil, e
+		}
 
 		ks, e := tr.Snapshot().GetRange(kr, fdb.RangeOptions{1, -1, true}).GetSliceWithError()
-		if e != nil {return nil, e}
+		if e != nil {
+			return nil, e
+		}
 
-		if len(ks) == 0 {return 0, nil}
+		if len(ks) == 0 {
+			return 0, nil
+		}
 		k, e := prty.PrioritySS.Unpack(ks[0].Key)
-		return k[0].(int)+1, nil
+		return k[0].(int) + 1, nil
 	})
-	if err != nil {return 0}
+	if err != nil {
+		return 0
+	}
 	return res.(int)
 }
 
 func (prty Priority) Pop(trtr fdb.Transactor, max bool) interface{} {
 	res, _ := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		ks, err := tr.GetRange(prty.PrioritySS, fdb.RangeOptions{1, -1, max}).GetSliceWithError()
-		if err != nil {return nil, err}
+		if err != nil {
+			return nil, err
+		}
 
-		if len(ks) == 0 {return nil, nil}
+		if len(ks) == 0 {
+			return nil, nil
+		}
 		tr.Clear(ks[0].Key)
 		return _unpack(ks[0].Value)[0], nil
 	})
@@ -90,22 +104,27 @@ func (prty Priority) Pop(trtr fdb.Transactor, max bool) interface{} {
 func (prty Priority) Peek(trtr fdb.Transactor, max bool) interface{} {
 	res, _ := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		ks, err := tr.GetRange(prty.PrioritySS, fdb.RangeOptions{1, -1, max}).GetSliceWithError()
-		if err != nil {return nil, err}
-		if len(ks) == 0 {return nil, nil}
+		if err != nil {
+			return nil, err
+		}
+		if len(ks) == 0 {
+			return nil, nil
+		}
 
 		return _unpack(ks[0].Value)[0], nil
 	})
 	return res
 }
 
-
 func main() {
-	fdb.MustAPIVersion(510)
+	fdb.MustAPIVersion(520)
 
 	db := fdb.MustOpenDefault()
 
 	PriorityDemoDir, err := directory.CreateOrOpen(db, []string{"Priority"}, nil)
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	clear_subspace(db, PriorityDemoDir)
 

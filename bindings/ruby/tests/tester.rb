@@ -1,17 +1,19 @@
 #!/usr/bin/env ruby
+#encoding:BINARY
+
 #
 # tester.rb
 #
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,14 +21,18 @@
 # limitations under the License.
 #
 
-#encoding:BINARY
-
 require 'thread'
 
 $:.unshift( File.join( File.dirname(__FILE__), "../lib" ) )
 
 require 'fdb'
+if FDB.is_api_version_selected?()
+  raise 'FDB API version already selected'
+end
 FDB.api_version(ARGV[1].to_i)
+if FDB.get_api_version() != ARGV[1].to_i
+  raise 'FDB API version did not match'
+end
 
 require_relative 'directory_extension'
 
@@ -427,6 +433,24 @@ class Tester
           end
           inst.push("WAITED_FOR_EMPTY")
         when "UNIT_TESTS"
+          api_version = FDB::get_api_version()
+          begin
+            FDB::api_version(api_version + 1)
+            raise "Was not stopped from selecting two API versions"
+          rescue RuntimeError => e
+            if e.message != "FDB API already loaded at version #{api_version}."
+                raise
+            end
+          end
+          begin
+            FDB::api_version(api_version - 1)
+            raise "Was not stopped from selecting two API versions"
+          rescue RuntimeError => e
+            if e.message != "FDB API already loaded at version #{api_version}."
+                raise
+            end
+          end
+          FDB::api_version(api_version)
           begin
             @db.options.set_location_cache_size(100001)
 

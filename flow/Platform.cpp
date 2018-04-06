@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -701,7 +701,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 			disk_stream.ignore( std::numeric_limits<std::streamsize>::max(), '\n');
 	}
 
-	if(!g_network->isSimulated()) TraceEvent(SevWarnAlways, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
+	if(!g_network->isSimulated()) TraceEvent(SevWarn, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
 }
 
 dev_t getDeviceId(std::string path) {

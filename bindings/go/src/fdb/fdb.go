@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,18 +23,18 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 510
+ #define FDB_API_VERSION 520
  #include <foundationdb/fdb_c.h>
  #include <stdlib.h>
 */
 import "C"
 
 import (
+	"fmt"
+	"log"
 	"runtime"
 	"sync"
 	"unsafe"
-	"fmt"
-	"log"
 )
 
 /* Would put this in futures.go but for the documented issue with
@@ -53,7 +53,7 @@ type Transactor interface {
 	// Transact executes the caller-provided function, providing it with a
 	// Transaction (itself a Transactor, allowing composition of transactional
 	// functions).
-	Transact(func (Transaction) (interface{}, error)) (interface{}, error)
+	Transact(func(Transaction) (interface{}, error)) (interface{}, error)
 
 	// All Transactors are also ReadTransactors, allowing them to be used with
 	// read-only transactional functions.
@@ -68,7 +68,7 @@ type ReadTransactor interface {
 	// ReadTransact executes the caller-provided function, providing it with a
 	// ReadTransaction (itself a ReadTransactor, allowing composition of
 	// read-only transactional functions).
-	ReadTransact(func (ReadTransaction) (interface{}, error)) (interface{}, error)
+	ReadTransact(func(ReadTransaction) (interface{}, error)) (interface{}, error)
 }
 
 func setOpt(setter func(*C.uint8_t, C.int) C.fdb_error_t, param []byte) error {
@@ -109,7 +109,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // library, an error will be returned. APIVersion must be called prior to any
 // other functions in the fdb package.
 //
-// Currently, this package supports API versions 200 through 510.
+// Currently, this package supports API versions 200 through 520.
 //
 // Warning: When using the multi-version client API, setting an API version that
 // is not supported by a particular client library will prevent that client from
@@ -117,7 +117,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // the API version of your application after upgrading your client until the
 // cluster has also been upgraded.
 func APIVersion(version int) error {
-	headerVersion := 510
+	headerVersion := 520
 
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
@@ -129,7 +129,7 @@ func APIVersion(version int) error {
 		return errAPIVersionAlreadySet
 	}
 
-	if version < 200 || version > 510 {
+	if version < 200 || version > 520 {
 		return errAPIVersionNotSupported
 	}
 
@@ -152,6 +152,25 @@ func APIVersion(version int) error {
 	return nil
 }
 
+// Determines if an API version has already been selected, i.e., if
+// APIVersion or MustAPIVersion have already been called.
+func IsAPIVersionSelected() bool {
+	return apiVersion != 0
+}
+
+// Returns the API version that has been selected through APIVersion
+// or MustAPIVersion. If the version has already been selected, then
+// the first value returned is the API version and the error is
+// nil. If the API version has not yet been set, then the error
+// will be non-nil.
+func GetAPIVersion() (int, error) {
+	if IsAPIVersionSelected() {
+		return apiVersion, nil
+	} else {
+		return 0, errAPIVersionUnset
+	}
+}
+
 // MustAPIVersion is like APIVersion but panics if the API version is not
 // supported.
 func MustAPIVersion(version int) {
@@ -159,6 +178,16 @@ func MustAPIVersion(version int) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+// MustGetAPIVersion is like GetAPIVersion but panics if the API version
+// has not yet been set.
+func MustGetAPIVersion() int {
+	apiVersion, err := GetAPIVersion()
+	if err != nil {
+		panic(err)
+	}
+	return apiVersion
 }
 
 var apiVersion int

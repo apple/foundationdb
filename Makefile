@@ -144,7 +144,7 @@ OBJDIR := .objs
 
 include $(MK_INCLUDE)
 
-clean: $(CLEAN_TARGETS)
+clean: $(CLEAN_TARGETS) docpreview_clean
 	@echo "Cleaning       toplevel"
 	@rm -rf $(OBJDIR)
 	@rm -rf $(DEPSDIR)
@@ -174,12 +174,21 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	@ar rcs $@ .libstdc++/*.o
 	@rm -r .libstdc++
 
+docpreview: javadoc godoc
+	TARGETS= $(MAKE) -C documentation docpreview
 
-ifeq ($(PLATFORM),osx)
-  MD5SUM=md5
-else
-  MD5SUM=md5sum
-endif
+docpreview_clean:
+	CLEAN_TARGETS= $(MAKE) -C documentation docpreview_clean
+
+packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc godoc
+	TARGETS= $(MAKE) -C documentation docpackage
+	@mkdir -p packages
+	@rm -f packages/foundationdb-docs-$(VERSION).tar.gz
+	@cp documentation/sphinx/.dist/foundationdb-docs-$(VERSION).tar.gz packages/foundationdb-docs-$(VERSION).tar.gz
+
+docpackage: packages/foundationdb-docs-$(VERSION).tar.gz
+
+FORCE:
 
 .SECONDEXPANSION:
 

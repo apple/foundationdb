@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -369,14 +369,14 @@ struct Peer : NonCopyable {
 					Void _ = wait( delayJittered( std::max(0.0, self->lastConnectTime+self->reconnectionDelay - now()) ) );  // Don't connect() to the same peer more than once per 2 sec
 					self->lastConnectTime = now();
 
-					TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination);
+					TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).suppressFor(1.0);
 					Reference<IConnection> _conn = wait( timeout( INetworkConnections::net()->connect(self->destination), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) );
 					if (_conn) {
 						conn = _conn;
-						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID()).detail("PeerAddr", self->destination);
+						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID()).detail("PeerAddr", self->destination).suppressFor(1.0);
 						self->prependConnectPacket();
 					} else {
-						TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination);
+						TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).suppressFor(1.0);
 						throw connection_failed();
 					}
 
@@ -408,10 +408,10 @@ struct Peer : NonCopyable {
 				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed );
 
 				if(self->compatible) {
-					TraceEvent(ok ? SevInfo : SevError, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true).suppressFor(1.0);
 				}
 				else {
-					TraceEvent(ok ? SevInfo : SevError, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
 				}
 
 				if (conn) {
@@ -486,15 +486,6 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 			TraceEvent(SevError, "Net2_PacketLimitExceeded").detail("FromPeer", peerAddress.toString()).detail("Length", (int)packetLen);
 			throw platform_error();
 		}
-		else if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
-				.detail("FromPeer", peerAddress.toString())
-				.detail("Length", (int)packetLen)
-				.suppressFor(1.0);
-
-			if(g_network->isSimulated())
-				transport->warnAlwaysForLargePacket = false;
-		}
 
 		if (e-p<packetLen) break;
 		ASSERT( packetLen >= sizeof(UID) );
@@ -543,6 +534,17 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 		UID token; reader >> token;
 
 		++transport->countPacketsReceived;
+
+		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
+			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+				.detail("FromPeer", peerAddress.toString())
+				.detail("Length", (int)packetLen)
+				.detail("Token", token)
+				.suppressFor(1.0);
+
+			if(g_network->isSimulated())
+				transport->warnAlwaysForLargePacket = false;
+		}
 
 		deliver( transport, Endpoint( peerAddress, token ), std::move(reader), true );
 
@@ -637,7 +639,7 @@ ACTOR static Future<Void> connectionReader(
 							compatible = true;
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
 								.detail("Peer", conn->getPeerAddress())
-								.detail("ConnectionId", connectionId);
+								.detail("ConnectionId", connectionId).suppressFor(1.0);
 						}
 
 						if(connectionId > 1) {
@@ -649,7 +651,7 @@ ACTOR static Future<Void> connectionReader(
 						peerProtocolVersion = p->protocolVersion;
 						if (peer != nullptr) {
 							// Outgoing connection; port information should be what we expect
-							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
+							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) ).suppressFor(1.0);
 							peer->compatible = compatible;
 							if (!compatible)
 								peer->transport->numIncompatibleConnections++;
@@ -710,7 +712,7 @@ ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<ICo
 		}
 		return Void();
 	} catch (Error& e) {
-		TraceEvent("IncomingConnectionError", conn->getDebugID()).error(e).detail("FromAddress", conn->getPeerAddress());
+		TraceEvent("IncomingConnectionError", conn->getDebugID()).error(e).detail("FromAddress", conn->getPeerAddress()).suppressFor(1.0);
 		conn->close();
 		return Void();
 	}
@@ -722,7 +724,7 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
-			TraceEvent("ConnectionFrom", conn->getDebugID()).detail("FromAddress", conn->getPeerAddress());
+			TraceEvent("ConnectionFrom", conn->getDebugID()).detail("FromAddress", conn->getPeerAddress()).suppressFor(1.0);
 			incoming.add( connectionIncoming(self, conn) );
 		}
 	} catch (Error& e) {
@@ -907,6 +909,8 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 			TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
 				.detail("ToPeer", destination.address)
 				.detail("Length", (int)len)
+				.detail("Token", destination.token)
+				.backtrace()
 				.suppressFor(1.0);
 
 			if(g_network->isSimulated())

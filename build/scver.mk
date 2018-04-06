@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -60,6 +60,12 @@ FDBDIRBASE := $(shell basename $(FDBDIR))
 USERID := $(shell id -u)
 USER := $(shell whoami)
 PROCESSID := $(shell echo "$$$$")
+
+ifeq ($(PLATFORM),osx)
+  MD5SUM=md5
+else
+  MD5SUM=md5sum
+endif
 
 
 #
@@ -141,10 +147,8 @@ info:
 	@echo "Package:        $(PACKAGE_NAME)"
 	@echo "Version ID:     $(VERSION_ID)"
 	@echo "Package ID:     $(PKGRELEASE)"
-	@echo "Source Control: $(SOURCE_CONTROL)"
 	@echo "SC Branch:      $(SCBRANCH)"
 	@echo "Git Dir:        $(GITPRESENT)"
-	@echo "Mercurial Dir:  $(HGPRESENT)"
 	@echo "Make Dir:       $(MAKEDIR)"
 	@echo "Foundation Dir: $(FDBDIR)"
 	@echo "Fdb Dir Base:   $(FDBDIRBASE)"

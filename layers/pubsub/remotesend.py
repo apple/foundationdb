@@ -5,13 +5,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,7 +23,7 @@
 import os
 import sys
 
-sys.path[:0]=[os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
+sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 'python')]
 import fdb
 import argparse
 import random
@@ -54,6 +54,7 @@ name = os.uname()[1]
 
 print 'sending messages',
 
+
 def message_client():
     gevent.sleep(random.random())
     messages_sent = 0
@@ -65,8 +66,8 @@ def message_client():
         else:
             ps.get_inbox_messages(ps.get_inbox_by_name('%09d' % user), 10)
 
+
 jobs = [gevent.spawn(message_client) for i in range(0, args.threads)]
 gevent.joinall(jobs)
 
 print 'done'
-

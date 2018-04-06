@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -790,8 +790,21 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 
 			if (programStarts.count(address)) {
 				auto const& psxml = programStarts.at(address);
-				int64_t memLimit = parseInt64(extractAttribute(psxml, "MemoryLimit"));
-				memoryObj["limit_bytes"] = memLimit;
+
+				if(psxml.size() > 0) {
+					int64_t memLimit = parseInt64(extractAttribute(psxml, "MemoryLimit"));
+					memoryObj["limit_bytes"] = memLimit;
+
+					std::string version;
+					if (tryExtractAttribute(psxml, LiteralStringRef("Version"), version)) {
+						statusObj["version"] = version;
+					}
+
+					std::string commandLine;
+					if (tryExtractAttribute(psxml, LiteralStringRef("CommandLine"), commandLine)) {
+						statusObj["command_line"] = commandLine;
+					}
+				}
 			}
 
 			// if this process address is in the machine metrics
@@ -811,9 +824,10 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 
 			StatusArray messages;
 
-			if (errors.count(address) && errors[address].size())
+			if (errors.count(address) && errors[address].size()) {
 				// returns status object with type and time of error
 				messages.push_back(getError(errors.at(address)));
+			}
 
 			// string of address used so that other fields of a NetworkAddress are not compared
 			std::string strAddress = address.toString();
@@ -837,18 +851,6 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 
 			// Get roles for the worker's address as an array of objects
 			statusObj["roles"] = roles.getStatusForAddress(address);
-
-			if (programStarts.count(address)) {
-				auto const& psxml = programStarts.at(address);
-
-				std::string version;
-				if (tryExtractAttribute(psxml, LiteralStringRef("Version"), version))
-					statusObj["version"] = version;
-
-				std::string commandLine;
-				if (tryExtractAttribute(psxml, LiteralStringRef("CommandLine"), commandLine))
-					statusObj["command_line"] = commandLine;
-			}
 
 			if (configuration.present()){
 				statusObj["excluded"] = configuration.get().isExcludedServer(address);

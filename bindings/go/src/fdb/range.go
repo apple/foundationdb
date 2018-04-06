@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,7 +23,7 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 510
+ #define FDB_API_VERSION 520
  #include <foundationdb/fdb_c.h>
 */
 import "C"
@@ -34,7 +34,7 @@ import (
 
 // KeyValue represents a single key-value pair in the database.
 type KeyValue struct {
-	Key Key
+	Key   Key
 	Value []byte
 }
 
@@ -121,11 +121,11 @@ func (sr SelectorRange) FDBRangeKeySelectors() (Selectable, Selectable) {
 // A RangeResult should not be returned from a transactional function passed to
 // the Transact method of a Transactor.
 type RangeResult struct {
-	t *transaction
-	sr SelectorRange
-	options RangeOptions
+	t        *transaction
+	sr       SelectorRange
+	options  RangeOptions
 	snapshot bool
-	f *futureKeyValueArray
+	f        *futureKeyValueArray
 }
 
 // GetSliceWithError returns a slice of KeyValue objects satisfying the range
@@ -173,12 +173,12 @@ func (rr RangeResult) GetSliceOrPanic() []KeyValue {
 // range specified in the read that returned this RangeResult.
 func (rr RangeResult) Iterator() *RangeIterator {
 	return &RangeIterator{
-		t: rr.t,
-		f: rr.f,
-		sr: rr.sr,
-		options: rr.options,
+		t:         rr.t,
+		f:         rr.f,
+		sr:        rr.sr,
+		options:   rr.options,
 		iteration: 1,
-		snapshot: rr.snapshot,
+		snapshot:  rr.snapshot,
 	}
 }
 
@@ -193,17 +193,17 @@ func (rr RangeResult) Iterator() *RangeIterator {
 // RangeResult and used concurrently. RangeIterator should not be returned from
 // a transactional function passed to the Transact method of a Transactor.
 type RangeIterator struct {
-	t *transaction
-	f *futureKeyValueArray
-	sr SelectorRange
-	options RangeOptions
+	t         *transaction
+	f         *futureKeyValueArray
+	sr        SelectorRange
+	options   RangeOptions
 	iteration int
-	done bool
-	more bool
-	kvs []KeyValue
-	index int
-	err error
-	snapshot bool
+	done      bool
+	more      bool
+	kvs       []KeyValue
+	index     int
+	err       error
+	snapshot  bool
 }
 
 // Advance attempts to advance the iterator to the next key-value pair. Advance

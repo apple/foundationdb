@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -989,7 +989,7 @@ TEST_CASE("flow/flow/perf/actor patterns")
 			ASSERT(out2[i].isReady());
 		}
 		printf("2xcheeseActor(chooseTwoActor(cheeseActor(fifo), never)): %0.2f M/sec\n", N / 1e6 / (timer() - start));
-		printf("sizeof(CheeseWaitActorActor) == %lu\n", sizeof(CheeseWaitActorActor));
+		printf("sizeof(CheeseWaitActorActor) == %zu\n", sizeof(CheeseWaitActorActor));
 	}
 
 	{

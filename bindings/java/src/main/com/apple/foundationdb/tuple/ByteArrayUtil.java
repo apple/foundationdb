@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -236,8 +236,11 @@ public class ByteArrayUtil {
 	/**
 	 * Compare byte arrays for equality and ordering purposes. Elements in the array
 	 *  are interpreted and compared as unsigned bytes. Neither parameter
-	 *  may be {@code null}
-
+	 *  may be {@code null}.
+	 *
+	 * @param l byte array on the left-hand side of the inequality
+	 * @param r byte array on the right-hand side of the inequality
+	 *
 	 * @return return -1, 0, or 1 if {@code l} is less than, equal to, or greater than
 	 *  {@code r}.
 	 */
@@ -252,27 +255,27 @@ public class ByteArrayUtil {
 		return l.length < r.length ? -1 : 1;
 	}
 
-    /**
+	/**
 	 * Check if a byte array starts with another byte array.
 	 *
-     * @param array the source byte array
-     *
-     * @param prefix the byte array that we are checking if {@code src}
+	 * @param array the source byte array
+	 *
+	 * @param prefix the byte array that we are checking if {@code src}
 	 *  starts with.
-     *
-     * @return {@code true} if {@code array} starts with {@code prefix}
-     */
-    public static boolean startsWith(byte[] array, byte[] prefix) {
-        if(array.length < prefix.length) {
-            return false;
-        }
-        for(int i = 0; i < prefix.length; ++i) {
-            if(prefix[i] != array[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
+	 *
+	 * @return {@code true} if {@code array} starts with {@code prefix}
+	 */
+	public static boolean startsWith(byte[] array, byte[] prefix) {
+		if(array.length < prefix.length) {
+			return false;
+		}
+		for(int i = 0; i < prefix.length; ++i) {
+			if(prefix[i] != array[i]) {
+				return false;
+			}
+		}
+		return true;
+	}
 
 	/**
 	 * Scan through an array of bytes to find the first occurrence of a specific value.
@@ -320,12 +323,12 @@ public class ByteArrayUtil {
 	static int findTerminator(byte[] v, byte n, byte m, int start, int end) {
 		int pos = start;
 		while(true) {
-	        pos = findNext(v, n, pos, end);
-	        if(pos < 0)
-	            return end;
-	        if(pos + 1 == end || v[pos+1] != m)
-	            return pos;
-	        pos += 2;
+			pos = findNext(v, n, pos, end);
+			if(pos < 0)
+				return end;
+			if(pos + 1 == end || v[pos+1] != m)
+				return pos;
+			pos += 2;
 		}
 	}
 

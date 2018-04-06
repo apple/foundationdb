@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -1510,6 +1510,25 @@ struct UnitTestsFunc : InstructionFunc {
 		ASSERT(data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(1020)));
 		ASSERT(!data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(10)));
 
+		ASSERT(API::isAPIVersionSelected());
+		state API *fdb = API::getInstance();
+		ASSERT(fdb->getAPIVersion() <= FDB_API_VERSION);
+		try {
+			API::selectAPIVersion(fdb->getAPIVersion() + 1);
+			ASSERT(false);
+		}
+		catch(Error &e) {
+			ASSERT(e.code() == error_code_api_version_already_set);
+		}
+		try {
+			API::selectAPIVersion(fdb->getAPIVersion() - 1);
+			ASSERT(false);
+		}
+		catch(Error &e) {
+			ASSERT(e.code() == error_code_api_version_already_set);
+		}
+		API::selectAPIVersion(fdb->getAPIVersion());
+
 		state Reference<Transaction> tr(new Transaction(data->db));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
@@ -1574,7 +1593,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 		try {
 			if(LOG_INSTRUCTIONS) {
 				if(op != LiteralStringRef("SWAP") && op != LiteralStringRef("PUSH")) {
-					printf("%lu. %s\n", idx, tupleToString(opTuple).c_str());
+					printf("%zu. %s\n", idx, tupleToString(opTuple).c_str());
 					fflush(stdout);
 				}
 			}
@@ -1654,6 +1673,7 @@ void populateAtomicOpMap() {
 	optionInfo["BIT_OR"] = FDBMutationType::FDB_MUTATION_TYPE_BIT_OR;
 	optionInfo["XOR"] = FDBMutationType::FDB_MUTATION_TYPE_XOR;
 	optionInfo["BIT_XOR"] = FDBMutationType::FDB_MUTATION_TYPE_BIT_XOR;
+	optionInfo["APPEND_IF_FITS"] = FDBMutationType::FDB_MUTATION_TYPE_APPEND_IF_FITS;
 	optionInfo["MAX"] = FDBMutationType::FDB_MUTATION_TYPE_MAX;
 	optionInfo["MIN"] = FDBMutationType::FDB_MUTATION_TYPE_MIN;
 	optionInfo["SET_VERSIONSTAMPED_KEY"] = FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY;
@@ -1681,7 +1701,18 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		// This is "our" network
 		g_network = newNet2(NetworkAddress(), false);
 
+		ASSERT(!API::isAPIVersionSelected());
+		try {
+			API::getInstance();
+			ASSERT(false);
+		}
+		catch(Error& e) {
+			ASSERT(e.code() == error_code_api_version_unset);
+		}
+
 		API *fdb = API::selectAPIVersion(apiVersion);
+		ASSERT(API::isAPIVersionSelected());
+		ASSERT(fdb->getAPIVersion() == apiVersion);
 		//fdb->setNetworkOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE);
 
 		// We have to start the fdb_flow network and thread separately!

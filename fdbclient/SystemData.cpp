@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -342,6 +342,11 @@ const KeyRangeRef fileBackupPrefixRange(LiteralStringRef("\xff\x02/backup-agent/
 // DR Agent configuration constant variables
 const KeyRangeRef databaseBackupPrefixRange(LiteralStringRef("\xff\x02/db-backup-agent/"), LiteralStringRef("\xff\x02/db-backup-agent0"));
 
+// \xff\x02/sharedLogRangesConfig/destUidLookup/[keyRange]
+const KeyRef destUidLookupPrefix = LiteralStringRef("\xff\x02/sharedLogRangesConfig/destUidLookup/");
+// \xff\x02/sharedLogRangesConfig/backuplatestVersions/[destUid]/[logUid]
+const KeyRef backupLatestVersionsPrefix = LiteralStringRef("\xff\x02/sharedLogRangesConfig/backupLatestVersions/");
+
 // Returns the encoded key comprised of begin key and log uid
 Key logRangesEncodeKey(KeyRef keyBegin, UID logUid) {
 	return keyBegin.withPrefix(uidPrefixKey(logRangesRange.begin, logUid));
@@ -361,10 +366,10 @@ KeyRef logRangesDecodeKey(KeyRef key, UID* logUid) {
 	return key.substr(logRangesRange.begin.size() + sizeof(UID));
 }
 
-// Returns the encoded key value comprised of the end key and destination prefix
-Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destKeyPrefix) {
+// Returns the encoded key value comprised of the end key and destination path
+Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath) {
 	BinaryWriter wr(IncludeVersion());
-	wr << std::make_pair(keyEnd, destKeyPrefix);
+	wr << std::make_pair(keyEnd, destPath);
 	return wr.toStringRef();
 }
 

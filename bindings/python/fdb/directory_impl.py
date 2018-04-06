@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -28,17 +28,19 @@ from fdb import impl as _impl
 from fdb import six
 import fdb.tuple
 from .subspace_impl import Subspace
-    
+
+
 class AllocatorTransactionState:
     def __init__(self):
         self.lock = threading.Lock()
+
 
 class HighContentionAllocator (object):
 
     def __init__(self, subspace):
         self.counters = subspace[0]
         self.recent = subspace[1]
-        self.lock = threading.Lock();
+        self.lock = threading.Lock()
 
     @_impl.transactional
     def allocate(self, tr):
@@ -52,27 +54,28 @@ class HighContentionAllocator (object):
         if not hasattr(tr, "__fdb_directory_layer_hca_state__"):
             with self.lock:
                 if not hasattr(tr, "__fdb_directory_layer_hca_state__"):
-                    tr.__fdb_directory_layer_hca_state__ = AllocatorTransactionState();
+                    tr.__fdb_directory_layer_hca_state__ = AllocatorTransactionState()
 
         tr_state = tr.__fdb_directory_layer_hca_state__
 
         while True:
-            [start] = [self.counters.unpack(k)[0] for k,_ in tr.snapshot.get_range(self.counters.range().start, self.counters.range().stop, limit=1, reverse=True)] or [0]
+            [start] = [self.counters.unpack(k)[0] for k, _ in tr.snapshot.get_range(
+                self.counters.range().start, self.counters.range().stop, limit=1, reverse=True)] or [0]
 
             window_advanced = False
             while True:
                 with tr_state.lock:
                     if window_advanced:
-                        del tr[self.counters : self.counters[start]]
+                        del tr[self.counters: self.counters[start]]
                         tr.options.set_next_write_no_write_conflict_range()
-                        del tr[self.recent : self.recent[start]]
+                        del tr[self.recent: self.recent[start]]
 
                     # Increment the allocation count for the current window
                     tr.add(self.counters[start], struct.pack("<q", 1))
                     count = tr.snapshot[self.counters[start]]
 
                 if count != None:
-                    count = struct.unpack("<q", str(count))[0]
+                    count = struct.unpack("<q", bytes(count))[0]
                 else:
                     count = 0
 
@@ -96,10 +99,10 @@ class HighContentionAllocator (object):
                     tr.options.set_next_write_no_write_conflict_range()
                     tr[self.recent[candidate]] = b''
 
-                latest_counter = [self.counters.unpack(k)[0] for k,_ in latest_counter]
+                latest_counter = [self.counters.unpack(k)[0] for k, _ in latest_counter]
                 if len(latest_counter) > 0 and latest_counter[0] > start:
                     break
-                    
+
                 if candidate_value == None:
                     tr.add_write_conflict_key(self.recent[candidate])
                     return fdb.tuple.pack((candidate,))
@@ -108,11 +111,14 @@ class HighContentionAllocator (object):
         # Larger window sizes are better for high contention, smaller sizes for
         # keeping the keys small.  But if there are many allocations, the keys
         # can't be too small.  So start small and scale up.  We don't want this
-        # to ever get *too* big because we have to store about window_size/2 
+        # to ever get *too* big because we have to store about window_size/2
         # recent items.
-        if start < 255: return 64
-        if start < 65535: return 1024
+        if start < 255:
+            return 64
+        if start < 65535:
+            return 1024
         return 8192
+
 
 class Directory(object):
     def __init__(self, directory_layer, path=(), layer=b''):
@@ -177,7 +183,7 @@ class Directory(object):
 
     def get_layer(self):
         return self._layer
-    
+
     def get_path(self):
         return self._path
 
@@ -186,7 +192,7 @@ class Directory(object):
             path = (path,)
         return path
 
-    def _partition_subpath(self, path, directory_layer = None):
+    def _partition_subpath(self, path, directory_layer=None):
         directory_layer = directory_layer or self._directory_layer
         return self._path[len(directory_layer._path):] + path
 
@@ -194,6 +200,7 @@ class Directory(object):
     # Subclasses can choose to return a different directory layer to use for the operation if path is in fact ()
     def _get_layer_for_path(self, path):
         return self._directory_layer
+
 
 class DirectoryLayer(Directory):
 
@@ -214,7 +221,7 @@ class DirectoryLayer(Directory):
     def create_or_open(self, tr, path, layer=None):
         """ Opens the directory with the given path.
 
-        If the directory does not exist, it is created (creating parent 
+        If the directory does not exist, it is created (creating parent
         directories if necessary).
 
         If layer is specified, it is checked against the layer of an existing
@@ -241,7 +248,9 @@ class DirectoryLayer(Directory):
         if existing_node.exists():
             if existing_node.is_in_partition():
                 subpath = existing_node.get_partition_subpath()
-                return existing_node.get_contents(self)._directory_layer._create_or_open_internal(tr, subpath, layer, prefix, allow_create, allow_open)
+                return existing_node.get_contents(self)._directory_layer._create_or_open_internal(
+                    tr, subpath, layer, prefix, allow_create, allow_open
+                )
 
             if not allow_open:
                 raise ValueError("The directory already exists.")
@@ -282,7 +291,7 @@ class DirectoryLayer(Directory):
             layer = b''
 
         tr[node[b'layer']] = layer
-        
+
         return self._contents_of_node(node, path, layer)
 
     @_impl.transactional
@@ -332,7 +341,7 @@ class DirectoryLayer(Directory):
 
         if old_path == new_path[:len(old_path)]:
             raise ValueError("The destination directory cannot be a subdirectory of the source directory.")
-        
+
         old_node = self._find(tr, old_path).prefetch_metadata(tr)
         new_node = self._find(tr, new_path).prefetch_metadata(tr)
 
@@ -340,7 +349,7 @@ class DirectoryLayer(Directory):
             raise ValueError("The source directory does not exist.")
 
         if old_node.is_in_partition() or new_node.is_in_partition():
-            if not old_node.is_in_partition() or not new_node.is_in_partition() or old_node.path != new_node.path: 
+            if not old_node.is_in_partition() or not new_node.is_in_partition() or old_node.path != new_node.path:
                 raise ValueError("Cannot move between partitions.")
 
             return new_node.get_contents(self).move(tr, old_node.get_partition_subpath(), new_node.get_partition_subpath())
@@ -399,7 +408,7 @@ class DirectoryLayer(Directory):
 
     @_impl.transactional
     def list(self, tr, path=()):
-        """Returns the names of the specified directory's subdirectories as a 
+        """Returns the names of the specified directory's subdirectories as a
         list of strings.
         """
         self._check_version(tr, write_access=False)
@@ -431,11 +440,11 @@ class DirectoryLayer(Directory):
         return True
 
     ########################################
-    ## Private methods for implementation ##
+    #  Private methods for implementation  #
     ########################################
 
-    SUBDIRS=0
-    VERSION=(1,0,0)
+    SUBDIRS = 0
+    VERSION = (1, 0, 0)
 
     def _check_version(self, tr, write_access=True):
         version = tr[self._root_node[b'version']]
@@ -473,7 +482,8 @@ class DirectoryLayer(Directory):
         return None
 
     def _node_with_prefix(self, prefix):
-        if prefix == None: return None
+        if prefix == None:
+            return None
         return self._node_subspace[prefix]
 
     def _contents_of_node(self, node, path, layer=None):
@@ -487,7 +497,7 @@ class DirectoryLayer(Directory):
     def _find(self, tr, path):
         n = _Node(self._root_node, (), path)
         for i, name in enumerate(path):
-            n = _Node(self._node_with_prefix(tr[n.subspace[self.SUBDIRS][name]]), path[:i+1], path)
+            n = _Node(self._node_with_prefix(tr[n.subspace[self.SUBDIRS][name]]), path[:i + 1], path)
             if not n.exists() or n.layer(tr) == b'partition':
                 return n
         return n
@@ -511,10 +521,12 @@ class DirectoryLayer(Directory):
         # Returns true if the given prefix does not "intersect" any currently
         # allocated prefix (including the root node). This means that it neither
         # contains any other prefix nor is contained by any other prefix.
-        return prefix and not self._node_containing_key(tr, prefix) and not len(list(tr.get_range(self._node_subspace.pack((prefix,)), self._node_subspace.pack((_impl.strinc(prefix),)), limit=1)))
+        return prefix and not self._node_containing_key(tr, prefix) \
+            and not len(list(tr.get_range(self._node_subspace.pack((prefix,)), self._node_subspace.pack((_impl.strinc(prefix),)), limit=1)))
 
     def _is_prefix_empty(self, tr, prefix):
         return len(list(tr.get_range(prefix, _impl.strinc(prefix), limit=1))) == 0
+
 
 def _to_unicode_path(path):
     if isinstance(path, bytes):
@@ -535,7 +547,9 @@ def _to_unicode_path(path):
 
     raise ValueError('Invalid path: must be a unicode string or a tuple of unicode strings')
 
+
 directory = DirectoryLayer()
+
 
 class DirectorySubspace(Subspace, Directory):
     # A DirectorySubspace represents the *contents* of a directory, but it also
@@ -548,6 +562,7 @@ class DirectorySubspace(Subspace, Directory):
 
     def __repr__(self):
         return 'DirectorySubspace(path=' + repr(self._path) + ', prefix=' + repr(self.rawPrefix) + ')'
+
 
 class DirectoryPartition(DirectorySubspace):
     def __init__(self, path, prefix, parent_directory_layer):
@@ -590,6 +605,7 @@ class DirectoryPartition(DirectorySubspace):
         else:
             return self._directory_layer
 
+
 class _Node (object):
 
     def __init__(self, subspace, path, target_path):
@@ -623,4 +639,3 @@ class _Node (object):
 
     def get_contents(self, directory_layer, tr=None):
         return directory_layer._contents_of_node(self.subspace, self.path, self.layer(tr))
-

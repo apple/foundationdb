@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -1841,7 +1841,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 				break;
 			} catch (Error& e) {
-				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true);
+				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true).suppressFor(1.0);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
 					Void _ = wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
@@ -2291,9 +2291,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			if (now() - waitStartT >= .1) {
 				TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
 					.detail("Version", data->version.get())
-					.detail("DurableVersion", data->durableVersion.get())
-					//.detail("ExtraBytes", usedBytesOlderThanDesiredDurableVersion(data))
-					;
+					.detail("DurableVersion", data->durableVersion.get()).suppressFor(1.0);
 				waitStartT = now();
 			}
 
@@ -3325,7 +3323,7 @@ Possibilities:
 void versionedMapTest() {
 	VersionedMap<int,int> vm;
 
-	printf("SS Ptree node is %lu bytes\n", sizeof( StorageServer::VersionedData::PTreeT ) );
+	printf("SS Ptree node is %zu bytes\n", sizeof( StorageServer::VersionedData::PTreeT ) );
 
 	const int NSIZE = sizeof(VersionedMap<int,int>::PTreeT);
 	const int ASIZE = NSIZE<=64 ? 64 : NextPowerOfTwo<NSIZE>::Result;

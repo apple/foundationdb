@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,6 +32,7 @@ struct TLogInterface {
 	enum { LocationAwareLoadBalance = 1 };
 	LocalityData locality;
 	UID uniqueID;
+	UID sharedTLogID;
 	RequestStream< struct TLogPeekRequest > peekMessages;
 	RequestStream< struct TLogPopRequest > popMessages;
 
@@ -42,8 +43,11 @@ struct TLogInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
 	
-	TLogInterface() : uniqueID( g_random->randomUniqueID() ) {}
+	TLogInterface() { }
+	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
+	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
+	UID getSharedTLogID() const { return sharedTLogID; }
 	std::string toString() const { return id().shortString(); }
 	bool operator == ( TLogInterface const& r ) const { return id() == r.id(); }
 	NetworkAddress address() const { return peekMessages.getEndpoint().address; }
@@ -57,7 +61,7 @@ struct TLogInterface {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & uniqueID & locality & peekMessages & popMessages 
+		ar & uniqueID & sharedTLogID & locality & peekMessages & popMessages
 		   & commit & lock & getQueuingMetrics & confirmRunning & waitFailure & recoveryFinished;
 	}
 };

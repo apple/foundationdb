@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -1419,8 +1419,7 @@ namespace oldTLog {
 
 			if (self->dbInfo->get().master.id() != lastMasterID) {
 				// The TLogRejoinRequest is needed to establish communications with a new master, which doesn't have our TLogInterface
-				TLogRejoinRequest req;
-				req.myInterface = tli;
+				TLogRejoinRequest req(tli);
 				TraceEvent("TLogRejoining", self->dbgid).detail("Master", self->dbInfo->get().master.id());
 				choose {
 					when ( bool success = wait( brokenPromiseToNever( self->dbInfo->get().master.tlogRejoin.getReply( req ) ) ) ) {

@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -83,7 +83,7 @@ public:
 			TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError").error(e).GetLastError().detail("File", filename).detail("Flags", flags).detail("Mode", mode);
 			throw e;
 		}
-		TraceEvent("AsyncFileOpened").detail("Filename", filename).detail("fd", r->result).detail("Flags", flags);
+		TraceEvent("AsyncFileOpened").detail("Filename", filename).detail("fd", r->result).detail("Flags", flags).suppressFor(1.0);
 
 		if ((flags & OPEN_LOCK) && !lock_fd(r->result)) {
 			TraceEvent(SevError, "UnableToLockFile").detail("filename", filename).GetLastError();
@@ -264,7 +264,7 @@ private:
 		state eio_req* r = eio_close(fd, 0, eio_callback, &p);
 		Void _ = wait( p.getFuture() );
 		if (r->result) error( "CloseError", fd, r );
-		TraceEvent("AsyncFileClosed").detail("fd", fd);
+		TraceEvent("AsyncFileClosed").detail("fd", fd).suppressFor(1.0);
 	}
 
 	ACTOR static Future<int> read_impl( int fd, void* data, int length, int64_t offset ) {

@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -943,13 +943,17 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 				g_simulator.connectionFailuresDisableDuration = spec.simConnectionFailuresDisableDuration;
 			TraceEvent("TestParserTest").detail("ParsedSimConnectionFailuresDisableDuration", spec.simConnectionFailuresDisableDuration);
 		} else if( attrib == "simBackupAgents" ) {
-			if (value == "BackupToFile")
+			if (value == "BackupToFile" || value == "BackupToFileAndDB")
 				spec.simBackupAgents = ISimulator::BackupToFile;
-			else if (value == "BackupToDB")
-				spec.simBackupAgents = ISimulator::BackupToDB;
 			else
 				spec.simBackupAgents = ISimulator::NoBackupAgents;
 			TraceEvent("TestParserTest").detail("ParsedSimBackupAgents", spec.simBackupAgents);
+
+			if (value == "BackupToDB" || value == "BackupToFileAndDB")
+				spec.simDrAgents = ISimulator::BackupToDB;
+			else
+				spec.simDrAgents = ISimulator::NoBackupAgents;
+			TraceEvent("TestParserTest").detail("ParsedSimDrAgents", spec.simDrAgents);
 		} else if( attrib == "extraDB" ) {
 			TraceEvent("TestParserTest").detail("ParsedExtraDB", "");
 		} else if( attrib == "minimumReplication" ) {
@@ -1004,6 +1008,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	state double startDelay = 0.0;
 	state double databasePingDelay = 1e9;
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::NoBackupAgents;
+	state ISimulator::BackupAgentType simDrAgents = ISimulator::NoBackupAgents;
 	if (tests.empty()) useDB = true;
 	for( auto iter = tests.begin(); iter != tests.end(); ++iter ) {
 		if( iter->useDB ) useDB = true;
@@ -1012,10 +1017,15 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		startDelay = std::max( startDelay, iter->startDelay );
 		databasePingDelay = std::min( databasePingDelay, iter->databasePingDelay );
 		if (iter->simBackupAgents != ISimulator::NoBackupAgents) simBackupAgents = iter->simBackupAgents;
+
+		if (iter->simDrAgents != ISimulator::NoBackupAgents) {
+			simDrAgents = iter->simDrAgents;
+		}
 	}
 
 	if (g_network->isSimulated()) {
 		g_simulator.backupAgents = simBackupAgents;
+		g_simulator.drAgents = simDrAgents;
 	}
 
 	// turn off the database ping functionality if the suite of tests are not going to be using the database

@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -29,14 +29,14 @@
 // As a best practice, API clients should use at least one subspace for
 // application data. For general guidance on subspace usage, see the Subspaces
 // section of the Developer Guide
-// (https://foundationdb.org/documentation/developer-guide.html#developer-guide-sub-keyspaces).
+// (https://www.foundationdb.org/documentation/developer-guide.html#developer-guide-sub-keyspaces).
 package subspace
 
 import (
-	"github.com/apple/foundationdb/bindings/go/src/fdb"
-	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"bytes"
 	"errors"
+	"github.com/apple/foundationdb/bindings/go/src/fdb"
+	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
 // Subspace represents a well-defined region of keyspace in a FoundationDB
@@ -134,7 +134,7 @@ func (s subspace) FDBRangeKeySelectors() (fdb.Selectable, fdb.Selectable) {
 }
 
 func concat(a []byte, b ...byte) []byte {
-	r := make([]byte, len(a) + len(b))
+	r := make([]byte, len(a)+len(b))
 	copy(r, a)
 	copy(r[len(a):], b)
 	return r

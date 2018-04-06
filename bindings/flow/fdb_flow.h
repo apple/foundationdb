@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,7 +23,7 @@
 
 #include <flow/flow.h>
 
-#define FDB_API_VERSION 510
+#define FDB_API_VERSION 520
 #include <bindings/c/foundationdb/fdb_c.h>
 #undef DLLEXPORT
 
@@ -64,6 +64,8 @@ namespace FDB {
 	class API {
 	public:
 		static API* selectAPIVersion(int apiVersion);
+		static API* getInstance();
+		static bool isAPIVersionSelected();
 
 		void setNetworkOption(FDBNetworkOption option, Optional<StringRef> value = Optional<StringRef>());
 
@@ -74,6 +76,7 @@ namespace FDB {
 		Reference<Cluster> createCluster( std::string const& connFilename );
 
 		bool evaluatePredicate(FDBErrorPredicate pred, Error const& e);
+		int getAPIVersion() const;
 
 	private:
 		static API* instance;

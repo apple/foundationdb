@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -140,8 +140,13 @@ namespace FDB {
 	API::API(int version) : version(version) {}
 
 	API* API::selectAPIVersion(int apiVersion) {
-		if(API::instance && apiVersion != API::instance->version) {
-			throw api_version_already_set();
+		if(API::instance) {
+			if(apiVersion != API::instance->version) {
+				throw api_version_already_set();
+			}
+			else {
+				return API::instance;
+			}
 		}
 
 		if(apiVersion < 500 || apiVersion > FDB_API_VERSION) {
@@ -150,11 +155,21 @@ namespace FDB {
 
 		throw_on_error( fdb_select_api_version_impl(apiVersion, FDB_API_VERSION) );
 
-		if(!API::instance) {
-			API::instance = new API(apiVersion);
-		}
-
+		API::instance = new API(apiVersion);
 		return API::instance;
+	}
+
+	bool API::isAPIVersionSelected() {
+		return API::instance != NULL;
+	}
+
+	API* API::getInstance() {
+		if(API::instance == NULL) {
+			throw api_version_unset();
+		}
+		else {
+			return API::instance;
+		}
 	}
 
 	void API::setupNetwork() {
@@ -181,6 +196,10 @@ namespace FDB {
 		throw_on_error( fdb_future_get_cluster( f.f, &c ) );
 
 		return Reference<Cluster>( new Cluster(c) );
+	}
+
+	int API::getAPIVersion() const {
+		return version;
 	}
 
 	Reference<DatabaseContext> Cluster::createDatabase() {

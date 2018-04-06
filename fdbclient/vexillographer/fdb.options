@@ -217,6 +217,9 @@ description is not currently required but encouraged.
     <Option name="bit_xor" code="8"
             paramType="Bytes" paramDescription="value with which to perform bitwise xor"
             description="Performs a bitwise ``xor`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``."/>
+    <Option name="append_if_fits" code="9"
+            paramType="Bytes" paramDescription="value to append to the database value"
+            description="Appends ``param`` to the end of the existing value already in the database at the given key (or creates the key and sets the value to ``param`` if the key is empty). This will only append the value if the final concatenated value size is less than or equal to the maximum value size (i.e., if it fits). WARNING: No error is surfaced back to the user if the final value is too large because the mutation will not be applied until after the transaction has been committed. Therefore, it is only safe to use this mutation type if one can guarantee that one will keep the total value size under the maximum size."/>
     <Option name="max" code="12"
             paramType="Bytes" paramDescription="value to check against database value"
             description="Performs a little-endian comparison of byte strings. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The larger of the two values is then stored in the database."/>

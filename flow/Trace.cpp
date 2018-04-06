@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -615,46 +615,46 @@ bool TraceEvent::isEnabled( const char* type, Severity severity ) {
 	return !suppress.count(s);
 }
 
-TraceEvent::TraceEvent( const char* type, UID id ) : type(type), id(id) {
+TraceEvent::TraceEvent( const char* type, UID id ) : id(id) {
 	init(SevInfo, type);
 	detail("ID", id);
 }
 
-TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : type(type), id(id) {
+TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : id(id) {
 	init(severity, type);
 	detail("ID", id);
 }
 
-TraceEvent::TraceEvent(const char* type, const StringRef& zoneId) : type(type) {
+TraceEvent::TraceEvent(const char* type, const StringRef& zoneId) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
 	init(SevInfo, type);
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent(Severity severity, const char* type, const StringRef& zoneId) : type(type) {
+TraceEvent::TraceEvent(Severity severity, const char* type, const StringRef& zoneId) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
 	init(severity, type);
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent(const char* type, const Optional<Standalone<StringRef>>& zoneId) : type(type) {
+TraceEvent::TraceEvent(const char* type, const Optional<Standalone<StringRef>>& zoneId) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
 	init(SevInfo, type);
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent(Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId) : type(type) {
+TraceEvent::TraceEvent(Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL, 0);
 	init(severity, type);
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : type(""), id(id) {
-	init(SevInfo, interval);
+TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id) {
+	init(interval.severity, interval);
 	detail("ID", id);
 }
 
-TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : type(""), id(id) {
+TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : id(id) {
 	init(severity, interval);
 	detail("ID", id);
 }
@@ -670,6 +670,9 @@ bool TraceEvent::init( Severity severity, TraceInterval& interval ) {
 }
 
 bool TraceEvent::init( Severity severity, const char* type ) {
+	ASSERT(*type != '\0');
+
+	this->type = type;
 	this->severity = severity;
 	tmpEventMetric = new DynamicEventMetric(MetricNameRef());
 	tmpEventMetric->setField("Severity", (int64_t)severity);
@@ -911,7 +914,7 @@ TraceEvent::~TraceEvent() {
 				TraceEvent::eventCounts[severity/10]++;
 
 				// Log Metrics
-				if(g_traceLog.logTraceEventMetrics && *type != '\0' && isNetworkThread()) {
+				if(g_traceLog.logTraceEventMetrics && isNetworkThread()) {
 					// Get the persistent Event Metric representing this trace event and push the fields (details) accumulated in *this to it and then log() it.
 					// Note that if the event metric is disabled it won't actually be logged BUT any new fields added to it will be registered.
 					// If the event IS logged, a timestamp will be returned, if not then 0.  Either way, pass it through to be used if possible
@@ -1036,7 +1039,7 @@ void TraceBatch::dump() {
 	for(int i = 0; i < attachBatch.size(); i++) {
 		char buffer[256];
 		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" ID=\"%016" PRIx64 "\" To=\"%016" PRIx64 "\"/>\r\n",
-			(int)SevInfo, attachBatch[i].time, attachBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
+			(int)SevInfo, attachBatch[i].time, attachBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			attachBatch[i].id, attachBatch[i].to);
 		g_traceLog.write( buffer, length );
 	}
@@ -1044,7 +1047,7 @@ void TraceBatch::dump() {
 	for(int i = 0; i < eventBatch.size(); i++) {
 		char buffer[256];
 		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" ID=\"%016" PRIx64 "\" Location=\"%s\"/>\r\n",
-			(int)SevInfo, eventBatch[i].time, eventBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
+			(int)SevInfo, eventBatch[i].time, eventBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			eventBatch[i].id, eventBatch[i].location );
 		g_traceLog.write( buffer, length );
 	}
@@ -1052,7 +1055,7 @@ void TraceBatch::dump() {
 	for(int i = 0; i < buggifyBatch.size(); i++) {
 		char buffer[256];
 		int length = sprintf( buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"BuggifySection\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" Activated=\"%d\" File=\"%s\" Line=\"%d\"/>\r\n",
-			(int)SevInfo, buggifyBatch[i].time, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
+			(int)SevInfo, buggifyBatch[i].time, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			buggifyBatch[i].activated, buggifyBatch[i].file.c_str(), buggifyBatch[i].line );
 		g_traceLog.write( buffer, length );
 	}

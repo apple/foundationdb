@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -32,7 +32,10 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
  *  {@link Transaction#getRange(KeySelector, KeySelector) getRange()}.<br>
  * <br>
  * For more about how key selectors work in practice, see
- * <a href="/foundationdb/developer-guide.html#key-selectors" target="_blank">the KeySelector documentation</a>.
+ * <a href="/developer-guide.html#key-selectors" target="_blank">the KeySelector documentation</a>.
+ *  Note that the way the key selectors are resolved is somewhat non-intuitive, so
+ *  users who wish to use a key selector other than the default ones described below should
+ *  probably consult that documentation before proceeding.
  * <br>
  * <br>
  * Generally one of the following static methods should be used to construct a {@code KeySelector}:
@@ -52,13 +55,25 @@ public class KeySelector {
 
 	/**
 	 * Constructs a new {@code KeySelector} from the given parameters.  Client code
-	 *  will not generally call this constructor.
+	 *  will not generally call this constructor. A key selector can be used to
+	 *  specify a key that will be resolved at runtime based on a starting key and
+	 *  an offset. When this is passed as an argument to a {@link Transaction}'s
+	 *  {@link Transaction#getKey(KeySelector) getKey()} or
+	 *  {@link Transaction#getRange(KeySelector, KeySelector) getRange()}
+	 *  methods, the key selector will be resolved to a key within the
+	 *  database. This is done in a manner equivalent to finding the last key that is
+	 *  less than (or less than or equal to, if {@code orEqual} is
+	 *  {@code true}) the base {@code key} specified here and then
+	 *  returning the key that is {@code offset} keys greater than that
+	 *  key.
 	 *
 	 * @param key the base key to reference
-	 * @param orEqual <code>true</code> if the key should be considered for equality
-	 * @param offset the number of keys to offset from once the key is found
+	 * @param orEqual {@code true} if the key selector should resolve to
+	 *                {@code key} (if {@code key} is present) before accounting for the offset
+	 * @param offset the offset (in number of keys) that the selector will advance after
+	 *               resolving to a key based on the {@code key} and {@code orEqual} parameters
 	 */
-	public KeySelector(byte[] key, boolean orEqual,int offset) {
+	public KeySelector(byte[] key, boolean orEqual, int offset) {
 		this.key = key;
 		this.orEqual = orEqual;
 		this.offset = offset;
@@ -119,7 +134,7 @@ public class KeySelector {
 	 *  poor choice for iterating through a large range. (Instead, use the keys
 	 *  returned from a range query operation
 	 *  themselves to create a new beginning {@code KeySelector}.) For more information see
-	 *  <a href="/foundationdb/developer-guide.html#key-selectors" target="_blank">the KeySelector documentation</a>.
+	 *  <a href="/developer-guide.html#key-selectors" target="_blank">the KeySelector documentation</a>.
 	 *
 	 * @param offset the number of keys to offset the {@code KeySelector}. This number can be
 	 *  negative.
@@ -157,7 +172,11 @@ public class KeySelector {
 	}
 
 	/**
-	 * Returns the key offset for this {@code KeySelector}. For internal use.
+	 * Returns the key offset parameter for this {@code KeySelector}. See
+	 *  the {@link #KeySelector(byte[], boolean, int) KeySelector constructor}
+	 *  for more details.
+	 *
+	 * @return the key offset for this {@code KeySelector}
 	 */
 	public int getOffset() {
 		return offset;

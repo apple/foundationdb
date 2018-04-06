@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -164,6 +164,7 @@ public:
 		simCheckRelocationDuration = false;
 		simConnectionFailuresDisableDuration = 0;
 		simBackupAgents = ISimulator::NoBackupAgents;
+		simDrAgents = ISimulator::NoBackupAgents;
 	}
 	TestSpec( StringRef title, bool dump, bool clear, double startDelay = 30.0, bool useDB = true, double databasePingDelay = -1.0 ) : 
 			title( title ), dumpAfterTest( dump ), 
@@ -171,7 +172,7 @@ public:
 				useDB( useDB ), timeout( 600 ),
 				databasePingDelay( databasePingDelay ), runConsistencyCheck( g_network->isSimulated() ),
 				waitForQuiescenceBegin( true ), waitForQuiescenceEnd( true ), simCheckRelocationDuration( false ), 
-				simConnectionFailuresDisableDuration( 0 ), simBackupAgents( ISimulator::NoBackupAgents ) {
+				simConnectionFailuresDisableDuration( 0 ), simBackupAgents( ISimulator::NoBackupAgents ), simDrAgents( ISimulator::NoBackupAgents ) {
 		phases = TestWorkload::SETUP | TestWorkload::EXECUTION | TestWorkload::CHECK | TestWorkload::METRICS;
 		if( databasePingDelay < 0 )
 			databasePingDelay = g_network->isSimulated() ? 0.0 : 15.0;
@@ -193,6 +194,7 @@ public:
 	bool simCheckRelocationDuration; //If set to true, then long duration relocations generate SevWarnAlways messages.  Once any workload sets this to true, it will be true for the duration of the program.  Can only be used in simulation.
 	double simConnectionFailuresDisableDuration;
 	ISimulator::BackupAgentType simBackupAgents; //If set to true, then the simulation runs backup agents on the workers. Can only be used in simulation.
+	ISimulator::BackupAgentType simDrAgents;
 };
 
 Future<DistributedTestResults> runWorkload( 

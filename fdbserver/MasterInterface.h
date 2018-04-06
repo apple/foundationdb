@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -77,9 +77,10 @@ struct GetRateInfoReply {
 
 struct TLogRejoinRequest {
 	TLogInterface myInterface;
-	DBRecoveryCount recoveryCount;
 	ReplyPromise<bool> reply;   // false means someone else registered, so we should re-register.  true means this master is recovered, so don't send again to the same master.
 
+	TLogRejoinRequest() { }
+	explicit TLogRejoinRequest(const TLogInterface &interf) : myInterface(interf) { }
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ar & myInterface & reply;

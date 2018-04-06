@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -174,6 +174,8 @@ ERROR( backup_bad_block_size, 2313, "Backup file block size too small")
 ERROR( backup_invalid_url, 2314, "Backup Container URL invalid")
 ERROR( backup_invalid_info, 2315, "Backup Container URL invalid")
 ERROR( backup_cannot_expire, 2316, "Cannot expire requested data from backup without violating minimum restorability")
+ERROR( backup_auth_missing, 2317, "Cannot find authentication details (such as a password or secret key) for the specified Backup Container URL")
+ERROR( backup_auth_unreadable, 2318, "Cannot read or parse one or more sources of authentication information for Backup Container URLs")
 ERROR( restore_invalid_version, 2361, "Invalid restore version")
 ERROR( restore_corrupted_data, 2362, "Corrupted backup data")
 ERROR( restore_missing_data, 2363, "Missing backup data")

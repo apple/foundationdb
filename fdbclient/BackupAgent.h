@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -46,6 +46,7 @@ public:
 	static const Key keyFolderId;
 	static const Key keyBeginVersion;
 	static const Key keyEndVersion;
+	static const Key keyPrevBeginVersion;
 	static const Key keyConfigBackupTag;
 	static const Key keyConfigLogUid;
 	static const Key keyConfigBackupRanges;
@@ -55,6 +56,8 @@ public:
 	static const Key keyLastUid;
 	static const Key keyBeginKey;
 	static const Key keyEndKey;
+	static const Key destUid;
+	static const Key backupStartVersion;
 
 	static const Key keyTagName;
 	static const Key keyStates;
@@ -265,7 +268,7 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return abortBackup(tr, tagName); });
 	}
 
-	Future<std::string> getStatus(Database cx, int errorLimit, std::string tagName);
+	Future<std::string> getStatus(Database cx, bool showErrors, std::string tagName);
 
 	Future<Version> getLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	void setLastRestorable(Reference<ReadYourWritesTransaction> tr, Key tagName, Version version);
@@ -353,6 +356,11 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateValue(tr, logUid); });
 	}
 
+	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	Future<UID> getDestUid(Database cx, UID logUid) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getDestUid(tr, logUid); });
+	}
+
 	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName);
 	Future<UID> getLogUid(Database cx, Key tagName) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getLogUid(tr, tagName); });
@@ -410,8 +418,9 @@ struct RCGroup {
 
 bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
-Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key backupUid, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
+Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
+Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> beginVersion = Optional<Version>(), Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
 std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key);
 Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
@@ -421,7 +430,7 @@ Future<Void> logError(Database cx, Key keyErrors, const std::string& message);
 Future<Void> logError(Reference<ReadYourWritesTransaction> tr, Key keyErrors, const std::string& message);
 Future<Void> checkVersion(Reference<ReadYourWritesTransaction> const& tr);
 Future<Void> readCommitted(Database const& cx, PromiseStream<RangeResultWithVersion> const& results, Reference<FlowLock> const& lock, KeyRangeRef const& range, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false);
-Future<Void> readCommitted(Database const& cx, PromiseStream<RCGroup> const& results, Future<Void> const& active, Reference<FlowLock> const& lock, KeyRangeRef const& range, std::function< std::pair<uint64_t, uint32_t>(Key key) > const& groupBy, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false, std::function< Future<Void>(Reference<ReadYourWritesTransaction> tr) > const& withEachFunction = nullptr);
+Future<Void> readCommitted(Database const& cx, PromiseStream<RCGroup> const& results, Future<Void> const& active, Reference<FlowLock> const& lock, KeyRangeRef const& range, std::function< std::pair<uint64_t, uint32_t>(Key key) > const& groupBy, bool const& terminator = true, bool const& systemAccess = false, bool const& lockAware = false);
 Future<Void> applyMutations(Database const& cx, Key const& uid, Key const& addPrefix, Key const& removePrefix, Version const& beginVersion, Version* const& endVersion, RequestStream<CommitTransactionRequest> const& commit, NotifiedVersion* const& committedVersion, Reference<KeyRangeMap<Version>> const& keyVersion);
 
 typedef BackupAgentBase::enumState EBackupState;
@@ -500,9 +509,14 @@ public:
 
 	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
 
-	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
+	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool setValidation = true) {
 		// Set the uid task parameter
 		TaskParams.uid().set(task, uid);
+
+		if (!setValidation) {
+			return Void();
+		}
+
 		// Set the validation condition for the task which is that the restore uid's tag's uid is the same as the restore uid.
 		// Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the validation key
 		// which TaskBucket will check, and its value must be this restore config's uid.
@@ -530,8 +544,29 @@ public:
 	}
 
 	// lastError is a pair of error message and timestamp expressed as an int64_t
-	KeyBackedProperty<std::pair<std::string, int64_t>> lastError() {
+	KeyBackedProperty<std::pair<std::string, Version>> lastError() {
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	KeyBackedMap<int64_t, std::pair<std::string, Version>> lastErrorPerType() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
+	// Updates the error per type map and the last error property
+	Future<Void> updateErrorInfo(Database cx, Error e, std::string message) {
+		// Avoid capture of this ptr
+		auto &copy = *this;
+
+		return runRYWTransaction(cx, [=] (Reference<ReadYourWritesTransaction> tr) mutable {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return map(tr->getReadVersion(), [=] (Version v) mutable {
+				copy.lastError().set(tr, {message, v});
+				copy.lastErrorPerType().set(tr, e.code(), {message, v});
+				return Void();
+			});
+		});
 	}
 
 protected:
@@ -680,6 +715,10 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	KeyBackedProperty<Key> destUidValue() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -699,9 +738,9 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange) {
-		Key mutationLogsDestKey = uidPrefixKey(backupLogKeys.begin, getUid());
-		tr->set(logRangesEncodeKey(backupRange.begin, getUid()), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
+	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange, Key destUidValue) {
+		Key mutationLogsDestKey = destUidValue.withPrefix(backupLogKeys.begin);
+		tr->set(logRangesEncodeKey(backupRange.begin, BinaryReader::fromStringRef<UID>(destUidValue, Unversioned())), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
 	}
 
 	Future<Void> logError(Database cx, Error e, std::string details, void *taskInstance = nullptr) {
@@ -714,8 +753,8 @@ public:
 		// These should not happen
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
-		std::string msg = format("ERROR: %s %s", e.what(), details.c_str());
-		return lastError().set(cx, {msg, (int64_t)now()});
+
+		return updateErrorInfo(cx, e, details);
 	}
 };
 #endif

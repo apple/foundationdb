@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -91,6 +91,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( TASKBUCKET_MAX_TASK_KEYS,               1000 ); if( randomize && BUGGIFY ) TASKBUCKET_MAX_TASK_KEYS = 20;
 
 	//Backup
+	init( BACKUP_CONCURRENT_DELETES,               100 );
 	init( BACKUP_SIMULATED_LIMIT_BYTES,		       1e6 ); if( randomize && BUGGIFY ) BACKUP_SIMULATED_LIMIT_BYTES = 1000;
 	init( BACKUP_GET_RANGE_LIMIT_BYTES,		       1e6 );
 	init( BACKUP_LOCK_BYTES,                       1e8 );
@@ -128,6 +129,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_ERROR_DELAY,                     10.0 );
 	init( BACKUP_STATUS_DELAY,                    40.0 );
 	init( BACKUP_STATUS_JITTER,                   0.05 );
+	init( CLEAR_LOG_RANGE_COUNT,                   1500); // transaction size / (size of '\xff\x02/blog/' + size of UID + size of hash result) = 200,000 / (8 + 16 + 8)
 
 	// Configuration
 	init( DEFAULT_AUTO_PROXIES,                      3 );

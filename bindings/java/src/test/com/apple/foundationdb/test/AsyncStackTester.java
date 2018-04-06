@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -451,6 +451,27 @@ public class AsyncStackTester {
 		else if(op == StackOperation.UNIT_TESTS) {
 			inst.context.db.options().setLocationCacheSize(100001);
 			return inst.context.db.runAsync(tr -> {
+				FDB fdb = FDB.instance();
+
+				String alreadyStartedMessage = "FoundationDB API already started at different version";
+				try {
+					FDB.selectAPIVersion(fdb.getAPIVersion() + 1);
+					throw new IllegalStateException("Was not stopped from selecting two API versions");
+				}
+				catch(IllegalArgumentException e) {
+					if(!e.getMessage().equals(alreadyStartedMessage)) {
+						throw e;
+					}
+				}
+				try {
+					FDB.selectAPIVersion(fdb.getAPIVersion() - 1);
+					throw new IllegalStateException("Was not stopped from selecting two API versions");
+				}
+				catch(IllegalArgumentException e) {
+					if(!e.getMessage().equals(alreadyStartedMessage)) {
+						throw e;
+					}
+				}
 				tr.options().setPrioritySystemImmediate();
 				tr.options().setPriorityBatch();
 				tr.options().setCausalReadRisky();
@@ -686,7 +707,23 @@ public class AsyncStackTester {
 
 		byte[] prefix = args[0].getBytes();
 
-		FDB fdb = FDB.selectAPIVersion(Integer.parseInt(args[1]));
+		if(FDB.isAPIVersionSelected()) {
+			throw new IllegalStateException("API version already set to " + FDB.instance().getAPIVersion());
+		}
+		try {
+			FDB.instance();
+			throw new IllegalStateException("Able to get API instance before selecting API version");
+		}
+		catch(FDBException e) {
+			if(e.getCode() != 2200) {
+				throw e;
+			}
+		}
+		int apiVersion = Integer.parseInt(args[1]);
+		FDB fdb = FDB.selectAPIVersion(apiVersion);
+		if(FDB.instance().getAPIVersion() != apiVersion) {
+			throw new IllegalStateException("API version not correctly set to " + apiVersion);
+		}
 		//ExecutorService executor = Executors.newFixedThreadPool(2);
 		Cluster cl = fdb.createCluster(args.length > 2 ? args[2] : null);
 

@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -123,6 +123,26 @@ struct LogSystemConfig {
 		for( int i = 0; i < tLogs.size(); i++ )
 			if( tLogs[i].present() )
 				results.push_back(tLogs[i].interf());
+		return results;
+	}
+
+	std::vector<std::pair<UID, NetworkAddress>> allSharedLogs() const {
+		typedef std::pair<UID, NetworkAddress> IdAddrPair;
+		std::vector<IdAddrPair> results;
+		for (auto &tLog : tLogs) {
+			if (tLog.present())
+				results.push_back(IdAddrPair(tLog.interf().getSharedTLogID(), tLog.interf().address()));
+		}
+
+		for (auto &oldLog : oldTLogs) {
+			for (auto &tLog : oldLog.tLogs) {
+				if (tLog.present())
+					results.push_back(IdAddrPair(tLog.interf().getSharedTLogID(), tLog.interf().address()));
+			}
+		}
+		uniquify(results);
+		// This assert depends on the fact that uniquify will sort the elements based on <UID, NetworkAddr> order
+		ASSERT_WE_THINK(std::unique(results.begin(), results.end(), [](IdAddrPair &x, IdAddrPair &y) { return x.first == y.first; }) == results.end());
 		return results;
 	}
 

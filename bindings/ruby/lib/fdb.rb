@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,14 +21,24 @@
 # FoundationDB Ruby API
 
 # Documentation for this API can be found at
-# https://foundationdb.org/documentation/api-ruby.html
+# https://www.foundationdb.org/documentation/api-ruby.html
 
 module FDB
   @@chosen_version = -1
+  def self.is_api_version_selected?()
+    @@chosen_version >= 0
+  end
+  def self.get_api_version()
+    if self.is_api_version_selected?()
+      return @@chosen_version
+    else
+      raise "FDB API version not selected"
+    end
+  end
   def self.api_version(version)
-    header_version = 510
-    if @@chosen_version >= 0
-      if@@chosen_version != version
+    header_version = 520
+    if self.is_api_version_selected?()
+      if @@chosen_version != version
         raise "FDB API already loaded at version #{@@chosen_version}."
       end
       return

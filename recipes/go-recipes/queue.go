@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,15 +21,15 @@
 package main
 
 import (
+	"fmt"
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/directory"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 	"log"
-	"fmt"
 )
 
-type EmptyQueueError struct {}
+type EmptyQueueError struct{}
 
 func (q EmptyQueueError) Error() string {
 	return "Queue is Empty"
@@ -54,7 +54,9 @@ func (q *Queue) NewQueue(ss subspace.Subspace) {
 func (q *Queue) Dequeue(trtr fdb.Transactor) (interface{}, error) {
 	i, e := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		item, err := q.FirstItem(tr)
-		if err != nil {return nil, err}
+		if err != nil {
+			return nil, err
+		}
 		tr.Clear(item.(fdb.KeyValue).Key)
 		return item.(fdb.KeyValue).Value, err
 	})
@@ -64,12 +66,16 @@ func (q *Queue) Dequeue(trtr fdb.Transactor) (interface{}, error) {
 func (q *Queue) Enqueue(trtr fdb.Transactor, item interface{}) (interface{}, error) {
 	i, e := trtr.Transact(func(tr fdb.Transaction) (interface{}, error) {
 		index, err := q.LastIndex(tr)
-		if err != nil {return nil, err}
+		if err != nil {
+			return nil, err
+		}
 
 		ki, err := q.QueueSS.Unpack(index.(fdb.Key))
-		if err != nil {return nil, err}
+		if err != nil {
+			return nil, err
+		}
 
-		tr.Set(q.QueueSS.Pack(tuple.Tuple{ki[0].(int64)+1}), []byte(item.(string)))
+		tr.Set(q.QueueSS.Pack(tuple.Tuple{ki[0].(int64) + 1}), []byte(item.(string)))
 
 		return nil, nil
 	})
@@ -101,12 +107,14 @@ func (q *Queue) FirstItem(trtr fdb.Transactor) (interface{}, error) {
 func main() {
 	fmt.Println("Queue Example Program")
 
-	fdb.MustAPIVersion(510)
+	fdb.MustAPIVersion(520)
 
 	db := fdb.MustOpenDefault()
 
 	QueueDemoDir, err := directory.CreateOrOpen(db, []string{"Queue"}, nil)
-	if err != nil {log.Fatal(err)}
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	clear_subspace(db, QueueDemoDir)
 
@@ -119,7 +127,9 @@ func main() {
 	q.Enqueue(db, "test3")
 	for i := 0; i < 5; i++ {
 		item, e := q.Dequeue(db)
-		if e != nil {log.Fatal(e)}
+		if e != nil {
+			log.Fatal(e)
+		}
 
 		fmt.Println(string(item.([]byte)))
 	}

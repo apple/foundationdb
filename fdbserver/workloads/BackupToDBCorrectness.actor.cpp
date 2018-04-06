@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -34,9 +34,11 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	int	 backupRangesCount, backupRangeLengthMax;
 	bool differentialBackup, performRestore, agentRequest;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
-	static int backupAgentRequests;
+	static int drAgentRequests;
 	Database extraDB;
 	bool locked;
+	bool shareLogRange;
+	UID destUid;
 
 	BackupToDBCorrectnessWorkload(WorkloadContext const& wcx)
 		: TestWorkload(wcx) {
@@ -53,13 +55,15 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		differentialBackup = getOption(options, LiteralStringRef("differentialBackup"), g_random->random01() < 0.5 ? true : false);
 		stopDifferentialAfter = getOption(options, LiteralStringRef("stopDifferentialAfter"),
 			differentialBackup ? g_random->random01() * (restoreAfter - std::max(abortAndRestartAfter,backupAfter)) + std::max(abortAndRestartAfter,backupAfter) : 0.0);
-		agentRequest = getOption(options, LiteralStringRef("simBackupAgents"), true);
+		agentRequest = getOption(options, LiteralStringRef("simDrAgents"), true);
+		shareLogRange = getOption(options, LiteralStringRef("shareLogRange"), false);
 
-		beforePrefix = g_random->random01() < 0.5;
+		// Use sharedRandomNumber if shareLogRange is true so that we can ensure backup and DR both backup the same range
+		beforePrefix = shareLogRange ? (sharedRandomNumber & 1) : (g_random->random01() < 0.5);
+
 		if (beforePrefix) {
 			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
 			backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xff"));
-
 		}
 		else {
 			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\x00\x00\x01"));
@@ -72,7 +76,12 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		KeyRef endRange;
 		UID randomID = g_nondeterministic_random->randomUniqueID();
 
-		if(backupRangesCount <= 0) {
+		if (shareLogRange) {
+			if (beforePrefix)
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, LiteralStringRef("\xfe\xff\xfe")));
+			else
+				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(strinc(LiteralStringRef("\x00\x00\x01")), normalKeys.end));
+		} else if(backupRangesCount <= 0) {
 			if (beforePrefix)
 				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, std::min(backupPrefix, extraPrefix)));
 			else
@@ -249,6 +258,8 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		submitted.send(Void());
 
+		state UID logUid = wait(backupAgent->getLogUid(cx, tag));
+
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
 			TEST(!stopDifferentialFuture.isReady()); //Restore starts at specified time
@@ -261,7 +272,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					TraceEvent("BARW_doBackup waitForRestorable", randomID).detail("tag", printable(tag));
 					// Wait until the backup is in a restorable state
 					state int resultWait = wait(backupAgent->waitBackup(cx, tag, false));
-					state UID logUid = wait(backupAgent->getLogUid(cx, tag));
 
 					TraceEvent("BARW_lastBackupFolder", randomID).detail("backupTag", printable(tag))
 						.detail("logUid", logUid).detail("waitStatus", resultWait);
@@ -296,6 +306,10 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		// Wait for the backup to complete
 		TraceEvent("BARW_doBackup waitBackup", randomID).detail("tag", printable(tag));
+
+		UID _destUid = wait(backupAgent->getDestUid(cx, logUid));
+		self->destUid = _destUid;
+
 		state int statusValue = wait(backupAgent->waitBackup(cx, tag, true));
 		Void _ = wait(backupAgent->unlockBackup(cx, tag));
 
@@ -311,9 +325,11 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> checkData(Database cx, UID logUid, UID randomID, Key tag, DatabaseBackupAgent* backupAgent) {
+	ACTOR static Future<Void> checkData(Database cx, UID logUid, UID destUid, UID randomID, Key tag, DatabaseBackupAgent* backupAgent, bool shareLogRange) {
 		state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
-		state Key backupLogValuesKey = uidPrefixKey(backupLogKeys.begin, logUid);
+		state Key backupLogValuesKey = uidPrefixKey(backupLogKeys.begin, destUid);
+		state Key backupLatestVersionsPath = uidPrefixKey(backupLatestVersionsPrefix, destUid);
+		state Key backupLatestVersionsKey = uidPrefixKey(backupLatestVersionsPath, logUid);
 		state int displaySystemKeys = 0;
 
 		// Ensure that there is no left over key within the backup subspace
@@ -378,21 +394,31 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					printf("No left over backup agent configuration keys\n");
 				}
 
-				Standalone<RangeResultRef> logValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
-
-				// Error if the log/mutation keyspace for the backup tag is not empty
-				if (logValues.size() > 0) {
-					displaySystemKeys++;
-					printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n", logValues.size(), printable(backupLogValuesKey).c_str());
-					TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID).detail("backupTag", printable(tag))
-						.detail("LeftOverKeys", logValues.size()).detail("keySpace", printable(backupLogValuesKey)).detail("version", decodeBKMutationLogKey(logValues[0].key).first);
-					for (auto & s : logValues) {
-						TraceEvent("BARW_LeftOverKey", randomID).detail("key", printable(StringRef(s.key.toString()))).detail("value", printable(StringRef(s.value.toString())));
-						printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(), printable(StringRef(s.value.toString())).c_str());
-					}
+				Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
+				if (latestVersion.present()) {
+					TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID).detail("backupTag", printable(tag)).detail("key", backupLatestVersionsKey.printable()).detail("value", BinaryReader::fromStringRef<Version>(latestVersion.get(), Unversioned()));
+				} else {
+					printf("No left over backup version key\n");
 				}
-				else {
-					printf("No left over backup log keys\n");
+
+				Standalone<RangeResultRef> versions = wait(tr->getRange(KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
+				if (!shareLogRange || !versions.size()) {
+					Standalone<RangeResultRef> logValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
+
+					// Error if the log/mutation keyspace for the backup tag is not empty
+					if (logValues.size() > 0) {
+						displaySystemKeys++;
+						printf("BackupCorrectnessLeftOverLogKeys: (%d) %s\n", logValues.size(), printable(backupLogValuesKey).c_str());
+						TraceEvent(SevError, "BackupCorrectnessLeftOverLogKeys", randomID).detail("backupTag", printable(tag))
+							.detail("LeftOverKeys", logValues.size()).detail("keySpace", printable(backupLogValuesKey)).detail("version", decodeBKMutationLogKey(logValues[0].key).first);
+						for (auto & s : logValues) {
+							TraceEvent("BARW_LeftOverKey", randomID).detail("key", printable(StringRef(s.key.toString()))).detail("value", printable(StringRef(s.value.toString())));
+							printf("   Key: %-50s  Value: %s\n", printable(StringRef(s.key.toString())).c_str(), printable(StringRef(s.value.toString())).c_str());
+						}
+					}
+					else {
+						printf("No left over backup log keys\n");
+					}
 				}
 
 				break;
@@ -422,7 +448,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 
 		// Increment the backup agent requets
 		if (self->agentRequest) {
-			BackupToDBCorrectnessWorkload::backupAgentRequests++;
+			BackupToDBCorrectnessWorkload::drAgentRequests++;
 		}
 
 		try{
@@ -527,23 +553,23 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			Void _ = wait( checkData(self->extraDB, logUid, randomID, self->backupTag, &backupAgent) );
+			Void _ = wait( checkData(self->extraDB, logUid, self->destUid, randomID, self->backupTag, &backupAgent, self->shareLogRange) );
 
 			if (self->performRestore) {
 				state UID restoreUid = wait(backupAgent.getLogUid(self->extraDB, self->restoreTag));
-				Void _ = wait( checkData(cx, restoreUid, randomID, self->restoreTag, &restoreAgent) );
+				Void _ = wait( checkData(cx, restoreUid, restoreUid, randomID, self->restoreTag, &restoreAgent, self->shareLogRange) );
 			}
 
 			TraceEvent("BARW_complete", randomID).detail("backupTag", printable(self->backupTag));
 
 			// Decrement the backup agent requets
 			if (self->agentRequest) {
-				BackupToDBCorrectnessWorkload::backupAgentRequests--;
+				BackupToDBCorrectnessWorkload::drAgentRequests--;
 			}
 
 			// SOMEDAY: Remove after backup agents can exist quiescently
-			if ((g_simulator.backupAgents == ISimulator::BackupToDB) && (!BackupToDBCorrectnessWorkload::backupAgentRequests)) {
-				g_simulator.backupAgents = ISimulator::NoBackupAgents;
+			if ((g_simulator.drAgents == ISimulator::BackupToDB) && (!BackupToDBCorrectnessWorkload::drAgentRequests)) {
+				g_simulator.drAgents = ISimulator::NoBackupAgents;
 			}
 		}
 		catch (Error& e) {
@@ -555,6 +581,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 	}
 };
 
-int BackupToDBCorrectnessWorkload::backupAgentRequests = 0;
+int BackupToDBCorrectnessWorkload::drAgentRequests = 0;
 
 WorkloadFactory<BackupToDBCorrectnessWorkload> BackupToDBCorrectnessWorkloadFactory("BackupToDBCorrectness");

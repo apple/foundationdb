@@ -5,13 +5,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -37,19 +37,20 @@ import fdb
 import fdb.tuple
 fdb.api_version(400)
 
+
 class PythonPerformance(PythonTest):
     tests = {
-        'future_latency' : 'Python API future throughput',
-        'set' : 'Python API set throughput',
-        'clear' : 'Python API clear throughput',
-        'clear_range' : 'Python API clear_range throughput',
-        'parallel_get' : 'Python API parallel get throughput',
-        'serial_get' : 'Python API serial get throughput',
-        'get_range' : 'Python API get_range throughput',
-        'get_key' : 'Python API get_key throughput',
-        'get_single_key_range' : 'Python API get_single_key_range throughput',
-        'alternating_get_set' : 'Python API alternating get and set throughput',
-        'write_transaction' : 'Python API single-key transaction throughput',
+        'future_latency': 'Python API future throughput',
+        'set': 'Python API set throughput',
+        'clear': 'Python API clear throughput',
+        'clear_range': 'Python API clear_range throughput',
+        'parallel_get': 'Python API parallel get throughput',
+        'serial_get': 'Python API serial get throughput',
+        'get_range': 'Python API get_range throughput',
+        'get_key': 'Python API get_key throughput',
+        'get_single_key_range': 'Python API get_single_key_range throughput',
+        'alternating_get_set': 'Python API alternating get and set throughput',
+        'write_transaction': 'Python API single-key transaction throughput',
     }
 
     def __init__(self, key_count=1000000, key_size=16, value_size=100):
@@ -58,7 +59,7 @@ class PythonPerformance(PythonTest):
         self.key_size = key_size
         self.value_str = ''.join(['x' for i in range(value_size)])
 
-    #Python Performance Tests (checks if functions run and yield correct results, gets performance indicators)
+    # Python Performance Tests (checks if functions run and yield correct results, gets performance indicators)
     def run_test(self):
         try:
             db = fdb.open(None, 'DB')
@@ -76,7 +77,7 @@ class PythonPerformance(PythonTest):
             self.result.add_error(self.get_error('Failed to complete all tests'))
 
     def random_key(self):
-        return self.key(random.randint(0, self.key_count-1))
+        return self.key(random.randint(0, self.key_count - 1))
 
     def key(self, num):
         return '%0*d' % (self.key_size, num)
@@ -89,7 +90,7 @@ class PythonPerformance(PythonTest):
         del db[:]
         num_keys = 100000 / (self.key_size + len(self.value_str))
 
-        trs = [db.create_transaction() for i in range(int(math.ceil(float(self.key_count)/num_keys)))]
+        trs = [db.create_transaction() for i in range(int(math.ceil(float(self.key_count) / num_keys)))]
         success = [False for i in range(len(trs))]
 
         while not all(success):
@@ -104,16 +105,16 @@ class PythonPerformance(PythonTest):
                     tr.options.set_retry_limit(5)
                     futures[i] = tr.commit()
 
-            for i,f in futures.items():
+            for i, f in futures.items():
                 try:
                     f.wait()
                     success[i] = True
                 except fdb.FDBError as e:
                     trs[i].on_error(e).wait()
 
-        time.sleep(60) # Give the database time to rebalance
+        time.sleep(60)  # Give the database time to rebalance
 
-    #Tests the performance of the API functions
+    # Tests the performance of the API functions
     def test_performance(self, db):
         self.insert_data(db)
 
@@ -121,12 +122,12 @@ class PythonPerformance(PythonTest):
             self.args.tests_to_run = PythonPerformance.tests.keys()
         else:
             for t in self.args.tests_to_run:
-                if not t in PythonPerformance.tests:
+                if t not in PythonPerformance.tests:
                     raise Exception("Unknown Python performance test '%s'" % t)
 
         num_runs = 25
 
-        #Run each test
+        # Run each test
         for test in self.args.tests_to_run:
             time.sleep(5)
             print('Running test %s' % test)
@@ -135,7 +136,7 @@ class PythonPerformance(PythonTest):
             fxn_name = 'run_%s' % test
             assert hasattr(self, fxn_name), 'Test function %s not implemented' % fxn_name
 
-            #Perform each test several times
+            # Perform each test several times
             for x in range(0, num_runs):
                 try:
                     results.append(getattr(self, fxn_name)(db))
@@ -161,7 +162,7 @@ class PythonPerformance(PythonTest):
 
         return count / (time.time() - s)
 
-    #Tests the performance of the 'clear' function
+    # Tests the performance of the 'clear' function
     def run_clear(self, db, count=100000):
         tr = db.create_transaction()
         s = time.time()
@@ -171,18 +172,18 @@ class PythonPerformance(PythonTest):
 
         return count / (time.time() - s)
 
-    #Tests the performance of the 'clear_range' function
+    # Tests the performance of the 'clear_range' function
     def run_clear_range(self, db, count=100000):
         tr = db.create_transaction()
         s = time.time()
 
         for i in range(count):
             key = self.random_key()
-            del tr[key : self.key(int(key)+1)]
+            del tr[key: self.key(int(key) + 1)]
 
         return count / (time.time() - s)
 
-    #Tests the performance of the 'set' function
+    # Tests the performance of the 'set' function
     def run_set(self, db, count=100000):
         tr = db.create_transaction()
         s = time.time()
@@ -193,7 +194,7 @@ class PythonPerformance(PythonTest):
 
         return count / (time.time() - s)
 
-    #Tests the parallel performance of the 'get' function
+    # Tests the parallel performance of the 'get' function
     @fdb.transactional
     def run_parallel_get(self, tr, count=10000):
         tr.options.set_retry_limit(5)
@@ -226,12 +227,12 @@ class PythonPerformance(PythonTest):
 
         return count / (time.time() - s)
 
-    #Tests the serial performance of the 'get' function
+    # Tests the serial performance of the 'get' function
     @fdb.transactional
     def run_serial_get(self, tr, count=2000):
         tr.options.set_retry_limit(5)
 
-        if count > self.key_count/2:
+        if count > self.key_count / 2:
             keys = [self.random_key() for i in range(count)]
         else:
             key_set = OrderedDict()
@@ -246,18 +247,18 @@ class PythonPerformance(PythonTest):
 
         return count / (time.time() - s)
 
-    #Tests the performance of the 'get_range' function
+    # Tests the performance of the 'get_range' function
     @fdb.transactional
     def run_get_range(self, tr, count=100000):
         tr.options.set_retry_limit(5)
-        b = random.randint(0, self.key_count-count)
+        b = random.randint(0, self.key_count - count)
         s = time.time()
 
-        list(tr[self.key(b) : self.key(b+count)])
+        list(tr[self.key(b): self.key(b + count)])
 
         return count / (time.time() - s)
 
-    #Tests the performance of the 'get_key' function
+    # Tests the performance of the 'get_key' function
     @fdb.transactional
     def run_get_key(self, tr, count=2000):
         tr.options.set_retry_limit(5)
@@ -275,7 +276,7 @@ class PythonPerformance(PythonTest):
 
         for i in range(count):
             index = random.randint(0, self.key_count)
-            list(tr.get_range(self.key(index), self.key(index+1), limit=2))
+            list(tr.get_range(self.key(index), self.key(index + 1), limit=2))
 
         return count / (time.time() - s)
 
@@ -292,14 +293,16 @@ class PythonPerformance(PythonTest):
 
         return count / (time.time() - s)
 
-    #Adds the stack trace to an error message
+    # Adds the stack trace to an error message
     def get_error(self, message):
         errorMessage = message + "\n" + traceback.format_exc()
         print('%s' % errorMessage)
         return errorMessage
 
+
 if __name__ == '__main__':
-    print("Running PythonPerformance test on Python version %d.%d.%d%s%d" % (sys.version_info[0], sys.version_info[1], sys.version_info[2], sys.version_info[3][0], sys.version_info[4]))
+    print("Running PythonPerformance test on Python version %d.%d.%d%s%d" %
+          (sys.version_info[0], sys.version_info[1], sys.version_info[2], sys.version_info[3][0], sys.version_info[4]))
 
     parser = argparse.ArgumentParser()
 

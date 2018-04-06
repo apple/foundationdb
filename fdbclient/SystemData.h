@@ -4,13 +4,13 @@
  * This source file is part of the FoundationDB open source project
  *
  * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
- * 
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *     http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -149,7 +149,7 @@ KeyRef logRangesDecodeKey(KeyRef key, UID* logUid = NULL);
 Key logRangesDecodeValue(KeyRef keyValue, Key* destKeyPrefix = NULL);
 
 // Returns the encoded key value comprised of the end key and destination prefix
-Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destKeyPrefix);
+Key logRangesEncodeValue(KeyRef keyEnd, KeyRef destPath);
 
 // Returns a key prefixed with the specified key with
 // the given uid encoded at the end
@@ -201,6 +201,9 @@ extern const KeyRangeRef fileRestorePrefixRange;
 
 // Key range reserved by database backup agent to storing configuration and state information
 extern const KeyRangeRef databaseBackupPrefixRange;
+
+extern const KeyRef destUidLookupPrefix;
+extern const KeyRef backupLatestVersionsPrefix;
 
 // Key range reserved by backup agent to storing mutations
 extern const KeyRangeRef backupLogKeys;

@@ -4,13 +4,13 @@
 # This source file is part of the FoundationDB open source project
 #
 # Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -21,16 +21,16 @@
 TARGETS += packages
 CLEAN_TARGETS += packages_clean
 
-PACKAGE_BINARIES = fdbcli fdbserver fdbbackup fdbmonitor fdbrestore fdbblob fdbdr dr_agent backup_agent
+PACKAGE_BINARIES = fdbcli fdbserver fdbbackup fdbmonitor fdbrestore fdbdr dr_agent backup_agent
 PACKAGE_CONTENTS := $(addprefix bin/, $(PACKAGE_BINARIES)) $(addprefix bin/, $(addsuffix .debug, $(PACKAGE_BINARIES))) lib/libfdb_c.$(DLEXT) bindings/python/fdb/fdboptions.py bindings/c/foundationdb/fdb_c_options.g.h
 
 packages: TGZ FDBSERVERAPI
 
-TGZ: $(PACKAGE_CONTENTS) versions.target
+TGZ: $(PACKAGE_CONTENTS) versions.target lib/libfdb_java.$(DLEXT)
 	@echo "Archiving      tgz"
 	@mkdir -p packages
 	@rm -f packages/FoundationDB-$(PLATFORM)-*.tar.gz
-	@bash -c "tar -czf packages/FoundationDB-$(PLATFORM)-$(VERSION)-$(PKGRELEASE).tar.gz bin/{fdbmonitor{,.debug},fdbcli{,.debug},fdbserver{,.debug},fdbbackup{,.debug},fdbblob{,.debug},fdbdr{,.debug},fdbrestore{,.debug},dr_agent{,.debug},coverage.{fdbclient,fdbserver,fdbrpc,flow}.xml} lib/libfdb_c.$(DLEXT){,-debug} lib/libfdb_java.$(DLEXT)* bindings/python/fdb/*.py bindings/c/*.h"
+	@bash -c "tar -czf packages/FoundationDB-$(PLATFORM)-$(VERSION)-$(PKGRELEASE).tar.gz bin/{fdbmonitor{,.debug},fdbcli{,.debug},fdbserver{,.debug},fdbbackup{,.debug},fdbdr{,.debug},fdbrestore{,.debug},dr_agent{,.debug},coverage.{fdbclient,fdbserver,fdbrpc,flow}.xml} lib/libfdb_c.$(DLEXT){,-debug} lib/libfdb_java.$(DLEXT)* bindings/python/fdb/*.py bindings/c/*.h"
 
 packages_clean:
 	@echo "Cleaning       packages"
