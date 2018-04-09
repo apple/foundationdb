@@ -1309,6 +1309,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->lockResults = lockResults;
 				logSystem->epochEndVersion = end.get();
 				logSystem->knownCommittedVersion = knownCommittedVersion;
+				logSystem->remoteLogsWrittenToCoreState = true;
 
 				for(int log = 0; log < logServers.size(); log++) {
 					if(lockResults[log].logSet->isLocal) {
