@@ -514,7 +514,7 @@ ACTOR Future<Void> tLogLock( TLogData* self, ReplyPromise< TLogLockResult > repl
 
 	for(int tag_locality = 0; tag_locality < logData->tag_data.size(); tag_locality++) {
 		for(int tag_id = 0; tag_id < logData->tag_data[tag_locality].size(); tag_id++) {
-			if(logData->tag_data[tag_locality][tag_id] && (!logData->tag_data[tag_locality][tag_id]->nothing_persistent || logData->tag_data[tag_locality][tag_id]->version_messages.size() || logData->tag_data[tag_locality][tag_id]->unpoppedRecovered)) {
+			if(logData->tag_data[tag_locality][tag_id] && logData->tag_data[tag_locality][tag_id]->tag.locality != tagLocalityLogRouter && (!logData->tag_data[tag_locality][tag_id]->nothing_persistent || logData->tag_data[tag_locality][tag_id]->version_messages.size() || logData->tag_data[tag_locality][tag_id]->unpoppedRecovered)) {
 				result.tags.push_back(logData->tag_data[tag_locality][tag_id]->tag);
 			}
 		}

@@ -1600,12 +1600,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		std::vector<int> locations;
 		for( Tag tag : oldLogSystem->getEpochEndTags() ) {
-			if(tag.locality != tagLocalityLogRouter) {
-				locations.clear();
-				logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
-				for(int loc : locations)
-					reqs[ loc ].recoverTags.push_back( tag );
-			}
+			locations.clear();
+			logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+			for(int loc : locations)
+				reqs[ loc ].recoverTags.push_back( tag );
 		}
 
 		for( int i = 0; i < recr.tLogs.size(); i++ )
@@ -1639,12 +1637,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			filterLocalityDataForPolicy(logSystem->tLogs[1]->tLogPolicy, &logSystem->tLogs[1]->tLogLocalities);
 
 			for( Tag tag : oldLogSystem->getEpochEndTags() ) {
-				if(tag.locality != tagLocalityLogRouter) {
-					locations.clear();
-					logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
-					for(int loc : locations)
-						sreqs[ loc ].recoverTags.push_back( tag );
-				}
+				locations.clear();
+				logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
+				for(int loc : locations)
+					sreqs[ loc ].recoverTags.push_back( tag );
 			}
 
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ )
