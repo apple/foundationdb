@@ -12,7 +12,6 @@ The following documents give detailed descriptions of the API for each language:
 
    api-python
    api-ruby
-   Node.js API <api-node>
    Java API <relative://javadoc/index.html>
    Go API <relative://godoc/fdb.html>
    api-c
