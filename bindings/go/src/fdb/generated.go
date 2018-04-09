@@ -25,7 +25,7 @@
 
 // To regenerate this file, from the top level of a FoundationDB repository
 // checkout, run:
-// $ go run bindings/go/src/_util/translate_fdb_options.go < /usr/local/include/foundationdb/fdb.options > bindings/go/src/fdb/generated.go
+// $ go run bindings/go/src/_util/translate_fdb_options.go < fdbclient/vexillographer/fdb.options > bindings/go/src/fdb/generated.go
 
 package fdb
 
