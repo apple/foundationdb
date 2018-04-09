@@ -24,7 +24,7 @@
 
 #include "TLogInterface.h"
 #include "WorkerInterface.h"
-#include "DatabaseConfiguration.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/Locality.h"
@@ -46,10 +46,10 @@ public:
 	bool isLocal;
 	int32_t hasBestPolicy;
 	int8_t locality;
-	int32_t logRouterCount;
 	Version startVersion;
+	std::vector<Future<TLogLockResult>> replies;
 
-	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityInvalid), logRouterCount(0), startVersion(invalidVersion) {}
+	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 
 	int bestLocationFor( Tag tag ) {
 		if(hasBestPolicy == HasBestPolicyNone) {
@@ -286,6 +286,7 @@ struct ILogSystem {
 		int tLogReplicationFactor;
 		IRepPolicyRef tLogPolicy;
 		std::vector< LocalityData > tLogLocalities;
+		Arena messageArena;
 		
 		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
 		bool collectTags;
@@ -439,7 +440,7 @@ struct ILogSystem {
 		// Same contract as peek(), but can only peek from the logs elected in the same generation. 
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
-	virtual void pop( Version upTo, Tag tag ) = 0;
+	virtual void pop( Version upTo, Tag tag, int8_t popLocality = tagLocalityInvalid ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)
 		// The popping of any given message may be arbitrarily delayed.
 

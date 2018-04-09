@@ -79,6 +79,8 @@ struct InitializeTLogRequest {
 	Tag remoteTag;
 	int8_t locality;
 	bool isPrimary;
+	Version startVersion;
+	int logRouterTags;
 
 	ReplyPromise< struct TLogInterface > reply;
 
@@ -86,7 +88,7 @@ struct InitializeTLogRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & allTags & storeType & remoteTag & locality & isPrimary & reply;
+		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & allTags & storeType & remoteTag & locality & isPrimary & startVersion & logRouterTags & reply;
 	}
 };
 
@@ -94,11 +96,12 @@ struct InitializeLogRouterRequest {
 	uint64_t recoveryCount;
 	int logSet;
 	Tag routerTag;
+	Version startVersion;
 	ReplyPromise<struct TLogInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & routerTag & logSet & reply;
+		ar & recoveryCount & routerTag & logSet & startVersion & reply;
 	}
 };
 

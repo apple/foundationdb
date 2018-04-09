@@ -547,9 +547,9 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 			.trackLatest("MasterRecoveryState");
 	
 	//FIXME: we only need log routers for the same locality as the master
-	int maxLogRouters = 0;
-	for(auto& tLogs : self->cstate.prevDBState.tLogs) {
-		maxLogRouters = std::max(maxLogRouters, tLogs.logRouterCount);
+	int maxLogRouters = self->cstate.prevDBState.logRouterTags;
+	for(auto& old : self->cstate.prevDBState.oldTLogData) {
+		maxLogRouters = std::max(maxLogRouters, old.logRouterTags);
 	}
 
 	state RecruitFromConfigurationReply recruits = wait(
@@ -1024,22 +1024,20 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 
 		state bool finalUpdate = !newState.oldTLogData.size() && newState.tLogs.size() == self->configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		Void _ = wait( self->cstate.write(newState, finalUpdate) );
-
+		self->logSystem->coreStateWritten(newState);
+		self->cstateUpdated.set(true);
+		
 		if( finalUpdate ) {
 			self->recoveryState = RecoveryState::REMOTE_RECOVERED;
 			TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", RecoveryStatus::remote_recovered)
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::remote_recovered])
 			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
-			self->logSystem->coreStateWritten(newState);
 		}
-		
-		self->cstateUpdated.set(true);
 		
 		self->registrationTrigger.trigger();
 		
 		if( finalUpdate ) {
-			TraceEvent("MasterFullyRecovered", self->dbgid);
 			oldLogSystems->get()->stopRejoins();
 			rejoinRequests = rejoinRequestHandler(self);
 			return Void();
@@ -1057,9 +1055,7 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state Future<Standalone<RangeResultRef>> fresults = tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY );
-				Void _ = wait( success(fresults) ); 
-				Standalone<RangeResultRef> results = fresults.get();
+				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) ); 
 				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
 
 				DatabaseConfiguration conf;
@@ -1175,14 +1171,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
 
-	//FIXME: upgrade code for 4.4, remove for 4.5
-	tr.clear(recoveryCommitRequest.arena, KeyRangeRef(LiteralStringRef("\xff/status/"), LiteralStringRef("\xff/status0")));
-	tr.clear(recoveryCommitRequest.arena, KeyRangeRef(LiteralStringRef("\xff/backupstatus/"), LiteralStringRef("\xff/backupstatus0")));
-	tr.clear(recoveryCommitRequest.arena, KeyRangeRef(LiteralStringRef("\xff/backup-agent/"), LiteralStringRef("\xff/backup-agent0")));
-	tr.clear(recoveryCommitRequest.arena, KeyRangeRef(LiteralStringRef("\xff/db-backup-agent/"), LiteralStringRef("\xff/db-backup-agent0")));
-	tr.clear(recoveryCommitRequest.arena, KeyRangeRef(LiteralStringRef("\xff/cplog/"), LiteralStringRef("\xff/cplog0")));
-	tr.clear(recoveryCommitRequest.arena, KeyRangeRef(LiteralStringRef("\xff/bklog/"), LiteralStringRef("\xff/bklog0")));
-
 	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, NULL, NULL);
 	mmApplied = tr.mutations.size();
 
@@ -1229,7 +1217,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	//     we made to the new Tlogs (self->recoveryTransactionVersion), and only our own semi-commits can come between our
 	//     first commit and the next new TLogs
 
-	self->addActor.send( trackTlogRecovery(self, oldLogSystems) );
+	state Future<Void> remoteRecovered = trackTlogRecovery(self, oldLogSystems);
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	while(!self->cstateUpdated.get()) {
 		Void _ = wait(self->cstateUpdated.onChange());
@@ -1261,7 +1249,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	{
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
-		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
+		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited, remoteRecovered ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
 		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->dbName, self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
 	}
 

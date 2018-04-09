@@ -403,8 +403,19 @@ void ILogSystem::MergedPeekCursor::nextMessage() {
 
 StringRef ILogSystem::MergedPeekCursor::getMessage() { return serverCursors[currentCursor]->getMessage(); }
 
-StringRef ILogSystem::MergedPeekCursor::getMessageWithTags() { return serverCursors[currentCursor]->getMessageWithTags(); }
-
+StringRef ILogSystem::MergedPeekCursor::getMessageWithTags() { 
+	if(collectTags) {
+		StringRef msg = serverCursors[currentCursor]->getMessage();
+		BinaryWriter messageWriter(Unversioned());
+		messageWriter << uint32_t(msg.size() + sizeof(uint32_t) + sizeof(uint16_t) + tags.size()*sizeof(Tag)) << serverCursors[currentCursor]->version().sub << uint16_t(tags.size());
+		for(auto& t : tags) {
+			messageWriter << t;
+		}
+		messageWriter.serializeBytes(msg);
+		return StringRef(messageArena, messageWriter.toStringRef());
+	}
+	return serverCursors[currentCursor]->getMessageWithTags(); 
+}
 
 const std::vector<Tag>& ILogSystem::MergedPeekCursor::getTags() {
 	if(collectTags) {
@@ -434,8 +445,10 @@ ACTOR Future<Void> mergedPeekGetMore(ILogSystem::MergedPeekCursor* self, LogMess
 		}
 		self->calcHasMessage();
 		//TraceEvent("MPC_getMoreB", self->randomID).detail("hasMessage", self->hasMessage()).detail("start", startVersion.toString()).detail("seq", self->version().toString());
-		if (self->hasMessage() || self->version() > startVersion)
+		if (self->hasMessage() || self->version() > startVersion) {
+			self->messageArena = Arena();
 			return Void();
+		}
 	}
 }
 

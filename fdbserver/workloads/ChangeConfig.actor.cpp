@@ -61,9 +61,10 @@ struct ChangeConfigWorkload : TestWorkload {
 			state Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
 
 			Void _ = wait(delay(5*g_random->random01()));
-			if (self->configMode.size())
+			if (self->configMode.size()) {
 				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode));
-			if (self->networkAddresses.size()) {
+				Void _ = wait( waitForFullReplication( extraDB ) );
+			} if (self->networkAddresses.size()) {
 				if (self->networkAddresses == "auto")
 					CoordinatorsResult::Type _ = wait(changeQuorum(extraDB, autoQuorumChange()));
 				else
@@ -83,8 +84,10 @@ struct ChangeConfigWorkload : TestWorkload {
 			Void _ = wait( self->extraDatabaseConfigure(self) );
 		}
 
-		if( self->configMode.size() )
+		if( self->configMode.size() ) {
 			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode ) );
+			Void _ = wait( waitForFullReplication( cx ) );
+		}
 		if( self->networkAddresses.size() ) {
 			if (self->networkAddresses == "auto")
 				CoordinatorsResult::Type _ = wait( changeQuorum( cx, autoQuorumChange() ) );

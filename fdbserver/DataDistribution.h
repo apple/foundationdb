@@ -27,7 +27,7 @@ struct RelocateShard {
 	KeyRange keys;
 	int priority;
 
-	RelocateShard() {}
+	RelocateShard() : priority(0) {}
 	RelocateShard( KeyRange const& keys, int priority ) : keys(keys), priority(priority) {}
 };
 
@@ -202,7 +202,8 @@ Future<Void> dataDistribution(
 	Version const& recoveryCommitVersion,
 	std::vector<Optional<Key>> const& primaryDcId,
 	std::vector<Optional<Key>> const& remoteDcIds,
-	double* const& lastLimited);
+	double* const& lastLimited,
+	Future<Void> const& remoteRecovered);
 
 Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> const& initData,
@@ -218,6 +219,7 @@ Future<Void> dataDistributionQueue(
 	Database const& cx,
 	PromiseStream<RelocateShard> const& input,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
+	Reference<AsyncVar<bool>> const& processingUnhealthy,
 	vector<TeamCollectionInterface> const& teamCollection,
 	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	MoveKeysLock const& lock,

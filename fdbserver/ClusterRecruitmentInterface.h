@@ -25,7 +25,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
-#include "DatabaseConfiguration.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "MasterInterface.h"
 #include "TLogInterface.h"
 #include "WorkerInterface.h"

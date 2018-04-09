@@ -1181,6 +1181,64 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 	}
 }
 
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
+			ASSERT( res.size() < CLIENT_KNOBS->TOO_MANY );
+			DatabaseConfiguration config;
+			config.fromKeyValues((VectorRef<KeyValueRef>) res);
+			return config;
+		} catch( Error &e ) {
+			Void _ = wait( tr.onError(e) );
+		}
+	}
+
+}
+
+ACTOR Future<Void> waitForFullReplication( Database cx ) {
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
+				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+				tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+
+				Standalone<RangeResultRef> confResults = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
+				ASSERT( !confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY );
+				state DatabaseConfiguration config;
+				config.fromKeyValues((VectorRef<KeyValueRef>) confResults);
+			
+				state std::vector<Future<Optional<Value>>> replicasFutures;
+				for(auto& region : config.regions) {
+					replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
+				}
+				Void _ = wait( waitForAll(replicasFutures) );
+
+				state std::vector<Future<Void>> watchFutures;
+				for(int i = 0; i < config.regions.size(); i++) {
+					if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize ) {
+						watchFutures.push_back(tr.watch(datacenterReplicasKeyFor(config.regions[i].dcId)));
+					}
+				}
+
+				if( !watchFutures.size() || (config.remoteTLogReplicationFactor == 0 && watchFutures.size() < config.regions.size())) {
+					return Void();
+				}
+
+				Void _ = wait( tr.commit() );
+				Void _ = wait( waitForAny(watchFutures) );
+				break;
+			} catch (Error& e) {
+				Void _ = wait( tr.onError(e) );
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
 	loop {
 		state Transaction tr(cx);

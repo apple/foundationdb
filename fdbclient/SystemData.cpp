@@ -228,6 +228,36 @@ int8_t decodeTagLocalityListValue( ValueRef const& value ) {
 	return s;
 }
 
+const KeyRangeRef datacenterReplicasKeys(
+	LiteralStringRef("\xff\x02/datacenterReplicas/"),
+	LiteralStringRef("\xff\x02/datacenterReplicas0") );
+const KeyRef datacenterReplicasPrefix = datacenterReplicasKeys.begin;
+
+const Key datacenterReplicasKeyFor( Optional<Value> dcID ) {
+	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	wr.serializeBytes( datacenterReplicasKeys.begin );
+	wr << dcID;
+	return wr.toStringRef();
+}
+
+const Value datacenterReplicasValue( int const& replicas ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << replicas;
+	return wr.toStringRef();
+}
+Optional<Value> decodeDatacenterReplicasKey( KeyRef const& key ) {
+	Optional<Value> dcID;
+	BinaryReader rd( key.removePrefix(datacenterReplicasKeys.begin), AssumeVersion(currentProtocolVersion) );
+	rd >> dcID;
+	return dcID;
+}
+int decodeDatacenterReplicasValue( ValueRef const& value ) {
+	int s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
 // serverListKeys.contains(k) iff k.startsWith( serverListKeys.begin ) because '/'+1 == '0'
 const KeyRangeRef serverListKeys(
 	LiteralStringRef("\xff/serverList/"),

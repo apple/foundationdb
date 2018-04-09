@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_DATABASECONFIGURATION_H
-#define FDBSERVER_DATABASECONFIGURATION_H
+#ifndef FDBCLIENT_DATABASECONFIGURATION_H
+#define FDBCLIENT_DATABASECONFIGURATION_H
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
@@ -65,7 +65,7 @@ struct RegionInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & dcId & priority & satelliteTLogPolicy & satelliteDesiredTLogCount & satelliteTLogReplicationFactor & satelliteTLogWriteAntiQuorum & & satelliteTLogUsableDcs & satellites;
+		ar & dcId & priority & satelliteTLogPolicy & satelliteDesiredTLogCount & satelliteTLogReplicationFactor & satelliteTLogWriteAntiQuorum & satelliteTLogUsableDcs & satellites;
 	}
 };
 

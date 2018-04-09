@@ -725,6 +725,20 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
+ACTOR template <class T> 
+Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
+	try {
+		loop {
+			Void _ = wait( delay( time ) );
+			out->set( in->get() );
+			Void _ = wait( in->onChange() );
+		}
+	} catch (Error& e) {
+		out->set( in->get() );
+		throw;
+	}
+}
+
 Future<bool> allTrue( const std::vector<Future<bool>>& all );
 Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output );
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );

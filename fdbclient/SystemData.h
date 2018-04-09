@@ -78,6 +78,14 @@ const Value tagLocalityListValue( int8_t const& );
 Optional<Value> decodeTagLocalityListKey( KeyRef const& );
 int8_t decodeTagLocalityListValue( ValueRef const& );
 
+//    "\xff\x02/DatacenterReplicas/[[datacenterID]]" := "[[replicas]]"
+extern const KeyRangeRef datacenterReplicasKeys;
+extern const KeyRef datacenterReplicasPrefix;
+const Key datacenterReplicasKeyFor( Optional<Value> dcID );
+const Value datacenterReplicasValue( int const& );
+Optional<Value> decodeDatacenterReplicasKey( KeyRef const& );
+int decodeDatacenterReplicasValue( ValueRef const& );
+
 //    "\xff/serverList/[[serverID]]" := "[[StorageServerInterface]]"
 // Storage servers are listed here when they are recruited - always before assigning them keys
 // Storage servers removed from here are never replaced.  The same fdbserver, if re-recruited, will always
