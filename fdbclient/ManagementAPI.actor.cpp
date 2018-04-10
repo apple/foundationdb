@@ -105,7 +105,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		redundancy="3";
 		log_replicas="3";
 		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
-	} else if(mode == "three_datacenter") {
+	} else if(mode == "three_datacenter" || mode == "multi_dc") {
 		redundancy="6";
 		log_replicas="4";
 		storagePolicy = IRepPolicyRef(new PolicyAcross(3, "dcid",
