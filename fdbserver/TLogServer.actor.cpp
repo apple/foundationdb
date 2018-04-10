@@ -1894,7 +1894,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 			TraceEvent("TLogPullComplete", self->dbgid).detail("logId", logData->logId);
 
-			if(req.isPrimary && !req.recoverTags.empty() && !logData->stopped) {
+			if(req.isPrimary && !req.recoverTags.empty() && !logData->stopped && req.knownCommittedVersion < req.recoverAt) {
 				Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) || logData->removed);
 			}
 
