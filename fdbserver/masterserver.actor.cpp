@@ -207,7 +207,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	ClusterControllerFullInterface clusterController;  // If the cluster controller changes, this master will die, so this is immutable.
 
 	ReusableCoordinatedState cstate;
-	AsyncVar<bool> cstateUpdated;
+	Promise<Void> cstateUpdated;
 	Reference<AsyncVar<ServerDBInfo>> dbInfo;
 	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
 
@@ -244,7 +244,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  lastVersionTime(0),
 		  txnStateStore(0),
 		  memoryLimit(2e9),
-		  cstateUpdated(false),
 		  addActor(addActor),
 		  hasConfiguration(false)
 	{
@@ -458,7 +457,7 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 
 		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("logs", describe(logSystem->getLogSystemConfig().tLogs));
 
-		if (!self->cstateUpdated.get()) {
+		if (!self->cstateUpdated.isSet()) {
 			Void _ = wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->provisionalProxies, self->resolvers, self->cstate.myDBState.recoveryCount, self->cstate.prevDBState.getPriorCommittedLogServers() ));
 		} else {
 			updateLogsKey = updateLogsValue(self, cx);
@@ -1025,7 +1024,9 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		state bool finalUpdate = !newState.oldTLogData.size() && newState.tLogs.size() == self->configuration.expectedLogSets(self->primaryDcId.size() ? self->primaryDcId[0] : Optional<Key>());
 		Void _ = wait( self->cstate.write(newState, finalUpdate) );
 		self->logSystem->coreStateWritten(newState);
-		self->cstateUpdated.set(true);
+		if(self->cstateUpdated.canBeSet()) {
+			self->cstateUpdated.send(Void());
+		}
 		
 		if( finalUpdate ) {
 			self->recoveryState = RecoveryState::REMOTE_RECOVERED;
@@ -1219,9 +1220,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 	state Future<Void> remoteRecovered = trackTlogRecovery(self, oldLogSystems);
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
-	while(!self->cstateUpdated.get()) {
-		Void _ = wait(self->cstateUpdated.onChange());
-	}
+	Void _ = wait(self->cstateUpdated.getFuture() || remoteRecovered);
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
 	if( debugResult )
