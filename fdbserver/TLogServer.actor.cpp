@@ -1869,10 +1869,10 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 		if (req.recoverFrom.logSystemType == 2) {
 			logData->unrecoveredBefore = req.startVersion;
-			logData->persistentDataVersion = logData->unrecoveredBefore;
-			logData->persistentDataDurableVersion = logData->unrecoveredBefore;
-			logData->queueCommittedVersion.set( logData->unrecoveredBefore );
-			logData->version.set( logData->unrecoveredBefore );
+			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
+			logData->persistentDataDurableVersion = logData->unrecoveredBefore - 1;
+			logData->queueCommittedVersion.set( logData->unrecoveredBefore - 1 );
+			logData->version.set( logData->unrecoveredBefore - 1 );
 
 			logData->unpoppedRecoveredTags = req.allTags.size();
 			Void _ = wait( initPersistentState( self, logData, req.allTags ) || logData->removed );
