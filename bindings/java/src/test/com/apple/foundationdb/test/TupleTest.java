@@ -20,7 +20,6 @@
 
 package com.apple.foundationdb.test;
 
-import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.TransactionContext;
