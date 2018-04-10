@@ -573,8 +573,12 @@ struct ConsistencyCheckWorkload : TestWorkload
 		state int increment = (self->distributed && !self->firstClient) ? effectiveClientCount * self->shardSampleFactor : 1;
 		state Reference<IRateControl> rateLimiter = Reference<IRateControl>( new SpeedLimit(self->rateLimit, CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_WINDOW) );
 
-		int64_t _dbSize = wait( self->getDatabaseSize( cx ) );
-		state double dbSize = _dbSize;
+		state double dbSize = 100e12;
+		if(g_network->isSimulated()) {
+			//This call will get all shard ranges in the database, which is too expensive on real clusters.
+			int64_t _dbSize = wait( self->getDatabaseSize( cx ) );
+			dbSize = _dbSize;
+		}
 
 		state vector<KeyRangeRef> ranges;
 

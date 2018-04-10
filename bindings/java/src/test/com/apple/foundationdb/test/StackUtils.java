@@ -62,7 +62,7 @@ public class StackUtils {
 				throw e;
 			}
 
-            item = getErrorBytes(ex);
+			item = getErrorBytes(ex);
 		}
 		return item;
 	}

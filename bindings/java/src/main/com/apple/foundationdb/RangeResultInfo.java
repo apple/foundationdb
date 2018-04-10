@@ -21,17 +21,17 @@
 package com.apple.foundationdb;
 
 class RangeResultInfo {
-    RangeResultSummary getSummary() {
-        return f.getSummary();
-    }
+	RangeResultSummary getSummary() {
+		return f.getSummary();
+	}
 
-    RangeResult get() {
-        return f.getResults();
-    }
+	RangeResult get() {
+		return f.getResults();
+	}
 
-    RangeResultInfo(FutureResults f) {
-        this.f = f;
-    }
+	RangeResultInfo(FutureResults f) {
+		this.f = f;
+	}
 
-    private FutureResults f;
+	private FutureResults f;
 }

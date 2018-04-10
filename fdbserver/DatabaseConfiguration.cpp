@@ -85,14 +85,12 @@ std::map<std::string, std::string> DatabaseConfiguration::toMap() const {
 				result["redundancy_mode"] = "single";
 			else if( tLogReplicationFactor == 2 && durableStorageQuorum == 2 )
 				result["redundancy_mode"] = "double";
-			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 && tlogInfo == "((dcid^3 x 1) & (zoneid^3 x 1))" && storageInfo == "((dcid^3 x 1) & (zoneid^3 x 1))" )
+			else if( tLogReplicationFactor == 4 && durableStorageQuorum == 6 && tlogInfo == "dcid^2 x zoneid^2 x 1" && storageInfo == "dcid^3 x zoneid^2 x 1" )
 				result["redundancy_mode"] = "three_datacenter";
 			else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 )
 				result["redundancy_mode"] = "triple";
 			else if( tLogReplicationFactor == 4 && durableStorageQuorum == 3 && tlogInfo == "data_hall^2 x zoneid^2 x 1" && storageInfo == "data_hall^3 x 1" )
 				result["redundancy_mode"] = "three_data_hall";
-			else if( tLogReplicationFactor == 4 && durableStorageQuorum == 6 && tlogInfo == "dcid^2 x zoneid^2 x 1" && storageInfo == "dcid^3 x zoneid^2 x 1" )
-				result["redundancy_mode"] = "multi_dc";
 			else
 				result["redundancy_mode"] = "custom";
 		} else

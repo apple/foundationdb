@@ -102,5 +102,3 @@ fdb_c_tests: packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz
 
 fdb_c_tests_clean:
 	@rm -f packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz
-
-packages: fdb_c_tests

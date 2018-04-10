@@ -748,13 +748,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		break;
 	}
 	case 3: {
-		if( datacenters == 1 ) {
+		if( datacenters <= 2 ) {
 			TEST( true );  // Simulated cluster running in triple redundancy mode
 			set_config("triple");
-		}
-		else if( datacenters == 2 ) {
-			TEST( true );  // Simulated cluster running in 2 datacenter mode
-			set_config("two_datacenter");
 		}
 		else if( datacenters == 3 ) {
 			TEST( true );  // Simulated cluster running in 3 data-hall mode
@@ -849,7 +845,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	ASSERT( coordinatorAddresses.size() == coordinatorCount );
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
-	g_simulator.extraDB = extraDB ? new ClusterConnectionString(coordinatorAddresses, ((extraDB==1 && BUGGIFY) ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0"))) : NULL;
+	g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, ((extraDB==0 || (extraDB==1 && BUGGIFY)) ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0")));
 
 	*pConnString = conn;
 
