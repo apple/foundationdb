@@ -1179,11 +1179,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 	TraceEvent("MasterRecoveryCommit", self->dbgid);
 	state Future<ErrorOr<CommitID>> recoveryCommit = self->proxies[0].commit.tryGetReply(recoveryCommitRequest);
-	state Future<Void> tlogFailure = self->logSystem->onError();
-	state Future<Void> resolverFailure = waitResolverFailure( self->resolvers );
-	state Future<Void> proxyFailure = waitProxyFailure( self->proxies );
-	state Future<Void> providingVersions = provideVersions(self);
-
+	self->addActor.send( self->logSystem->onError() );
+	self->addActor.send( waitResolverFailure( self->resolvers ) );
+	self->addActor.send( waitProxyFailure( self->proxies ) );
+	self->addActor.send( provideVersions(self) );
 	self->addActor.send( reportErrors(updateRegistration(self, self->logSystem), "updateRegistration", self->dbgid) );
 	self->registrationTrigger.trigger();
 
@@ -1192,7 +1191,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	// Wait for the recovery transaction to complete.
 	// SOMEDAY: For faster recovery, do this and setDBState asynchronously and don't wait for them
 	// unless we want to change TLogs
-	Void _ = wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)) || tlogFailure || resolverFailure || proxyFailure );
+	Void _ = wait((success(recoveryCommit) && sendInitialCommitToResolvers(self)) );
 	if(recoveryCommit.isReady() && recoveryCommit.get().isError()) {
 		TEST(true);  // Master recovery failed because of the initial commit failed
 		throw master_recovery_failed();
@@ -1219,8 +1218,9 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	//     first commit and the next new TLogs
 
 	state Future<Void> remoteRecovered = trackTlogRecovery(self, oldLogSystems);
+	self->addActor.send( remoteRecovered );
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
-	Void _ = wait(self->cstateUpdated.getFuture() || remoteRecovered);
+	Void _ = wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);
 
 	if( debugResult )
@@ -1256,15 +1256,10 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		self->addActor.send( resolutionBalancing(self) );
 
 	self->addActor.send( changeCoordinators(self) );
-	state Future<Void> configMonitor = configurationMonitor( self );
+	self->addActor.send( configurationMonitor( self ) );
 
-	loop choose {
-		when( Void _ = wait( tlogFailure ) ) { throw internal_error(); }
-		when( Void _ = wait( proxyFailure ) ) { throw internal_error(); }
-		when( Void _ = wait( resolverFailure ) ) { throw internal_error(); }
-		when( Void _ = wait( providingVersions ) ) { throw internal_error(); }
-		when( Void _ = wait( configMonitor ) ) { throw internal_error(); }
-	}
+	Void _ = wait( Future<Void>(Never()) );
+	throw internal_error();
 }
 
 ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDBInfo>> db, ServerCoordinators coordinators, LifetimeToken lifetime )
