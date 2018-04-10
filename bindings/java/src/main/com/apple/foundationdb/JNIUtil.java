@@ -42,12 +42,12 @@ class JNIUtil {
 		OSX("osx", "x86_64", true);
 
 		private final String name;
-        private final String arch;
+		private final String arch;
 		private final boolean canDeleteEager;
 
 		OS(String name, String arch, boolean canDeleteEager) {
 			this.name = name;
-            this.arch = arch;
+			this.arch = arch;
 			this.canDeleteEager = canDeleteEager;
 		}
 
@@ -55,9 +55,9 @@ class JNIUtil {
 			return this.name;
 		}
 
-        public String getArch() {
-            return this.arch;
-        }
+		public String getArch() {
+			return this.arch;
+		}
 	}
 
 	/**
@@ -89,18 +89,18 @@ class JNIUtil {
 		OS os = getRunningOS();
 		String path = getPath(os, libName);
 
-        if ((os.getName().equals("linux") && !path.endsWith(".so")) || (os.getName().equals("windows") && !path.endsWith(".dll")) || (os.getName().equals("osx") && !path.endsWith(".jnilib") && !path.endsWith(".dylib"))) {
-            throw new IllegalStateException("OS sanity check failed. System property os.name reports " + os.getName()+" but System.mapLibraryName is looking for " + getLibName(libName));
-        }
+		if ((os.getName().equals("linux") && !path.endsWith(".so")) || (os.getName().equals("windows") && !path.endsWith(".dll")) || (os.getName().equals("osx") && !path.endsWith(".jnilib") && !path.endsWith(".dylib"))) {
+			throw new IllegalStateException("OS sanity check failed. System property os.name reports " + os.getName()+" but System.mapLibraryName is looking for " + getLibName(libName));
+		}
 
-        File exported;
+		File exported;
 
-        try {
-		    exported = exportResource(path);
-        }
-        catch (IOException e) {
-            throw new UnsatisfiedLinkError(e.getMessage());
-        }
+		try {
+			exported = exportResource(path);
+		}
+		catch (IOException e) {
+			throw new UnsatisfiedLinkError(e.getMessage());
+		}
 		String filename = exported.getAbsolutePath();
 
 		System.load(filename);
