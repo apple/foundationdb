@@ -95,6 +95,7 @@
     <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\BackupToDBUpgrade.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicSwitchover.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp" />
     <ClCompile Include="workloads\Fuzz.cpp" />
