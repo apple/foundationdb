@@ -240,7 +240,7 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).detail("Message", error.value());
+				TraceEvent(SevWarn, errContext, errID).detail("Message", error.value()).suppressFor(1.0);
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );

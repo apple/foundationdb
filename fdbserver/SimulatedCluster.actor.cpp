@@ -735,13 +735,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		break;
 	}
 	case 3: {
-		if( datacenters == 1 ) {
+		if( datacenters <= 2 ) {
 			TEST( true );  // Simulated cluster running in triple redundancy mode
 			set_config("triple");
-		}
-		else if( datacenters == 2 ) {
-			TEST( true );  // Simulated cluster running in 2 datacenter mode
-			set_config("two_datacenter");
 		}
 		else if( datacenters == 3 ) {
 			TEST( true );  // Simulated cluster running in 3 data-hall mode
