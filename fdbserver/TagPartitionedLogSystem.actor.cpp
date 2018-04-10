@@ -1427,19 +1427,19 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSet->hasBestPolicy = HasBestPolicyId;
 		logSet->locality = remoteLocality;
 
-		logSet->startVersion = std::min(oldLogSystem->epochEndVersion.get(), oldLogSystem->knownCommittedVersion + 1);
+		logSet->startVersion = oldLogSystem->knownCommittedVersion + 1;
 		state int lockNum = 0;
 		while(lockNum < oldLogSystem->lockResults.size()) {
 			if(oldLogSystem->lockResults[lockNum].logSet->locality == remoteLocality) {
 				std::pair<Version,Version> versions = wait(TagPartitionedLogSystem::getDurableVersion(self->dbgid, oldLogSystem->lockResults[lockNum]));
-				logSet->startVersion = std::min(oldLogSystem->epochEndVersion.get(), versions.first + 1);
+				logSet->startVersion = versions.first + 1;
 				break;
 			}
 			lockNum++;
 		}
 
 		state Future<Void> oldRouterRecruitment = Void();
-		if(logSet->startVersion < std::min(oldLogSystem->epochEndVersion.get(), oldLogSystem->knownCommittedVersion + 1)) {
+		if(logSet->startVersion < oldLogSystem->knownCommittedVersion + 1) {
 			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(self, remoteWorkers.logRouters, recoveryCount, remoteLocality, logSet->startVersion, self->tLogs.size());
 		}
 
@@ -1537,7 +1537,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogs[1]->isLocal = true;
 			logSystem->tLogs[1]->hasBestPolicy = HasBestPolicyNone;
 			logSystem->tLogs[1]->locality = tagLocalityInvalid;
-			logSystem->tLogs[1]->startVersion = std::min(oldLogSystem->epochEndVersion.get(), oldLogSystem->knownCommittedVersion + 1);
+			logSystem->tLogs[1]->startVersion = oldLogSystem->knownCommittedVersion + 1;
 			logSystem->expectedLogSets++;
 		}
 
@@ -1558,7 +1558,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->oldLogData.push_back(oldLogSystem->oldLogData[i]);
 		}
 
-		logSystem->tLogs[0]->startVersion = std::min(oldLogSystem->epochEndVersion.get(), oldLogSystem->knownCommittedVersion + 1);
+		logSystem->tLogs[0]->startVersion = oldLogSystem->knownCommittedVersion + 1;
 		state int lockNum = 0;
 		while(lockNum < oldLogSystem->lockResults.size()) {
 			if(oldLogSystem->lockResults[lockNum].logSet->locality == primaryLocality) {
@@ -1570,7 +1570,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		state Future<Void> oldRouterRecruitment = Void();
-		if(logSystem->tLogs[0]->startVersion < std::min(oldLogSystem->epochEndVersion.get(), oldLogSystem->knownCommittedVersion + 1)) {
+		if(logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
 			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(logSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0);
 		}
 
@@ -1628,7 +1628,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.remoteTag = Tag();
 				req.isPrimary = true;
 				req.allTags = allTags;
-				req.startVersion = std::min(oldLogSystem->epochEndVersion.get(), oldLogSystem->knownCommittedVersion + 1);
+				req.startVersion = oldLogSystem->knownCommittedVersion + 1;
 				req.logRouterTags = logSystem->logRouterTags;
 			}
 
