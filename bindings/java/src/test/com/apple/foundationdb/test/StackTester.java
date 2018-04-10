@@ -439,15 +439,15 @@ public class StackTester {
 				byte[] prefix = (byte[]) params.get(0);
 
 				Map<Integer, StackEntry> entries = new HashMap<>();
-                while(inst.size() > 0) {
+				while(inst.size() > 0) {
 					entries.put(inst.size()-1, inst.pop());
 					if(entries.size() == 100) {
 						logStack(inst.context.db, entries, prefix);
 						entries.clear();
 					}
-                }
+				}
 
-                logStack(inst.context.db, entries, prefix);
+				logStack(inst.context.db, entries, prefix);
 			}
 			else {
 				throw new IllegalArgumentException("Unrecognized (or unimplemented) operation");
@@ -576,7 +576,7 @@ public class StackTester {
 	}
 
 	private static void logStack(Database db, Map<Integer, StackEntry> entries, byte[] prefix) {
-	    db.run(tr -> {
+		db.run(tr -> {
 			for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
 				byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
 				byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
@@ -588,7 +588,7 @@ public class StackTester {
 	}
 
 	private static boolean checkWatches(List<CompletableFuture<Void>> watches, Database db, boolean expected) {
-	    for(CompletableFuture<Void> w : watches) {
+		for(CompletableFuture<Void> w : watches) {
 			if(w.isDone() || expected) {
 				try {
 					w.join();
@@ -647,8 +647,8 @@ public class StackTester {
 				return null;
 			});
 
-            if(checkWatches(watches, db, true)) {
-            	return;
+			if(checkWatches(watches, db, true)) {
+				return;
 			}
 		}
 	}

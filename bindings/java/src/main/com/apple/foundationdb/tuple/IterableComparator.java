@@ -63,45 +63,45 @@ import java.util.Iterator;
  * </ul>
  */
 public class IterableComparator implements Comparator<Iterable<?>> {
-    /**
-     * Creates a new {@code IterableComparator}. This {@link Comparator} has
-     * no internal state.
-     */
-    public IterableComparator() {}
+	/**
+	 * Creates a new {@code IterableComparator}. This {@link Comparator} has
+	 * no internal state.
+	 */
+	public IterableComparator() {}
 
-    /**
-     * Compare two {@link Iterable}s in a way consistent with their
-     * byte representation. This is done element-wise and is consistent
-     * with a number of other ways of sorting {@link Tuple}s. This will
-     * raise an {@link IllegalArgumentException} if any of the items
-     * of either {@link Iterable} cannot be serialized by a {@link Tuple}.
-     *
-     * @param iterable1 the first {@link Iterable} of items
-     * @param iterable2 the second {@link Iterable} of items
-     * @return a negative number if the first iterable would sort before the second
-     * when serialized, a positive number if the opposite is true, and zero
-     * if the two are equal
-     */
-    @Override
-    public int compare(Iterable<?> iterable1, Iterable<?> iterable2) {
-        Iterator<?> i1 = iterable1.iterator();
-        Iterator<?> i2 = iterable2.iterator();
+	/**
+	 * Compare two {@link Iterable}s in a way consistent with their
+	 * byte representation. This is done element-wise and is consistent
+	 * with a number of other ways of sorting {@link Tuple}s. This will
+	 * raise an {@link IllegalArgumentException} if any of the items
+	 * of either {@link Iterable} cannot be serialized by a {@link Tuple}.
+	 *
+	 * @param iterable1 the first {@link Iterable} of items
+	 * @param iterable2 the second {@link Iterable} of items
+	 * @return a negative number if the first iterable would sort before the second
+	 * when serialized, a positive number if the opposite is true, and zero
+	 * if the two are equal
+	 */
+	@Override
+	public int compare(Iterable<?> iterable1, Iterable<?> iterable2) {
+		Iterator<?> i1 = iterable1.iterator();
+		Iterator<?> i2 = iterable2.iterator();
 
-        while(i1.hasNext() && i2.hasNext()) {
-            int itemComp = TupleUtil.compareItems(i1.next(), i2.next());
-            if(itemComp != 0) {
-                return itemComp;
-            }
-        }
+		while(i1.hasNext() && i2.hasNext()) {
+			int itemComp = TupleUtil.compareItems(i1.next(), i2.next());
+			if(itemComp != 0) {
+				return itemComp;
+			}
+		}
 
-        if(i1.hasNext()) {
-            // iterable2 is a prefix of iterable1.
-            return 1;
-        }
-        if(i2.hasNext()) {
-            // iterable1 is a prefix of iterable2.
-            return -1;
-        }
-        return 0;
-    }
+		if(i1.hasNext()) {
+			// iterable2 is a prefix of iterable1.
+			return 1;
+		}
+		if(i2.hasNext()) {
+			// iterable1 is a prefix of iterable2.
+			return -1;
+		}
+		return 0;
+	}
 }
