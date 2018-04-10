@@ -318,11 +318,14 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					if (err.code() == error_code_move_to_removed_server)
 						throw;
 					Void _ = wait( tr.onError(e) );
-					TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "startMoveKeysRetrying", relocationIntervalId)
-						.detail("Keys", printable(keys))
-						.detail("BeginKey", printable(begin))
-						.detail("NumTries", retries)
-						.error(err);
+
+					if(retries%10 == 0) {
+						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "startMoveKeysRetrying", relocationIntervalId)
+							.detail("Keys", printable(keys))
+							.detail("BeginKey", printable(begin))
+							.detail("NumTries", retries)
+							.error(err);
+					}
 				}
 			}
 
@@ -602,12 +605,15 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					if (error.code() == error_code_actor_cancelled) throw;
 					state Error err = error;
 					Void _ = wait( tr.onError(error) );
-					TraceEvent(retries++ == 15 ? SevWarnAlways : SevWarn, "RelocateShard_finishMoveKeysRetrying", relocationIntervalId)
-						.error(err)
-						.detail("KeyBegin", printable(keys.begin))
-						.detail("KeyEnd", printable(keys.end))
-						.detail("IterationBegin", printable(begin))
-						.detail("IterationEnd", printable(endKey));
+					retries++;
+					if(retries%10 == 0) {
+						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_finishMoveKeysRetrying", relocationIntervalId)
+							.error(err)
+							.detail("KeyBegin", printable(keys.begin))
+							.detail("KeyEnd", printable(keys.end))
+							.detail("IterationBegin", printable(begin))
+							.detail("IterationEnd", printable(endKey));
+					}
 				}
 			}
 		}
