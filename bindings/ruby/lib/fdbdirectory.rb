@@ -472,7 +472,7 @@ module FDB
       prefix && 
         prefix.length > 0 &&
         !node_containing_key(tr, prefix) && 
-        tr.get_range(@node_subspace.pack([prefix]), @node_subspace.pack([tr.send(:strinc, prefix)]), 
+        tr.get_range(@node_subspace.pack([prefix]), @node_subspace.pack([FDB.strinc(prefix)]), 
                      { :limit => 1 }).to_a.empty?
     end
 

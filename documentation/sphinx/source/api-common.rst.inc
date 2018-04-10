@@ -443,7 +443,6 @@
 .. |directory-create-or-open-blurb| replace::
     Opens the directory with ``path`` specified as |dir-path-type| of strings. ``path`` can also be a string, in which case it will be automatically wrapped in |dir-path-type|. All string values in a path will be converted to unicode. If the directory does not exist, it is created (creating parent directories if necessary).
 
-.. **NOTE** this blurb is not used in api-node
 .. |directory-create-or-open-return-blurb| replace::
     Returns the directory and its contents as a |directory-subspace|.
 
@@ -456,7 +455,6 @@
 .. |directory-move-blurb| replace::
     Moves the directory at ``old_path`` to ``new_path``. There is no effect on the physical prefix of the given directory or on clients that already have the directory open. The method will |error-raise-type| an |error-type| if a directory does not exist at ``old_path``, a directory already exists at ``new_path``, or the parent directory of ``new_path`` does not exist.
 
-.. **NOTE** this blurb is not used in api-node
 .. |directory-move-return-blurb| replace::
     Returns the directory at its new location as a |directory-subspace|.
 

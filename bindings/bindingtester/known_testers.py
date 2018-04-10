@@ -58,8 +58,6 @@ _java_cmd = 'java -ea -cp %s:%s com.apple.foundationdb.test.' % (
 testers = {
     'python': Tester('python', 'python ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION, types=ALL_TYPES),
     'python3': Tester('python3', 'python3 ' + _absolute_path('python/tests/tester.py'), 2040, 23, MAX_API_VERSION, types=ALL_TYPES),
-    'node': Tester('node', _absolute_path('nodejs/tests/tester.js'), 53, 500, MAX_API_VERSION),
-    'streamline': Tester('streamline', _absolute_path('nodejs/tests/streamline_tester._js'), 53, 500, MAX_API_VERSION),
     'ruby': Tester('ruby', _absolute_path('ruby/tests/tester.rb'), 64, 23, MAX_API_VERSION),
     'java': Tester('java', _java_cmd + 'StackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES),
     'java_async': Tester('java', _java_cmd + 'AsyncStackTester', 2040, 510, MAX_API_VERSION, types=ALL_TYPES),

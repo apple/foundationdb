@@ -30,11 +30,6 @@
 			<property name="option" value="eol"/>
 			<property name="ignoreEnums" value="false"/>
 		</module>
-		<!-- We have about 76 errors with value = "alone" and 27 with value = "same". We should pick one.
-		<module name="RightCurly">
-			<property name="option" value="same"/>
-		</module>
-		-->
 
 		<!-- Design -->
 		<!-- We might get some helpful errors if we turned this on, but not right now.

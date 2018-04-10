@@ -611,7 +611,7 @@ For **RHEL/CentOS**, perform the upgrade using the rpm command:
     user@host$ sudo rpm -Uvh |package-rpm-clients| \\
     |package-rpm-server|
 
-The ``foundationdb-clients`` package also installs the :doc:`Python <api-python>` and :doc:`C <api-c>` APIs. If your clients use :doc:`Ruby <api-ruby>`, `Java <javadoc/index.html>`_, :doc:`Node.js <api-node>`, or `Go <godoc/fdb.html>`_, follow the instructions in the corresponding language documentation to install the APIs.
+The ``foundationdb-clients`` package also installs the :doc:`Python <api-python>` and :doc:`C <api-c>` APIs. If your clients use :doc:`Ruby <api-ruby>`, `Java <javadoc/index.html>`_, or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_, follow the instructions in the corresponding language documentation to install the APIs.
 
 Test the database
 -----------------

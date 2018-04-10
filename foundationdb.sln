@@ -64,22 +64,6 @@ Project("{930C7802-8A8C-48F9-8165-68863BCCD9DD}") = "MSIInstaller", "packaging\m
 		{E2939DAA-238E-4970-96C4-4C57980F93BD} = {E2939DAA-238E-4970-96C4-4C57980F93BD}
 	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fdb_node_0_8", "bindings\nodejs\fdb_node_0_8.vcxproj", "{E936E200-689E-49FD-8463-32FE763F1860}"
-	ProjectSection(ProjectDependencies) = postProject
-		{CACB2C8E-3E55-4309-A411-2A9C56C6C1CB} = {CACB2C8E-3E55-4309-A411-2A9C56C6C1CB}
-	EndProjectSection
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fdb_node_0_10", "bindings\nodejs\fdb_node_0_10.vcxproj", "{E22D4EF8-E75D-4281-93F9-A9F73936DE54}"
-	ProjectSection(ProjectDependencies) = postProject
-		{CACB2C8E-3E55-4309-A411-2A9C56C6C1CB} = {CACB2C8E-3E55-4309-A411-2A9C56C6C1CB}
-	EndProjectSection
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fdb_node", "bindings\nodejs\fdb_node.vcxproj", "{9463CB25-DCA0-9D45-C46E-0A8E68EE7FAE}"
-	ProjectSection(ProjectDependencies) = postProject
-		{E936E200-689E-49FD-8463-32FE763F1860} = {E936E200-689E-49FD-8463-32FE763F1860}
-		{E22D4EF8-E75D-4281-93F9-A9F73936DE54} = {E22D4EF8-E75D-4281-93F9-A9F73936DE54}
-	EndProjectSection
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "fdb_flow", "bindings\flow\fdb_flow.vcxproj", "{2BA0A5E2-EB4C-4A32-948C-CBAABD77AF87}"
 	ProjectSection(ProjectDependencies) = postProject
 		{00AC9087-0378-4872-9992-DF267CF12ACB} = {00AC9087-0378-4872-9992-DF267CF12ACB}
