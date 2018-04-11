@@ -905,7 +905,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				}
 				TEST(true); //did not find a healthy destination team on the first attempt
 				stuckCount++;
-				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).detail("Count", stuckCount);
+				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).detail("Count", stuckCount).suppressFor(1.0);
 				if(stuckCount > 50 && g_network->isSimulated()) { //FIXME: known bug in simulation we are supressing
 					int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
 					TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0)

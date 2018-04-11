@@ -53,15 +53,14 @@ public class ParallelRandomScan {
 	}
 
 	private static void runTest(Database database,
-			int parallelism, int rows, int duration) throws InterruptedException
-	{
+			int parallelism, int rows, int duration) throws InterruptedException {
 		final Random r = new Random();
 		final AtomicInteger readsCompleted = new AtomicInteger(0);
 		final AtomicInteger errors = new AtomicInteger(0);
 		final Semaphore coordinator = new Semaphore(parallelism);
 		final ContinuousSample<Long> latencies = new ContinuousSample<>(1000);
 
-		try(final Transaction tr = database.createTransaction()) {
+		try(Transaction tr = database.createTransaction()) {
 			tr.options().setReadYourWritesDisable();
 
 			// Clearing the whole database before starting means all reads are local

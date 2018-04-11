@@ -1,7 +1,7 @@
 .. _backups:
 
 ######################
-Backup and Restoration
+Backup, Restore, and Replication for Disaster Recovery
 ######################
 
 .. include:: guide-common.rst.inc
@@ -15,33 +15,49 @@ Introduction
 
 FoundationDB's backup tool makes a consistent, point-in-time backup of a FoundationDB database without downtime. Like FoundationDB itself, the backup/restore software is distributed, with multiple backup agents cooperating to perform a backup or restore faster than a single machine can send or receive data and to continue the backup process seamlessly even when some backup agents fail. 
 
-Since the FoundationDB database usually cannot maintain a consistent snapshot long enough to perform a full backup, the backup tool stores an *inconsistent* copy of the data with a log of database changes that took place during the backup process. The copy and the logs are combined at restore time to reconstruct a consistent, point-in-time snapshot of the database.
+The FoundationDB database usually cannot maintain a consistent snapshot long enough to read the entire database, so full backup consists of an *inconsistent* copy of the data with a log of database changes that took place during the creation of that inconsistent copy.  During a restore, the inconsistent copy and the log of changes are combined to reconstruct  a consistent, point-in-time snapshot of the original database.
 
-FoundationDB can write backup data to local disks, to a blob store instance, or to another FoundationDB cluster.  The location to write a backup to or restore a backup from is called a Backup URL.
+A FoundationDB Backup job can run continuously, pushing multiple inconsistent snapshots and logs of changes over time to maintain the backup's restorable point-in-time very close to now.
 
-There are 6 command line tools for working with backups:
+Backup vs DR
+============
+
+FoundationDB can backup a database to local disks, a blob store (such as Amazon S3), or to another FoundationDB database.  
+
+Backing up one database to another is a special form of backup is called DR backup or just DR for short.  DR stands for Disaster Recovery, as it can be used to keep two geographically separated databases in close synchronization to recover from a catastrophic disaster.  Once a DR  operation has reached 'differential' mode, the secondary database (the destination of the DR job) will always contains a *consistent* copy of the primary database (the source of the DR job) but it will be from some past point in time.  If the primary database is lost and applications continue using the secondary database, the "ACI" in ACID is preserved but D (Durability) is lost for some amount of most recent changes.  When DR is operating normally, the secondary database will lag behind the primary database by as little as a few seconds worth of database commits.
+
+While a cluster is being used as the destination for a DR operation it will be locked to prevent accidental use or modification.
+
+Limitations
+===========
+
+Backup data is not encrypted on disk, in a blob store account, or in transit to a destination blob store account or database.
+
+Tools
+===========
+
+There are 5 command line tools for working with Backup and DR operations:
 
 ``fdbbackup``
-    This command line tool is used to control the backup process. It can ``start`` or ``abort`` a backup, ``discontinue`` a continuous backup, get the ``status`` of an ongoing backup, or ``wait`` for a backup to complete. It controls ``backup_agent`` processes using the database and never does any work itself.
+    This command line tool is used to control (but not execute) backup jobs and manage backup data.  It can ``start`` or ``abort`` a backup, ``discontinue`` a continuous backup, get the ``status`` of an ongoing backup, or ``wait`` for a backup to complete.  It can also ``describe``, ``delete``, ``expire`` data in a backup, or ``list`` the backups at a destination folder URL.
 
 ``fdbrestore``
-    This command line tool is used to control the restore process.  It can ``start`` or ``abort`` a restore, get the ``status`` of current and recent restore tasks, or ``wait`` for a restore task to complete while printing ongoing progress details.
+    This command line tool is used to control (but not execute) restore jobs.  It can ``start`` or ``abort`` a restore, get the ``status`` of current and recent restore tasks, or ``wait`` for a restore task to complete while printing ongoing progress details.
 
 ``backup_agent``
-    The backup agent does the actual work of the backup: reading data (and logs) from the database and writing it to the Backup URL.  Any number of backup agents pointed at the same database will cooperate to perform the backup. The Backup URL specified for a backup must be accessible by all ``backup_agent`` processes.
-
-``fdbblob``
-    This tool allows listing, deleting, and getting information on backups that are located in a blob store instance (which have Backup URLs starting with blobstore://).
+    The backup agent is a daemon that actually executes the work of the backup and restore jobs.  Any number of backup agents pointed at the same database will cooperate to perform  backups and restores. The Backup URL specified for a backup or restore must be accessible by all ``backup_agent`` processes.
 
 ``fdbdr``
-    This command line tool is used to control the process of backing up to another FoundationDB cluster. It can ``start``, ``switch``, or ``abort`` a backup. It can also get the ``status`` of an ongoing backup. It controls ``db_agent`` processes using the database and never does any work itself.
+    This command line tool is used to control (but not execute) DR jobs - backups from one database to anothher.  It can ``start``, ``abort`` a DR job, or ``switch`` the DR direction.  It can also get the ``status`` of a running DR job.  
 
-``db_agent``
-    The database backup agent does the actual work of a the backup: reading data (and logs) from the source database and writing it to the destination database.  Any number of agents pointed at the same database will cooperate to perform the backup.
+``dr_agent``
+    The database backup agent is a daemon that actually executes the work of the DR jobs, writing snapshot and log data to the destination database.  Any number of agents pointed at the same databases will cooperate to perform the backup.
 
-By default, the FoundationDB packages are configured to start a single ``backup_agent`` process on each FoundationDB server. If you want to perform a backup to a network drive or blob store instance that is accessible to every server, you can immediately use the ``fdbbackup start`` command from any machine with access to your cluster to start the backup::
+By default, the FoundationDB packages are configured to start a single ``backup_agent`` process on each FoundationDB server. If you want to perform a backup to a network drive or blob store instance that is accessible to every server, you can immediately use the ``fdbbackup start`` command from any machine with access to your cluster to start the backup
 
-    user@host$ fdbbackup start -d <Backup_URL>
+::
+
+    user@host$ fdbbackup start -d <BACKUP_URL>
 
 If instead you want to perform a backup to the local disk of a particular machine or machines which are not network accessible to the FoundationDB servers, then you should disable the backup agents on the FoundationDB servers. This is accomplished by commenting out all of the ``[backup_agent.<ID>]`` sections in :ref:`foundationdb.conf <foundationdb-conf>`. Do not comment out the global ``[backup_agent]`` section. Next, start backup agents on the destination machine or machines. Now, when you start a backup, you can specify the destination directory (as a Backup URL) using a local path on the destination machines. The backup agents will fetch data from the database and store it locally on the destination machines.
 
@@ -50,9 +66,11 @@ Backup URLs
 
 Backup and Restore locations are specified by Backup URLs.  Currently there are two valid Backup URL formats.
 
-Note that items in angle brackets (< and >) are just placeholders and must be replaced (including the brackets) with meaningful values.
+Note that items in angle brackets (< and >) are just placeholders and must be replaced (including the brackets) with meaningful values.  Items within square brackets ([ and ]) are optional.
 
-For local directories, the Backup URL format is::
+For local directories, the Backup URL format is
+
+::
 
     file://</absolute/path/to/base_dir>
 
@@ -61,15 +79,25 @@ Note that since paths must be absolute this will result in three slashes (/) in 
 
 Note that for local directory URLs the actual backup files will not be written to <base_dir> directly but rather to a uniquely timestamped subdirectory.  When starting a restore the path to the timestamped subdirectory must be specified.
 
-For blob store backup locations, the Backup URL format is::
+For blob store backup locations, the Backup URL format is
 
-    blobstore://<api_key>:<secret>@<ip>:<port>/<name>[?<param>=<value>[&<param>=<value>]...]
+::
 
-An example blob store Backup URL would be ``blobstore://myKey:mySecret@2.2.2.2:80/dec_1_2015_0400``.
+    blobstore://<api_key>[:<secret>]@<hostname>[:<port>]/<name>[?<param>=<value>[&<param>=<value>]...]
 
-Blob store Backup URLs can have optional parameters which set various limits on interactions with the blob store.  All values must be positive decimal integers.
+      <api_key> - API key to use for authentication
+      <secret> - API key's secret.  Optional.
+      <hostname> - Remote hostname or IP address to connect to
+      <port> - Remote port to connect to.  Optional.  Default is 80.
+      <name> - Name of backup.  It can contain '/' characters, to place backups into a folder-like structure.
+      
+      <param>=<value> - Optional URL parameters.  See below for details.
 
-Under normal circumstances the default values should be succificient.  The most likely parameter that must be changed is the maximum speed at which to send data to the blob store which is called ``max_send_bytes_per_second`` or ``sbps`` for short.
+If <secret> is not specified, it will be looked up in :ref:`blob credential sources<blob-credential-files>`.
+
+An example blob store Backup URL would be ``blobstore://myKey:mySecret@something.domain.com:80/dec_1_2017_0400``.
+
+Blob store Backup URLs can have optional parameters at the end which set various limits on interactions with the blob store.  All values must be positive decimal integers.  The default values are not very restrictive.  The most likely parameter a user would want to change is ``max_send_bytes_per_second`` (or ``sbps`` for short) which determines the upload speed to the blob service.
 
 Here is a complete list of valid parameters:
 
@@ -99,31 +127,54 @@ Here is a complete list of valid parameters:
 
  *max_recv_bytes_per_second* (or *rbps*) - Max receive bytes per second for all requests combined
 
+.. _blob-credential-files:
+
+Blob Credential Files
+==============================
+
+In order to help safeguard blob store credentials, the <SECRET> can optionally be omitted from blobstore:// URLs on the command line.  Omitted secrets will be resolved at connect time using 1 or more Blob Credential files.
+
+Blob Credential files can be specified on the command line (via --blob_credentials <FILE>) or via the environment variable FDB_BLOB_CREDENTIALS which can be set to a colon-separated list of files.  The command line takes priority over the environment variable however all files from both sources will be used.
+
+At connect time, the specified files are read in order and the first matching account specification (user@host)
+will be used to obtain the secret key.
+
+The Blob Credential File format is JSON with the following schema:
+
+::
+
+  {
+    "accounts" : {
+      "user@host" :   { "secret" : "SECRETKEY" },
+      "user2@host2" : { "secret" : "SECRETKEY2" }
+    }
+  }
+
 
 ``fdbbackup`` command line tool
 ===============================
 
 .. program:: fdbbackup
 
-The ``fdbbackup`` command line tool is used to control the backup process. ::
+The ``fdbbackup`` command line tool is used to control backup jobs or to manage backup data.
 
-    user@host$ fdbbackup [-h] [-v] [-C <CLUSTER_FILE>] <SUBCOMMAND> <SUBCOMMAND_OPTIONS>
+::
 
-The following optional arguments must be specified *before* a subcommand:
+   user@host$ fdbbackup [-h] <SUBCOMMAND> <SUBCOMMAND_OPTIONS>
 
-    .. option:: -h
+The following options apply to most subcommands:
 
-        Get help on the ``fdbbackup`` command.
+``-C <CLUSTER_FILE>``
+  Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
 
-    .. option:: -v
+``-d <BACKUP_URL>``
+  The Backup URL which the subcommand should read, write, or modify.  For ``start`` operations, the Backup URL must be accessible by the ``backup_agent`` processes.
 
-        Get the version of FoundationDB in use.
+``-t <TAG>``
+  A "tag" is a named slot in which a backup task executes.  Backups on different named tags make progress and are controlled independently, though their executions are handled by the same set of backup agent processes.  Any number of unique backup tags can be active at once.  It the tag is not specified, the default tag name "default" is used.
 
-    .. option:: -C <CLUSTER_FILE>
-
-        Specify the path to the ``fdb.cluster`` file that should be used to connect to the FoundationDB cluster you want to back up.
-
-        If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
+``--blob_credentials <FILE>``
+  Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
 
 .. _backup-start:
 
@@ -134,50 +185,37 @@ The following optional arguments must be specified *before* a subcommand:
 
 The ``start`` subcommand is used to start a backup.  If there is already a backup in progress, the command will fail and the current backup will be unaffected.  Otherwise, a backup is started. If the wait option is used, the command will wait for the backup to complete; otherwise, it returns immediately.
 
-    .. option:: -h
+::
 
-        Get help on the ``fdbbackup start`` subcommand.
+   user@host$ fdbbackup start [-t <TAG>] -d <BACKUP_URL> [-z] [-s <DURATION>] [-w] [-k '<BEGIN>[ <END>]']...
 
-    .. option:: -d <Backup_URL>
+``-z``
+  Perform the backup continuously rather than terminating once a restorable backup is achieved.  Database mutations within the backup's target key ranges will be continuously written to the backup as well as repeated inconsistent snapshots at the configured snapshot rate.
 
-        | Specify the Backup URL for backup data to be written to.  The destination must exist and be writable by every active ``backup_agent`` process connected to the FoundationDB cluster, but need not be accessible to the ``fdbbackup`` tool itself. (By default, the ``backup_agent`` process is running as the ``foundationdb`` user and group on each FoundationDB server.)
-        | 
-        | When using file:// Backup URLs, note that the backup files are not written directly to specified directory but rather in a subdirectory of this directory unique for each backup. For example, if the destination URL is ``file:///shared/database-backups/``, the backup agents will create a subdirectory like ``/shared/database-backups/backup-2012-11-01-08-50-22.285173`` in which the actual backup files will be written.  Once the backup has completed successfully, all the files in the backup subdirectory together make up the backup. For restoring a backup to succeed, all of these files must be present. The last file written will be ``/shared/database-backups/backup-2012-11-01-08-50-22.285173/restorable``.
+``-s <DURATION>`` or ``--snapshot_interval <DURATION>``  
+  Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continous mode.  The default is 864000 which is 10 days.
 
-    .. option:: -w 
+``-w``
+  Wait for the backup to complete with behavior identical to that of the :ref:`wait command <backup-wait>`.
 
-        Wait for the backup to complete with behavior identical to that of the :ref:`wait command <backup-wait>`.
+``-k '<BEGIN>[ <END>]'``
+  Specify a key range to be included in the backup.  Can be used multiple times to specify multiple key ranges.  The argument should be a single string containing either a BEGIN alone or both a BEGIN and END separated by a space.  If only the BEGIN is specified, the END is assumed to be BEGIN + '\xff'.  If no key ranges are different, the default is all user keys ('' to '\xff').
 
-    .. option:: -k <KEY_RANGE>+
+  Each key range should be quoted in a manner appropriate for your command line environment. Here are some examples for Bash: ::
 
-       | Specify one or more key ranges to be used for the backup. The key ranges are specifed on a single line, separated by spaces. Each key range consists of a single quoted string of the form ``[<BEGIN_KEY> [<END_KEY>]]``. If ``<END_KEY>`` is given, the range extends from ``<BEGIN_KEY>`` (inclusive) to ``<END_KEY>`` (exclusive). If ``<END_KEY>`` is omitted, the range consists of all keys with ``<BEGIN_KEY>`` as a proper prefix.
-       |
-       | Each key range should be quoted in a manner appropriate for your command line environment. Here are some examples for Bash:
-       | ``fdbbackup start -k 'apple bananna' -k 'mango pineapple' <Backup_URL>``
-       | ``fdbbackup start -k '@pp1e b*n*nn*' -k '#an&0 p^n3app!e' <Backup_URL>``
-       |
-       | Here are the equivalent examples for Windows:
-       | ``fdbbackup.exe start -k "apple bananna" -k "mango pineapple" <Backup_URL>``
-       | ``fdbbackup.exe start -k "@pp1e b*n*nn*" -k "#an&0 p^n3app!e" <Backup_URL>``
-
-    .. option:: -z
-
-        Perform the backup continuously rather than terminating when a full backup is complete. All subsequent writes (in the backup's key ranges) will be included in the backup.
-
-        .. warning:: Restoring a backup will take time proportional to the duration of the backup. Therefore, leaving a backup running with -z for an extended period is not recommended. The continuous backup feature should only be used if you periodically discontinue and restart the backup.
+     user@host$ fdbbackup start -k 'apple bananna' -k 'mango pineapple' -d <BACKUP_URL>
+     user@host$ fdbbackup start -k '@pp1e b*n*nn*' -k '#an&0 p^n3app!e' -d <BACKUP_URL>
 
 .. program:: fdbbackup abort
 
 ``abort``
 ---------
 
-The ``abort`` subcommand is used to abort a backup that is currently in progress.  If there is no backup in progress, the command will return an error.  The destination backup is NOT deleted automatically, but it cannot be used to perform a restore.
+The ``abort`` subcommand is used to abort a backup that is currently in progress.  If there is no backup in progress, the command will return an error.  The destination backup is NOT deleted automatically, and it may or may not be restorable depending on when the abort is done.
 
-    .. option:: -h
+::
 
-        Get help on the ``fdbbackup abort`` subcommand.
-
-    .. warning:: The ``abort`` command will render any running backup unrestorable. To stop a continuous backup gracefully, use ``discontinue``.
+   user@host$ fdbbackup abort [-t <TAG>]
 
 .. program:: fdbbackup discontinue
 
@@ -186,14 +224,12 @@ The ``abort`` subcommand is used to abort a backup that is currently in progress
 
 The ``discontinue`` subcommand is only available for backups that were started with the continuous (``-z``) option. Its effect is to discontinue the continous backup. Note that the subcommand does *not* abort the backup; it simply allows the backup to complete as a noncontinuous backup would.
 
-    .. option:: -h
+::
 
-        Get help on the ``fdbbackup discontinue`` subcommand.
+   user@host$ fdbbackup discontinue [-t <TAG>] [-w]
 
-    .. option:: -w 
-
-        Wait for the backup to complete with behavior identical to that of the :ref:`wait command <backup-wait>`.
-
+``-w``
+ Wait for the backup to complete with behavior identical to that of the :ref:`wait command <backup-wait>`.
 
 .. _backup-wait:
 
@@ -204,40 +240,100 @@ The ``discontinue`` subcommand is only available for backups that were started w
 
 The ``wait`` subcommand is used to wait for a backup to complete, which is useful for scripting purposes.  If there is a backup in progress, it waits for it to complete or be aborted and returns a status based on the result of the backup.  If there is no backup in progress, it returns immediately based on the result of the previous backup.  The exit code is zero (success) if the backup was completed successfully and nonzero if it was aborted.
 
-    .. option:: -h
+::
 
-        Get help on the ``fdbbackup wait`` subcommand.
+   user@host$ fdbbackup wait [-t <TAG>]
 
 .. program:: fdbbackup status
 
 ``status``
 ----------
 
-The ``status`` subcommand is used to get information on the current status of a backup.  It tells whether there is a backup in progress and backup agents are running. It will also report any errors that have been encountered by backup agents (e.g., errors writing to the output directory).
+The ``status`` subcommand is used to get information on the current status of backup.  It will show several backup metrics as well as recent errors which organized by whether or not they appear to be preventing backup progress.
 
-    ::
+::
 
-        user@host$ fdbbackup status -e 1
-        Backup in progress to file:///share/backup_test/out/backup-2012-11-01-10-30-59.270596/.
-        WARNING: Some backup agents have reported errors (printing 1):
-            rebar06(17403) - Error opening /share/backup_test/out/backup-2012-11-01-10-30-59.270596/temp.aff16af7e28046698bc847dc36f3f0f4.part. (IOError: [Errno 2] No such file or directory: '/share/backup_test/out/backup-2012-11-01-10-30-59.270596/temp.aff16af7e28046698bc847dc36f3f0f4.part')
+   user@host$ fdbbackup status [-t <TAG>]
 
-    .. option:: -h
+.. program:: fdbbackup delete
 
-        Get help on the ``fdbbackup status`` subcommand.
+``delete``
+----------
 
-    .. option:: -e <LIMIT>
+The ``delete`` subcommand will delete the specified backup.
 
-        Print the last (up to) ``<LIMIT>`` errors that were logged into the database by backup agents.  The default is 10.
+::
+
+   user@host$ fdbbackup delete -d <BACKUP_URL>
+
+.. warning:: If you cancel a delete operation while it is in progress the specified backup is in an unknown state and is likely no longer usable.  Repeat the delete command to finish deleting the backup.
+
+.. program:: fdbbackup expire
+
+``expire``
+----------
+
+The ``expire`` subcommand will remove data from a backup prior to some point in time referred to as the 'cutoff'.
+
+::
+
+   user@host$ fdbbackup expire -d <BACKUP_URL> <CUTOFF> [<RESTORABILITY>] [--force]
+
+The expiration CUTOFF must be specified by one of the two following arguments:
+   
+  ``--expire_before_timestamp <DATETIME>``
+    Specifies the expiration cutoff to DATETIME.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY-MM-DD.HH:MI:SS" in UTC.
+
+  ``--expire_before_version <VERSION>``
+    Specifies the cutoff by a database commit version.
+
+Optionally, the user can specify a minimum RESTORABILITY guarauntee with one of the following options.
+
+  ``--restorable_after_timestamp <DATETIME>``
+    Specifies that the backup must be restorable to DATETIME and later.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY-MM-DD.HH:MI:SS" in UTC.
+
+  ``--restorable_after_version <VERSION>``
+    Specifies that the backup must be restorable as of VERSION and later.
+
+``-f`` or ``--force``
+  If the designated cutoff will result in removal of data such that the backup's restorability would be reduced to either unrestorable or less restorable than the optional restorability requirement then the --force option must be given or the result will be an error and no action will be taken.
+
+.. program:: fdbbackup describe
+
+``describe``
+----------
+
+The ``describe`` subcommand will analyze the given backup and print a summary of the snapshot and mutation data versions it contains as well as the version range of restorability the backup can currently provide.
+
+::
+
+   user@host$ fdbbackup describe -d <BACKUP_URL> [--version_timestamps] [-C <CLUSTER_FILE>] 
+
+``--version_timestamps``
+  If the originating cluster is still available and is passed on the command line, this option can be specified in order for all versions in the output to also be converted to timestamps for better human readability.
+
+
+.. program:: fdbbackup list
+
+``list``
+----------
+
+The ``list`` subcommand will list the backups at a given 'base' or shortened Backup URL.
+
+::
+
+   user@host$ fdbbackup list -b <BASE_URL>
+
+``-b <BASE_URL>`` or ``--base_url <BASE_URL>``
+  This a shortened Backup URL which looks just like a Backup URL but without the backup name so that the list command will discover and list all of the backups under that base URL.
+
 
 ``fdbrestore`` command line tool
 ================================
 
 .. program:: fdbrestore
 
-The ``fdbrestore`` command line tool is used to control restore tasks.
-
-.. warning:: Restoring a backup will clear the contents of your database within the specified key range to restore, so use this tool with caution! 
+The ``fdbrestore`` command line tool is used to control restore tasks.  Note that a restore operation will not clear the target key ranges, for safety reasons, so you must manually clear the ranges to be restored prior to starting the restore.
 
 .. warning:: It is your responsibility to ensure that no clients are accessing the database while it is being restored. During the restore process the database is in an inconsistent state, and writes that happen during the restore process might be partially or completely overwritten by restored data.
 
@@ -247,21 +343,19 @@ The ``fdbrestore`` command line tool is used to control restore tasks.
 
 The following options apply to all commands:
 
-.. option:: -h
+``-h`` 
+  Get help on the ``fdbrestore`` command.
 
-   Get help on the ``fdbrestore`` command.
+``-t <TAG>``
+  Specify the tag for the restore task.  Multiple restore tasks can be in progress at once so long as each task uses a different tag.  The default tag is "default".
 
-.. option:: -t <TAG>
+  .. warning:: If multiple restore tasks are in progress they should be restoring to different prefixes or the result is undefined.
 
-   Specify the tag for the restore task.  Multiple restore tasks can be in progress at once so long as each task uses a different tag.  The default tag is "default".
+``-C <CLUSTER_FILE>``
+  Path to the cluster file that should be used to connect to the FoundationDB cluster you want to use.  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
 
-   .. warning:: If multiple restore tasks are in progress they should be restoring to different prefixes or the result is undefined.
-
-.. option:: -C <CLUSTER_FILE>
-
-   Specify the path to the ``fdb.cluster`` file that should be used to connect to the FoundationDB cluster you want to use.
-
-   If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
+``--blob_credentials <FILE>``
+  Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
 
 .. _restore-start:
 
@@ -270,33 +364,29 @@ The following options apply to all commands:
 
 The ``start`` command will start a new restore on the specified (or default) tag.  The command will fail if a tag is already in use by an active restore.
 
-    .. option:: -r <Backup_URL>
+::
+    user@host$ fdbrestore start -r <BACKUP_URL> [OPTIONS]
 
-        | Specify the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the ``backup_agent`` processes for the cluster.
+``-r <BACKUP_URL>``
+  Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the ``backup_agent`` processes for the cluster.
 
-    .. option:: -w 
+``-w``
+  Wait for the the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.
 
-        | Wait for the the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.
+``-k <KEYS>``
+  Specify list of key ranges from the backup to restore to the database
 
-    .. option:: -k <KEYS>
+``--remove_prefix <PREFIX>``
+  Remove PREFIX from the keys read from the backup
 
-        | Specify list of key ranges from the backup to restore to the database
+``--add_prefix <PREFIX>``
+  Add PREFIX to restored keys before writing them to the database
 
-    .. option:: --remove_prefix <PREFIX>
-        
-        | remove PREFIX from the keys read from the backup
+``-n``
+  Perform a trial run without actually restoring any data.
 
-    .. option:: --add_prefix <PREFIX>
-
-        | prefix to add to restored keys before writing them to the database
-
-    .. option:: -n
-
-        | Perform a trial run without actually restoring any data.
-
-    .. option:: -v <VERSION>
- 
-        | Instead of the latest version the backup can be restored to, restore to VERSION.
+``-v <VERSION>``
+  Instead of the latest version the backup can be restored to, restore to VERSION.
 
 .. program:: fdbrestore abort
 
@@ -315,7 +405,7 @@ The ``wait`` command will wait for the restore on the specified (or default) tag
 ``status``
 ----------
 
-The ``status`` command will print a detailed status report for either one tag (if a tag is specified) or for all tags.
+The ``status`` command will print a detailed status report on restore job progress.  If a tag is specified, it will only show status for that specific tag, otherwise status for all tags will be shown.
 
 ``backup_agent`` command line tool
 ==================================
@@ -326,40 +416,19 @@ The ``status`` command will print a detailed status report for either one tag (i
 
     user@host$ backup_agent [-h] [-v] [-C <CLUSTER_FILE>]
 
-.. option:: -h
+``-h``
+  Get help on the ``backup_agent`` command.
 
-    Get help on the ``backup_agent`` command.
+``-v``
+  Get the version of FoundationDB in use.
 
-.. option:: -v
+``-C <CLUSTER_FILE>``
+  Specify the path to the ``fdb.cluster`` file that should be used to connect to the FoundationDB cluster you want to back up.
+ 
+  If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
 
-    Get the version of FoundationDB in use.
-
-.. option:: -C <CLUSTER_FILE>
-
-    Specify the path to the ``fdb.cluster`` file that should be used to connect to the FoundationDB cluster you want to back up.
-
-    If not specified, a :ref:`default cluster file <default-cluster-file>` will be used.
-
-``fdbblob`` command line tool
-=============================
-
-The ``fdbblob`` command line tool is used to list, delete, and get info on backups stored in a blob store instance.
-
-To list backups, run::
-
-    fdbblob list <Blobstore_URL>
-
-where <Blobstore_URL> is simply a blobstore:// Backup URL without a backup name specified.  For example, ``blobstore://mykey:mysecret@2.2.2.2:80/``.  The output will be a list of blobstore:// Backup URLs which can then be used for ``delete`` or ``info`` operations.
-
-To delete a backup, run::
-
-    fdbblob delete <Backup_URL>
-
-.. warning:: If you cancel a delete operation while it is in progress then the specified backup will no longer be usable.  Repeat the delete command and allow it to complete to finish removing the backup since it is just wasting space.
-
-To scan a backup to in order to get its size and object count, run::
-
-    fdbblob info <Backup_URL>
+``--blob_credentials <FILE>``
+  Use FILE as a :ref:`Blob Credential File<blob-credential-files>`.  Can be used multiple times.
 
 .. _fdbdr-intro:
 
@@ -368,27 +437,25 @@ To scan a backup to in order to get its size and object count, run::
 
 .. program:: fdbdr
 
-The ``fdbdr`` command line tool is used to control the process of backing up to another database. ::
+The ``fdbdr`` command line tool is used to manage DR tasks.
 
-    user@host$ fdbdr [-h] [-v] [-d <CLUSTER_FILE>] [-s <CLUSTER_FILE>] <SUBCOMMAND> <SUBCOMMAND_OPTION>*
+::
 
-The following optional arguments must be specified *before* a subcommand:
+    user@host$ fdbdr [-h] <SUBCOMMAND> [<SUBCOMMAND_OPTIONS>] -d <CLUSTER_FILE> -s <CLUSTER_FILE> [-v]
 
-    .. option:: -h
+The following arguments are used by mutiple subcommands:
 
-        Get help on the ``fdbdr`` command.
+``-h``
+  Get help on the ``fdbdr`` command.
 
-    .. option:: -v
+``-v``
+  Get the version of FoundationDB in use.
 
-        Get the version of FoundationDB in use.
+``-d <CLUSTER_FILE>``
+  Specify the path to the ``fdb.cluster`` file for the destination cluster of the DR operaiton.
 
-    .. option:: -d <CLUSTER_FILE>
-
-    Specify the path to the ``fdb.cluster`` file that should be used to connect to the destination FoundationDB cluster you want to back up into.
-
-.. option:: -s <CLUSTER_FILE>
-
-    Specify the path to the ``fdb.cluster`` file that should be used to connect to the source FoundationDB cluster you want to back up.
+``-s <CLUSTER_FILE>``
+  Specify the path to the ``fdb.cluster`` file for the source cluster of the DR operation.
 
 .. _dr-start:
 
@@ -397,86 +464,58 @@ The following optional arguments must be specified *before* a subcommand:
 ``start``
 ---------
 
-The ``start`` subcommand is used to start a backup.  If there is already a backup in progress, the command will fail and the current backup will be unaffected.  Otherwise, a backup is started.
+The ``start`` subcommand is used to start a DR backup.  If there is already a DR backup in progress, the command will fail and the current DR backup will be unaffected.
 
-    .. option:: -h
-
-        Get help on the ``fdbdr start`` subcommand.
-
-    .. option:: -k <KEY_RANGE>+
-
-       | Specify one or more key ranges to be used for the backup. The key ranges are specifed on a single line, separated by spaces. Each key range consists of a single quoted string of the form ``[<BEGIN_KEY> [<END_KEY>]]``. If ``<END_KEY>`` is given, the range extends from ``<BEGIN_KEY>`` (inclusive) to ``<END_KEY>`` (exclusive). If ``<END_KEY>`` is omitted, the range consists of all keys with ``<BEGIN_KEY>`` as a proper prefix.
-       |
-       | Each key range should be quoted in a manner appropriate for your command line environment. Here are some examples for Bash:
-       | ``fdbdr start -k 'apple bananna' -k 'mango pineapple' <Backup_URL>``
-       | ``fdbdr start -k '@pp1e b*n*nn*' -k '#an&0 p^n3app!e' <Backup_URL>``
-       |
-       | Here are the equivalent examples for Windows:
-       | ``fdbdr.exe start -k "apple bananna" -k "mango pineapple" <Backup_URL>``
-       | ``fdbdr.exe start -k "@pp1e b*n*nn*" -k "#an&0 p^n3app!e" <Backup_URL>``
+``-k '<BEGIN>[ <END>]'``
+  Specify a key range to be included in the DR.  Can be used multiple times to specify multiple key ranges.  The argument should be a single string containing either a BEGIN alone or both a BEGIN and END separated by a space.  If only the BEGIN is specified, the END is assumed to be BEGIN + '\xff'.  If no key ranges are different, the default is all user keys ('' to '\xff').
 
 .. program:: fdbdr switch
 
 ``switch``
 ----------
 
-The ``switch`` subcommand is used to switch the source database and the destination database. This means the destination will be unlocked and start streaming data into the source database. This command requires both databases to be available. While the switch command is working, both databases will be locked for a few seconds.
+The ``switch`` subcommand is used to swap the source and destination database clusters of an active DR in differential mode.  This means the destination will be unlocked and start streaming data into the source database, which will subsequently be locked.
 
-    .. option:: -h
-
-        Get help on the ``fdbdr switch`` subcommand.
+This command requires both databases to be available.  While the switch command is working, both databases will be locked for a few seconds.
 
 .. program:: fdbdr abort
 
 ``abort``
 ---------
 
-The ``abort`` subcommand is used to abort a backup that is currently in progress.  If there is no backup in progress, the command will return an error. The command will leave the destination database at a consistent snapshot of the source database from sometime in the past.
+The ``abort`` subcommand is used to abort a DR that is currently in progress.  If there is no backup in progress, the command will return an error.  If the DR had already reached differential status, the abort command will leave the destination database at consistent snapshot of the source database from sometime in the past.
 
-    .. option:: -h
-
-        Get help on the ``fdbdr abort`` subcommand.
-
-    .. warning:: The ``abort`` command will lose some amount of prior commits.
-
+  .. warning:: The ``abort`` command will lose some amount of prior commits.
 
 .. program:: fdbdr status
 
 ``status``
 ----------
 
-The ``status`` subcommand is used to get information on the current status of a backup.  It tells whether there is a backup in progress and backup agents are running. It will also report any errors that have been encountered by backup agents.
+The ``status`` subcommand is used to get information on the current status of DR backup.  It tells whether or not there is a DR in progress and whether or not there are active DR agents.  It will also report any errors that have been encountered by the DR agents.
 
-    .. option:: -h
+``-e <LIMIT>``
+  Print the last (up to) ``<LIMIT>`` errors that were logged into the database by backup agents.  The default is 10.
 
-        Get help on the ``fdbdr status`` subcommand.
-
-    .. option:: -e <LIMIT>
-
-        Print the last (up to) ``<LIMIT>`` errors that were logged into the database by backup agents.  The default is 10.
-
-``db-agent`` command line tool
+``dr_agent`` command line tool
 ==============================
 
-.. program:: db-agent
+.. program:: dr_agent
 
-unlike ``backup_agent``, ``db-agent`` is not started automatically. A ``db-agent`` needs the cluster files for both the source database and the destination database, and can only perform a backup in one direction (from source to destination). ::
+Unlike ``backup_agent``, ``dr_agent`` is not started automatically in a default FoundationDB installation.  A ``dr_agent`` needs the cluster files for both the source database and the destination database, and can only perform a backup in one direction (from source to destination) at a time.
 
-    user@host$ db-agent [-h] [-v] [-d <CLUSTER_FILE>] [-s <CLUSTER_FILE>]
+::
 
-.. option:: -h
+    user@host$ dr_agent [-h] [-v] -d <CLUSTER_FILE> -s <CLUSTER_FILE>
 
-    Get help on the ``db-agent`` command.
+``-h``
+  Get help on the ``fdbdr`` command.
 
-.. option:: -v
+``-v``
+  Get the version of FoundationDB in use.
 
-    Get the version of FoundationDB in use.
+``-d <CLUSTER_FILE>``
+  Specify the path to the ``fdb.cluster`` file for the destination cluster of the DR operaiton.
 
-.. option:: -d <CLUSTER_FILE>
-
-    Specify the path to the ``fdb.cluster`` file that should be used to connect to the destination FoundationDB cluster you want to back up into.
-
-.. option:: -s <CLUSTER_FILE>
-
-    Specify the path to the ``fdb.cluster`` file that should be used to connect to the source FoundationDB cluster you want to back up.
-    
+``-s <CLUSTER_FILE>``
+  Specify the path to the ``fdb.cluster`` file for the source cluster of the DR operation.
