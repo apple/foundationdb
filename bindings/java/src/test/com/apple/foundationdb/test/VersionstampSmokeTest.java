@@ -31,9 +31,9 @@ import com.apple.foundationdb.tuple.Tuple;
 import com.apple.foundationdb.tuple.Versionstamp;
 
 public class VersionstampSmokeTest {
-    public static void main(String[] args) {
-        FDB fdb = FDB.selectAPIVersion(520);
-        try(Database db = fdb.open()) {
+	public static void main(String[] args) {
+		FDB fdb = FDB.selectAPIVersion(520);
+		try(Database db = fdb.open()) {
 			db.run(tr -> {
 				tr.clear(Tuple.from("prefix").range());
 				return null;
@@ -59,7 +59,7 @@ public class VersionstampSmokeTest {
 			System.out.println(Versionstamp.complete(trVersion));
 			assert v.equals(Versionstamp.complete(trVersion));
 		}
-    }
+	}
 
-    private VersionstampSmokeTest() {}
+	private VersionstampSmokeTest() {}
 }

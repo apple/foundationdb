@@ -6,8 +6,6 @@ bindings/flow/bin/
 bindings/java/foundationdb-client*.jar
 bindings/java/foundationdb-tests*.jar
 bindings/java/fdb-java-*-sources.jar
-bindings/nodejs/build/
-bindings/nodejs/modules/
 packaging/msi/FDBInstaller.msi
 
 # Generated source, build, and packaging files
@@ -24,7 +22,6 @@ bindings/java/src*/main/com/apple/foundationdb/StreamingMode.java
 bindings/java/src*/main/com/apple/foundationdb/MutationType.java
 bindings/java/src*/main/com/apple/foundationdb/ConflictRangeType.java
 bindings/java/src*/main/com/apple/foundationdb/FDBException.java
-bindings/nodejs/package.json
 bindings/python/fdb/fdb*options.py
 bindings/python/dist/
 bindings/python/setup.py
@@ -52,12 +49,8 @@ bindings/go/godoc
 bindings/java/.classstamp*
 bindings/java/classes*/
 bindings/java/javadoc*/
-bindings/nodejs/fdb_node.stamp
-bindings/nodejs/node_modules/
 
 # Testing and logging
-bindings/nodejs/fdb_node*.log
-bindings/nodejs/npm-debug.log
 packaging/msi/*.log
 packaging/msi/obj
 simfdb

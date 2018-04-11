@@ -42,7 +42,6 @@
     <Compile Include="c.cs" />
     <Compile Include="cpp.cs" />
     <Compile Include="java.cs" />
-    <Compile Include="nodejs.cs" />
     <Compile Include="python.cs" />
     <Compile Include="ruby.cs" />
     <Compile Include="vexillographer.cs" />
@@ -74,7 +73,6 @@
     <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; c &quot;$(ProjectDir)..\..\bindings\c\foundationdb\fdb_c_options.g.h&quot;" />
     <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; cpp &quot;$(ProjectDir)..\..\fdbclient\FDBOptions.g&quot;" />
     <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; python &quot;$(ProjectDir)..\..\bindings\python\fdb\fdboptions.py&quot;" />
-    <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; nodejs &quot;$(ProjectDir)..\..\bindings\nodejs\src\FdbOptions.g.cpp&quot;" />
     <Exec Command="&quot;$(SolutionDir)bin\$(Configuration)\vexillographer.exe&quot; &quot;$(ProjectDir)fdb.options&quot; ruby &quot;$(ProjectDir)..\..\bindings\ruby\lib\fdboptions.rb&quot;" />
   </Target>
 </Project>

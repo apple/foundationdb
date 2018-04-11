@@ -59,7 +59,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|multi_dc] [ssd|memory] [proxies=<N>] [resolvers=<N>] [logs=<N>]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [proxies=<N>] [resolvers=<N>] [logs=<N>]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -72,7 +72,7 @@ Redundancy modes define storage requirements, required cluster size, and resilie
 * ``double``
 * ``triple``
 * ``three_data_hall``
-* ``multi_dc``
+* ``three_datacenter``
 
 For descriptions of redundacy modes, see :ref:`configuration-choosing-redundancy-mode`.
 

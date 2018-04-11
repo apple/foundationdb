@@ -27,89 +27,89 @@ import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 
 public abstract class AbstractTester {
-    public static final int API_VERSION = 520;
-    protected static final int NUM_RUNS = 25;
-    protected static final Charset ASCII = Charset.forName("ASCII");
+	public static final int API_VERSION = 520;
+	protected static final int NUM_RUNS = 25;
+	protected static final Charset ASCII = Charset.forName("ASCII");
 
-    protected TesterArgs args;
-    protected Random random;
-    protected TestResult result;
-    protected FDB fdb;
+	protected TesterArgs args;
+	protected Random random;
+	protected TestResult result;
+	protected FDB fdb;
 
-    public AbstractTester() {
-        args = null;
-        random = new Random();
-        result = new TestResult(random);
-    }
+	public AbstractTester() {
+		args = null;
+		random = new Random();
+		result = new TestResult(random);
+	}
 
-    public void runTest() {
-        try(Database db = fdb.open()) {
-            try {
-                testPerformance(db);
-            }
-            catch (Exception e) {
-                result.addError(wrapAndPrintError(e, "Failed to complete all tests"));
-            }
-        }
-        catch (Exception e) {
-            result.addError(wrapAndPrintError(e, "fdb.open failed"));
-            return;
-        }
-    }
+	public void runTest() {
+		try(Database db = fdb.open()) {
+			try {
+				testPerformance(db);
+			}
+			catch (Exception e) {
+				result.addError(wrapAndPrintError(e, "Failed to complete all tests"));
+			}
+		}
+		catch (Exception e) {
+			result.addError(wrapAndPrintError(e, "fdb.open failed"));
+			return;
+		}
+	}
 
-    public abstract void testPerformance(Database db);
+	public abstract void testPerformance(Database db);
 
-    public String multiVersionDescription() {
-        if (args == null) return "";
+	public String multiVersionDescription() {
+		if (args == null) return "";
 
-        if (!args.useMultiversionApi()) {
-            return "multi-version API disabled";
-        } else if (args.useExternalClient()) {
-            if (args.putCallbacksOnExternalThread()) {
-                return "external client on external thread";
-            } else {
-                return "external client on main thread";
-            }
-        } else {
-            return "local client";
-        }
-    }
+		if (!args.useMultiversionApi()) {
+			return "multi-version API disabled";
+		} else if (args.useExternalClient()) {
+			if (args.putCallbacksOnExternalThread()) {
+				return "external client on external thread";
+			} else {
+				return "external client on main thread";
+			}
+		} else {
+			return "local client";
+		}
+	}
 
-    public void run(String[] argStrings) {
-        args = TesterArgs.parseArgs(argStrings);
-        if (args == null) return;
+	public void run(String[] argStrings) {
+		args = TesterArgs.parseArgs(argStrings);
+		if (args == null) return;
 
-        fdb = FDB.selectAPIVersion(API_VERSION);
+		fdb = FDB.selectAPIVersion(API_VERSION);
 
-        // Validate argument combinations and set options.
-        if (!args.useMultiversionApi()) {
-            if (args.putCallbacksOnExternalThread() || args.useExternalClient()) {
-                throw new IllegalArgumentException("Invalid multi-version API argument combination");
-            }
-            fdb.options().setDisableMultiVersionClientApi();
-        }
-        if (args.putCallbacksOnExternalThread()) {
-            if (!args.useExternalClient()) {
-                throw new IllegalArgumentException("Cannot enable callbacks on external thread without using external client");
-            }
-            fdb.options().setCallbacksOnExternalThreads();
-        }
-        if (args.useExternalClient()) {
-            fdb.options().setDisableLocalClient();
-        }
+		// Validate argument combinations and set options.
+		if (!args.useMultiversionApi()) {
+			if (args.putCallbacksOnExternalThread() || args.useExternalClient()) {
+				throw new IllegalArgumentException("Invalid multi-version API argument combination");
+			}
+			fdb.options().setDisableMultiVersionClientApi();
+		}
+		if (args.putCallbacksOnExternalThread()) {
+			if (!args.useExternalClient()) {
+				throw new IllegalArgumentException("Cannot enable callbacks on external thread without using external client");
+			}
+			fdb.options().setCallbacksOnExternalThreads();
+		}
+		if (args.useExternalClient()) {
+			fdb.options().setDisableLocalClient();
+		}
 
-        try {
-            runTest();
-        } catch (Exception e) {
-            result.addError(e);
-        }
+		try {
+			runTest();
+		} catch (Exception e) {
+			result.addError(e);
+		}
 
-        result.save(args.getOutputDirectory());
-    }
+		result.save(args.getOutputDirectory());
+	}
 
-    public RuntimeException wrapAndPrintError(Throwable t, String message) {
-        String errorMessage = message + ": " + t.getClass() + ": " + t.getMessage() + "\n";
-        t.printStackTrace();
-        return new RuntimeException(errorMessage, t);
-    }
+	public RuntimeException wrapAndPrintError(Throwable t, String message) {
+		String errorMessage = message + ": " + t.getClass() + ": " + t.getMessage() + "\n";
+		t.printStackTrace();
+		return new RuntimeException(errorMessage, t);
+	}
 }
