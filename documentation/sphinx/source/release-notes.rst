@@ -2,6 +2,21 @@
 Release Notes
 #############
 
+5.1.5
+=====
+
+Fixes
+-----
+
+* The consistency check calculated the size of the database inefficiently. <rdar://problem/38385230>
+* Could not create new directories with the Python and Ruby implementations of the directory layer. <rdar://problem/38911902> <rdar://problem/38477474>
+
+
+Other Changes
+-------------
+
+* renamed the ``multi_dc`` replication mode to ``three_datacenter``.
+
 5.1.4
 =====
 
