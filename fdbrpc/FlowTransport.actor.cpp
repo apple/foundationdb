@@ -144,7 +144,8 @@ public:
 		pingReceiver(endpoints),
 		warnAlwaysForLargePacket(true),
 		lastIncompatibleMessage(0),
-		transportId(transportId)
+		transportId(transportId),
+		numIncompatibleConnections(0)
 	{}
 
 	void initMetrics() {
