@@ -427,7 +427,6 @@ public class StackTester {
 						tr.options().setCausalReadRisky();
 						tr.options().setCausalWriteRisky();
 						tr.options().setReadYourWritesDisable();
-						tr.options().setReadAheadDisable();
 						tr.options().setReadSystemKeys();
 						tr.options().setAccessSystemKeys();
 						tr.options().setDurabilityDevNullIsWebScale();
