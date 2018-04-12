@@ -80,6 +80,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::map< std::pair<UID, Tag>, Version > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
 	ActorCollection actors;
 	std::vector<OldLogData> oldLogData;
+	AsyncTrigger logRoutersChanged;
 
 	TagPartitionedLogSystem( UID dbgid, LocalityData locality ) : dbgid(dbgid), locality(locality), actors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(0), logRouterTags(0), expectedLogSets(0), hasRemoteServers(false) {}
 
@@ -877,7 +878,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual Future<Void> onLogSystemConfigChange() {
 		std::vector<Future<Void>> changes;
-		changes.push_back(Never());
+		changes.push_back(logRoutersChanged.onTrigger());
 		for(auto& t : tLogs) {
 			for( int i = 0; i < t->logServers.size(); i++ ) {
 				changes.push_back( t->logServers[i]->onChange() );
@@ -1343,11 +1344,55 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	ACTOR static Future<Void> recruitOldLogRouters( TagPartitionedLogSystem* self, vector<WorkerInterface> workers, LogEpoch recoveryCount, int8_t locality, Version startVersion, int logSet ) 
-	{
+	ACTOR static Future<Void> recruitOldLogRouters( TagPartitionedLogSystem* self, vector<WorkerInterface> workers, LogEpoch recoveryCount, int8_t locality, Version startVersion, int logSet, bool onlyOld ) {
 		state vector<vector<Future<TLogInterface>>> logRouterInitializationReplies;
 		state vector<Future<TLogInterface>> allReplies;
 		int nextRouter = 0;
+
+		if(!onlyOld) {
+			if( self->logRouterTags == 0 ) {
+				return Void();
+			}
+
+			bool found = false;
+			Version ver = 0;
+			for(auto& tLogs : self->tLogs) {
+				if(tLogs->locality == locality) {
+					found = true;
+				}
+				if(tLogs->isLocal && tLogs->logServers.size()) {
+					ver = std::max(startVersion, tLogs->startVersion);
+				}
+				tLogs->logRouters.clear();
+			}
+			
+			if(!found) {
+				Reference<LogSet> newLogSet( new LogSet() );
+				newLogSet->locality = locality;
+				newLogSet->startVersion = ver;
+				newLogSet->isLocal = false;
+				self->tLogs.push_back(newLogSet);
+			}
+
+			for(auto& tLogs : self->tLogs) {
+				//Recruit log routers for old generations of the primary locality
+				if(tLogs->locality == locality) {
+					logRouterInitializationReplies.push_back(vector<Future<TLogInterface>>());
+					for( int i = 0; i < self->logRouterTags; i++) {
+						InitializeLogRouterRequest req;
+						req.recoveryCount = recoveryCount;
+						req.routerTag = Tag(tagLocalityLogRouter, i);
+						req.logSet = logSet;
+						req.startVersion = ver;
+						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
+						logRouterInitializationReplies.back().push_back( reply );
+						allReplies.push_back( reply );
+						nextRouter = (nextRouter+1)%workers.size();
+					}
+				}
+			}
+		}
+
 		for(auto& old : self->oldLogData) {
 			if(old.logRouterTags == 0) {
 				break;
@@ -1362,6 +1407,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(tLogs->isLocal && tLogs->logServers.size()) {
 					ver = std::max(startVersion, tLogs->startVersion);
 				}
+				tLogs->logRouters.clear();
 			}
 			
 			if(!found) {
@@ -1393,6 +1439,17 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		Void _ = wait( waitForAll(allReplies) );
 
 		int nextReplies = 0;
+		if(!onlyOld) {
+			for(auto& tLogs : self->tLogs) {
+				if(tLogs->locality == locality) {
+					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
+						tLogs->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get()) ) ) );
+					}
+					nextReplies++;
+				}
+			}
+		}
+
 		for(auto& old : self->oldLogData) {
 			if(old.logRouterTags == 0) {
 				break;
@@ -1407,6 +1464,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}	
 
+		self->logRoutersChanged.trigger();
 		return Void();
 	}
 
@@ -1440,7 +1498,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state Future<Void> oldRouterRecruitment = Void();
 		if(logSet->startVersion < oldLogSystem->knownCommittedVersion + 1) {
-			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(self, remoteWorkers.logRouters, recoveryCount, remoteLocality, logSet->startVersion, self->tLogs.size());
+			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(self, remoteWorkers.logRouters, recoveryCount, remoteLocality, logSet->startVersion, self->tLogs.size(), true);
 		}
 
 		state vector<Future<TLogInterface>> logRouterInitializationReplies;
@@ -1552,6 +1610,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->oldLogData.push_back(OldLogData());
 			logSystem->oldLogData[0].tLogs = oldLogSystem->tLogs;
 			logSystem->oldLogData[0].epochEnd = oldLogSystem->knownCommittedVersion + 1;
+			logSystem->oldLogData[0].logRouterTags = oldLogSystem->logRouterTags;
 		}
 
 		for(int i = 0; i < oldLogSystem->oldLogData.size(); i++) {
@@ -1571,7 +1630,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state Future<Void> oldRouterRecruitment = Void();
 		if(logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
-			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(logSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0);
+			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0, false);
 		}
 
 		state vector<Future<TLogInterface>> initializationReplies;

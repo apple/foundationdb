@@ -76,7 +76,7 @@ struct TLogSet {
 
 	bool operator == ( const TLogSet& rhs ) const {
 		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || hasBestPolicy != rhs.hasBestPolicy ||
-			startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality ) {
+			startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality || logRouters.size() != rhs.logRouters.size()) {
 			return false;
 		}
 		if ((tLogPolicy && !rhs.tLogPolicy) || (!tLogPolicy && rhs.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != rhs.tLogPolicy->info()))) {
@@ -84,6 +84,11 @@ struct TLogSet {
 		}
 		for(int j = 0; j < tLogs.size(); j++ ) {
 			if (tLogs[j].id() != rhs.tLogs[j].id() || tLogs[j].present() != rhs.tLogs[j].present() || ( tLogs[j].present() && tLogs[j].interf().commit.getEndpoint().token != rhs.tLogs[j].interf().commit.getEndpoint().token ) ) {
+				return false;
+			}
+		}
+		for(int j = 0; j < logRouters.size(); j++ ) {
+			if (logRouters[j].id() != rhs.logRouters[j].id() || logRouters[j].present() != rhs.logRouters[j].present() || ( logRouters[j].present() && logRouters[j].interf().commit.getEndpoint().token != rhs.logRouters[j].interf().commit.getEndpoint().token ) ) {
 				return false;
 			}
 		}

@@ -1094,7 +1094,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 
 
 	TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
-	if(logData->logSystem->get() && !logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion) {
+	if(logData->logSystem->get() && (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
 		logData->logSystem->get()->pop(ver, logData->remoteTag, logData->locality);
 	}
