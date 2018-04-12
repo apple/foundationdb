@@ -92,7 +92,7 @@ STATIC_LIBS :=
 VPATH += $(addprefix :,$(filter-out lib,$(patsubst -L%,%,$(filter -L%,$(LDFLAGS)))))
 
 CS_PROJECTS := flow/actorcompiler flow/coveragetool fdbclient/vexillographer
-CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow
+CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow FDBLibTLS
 OTHER_PROJECTS := bindings/python bindings/ruby bindings/go
 
 CS_MK_GENERATED := $(CS_PROJECTS:=/generated.mk)
@@ -148,7 +148,7 @@ clean: $(CLEAN_TARGETS) docpreview_clean
 	@echo "Cleaning       toplevel"
 	@rm -rf $(OBJDIR)
 	@rm -rf $(DEPSDIR)
-	@rm -rf lib/libstdc++.a
+	@rm -rf lib/
 	@rm -rf bin/coverage.*.xml
 
 targets:
