@@ -990,7 +990,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			if(assignClasses) {
 				if(assignedMachines < 4)
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 2), ProcessClass::CommandLineSource); //Unset or Storage
-				else if(assignedMachines == 4 && !g_simulator.hasRemoteReplication && !g_simulator.hasSatelliteReplication)
+				else if(assignedMachines == 4 && !simconfig.db.regions.size())
 					processClass = ProcessClass((ProcessClass::ClassType) (g_random->randomInt(0, 2) * ProcessClass::ResolutionClass), ProcessClass::CommandLineSource); //Unset or Resolution
 				else
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 3), ProcessClass::CommandLineSource); //Unset, Storage, or Transaction
