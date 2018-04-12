@@ -1,5 +1,7 @@
 // Apple Proprietary and Confidential Information
 
+#include "boost/config.hpp"
+
 #include "FDBLibTLSPlugin.h"
 #include "FDBLibTLSPolicy.h"
 
@@ -22,7 +24,7 @@ ITLSPolicy *FDBLibTLSPlugin::create_policy(ITLSLogFunc logf) {
 	return new FDBLibTLSPolicy(Reference<FDBLibTLSPlugin>::addRef(this), logf);
 }
 
-extern "C" void *get_plugin(const char *plugin_type_name_and_version) {
+extern "C" BOOST_SYMBOL_EXPORT void *get_plugin(const char *plugin_type_name_and_version) {
 	if (strcmp(plugin_type_name_and_version, FDBLibTLSPlugin::get_plugin_type_name_and_version()) == 0) {
 		return new FDBLibTLSPlugin;
 	}
