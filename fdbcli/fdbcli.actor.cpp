@@ -2513,7 +2513,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("ERROR: No active transaction\n");
 						is_error = true;
 					} else {
-						commitTransaction( tr );
+						Void _ = wait( commitTransaction( tr ) );
 						intrans = false;
 						options = &globalOptions;
 					}
