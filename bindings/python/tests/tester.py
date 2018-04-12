@@ -32,14 +32,7 @@ import traceback
 
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
 import fdb
-
-assert not fdb.is_api_version_selected()
-try:
-    fdb.get_api_version()
-except RuntimeError as e:
-    assert str(e) == 'API version is not set'
 fdb.api_version(int(sys.argv[2]))
-assert int(sys.argv[2]) == fdb.get_api_version()
 
 from fdb import six
 from fdb.impl import strinc
@@ -467,7 +460,7 @@ class Tester:
                     count = inst.pop()
                     items = inst.pop(count)
                     inst.push(fdb.tuple.pack(tuple(items)))
-                elif inst.op == six.u("TUPLE_PACK_VERSIONSTAMPED_KEY"):
+                elif inst.op == six.u("TUPLE_PACK_WITH_VERSIONSTAMP"):
                     prefix = inst.pop()
                     count = inst.pop()
                     items = inst.pop(count)
@@ -475,23 +468,7 @@ class Tester:
                         inst.push(b"ERROR: NONE")
                     else:
                         try:
-                            packed = fdb.tuple.pack_versionstamped_key(tuple(items), prefix=prefix)
-                            inst.push(b"OK")
-                            inst.push(packed)
-                        except ValueError as e:
-                            if str(e).startswith("No incomplete"):
-                                inst.push(b"ERROR: NONE")
-                            else:
-                                inst.push(b"ERROR: MULTIPLE")
-                elif inst.op == six.u("TUPLE_PACK_VERSIONSTAMPED_VALUE"):
-                    prefix = inst.pop()
-                    count = inst.pop()
-                    items = inst.pop(count)
-                    if not fdb.tuple.has_incomplete_versionstamp(items) and random.random() < 0.5:
-                        inst.push(b"ERROR: NONE")
-                    else:
-                        try:
-                            packed = fdb.tuple.pack_versionstamped_value(tuple(items), prefix=prefix)
+                            packed = fdb.tuple.pack_with_versionstamp(tuple(items), prefix=prefix)
                             inst.push(b"OK")
                             inst.push(packed)
                         except ValueError as e:
@@ -544,19 +521,6 @@ class Tester:
                     Tester.wait_empty(self.db, prefix)
                     inst.push(b"WAITED_FOR_EMPTY")
                 elif inst.op == six.u("UNIT_TESTS"):
-                    assert fdb.is_api_version_selected()
-                    api_version = fdb.get_api_version()
-                    try:
-                        fdb.api_version(api_version + 1)
-                        raise RuntimeError('Was not stopped from selecting two API versions')
-                    except RuntimeError as e:
-                        assert str(e) == 'FDB API already loaded at version {}'.format(api_version)
-                    try:
-                        fdb.api_version(api_version - 1)
-                        raise RuntimeError('Was not stopped from selecting two API versions')
-                    except RuntimeError as e:
-                        assert str(e) == 'FDB API already loaded at version {}'.format(api_version)
-                    fdb.api_version(api_version)
                     try:
                         db.options.set_location_cache_size(100001)
 

@@ -321,7 +321,7 @@ public class StackTester {
 				//System.out.println(inst.context.preStr + " - " + " -> result '" + ByteArrayUtil.printable(coded) + "'");
 				inst.push(coded);
 			}
-			else if(op == StackOperation.TUPLE_PACK_VERSIONSTAMPED_KEY || op == StackOperation.TUPLE_PACK_VERSIONSTAMPED_VALUE) {
+			else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
 				List<Object> params = inst.popParams(2).join();
 				byte[] prefix = (byte[])params.get(0);
 				int tupleSize = StackUtils.getInt(params.get(1));
@@ -331,12 +331,7 @@ public class StackTester {
 					inst.push("ERROR: NONE".getBytes());
 				} else {
 					try {
-						byte[] coded;
-						if(op == StackOperation.TUPLE_PACK_VERSIONSTAMPED_KEY) {
-							coded = tuple.packVersionstampedKey(prefix);
-						} else {
-							coded = tuple.packVersionstampedValue(prefix);
-						}
+						byte[] coded = tuple.packWithVersionstamp(prefix);
 						inst.push("OK".getBytes());
 						inst.push(coded);
 					} catch (IllegalArgumentException e) {

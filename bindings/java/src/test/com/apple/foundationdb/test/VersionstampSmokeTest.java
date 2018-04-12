@@ -42,7 +42,7 @@ public class VersionstampSmokeTest {
 			CompletableFuture<byte[]> trVersionFuture = db.run((Transaction tr) -> {
 				// The incomplete Versionstamp will have tr's version information when committed.
 				Tuple t = Tuple.from("prefix", Versionstamp.incomplete());
-				tr.mutate(MutationType.SET_VERSIONSTAMPED_KEY, t.packVersionstampedKey(), new byte[0]);
+				tr.mutate(MutationType.SET_VERSIONSTAMPED_KEY, t.packWithVersionstamp(), new byte[0]);
 				return tr.getVersionstamp();
 			});
 

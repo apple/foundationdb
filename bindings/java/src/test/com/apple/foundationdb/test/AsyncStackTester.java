@@ -360,7 +360,7 @@ public class AsyncStackTester {
 				}, FDB.DEFAULT_EXECUTOR);
 			}, FDB.DEFAULT_EXECUTOR);
 		}
-		else if(op == StackOperation.TUPLE_PACK_VERSIONSTAMPED_KEY || op == StackOperation.TUPLE_PACK_VERSIONSTAMPED_VALUE) {
+		else if(op == StackOperation.TUPLE_PACK_WITH_VERSIONSTAMP) {
 			return inst.popParams(2).thenComposeAsync(params -> {
 				byte[] prefix = (byte[])params.get(0);
 				int tupleSize = StackUtils.getInt(params.get(1));
@@ -372,12 +372,7 @@ public class AsyncStackTester {
 						return;
 					}
 					try {
-						byte[] coded;
-						if(op == StackOperation.TUPLE_PACK_VERSIONSTAMPED_KEY) {
-							coded = tuple.packVersionstampedKey(prefix);
-						} else {
-							coded = tuple.packVersionstampedValue(prefix);
-						}
+						byte[] coded = tuple.packWithVersionstamp(prefix);
 						inst.push("OK".getBytes());
 						inst.push(coded);
 					} catch(IllegalArgumentException e) {
