@@ -785,7 +785,6 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetCausalReadRisky()
 			tr.Options().SetCausalWriteRisky()
 			tr.Options().SetReadYourWritesDisable()
-			tr.Options().SetReadAheadDisable()
 			tr.Options().SetReadSystemKeys()
 			tr.Options().SetAccessSystemKeys()
 			tr.Options().SetDurabilityDevNullIsWebScale()
