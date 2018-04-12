@@ -76,6 +76,7 @@ struct LogRouterData {
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	NotifiedVersion version;
 	NotifiedVersion minPopped;
+	Version startVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Tag routerTag;
 	int logSet;
@@ -97,7 +98,7 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, Tag routerTag, int logSet, Version startVersion) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(startVersion), minPopped(startVersion) {}
+	LogRouterData(UID dbgid, Tag routerTag, int logSet, Version startVersion) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(startVersion), minPopped(startVersion), startVersion(startVersion) {}
 };
 
 void commitMessages( LogRouterData* self, Version version, const std::vector<TagsAndMessage>& taggedMessages ) {
@@ -275,7 +276,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 
 	Version poppedVer = poppedVersion(self, req.tag);
 
-	if(poppedVer > req.begin) {
+	if(poppedVer > req.begin || req.begin < self->startVersion) {
 		//This should only happen if a packet is sent multiple times and the reply is not needed. 
 		// Since we are using popped differently, do not send a reply.
 		TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid);
