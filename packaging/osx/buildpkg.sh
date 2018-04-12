@@ -54,6 +54,6 @@ pkgbuild --root $SERVERDIR --identifier FoundationDB-server --version $VERSION.$
 
 rm -rf $SERVERDIR
 
-productbuild --distribution packaging/osx/Distribution.xml --package-path . $PKGFILE
+productbuild --distribution packaging/osx/Distribution.xml --resources packaging/osx/resources --package-path . $PKGFILE
 
 rm FoundationDB-clients.pkg FoundationDB-server.pkg
