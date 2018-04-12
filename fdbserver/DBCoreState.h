@@ -131,6 +131,13 @@ struct DBCoreState {
 					ar & locality;
 					tLogs[0].tLogLocalities.push_back(locality);
 				}
+
+				if(oldTLogData.size()) {
+					tLogs[0].startVersion = oldTLogData[0].epochEnd + 1;
+					for(int i = 0; i < oldTLogData.size() - 1; i++) {
+						oldTLogData[i].tLogs[0].startVersion = oldTLogData[i+1].epochEnd + 1;
+					}
+				}
 			}
 		}
 	}
