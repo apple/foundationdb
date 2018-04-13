@@ -20,7 +20,7 @@ Contributing to FoundationDB can be in contributions to the code base, sharing y
 
 ### Binary downloads
 
-Developers interested in using the FoundationDB store for an application can get started easily by downloading and installing a binary package. Please see the [downloads page](https://www.foundationdb.org/download.html) for a list of available packages.
+Developers interested in using the FoundationDB store for an application can get started easily by downloading and installing a binary package. Please see the [downloads page](https://www.foundationdb.org/download/) for a list of available packages.
 
 
 ### Compiling for source
