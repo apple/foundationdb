@@ -17,8 +17,8 @@ FoundationDB is a distributed database designed to handle large volumes of struc
 
 ## Linux
 
-1. Install [Docker] (https://www.docker.com/) software
-1. Build Linux docker image using the file `Dockerfile` located in the `build` source directory
+1. Install [Docker] (https://www.docker.com/).
+1. Build Linux docker image using the file `Dockerfile` located in the `build` source directory.
 1. Within the built Linux image, check out the foundationdb repo.
 1. Run `make` within the source directory.
 
