@@ -174,13 +174,13 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	@ar rcs $@ .libstdc++/*.o
 	@rm -r .libstdc++
 
-docpreview: javadoc godoc
+docpreview: javadoc
 	TARGETS= $(MAKE) -C documentation docpreview
 
 docpreview_clean:
 	CLEAN_TARGETS= $(MAKE) -C documentation docpreview_clean
 
-packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc godoc
+packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc
 	TARGETS= $(MAKE) -C documentation docpackage
 	@mkdir -p packages
 	@rm -f packages/foundationdb-docs-$(VERSION).tar.gz

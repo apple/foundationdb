@@ -25,7 +25,7 @@ GOPATH := $(CURDIR)/bindings/go/build
 GO_IMPORT_PATH := github.com/apple/foundationdb/bindings/go/src
 GO_DEST := $(GOPATH)/src/$(GO_IMPORT_PATH)
 
-.PHONY: fdb_go fdb_go_path fdb_go_fmt fdb_go_fmt_check fdb_go_tester fdb_go_tester_clean godoc godoc_clean
+.PHONY: fdb_go fdb_go_path fdb_go_fmt fdb_go_fmt_check fdb_go_tester fdb_go_tester_clean
 
 # We only override if the environment didn't set it (this is used by
 # the fdbwebsite documentation build process)
@@ -47,7 +47,8 @@ GO_PACKAGE_OUTDIR := $(GOPATH)/pkg/$(GOPLATFORM)/$(GO_IMPORT_PATH)
 GO_PACKAGES := fdb fdb/tuple fdb/subspace fdb/directory
 GO_PACKAGE_OBJECTS := $(addprefix $(GO_PACKAGE_OUTDIR)/,$(GO_PACKAGES:=.a))
 
-GO_SRC := $(shell find $(CURDIR)/bindings/go/src -name '*.go')
+GO_GEN := $(CURDIR)/bindings/go/src/fdb/generated.go
+GO_SRC := $(shell find $(CURDIR)/bindings/go/src -name '*.go') $(GO_GEN)
 
 fdb_go: $(GO_PACKAGE_OBJECTS) $(GO_SRC) fdb_go_fmt_check
 
@@ -77,53 +78,26 @@ fdb_go_tester_clean:
 	@echo "Cleaning       fdb_go_tester"
 	@rm -rf $(GOPATH)/bin
 
-$(GOPATH)/bin/_stacktester: $(GO_DEST)/.stamp $(GO_SRC) $(GO_PACKAGE_OBJECTS) $(GO_DEST)/fdb/generated.go
+$(GOPATH)/bin/_stacktester: $(GO_DEST)/.stamp $(GO_SRC) $(GO_PACKAGE_OBJECTS)
 	@echo "Compiling      $(basename $(notdir $@))"
 	@go install $(GO_IMPORT_PATH)/_stacktester
 
-$(GO_PACKAGE_OUTDIR)/fdb/tuple.a: $(GO_DEST)/.stamp $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_DEST)/fdb/generated.go
+$(GO_PACKAGE_OUTDIR)/fdb/tuple.a: $(GO_DEST)/.stamp $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a
 	@echo "Compiling      fdb/tuple"
 	@go install $(GO_IMPORT_PATH)/fdb/tuple
 
-$(GO_PACKAGE_OUTDIR)/fdb/subspace.a: $(GO_DEST)/.stamp $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_PACKAGE_OUTDIR)/fdb/tuple.a $(GO_DEST)/fdb/generated.go
+$(GO_PACKAGE_OUTDIR)/fdb/subspace.a: $(GO_DEST)/.stamp $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_PACKAGE_OUTDIR)/fdb/tuple.a
 	@echo "Compiling      fdb/subspace"
 	@go install $(GO_IMPORT_PATH)/fdb/subspace
 
-$(GO_PACKAGE_OUTDIR)/fdb/directory.a: $(GO_DEST)/.stamp $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_PACKAGE_OUTDIR)/fdb/tuple.a $(GO_PACKAGE_OUTDIR)/fdb/subspace.a $(GO_DEST)/fdb/generated.go
+$(GO_PACKAGE_OUTDIR)/fdb/directory.a: $(GO_DEST)/.stamp $(GO_SRC) $(GO_PACKAGE_OUTDIR)/fdb.a $(GO_PACKAGE_OUTDIR)/fdb/tuple.a $(GO_PACKAGE_OUTDIR)/fdb/subspace.a
 	@echo "Compiling      fdb/directory"
 	@go install $(GO_IMPORT_PATH)/fdb/directory
 
-$(GO_PACKAGE_OUTDIR)/fdb.a: $(GO_DEST)/.stamp lib/libfdb_c.$(DLEXT) $(GO_SRC) $(GO_DEST)/fdb/generated.go
+$(GO_PACKAGE_OUTDIR)/fdb.a: $(GO_DEST)/.stamp lib/libfdb_c.$(DLEXT) $(GO_SRC)
 	@echo "Compiling      fdb"
 	@go install $(GO_IMPORT_PATH)/fdb
 
-$(GO_DEST)/fdb/generated.go: $(GO_DEST)/.stamp bindings/go/src/_util/translate_fdb_options.go fdbclient/vexillographer/fdb.options
+$(GO_GEN): bindings/go/src/_util/translate_fdb_options.go fdbclient/vexillographer/fdb.options
 	@echo "Building       $@"
 	@go run bindings/go/src/_util/translate_fdb_options.go < fdbclient/vexillographer/fdb.options > $@
-
-godoc: fdb_go_path $(GO_SRC) $(GO_DEST)/fdb/generated.go
-	@echo "Generating Go Documentation"
-	@rm -rf $(GODOC_DIR)/godoc
-	@mkdir -p $(GODOC_DIR)/godoc
-	@mkdir -p $(GODOC_DIR)/godoc/lib/godoc
-	@godoc -url "pkg/$(GO_IMPORT_PATH)/fdb" > $(GODOC_DIR)/godoc/fdb.html
-	@godoc -url "pkg/$(GO_IMPORT_PATH)/fdb/tuple" > $(GODOC_DIR)/godoc/fdb.tuple.html
-	@godoc -url "pkg/$(GO_IMPORT_PATH)/fdb/subspace" > $(GODOC_DIR)/godoc/fdb.subspace.html
-	@godoc -url "pkg/$(GO_IMPORT_PATH)/fdb/directory" > $(GODOC_DIR)/godoc/fdb.directory.html
-	@cp $(CURDIR)/bindings/go/godoc-resources/* $(GODOC_DIR)/godoc/lib/godoc
-	@echo "Mangling paths in Go Documentation"
-	@(find $(GODOC_DIR)/godoc/ -name *.html -exec sed -i '' -e 's_/lib_lib_' {} \;)
-	@(sed -i -e 's_a href="tuple/"_a href="fdb.tuple.html"_' $(GODOC_DIR)/godoc/fdb.html)
-	@(sed -i -e 's_a href="subspace/"_a href="fdb.subspace.html"_' $(GODOC_DIR)/godoc/fdb.html)
-	@(sed -i -e 's_a href="directory/"_a href="fdb.directory.html"_' $(GODOC_DIR)/godoc/fdb.html)
-	
-	@(sed -i -e 's_a href="/pkg/builtin_a href="https://godoc.org/pkg/builtin_g;s_a href="/src/github.com/apple/foundationdb_a href="https://github.com/apple/foundationdb/tree/master_g;s_a href="/pkg/github.com/apple/foundationdb/bindings/go/src/fdb/_a href="./fdb.html_g' $(GODOC_DIR)/godoc/fdb.html)
-	@(sed -i -e 's_a href="/pkg/builtin_a href="https://godoc.org/pkg/builtin_g;s_a href="/src/github.com/apple/foundationdb_a href="https://github.com/apple/foundationdb/tree/master_g;s_a href="/pkg/github.com/apple/foundationdb/bindings/go/src/fdb/_a href="./fdb.html_g' $(GODOC_DIR)/godoc/fdb.directory.html)
-	@(sed -i -e 's_a href="/pkg/builtin_a href="https://godoc.org/pkg/builtin_g;s_a href="/src/github.com/apple/foundationdb_a href="https://github.com/apple/foundationdb/tree/master_g;s_a href="/pkg/github.com/apple/foundationdb/bindings/go/src/fdb/_a href="./fdb.html_g' $(GODOC_DIR)/godoc/fdb.subspace.html)
-	@(sed -i -e 's_a href="/pkg/builtin_a href="https://godoc.org/pkg/builtin_g;s_a href="/src/github.com/apple/foundationdb_a href="https://github.com/apple/foundationdb/tree/master_g;s_a href="/pkg/github.com/apple/foundationdb/bindings/go/src/fdb/_a href="./fdb.html_g' $(GODOC_DIR)/godoc/fdb.tuple.html)
-
-
-godoc_clean:
-	@echo "Cleaning Go Documentation"
-	@rm -rf $(GODOC_DIR)/godoc
-
