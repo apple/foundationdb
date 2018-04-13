@@ -15,6 +15,13 @@ FoundationDB is a distributed database designed to handle large volumes of struc
 1. Navigate to the directory where you checked out the foundationdb repo.
 1. Run `make`.
 
+## Linux
+
+1. Install Docker software (https://www.docker.com/)
+1. Build Linux docker image from the source [Dockerfile] (build/Dockerfile)
+1. Within your built Linux image, check out the foundationdb repo.
+1. Run `make` within the source directory.
+
 This will build the fdbserver binary and the python bindings. If you
 want to build our other bindings, you will need to install a runtime for the
 language whose binding you want to build. Each binding has an `.mk` file
