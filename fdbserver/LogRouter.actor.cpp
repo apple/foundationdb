@@ -345,7 +345,16 @@ ACTOR Future<Void> logRouterCore(
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
 			if( db->get().logSystemConfig.tLogs.size() > logSet ) {
-				logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
+				bool found = false;
+				for(auto& it : db->get().logSystemConfig.tLogs[logSet].tLogs) {
+					if( !it.present() ) {
+						found = true;
+						break;
+					}
+				}
+				if(!found) {
+					logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
+				}
 			}
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {
