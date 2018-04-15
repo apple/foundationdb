@@ -542,7 +542,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 				}
 				if(bestOldSet == -1) {
-					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+					continue;
 				}
 
 				Version thisBegin = std::max(oldLogData[i].tLogs[bestOldSet]->startVersion, begin);
@@ -1112,7 +1112,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::set<int8_t> lockedLocalities;
 		bool foundSpecial = false;
 		for( int i=0; i < logServers.size(); i++ ) {
-			if(logServers[i]->locality < 0) {
+			if(logServers[i]->locality == tagLocalitySpecial || logServers[i]->locality == tagLocalityUpgraded) {
 				foundSpecial = true;
 			}
 			lockedLocalities.insert(logServers[i]->locality);
@@ -1127,7 +1127,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				break;
 			}
 			for( auto& log : old.tLogs ) {
-				if(log->locality < 0) {
+				if(log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded) {
 					foundSpecial = true;
 					break;
 				}
@@ -1348,8 +1348,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state vector<vector<Future<TLogInterface>>> logRouterInitializationReplies;
 		state vector<Future<TLogInterface>> allReplies;
 		int nextRouter = 0;
+		Version lastStart = std::numeric_limits<Version>::max();
 
 		if(!onlyOld) {
+			lastStart = std::max(startVersion, self->tLogs[0]->startVersion);
 			if( self->logRouterTags == 0 ) {
 				return Void();
 			}
@@ -1366,7 +1368,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(!found) {
 				Reference<LogSet> newLogSet( new LogSet() );
 				newLogSet->locality = locality;
-				newLogSet->startVersion = self->tLogs[0]->startVersion;
+				newLogSet->startVersion = lastStart;
 				newLogSet->isLocal = false;
 				self->tLogs.push_back(newLogSet);
 			}
@@ -1380,7 +1382,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						req.recoveryCount = recoveryCount;
 						req.routerTag = Tag(tagLocalityLogRouter, i);
 						req.logSet = logSet;
-						req.startVersion = self->tLogs[0]->startVersion;
+						req.startVersion = lastStart;
 						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
 						logRouterInitializationReplies.back().push_back( reply );
 						allReplies.push_back( reply );
@@ -1391,10 +1393,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		for(auto& old : self->oldLogData) {
-			if(old.logRouterTags == 0) {
+			if(old.logRouterTags == 0 || old.tLogs[0]->startVersion >= lastStart) {
 				break;
 			}
-
+			lastStart = std::max(startVersion, old.tLogs[0]->startVersion);
 			bool found = false;
 			for(auto& tLogs : old.tLogs) {
 				if(tLogs->locality == locality) {
@@ -1406,7 +1408,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			if(!found) {
 				Reference<LogSet> newLogSet( new LogSet() );
 				newLogSet->locality = locality;
-				newLogSet->startVersion = old.tLogs[0]->startVersion;
+				newLogSet->startVersion = lastStart;
 				old.tLogs.push_back(newLogSet);
 			}
 
@@ -1419,7 +1421,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						req.recoveryCount = recoveryCount;
 						req.routerTag = Tag(tagLocalityLogRouter, i);
 						req.logSet = logSet;
-						req.startVersion = old.tLogs[0]->startVersion;
+						req.startVersion = lastStart;
 						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
 						logRouterInitializationReplies.back().push_back( reply );
 						allReplies.push_back( reply );
@@ -1432,7 +1434,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		Void _ = wait( waitForAll(allReplies) );
 
 		int nextReplies = 0;
+		Version lastStart = std::numeric_limits<Version>::max();
 		if(!onlyOld) {
+			lastStart = std::max(startVersion, self->tLogs[0]->startVersion);
 			for(auto& tLogs : self->tLogs) {
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
@@ -1444,9 +1448,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		for(auto& old : self->oldLogData) {
-			if(old.logRouterTags == 0) {
+			if(old.logRouterTags == 0 || old.tLogs[0]->startVersion >= lastStart) {
 				break;
 			}
+			lastStart = std::max(startVersion, old.tLogs[0]->startVersion);
 			for(auto& tLogs : old.tLogs) {
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
