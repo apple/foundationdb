@@ -1537,10 +1537,6 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInt
 		return Void();
 	}
 
-	TraceEvent("newLogData", self->dbgid).detail("logId", logData->logId);
-	logData->initialized = true;
-	self->newLogData.trigger();
-
 	state PromiseStream<Void> warningCollectorInput;
 	state Future<Void> warningCollector = timeoutWarningCollector( warningCollectorInput.getFuture(), 1.0, "TLogQueueCommitSlow", self->dbgid );
 	state Future<Void> error = actorCollection( logData->addActor.getFuture() );
@@ -1885,6 +1881,9 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 			updater = updateLogSystem(self, logData, req.recoverFrom, logData->logSystem);
 
+			logData->initialized = true;
+			self->newLogData.trigger();
+
 			if(req.isPrimary && logData->unrecoveredBefore < req.knownCommittedVersion && !logData->stopped) {
 				logData->logRouterPopToVersion = req.knownCommittedVersion;
 				std::vector<Tag> tags;
@@ -1941,6 +1940,9 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			if(logData->recoveryComplete.isSet()) {
 				throw worker_removed();
 			}
+
+			logData->initialized = true;
+			self->newLogData.trigger();
 
 			logData->recoveryComplete.send(Void());
 		}
