@@ -1488,7 +1488,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		while(lockNum < oldLogSystem->lockResults.size()) {
 			if(oldLogSystem->lockResults[lockNum].logSet->locality == remoteLocality) {
 				std::pair<Version,Version> versions = wait(TagPartitionedLogSystem::getDurableVersion(self->dbgid, oldLogSystem->lockResults[lockNum]));
-				logSet->startVersion = versions.first + 1;
+				logSet->startVersion = std::min(versions.first + 1, logSet->startVersion);
 				break;
 			}
 			lockNum++;
