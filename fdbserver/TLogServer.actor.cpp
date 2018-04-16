@@ -405,7 +405,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Version logRouterPoppedVersion, logRouterPopToVersion;
 	int8_t locality;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags) : tLogData(tLogData), knownCommittedVersion(0), logId(interf.id()),
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), logSystem(new AsyncVar<Reference<ILogSystem>>()),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), unpoppedRecoveredTags(0),

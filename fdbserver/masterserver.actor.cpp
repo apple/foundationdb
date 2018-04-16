@@ -291,7 +291,7 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 	if(self->configuration.remoteTLogReplicationFactor > 0) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if( !self->dcId_locality.count(recr.dcId) ) {
-			TraceEvent(SevWarnAlways, "UnknownPrimaryDCID", self->dbgid).detail("found", self->dcId_locality.count(recr.dcId)).detail("primaryId", printable(recr.dcId));
+			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("primaryId", printable(recr.dcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
 			tr.set(tr.arena(), tagLocalityListKeyFor(recr.dcId), tagLocalityListValue(loc));
@@ -300,7 +300,7 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 		}
 
 		if( !self->dcId_locality.count(remoteDcId) ) {
-			TraceEvent(SevWarnAlways, "UnknownRemoteDCID", self->dbgid).detail("remoteFound", self->dcId_locality.count(remoteDcId)).detail("remoteId", printable(remoteDcId));
+			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("remoteId", printable(remoteDcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
 			tr.set(tr.arena(), tagLocalityListKeyFor(remoteDcId), tagLocalityListValue(loc));
