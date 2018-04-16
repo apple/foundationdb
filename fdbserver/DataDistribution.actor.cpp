@@ -2038,9 +2038,6 @@ static std::set<int> const& normalDDQueueErrors() {
 	if (s.empty()) {
 		s.insert( error_code_movekeys_conflict );
 		s.insert( error_code_broken_promise );
-		s.insert( error_code_master_recovery_failed );
-		s.insert( error_code_coordinated_state_conflict );
-		s.insert( error_code_worker_removed );
 	}
 	return s;
 }
