@@ -98,7 +98,7 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, Tag routerTag, int logSet, Version startVersion) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(startVersion), minPopped(startVersion-1), startVersion(startVersion) {}
+	LogRouterData(UID dbgid, Tag routerTag, int logSet, Version startVersion) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(startVersion-1), minPopped(startVersion-1), startVersion(startVersion) {}
 };
 
 void commitMessages( LogRouterData* self, Version version, const std::vector<TagsAndMessage>& taggedMessages ) {
@@ -154,7 +154,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Version tagAt = self->version.get();
+	state Version tagAt = self->version.get() + 1;
 	state Version tagPopped = 0;
 	state Version lastVer = 0;
 	state std::vector<int> tags;
