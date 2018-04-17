@@ -1547,6 +1547,12 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInt
 	logData->addActor.send( traceCounters("TLogMetrics", logData->logId, SERVER_KNOBS->STORAGE_LOGGING_DELAY, &logData->cc, logData->logId.toString() + "/TLogMetrics"));
 	logData->addActor.send( serveTLogInterface(self, tli, logData, warningCollectorInput) );
 
+	if(!logData->isPrimary) {
+		std::vector<Tag> tags;
+		tags.push_back(logData->remoteTag);
+		logData->addActor.send( pullAsyncData(self, logData, tags, logData->unrecoveredBefore, Optional<Version>(), true) );
+	}
+
 	try {
 		Void _ = wait( error );
 		throw internal_error();
@@ -1954,14 +1960,6 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		removeLog(self, logData);
 		return Void();
 	}
-
-	if(!logData->isPrimary) {
-		std::vector<Tag> tags;
-		tags.push_back(logData->remoteTag);
-		logData->addActor.send( pullAsyncData(self, logData, tags, logData->unrecoveredBefore, Optional<Version>(), true) );
-	}
-
-	Void _ = wait(logData->version.whenAtLeast(req.recoverAt) || logData->removed);
 
 	req.reply.send( recruited );
 
