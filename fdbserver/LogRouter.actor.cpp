@@ -154,7 +154,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
-	state Version tagAt = self->version.get()+1;
+	state Version tagAt = self->version.get();
 	state Version tagPopped = 0;
 	state Version lastVer = 0;
 	state std::vector<int> tags;
