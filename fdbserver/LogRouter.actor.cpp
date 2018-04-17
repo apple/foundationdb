@@ -80,6 +80,7 @@ struct LogRouterData {
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Tag routerTag;
 	int logSet;
+	bool allowPops;
 
 	std::vector<Reference<TagData>> tag_data; //we only store data for the remote tag locality
 
@@ -98,7 +99,7 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, Tag routerTag, int logSet, Version startVersion) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(startVersion-1), minPopped(startVersion-1), startVersion(startVersion) {}
+	LogRouterData(UID dbgid, Tag routerTag, int logSet, Version startVersion) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(startVersion-1), minPopped(startVersion-1), startVersion(startVersion), allowPops(false) {}
 };
 
 void commitMessages( LogRouterData* self, Version version, const std::vector<TagsAndMessage>& taggedMessages ) {
@@ -319,7 +320,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 		Void _ = wait(yield(TaskUpdateStorage));
 	}
 
-	if(self->logSystem->get()) {
+	if(self->logSystem->get() && self->allowPops) {
 		self->logSystem->get()->pop(minPopped - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, self->routerTag);
 	}
 	req.reply.send(Void());
@@ -344,6 +345,7 @@ ACTOR Future<Void> logRouterCore(
 	loop choose {
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
+			logRouterData.allowPops = db->get().recoveryState == 7;
 			if( db->get().logSystemConfig.tLogs.size() > logSet ) {
 				bool found = false;
 				for(auto& it : db->get().logSystemConfig.tLogs[logSet].tLogs) {
