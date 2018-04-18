@@ -107,7 +107,7 @@ When loading a TLS plugin from a non-default location when using a client bindin
 The default LibreSSL-based plugin
 =================================
 
-FoundationDB server and client libraries ship with a default TLS plugin based on the LibreSSL library. By default, it will be loaded automatically when participating in a TLS-enabled cluster.
+FoundationDB offers a TLS plugin based on the LibreSSL library. By default, it will be loaded automatically when participating in a TLS-enabled cluster.
 
 For the plugin to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and potentially the certificates with which is was signed. When a process begins to communicate with a FoundationDB server process, the peer's certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.
 
