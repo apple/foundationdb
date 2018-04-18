@@ -25,7 +25,7 @@ Contributing to FoundationDB can be in contributions to the code base, sharing y
 Developers interested in using the FoundationDB store for an application can get started easily by downloading and installing a binary package. Please see the [downloads page](https://www.foundationdb.org/download/) for a list of available packages.
 
 
-### Compiling for source
+### Compiling from source
 
 Developers on a OS for which there is no binary package, or who would like to start hacking on the code can get started by compiling from source.
 
@@ -42,10 +42,10 @@ Developers on a OS for which there is no binary package, or who would like to st
 
 #### Linux
 
-1. Install [Docker] (https://www.docker.com/).
+1. Install [Docker](https://www.docker.com/).
 1. Build Linux docker image using the file `Dockerfile` located in the `build` source directory.
 1. Check out the foundationdb repo.
-1. Run the docker image interactively [Docker Run] (https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts] (https://docs.docker.com/storage/volumes/).
+1. Run the docker image interactively [Docker Run](https://docs.docker.com/engine/reference/run/#general-form) with the directory containing the foundationdb repo mounted [Docker Mounts](https://docs.docker.com/storage/volumes/).
 `docker run -it -v '/local/dir/path/foundationdb:/docker/dir/path/foundationdb' /bin/bash`
 1. Navigate to the mounted directory containing the foundationdb repo.
 `cd /docker/dir/path/foundationdb`
