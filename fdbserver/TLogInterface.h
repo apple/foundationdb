@@ -167,15 +167,16 @@ struct TLogPeekRequest {
 struct TLogPopRequest {
 	Arena arena;
 	Version to;
+	Version knownCommittedVersion;
 	Tag tag;
 	ReplyPromise<Void> reply;
 
-	TLogPopRequest( Version to, Tag tag ) : to(to), tag(tag) {}
+	TLogPopRequest( Version to, Version knownCommittedVersion, Tag tag ) : to(to), knownCommittedVersion(knownCommittedVersion), tag(tag) {}
 	TLogPopRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & to & tag & reply;
+		ar & arena & to & knownCommittedVersion & tag & reply;
 	}
 };
 

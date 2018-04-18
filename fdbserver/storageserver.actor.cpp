@@ -2489,7 +2489,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) {
 			data->lastVersionWithData = ver;
-		} else {
+		} else if(cloneCursor2->version().version - data->version.get() < SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 			ver = cloneCursor2->version().version - 1;
 		}
 		if(injectedChanges) data->lastVersionWithData = ver;

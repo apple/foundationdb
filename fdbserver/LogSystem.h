@@ -440,7 +440,7 @@ struct ILogSystem {
 		// Same contract as peek(), but can only peek from the logs elected in the same generation. 
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
-	virtual void pop( Version upTo, Tag tag, int8_t popLocality = tagLocalityInvalid ) = 0;
+	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;
 		// Permits, but does not require, the log subsystem to strip `tag` from any or all messages with message versions < (upTo,0)
 		// The popping of any given message may be arbitrarily delayed.
 

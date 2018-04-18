@@ -1072,6 +1072,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 	state Version ver = logData->version.get();
 	state Version commitNumber = self->queueCommitBegin+1;
+	state Version knownCommittedVersion = logData->knownCommittedVersion;
 	self->queueCommitBegin = commitNumber;
 	logData->queueCommittingVersion = ver;
 
@@ -1096,7 +1097,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 	TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 	if(logData->logSystem->get() && (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
-		logData->logSystem->get()->pop(ver, logData->remoteTag, logData->locality);
+		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 
 	return Void();
@@ -1922,7 +1923,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 				for(int tag_id = 0; tag_id < logData->tag_data[tag_locality].size(); tag_id++) {
 					auto data = logData->tag_data[tag_locality][tag_id];
 					if(data && !allTags.count(data->tag) && data->tag.locality != tagLocalityLogRouter) {
-						tLogPop(self, TLogPopRequest(req.recoverAt, data->tag), logData);
+						tLogPop(self, TLogPopRequest(req.recoverAt, 0, data->tag), logData);
 					}
 				}
 			}

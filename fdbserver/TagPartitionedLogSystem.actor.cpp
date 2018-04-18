@@ -77,7 +77,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::set<Tag> epochEndTags;
 	Version knownCommittedVersion;
 	LocalityData locality;
-	std::map< std::pair<UID, Tag>, Version > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
+	std::map< std::pair<UID, Tag>, std::pair<Version, Version> > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
 	ActorCollection actors;
 	std::vector<OldLogData> oldLogData;
 	AsyncTrigger logRoutersChanged;
@@ -638,14 +638,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 	}
 
-	void popLogRouter( Version upTo, Tag tag, int8_t popLocality ) { //FIXME: do not need to pop all generations of old logs
+	void popLogRouter( Version upTo, Tag tag, Version knownCommittedVersion, int8_t popLocality ) { //FIXME: do not need to pop all generations of old logs
 		if (!upTo) return;
 		for(auto& t : tLogs) {
 			if(t->locality == popLocality) {
 				for(auto& log : t->logRouters) {
-					Version prev = outstandingPops[std::make_pair(log->get().id(),tag)];
+					Version prev = outstandingPops[std::make_pair(log->get().id(),tag)].first;
 					if (prev < upTo)
-						outstandingPops[std::make_pair(log->get().id(),tag)] = upTo;
+						outstandingPops[std::make_pair(log->get().id(),tag)] = std::make_pair(upTo, knownCommittedVersion);
 					if (prev == 0)
 						actors.add( popFromLog( this, log, tag, 0.0 ) ); //Fast pop time because log routers can only hold 5 seconds of data.
 				}
@@ -656,9 +656,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for(auto& t : old.tLogs) {
 				if(t->locality == popLocality) {
 					for(auto& log : t->logRouters) {
-						Version prev = outstandingPops[std::make_pair(log->get().id(),tag)];
+						Version prev = outstandingPops[std::make_pair(log->get().id(),tag)].first;
 						if (prev < upTo)
-							outstandingPops[std::make_pair(log->get().id(),tag)] = upTo;
+							outstandingPops[std::make_pair(log->get().id(),tag)] = std::make_pair(upTo, knownCommittedVersion);
 						if (prev == 0)
 							actors.add( popFromLog( this, log, tag, 0.0 ) );
 					}
@@ -667,18 +667,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual void pop( Version upTo, Tag tag, int8_t popLocality ) {
+	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion, int8_t popLocality ) {
 		if (upTo <= 0) return;
 		if( tag.locality == tagLocalityRemoteLog) {
-			popLogRouter(upTo, tag, popLocality);
+			popLogRouter(upTo, tag, knownCommittedVersion, popLocality);
 			return;
 		}
 		ASSERT(popLocality == tagLocalityInvalid);
 		for(auto& t : tLogs) {
 			for(auto& log : t->logServers) {
-				Version prev = outstandingPops[std::make_pair(log->get().id(),tag)];
+				Version prev = outstandingPops[std::make_pair(log->get().id(),tag)].first;
 				if (prev < upTo)
-					outstandingPops[std::make_pair(log->get().id(),tag)] = upTo;
+					outstandingPops[std::make_pair(log->get().id(),tag)] = std::make_pair(upTo, knownCommittedVersion);
 				if (prev == 0)
 					actors.add( popFromLog( this, log, tag, 1.0 ) ); //< FIXME: knob
 			}
@@ -690,9 +690,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		loop {
 			Void _ = wait( delay(time) );
 
-			state Version to = self->outstandingPops[ std::make_pair(log->get().id(),tag) ];
+			state std::pair<Version,Version> to = self->outstandingPops[ std::make_pair(log->get().id(),tag) ];
 
-			if (to <= last) {
+			if (to.first <= last) {
 				self->outstandingPops.erase( std::make_pair(log->get().id(),tag) );
 				return Void();
 			}
@@ -700,9 +700,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			try {
 				if( !log->get().present() )
 					return Void();
-				Void _ = wait(log->get().interf().popMessages.getReply( TLogPopRequest( to, tag ) ) );
+				Void _ = wait(log->get().interf().popMessages.getReply( TLogPopRequest( to.first, to.second, tag ) ) );
 
-				last = to;
+				last = to.first;
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
 				TraceEvent( (e.code() == error_code_broken_promise) ? SevInfo : SevError, "LogPopError", self->dbgid ).detail("Log", log->get().id()).error(e);
