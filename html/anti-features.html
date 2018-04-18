@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Anti-Features &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Transaction Processing" href="transaction-processing.html" />
+    <link rel="prev" title="Layer Concept" href="layer-concept.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Anti-Features</a><ul>
+<li><a class="reference internal" href="#what-is-an-anti-feature">What is an anti-feature?</a></li>
+<li><a class="reference internal" href="#data-models">Data models</a></li>
+<li><a class="reference internal" href="#query-languages">Query languages</a></li>
+<li><a class="reference internal" href="#analytic-frameworks">Analytic frameworks</a></li>
+<li><a class="reference internal" href="#disconnected-operation">Disconnected operation</a></li>
+<li><a class="reference internal" href="#long-running-read-write-transactions">Long-running read/write transactions</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="layer-concept.html" title="Previous Chapter: Layer Concept"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Layer Concept</span>
+    </a>
+  </li>
+  <li>
+    <a href="transaction-processing.html" title="Next Chapter: Transaction Processing"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Transaction P... &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Anti-Features</a><ul>
+<li><a class="reference internal" href="#what-is-an-anti-feature">What is an anti-feature?</a></li>
+<li><a class="reference internal" href="#data-models">Data models</a></li>
+<li><a class="reference internal" href="#query-languages">Query languages</a></li>
+<li><a class="reference internal" href="#analytic-frameworks">Analytic frameworks</a></li>
+<li><a class="reference internal" href="#disconnected-operation">Disconnected operation</a></li>
+<li><a class="reference internal" href="#long-running-read-write-transactions">Long-running read/write transactions</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="anti-features">
+<h1>Anti-Features</h1>
+<div class="section" id="what-is-an-anti-feature">
+<h2>What is an anti-feature?</h2>
+<p>FoundationDB&#8217;s design clearly distinguishes its set of <a class="reference internal" href="features.html"><span class="doc">core features</span></a> from those that are better supported elsewhere, often as <a class="reference internal" href="layer-concept.html"><span class="doc">layers</span></a>. FoundationDB has deliberately limited its database core API to the minimal set of features needed to expose a scalable, fault-tolerant database with ACID transactions and high performance. As a result, there is also a set of <em>anti-features:</em> features that FoundationDB does not intend to provide in its database core. (For a detailed list of technical limitations, whether relating to our design or just to the current version, see <a class="reference internal" href="known-limitations.html"><span class="doc">Known Limitations</span></a>).</p>
+</div>
+<div class="section" id="data-models">
+<h2>Data models</h2>
+<p>With the rise of NoSQL databases, a wide variety of data models have become popular. Geospatial models are used for geographical data, JSON and XML for hierarchical documents, and column-family models for sparse, tabular data. Of course, the traditional relational model is also still widely used. Each of these data models is useful and appropriate for different use cases. An application that is even moderately complex may have distinct data sets that best fit different models.</p>
+<p>FoundationDB&#8217;s core exposes a single data model: an ordered key-value store. When combined with multikey, ACID transactions, this model is powerful enough to be used directly by applications, as illustrated in our <a class="reference internal" href="tutorials.html"><span class="doc">tutorial examples</span></a>. However, our ordered key-value store can also serve as a foundation for other data models, including those above. Because of the simplicity of the key-value model, it is easy to map higher-level models onto it. (See <a class="reference internal" href="data-modeling.html"><span class="doc">Data Modeling</span></a> for examples of these mappings).</p>
+<p>Transactions are the essential capability that allows a developer to build a data model reliably and efficiently in a layer. If a higher-level model requires multiple key-value pairs per data item, a layer can update them all in a single transaction, ensuring their consistency.</p>
+</div>
+<div class="section" id="query-languages">
+<h2>Query languages</h2>
+<p>A variety of query languages have come into use alongside NoSQL databases. For example, new query languages specific to JSON databases have become popular. XQuery is used with XML. Languages with SQL-like syntax are often defined for column-family databases. Of course, SQL itself is still heavily used with relational databases.</p>
+<p>The FoundationDB core exposes a robust and powerful API but includes no separate query language. FoundationDB empowers developers to employ a broad range of data models and use the query languages best suited to their applications, implemented as layers.</p>
+</div>
+<div class="section" id="analytic-frameworks">
+<h2>Analytic frameworks</h2>
+<p>Analytic processing of large data sets has become prominent in conjunction with NoSQL databases. Some popular approaches offer generic frameworks for batch processing (e.g, MapReduce); some offer frameworks for real-time, stream processing; some focus on more specific analytics, whether using traditional aggregation functions or statistical techniques such as machine learning. The most effective approach to analytics depends on the details of the application&#8217;s data model.</p>
+<p>Analytic frameworks are outside the scope of the FoundationDB core. However, because the core can use range reads to efficiently scan large swaths of data, analytics can be implemented within a layer, possibly as part of a query language.</p>
+</div>
+<div class="section" id="disconnected-operation">
+<h2>Disconnected operation</h2>
+<p>The rise of mobile computing has led to the model of <em>disconnected operation</em> in which an application on a mobile device remains available even when it&#8217;s not connected to a central server. Examples of this sort of mobile application include note taking, to-do lists, and document editing.</p>
+<p>While a central server running FoundationDB could be used as a database for a mobile application to connect and sync to from time to time, FoundationDB&#8217;s core does not itself directly provide disconnected operation. Because it would sacrifice ACID properties, we believe that in those applications where disconnected operation is needed, the database is the wrong tier to implement it.</p>
+</div>
+<div class="section" id="long-running-read-write-transactions">
+<h2>Long-running read/write transactions</h2>
+<p>FoundationDB aims to provide low latencies across a range of metrics. Transaction latencies, in particular, are typically under 15 milliseconds. Some applications require very large operations that require several seconds or more, several orders of magnitude larger than our usual transaction latency. Large operations of this kind are best approached in FoundationDB by decomposition into a set of smaller transactions.</p>
+<p>FoundationDB does not support <em>long-running read/write transactions</em>, currently defined as those
+<a class="reference internal" href="known-limitations.html#long-transactions"><span class="std std-ref">lasting over five seconds</span></a>. The system employs multiversion concurrency control and maintains conflict information for a five second period. A transaction that is kept open longer will not be able to commit.</p>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/anti-features.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

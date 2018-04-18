@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Getting Started on macOS &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Getting Started on Linux" href="getting-started-linux.html" />
+    <link rel="prev" title="Release Notes" href="release-notes.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Getting Started on macOS</a><ul>
+<li><a class="reference internal" href="#first-steps">First steps</a></li>
+<li><a class="reference internal" href="#installing-or-upgrading-foundationdb">Installing or upgrading FoundationDB</a><ul>
+<li><a class="reference internal" href="#client-only-installation">Client-only installation</a></li>
+<li><a class="reference internal" href="#other-considerations">Other considerations</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#testing-your-foundationdb-installation">Testing your FoundationDB installation</a></li>
+<li><a class="reference internal" href="#managing-the-foundationdb-service">Managing the FoundationDB service</a></li>
+<li><a class="reference internal" href="#next-steps">Next steps</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="release-notes.html" title="Previous Chapter: Release Notes"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Release Notes</span>
+    </a>
+  </li>
+  <li>
+    <a href="getting-started-linux.html" title="Next Chapter: Getting Started on Linux"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Getting Start... &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Getting Started on macOS</a><ul>
+<li><a class="reference internal" href="#first-steps">First steps</a></li>
+<li><a class="reference internal" href="#installing-or-upgrading-foundationdb">Installing or upgrading FoundationDB</a><ul>
+<li><a class="reference internal" href="#client-only-installation">Client-only installation</a></li>
+<li><a class="reference internal" href="#other-considerations">Other considerations</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#testing-your-foundationdb-installation">Testing your FoundationDB installation</a></li>
+<li><a class="reference internal" href="#managing-the-foundationdb-service">Managing the FoundationDB service</a></li>
+<li><a class="reference internal" href="#next-steps">Next steps</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="getting-started-on-macos">
+<span id="getting-started-mac"></span><h1>Getting Started on macOS</h1>
+<p>This guide walks through installing a locally accessible FoundationDB server that is suitable for development on macOS.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">This version of FoundationDB server is intended only for locally available operation for development purposes. Externally available operation, performance testing, and production use are supported by the <a class="reference internal" href="getting-started-linux.html"><span class="doc">Linux</span></a> version.</p>
+</div>
+<div class="section" id="first-steps">
+<h2>First steps</h2>
+<ul class="simple">
+<li>Validate that your system has<ul>
+<li>x86-64 processor architecture</li>
+<li>4 GB RAM (per process)</li>
+<li>macOS 10.7 or newer</li>
+</ul>
+</li>
+<li>Download the FoundationDB packages for your system from <a class="reference internal" href="downloads.html"><span class="doc">Downloads</span></a>.</li>
+<li>Before upgrading from a previous version of FoundationDB, see <a class="reference internal" href="administration.html#upgrading-foundationdb"><span class="std std-ref">Upgrading</span></a>.</li>
+</ul>
+</div>
+<div class="section" id="installing-or-upgrading-foundationdb">
+<h2>Installing or upgrading FoundationDB</h2>
+<p>To begin installation, double-click on FoundationDB-5.1.5.pkg. Follow the instructions and select the components that you want to install.</p>
+<div class="section" id="client-only-installation">
+<h3>Client-only installation</h3>
+<p>By default, the FoundationDB installer installs the binaries required to run both clients and a local development server. If you don&#8217;t intend to run the FoundationDB server on your machine, you can deselect the &#8220;FoundationDB Server&#8221; option. Copy the <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a> from a server or client in the cluster you want to connect to and place it in <code class="docutils literal"><span class="pre">/usr/local/etc/foundationdb/</span></code>.</p>
+</div>
+<div class="section" id="other-considerations">
+<h3>Other considerations</h3>
+<p>FoundationDB installs in a single-server mode appropriate for a development workstation. In this mode data is not replicated, and therefore the database is <strong>not failure tolerant</strong>. This default database is also configured to use the memory storage engine which, while using the disk for durability, <strong>requires data to fit in RAM</strong>.</p>
+<p>By default FoundationDB uses the loopback IP (<code class="docutils literal"><span class="pre">127.0.0.1</span></code>). In this configuration all parts of FoundationDB, <strong>including client applications</strong>, must run on the same machine and communicate via <code class="docutils literal"><span class="pre">127.0.0.1</span></code>, not via external IPs.</p>
+</div>
+</div>
+<div class="section" id="testing-your-foundationdb-installation">
+<h2>Testing your FoundationDB installation</h2>
+<p>To verify that the local FoundationDB database is operational, open the command line interface (<code class="docutils literal"><span class="pre">fdbcli</span></code>) and use the status command.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span>host:~ user$ fdbcli
+Using cluster file `/usr/local/etc/foundationdb/fdb.cluster&#39;.
+
+The database is available.
+
+Welcome to the fdbcli. For help, type `help&#39;.
+fdb&gt; status
+
+Configuration:
+  Redundancy mode        - single
+  Storage engine         - memory
+  Coordinators           - 1
+
+Cluster:
+  FoundationDB processes - 1
+  Machines               - 1
+  Memory availability    - 4.1 GB per process on machine with least available
+  Fault Tolerance        - 0 machines
+  Server time            - Thu Mar 15 14:41:34 2018
+
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 8 MB
+  Disk space used        - 103 MB
+
+Operating space:
+  Storage server         - 1.0 GB free on most full server
+  Transaction log        - 1.0 GB free on most full server
+
+Workload:
+  Read rate              - 2 Hz
+  Write rate             - 0 Hz
+  Transactions started   - 2 Hz
+  Transactions committed - 0 Hz
+  Conflict rate          - 0 Hz
+
+Backup and DR:
+  Running backups        - 0
+  Running DRs            - 0
+
+Client time: Thu Mar 15 14:41:34 2018
+</pre></div>
+</div>
+<p>If these steps were successful you have installed and validated FoundationDB. You can now start using the database!</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">If the database is not operational the <code class="docutils literal"><span class="pre">status</span></code> command will provide diagnostic information to help you resolve the issue.</p>
+</div>
+</div>
+<div class="section" id="managing-the-foundationdb-service">
+<h2>Managing the FoundationDB service</h2>
+<ul class="simple">
+<li>See <a class="reference internal" href="administration.html#administration-running-foundationdb"><span class="std std-ref">Starting and stopping</span></a>.</li>
+<li>See <a class="reference internal" href="administration.html#administration-removing"><span class="std std-ref">Uninstalling</span></a>.</li>
+</ul>
+</div>
+<div class="section" id="next-steps">
+<h2>Next steps</h2>
+<ul class="simple">
+<li>Install the APIs for <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a> if you intend to use those languages.  <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a> and <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> APIs were installed using the FoundationDB installer above.</li>
+<li>See <a class="reference internal" href="tutorials.html"><span class="doc">Tutorials</span></a> for samples of developing applications with FoundationDB.</li>
+<li>See <a class="reference internal" href="developer-guide.html"><span class="doc">Developer Guide</span></a> for information of interest to developers, including common design patterns and performance considerations.</li>
+<li>See <a class="reference internal" href="administration.html"><span class="doc">Administration</span></a> for detailed administration information.</li>
+<li>See <a class="reference internal" href="known-limitations.html"><span class="doc">Known Limitations</span></a> of the system.</li>
+</ul>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/getting-started-mac.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

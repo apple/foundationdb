@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Local Development &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Why FoundationDB" href="why-foundationdb.html" />
+    <link rel="prev" title="FoundationDB 5.1" href="index.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Local Development</a><ul>
+<li><a class="reference internal" href="#download-the-foundationdb-package">Download the FoundationDB package</a></li>
+<li><a class="reference internal" href="#install-the-foundationdb-binaries">Install the FoundationDB binaries</a></li>
+<li><a class="reference internal" href="#check-the-status-of-the-local-database">Check the status of the local database</a></li>
+<li><a class="reference internal" href="#basic-tutorial">Basic tutorial</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="index.html" title="Previous Chapter: FoundationDB 5.1"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; FoundationDB 5.1</span>
+    </a>
+  </li>
+  <li>
+    <a href="why-foundationdb.html" title="Next Chapter: Why FoundationDB"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Why FoundationDB &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Local Development</a><ul>
+<li><a class="reference internal" href="#download-the-foundationdb-package">Download the FoundationDB package</a></li>
+<li><a class="reference internal" href="#install-the-foundationdb-binaries">Install the FoundationDB binaries</a></li>
+<li><a class="reference internal" href="#check-the-status-of-the-local-database">Check the status of the local database</a></li>
+<li><a class="reference internal" href="#basic-tutorial">Basic tutorial</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="local-development">
+<h1>Local Development</h1>
+<div class="section" id="download-the-foundationdb-package">
+<h2>Download the FoundationDB package</h2>
+<p><a class="reference internal" href="downloads.html"><span class="doc">Download the FoundationDB package</span></a> for macOS (FoundationDB-<a href="#id1"><span class="problematic" id="id2">*</span></a>.pkg) onto your local development machine.</p>
+</div>
+<div class="section" id="install-the-foundationdb-binaries">
+<h2>Install the FoundationDB binaries</h2>
+<p>By default, the FoundationDB installer installs the binaries required to run both a client and a local development server. Begin installation by double-clicking on the downloaded FoundationDB package and following the displayed instructions.</p>
+<p>For more details on installing on macOS, see <a class="reference internal" href="getting-started-mac.html"><span class="doc">Getting Started on macOS</span></a>.</p>
+<p>If you later wish to remove FoundationDB from a machine, follow the instruction for <a class="reference internal" href="administration.html#administration-removing"><span class="std std-ref">uninstalling</span></a>.</p>
+</div>
+<div class="section" id="check-the-status-of-the-local-database">
+<h2>Check the status of the local database</h2>
+<p>You can verify the status of the local database with the following the command, which will show basic statistics:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">fdbcli</span> <span class="o">--</span><span class="n">exec</span> <span class="n">status</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="basic-tutorial">
+<h2>Basic tutorial</h2>
+<p>Here&#8217;s a <a class="reference internal" href="class-scheduling.html"><span class="doc">tutorial</span></a> that begins with &#8220;Hello world&#8221; code for connecting to the database and then walks through the basics of reading and writing data with transactions.</p>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/local-dev.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

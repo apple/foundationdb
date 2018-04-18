@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Priority Queues &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Queues" href="queues.html" />
+    <link rel="prev" title="Priority Queues" href="priority-queues.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Priority Queues</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a></li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="priority-queues.html" title="Previous Chapter: Priority Queues"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Priority Queues</span>
+    </a>
+  </li>
+  <li>
+    <a href="queues.html" title="Next Chapter: Queues"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Queues &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Priority Queues</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a></li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="priority-queues">
+<h1>Priority Queues</h1>
+<p><a class="reference internal" href="priority-queues.html"><span class="doc">Python</span></a> <strong>Java</strong></p>
+<div class="section" id="goal">
+<h2>Goal</h2>
+<p>Create a data structure for <a class="reference external" href="http://en.wikipedia.org/wiki/Priority_queue">priority queues</a> supporting operations for push, pop_min, peek_min, pop_max, and peek_max. You may find it helpful to review the <a class="reference internal" href="queues-java.html"><span class="doc">Queues</span></a> recipe before this one.</p>
+</div>
+<div class="section" id="challenge">
+<h2>Challenge</h2>
+<p>Allow efficient operations on a shared priority queue by multiple clients acting concurrently.</p>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation</h2>
+<p>We can model a priority queue using a key formed from a tuple of three elements: an item&#8217;s priority, an increasing integer encoding the order in which the item was pushed, and a random element to make the key unique. By making keys unique, we can minimize conflicts for concurrent pushes.</p>
+</div>
+<div class="section" id="ordering">
+<h2>Ordering</h2>
+<p>The ordering of keys will sort items first by priority, then by push order, then randomly (to break ties in concurrent pushes). The minimum and maximum priority items will always be at the beginning and end of the queue, respectively, allowing us to efficiently peek or pop them.</p>
+</div>
+<div class="section" id="pattern">
+<h2>Pattern</h2>
+<p>We create a subspace for the priority queue, which takes care of packing our tuples into byte strings.</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="n">pq</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="s">&quot;P&quot;</span><span class="o">));</span>
+</pre></div>
+</div>
+<p>Push operations will construct a key-value pair with the subspace pq of the form</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="c1">// (priority, count, random) = value</span>
+</pre></div>
+</div>
+<p>where priority is supplied by the client, count is an integer that increases by 1 for each item pushed with priority, and random is a randomly generated integer.</p>
+<p>Items of the same priority that are pushed concurrently may occasionally be assigned the same count, but their keys will still be distinct and ordered (in this case, randomly). The count is derived by reading and incrementing the highest count previously used for a given priority. By using a snapshot read, we guarantee that pushing is conflict-free.</p>
+<p>To implement this model, we need an efficient way of finding the first and last key in the queue. (The ordering of keys guarantees that these will always be the proper keys to pop or peek.) FoundationDB&#8217;s range reads have limit and reverse options that let us accomplish this. We can find the first and last key-value pairs in the range of the pq subspace with:</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">pq</span><span class="o">.</span><span class="na">subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">priority</span><span class="o">)).</span><span class="na">range</span><span class="o">(),</span><span class="mi">1</span><span class="o">)</span>      <span class="c1">//  first</span>
+<span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">pq</span><span class="o">.</span><span class="na">subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">priority</span><span class="o">)).</span><span class="na">range</span><span class="o">(),</span><span class="mi">1</span><span class="o">,</span><span class="kc">true</span><span class="o">)</span> <span class="c1">//  last</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="extensions">
+<h2>Extensions</h2>
+<p><em>High-Contention Pop Operations</em></p>
+<p>To minimize conflicts during pop operations, we can use a staging technique to service the requests. If a pop operation doesn&#8217;t initially succeed, it registers a pop request in a semi-ordered set of such requests. It then enters a retry loop in which it attempts to fulfill outstanding requests.</p>
+</div>
+<div class="section" id="code">
+<h2>Code</h2>
+<p>Here&#8217;s a basic implementation of the model:</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">java.util.Random</span><span class="o">;</span>
+
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">MicroPriority</span> <span class="o">{</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">FDB</span> <span class="n">fdb</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Database</span> <span class="n">db</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Subspace</span> <span class="n">pq</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Random</span> <span class="n">randno</span><span class="o">;</span>
+
+    <span class="kd">static</span><span class="o">{</span>
+        <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">510</span><span class="o">);</span>
+        <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
+        <span class="n">pq</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="s">&quot;P&quot;</span><span class="o">));</span>
+
+        <span class="n">randno</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Random</span><span class="o">();</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">push</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">Object</span> <span class="n">value</span><span class="o">,</span> <span class="kd">final</span> <span class="kt">int</span> <span class="n">priority</span><span class="o">){</span>
+        <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="kt">byte</span><span class="o">[]</span> <span class="n">rands</span> <span class="o">=</span> <span class="k">new</span> <span class="kt">byte</span><span class="o">[</span><span class="mi">20</span><span class="o">];</span>
+            <span class="n">randno</span><span class="o">.</span><span class="na">nextBytes</span><span class="o">(</span><span class="n">rands</span><span class="o">);</span>
+            <span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">pq</span><span class="o">.</span><span class="na">subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">priority</span><span class="o">,</span> <span class="n">nextCount</span><span class="o">(</span><span class="n">tr</span><span class="o">,</span><span class="n">priority</span><span class="o">),</span><span class="n">rands</span><span class="o">)).</span><span class="na">pack</span><span class="o">(),</span>
+                    <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">value</span><span class="o">).</span><span class="na">pack</span><span class="o">());</span>
+            <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kt">long</span> <span class="nf">nextCount</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="kt">int</span> <span class="n">priority</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">snapshot</span><span class="o">().</span><span class="na">getRange</span><span class="o">(</span><span class="n">pq</span><span class="o">.</span><span class="na">subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">priority</span><span class="o">)).</span><span class="na">range</span><span class="o">(),</span><span class="mi">1</span><span class="o">,</span><span class="kc">true</span><span class="o">)){</span>
+                <span class="k">return</span> <span class="mi">1l</span> <span class="o">+</span> <span class="o">(</span><span class="kt">long</span><span class="o">)</span><span class="n">pq</span><span class="o">.</span><span class="na">subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">priority</span><span class="o">)).</span><span class="na">unpack</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getKey</span><span class="o">()).</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span>
+            <span class="o">}</span>
+
+            <span class="k">return</span> <span class="mi">0</span><span class="n">l</span><span class="o">;</span> <span class="c1">// None previously with this priority.</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+
+    <span class="c1">// Pop--assumes min priority queue..</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">pop</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">pop</span><span class="o">(</span><span class="n">tcx</span><span class="o">,</span><span class="kc">false</span><span class="o">);</span>
+    <span class="o">}</span>
+
+    <span class="c1">// Pop--allows for either max or min priority queue.</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">pop</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="kt">boolean</span> <span class="n">max</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">pq</span><span class="o">.</span><span class="na">range</span><span class="o">(),</span> <span class="mi">1</span><span class="o">,</span> <span class="n">max</span><span class="o">)){</span>
+                <span class="n">tr</span><span class="o">.</span><span class="na">clear</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getKey</span><span class="o">());</span>
+                <span class="k">return</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">fromBytes</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getValue</span><span class="o">()).</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span>
+            <span class="o">}</span>
+
+            <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+
+    <span class="c1">// Peek--assumes min priority queue.</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">peek</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">peek</span><span class="o">(</span><span class="n">tcx</span><span class="o">,</span><span class="kc">false</span><span class="o">);</span>
+    <span class="o">}</span>
+
+    <span class="c1">// Peek--allows for either max or min priority queue.</span>
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">peek</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="kt">boolean</span> <span class="n">max</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="n">Range</span> <span class="n">r</span> <span class="o">=</span> <span class="n">pq</span><span class="o">.</span><span class="na">range</span><span class="o">();</span>
+            <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">r</span><span class="o">.</span><span class="na">begin</span><span class="o">,</span> <span class="n">r</span><span class="o">.</span><span class="na">end</span><span class="o">,</span> <span class="mi">1</span><span class="o">,</span> <span class="n">max</span><span class="o">)){</span>
+                <span class="k">return</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">fromBytes</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getValue</span><span class="o">()).</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span>
+            <span class="o">}</span>
+
+            <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/priority-queues-java.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

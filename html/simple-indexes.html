@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Simple Indexes &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Simple Indexes" href="simple-indexes-java.html" />
+    <link rel="prev" title="Segmented Range Reads" href="segmented-range-reads-java.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Simple Indexes</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenges">Challenges</a></li>
+<li><a class="reference internal" href="#strategy">Strategy</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a><ul>
+<li><a class="reference internal" href="#additional-indexes">Additional indexes</a></li>
+<li><a class="reference internal" href="#covering-indexes">Covering indexes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="segmented-range-reads-java.html" title="Previous Chapter: Segmented Range Reads"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Segmented Range Reads</span>
+    </a>
+  </li>
+  <li>
+    <a href="simple-indexes-java.html" title="Next Chapter: Simple Indexes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Simple Indexes &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Simple Indexes</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenges">Challenges</a></li>
+<li><a class="reference internal" href="#strategy">Strategy</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a><ul>
+<li><a class="reference internal" href="#additional-indexes">Additional indexes</a></li>
+<li><a class="reference internal" href="#covering-indexes">Covering indexes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="simple-indexes">
+<h1>Simple Indexes</h1>
+<p><strong>Python</strong> <a class="reference internal" href="simple-indexes-java.html"><span class="doc">Java</span></a></p>
+<div class="section" id="goal">
+<h2>Goal</h2>
+<p>Add (one or more) indexes to allow efficient retrieval of data in multiple ways.</p>
+</div>
+<div class="section" id="challenges">
+<h2>Challenges</h2>
+<p>There are two big challenges with building indexes in a key-value store: 1) Storing the index so that multiple data elements “matching” the index read are returned as efficiently as possible, and 2) Keeping the indexes in sync with the data with concurrent readers and writers.</p>
+</div>
+<div class="section" id="strategy">
+<h2>Strategy</h2>
+<p>By using the key ordering of FoundationDB, we can store indexes so that an index query can return multiple matches using a single efficient range read operation. By updating the data element and all of its associated indexes together within a single ACID transaction we can guarantee that the data and indexes stay in sync.</p>
+</div>
+<div class="section" id="pattern">
+<h2>Pattern</h2>
+<p>Let&#8217;s say the primary copy of the data is stored with key-value pairs where the key has a tuple-structure consisting of a subspace and an ID:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">(</span><span class="n">main_subspace</span><span class="p">,</span> <span class="n">ID</span><span class="p">)</span> <span class="o">=</span> <span class="n">value</span>
+</pre></div>
+</div>
+<p>This structure lets you lookup an “ID” easily and get its associated value. But, let’s say part of the value is a zipcode. You might be interested in all IDs that have a zipcode of 22182. You could answer that question, but it would require scanning every single ID. What we need to improve the efficiency is an “index on zipcode”.</p>
+<p>An index is essentially another representation of the data, designed to be looked up in a different way:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">(</span><span class="n">index_subspace</span><span class="p">,</span> <span class="n">zipcode</span><span class="p">,</span> <span class="n">ID</span><span class="p">)</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+</pre></div>
+</div>
+<p>To make the index, you store both the zipcode and the ID as parts of the key, but don’t store the whole value again. You also put the index in its own subspace to keep it separate from the primary data.</p>
+<p>Now, to answer the question of what IDs match zipcode 22182, you can now restrict the search to all tuples matching <code class="docutils literal"><span class="pre">(index_subspace,</span> <span class="pre">22182,</span> <span class="pre">*)</span></code>. Happily, because of the way that ordered tuples get packed into ordered keys, all of the tuples matching this pattern can be retrieved using a single range-read operation on the database. This makes index queries blazing fast&#8211;requiring one database operation instead of a scan of the entire dataset.</p>
+<p>You can use the pattern above in any ordered key-value store. But, as anyone who has tried it will tell you, the trick is dealing with maintaining these indexes during concurrent reads and writes. In most distributed databases, this is a nightmare of race conditions and extra logic to deal with the fact that, while the data and the indexes both get updated, they do not necessarily do so at the same time.</p>
+<p>By contrast, FoundationDB’s ACID transactions completely handle the difficult concurrency problem automatically. This is accomplished by simply updating the data and the indexes in the same transaction. A good approach is to implement a transactional setter function that does nothing but perform a logical write to both the data record and its indexes. This approach keeps your code clean and makes it easier to add further indexes in the future.</p>
+</div>
+<div class="section" id="extensions">
+<h2>Extensions</h2>
+<div class="section" id="additional-indexes">
+<h3>Additional indexes</h3>
+<p>Of course, you can maintain as many indexes as you need. You are trading off write performance (and a bit of capacity usage) to speed up read performance. In general, you usually add indexes to support all of the access patterns that you actually use. For example, if we need fast access by both the &#8220;X&#8221; and &#8220;Y&#8221; properties, we could maintain three data representations (the main data plus two indexes):</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">(</span><span class="n">main_subspace</span><span class="p">,</span> <span class="n">ID</span><span class="p">)</span> <span class="o">=</span> <span class="n">value</span>
+<span class="p">(</span><span class="n">index_x</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">ID</span><span class="p">)</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+<span class="p">(</span><span class="n">index_y</span><span class="p">,</span> <span class="n">Y</span><span class="p">,</span> <span class="n">ID</span><span class="p">)</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="covering-indexes">
+<h3>Covering indexes</h3>
+<p>In the above examples, the index gives you an entity ID or primary key with which the rest of the record can be retrieved. Sometimes might you want to retrieve the entire record from an index with a single read. In this case, you can store all data components in the key, possibly including the value.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="p">(</span><span class="n">main_subspace</span><span class="p">,</span> <span class="n">ID</span><span class="p">)</span> <span class="o">=</span> <span class="n">value</span>
+<span class="p">(</span><span class="n">index_subspace</span><span class="p">,</span> <span class="n">X</span><span class="p">,</span> <span class="n">ID</span><span class="p">)</span> <span class="o">=</span> <span class="n">value</span>
+</pre></div>
+</div>
+<p>The obvious tradeoff is that you are storing another entire copy of the value.</p>
+</div>
+</div>
+<div class="section" id="code">
+<h2>Code</h2>
+<p>In this example, we’re storing user data based on user_ID but sometimes need to retrieve users based on their zipcode. We use a transactional function to set user data and its index and another to retrieve data using the index.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">user</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;user&#39;</span><span class="p">,))</span>
+<span class="n">index</span> <span class="o">=</span> <span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;zipcode_index&#39;</span><span class="p">,))</span>
+
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">set_user</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">ID</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="n">zipcode</span><span class="p">):</span>
+        <span class="n">tr</span><span class="p">[</span><span class="n">user</span><span class="p">[</span><span class="n">ID</span><span class="p">][</span><span class="n">zipcode</span><span class="p">]]</span> <span class="o">=</span> <span class="n">name</span>
+        <span class="n">tr</span><span class="p">[</span><span class="n">index</span><span class="p">[</span><span class="n">zipcode</span><span class="p">][</span><span class="n">ID</span><span class="p">]]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+
+<span class="c1"># Normal lookup</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">get_user</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">ID</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">tr</span><span class="p">[</span><span class="n">user</span><span class="p">[</span><span class="n">ID</span><span class="p">]]</span>
+
+<span class="c1"># Index lookup</span>
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">get_user_IDs_in_region</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">region</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">index</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">index</span><span class="p">[</span><span class="n">region</span><span class="p">]</span><span class="o">.</span><span class="n">range</span><span class="p">()]]</span>
+</pre></div>
+</div>
+<p>That&#8217;s just about all you need to create an index.</p>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/simple-indexes.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

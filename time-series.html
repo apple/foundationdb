@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Time-Series Data &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Earlier Release Notes" href="earlier-release-notes.html" />
+    <link rel="prev" title="Managing Large Values and Blobs" href="largeval.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Time-Series Data</a><ul>
+<li><a class="reference internal" href="#what-is-time-series-data">What is Time-Series Data?</a></li>
+<li><a class="reference internal" href="#time-series-data-and-foundationdb">Time-series Data and FoundationDB</a></li>
+<li><a class="reference internal" href="#ordering-and-transactions">Ordering and Transactions</a></li>
+<li><a class="reference internal" href="#conclusion">Conclusion</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="largeval.html" title="Previous Chapter: Managing Large Values and Blobs"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Managing Larg...</span>
+    </a>
+  </li>
+  <li>
+    <a href="earlier-release-notes.html" title="Next Chapter: Earlier Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Earlier Release Notes &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Time-Series Data</a><ul>
+<li><a class="reference internal" href="#what-is-time-series-data">What is Time-Series Data?</a></li>
+<li><a class="reference internal" href="#time-series-data-and-foundationdb">Time-series Data and FoundationDB</a></li>
+<li><a class="reference internal" href="#ordering-and-transactions">Ordering and Transactions</a></li>
+<li><a class="reference internal" href="#conclusion">Conclusion</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="time-series-data">
+<h1>Time-Series Data</h1>
+<p>FoundationDB is a multi-model database that combines scalability, fault-tolerance, and high performance with multi-key ACID transactions. A common use case involves time-series data, which are easy to model in FoundationDB.</p>
+<div class="section" id="what-is-time-series-data">
+<h2>What is Time-Series Data?</h2>
+<p>Modern applications generate huge amounts of “event”-based data organized by the timestamp of when the event occurred. Sensor data, call or SMS data, network monitoring or analytics data, and financial applications all have time components, and data can be generated in huge volumes as automated “events” occur in connected networks and systems. Although &#8220;time-series” is often used to refer to huge, maybe read-only, data sets that are mined for insights using something like a Hadoop cluster, we are finding more and more people using “time-oriented” data as part of an operational workload supporting their real-time applications and systems.</p>
+<p>We have a number of customers, ranging from network analytics providers to VoIP/telephony systems, who are taking a time-oriented view of their data stored in FoundationDB. They’re using an event timestamp to help with dashboards, customer UIs, and other reporting functions provided by their applications in real time, sometimes processing hundreds of thousands of operations per second.</p>
+</div>
+<div class="section" id="time-series-data-and-foundationdb">
+<h2>Time-series Data and FoundationDB</h2>
+<p>If you only have a few fields to store per database record, it’s pretty simple to picture what a time-oriented record would look like. If you were tracking analytics for a website, you might have a few fields, such as a website identifer, a page identfier, and a browser type. That’s pretty simple to picture fitting into a defined, relational-database table that looks like this:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="33%" />
+<col width="25%" />
+<col width="18%" />
+<col width="25%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Timestamp</th>
+<th class="head">website_ID</th>
+<th class="head">page_ID</th>
+<th class="head">browser_ID</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>UTC_timestamp</td>
+<td>0</td>
+<td>24</td>
+<td>6</td>
+</tr>
+<tr class="row-odd"><td>UTC_timestamp</td>
+<td>4</td>
+<td>22</td>
+<td>4</td>
+</tr>
+</tbody>
+</table>
+<p>If you’re already thinking about the world in keys and values, you’ve probably figured out that those data fields translate easily to FoundationDB as well. But what you may not have already figured out is that keys that can be structured as <strong>Tuples</strong> that are exposed to applications through the Tuple API and have very useful properties. In FoundationDB, we could use a simple Tuple structure to store each event that you’re tracking as a data element that looks something like this:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">[</span><span class="n">time_data_in_milliseconds</span><span class="p">,</span> <span class="n">website_ID</span><span class="p">,</span> <span class="n">page_ID</span><span class="p">,</span> <span class="n">browser_ID</span><span class="o">]</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>So the key for a particular data element within the KV store is formed from a Tuple of sub-keys packed together by the Tuple layer into a single key using a pre-defined delimiter between each sub-key. This Tuple structure is really helpful because you can break up the time into key spaces that fit your reporting or querying patterns.</p>
+<p>FoundationDB’s KV store is also globally ordered, so the keys are arranged in increasing order over the entire database. Together, the ordering and tuple structure allow you to perform queries along defined time ranges (e.g. monthly) using an extremely simple range operation. If you take the previous tuple structure that used a time component in milliseconds and divide the keys into smaller parts, you get a tuple that looks like this:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">[</span><span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">hour</span><span class="p">,</span> <span class="n">minute</span><span class="p">,</span> <span class="n">seconds</span><span class="o">]</span><span class="p">,</span> <span class="n">value</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>You could also use a tuple for the value component of the key-value pair to serialize the data elements associated with the timestamp that are used for application-level reporting or logic after retrieval:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="p">(</span><span class="o">[</span><span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">hour</span><span class="p">,</span> <span class="n">minute</span><span class="p">,</span> <span class="n">seconds</span><span class="o">]</span><span class="p">,</span> <span class="o">[</span><span class="n">website_ID</span><span class="p">,</span> <span class="n">page_ID</span><span class="p">,</span> <span class="n">browser_ID</span><span class="o">]</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Then a query (written in Ruby) for all data elements in a particular month is just:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range_start_with</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,))</span>
+<span class="k">end</span>
+</pre></div>
+</div>
+<p>(This transaction returns an array of matching elements that you can iterate over in your application.)</p>
+<p>But it gets even more convenient because you can also create global, consistent indexes that help you track metrics about your event data as well! In the KV store, indexes are stored like regular data, and updating your index is handled atomically as part of a transaction. So in this example, maybe you want to create an index by website_ID so you can easily analyze data for a particular website over time. That index would look something like this:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="c1"># define a subspace in your application for the index</span>
+<span class="n">subspace_website_index</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;website-index&#39;</span><span class="o">]</span><span class="p">)</span>
+
+<span class="c1"># set up a transaction that stores information about a website in a website-oriented index</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">subspace_website_index</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">website_ID</span><span class="p">,</span> <span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">seconds</span><span class="o">]</span><span class="p">),</span> <span class="n">value</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>And let’s say you also want to create a couple of simple counters that track some common metrics for your websites: The first is a simple counter of the number of visits to your website each month:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="c1"># again, you define the subspace that you want to use for the counter</span>
+<span class="n">subspace_count</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;subspace-counters&#39;</span><span class="o">]</span><span class="p">)</span>
+
+<span class="c1"># then use the atomic add functionality to increment the monthly counter</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">subspace_count</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">website_ID</span><span class="p">,</span> <span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="o">]</span><span class="p">),</span> <span class="o">[</span><span class="mi">1</span><span class="o">].</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;q&lt;&#39;</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>Or maybe you want to track individual pages so you have a record of page access information over time. Again, that’s pretty simple:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="c1"># define the subspace that you want to use for the page counters</span>
+<span class="n">subspace_pages</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;pages-counter&#39;</span><span class="o">]</span><span class="p">)</span>
+
+<span class="c1"># then use atomic add again with a tuple sorted by time and counter</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">subpace_pages</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">page_ID</span><span class="p">,</span> <span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">hour</span><span class="o">]</span><span class="p">),</span> <span class="o">[</span><span class="mi">1</span><span class="o">].</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;q&lt;&#39;</span><span class="p">))</span>
+
+<span class="c1"># then retrieving any information about this page just requires specifying the time range you want to return the associated counter values</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">subspace_pages</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">hour</span><span class="o">]</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>or:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="c1"># use a shorter prefix to get back a range so your application can aggregate the individual counters</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">get_range_start_with</span><span class="p">(</span><span class="n">subspace_pages</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span><span class="o">]</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>Putting it all together, your application just updates the primary copy of the data along with the index by wrapping everything in a single transaction:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">seconds</span><span class="o">]</span><span class="p">),</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">website_ID</span><span class="p">,</span> <span class="n">page_ID</span><span class="p">,</span> <span class="n">browser_ID</span><span class="o">]</span><span class="p">))</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">set</span><span class="p">(</span><span class="n">subspace_website_index</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">website_ID</span><span class="p">,</span> <span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">seconds</span><span class="o">]</span><span class="p">),</span> <span class="n">value</span><span class="p">)</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">subspace_count</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">website_ID</span><span class="p">,</span> <span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="o">]</span><span class="p">),</span> <span class="o">[</span><span class="mi">1</span><span class="o">].</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;q&lt;&#39;</span><span class="p">))</span>
+    <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">subpace_pages</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="n">page_ID</span><span class="p">,</span> <span class="n">year</span><span class="p">,</span> <span class="n">month</span><span class="p">,</span> <span class="n">day</span><span class="p">,</span> <span class="n">hour</span><span class="o">]</span><span class="p">),</span> <span class="o">[</span><span class="mi">1</span><span class="o">].</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;q&lt;&#39;</span><span class="p">))</span>
+<span class="k">end</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="ordering-and-transactions">
+<h2>Ordering and Transactions</h2>
+<p>FoundationDB’s ability to let you structure your data in different ways, keep track of metrics, and search it with varying granularity is a direct result of two key features of our key-value store: global ordering and ACID transactions. And as you’ve seen from the code included above, the direct impact of these properties is simpler application code and overall faster development.</p>
+<p>Global ordering makes a big difference if you’re attempting to process significant amounts of sequential information because the database can retrieve that information quickly and efficiently. So rather than having to package your data into a single database object or broadcast a request for many individual data elements that correspond to a given range of application data (e.g. time0, time1, time2, . . ., timen), a globally ordered storage system, like FoundationDB, can generate a single range request to the database for the matching data. And internally, FoundationDB can further optimize requests by knowing which data resides on which machines, so there’s no need to broadcast the data request to all machines in the cluster.</p>
+<p>Global indexing also makes a huge difference in terms of application complexity and database efficiency. Many non-relational databases provide node-specific indexing and secondary indexing, but if you wanted global indexes, you would have to build those at the application level to ensure the index and related data get updated atomically.</p>
+<p>Because FoundationDB supports global indexing and ACID transactions, the database itself will handle updates to the relevant data without intervention or management by the application. (And because an index is just like regular data, it has the same properties, like ordering, for efficient access.) So now, the application interacting with the database can make simple requests to the database as part of a single transaction and avoid having to reason about whether the data requested from the data is actually up-to-date and valid.</p>
+</div>
+<div class="section" id="conclusion">
+<h2>Conclusion</h2>
+<p>FoundationDB offers many great benefits for developers working with time-series data or any data that has a temporal component that’s used for reporting and organization. With ACID transactions, ordering, global indexes, and a data model that gives you a lot of flexibility, FoundationDB makes application development much simpler and more manageable.</p>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/time-series.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

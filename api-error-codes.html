@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Error Codes &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Tutorials" href="tutorials.html" />
+    <link rel="prev" title="C API" href="api-c.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Error Codes</a></li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="api-c.html" title="Previous Chapter: C API"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; C API</span>
+    </a>
+  </li>
+  <li>
+    <a href="tutorials.html" title="Next Chapter: Tutorials"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Tutorials &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Error Codes</a></li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="error-codes">
+<span id="developer-guide-error-codes"></span><h1>Error Codes</h1>
+<p>FoundationDB may return the following error codes from API functions. If you need to check for specific errors (for example, to implement custom retry logic), you must use the numerical code, since the other fields are particularly likely to change unexpectedly. Error handling logic should also be prepared for new error codes which are not listed here.</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="36%" />
+<col width="4%" />
+<col width="61%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Name</th>
+<th class="head">Code</th>
+<th class="head">Description</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>success</td>
+<td>0</td>
+<td>Success</td>
+</tr>
+<tr class="row-odd"><td>operation_failed</td>
+<td>1000</td>
+<td>Operation failed</td>
+</tr>
+<tr class="row-even"><td>timed_out</td>
+<td>1004</td>
+<td>Operation timed out</td>
+</tr>
+<tr class="row-odd"><td>transaction_too_old</td>
+<td>1007</td>
+<td>Transaction is too old to perform reads or be committed</td>
+</tr>
+<tr class="row-even"><td>future_version</td>
+<td>1009</td>
+<td>Request for future version</td>
+</tr>
+<tr class="row-odd"><td>not_committed</td>
+<td>1020</td>
+<td>Transaction not committed due to conflict with another transaction</td>
+</tr>
+<tr class="row-even"><td>commit_unknown_result</td>
+<td>1021</td>
+<td>Transaction may or may not have committed</td>
+</tr>
+<tr class="row-odd"><td>transaction_cancelled</td>
+<td>1025</td>
+<td>Operation aborted because the transaction was cancelled</td>
+</tr>
+<tr class="row-even"><td>transaction_timed_out</td>
+<td>1031</td>
+<td>Operation aborted because the transaction timed out</td>
+</tr>
+<tr class="row-odd"><td>too_many_watches</td>
+<td>1032</td>
+<td>Too many watches currently set</td>
+</tr>
+<tr class="row-even"><td>watches_disabled</td>
+<td>1034</td>
+<td>Watches cannot be set if read your writes is disabled</td>
+</tr>
+<tr class="row-odd"><td>accessed_unreadable</td>
+<td>1036</td>
+<td>Read or wrote an unreadable key</td>
+</tr>
+<tr class="row-even"><td>database_locked</td>
+<td>1038</td>
+<td>Database is locked</td>
+</tr>
+<tr class="row-odd"><td>cluster_version_changed</td>
+<td>1039</td>
+<td>Cluster has been upgraded to a new protocol version</td>
+</tr>
+<tr class="row-even"><td>external_client_already_loaded</td>
+<td>1040</td>
+<td>External client has already been loaded</td>
+</tr>
+<tr class="row-odd"><td>operation_cancelled</td>
+<td>1101</td>
+<td>Asynchronous operation cancelled</td>
+</tr>
+<tr class="row-even"><td>future_released</td>
+<td>1102</td>
+<td>Future has been released</td>
+</tr>
+<tr class="row-odd"><td>platform_error</td>
+<td>1500</td>
+<td>Platform error</td>
+</tr>
+<tr class="row-even"><td>large_alloc_failed</td>
+<td>1501</td>
+<td>Large block allocation failed</td>
+</tr>
+<tr class="row-odd"><td>performance_counter_error</td>
+<td>1502</td>
+<td>QueryPerformanceCounter error</td>
+</tr>
+<tr class="row-even"><td>io_error</td>
+<td>1510</td>
+<td>Disk i/o operation failed</td>
+</tr>
+<tr class="row-odd"><td>file_not_found</td>
+<td>1511</td>
+<td>File not found</td>
+</tr>
+<tr class="row-even"><td>bind_failed</td>
+<td>1512</td>
+<td>Unable to bind to network</td>
+</tr>
+<tr class="row-odd"><td>file_not_readable</td>
+<td>1513</td>
+<td>File could not be read</td>
+</tr>
+<tr class="row-even"><td>file_not_writable</td>
+<td>1514</td>
+<td>File could not be written</td>
+</tr>
+<tr class="row-odd"><td>no_cluster_file_found</td>
+<td>1515</td>
+<td>No cluster file found in current directory or default location</td>
+</tr>
+<tr class="row-even"><td>file_too_large</td>
+<td>1516</td>
+<td>File too large to be read</td>
+</tr>
+<tr class="row-odd"><td>client_invalid_operation</td>
+<td>2000</td>
+<td>Invalid API call</td>
+</tr>
+<tr class="row-even"><td>commit_read_incomplete</td>
+<td>2002</td>
+<td>Commit with incomplete read</td>
+</tr>
+<tr class="row-odd"><td>test_specification_invalid</td>
+<td>2003</td>
+<td>Invalid test specification</td>
+</tr>
+<tr class="row-even"><td>key_outside_legal_range</td>
+<td>2004</td>
+<td>Key outside legal range</td>
+</tr>
+<tr class="row-odd"><td>inverted_range</td>
+<td>2005</td>
+<td>Range begin key larger than end key</td>
+</tr>
+<tr class="row-even"><td>invalid_option_value</td>
+<td>2006</td>
+<td>Option set with an invalid value</td>
+</tr>
+<tr class="row-odd"><td>invalid_option</td>
+<td>2007</td>
+<td>Option not valid in this context</td>
+</tr>
+<tr class="row-even"><td>network_not_setup</td>
+<td>2008</td>
+<td>Action not possible before the network is configured</td>
+</tr>
+<tr class="row-odd"><td>network_already_setup</td>
+<td>2009</td>
+<td>Network can be configured only once</td>
+</tr>
+<tr class="row-even"><td>read_version_already_set</td>
+<td>2010</td>
+<td>Transaction already has a read version set</td>
+</tr>
+<tr class="row-odd"><td>version_invalid</td>
+<td>2011</td>
+<td>Version not valid</td>
+</tr>
+<tr class="row-even"><td>range_limits_invalid</td>
+<td>2012</td>
+<td>Range limits not valid</td>
+</tr>
+<tr class="row-odd"><td>invalid_database_name</td>
+<td>2013</td>
+<td>Database name must be &#8216;DB&#8217;</td>
+</tr>
+<tr class="row-even"><td>attribute_not_found</td>
+<td>2014</td>
+<td>Attribute not found in string</td>
+</tr>
+<tr class="row-odd"><td>future_not_set</td>
+<td>2015</td>
+<td>Future not ready</td>
+</tr>
+<tr class="row-even"><td>future_not_error</td>
+<td>2016</td>
+<td>Future not an error</td>
+</tr>
+<tr class="row-odd"><td>used_during_commit</td>
+<td>2017</td>
+<td>Operation issued while a commit was outstanding</td>
+</tr>
+<tr class="row-even"><td>invalid_mutation_type</td>
+<td>2018</td>
+<td>Unrecognized atomic mutation type</td>
+</tr>
+<tr class="row-odd"><td>transaction_invalid_version</td>
+<td>2020</td>
+<td>Transaction does not have a valid commit version</td>
+</tr>
+<tr class="row-even"><td>transaction_read_only</td>
+<td>2021</td>
+<td>Transaction is read-only and therefore does not have a commit version</td>
+</tr>
+<tr class="row-odd"><td>environment_variable_network_option_failed</td>
+<td>2022</td>
+<td>Environment variable network option could not be set</td>
+</tr>
+<tr class="row-even"><td>transaction_read_only</td>
+<td>2023</td>
+<td>Attempted to commit a transaction specified as read-only</td>
+</tr>
+<tr class="row-odd"><td>incompatible_protocol_version</td>
+<td>2100</td>
+<td>Incompatible protocol version</td>
+</tr>
+<tr class="row-even"><td>transaction_too_large</td>
+<td>2101</td>
+<td>Transaction exceeds byte limit</td>
+</tr>
+<tr class="row-odd"><td>key_too_large</td>
+<td>2102</td>
+<td>Key length exceeds limit</td>
+</tr>
+<tr class="row-even"><td>value_too_large</td>
+<td>2103</td>
+<td>Value length exceeds limit</td>
+</tr>
+<tr class="row-odd"><td>connection_string_invalid</td>
+<td>2104</td>
+<td>Connection string invalid</td>
+</tr>
+<tr class="row-even"><td>address_in_use</td>
+<td>2105</td>
+<td>Local address in use</td>
+</tr>
+<tr class="row-odd"><td>invalid_local_address</td>
+<td>2106</td>
+<td>Invalid local address</td>
+</tr>
+<tr class="row-even"><td>tls_error</td>
+<td>2107</td>
+<td>TLS error</td>
+</tr>
+<tr class="row-odd"><td>unsupported_operation</td>
+<td>2108</td>
+<td>Operation is not supported</td>
+</tr>
+<tr class="row-even"><td>api_version_unset</td>
+<td>2200</td>
+<td>API version is not set</td>
+</tr>
+<tr class="row-odd"><td>api_version_already_set</td>
+<td>2201</td>
+<td>API version may be set only once</td>
+</tr>
+<tr class="row-even"><td>api_version_invalid</td>
+<td>2202</td>
+<td>API version not valid</td>
+</tr>
+<tr class="row-odd"><td>api_version_not_supported</td>
+<td>2203</td>
+<td>API version not supported</td>
+</tr>
+<tr class="row-even"><td>exact_mode_without_limits</td>
+<td>2210</td>
+<td>EXACT streaming mode requires limits, but none were given</td>
+</tr>
+<tr class="row-odd"><td>unknown_error</td>
+<td>4000</td>
+<td>An unknown error occurred</td>
+</tr>
+<tr class="row-even"><td>internal_error</td>
+<td>4100</td>
+<td>An internal error occurred</td>
+</tr>
+</tbody>
+</table>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/api-error-codes.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

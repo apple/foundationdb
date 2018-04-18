@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Queues &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Queues" href="queues-java.html" />
+    <link rel="prev" title="Priority Queues" href="priority-queues-java.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Queues</a><ul>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a></li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="priority-queues-java.html" title="Previous Chapter: Priority Queues"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Priority Queues</span>
+    </a>
+  </li>
+  <li>
+    <a href="queues-java.html" title="Next Chapter: Queues"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Queues &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Queues</a><ul>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a></li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="queues">
+<h1>Queues</h1>
+<p><strong>Python</strong> <a class="reference internal" href="queues-java.html"><span class="doc">Java</span></a></p>
+<div class="section" id="challenge">
+<h2>Challenge</h2>
+<p>Allow efficient operations on a shared queue by multiple clients acting concurrently.</p>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation</h2>
+<p>We can model a queue by assigning increasing integers that encode the order of items. To minimize conflicts for concurrent operations, we combine the integers in a tuple with a random element to make the final key unique.</p>
+</div>
+<div class="section" id="ordering">
+<h2>Ordering</h2>
+<p>The ordering of keys preserves the FIFO order of items and therefore lets us identify the next item to be dequeued without maintaining a pointer to it.</p>
+</div>
+<div class="section" id="pattern">
+<h2>Pattern</h2>
+<p>We store each item in the queue within a subspace, which takes care of packing our integer indexes into byte strings.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">queue</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;Q&#39;</span><span class="p">,))</span>
+</pre></div>
+</div>
+<p>As a first cut, we could store each item with a single key-value pair using increasing integer indexes for subsequent items:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">tr</span><span class="p">[</span><span class="n">queue</span><span class="p">[</span><span class="n">index</span><span class="p">]]</span> <span class="o">=</span> <span class="n">value</span>
+</pre></div>
+</div>
+<p>However, this would leave concurrent enqueue operations vulnerable to conflicts. To minimize these conflicts, we can add a random integer to the key.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">tr</span><span class="p">[</span><span class="n">queue</span><span class="p">[</span><span class="n">index</span><span class="p">][</span><span class="n">random_int</span><span class="p">]]</span> <span class="o">=</span> <span class="n">value</span>
+</pre></div>
+</div>
+<p>With this data model, items enqueued concurrently may be assigned the same index, but the keys as a whole will still be ordered (in this case, randomly). By using a <a class="reference internal" href="developer-guide.html#snapshot-isolation"><span class="std std-ref">snapshot read</span></a>, we guarantee that enqueuing will be conflict-free.</p>
+<p>To implement this model, we need an efficient way of finding the first and last index presently in use. FoundationDB&#8217;s range reads have limit and reverse options that let us accomplish this. Given the range of the subspace:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">r</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">range</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>we can find the first and last key-value pairs in the range with:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="c1"># first</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="c1"># last</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="extensions">
+<h2>Extensions</h2>
+<p><em>High-Contention Dequeue Operations</em></p>
+<p>To minimize conflicts during dequeue operations, we can use a staging technique to service the requests. If a dequeue operation doesn&#8217;t initially succeed, it registers a dequeue request in a semi-ordered set of such requests. It then enters a retry loop in which it attempts to fulfill outstanding requests.</p>
+</div>
+<div class="section" id="code">
+<h2>Code</h2>
+<p>The following is a simple implementation of the basic pattern:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
+
+<span class="n">queue</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">Subspace</span><span class="p">((</span><span class="s1">&#39;Q&#39;</span><span class="p">,))</span>
+
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">dequeue</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+    <span class="n">item</span> <span class="o">=</span> <span class="n">first_item</span><span class="p">(</span><span class="n">tr</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">item</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span> <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">del</span> <span class="n">tr</span><span class="p">[</span><span class="n">item</span><span class="o">.</span><span class="n">key</span><span class="p">]</span>
+    <span class="k">return</span> <span class="n">item</span><span class="o">.</span><span class="n">value</span>
+
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">enqueue</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">value</span><span class="p">):</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">queue</span><span class="p">[</span><span class="n">last_index</span><span class="p">(</span><span class="n">tr</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span><span class="p">][</span><span class="n">os</span><span class="o">.</span><span class="n">urandom</span><span class="p">(</span><span class="mi">20</span><span class="p">)]]</span> <span class="o">=</span> <span class="n">value</span>
+
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">last_index</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">range</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">snapshot</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">queue</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">key</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">return</span> <span class="mi">0</span>
+
+<span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+<span class="k">def</span> <span class="nf">first_item</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="n">queue</span><span class="o">.</span><span class="n">range</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">kv</span> <span class="ow">in</span> <span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="n">r</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span> <span class="n">limit</span><span class="o">=</span><span class="mi">1</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">kv</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/queues.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

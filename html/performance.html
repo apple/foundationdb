@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Performance &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Benchmarking" href="benchmarking.html" />
+    <link rel="prev" title="Architecture" href="architecture.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Performance</a><ul>
+<li><a class="reference internal" href="#scaling">Scaling</a></li>
+<li><a class="reference internal" href="#latency">Latency</a></li>
+<li><a class="reference internal" href="#throughput-per-core">Throughput (per core)</a></li>
+<li><a class="reference internal" href="#concurrency">Concurrency</a></li>
+<li><a class="reference internal" href="#other-effects">Other Effects</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="architecture.html" title="Previous Chapter: Architecture"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Architecture</span>
+    </a>
+  </li>
+  <li>
+    <a href="benchmarking.html" title="Next Chapter: Benchmarking"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Benchmarking &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Performance</a><ul>
+<li><a class="reference internal" href="#scaling">Scaling</a></li>
+<li><a class="reference internal" href="#latency">Latency</a></li>
+<li><a class="reference internal" href="#throughput-per-core">Throughput (per core)</a></li>
+<li><a class="reference internal" href="#concurrency">Concurrency</a></li>
+<li><a class="reference internal" href="#other-effects">Other Effects</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="performance">
+<h1>Performance</h1>
+<p>FoundationDB uses commodity hardware to provide high throughputs and low latencies to your application at a variety of scales.</p>
+<div class="section" id="scaling">
+<h2>Scaling</h2>
+<p>FoundationDB scales linearly with the number of cores in a cluster over a wide range of sizes.</p>
+<img alt="_images/scaling.png" src="_images/scaling.png" />
+<p>Here, a cluster of commodity hardware scales to <strong>8.2 million</strong> operations/sec doing a 90% read and 10% write workload with 16 byte keys and values between 8 and 100 bytes.</p>
+<p>The scaling graph uses a 24-machine EC2 c3.8xlarge cluster in which each machine has a 16-core processor. We ran a FoundationDB server process on each core, yielding a 384-process cluster for the largest test, and scaled the cluster down for each smaller test.</p>
+<p>Scaling is the ability to efficiently deliver operations at different scales. For FoundationDB, the relevant operations are reads and writes, measured in operations per sec. Scale is measured in the number of processes, which will usually track the number of available cores. FoundationDB offers scalability from partial utilization of a single core on a single machine to full utilization of dozens of powerful multi-core machines in a cluster.</p>
+<p>See our <a class="reference internal" href="known-limitations.html#cluster-size"><span class="std std-ref">known limitations</span></a> for details about the limits of cluster scalability.</p>
+</div>
+<div class="section" id="latency">
+<h2>Latency</h2>
+<p>FoundationDB has low latencies over a broad range of workloads that only increase modestly as the cluster approaches saturation.</p>
+<img alt="_images/latency.png" src="_images/latency.png" />
+<p>When run at less than <strong>75% load</strong>, FoundationDB typically has the following latencies:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="40%" />
+<col width="60%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">&#160;</th>
+<th class="head">&#160;</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>Start transaction</td>
+<td>0.3 - 1ms</td>
+</tr>
+<tr class="row-odd"><td>Read</td>
+<td>0.1 - 1ms</td>
+</tr>
+<tr class="row-even"><td>Set</td>
+<td>0 (deferred until commit)</td>
+</tr>
+<tr class="row-odd"><td>Commit</td>
+<td>1.5 - 2.5ms</td>
+</tr>
+</tbody>
+</table>
+<p>The latency graph uses a 12-machine cluster in which each machine has a 4-core (E3-1240) processor and a single SATA SSD. We ran a FoundationDB server process on each core, yielding a 48-process cluster.</p>
+<p>Latency is the time required to complete a given operation. Latencies in FoundationDB are typically measured in milliseconds (ms). Like all systems, FoundationDB operates at low latencies while under low load and increasing latencies as the load approaches the saturation point. FoundationDB is engineered to keep latencies low even at moderate loads. As loads approach saturation, latencies increase as requests are queued up.</p>
+<p>For FoundationDB, the significant latencies are those experienced by a FoundationDB client as it prepares and submits a transaction. Writes incur no latency until the transaction is committed. There are three actions within a transaction that do incur latency:</p>
+<ul class="simple">
+<li><strong>Transaction start</strong>. This latency will be experienced as part of the first read in a transaction as the read version is obtained. It will typically be a few milliseconds under moderate load, but under high write loads FoundationDB tries to concentrate most transaction latency here.</li>
+<li><strong>Reads</strong>. Individual reads should take under 1 ms with moderate loads. If a transaction performs many reads by waiting for each to complete before starting the next, however, these small latencies can add up. You can thus reduce total latency (and potentially <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflicts</span></a>) by doing as many of your reads as possible in parallel. FoundationDB supports non-blocking reads, so it&#8217;s easy to perform reads without waiting on them.</li>
+<li><strong>Commit</strong>. Transactions that perform writes must be committed, and the commit will not succeed until the transaction is durable with full replication. This latency should average under 3 ms with moderate loads. Only a small part of this latency impacts transaction <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflicts</span></a>.</li>
+</ul>
+</div>
+<div class="section" id="throughput-per-core">
+<h2>Throughput (per core)</h2>
+<p>FoundationDB provides good throughput for the full range of read and write workloads, with two fully durable storage engine options.</p>
+<img alt="_images/throughput.png" src="_images/throughput.png" />
+<p>FoundationDB offers two <a class="reference internal" href="configuration.html#configuration-storage-engine"><span class="std std-ref">storage engines</span></a>, optimized for distinct use cases, both of which write to disk before reporting transactions committed. For each storage engine, the graph shows throughput of a single FoundationDB process running on a <strong>single core</strong> with saturating read/write workloads ranging from 100% reads to 100% writes, all with 16 byte keys and values between 8 and 100 bytes. Throughput for the unmixed workloads is about:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="27%" />
+<col width="30%" />
+<col width="42%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">workload</th>
+<th class="head">ssd engine</th>
+<th class="head">memory engine</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>Reads</td>
+<td>55,000/sec</td>
+<td>90,000/sec</td>
+</tr>
+<tr class="row-odd"><td>Writes</td>
+<td>20,000/sec</td>
+<td>35,000/sec</td>
+</tr>
+</tbody>
+</table>
+<p>The throughput graph uses a single FoundationDB server process on a single core (E3-1240).</p>
+<p>Throughput is the total number of operations successfully completed by a system in a given period of time. For FoundationDB, we measure throughput in operations, i.e., some mix of read and writes, per second.</p>
+<p>The memory engine is optimized for datasets that entirely fit in memory, with secondary storage used for durable writes but not reads. The SSD engine is optimized for datasets that do not entirely fit in memory, with some percentage of reads being served from secondary storage.</p>
+<p>Because SATA SSDs are only about 50 times slower than memory, they can be combined with memory to achieve throughputs on the same order of magnitude as memory alone as long as cache-hit rates are reasonable. The SSD engine takes advantage of this property. In contrast, spinning disks are 5,000 times slower than memory and radically degrade throughput as soon as cache hits fall appreciably below 100%.</p>
+<p>FoundationDB will only reach maximum throughputs with a highly concurrent workload. In fact, for a given average latency, concurrency is the main driver of throughput.</p>
+</div>
+<div class="section" id="concurrency">
+<h2>Concurrency</h2>
+<p>FoundationDB is designed to achieve great performance under high concurrency from a large number of clients.</p>
+<img alt="_images/concurrency.png" src="_images/concurrency.png" />
+<p>Its asynchronous design allows it to handle very high concurrency, and for a typical workload with 90% reads and 10% writes, maximum throughput is reached at about 200 concurrent operations. This number of operations was achieved with <strong>20</strong> concurrent transactions per FoundationDB process each running 10 operations with 16 byte keys and values between 8 and 100 bytes.</p>
+<p>The concurrency graph uses a single FoundationDB server process on a single core (E3-1240).</p>
+<p>For a given system, average throughput and latency are related by a ratio known in queuing theory as Little’s Law. The practical application of this law to FoundationDB states:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">throughput</span> <span class="o">=</span> <span class="n">outstanding</span> <span class="n">requests</span> <span class="o">/</span> <span class="n">latency</span>
+</pre></div>
+</div>
+<p>The implication of this relation is that, at a given latency, we can maximize throughput only by concurrently submitting enough outstanding requests. A FoundationDB cluster might have a commit latency of 2 ms and yet be capable of far more than 500 commits per second. In fact, tens of thousands of commits per second are easily achievable. To achieve this rate, there must be hundreds of requests happening concurrently. Not having enough pending requests is the single biggest reason for low performance.</p>
+</div>
+<div class="section" id="other-effects">
+<h2>Other Effects</h2>
+<p>A lot of things affect the simple first-order model of performance you see here. For example:</p>
+<ul class="simple">
+<li>For short periods, higher write throughputs can be absorbed, giving higher performance and keeping latencies low.</li>
+<li>Most workloads&#8217; reads can be cached, giving higher performance.</li>
+<li>Adjacently written keys can be written much faster.</li>
+<li>Large keys make the storage engine slower.</li>
+<li>Large values cost more to read and write than smaller ones.</li>
+<li>Not all CPUs are the same speed.</li>
+<li>To keep up with the performance modeled above, your disk subsystem will need to do a little over 1 IOPS per write, and about 1 IOPS per (uncached) read.</li>
+<li>Network performance tuning at the operating system level can be very important for both latency and throughput, especially in larger clusters.</li>
+<li>Running DR and/or backup requires applying each mutation multiple times and then reading those mutations from the database. Using either feature will reduce throughput.</li>
+<li>See our <a class="reference internal" href="known-limitations.html#known-limitations"><span class="std std-ref">known limitations</span></a> for other considerations which may affect performance.</li>
+</ul>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/performance.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Blob &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Hierarchical Documents" href="hierarchical-documents.html" />
+    <link rel="prev" title="Blob" href="blob.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Blob</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="blob.html" title="Previous Chapter: Blob"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Blob</span>
+    </a>
+  </li>
+  <li>
+    <a href="hierarchical-documents.html" title="Next Chapter: Hierarchical Documents"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Hierarchical ... &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Blob</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="blob">
+<h1>Blob</h1>
+<p><a class="reference internal" href="blob.html"><span class="doc">Python</span></a> <strong>Java</strong></p>
+<div class="section" id="goal">
+<h2>Goal</h2>
+<p>Store binary large objects (blobs) in the database.</p>
+</div>
+<div class="section" id="challenge">
+<h2>Challenge</h2>
+<p>A blob is too large to be stored as a single key-value pair in FoundationDB. Values of key-value pairs are limited to 100 kB, and you’ll get the better performance by keeping them closer to 10 kb.</p>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation</h2>
+<p>The core of the approach is simple: even though we can&#8217;t store the blob in a single key-value pair, we can still store it by using multiple key-value pairs. We do this by splitting the blob into chunks and storing the chunks within a single subspace.</p>
+</div>
+<div class="section" id="ordering">
+<h2>Ordering</h2>
+<p>Chunks are stored in order in adjacent key-value pairs. This approach allows the blob to be read with a single range read.</p>
+</div>
+<div class="section" id="pattern">
+<h2>Pattern</h2>
+<p>We create a subspace for a given blob. This subspace will hold the individual chunks of the blob as key-value pairs. In the key, we store a byte-offset into the blob; in the value, we store a range of the bytes starting at that offset. A constant <code class="docutils literal"><span class="pre">CHUNK_SIZE</span></code> establishes a maximum size for chunks of the blob (10 kb is a good starting point).</p>
+<p>A simple transactional function to store a single blob with this strategy would look like:</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kd">static</span><span class="o">{</span>
+    <span class="n">blob</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="s">&quot;B&quot;</span><span class="o">));</span>
+<span class="o">}</span>
+
+<span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">writeBlob</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">data</span><span class="o">){</span>
+    <span class="k">if</span><span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">length</span><span class="o">()</span> <span class="o">==</span> <span class="mi">0</span><span class="o">)</span> <span class="k">return</span><span class="o">;</span>
+    <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+        <span class="kt">int</span> <span class="n">numChunks</span> <span class="o">=</span> <span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">length</span><span class="o">()</span> <span class="o">+</span> <span class="n">CHUNK_SIZE</span> <span class="o">-</span> <span class="mi">1</span><span class="o">)/</span><span class="n">CHUNK_SIZE</span><span class="o">;</span>
+        <span class="kt">int</span> <span class="n">chunkSize</span> <span class="o">=</span> <span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">length</span><span class="o">()</span> <span class="o">+</span> <span class="n">numChunks</span><span class="o">)/</span><span class="n">numChunks</span><span class="o">;</span>
+
+        <span class="k">for</span><span class="o">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="o">;</span> <span class="n">i</span><span class="o">*</span><span class="n">chunkSize</span> <span class="o">&lt;</span> <span class="n">data</span><span class="o">.</span><span class="na">length</span><span class="o">();</span> <span class="n">i</span><span class="o">++){</span>
+            <span class="kt">int</span> <span class="n">start</span> <span class="o">=</span> <span class="n">i</span><span class="o">*</span><span class="n">chunkSize</span><span class="o">;</span>
+            <span class="kt">int</span> <span class="n">end</span>  <span class="o">=</span> <span class="o">((</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="o">)*</span><span class="n">chunkSize</span> <span class="o">&lt;=</span> <span class="n">data</span><span class="o">.</span><span class="na">length</span><span class="o">())</span> <span class="o">?</span> <span class="o">((</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="o">)*</span><span class="n">chunkSize</span><span class="o">)</span> <span class="o">:</span> <span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">length</span><span class="o">());</span>
+            <span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">blob</span><span class="o">.</span><span class="na">subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">start</span><span class="o">)).</span><span class="na">pack</span><span class="o">(),</span>
+                <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">data</span><span class="o">.</span><span class="na">substring</span><span class="o">(</span><span class="n">start</span><span class="o">,</span> <span class="n">end</span><span class="o">)).</span><span class="na">pack</span><span class="o">());</span>
+        <span class="o">}</span>
+
+        <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+    <span class="o">});</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+<p>The blob can then be efficiently read with a single range read:</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kd">public</span> <span class="kd">static</span> <span class="n">String</span> <span class="nf">readBlob</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">){</span>
+    <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
+        <span class="n">StringBuilder</span> <span class="n">value</span> <span class="o">=</span> <span class="k">new</span> <span class="n">StringBuilder</span><span class="o">();</span>
+        <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">blob</span><span class="o">.</span><span class="na">range</span><span class="o">())){</span>
+            <span class="n">value</span><span class="o">.</span><span class="na">append</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">fromBytes</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getValue</span><span class="o">()).</span><span class="na">getString</span><span class="o">(</span><span class="mi">0</span><span class="o">));</span>
+        <span class="o">}</span>
+
+        <span class="k">return</span> <span class="n">value</span><span class="o">.</span><span class="na">toString</span><span class="o">();</span>
+    <span class="o">});</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="extensions">
+<h2>Extensions</h2>
+<p><em>A sparse representation for random reads and writes</em></p>
+<p>The simple model above lets us read and write a blob as a whole, but it can be extended to allow random reads and writes, allowing the blob to be partially accessed or streamed. At the same time, the representation can remain sparse, only consuming space for the data that is actually written.</p>
+<p>For efficiency, we sometimes join chunks after a write to avoid the fragmentation than might result from small writes. Joining chunks is controlled by a constant <code class="docutils literal"><span class="pre">CHUNK_SMALL</span></code> (usually around 200 bytes), giving a lower limit for the sum of the size of adjacent chunks.</p>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/blob-java.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

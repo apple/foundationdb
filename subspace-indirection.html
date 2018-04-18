@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Subspace Indirection &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Subspace Indirection" href="subspace-indirection-java.html" />
+    <link rel="prev" title="Spatial Indexing" href="spatial-indexing-java.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Subspace Indirection</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a></li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="spatial-indexing-java.html" title="Previous Chapter: Spatial Indexing"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Spatial Indexing</span>
+    </a>
+  </li>
+  <li>
+    <a href="subspace-indirection-java.html" title="Next Chapter: Subspace Indirection"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Subspace Indirection &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Subspace Indirection</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a></li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="subspace-indirection">
+<h1>Subspace Indirection</h1>
+<p><strong>Python</strong> <a class="reference internal" href="subspace-indirection-java.html"><span class="doc">Java</span></a></p>
+<div class="section" id="goal">
+<h2>Goal</h2>
+<p>Employ subspace indirection to manage bulk inserts or similar long-running operations.</p>
+</div>
+<div class="section" id="challenge">
+<h2>Challenge</h2>
+<p>Some large or long operations, such as bulk inserts, cannot be handled in a single FoundationDB transaction because the database does not support transactions over five seconds.</p>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation</h2>
+<p>We can handle long-running operations using a distinct subspace to hold a temporary copy of the data. The new subspace is transactionally moved into place upon completion of the writes. We can perform the move quickly because the client accesses the subspaces through managed references.</p>
+<p>FoundationDB <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">directories</span></a> provide a convenient method to indirectly reference subspaces. Each directory is identified by a path that is mapped to a prefix for a subspace. The indirection from paths to subspaces makes it fast to move directories by renaming their paths.</p>
+</div>
+<div class="section" id="ordering">
+<h2>Ordering</h2>
+<p>The ordering of keys applies within each directory subspace for whatever data model is used by the application. However, directory subspaces are independent of each other, and there is no meaningful ordering between them.</p>
+</div>
+<div class="section" id="pattern">
+<h2>Pattern</h2>
+<p>For a single client, we can use a simple context manager to handle creation of a new subspace and transactionally swapping it into place. Rather than working with a subspace directly, a client accesses the current subspace through a managed reference as follows:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
+
+<span class="n">working_dir</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">directory</span><span class="o">.</span><span class="n">create_or_open</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">(</span><span class="sa">u</span><span class="s1">&#39;working&#39;</span><span class="p">,))</span>
+<span class="n">workspace</span> <span class="o">=</span> <span class="n">Workspace</span><span class="p">(</span><span class="n">working_dir</span><span class="p">,</span> <span class="n">db</span><span class="p">)</span>
+<span class="n">current</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">current</span>
+</pre></div>
+</div>
+<p>The client performs transactions on data in the subspace current in the usual manner. When we want a new workspace for a bulk load or other long-running operation, we create one with a context manager:</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">workspace</span> <span class="k">as</span> <span class="n">newspace</span><span class="p">:</span>
+    <span class="c1"># . . .</span>
+    <span class="c1"># perform long-running operation using newspace here</span>
+    <span class="c1"># . . .</span>
+<span class="c1"># current workspace has now been replaced by the new one</span>
+<span class="n">current</span> <span class="o">=</span> <span class="n">workspace</span><span class="o">.</span><span class="n">current</span>
+</pre></div>
+</div>
+<p>When the context manager completes, it transactionally replaces the current workspace with the new one.</p>
+</div>
+<div class="section" id="extensions">
+<h2>Extensions</h2>
+<p><em>Multiple Clients</em></p>
+<p>Beyond the ability to load and transactionally swap in a single new data set, an application may want to support multiple clients concurrently performing long-running operations on a data set. In this case, the application could perform optimistic validation of an operation before accepting it.</p>
+</div>
+<div class="section" id="code">
+<h2>Code</h2>
+<p>Here&#8217;s a simple context manager for swapping in a new workspace for the basic usage above.</p>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">Workspace</span><span class="p">(</span><span class="nb">object</span><span class="p">):</span>
+
+    <span class="k">def</span> <span class="nf">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">directory</span><span class="p">,</span> <span class="n">db</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dir</span> <span class="o">=</span> <span class="n">directory</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">db</span> <span class="o">=</span> <span class="n">db</span>
+
+    <span class="k">def</span> <span class="nf">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">dir</span><span class="o">.</span><span class="n">create_or_open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">db</span><span class="p">,</span> <span class="p">(</span><span class="sa">u</span><span class="s1">&#39;new&#39;</span><span class="p">,))</span>
+
+    <span class="k">def</span> <span class="nf">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="n">exc</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_update</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">db</span><span class="p">)</span>
+
+    <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
+    <span class="k">def</span> <span class="nf">_update</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">tr</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dir</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="p">(</span><span class="sa">u</span><span class="s1">&#39;current&#39;</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">dir</span><span class="o">.</span><span class="n">move</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="p">(</span><span class="sa">u</span><span class="s1">&#39;new&#39;</span><span class="p">),</span> <span class="p">(</span><span class="sa">u</span><span class="s1">&#39;current&#39;</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">current</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">dir</span><span class="o">.</span><span class="n">create_or_open</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">db</span><span class="p">,</span> <span class="p">(</span><span class="sa">u</span><span class="s1">&#39;current&#39;</span><span class="p">,))</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/subspace-indirection.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

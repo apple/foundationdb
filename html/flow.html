@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Flow &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Simulation and Testing" href="testing.html" />
+    <link rel="prev" title="Fault Tolerance" href="fault-tolerance.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Flow</a><ul>
+<li><a class="reference internal" href="#engineering-challenges">Engineering challenges</a></li>
+<li><a class="reference internal" href="#a-first-look">A first look</a></li>
+<li><a class="reference internal" href="#flow-features">Flow features</a><ul>
+<li><a class="reference internal" href="#promise-t-and-future-t">Promise&lt;T&gt; and Future&lt;T&gt;</a></li>
+<li><a class="reference internal" href="#wait">wait()</a></li>
+<li><a class="reference internal" href="#actor">ACTOR</a></li>
+<li><a class="reference internal" href="#state">State</a></li>
+<li><a class="reference internal" href="#promisestream-t-futurestream-t">PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</a></li>
+<li><a class="reference internal" href="#waitnext">waitNext()</a></li>
+<li><a class="reference internal" href="#choose-when">choose . . . when</a></li>
+<li><a class="reference internal" href="#example-a-server-interface">Example: A Server Interface</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="fault-tolerance.html" title="Previous Chapter: Fault Tolerance"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Fault Tolerance</span>
+    </a>
+  </li>
+  <li>
+    <a href="testing.html" title="Next Chapter: Simulation and Testing"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Simulation an... &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Flow</a><ul>
+<li><a class="reference internal" href="#engineering-challenges">Engineering challenges</a></li>
+<li><a class="reference internal" href="#a-first-look">A first look</a></li>
+<li><a class="reference internal" href="#flow-features">Flow features</a><ul>
+<li><a class="reference internal" href="#promise-t-and-future-t">Promise&lt;T&gt; and Future&lt;T&gt;</a></li>
+<li><a class="reference internal" href="#wait">wait()</a></li>
+<li><a class="reference internal" href="#actor">ACTOR</a></li>
+<li><a class="reference internal" href="#state">State</a></li>
+<li><a class="reference internal" href="#promisestream-t-futurestream-t">PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</a></li>
+<li><a class="reference internal" href="#waitnext">waitNext()</a></li>
+<li><a class="reference internal" href="#choose-when">choose . . . when</a></li>
+<li><a class="reference internal" href="#example-a-server-interface">Example: A Server Interface</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="flow">
+<h1>Flow</h1>
+<div class="section" id="engineering-challenges">
+<h2>Engineering challenges</h2>
+<p>FoundationDB began with ambitious goals for both <a class="reference internal" href="performance.html"><span class="doc">high performance</span></a> per node and <a class="reference internal" href="scalability.html"><span class="doc">scalability</span></a>. We knew that to achieve these goals we would face serious engineering challenges while developing the FoundationDB core. We&#8217;d need to implement efficient asynchronous communicating processes of the sort supported by <a class="reference external" href="http://en.wikipedia.org/wiki/Erlang_(programming_language)">Erlang</a> or the <a class="reference external" href="http://msdn.microsoft.com/en-us/library/vstudio/hh191443.aspx">Async library in .NET</a>, but we&#8217;d also need the raw speed and I/O efficiency of C++. Finally, we&#8217;d need to perform extensive simulation to engineer for reliability and fault tolerance on large clusters.</p>
+<p>To meet these challenges, we developed several new tools, the first of which is Flow, a new programming language that brings <a class="reference external" href="http://en.wikipedia.org/wiki/Actor_model">actor-based concurrency</a> to C++11. To add this capability, Flow introduces a number of new keywords and control-flow primitives for managing concurrency. Flow is implemented as a compiler which analyzes an asynchronous function (actor) and rewrites it as an object with many different sub-functions that use callbacks to avoid blocking (see <a class="reference external" href="https://github.com/Sage/streamlinejs">streamlinejs</a> for a similar concept using JavaScript). The Flow compiler&#8217;s output is normal C++11 code, which is then compiled to a binary using traditional tools. Flow also provides input to our simulation tool, which conducts deterministic simulations of the entire system, including its physical interfaces and failure modes. In short, Flow allows efficient concurrency within C++ in a maintainable and extensible manner, achieving all three major engineering goals:</p>
+<ul class="simple">
+<li>high performance (by compiling to native code),</li>
+<li>actor-based concurrency (for high productivity development),</li>
+<li>simulation support (for testing).</li>
+</ul>
+</div>
+<div class="section" id="a-first-look">
+<h2>A first look</h2>
+<p>Actors in Flow receive asynchronous messages from each other using a data type called a <em>future</em>. When an actor requires a data value to continue computation, it waits for it without blocking other actors. The following simple actor performs asynchronous addition. It takes a future integer and a normal integer as an offset, waits on the future integer, and returns the sum of the value and the offset:</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span> <span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span> <span class="n">asyncAdd</span><span class="p">(</span><span class="n">Future</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span> <span class="n">f</span><span class="p">,</span> <span class="kt">int</span> <span class="n">offset</span><span class="p">)</span> <span class="p">{</span>
+  <span class="kt">int</span> <span class="n">value</span> <span class="o">=</span> <span class="n">wait</span><span class="p">(</span> <span class="n">f</span> <span class="p">);</span>
+  <span class="k">return</span> <span class="n">value</span> <span class="o">+</span> <span class="n">offset</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="flow-features">
+<h2>Flow features</h2>
+<p>Flow&#8217;s new keywords and control-flow primitives support the capability to pass messages asynchronously between components. Here&#8217;s a brief overview.</p>
+<div class="section" id="promise-t-and-future-t">
+<h3>Promise&lt;T&gt; and Future&lt;T&gt;</h3>
+<p>The data types that connect asynchronous senders and receivers are <code class="docutils literal"><span class="pre">Promise&lt;T&gt;</span></code> and <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> for some C++ type <code class="docutils literal"><span class="pre">T</span></code>. When a sender holds a <code class="docutils literal"><span class="pre">Promise&lt;T&gt;</span></code>, it represents a promise to deliver a value of type <code class="docutils literal"><span class="pre">T</span></code> at some point in the future to the holder of the <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code>. Conversely, a receiver holding a <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> can asynchronously continue computation until the point at which it actually needs the <code class="docutils literal"><span class="pre">T.</span></code></p>
+<p>Promises and futures can be used within a single process, but their real strength in a distributed system is that they can traverse the network. For example, one computer could create a promise/future pair, then send the promise to another computer over the network. The promise and future will still be connected, and when the promise is fulfilled by the remote computer, the original holder of the future will see the value appear.</p>
+</div>
+<div class="section" id="wait">
+<h3>wait()</h3>
+<p>At the point when a receiver holding a <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> needs the <code class="docutils literal"><span class="pre">T</span></code> to continue computation, it invokes the <code class="docutils literal"><span class="pre">wait()</span></code> statement with the <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> as its parameter. The <code class="docutils literal"><span class="pre">wait()</span></code> statement allows the calling actor to pause execution until the value of the future is set, returning a value of type <code class="docutils literal"><span class="pre">T</span></code> During the wait, other actors can continue execution, providing asynchronous concurrency within a single process.</p>
+</div>
+<div class="section" id="actor">
+<h3>ACTOR</h3>
+<p>Only functions labeled with the <code class="docutils literal"><span class="pre">ACTOR</span></code> tag can call <code class="docutils literal"><span class="pre">wait()</span></code>. Actors are the essential unit of asynchronous work and can be composed to create complex message-passing systems. By composing actors, futures can be chained together so that the result of one depends on the output of another.</p>
+<p>An actor is declared as returning a <code class="docutils literal"><span class="pre">Future&lt;T&gt;</span></code> where <code class="docutils literal"><span class="pre">T</span></code> may be <code class="docutils literal"><span class="pre">Void</span></code> if the actor&#8217;s return value is used only for signaling. Each actor is preprocessed into a C++11 class with internal callbacks and supporting functions.</p>
+</div>
+<div class="section" id="state">
+<h3>State</h3>
+<p>The <code class="docutils literal"><span class="pre">state</span></code> keyword is used to scope a variable so that it is visible across multiple <code class="docutils literal"><span class="pre">wait()</span></code> statements within an actor. The use of a <code class="docutils literal"><span class="pre">state</span></code> variable is illustrated in the example actor below.</p>
+</div>
+<div class="section" id="promisestream-t-futurestream-t">
+<h3>PromiseStream&lt;T&gt;, FutureStream&lt;T&gt;</h3>
+<p>When a component wants to work with a <em>stream</em> of asynchronous messages rather than a single message, it can use <code class="docutils literal"><span class="pre">PromiseStream&lt;T&gt;</span></code> and <code class="docutils literal"><span class="pre">FutureStream&lt;T&gt;</span></code>. These constructs allow for two important features: multiplexing and reliable delivery of messages. They also play an important role in Flow design patterns. For example, many of the servers in FoundationDB expose their interfaces as a <code class="docutils literal"><span class="pre">struct</span></code> of promise streams—one for each request type.</p>
+</div>
+<div class="section" id="waitnext">
+<h3>waitNext()</h3>
+<p><code class="docutils literal"><span class="pre">waitNext()</span></code> is the counterpart of <code class="docutils literal"><span class="pre">wait()</span></code> for streams. It pauses program execution and waits for the next value in a <code class="docutils literal"><span class="pre">FutureStream</span></code>. If there is a value ready in the stream, execution continues without delay.</p>
+</div>
+<div class="section" id="choose-when">
+<h3>choose . . . when</h3>
+<p>The <code class="docutils literal"><span class="pre">choose</span></code> and <code class="docutils literal"><span class="pre">when</span></code> constructs allow an actor to wait for multiple futures at once in a ordered and predictable way.</p>
+</div>
+<div class="section" id="example-a-server-interface">
+<h3>Example: A Server Interface</h3>
+<p>Below is a actor that runs on single server communicating over the network. Its functionality is to maintain a count in response to asynchronous messages from other actors. It supports an interface implemented with a loop containing a <code class="docutils literal"><span class="pre">choose</span></code> statement with a <code class="docutils literal"><span class="pre">when</span></code> for each request type. Each <code class="docutils literal"><span class="pre">when</span></code> uses <code class="docutils literal"><span class="pre">waitNext()</span></code> to asynchronously wait for the next request in the stream. The add and subtract interfaces modify the count itself, stored with a state variable. The get interface takes a <code class="docutils literal"><span class="pre">Promise&lt;int&gt;</span></code> instead of just an <code class="docutils literal"><span class="pre">int</span></code> to facilitate sending back the return message.</p>
+<p>To write the equivalent code directly in C++, a developer would have to implement a complex set of callbacks with exception-handling, requiring far more engineering effort. Flow makes it much easier to implement this sort of asynchronous coordination, with no loss of performance.:</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="n">ACTOR</span> <span class="kt">void</span> <span class="nf">serveCountingServerInterface</span><span class="p">(</span>
+           <span class="n">CountingServerInterface</span> <span class="n">csi</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">state</span> <span class="kt">int</span> <span class="n">count</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="k">while</span> <span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">choose</span> <span class="p">{</span>
+            <span class="n">when</span> <span class="p">(</span><span class="kt">int</span> <span class="n">x</span> <span class="o">=</span> <span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">addCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
+                <span class="n">count</span> <span class="o">+=</span> <span class="n">x</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="n">when</span> <span class="p">(</span><span class="kt">int</span> <span class="n">x</span> <span class="o">=</span> <span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">subtractCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
+                <span class="n">count</span> <span class="o">-=</span> <span class="n">x</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="n">when</span> <span class="p">(</span><span class="n">Promise</span><span class="o">&lt;</span><span class="kt">int</span><span class="o">&gt;</span> <span class="n">r</span> <span class="o">=</span> <span class="n">waitNext</span><span class="p">(</span><span class="n">csi</span><span class="p">.</span><span class="n">getCount</span><span class="p">.</span><span class="n">getFuture</span><span class="p">())){</span>
+                <span class="n">r</span><span class="p">.</span><span class="n">send</span><span class="p">(</span> <span class="n">count</span> <span class="p">);</span> <span class="c1">// goes to client</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/flow.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

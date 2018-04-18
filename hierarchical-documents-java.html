@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Hierarchical Documents &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Multimaps" href="multimaps.html" />
+    <link rel="prev" title="Hierarchical Documents" href="hierarchical-documents.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Hierarchical Documents</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a><ul>
+<li><a class="reference internal" href="#indexing">Indexing</a></li>
+<li><a class="reference internal" href="#query-language">Query language</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="hierarchical-documents.html" title="Previous Chapter: Hierarchical Documents"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Hierarchical ...</span>
+    </a>
+  </li>
+  <li>
+    <a href="multimaps.html" title="Next Chapter: Multimaps"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Multimaps &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Hierarchical Documents</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a><ul>
+<li><a class="reference internal" href="#indexing">Indexing</a></li>
+<li><a class="reference internal" href="#query-language">Query language</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="hierarchical-documents">
+<h1>Hierarchical Documents</h1>
+<p><a class="reference internal" href="hierarchical-documents.html"><span class="doc">Python</span></a> <strong>Java</strong></p>
+<div class="section" id="goal">
+<h2>Goal</h2>
+<p>Create a representation for hierarchical <a class="reference external" href="http://en.wikipedia.org/wiki/Document-oriented_database">documents</a>.</p>
+</div>
+<div class="section" id="challenge">
+<h2>Challenge</h2>
+<p>Support efficient storage and retrieval of documents, both as a whole and by subdocuments specified by paths.</p>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation</h2>
+<p>A hierarchical document has a tree-like structure, with the document ID as the root. We&#8217;ll map the hierarchy to a list of tuples in which each tuple corresponds to a path from the root to a leaf. These tuples will form keys, so each leaf is indexed by the path leading to it.</p>
+</div>
+<div class="section" id="ordering">
+<h2>Ordering</h2>
+<p>Because each tuple represents a path from the document root to a leaf, the lexicographic ordering of tuples guarantees that adjacent paths will be stored in adjacent keys. Each tuple prefix will correspond to a subdocument that can be retrieved using a prefix range read. Likewise, a range read using the root as a prefix will retrieve the entire document.</p>
+</div>
+<div class="section" id="pattern">
+<h2>Pattern</h2>
+<p>A document will consist of a dictionary whose values may be simple data types (e.g., integers or strings), lists, or (nested) dictionaries. Each document will be stored under a unique ID. If a document ID has not already been supplied, we randomly generate one.</p>
+<p>We convert the document to a list of tuples representing each path from the root to a leaf. Each tuple is used to construct a composite key within a subspace. The document ID becomes the first element after the subspace prefix, followed by the remainder of the path. We store the leaf (the last element of the tuple) as the value, which enables storage of larger data sizes (see <a class="reference internal" href="data-modeling.html#data-modeling-performance-guidelines"><span class="std std-ref">Key and value sizes</span></a>).</p>
+<p>If we&#8217;re given a serialized JSON object to start with, we just deserialize it before converting it to tuples. To distinguish the list elements in the document (a.k.a. JSON arrays) from dictionary elements and preserve the order of the lists, we include the index of each list element before it in the tuple.</p>
+<p>We can retrieve any subdocument based on the partial path to its root. The partial path will just be a tuple that the query function uses as a key prefix for a range read. The retrieved data will be a list of tuples. The final step before returning the data is to convert it back to a document.</p>
+</div>
+<div class="section" id="extensions">
+<h2>Extensions</h2>
+<div class="section" id="indexing">
+<h3>Indexing</h3>
+<p>We could extend the document model to allow selective indexing of keys or values at specified locations with a document.</p>
+</div>
+<div class="section" id="query-language">
+<h3>Query language</h3>
+<p>We could extend the document to support more powerful query capabilities, either with query functions or a full query language. Either would be designed to take advantage of existing indexes.</p>
+</div>
+</div>
+<div class="section" id="code">
+<h2>Code</h2>
+<p>Here’s a basic implementation of the recipe.</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">java.util.ArrayList</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.util.HashMap</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.util.Map</span><span class="o">;</span>
+<span class="kn">import</span> <span class="nn">java.util.Map.Entry</span><span class="o">;</span>
+
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">MicroDoc</span> <span class="o">{</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">FDB</span> <span class="n">fdb</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Database</span> <span class="n">db</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Subspace</span> <span class="n">docSpace</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="kt">long</span> <span class="n">EMPTY_OBJECT</span> <span class="o">=</span> <span class="o">-</span><span class="mi">2</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="kt">long</span> <span class="n">EMPTY_ARRAY</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="o">;</span>
+
+    <span class="kd">static</span> <span class="o">{</span>
+        <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">510</span><span class="o">);</span>
+        <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
+        <span class="n">docSpace</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="s">&quot;D&quot;</span><span class="o">));</span>
+    <span class="o">}</span>
+
+    <span class="nd">@SuppressWarnings</span><span class="o">(</span><span class="s">&quot;unchecked&quot;</span><span class="o">)</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="nf">toTuplesSwitch</span><span class="o">(</span><span class="n">Object</span> <span class="n">o</span><span class="o">){</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">o</span> <span class="k">instanceof</span> <span class="n">ArrayList</span><span class="o">){</span>
+            <span class="k">return</span> <span class="n">toTuples</span><span class="o">((</span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;)</span> <span class="n">o</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="k">if</span><span class="o">(</span><span class="n">o</span> <span class="k">instanceof</span> <span class="n">Map</span><span class="o">){</span>
+            <span class="k">return</span> <span class="n">toTuples</span><span class="o">((</span><span class="n">Map</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">Object</span><span class="o">&gt;)</span> <span class="n">o</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+            <span class="k">return</span> <span class="n">toTuples</span><span class="o">(</span><span class="n">o</span><span class="o">);</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="nf">toTuples</span><span class="o">(</span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">item</span><span class="o">){</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">item</span><span class="o">.</span><span class="na">isEmpty</span><span class="o">()){</span>
+            <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">val</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+            <span class="n">val</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">EMPTY_ARRAY</span><span class="o">,</span> <span class="kc">null</span><span class="o">));</span>
+            <span class="k">return</span> <span class="n">val</span><span class="o">;</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+            <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">val</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+            <span class="k">for</span><span class="o">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="o">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">item</span><span class="o">.</span><span class="na">size</span><span class="o">();</span> <span class="n">i</span><span class="o">++){</span>
+                <span class="k">for</span><span class="o">(</span><span class="n">Tuple</span> <span class="n">sub</span> <span class="o">:</span> <span class="n">toTuplesSwitch</span><span class="o">(</span><span class="n">item</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">i</span><span class="o">))){</span>
+                    <span class="n">val</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">i</span><span class="o">).</span><span class="na">addAll</span><span class="o">(</span><span class="n">sub</span><span class="o">));</span>
+                <span class="o">}</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="n">val</span><span class="o">;</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="nf">toTuples</span><span class="o">(</span><span class="n">Map</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">item</span><span class="o">){</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">item</span><span class="o">.</span><span class="na">isEmpty</span><span class="o">()){</span>
+            <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">val</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+            <span class="n">val</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">EMPTY_OBJECT</span><span class="o">,</span> <span class="kc">null</span><span class="o">));</span>
+            <span class="k">return</span> <span class="n">val</span><span class="o">;</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+            <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">val</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+            <span class="k">for</span><span class="o">(</span><span class="n">Entry</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">e</span> <span class="o">:</span> <span class="n">item</span><span class="o">.</span><span class="na">entrySet</span><span class="o">()){</span>
+                <span class="k">for</span><span class="o">(</span><span class="n">Tuple</span> <span class="n">sub</span> <span class="o">:</span> <span class="n">toTuplesSwitch</span><span class="o">(</span><span class="n">e</span><span class="o">.</span><span class="na">getValue</span><span class="o">())){</span>
+                    <span class="n">val</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">e</span><span class="o">.</span><span class="na">getKey</span><span class="o">()).</span><span class="na">addAll</span><span class="o">(</span><span class="n">sub</span><span class="o">));</span>
+                <span class="o">}</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="n">val</span><span class="o">;</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="nf">toTuples</span><span class="o">(</span><span class="n">Object</span> <span class="n">item</span><span class="o">){</span>
+        <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">val</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+        <span class="n">val</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">item</span><span class="o">));</span>
+        <span class="k">return</span> <span class="n">val</span><span class="o">;</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="nf">getTruncated</span><span class="o">(</span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">vals</span><span class="o">){</span>
+        <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">list</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+        <span class="k">for</span><span class="o">(</span><span class="n">Tuple</span> <span class="n">val</span> <span class="o">:</span> <span class="n">vals</span><span class="o">){</span>
+            <span class="n">list</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">val</span><span class="o">.</span><span class="na">popFront</span><span class="o">());</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">list</span><span class="o">;</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">fromTuples</span><span class="o">(</span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">tuples</span><span class="o">){</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">tuples</span> <span class="o">==</span> <span class="kc">null</span><span class="o">){</span>
+            <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="o">}</span>
+
+        <span class="n">Tuple</span> <span class="n">first</span> <span class="o">=</span> <span class="n">tuples</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span> <span class="c1">// Determine kind of object from</span>
+                                     <span class="c1">// first tuple.</span>
+        <span class="k">if</span><span class="o">(</span><span class="n">first</span><span class="o">.</span><span class="na">size</span><span class="o">()</span> <span class="o">==</span> <span class="mi">1</span><span class="o">){</span>
+            <span class="k">return</span> <span class="n">first</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span> <span class="c1">// Primitive type.</span>
+        <span class="o">}</span>
+
+        <span class="k">if</span><span class="o">(</span><span class="n">first</span><span class="o">.</span><span class="na">equals</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">EMPTY_OBJECT</span><span class="o">,</span> <span class="kc">null</span><span class="o">))){</span>
+            <span class="k">return</span> <span class="k">new</span> <span class="n">HashMap</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">Object</span><span class="o">&gt;();</span> <span class="c1">// Empty map.</span>
+        <span class="o">}</span>
+
+        <span class="k">if</span><span class="o">(</span><span class="n">first</span><span class="o">.</span><span class="na">equals</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">EMPTY_ARRAY</span><span class="o">))){</span>
+            <span class="k">return</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;();</span> <span class="c1">// Empty list.</span>
+        <span class="o">}</span>
+
+        <span class="n">HashMap</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;&gt;</span> <span class="n">groups</span> <span class="o">=</span> <span class="k">new</span> <span class="n">HashMap</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;&gt;();</span>
+        <span class="k">for</span><span class="o">(</span><span class="n">Tuple</span> <span class="n">t</span> <span class="o">:</span> <span class="n">tuples</span><span class="o">){</span>
+            <span class="k">if</span><span class="o">(</span><span class="n">groups</span><span class="o">.</span><span class="na">containsKey</span><span class="o">(</span><span class="n">t</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">))){</span>
+                <span class="n">groups</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">t</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">)).</span><span class="na">add</span><span class="o">(</span><span class="n">t</span><span class="o">);</span>
+            <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">list</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+                <span class="n">list</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">t</span><span class="o">);</span>
+                <span class="n">groups</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="n">t</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">),</span><span class="n">list</span><span class="o">);</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+
+        <span class="k">if</span><span class="o">(</span><span class="n">first</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">).</span><span class="na">equals</span><span class="o">(</span><span class="mi">0</span><span class="n">l</span><span class="o">)){</span>
+            <span class="c1">// Array.</span>
+            <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">array</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">&gt;();</span>
+            <span class="k">for</span><span class="o">(</span><span class="n">Entry</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;&gt;</span> <span class="n">g</span> <span class="o">:</span> <span class="n">groups</span><span class="o">.</span><span class="na">entrySet</span><span class="o">()){</span>
+                <span class="n">array</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">fromTuples</span><span class="o">(</span><span class="n">getTruncated</span><span class="o">(</span><span class="n">g</span><span class="o">.</span><span class="na">getValue</span><span class="o">())));</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="n">array</span><span class="o">;</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+            <span class="c1">// Object.</span>
+            <span class="n">HashMap</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">map</span> <span class="o">=</span> <span class="k">new</span> <span class="n">HashMap</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">Object</span><span class="o">&gt;();</span>
+            <span class="k">for</span><span class="o">(</span><span class="n">Entry</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;&gt;</span> <span class="n">g</span> <span class="o">:</span> <span class="n">groups</span><span class="o">.</span><span class="na">entrySet</span><span class="o">()){</span>
+                <span class="n">map</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="n">g</span><span class="o">.</span><span class="na">getKey</span><span class="o">(),</span> <span class="n">fromTuples</span><span class="o">(</span><span class="n">getTruncated</span><span class="o">(</span><span class="n">g</span><span class="o">.</span><span class="na">getValue</span><span class="o">())));</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="n">map</span><span class="o">;</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">insertDoc</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">Map</span><span class="o">&lt;</span><span class="n">Object</span><span class="o">,</span><span class="n">Object</span><span class="o">&gt;</span> <span class="n">doc</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="k">if</span><span class="o">(!</span><span class="n">doc</span><span class="o">.</span><span class="na">containsKey</span><span class="o">(</span><span class="s">&quot;doc_id&quot;</span><span class="o">)){</span>
+                <span class="n">doc</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="s">&quot;doc_id&quot;</span><span class="o">,</span> <span class="n">getNewID</span><span class="o">(</span><span class="n">tr</span><span class="o">));</span>
+            <span class="o">}</span>
+            <span class="k">for</span><span class="o">(</span><span class="n">Tuple</span> <span class="n">t</span> <span class="o">:</span> <span class="n">toTuples</span><span class="o">(</span><span class="n">doc</span><span class="o">)){</span>
+                <span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">docSpace</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">doc</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="s">&quot;doc_id&quot;</span><span class="o">)).</span><span class="na">addAll</span><span class="o">(</span><span class="n">t</span><span class="o">.</span><span class="na">popBack</span><span class="o">())),</span>
+                        <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">t</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">t</span><span class="o">.</span><span class="na">size</span><span class="o">()</span> <span class="o">-</span> <span class="mi">1</span><span class="o">)).</span><span class="na">pack</span><span class="o">());</span>
+            <span class="o">}</span>
+            <span class="k">return</span> <span class="n">doc</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="s">&quot;doc_id&quot;</span><span class="o">);</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">getDoc</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">Object</span> <span class="n">ID</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">getDoc</span><span class="o">(</span><span class="n">tcx</span><span class="o">,</span> <span class="n">ID</span><span class="o">,</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">());</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">getDoc</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">Object</span> <span class="n">ID</span><span class="o">,</span> <span class="kd">final</span> <span class="n">Tuple</span> <span class="n">prefix</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="n">Future</span><span class="o">&lt;</span><span class="kt">byte</span><span class="o">[]&gt;</span> <span class="n">v</span> <span class="o">=</span> <span class="n">tr</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">docSpace</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">ID</span><span class="o">).</span><span class="na">addAll</span><span class="o">(</span><span class="n">prefix</span><span class="o">)));</span>
+            <span class="k">if</span><span class="o">(</span><span class="n">v</span><span class="o">.</span><span class="na">get</span><span class="o">()</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">){</span>
+                <span class="c1">// One single item.</span>
+                <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">vals</span> <span class="o">=</span> <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+                <span class="n">vals</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">prefix</span><span class="o">.</span><span class="na">addAll</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">fromBytes</span><span class="o">(</span><span class="n">v</span><span class="o">.</span><span class="na">get</span><span class="o">())));</span>
+                <span class="k">return</span> <span class="n">fromTuples</span><span class="o">(</span><span class="n">vals</span><span class="o">);</span>
+            <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                <span class="c1">// Multiple items.</span>
+                <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;</span> <span class="n">vals</span> <span class="o">=</span>  <span class="k">new</span> <span class="n">ArrayList</span><span class="o">&lt;</span><span class="n">Tuple</span><span class="o">&gt;();</span>
+                <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">docSpace</span><span class="o">.</span><span class="na">range</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">ID</span><span class="o">).</span><span class="na">addAll</span><span class="o">(</span><span class="n">prefix</span><span class="o">)))){</span>
+                    <span class="n">vals</span><span class="o">.</span><span class="na">add</span><span class="o">(</span><span class="n">docSpace</span><span class="o">.</span><span class="na">unpack</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getKey</span><span class="o">()).</span><span class="na">popFront</span><span class="o">().</span><span class="na">addAll</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">fromBytes</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getValue</span><span class="o">())));</span>
+                <span class="o">}</span>
+                <span class="k">return</span> <span class="n">fromTuples</span><span class="o">(</span><span class="n">vals</span><span class="o">);</span>
+            <span class="o">}</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kt">int</span> <span class="nf">getNewID</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="kt">boolean</span> <span class="n">found</span> <span class="o">=</span> <span class="kc">false</span><span class="o">;</span>
+            <span class="kt">int</span> <span class="n">newID</span><span class="o">;</span>
+            <span class="k">do</span> <span class="o">{</span>
+                <span class="n">newID</span> <span class="o">=</span> <span class="o">(</span><span class="kt">int</span><span class="o">)(</span><span class="n">Math</span><span class="o">.</span><span class="na">random</span><span class="o">()*</span><span class="mi">100000000</span><span class="o">);</span>
+                <span class="n">found</span> <span class="o">=</span> <span class="kc">true</span><span class="o">;</span>
+                <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">docSpace</span><span class="o">.</span><span class="na">range</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">newID</span><span class="o">)))){</span>
+                    <span class="c1">// If not empty, this is false.</span>
+                    <span class="n">found</span> <span class="o">=</span> <span class="kc">false</span><span class="o">;</span>
+                    <span class="k">break</span><span class="o">;</span>
+                <span class="o">}</span>
+            <span class="o">}</span> <span class="k">while</span><span class="o">(!</span><span class="n">found</span><span class="o">);</span>
+            <span class="k">return</span> <span class="n">newID</span><span class="o">;</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/hierarchical-documents-java.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

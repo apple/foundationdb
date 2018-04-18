@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Features &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Layer Concept" href="layer-concept.html" />
+    <link rel="prev" title="Engineering" href="engineering.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Features</a><ul>
+<li><a class="reference internal" href="#the-foundation">The Foundation</a><ul>
+<li><a class="reference internal" href="#scalable">Scalable</a></li>
+<li><a class="reference internal" href="#acid-transactions">ACID transactions</a></li>
+<li><a class="reference internal" href="#fault-tolerance">Fault tolerance</a></li>
+<li><a class="reference internal" href="#replicated-storage">Replicated Storage</a></li>
+<li><a class="reference internal" href="#ordered-key-value-api">Ordered Key-Value API</a></li>
+<li><a class="reference internal" href="#watches">Watches</a></li>
+<li><a class="reference internal" href="#atomic-operations">Atomic Operations</a></li>
+<li><a class="reference internal" href="#oltp-and-olap">OLTP and OLAP</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#performance">Performance</a><ul>
+<li><a class="reference internal" href="#low-predictable-latencies">Low, predictable latencies</a></li>
+<li><a class="reference internal" href="#load-balancing">Load balancing</a></li>
+<li><a class="reference internal" href="#bursting">Bursting</a></li>
+<li><a class="reference internal" href="#distributed-caching">Distributed Caching</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#concurrency">Concurrency</a><ul>
+<li><a class="reference internal" href="#non-blocking">Non-blocking</a></li>
+<li><a class="reference internal" href="#concurrent-connections">Concurrent Connections</a></li>
+<li><a class="reference internal" href="#interactive-transactions">Interactive Transactions</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#operations">Operations</a><ul>
+<li><a class="reference internal" href="#elastic">Elastic</a></li>
+<li><a class="reference internal" href="#datacenter-failover">Datacenter Failover</a></li>
+<li><a class="reference internal" href="#self-tuning">Self Tuning</a></li>
+<li><a class="reference internal" href="#deploy-anywhere">Deploy Anywhere</a></li>
+<li><a class="reference internal" href="#backup">Backup</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="engineering.html" title="Previous Chapter: Engineering"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Engineering</span>
+    </a>
+  </li>
+  <li>
+    <a href="layer-concept.html" title="Next Chapter: Layer Concept"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Layer Concept &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Features</a><ul>
+<li><a class="reference internal" href="#the-foundation">The Foundation</a><ul>
+<li><a class="reference internal" href="#scalable">Scalable</a></li>
+<li><a class="reference internal" href="#acid-transactions">ACID transactions</a></li>
+<li><a class="reference internal" href="#fault-tolerance">Fault tolerance</a></li>
+<li><a class="reference internal" href="#replicated-storage">Replicated Storage</a></li>
+<li><a class="reference internal" href="#ordered-key-value-api">Ordered Key-Value API</a></li>
+<li><a class="reference internal" href="#watches">Watches</a></li>
+<li><a class="reference internal" href="#atomic-operations">Atomic Operations</a></li>
+<li><a class="reference internal" href="#oltp-and-olap">OLTP and OLAP</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#performance">Performance</a><ul>
+<li><a class="reference internal" href="#low-predictable-latencies">Low, predictable latencies</a></li>
+<li><a class="reference internal" href="#load-balancing">Load balancing</a></li>
+<li><a class="reference internal" href="#bursting">Bursting</a></li>
+<li><a class="reference internal" href="#distributed-caching">Distributed Caching</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#concurrency">Concurrency</a><ul>
+<li><a class="reference internal" href="#non-blocking">Non-blocking</a></li>
+<li><a class="reference internal" href="#concurrent-connections">Concurrent Connections</a></li>
+<li><a class="reference internal" href="#interactive-transactions">Interactive Transactions</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#operations">Operations</a><ul>
+<li><a class="reference internal" href="#elastic">Elastic</a></li>
+<li><a class="reference internal" href="#datacenter-failover">Datacenter Failover</a></li>
+<li><a class="reference internal" href="#self-tuning">Self Tuning</a></li>
+<li><a class="reference internal" href="#deploy-anywhere">Deploy Anywhere</a></li>
+<li><a class="reference internal" href="#backup">Backup</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="features">
+<h1>Features</h1>
+<p>FoundationDB has an ordered transactional API with useful properties and strong guarantees. Features in the core are deliberately kept to a minimum; data models and other abilities are exposed <a class="reference internal" href="architecture.html"><span class="doc">via layers</span></a>.</p>
+<div class="section" id="the-foundation">
+<h2>The Foundation</h2>
+<div class="section" id="scalable">
+<h3>Scalable</h3>
+<p>FoundationDB adapts to efficiently support applications with diverse performance requirements. By using a shared-nothing distributed architecture, FoundationDB <em>scales out</em> by adding more machines to a cluster rather than just <em>scaling up</em> by increasing the capacity of a single machine. Best of all, the hard work of managing data redundancy, partitioning, caching, etc., is all handled automatically. Read more about our <a class="reference internal" href="scalability.html"><span class="doc">scalability</span></a>.</p>
+</div>
+<div class="section" id="acid-transactions">
+<h3>ACID transactions</h3>
+<p>All reads and writes in FoundationDB are accomplished using transactions. These transactions are fully ACID (Atomic, Consistent, Isolated, and Durable) and span multiple machines with high performance. FoundationDB&#8217;s isolation is the highest available; transactions appear to occur sequentially. FoundationDB&#8217;s durability is the strongest — all transactions are redundantly stored to disk before they are considered committed.</p>
+</div>
+<div class="section" id="fault-tolerance">
+<h3>Fault tolerance</h3>
+<p>A system designed to be distributed across many machines must be highly fault tolerant because the likelihood of hardware and network failures increases with the number of machines involved. FoundationDB has been designed and relentlessly tested to provide exceptionally high levels of fault tolerance. We&#8217;ve gone much further than designing for &#8220;no single point of failure&#8221;. FoundationDB has also been designed and tested to guarantee that all ACID properties are preserved, even under catastrophic failures. Read more about our <a class="reference internal" href="fault-tolerance.html"><span class="doc">fault tolerance</span></a>.</p>
+</div>
+<div class="section" id="replicated-storage">
+<h3>Replicated Storage</h3>
+<p>FoundationDB stores each piece of data on multiple servers. If a server containing one of the copies is lost, FoundationDB will automatically heal, finding a new location for the lost copy. For read operations, clients communicate directly to the servers with the replicas, requesting a specific version to ensure a consistent view of the data.</p>
+</div>
+<div class="section" id="ordered-key-value-api">
+<h3>Ordered Key-Value API</h3>
+<p>Simple can be powerful. FoundationDB uses an ordered key-value data model (and richer data models are exposed via <a class="reference internal" href="layer-concept.html"><span class="doc">layers</span></a>. Each &#8220;row&#8221; within the database consists of a key that is used to reference the row and a value which stores data associated with the key. No specific format for the keys or values is required; they are simply binary data. Because keys are kept in lexicographical (sorted) order, ranges of key-value pairs can be read efficiently.</p>
+</div>
+<div class="section" id="watches">
+<h3>Watches</h3>
+<p>Clients can create transactional watches on keys to ensure that they are notified if the value changes. After a watch is registered, FoundationDB efficiently pushes change notifications to clients without polling.</p>
+</div>
+<div class="section" id="atomic-operations">
+<h3>Atomic Operations</h3>
+<p>FoundationDB includes support for specific &#8220;atomic operations&#8221; (e.g. Add) within a transaction to manipulate the value of a key without requiring the client to actually read the value. This makes these operations low-latency and enables a variety of advanced data structures to be implemented more efficiently as layers.</p>
+</div>
+<div class="section" id="oltp-and-olap">
+<h3>OLTP and OLAP</h3>
+<p>FoundationDB is optimized for online transaction processing (OLTP) workloads consisting of many small reads and writes. However, because it is an <em>ordered</em> key-value store, FoundationDB can use range reads to efficiently scan large swaths of data. Thus, FoundationDB can be effectively used for online analytical processing (OLAP) workloads as well.</p>
+</div>
+</div>
+<div class="section" id="performance">
+<h2>Performance</h2>
+<div class="section" id="low-predictable-latencies">
+<h3>Low, predictable latencies</h3>
+<p>FoundationDB provides predictable throughput and low-latency random IO, even under workloads with unusual or erratically changing access patterns. Further, both FoundationDB&#8217;s API and implementation have been designed to make it possible to understand the costs of the operations being executed. For example, clearing any range, even the entire database, is a fast operation.
+Read more about <a class="reference internal" href="performance.html"><span class="doc">performance</span></a>.</p>
+</div>
+<div class="section" id="load-balancing">
+<h3>Load balancing</h3>
+<p>FoundationDB achieves full utilization of a cluster under variable real-world workloads by using two major techniques. First, individual chunks of data are continuously moved from machine to machine to balance the load minute-to-minute. Second, on a faster time scale, individual requests can be redirected from a busy machine to a less-busy peer that also has a copy of the data. These techniques work together to optimize both throughput and latency.</p>
+</div>
+<div class="section" id="bursting">
+<h3>Bursting</h3>
+<p>By deferring background work for later, FoundationDB can provide higher burst write speeds, often up to triple the steady-state speed. This ability to efficiently &#8220;absorb&#8221; work can last several minutes. The capability to buffer bursts of work allows FoundationDB to be provisioned without worrying about instantaneous load peaks, and to keep latencies low even when pushing &#8220;above 100%&#8221; load.</p>
+</div>
+<div class="section" id="distributed-caching">
+<h3>Distributed Caching</h3>
+<p>When your database scales out, you don&#8217;t need a separate distributed caching layer: you already have one. FoundationDB uses the aggregate memory of the entire cluster to cache commonly accessed data. Unlike a caching tier such as memcached, FoundationDB&#8217;s cache is completely synchronized to the database and provides all ACID guarantees.</p>
+</div>
+</div>
+<div class="section" id="concurrency">
+<h2>Concurrency</h2>
+<div class="section" id="non-blocking">
+<h3>Non-blocking</h3>
+<p>FoundationDB uses multiversion concurrency control to provide transactionally isolated reads without locking data or blocking writes. Optimistic concurrency control ensures that deadlocks are impossible and that slow or failing clients cannot interfere with the operation of the database.</p>
+</div>
+<div class="section" id="concurrent-connections">
+<h3>Concurrent Connections</h3>
+<p>FoundationDB is able to handle large numbers of concurrent client connections. Because it uses a threadless communications and concurrency model, FoundationDB does not have to create a thread per connection. This allows full performance even with hundreds of thousands of in-flight requests.</p>
+</div>
+<div class="section" id="interactive-transactions">
+<h3>Interactive Transactions</h3>
+<p>FoundationDB transactions are true interactive sessions, unlike distributed databases that require stored procedures. This means that client code can make an iterative series of reads and writes over the network to execute complex transactions.</p>
+</div>
+</div>
+<div class="section" id="operations">
+<h2>Operations</h2>
+<div class="section" id="elastic">
+<h3>Elastic</h3>
+<p>A FoundationDB database can start on a single machine and be expanded to a cluster as load and circumstances require. Adding a machine is as easy as running another FoundationDB process, even during database operation and without any extra administration. Data is continuously re-partitioned in the background; no manual data distribution or sharding is required.</p>
+</div>
+<div class="section" id="datacenter-failover">
+<h3>Datacenter Failover</h3>
+<p>FoundationDB can be configured to run multiple geographically diverse datacenters through our Multi DC mode. Each piece of data is replicated into three data centers, and clients can read data from their local data center at low latencies. In the event of a data center failure, the two remaining data centers will continue accepting writes, allowing for minimal downtime.</p>
+</div>
+<div class="section" id="self-tuning">
+<h3>Self Tuning</h3>
+<p>FoundationDB has been designed so that many functions (such as data distribution, fault tolerance, incorporation of new nodes, performance tuning, etc.) are done automatically and require minimal management. Management tools allow configuration of parameters like replication policy, cluster topology, and data directories. A status monitoring tool lets you monitor cluster health and utilization of the cluster&#8217;s physical resources.</p>
+</div>
+<div class="section" id="deploy-anywhere">
+<h3>Deploy Anywhere</h3>
+<p>Because it can scale linearly by adding new machines, FoundationDB is an ideal database for deployment in public or private cloud environments. For best performance in cloud environments with limited I/O, FoundationDB can be configured to use a durable in-memory storage engine instead of its default SSD-optimized storage engine.</p>
+</div>
+<div class="section" id="backup">
+<h3>Backup</h3>
+<p>An integrated backup system provides a true &#8220;moment-in-time&#8221; snapshot backup of the entire distributed database stored to a remote file system on a schedule. Although FoundationDB itself is fault tolerant, this capability is useful for recovering from disasters or unintentional modification of the database.</p>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/features.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Ruby API &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="C API" href="api-c.html" />
+    <link rel="prev" title="Python API" href="api-python.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Ruby API</a><ul>
+<li><a class="reference internal" href="#installation">Installation</a></li>
+<li><a class="reference internal" href="#api-versioning">API versioning</a></li>
+<li><a class="reference internal" href="#opening-a-database">Opening a database</a></li>
+<li><a class="reference internal" href="#cluster-objects">Cluster objects</a></li>
+<li><a class="reference internal" href="#keys-and-values">Keys and values</a><ul>
+<li><a class="reference internal" href="#as-foundationdb-key-and-as-foundationdb-value"><code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#keyvalue-objects">KeyValue objects</a></li>
+<li><a class="reference internal" href="#key-selectors">Key selectors</a></li>
+<li><a class="reference internal" href="#database-objects">Database objects</a><ul>
+<li><a class="reference internal" href="#database-options">Database options</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#transaction-objects">Transaction objects</a><ul>
+<li><a class="reference internal" href="#attributes">Attributes</a></li>
+<li><a class="reference internal" href="#reading-data">Reading data</a></li>
+<li><a class="reference internal" href="#snapshot-reads">Snapshot reads</a></li>
+<li><a class="reference internal" href="#writing-data">Writing data</a></li>
+<li><a class="reference internal" href="#atomic-operations">Atomic operations</a></li>
+<li><a class="reference internal" href="#committing">Committing</a></li>
+<li><a class="reference internal" href="#watches">Watches</a></li>
+<li><a class="reference internal" href="#conflict-ranges">Conflict ranges</a></li>
+<li><a class="reference internal" href="#versions">Versions</a></li>
+<li><a class="reference internal" href="#transaction-options">Transaction options</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#the-transact-method">The transact method</a></li>
+<li><a class="reference internal" href="#future-objects">Future objects</a></li>
+<li><a class="reference internal" href="#streaming-modes">Streaming modes</a></li>
+<li><a class="reference internal" href="#errors">Errors</a></li>
+<li><a class="reference internal" href="#tuple-layer">Tuple layer</a></li>
+<li><a class="reference internal" href="#subspaces">Subspaces</a></li>
+<li><a class="reference internal" href="#directories">Directories</a><ul>
+<li><a class="reference internal" href="#directorysubspace">DirectorySubspace</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#locality-information">Locality information</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="api-python.html" title="Previous Chapter: Python API"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Python API</span>
+    </a>
+  </li>
+  <li>
+    <a href="api-c.html" title="Next Chapter: C API"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">C API &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Ruby API</a><ul>
+<li><a class="reference internal" href="#installation">Installation</a></li>
+<li><a class="reference internal" href="#api-versioning">API versioning</a></li>
+<li><a class="reference internal" href="#opening-a-database">Opening a database</a></li>
+<li><a class="reference internal" href="#cluster-objects">Cluster objects</a></li>
+<li><a class="reference internal" href="#keys-and-values">Keys and values</a><ul>
+<li><a class="reference internal" href="#as-foundationdb-key-and-as-foundationdb-value"><code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#keyvalue-objects">KeyValue objects</a></li>
+<li><a class="reference internal" href="#key-selectors">Key selectors</a></li>
+<li><a class="reference internal" href="#database-objects">Database objects</a><ul>
+<li><a class="reference internal" href="#database-options">Database options</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#transaction-objects">Transaction objects</a><ul>
+<li><a class="reference internal" href="#attributes">Attributes</a></li>
+<li><a class="reference internal" href="#reading-data">Reading data</a></li>
+<li><a class="reference internal" href="#snapshot-reads">Snapshot reads</a></li>
+<li><a class="reference internal" href="#writing-data">Writing data</a></li>
+<li><a class="reference internal" href="#atomic-operations">Atomic operations</a></li>
+<li><a class="reference internal" href="#committing">Committing</a></li>
+<li><a class="reference internal" href="#watches">Watches</a></li>
+<li><a class="reference internal" href="#conflict-ranges">Conflict ranges</a></li>
+<li><a class="reference internal" href="#versions">Versions</a></li>
+<li><a class="reference internal" href="#transaction-options">Transaction options</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#the-transact-method">The transact method</a></li>
+<li><a class="reference internal" href="#future-objects">Future objects</a></li>
+<li><a class="reference internal" href="#streaming-modes">Streaming modes</a></li>
+<li><a class="reference internal" href="#errors">Errors</a></li>
+<li><a class="reference internal" href="#tuple-layer">Tuple layer</a></li>
+<li><a class="reference internal" href="#subspaces">Subspaces</a></li>
+<li><a class="reference internal" href="#directories">Directories</a><ul>
+<li><a class="reference internal" href="#directorysubspace">DirectorySubspace</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#locality-information">Locality information</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="ruby-api">
+<h1>Ruby API</h1>
+<div class="section" id="installation">
+<h2>Installation</h2>
+<p>The FoundationDB Ruby API is distributed in our <a class="reference internal" href="downloads.html"><span class="doc">Downloads</span></a>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">For the language binding to function, FoundationDB client binaries whose version is at least as recent
+must be installed. If you upgrade a language binding to a new version, you may need to upgrade the FoundationDB client binaries as well. See <a class="reference internal" href="api-general.html#installing-client-binaries"><span class="std std-ref">Installing FoundationDB client binaries</span></a>.</p>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">If you have a project with automatic dependency installation and have expressed a dependency on foundationdb, it may automatically install the lastest version of the language binding when you deploy your project to a new machine. If you have not also upgraded the Foundation client binary, an unplanned upgrade of the language binding may encounter an incompatibility. You should therefore configure any project dependency on foundationdb in coordination with your overall upgrade strategy.</p>
+</div>
+</div>
+<div class="section" id="api-versioning">
+<h2>API versioning</h2>
+<p>When you require the <code class="docutils literal"><span class="pre">FDB</span></code> gem, it exposes only one useful method:</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">You must call <code class="docutils literal"><span class="pre">FDB.api_version(...)</span></code> before using any other part of the API.  Once you have done so, the rest of the API will become available in the <code class="docutils literal"><span class="pre">FDB</span></code> module.</p>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">FoundationDB encapsulates multiple versions of its interface by requiring the client to explicitly specify the version of the API it uses. The purpose of this design is to allow you to upgrade the server, client libraries, or bindings without having to modify client code. The client libraries support all previous versions of the API. The API version specified by the client is used to control the behavior of the binding. You can therefore upgrade to more recent packages (and thus receive various improvements) without having to change your code.</p>
+</div>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
+</div>
+<p>For API changes between version 14 and 510 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
+</div>
+<div class="section" id="opening-a-database">
+<h2>Opening a database</h2>
+<p>After requiring the <code class="docutils literal"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a href="#id49"><span class="problematic" id="id50">:class:`Database`</span></a>. The simplest way of doing this is using <a href="#id51"><span class="problematic" id="id52">:func:`open`</span></a>:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="nb">require</span> <span class="s1">&#39;fdb&#39;</span>
+<span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">510</span>
+<span class="n">db</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="cluster-objects">
+<h2>Cluster objects</h2>
+</div>
+<div class="cluster section" id="keys-and-values">
+<span id="api-ruby-keys"></span><h2>Keys and values</h2>
+<p>Keys and values in FoundationDB are simple byte strings.</p>
+<p>To encode other data types, see <a class="reference internal" href="data-modeling.html#encoding-data-types"><span class="std std-ref">Encoding data types</span></a> and the <a class="reference internal" href="#api-ruby-tuple-layer"><span class="std std-ref">tuple layer</span></a>.</p>
+<div class="section" id="as-foundationdb-key-and-as-foundationdb-value">
+<h3><code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code></h3>
+<p>In some cases, you may have objects that are used to <em>represent</em> specific keys or values (for example, see <a href="#id137"><span class="problematic" id="id138">|subspace|</span></a>). As a convenience, the language binding API can work seamlessly with such objects if they implement the <a href="#id139"><span class="problematic" id="id140">|as-foundationdb-key|</span></a> or <a href="#id141"><span class="problematic" id="id142">|as-foundationdb-value|</span></a> methods, respectively. API methods that accept a key will alternately accept an object that implements the <a href="#id143"><span class="problematic" id="id144">|as-foundationdb-key|</span></a> method. Likewise, API methods accepting a value will also accept an object that implements the <a href="#id145"><span class="problematic" id="id146">|as-foundationdb-value|</span></a> method.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last"><a href="#id147"><span class="problematic" id="id148">|as-foundationdb-key|</span></a> and <a href="#id149"><span class="problematic" id="id150">|as-foundationdb-value|</span></a> are not intended to implement serialization protocols for object storage. Use these functions only when your object represents a specific key or value.</p>
+</div>
+</div>
+</div>
+<div class="section" id="keyvalue-objects">
+<h2>KeyValue objects</h2>
+<p class="keyvalue">Represents a single key-value pair in the database. This is a simple value type; mutating it won&#8217;t affect your <a href="#id53"><span class="problematic" id="id54">:class:`Transaction`</span></a> or <a href="#id55"><span class="problematic" id="id56">:class:`Database`</span></a>.</p>
+</div>
+<div class="section" id="key-selectors">
+<h2>Key selectors</h2>
+<p>FoundationDB&#8217;s lexicographically ordered data model permits finding keys based on their order (for example, finding the first key in the database greater than a given key). Key selectors represent a description of a key in the database that could be resolved to an actual key by <a href="#id153"><span class="problematic" id="id154">|get-key-func|</span></a> or used directly as the beginning or end of a range in <a href="#id155"><span class="problematic" id="id156">|get-range-func|</span></a>.</p>
+<p>For more about how key selectors work, see <a class="reference internal" href="developer-guide.html#key-selectors"><span class="std std-ref">Key selectors</span></a>.</p>
+<p class="keyselector-key or-equal offset">Creates a key selector with the given reference key, equality flag, and offset. It is usually more convenient to obtain a key selector with one of the following methods:</p>
+<blockquote class="keyselector-key or-equal offset">
+<div></div></blockquote>
+</div>
+<div class="section" id="database-objects">
+<h2>Database objects</h2>
+<p class="database">A <code class="docutils literal"><span class="pre">Database</span></code> represents a FoundationDB database &#8212; a mutable, lexicographically ordered mapping from binary keys to binary values. Although <code class="docutils literal"><span class="pre">Database</span></code> provides convenience methods for reading and writing, modifications to a database are usually via transactions, which are usually created and committed automatically by <a href="#id151"><span class="problematic" id="id152">|database-auto|</span></a>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The convenience methods provided by <code class="docutils literal"><span class="pre">Database</span></code> have the same signature as the corresponding methods of <code class="docutils literal"><span class="pre">Transaction</span></code>. However, most of the <code class="docutils literal"><span class="pre">Database</span></code> methods are fully synchronous. (An exception is the methods for watches.) As a result, the <code class="docutils literal"><span class="pre">Database</span></code> methods do not support the use of <a class="reference internal" href="developer-guide.html#developer-guide-programming-with-futures"><span class="std std-ref">implicit parallelism with futures</span></a>.</p>
+</div>
+<div class="section" id="database-options">
+<h3>Database options</h3>
+<p>Database options alter the behavior of FoundationDB databases.</p>
+</div>
+</div>
+<div class="section" id="transaction-objects">
+<h2>Transaction objects</h2>
+<p class="transaction">A <code class="docutils literal"><span class="pre">Transaction</span></code> object represents a FoundationDB database transaction.  All operations on FoundationDB take place, explicitly or implicitly, through a <code class="docutils literal"><span class="pre">Transaction</span></code>.</p>
+<p>In FoundationDB, a transaction is a mutable snapshot of a database. All read and write operations on a transaction see and modify an otherwise-unchanging version of the database and only change the underlying database if and when the transaction is committed. Read operations do see the effects of previous write operations on the same transaction. Committing a transaction usually succeeds in the absence of <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflicts</span></a>.</p>
+<p>Transactions group operations into a unit with the properties of <em>atomicity</em>, <em>isolation</em>, and <em>durability</em>. Transactions also provide the ability to maintain an application&#8217;s invariants or integrity constraints, supporting the property of <em>consistency</em>. Together these properties are known as <a class="reference internal" href="developer-guide.html#acid"><span class="std std-ref">ACID</span></a>.</p>
+<p>Transactions are also causally consistent: once a transaction has been successfully committed, all subsequently created transactions will see the modifications made by it.</p>
+<p>The most convenient way to create and use transactions is using the <a href="#id57"><span class="problematic" id="id58">:meth:`Database.transact`</span></a> method.</p>
+<p>Keys and values in FoundationDB are byte strings.  FoundationDB will accept Ruby strings with any encoding, but will always return strings with <code class="docutils literal"><span class="pre">ASCII-8BIT</span></code> encoding (also known as <code class="docutils literal"><span class="pre">BINARY</span></code>).  To encode other data types, see the <a href="#id59"><span class="problematic" id="id60">:mod:`FDB::Tuple`</span></a> module and <a class="reference internal" href="data-modeling.html#encoding-data-types"><span class="std std-ref">Encoding data types</span></a>.</p>
+<div class="section" id="attributes">
+<h3>Attributes</h3>
+</div>
+<div class="section" id="reading-data">
+<h3>Reading data</h3>
+</div>
+<div class="section" id="snapshot-reads">
+<h3>Snapshot reads</h3>
+</div>
+<div class="section" id="writing-data">
+<h3>Writing data</h3>
+</div>
+<div class="section" id="atomic-operations">
+<span id="api-ruby-transaction-atomic-operations"></span><h3>Atomic operations</h3>
+<p>An atomic operation is a single database command that carries out several logical steps: reading the value of a key, performing a transformation on that value, and writing the result. Different atomic operations perform different transformations. Like other database operations, an atomic operation is used within a transaction; however, its use within a transaction will not cause the transaction to conflict.</p>
+<p>Atomic operations do not expose the current value of the key to the client but simply send the database the transformation to apply. In regard to conflict checking, an atomic operation is equivalent to a write without a read. It can only cause <em>other</em> transactions performing reads of the key to conflict.</p>
+<p>By combining these logical steps into a single, read-free operation, FoundationDB can guarantee that the transaction will not conflict due to the operation. This makes atomic operations ideal for operating on keys that are frequently modified. A common example is the use of a key-value pair as a counter.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">If a transaction uses both an atomic operation and a serializable read on the same key, the benefits of using the atomic operation (for both conflict checking and performance) are lost.</p>
+</div>
+<p>In each of the methods below, <code class="docutils literal"><span class="pre">param</span></code> should be a string appropriately packed to represent the desired value. For example:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="c1"># wrong</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s1">&#39;key&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+<span class="c1"># right</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s1">&#39;key&#39;</span><span class="p">,</span> <span class="o">[</span><span class="mi">1</span><span class="o">].</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;q&lt;&#39;</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+<div class="section" id="committing">
+<h3>Committing</h3>
+</div>
+<div class="section" id="watches">
+<h3>Watches</h3>
+</div>
+<div class="section" id="conflict-ranges">
+<h3>Conflict ranges</h3>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Most applications will use the serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.</p>
+</div>
+<p>The following make it possible to add <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflict ranges</span></a> to a transaction.</p>
+</div>
+<div class="section" id="versions">
+<h3>Versions</h3>
+<p>Most applications should use the read version that FoundationDB determines automatically during the transaction&#8217;s first read, and ignore all of these methods.</p>
+</div>
+<div class="section" id="transaction-options">
+<h3>Transaction options</h3>
+<p>Transaction options alter the behavior of FoundationDB transactions. FoundationDB defaults to extremely safe transaction behavior, and we have worked hard to make the performance excellent with the default setting, so you should not often need to use transaction options.</p>
+</div>
+</div>
+<div class="section" id="the-transact-method">
+<span id="transact"></span><h2>The transact method</h2>
+<p>When performing a database transaction, any read operation, as well as the commit itself, may fail with one of a number of errors. If the error is a retryable error, the transaction needs to be restarted from the beginning. Committing a transaction is also an asynchronous operation, and the returned <a href="#id63"><span class="problematic" id="id64">:class:`FutureNil`</span></a> object needs to be waited on to ensure that no errors occurred.</p>
+<p>The methods <a href="#id65"><span class="problematic" id="id66">:meth:`Database.transact`</span></a> and <a href="#id67"><span class="problematic" id="id68">:meth:`Transaction.transact`</span></a> are convenient wrappers that allow much of this complexity to be handled automatically. A call like</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
+    <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;A&#39;</span>
+    <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;b&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;B&#39;</span>
+<span class="k">end</span>
+</pre></div>
+</div>
+<p>is equivalent to</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">tr</span> <span class="o">=</span> <span class="n">db</span><span class="o">.</span><span class="n">create_transaction</span>
+<span class="n">committed</span> <span class="o">=</span> <span class="kp">false</span>
+<span class="k">while</span> <span class="o">!</span><span class="n">committed</span>
+    <span class="k">begin</span>
+        <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;A&#39;</span>
+        <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;b&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;B&#39;</span>
+        <span class="n">tr</span><span class="o">.</span><span class="n">commit</span><span class="o">.</span><span class="n">wait</span>
+        <span class="n">committed</span> <span class="o">=</span> <span class="kp">true</span>
+    <span class="k">rescue</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Error</span> <span class="o">=&gt;</span> <span class="n">e</span>
+        <span class="n">tr</span><span class="o">.</span><span class="n">on_error</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="o">.</span><span class="n">wait</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+</pre></div>
+</div>
+<p>The first form is considerably easier to read, and ensures that the transaction is correctly committed (and retried, when necessary).</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Be careful when using control flow constructs within the block passed to <a href="#id69"><span class="problematic" id="id70">:meth:`transact`</span></a>. <code class="docutils literal"><span class="pre">return</span></code> or <code class="docutils literal"><span class="pre">break</span></code> will exit the retry loop <em>without committing</em> the transaction. Use <code class="docutils literal"><span class="pre">next</span></code> to exit the block and commit the transaction.</p>
+</div>
+<p>The <a href="#id71"><span class="problematic" id="id72">:meth:`Transaction.transact`</span></a> method, which logically does nothing, makes it easy to write functions that operate on either a <a href="#id73"><span class="problematic" id="id74">:class:`Database`</span></a> or <a href="#id75"><span class="problematic" id="id76">:class:`Transaction`</span></a>. Consider the following method:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">increment</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
+    <span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
+        <span class="n">tr</span><span class="o">[</span><span class="n">key</span><span class="o">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">tr</span><span class="o">[</span><span class="n">key</span><span class="o">].</span><span class="n">to_i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+</pre></div>
+</div>
+<p>This method can be called with a <a href="#id77"><span class="problematic" id="id78">:class:`Database`</span></a>, and it will do its job atomically:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">increment</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="s1">&#39;number&#39;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>It can also be called by another transactional method with a transaction:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">increment_both</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span> <span class="n">key1</span><span class="p">,</span> <span class="n">key2</span><span class="p">)</span>
+    <span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
+        <span class="n">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key1</span><span class="p">)</span>
+        <span class="n">increment</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">key2</span><span class="p">)</span>
+    <span class="k">end</span>
+<span class="k">end</span>
+</pre></div>
+</div>
+<p>In the second case, <code class="docutils literal"><span class="pre">increment</span></code> will use provided transaction and will not commit it or retry errors, since that is the responsibility of its caller, <code class="docutils literal"><span class="pre">increment_both</span></code>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">In some failure scenarios, it is possible that your transaction will be executed twice. See <a class="reference internal" href="developer-guide.html#developer-guide-unknown-results"><span class="std std-ref">Transactions with unknown results</span></a> for more information.</p>
+</div>
+</div>
+<div class="section" id="future-objects">
+<span id="api-ruby-future"></span><h2>Future objects</h2>
+<p>Many FoundationDB API functions return &#8220;future&#8221; objects. A brief overview of futures is included in the <a class="reference internal" href="class-scheduling.html"><span class="doc">class scheduling tutorial</span></a>. Most future objects behave just like a normal object, but block when you use them for the first time if the asynchronous function which returned the future has not yet completed its action. A future object is considered ready when either a value is available, or when an error has occurred.</p>
+<p id="api-ruby-block">When a future object &#8220;blocks&#8221;, the ruby thread is blocked, but the global interpreter lock is released.</p>
+<p>When used in a conditional expression, a future object will evaluate to true, even if its value is nil. To test for nil, you must explicitly use the nil?() method:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">].</span><span class="n">nil?</span>
+</pre></div>
+</div>
+<p>All future objects are a subclass of the <a href="#id79"><span class="problematic" id="id80">:class:`Future`</span></a> type.</p>
+<p>Asynchronous methods return one of the following subclasses of <a href="#id81"><span class="problematic" id="id82">:class:`Future`</span></a>:</p>
+<p class="key value">Both types are future <a href="#id83"><span class="problematic" id="id84">:class:`String`</span></a> objects. Objects of these types respond to the same methods as objects of type <a href="#id85"><span class="problematic" id="id86">:class:`String`</span></a>, and may be passed to any method that expects a <a href="#id87"><span class="problematic" id="id88">:class:`String`</span></a>.</p>
+<p class="key">An implementation quirk of <a href="#id89"><span class="problematic" id="id90">:class:`Value`</span></a> is that it will never evaluate to <code class="docutils literal"><span class="pre">false</span></code>, even if its value is <code class="docutils literal"><span class="pre">nil</span></code>. It is important to use <code class="docutils literal"><span class="pre">if</span> <span class="pre">value.nil?</span></code> rather than <code class="docutils literal"><span class="pre">if</span> <span class="pre">~value</span></code> when checking to see if a key was not present in the database.</p>
+<p class="version">This type is a future <a href="#id91"><span class="problematic" id="id92">:class:`Integer`</span></a> object. Objects of this type respond to the same methods as objects of type <a href="#id93"><span class="problematic" id="id94">:class:`Integer`</span></a>, and may be passed to any method that expects a <a href="#id95"><span class="problematic" id="id96">:class:`Integer`</span></a>.</p>
+<p class="futurearray">This type is a future <a href="#id97"><span class="problematic" id="id98">:class:`Array`</span></a> object. Objects of this type respond to the same methods as objects of type <a href="#id99"><span class="problematic" id="id100">:class:`Array`</span></a>, and may be passed to any method that expects a <a href="#id101"><span class="problematic" id="id102">:class:`Array`</span></a>.</p>
+<p class="futurenil">This type is a future returned from asynchronous methods that logically have no return value.</p>
+</div>
+<div class="section" id="streaming-modes">
+<span id="ruby-streaming-mode"></span><h2>Streaming modes</h2>
+<p>When using <a href="#id161"><span class="problematic" id="id162">|get-range-func|</span></a> and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn&#8217;t necessarily mean that the client will consume all of the data in the range - sometimes the client doesn&#8217;t know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.</p>
+<p>Streaming modes permit the API client to customize this performance tradeoff by providing extra information about how the iterator will be used.</p>
+<p>The following streaming modes are available:</p>
+</div>
+<div class="section" id="errors">
+<h2>Errors</h2>
+<p>Errors in the FoundationDB API are raised as exceptions of type <a href="#id103"><span class="problematic" id="id104">:class:`FDB::Error`</span></a>. These errors may be displayed for diagnostic purposes, but generally should be passed to <a href="#id105"><span class="problematic" id="id106">:meth:`Transaction.on_error`</span></a>. When using <a href="#id107"><span class="problematic" id="id108">:meth:`Database.transact`</span></a>, appropriate errors will be retried automatically.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">You should only use the <a href="#id109"><span class="problematic" id="id110">:attr:`code`</span></a> attribute for programmatic comparisons, as the description of the error may change at any time. Whenever possible, use the <a href="#id111"><span class="problematic" id="id112">:meth:`Transaction.on_error`</span></a> method to handle <a href="#id113"><span class="problematic" id="id114">:class:`FDB::Error`</span></a> exceptions.</p>
+</div>
+</div>
+<div class="section" id="tuple-layer">
+<span id="api-ruby-tuple-layer"></span><h2>Tuple layer</h2>
+<p>The FoundationDB API comes with a built-in layer for encoding tuples into keys usable by FoundationDB. The encoded key maintains the same sort order as the original tuple: sorted first by the first element, then by the second element, etc. This makes the tuple layer ideal for building a variety of higher-level data models.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">For general guidance on tuple usage, see the discussion in the document on <a class="reference internal" href="data-modeling.html#data-modeling-tuples"><span class="std std-ref">Data Modeling</span></a>.</p>
+</div>
+<p>In the FoundationDB Ruby API, a tuple is an <a href="#id115"><span class="problematic" id="id116">:class:`Enumerable`</span></a> of elements of the following data types:</p>
+<table border="1" class="docutils">
+<colgroup>
+<col width="12%" />
+<col width="44%" />
+<col width="44%" />
+</colgroup>
+<thead valign="bottom">
+<tr class="row-odd"><th class="head">Type</th>
+<th class="head">Legal Values</th>
+<th class="head">Canonical Value</th>
+</tr>
+</thead>
+<tbody valign="top">
+<tr class="row-even"><td>Null value</td>
+<td><code class="docutils literal"><span class="pre">nil</span></code></td>
+<td><code class="docutils literal"><span class="pre">nil</span></code></td>
+</tr>
+<tr class="row-odd"><td>Byte string</td>
+<td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">String</span> <span class="pre">==</span> <span class="pre">true</span></code> and <code class="docutils literal"><span class="pre">v.encoding</span></code> is
+either <code class="docutils literal"><span class="pre">Encoding::ASCII_8BIT</span></code> (aka <code class="docutils literal"><span class="pre">Encoding::BINARY</span></code>) or
+<code class="docutils literal"><span class="pre">Encoding::US_ASCII</span></code> (aka <code class="docutils literal"><span class="pre">Encoding::ASCII</span></code>)</td>
+<td><code class="docutils literal"><span class="pre">String</span></code> with encoding <code class="docutils literal"><span class="pre">Encoding::ASCII_8BIT</span></code></td>
+</tr>
+<tr class="row-even"><td>Unicode string</td>
+<td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">String</span> <span class="pre">==</span> <span class="pre">true</span></code> and <code class="docutils literal"><span class="pre">v.encoding</span></code> is
+<code class="docutils literal"><span class="pre">Encoding::UTF_8</span></code></td>
+<td><code class="docutils literal"><span class="pre">String</span></code> with encoding <code class="docutils literal"><span class="pre">Encoding::UTF_8</span></code></td>
+</tr>
+<tr class="row-odd"><td>64-bit signed integer</td>
+<td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">Integer</span> <span class="pre">==</span> <span class="pre">true</span></code> and <code class="docutils literal"><span class="pre">-2**64+1</span> <span class="pre">&lt;=</span> <span class="pre">v</span> <span class="pre">&lt;=</span>
+<span class="pre">2**64-1</span></code></td>
+<td><code class="docutils literal"><span class="pre">Fixnum</span></code> or <code class="docutils literal"><span class="pre">Bignum</span></code> (depending on the magnitude of the value)</td>
+</tr>
+<tr class="row-even"><td>Floating point number
+(single-precision)</td>
+<td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">FDB::Tuple::SingleFloat</span></code> where
+<code class="docutils literal"><span class="pre">v.value.kind_of?</span> <span class="pre">Float</span></code> and <code class="docutils literal"><span class="pre">v.value</span></code> fits inside an IEEE 754 32-bit
+floating-point number.</td>
+<td><a href="#id117"><span class="problematic" id="id118">:class:`FDB::Tuple::SingleFloat`</span></a></td>
+</tr>
+<tr class="row-odd"><td>Floating point number
+(double-precision)</td>
+<td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">Float</span></code></td>
+<td><code class="docutils literal"><span class="pre">Float</span></code></td>
+</tr>
+<tr class="row-even"><td>Boolean</td>
+<td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">Boolean</span></code></td>
+<td><code class="docutils literal"><span class="pre">Boolean</span></code></td>
+</tr>
+<tr class="row-odd"><td>UUID</td>
+<td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">FDB::Tuple::UUID</span></code> where
+<code class="docutils literal"><span class="pre">v.data.kind_of?</span> <span class="pre">String</span></code> and <code class="docutils literal"><span class="pre">v.data.encoding</span></code> is <code class="docutils literal"><span class="pre">Encoding::BINARY</span></code>
+and <code class="docutils literal"><span class="pre">v.data.length</span> <span class="pre">==</span> <span class="pre">16</span></code></td>
+<td><a href="#id119"><span class="problematic" id="id120">:class:`FDB::Tuple::UUID`</span></a></td>
+</tr>
+<tr class="row-even"><td>Array</td>
+<td>Any value <code class="docutils literal"><span class="pre">v</span></code> such that <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">Array</span></code> and each element within
+<code class="docutils literal"><span class="pre">v</span></code> is one of the supported types with a legal value.</td>
+<td><code class="docutils literal"><span class="pre">Array</span></code></td>
+</tr>
+</tbody>
+</table>
+<p>Note that as Ruby does not have native support for single-precision floating point values and UUIDs, tuple elements
+of those types are returned instead as <a href="#id121"><span class="problematic" id="id122">:class:`FDB::Tuple::SingleFloat`</span></a> and <a href="#id123"><span class="problematic" id="id124">:class:`FDB::Tuple::UUID`</span></a> instances.
+These are simple classes that just wrap their underlying values, and they are not intended to offer all of the methods
+that a more fully-featured library for handling floating point values or UUIDs might offer. Most applications
+should use their library of choice for handling these values and then convert to the appropriate tuple-type
+when serializing for storage into the key-value store.</p>
+<p>A single tuple element is ordered first by its type, and then by its value.</p>
+<p>If <code class="docutils literal"><span class="pre">T</span></code> is an <a href="#id125"><span class="problematic" id="id126">:class:`Enumerable`</span></a> meeting these criteria, then conceptually:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">T</span> <span class="o">==</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">T</span><span class="p">))</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Unpacking a tuple always returns an <a href="#id127"><span class="problematic" id="id128">:class:`Array`</span></a> of elements in a canonical representation, so packing and then unpacking a tuple may result in an equivalent but not identical representation.</p>
+</div>
+<p class="fdb-tuple-singlefloat-value">Wrapper around a single-precision floating point value. The <code class="docutils literal"><span class="pre">value</span></code> parameter should be a <code class="docutils literal"><span class="pre">Float</span></code> that
+can be encoded as an IEEE 754 floating point number. If the float does not fit within a IEEE 754 floating point
+integer, there may be a loss of precision.</p>
+<p class="fdb-tuple-uuid-data">Wrapper around a 128-bit UUID. The <code class="docutils literal"><span class="pre">data</span></code> parameter should be a byte string of length 16 and is taken to
+be the big-endian byte representation of the UUID. If <code class="docutils literal"><span class="pre">data</span></code> is not of length 16, an exception is thrown.</p>
+</div>
+<div class="section" id="subspaces">
+<span id="api-ruby-subspaces"></span><h2>Subspaces</h2>
+<p>Subspaces provide a convenient way to use the <a class="reference internal" href="#api-ruby-tuple-layer"><span class="std std-ref">tuple layer</span></a> to define namespaces for different categories of data. The namespace is specified by a prefix tuple which is prepended to all tuples packed by the subspace. When unpacking a key with the subspace, the prefix tuple will be removed from the result.</p>
+<p>As a best practice, API clients should use at least one subspace for application data.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">For general guidance on subspace usage, see the discussion in the <a class="reference internal" href="developer-guide.html#developer-guide-sub-keyspaces"><span class="std std-ref">Developer Guide</span></a>.</p>
+</div>
+<p class="subspace-prefix-tuple raw-prefix">Creates a subspace with the specified prefix tuple. If the raw prefix byte string is specified, then it will be prepended to all packed keys. Likewise, the raw prefix will be removed from all unpacked keys.</p>
+</div>
+<div class="section" id="directories">
+<span id="api-ruby-directories"></span><h2>Directories</h2>
+<p>The FoundationDB API provides <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">directories</span></a> as a tool for managing related <a class="reference internal" href="#api-ruby-subspaces"><span class="std std-ref">subspaces</span></a>. Directories are a recommended approach for administering applications. Each application should create or open at least one directory to manage its subspaces.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">For general guidance on directory usage, see the discussion in the <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">Developer Guide</span></a>.</p>
+</div>
+<p>Directories are identified by hierarchical paths analogous to the paths in a Unix-like file system. A path is represented as <a href="#id211"><span class="problematic" id="id212">|dir-path-type|</span></a> of strings. Each directory has an associated subspace used to store its content. The directory layer maps each path to a short prefix used for the corresponding subspace. In effect, directories provide a level of indirection for access to subspaces.</p>
+<p>Except where noted, directory methods interpret the provided path(s) relative to the path of the directory object. When opening a directory, a byte string <code class="docutils literal"><span class="pre">layer</span></code> option may be specified as a metadata identifier.</p>
+<p class="directorylayer-node-subspace-subspace-new xfe content-subspace-subspace-new allow-manual-prefixes-false">Each instance defines a new root directory. The subspaces <code class="docutils literal"><span class="pre">node_subspace</span></code> and <code class="docutils literal"><span class="pre">content_subspace</span></code> control where the directory metadata and contents, respectively, are stored. The default root directory has a <code class="docutils literal"><span class="pre">node_subspace</span></code> with raw prefix <code class="docutils literal"><span class="pre">\xFE</span></code> and a <code class="docutils literal"><span class="pre">content_subspace</span></code> with no prefix. Specifying more restrictive values for <code class="docutils literal"><span class="pre">node_subspace</span></code> and <code class="docutils literal"><span class="pre">content_subspace</span></code> will allow using the directory layer alongside other content in a database. If <code class="docutils literal"><span class="pre">allow_manual_prefixes</span></code> is false, attempts to create a directory with a manual prefix under the directory layer will raise an exception. The default root directory does not allow manual prefixes.</p>
+<div class="section" id="directorysubspace">
+<span id="api-ruby-directory-subspace"></span><h3>DirectorySubspace</h3>
+<p class="directorysubspace">A directory subspace represents a specific directory and its contents. It stores the <code class="docutils literal"><span class="pre">path</span></code> with which it was opened and supports all <a href="#id229"><span class="problematic" id="id230">|directory-layer|</span></a> methods for operating on itself and its subdirectories. It also implements all <a href="#id231"><span class="problematic" id="id232">|subspace|</span></a> methods for working with the contents of that directory.</p>
+</div>
+</div>
+<div class="section" id="locality-information">
+<h2>Locality information</h2>
+<p>The FoundationDB API comes with a set of functions for discovering the storage locations of keys within your cluster. This information can be useful for advanced users who wish to take into account the location of keys in the design of applications or processes.</p>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/api-ruby.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

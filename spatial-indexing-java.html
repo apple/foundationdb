@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Spatial Indexing &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Subspace Indirection" href="subspace-indirection.html" />
+    <link rel="prev" title="Spatial Indexing" href="spatial-indexing.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Spatial Indexing</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a><ul>
+<li><a class="reference internal" href="#higher-dimensions">Higher dimensions</a></li>
+<li><a class="reference internal" href="#richer-non-spatial-data">Richer non-spatial data</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="spatial-indexing.html" title="Previous Chapter: Spatial Indexing"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Spatial Indexing</span>
+    </a>
+  </li>
+  <li>
+    <a href="subspace-indirection.html" title="Next Chapter: Subspace Indirection"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Subspace Indirection &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Spatial Indexing</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a><ul>
+<li><a class="reference internal" href="#higher-dimensions">Higher dimensions</a></li>
+<li><a class="reference internal" href="#richer-non-spatial-data">Richer non-spatial data</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="spatial-indexing">
+<h1>Spatial Indexing</h1>
+<p><a class="reference internal" href="spatial-indexing.html"><span class="doc">Python</span></a> <strong>Java</strong></p>
+<div class="section" id="goal">
+<h2>Goal</h2>
+<p>Create a spatial index for the database.</p>
+</div>
+<div class="section" id="challenge">
+<h2>Challenge</h2>
+<p>For a data set of labeled points in two-dimensional (2D) space, support the efficient retrieval of all points within an axis-aligned rectangular region.</p>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation</h2>
+<p>To achieve good performance, you encode each point as a binary key whose structure allows queries to efficiently find points in a specified region. The encoding uses a <a class="reference external" href="http://en.wikipedia.org/wiki/Z-order_curve">Z-order curve</a> that maps 2D data to one-dimensional (1D) keys suitable for an ordered key-value store.</p>
+</div>
+<div class="section" id="ordering">
+<h2>Ordering</h2>
+<p>FoundationDB stores binary keys in their natural order. Z-order curves map 2D points to binary keys in a manner that preserves proximity, in the sense that nearby points end up in nearby binary keys. This property allows range-based queries to be <a class="reference external" href="http://en.wikipedia.org/wiki/Z-order_curve#Use_with_one-dimensional_data_structures_for_range_searching">efficiently computed from the keys</a>.</p>
+</div>
+<div class="section" id="pattern">
+<h2>Pattern</h2>
+<p>The indexer conceptually traverses the 2D space in a systematic order, tracing out a 1D curve. Data points are mapped to their position along the curve as they’re encountered. Each step in the traversal is encoded as a bit indicating its direction.</p>
+<p>The spatial index exploits the proximity preservation of Z-order curves to store spatial data in the ordered key-value store and support spatial queries.</p>
+<p>Given a point p represented as pair of coordinates (x, y), the Z-order curve lets us encode p as a binary key z. In other words, you have a pair of functions:</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kd">public</span> <span class="kt">long</span> <span class="nf">xyToZ</span><span class="o">(</span><span class="kt">long</span><span class="o">[]</span> <span class="n">p</span><span class="o">){</span>
+    <span class="kt">long</span> <span class="n">x</span><span class="o">,</span><span class="n">y</span><span class="o">,</span><span class="n">z</span><span class="o">;</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">p</span><span class="o">[</span><span class="mi">0</span><span class="o">];</span> <span class="n">y</span> <span class="o">=</span> <span class="n">p</span><span class="o">[</span><span class="mi">1</span><span class="o">];</span>
+    <span class="c1">// Encode (x,y) as a binary key z.</span>
+    <span class="k">return</span> <span class="n">z</span><span class="o">;</span>
+<span class="o">}</span>
+
+<span class="kd">public</span> <span class="kt">long</span><span class="o">[]</span> <span class="nf">zToXy</span><span class="o">(</span><span class="kt">long</span> <span class="n">z</span><span class="o">){</span>
+    <span class="kt">long</span><span class="o">[]</span> <span class="n">p</span> <span class="o">=</span> <span class="k">new</span> <span class="kt">long</span><span class="o">[</span><span class="mi">2</span><span class="o">];</span>
+    <span class="kt">long</span> <span class="n">x</span><span class="o">,</span> <span class="n">y</span><span class="o">;</span>
+    <span class="c1">// Decode z to a pair of coordinates (x,y).</span>
+    <span class="n">p</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span> <span class="o">=</span> <span class="n">x</span><span class="o">;</span> <span class="n">p</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span> <span class="o">=</span> <span class="n">y</span><span class="o">;</span>
+    <span class="k">return</span> <span class="n">p</span><span class="o">;</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+<p>The spatial index will use a pair of subspaces: one, <code class="docutils literal"><span class="pre">z_label</span></code>, to give us efficient access to labels by point; the other, <code class="docutils literal"><span class="pre">label_z</span></code>, to give us efficient access to points by label. Storing two access paths for each item is an example of an inverse index (see the pattern for Simple Indexes). You set both parts of the index in a single transactional function, as follows:</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kd">public</span> <span class="kt">void</span> <span class="nf">setLocation</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="n">String</span> <span class="n">label</span><span class="o">,</span> <span class="kd">final</span> <span class="kt">long</span><span class="o">[]</span> <span class="n">pos</span><span class="o">){</span>
+    <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="o">{</span>
+        <span class="kt">long</span> <span class="n">z</span> <span class="o">=</span> <span class="n">xyToZ</span><span class="o">(</span><span class="n">pos</span><span class="o">);</span>
+        <span class="kt">long</span> <span class="n">previous</span><span class="o">;</span>
+        <span class="c1">// Read labelZ.subspace(Tuple.from(label)) to find previous z.</span>
+        <span class="k">if</span><span class="o">(</span><span class="cm">/* there is a previous z */</span><span class="o">){</span>
+            <span class="n">tr</span><span class="o">.</span><span class="na">clear</span><span class="o">(</span><span class="n">labelZ</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">label</span><span class="o">,</span><span class="n">previous</span><span class="o">)));</span>
+            <span class="n">tr</span><span class="o">.</span><span class="na">clear</span><span class="o">(</span><span class="n">zLabel</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">previous</span><span class="o">,</span><span class="n">label</span><span class="o">)));</span>
+        <span class="o">}</span>
+        <span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">labelZ</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">label</span><span class="o">,</span><span class="n">z</span><span class="o">)),</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">().</span><span class="na">pack</span><span class="o">());</span>
+        <span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">zLabel</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">z</span><span class="o">,</span><span class="n">label</span><span class="o">)),</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">().</span><span class="na">pack</span><span class="o">());</span>
+        <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+    <span class="o">});</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+<p>This representation gives the building blocks you need to efficiently find all the points in a given rectangle.</p>
+</div>
+<div class="section" id="extensions">
+<h2>Extensions</h2>
+<div class="section" id="higher-dimensions">
+<h3>Higher dimensions</h3>
+<p>Z-order curves can be straightforwardly applied to points in three or more dimensions. As in two dimensions, each point will be mapped to a binary key determined by its position along the curve.</p>
+</div>
+<div class="section" id="richer-non-spatial-data">
+<h3>Richer non-spatial data</h3>
+<p>We&#8217;ve assumed that the labels of our data items are strings or a similar primitive data type, but you can easily extend the technique to richer data records in which the spatial coordinates are one component among several.</p>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/spatial-indexing-java.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    
+    <title>Vector &#8212; FoundationDB 5.1</title>
+    
+    <link rel="stylesheet" href="_static/basic.css" type="text/css" />
+    <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-3.3.4/css/bootstrap-theme.min.css" type="text/css" />
+    <link rel="stylesheet" href="_static/bootstrap-sphinx.css" type="text/css" />
+    
+    <script type="text/javascript">
+      var DOCUMENTATION_OPTIONS = {
+        URL_ROOT:    './',
+        VERSION:     '5.1.5',
+        COLLAPSE_INDEX: false,
+        FILE_SUFFIX: '.html',
+        HAS_SOURCE:  true,
+        SOURCELINK_SUFFIX: '.txt'
+      };
+    </script>
+    <script type="text/javascript" src="_static/jquery.js"></script>
+    <script type="text/javascript" src="_static/underscore.js"></script>
+    <script type="text/javascript" src="_static/doctools.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-1.11.0.min.js"></script>
+    <script type="text/javascript" src="_static/js/jquery-fix.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
+    <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="API Reference" href="api-reference.html" />
+    <link rel="prev" title="Vector" href="vector.html" />
+<meta charset='utf-8'>
+<meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
+<meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
+<meta name="apple-mobile-web-app-capable" content="yes">
+
+  </head>
+  <body role="document">
+
+  <div id="navbar" class="navbar navbar-default navbar-fixed-top">
+    <div class="container">
+      <div class="navbar-header">
+        <!-- .btn-navbar is used as the toggle for collapsed navbar content -->
+        <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".nav-collapse">
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+          <span class="icon-bar"></span>
+        </button>
+        <a class="navbar-brand" href="index.html">
+          FoundationDB</a>
+        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+      </div>
+
+        <div class="collapse navbar-collapse nav-collapse">
+          <ul class="nav navbar-nav">
+            
+                <li><a href="contents.html">Site Map</a></li>
+            
+            
+              <li class="dropdown globaltoc-container">
+  <a role="button"
+     id="dLabelGlobalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="index.html">Site <b class="caret"></b></a>
+  <ul class="dropdown-menu globaltoc"
+      role="menu"
+      aria-labelledby="dLabelGlobalToc"></ul>
+</li>
+              
+                <li class="dropdown">
+  <a role="button"
+     id="dLabelLocalToc"
+     data-toggle="dropdown"
+     data-target="#"
+     href="#">Page <b class="caret"></b></a>
+  <ul class="dropdown-menu localtoc"
+      role="menu"
+      aria-labelledby="dLabelLocalToc"><ul>
+<li><a class="reference internal" href="#">Vector</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a><ul>
+<li><a class="reference internal" href="#multi-dimensional">Multi-dimensional</a></li>
+<li><a class="reference internal" href="#sparse">Sparse</a></li>
+<li><a class="reference internal" href="#multiple-values">Multiple values</a></li>
+<li><a class="reference internal" href="#external-values-composition">External values/composition</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+</ul>
+</li>
+              
+            
+            
+              
+                
+  <li>
+    <a href="vector.html" title="Previous Chapter: Vector"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Vector</span>
+    </a>
+  </li>
+  <li>
+    <a href="api-reference.html" title="Next Chapter: API Reference"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">API Reference &raquo;</span>
+    </a>
+  </li>
+              
+            
+            
+            
+            
+          </ul>
+
+          
+            
+<form class="navbar-form navbar-right" action="search.html" method="get">
+ <div class="form-group">
+  <input type="text" name="q" class="form-control" placeholder="Search" />
+ </div>
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+          
+        </div>
+    </div>
+  </div>
+
+<div class="container">
+  <div class="row">
+      <div class="col-md-3">
+        <div id="sidebar" class="bs-sidenav" role="complementary"><ul>
+<li><a class="reference internal" href="#">Vector</a><ul>
+<li><a class="reference internal" href="#goal">Goal</a></li>
+<li><a class="reference internal" href="#challenge">Challenge</a></li>
+<li><a class="reference internal" href="#explanation">Explanation</a></li>
+<li><a class="reference internal" href="#ordering">Ordering</a></li>
+<li><a class="reference internal" href="#pattern">Pattern</a></li>
+<li><a class="reference internal" href="#extensions">Extensions</a><ul>
+<li><a class="reference internal" href="#multi-dimensional">Multi-dimensional</a></li>
+<li><a class="reference internal" href="#sparse">Sparse</a></li>
+<li><a class="reference internal" href="#multiple-values">Multiple values</a></li>
+<li><a class="reference internal" href="#external-values-composition">External values/composition</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#code">Code</a></li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    <div class="col-md-9 content">
+      
+  <div class="section" id="vector">
+<h1>Vector</h1>
+<p><a class="reference internal" href="vector.html"><span class="doc">Python</span></a> <strong>Java</strong></p>
+<div class="section" id="goal">
+<h2>Goal</h2>
+<p>Create a vector data structure.</p>
+</div>
+<div class="section" id="challenge">
+<h2>Challenge</h2>
+<p>Maintain the performance characteristics of vectors, including efficient random lookup, append, updates, scanning, and truncation.</p>
+</div>
+<div class="section" id="explanation">
+<h2>Explanation</h2>
+<p>Using the vector index to form a key allows efficient retrieval of individual vector elements. The ordering of keys further allows scanning of an entire vector.</p>
+</div>
+<div class="section" id="ordering">
+<h2>Ordering</h2>
+<p>We can exploit the ordering of FoundationDB’s keys to place adjacent vector elements into adjacent keys. This approach supports efficient retrieval of an entire vector using a single range read.</p>
+</div>
+<div class="section" id="pattern">
+<h2>Pattern</h2>
+<p>We store each element of the vector as a single key-value pair. We store each item in the vector within a subspace, which takes care of packing our indexes into byte strings.</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="n">vector</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="s">&quot;V&quot;</span><span class="o">));</span>
+</pre></div>
+</div>
+<p>For each index in the vector, we store:</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">vector</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">index</span><span class="o">)),</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">value</span><span class="o">).</span><span class="na">pack</span><span class="o">());</span>
+</pre></div>
+</div>
+<p>The tuple packing ensures that adjacent vector elements are stored as adjacent key values. This means that scanning an vector can be completed as a single range-read operation, which is very efficient. Likewise, looking up an individual vector element translates to a single random database read. Truncating the vector becomes a range-clear operation, which is O(log n) in FoundationDB.</p>
+</div>
+<div class="section" id="extensions">
+<h2>Extensions</h2>
+<div class="section" id="multi-dimensional">
+<h3>Multi-dimensional</h3>
+<p>This approach can easily be extended to multidimensional vectors by adding additional vector indexes to the tuples. Like in an in-memory vector, the ordering of the dimensions determine what kind of range operations are most efficient. With two dimensions (index1, index2), reads with a fixed index1 value and over a range of index2 values are most efficient.</p>
+</div>
+<div class="section" id="sparse">
+<h3>Sparse</h3>
+<p>Since we are using the presence of a key-value pair to denote the presence of each individual vector element, we can efficiently represent sparse vectors by not storing key-value pairs for absent elements and ranges.</p>
+</div>
+<div class="section" id="multiple-values">
+<h3>Multiple values</h3>
+<p>As described, each vector element stores only one value. An obvious extension would be to pack multiple logical values together in a single physical value for storage.</p>
+</div>
+<div class="section" id="external-values-composition">
+<h3>External values/composition</h3>
+<p>Another useful extension is to store a “pointer” in the value of the array to reference another source for the logical value. This allows you to compose an array with other design patterns and data structures. The advantage of transactions is that even data structures with indirection can maintain consistency with concurrent client modifications.</p>
+</div>
+</div>
+<div class="section" id="code">
+<h2>Code</h2>
+<p>Here’s the basic pattern:</p>
+<div class="highlight-java"><div class="highlight"><pre><span></span><span class="kd">public</span> <span class="kd">class</span> <span class="nc">MicroVector</span> <span class="o">{</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">FDB</span> <span class="n">fdb</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Database</span> <span class="n">db</span><span class="o">;</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="kd">final</span> <span class="n">Subspace</span> <span class="n">vector</span><span class="o">;</span>
+
+    <span class="kd">static</span> <span class="o">{</span>
+        <span class="n">fdb</span> <span class="o">=</span> <span class="n">FDB</span><span class="o">.</span><span class="na">selectAPIVersion</span><span class="o">(</span><span class="mi">510</span><span class="o">);</span>
+        <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="na">open</span><span class="o">();</span>
+        <span class="n">vector</span> <span class="o">=</span> <span class="k">new</span> <span class="n">Subspace</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="s">&quot;V&quot;</span><span class="o">));</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">Object</span> <span class="nf">get</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="kt">long</span> <span class="n">index</span><span class="o">){</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="k">return</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">fromBytes</span><span class="o">(</span><span class="n">tr</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">vector</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span>
+                            <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">index</span><span class="o">))).</span><span class="na">get</span><span class="o">()).</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+
+    <span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">set</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">,</span> <span class="kd">final</span> <span class="kt">long</span> <span class="n">index</span><span class="o">,</span> <span class="kd">final</span> <span class="n">Object</span> <span class="n">value</span><span class="o">){</span>
+        <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">(</span><span class="n">tr</span> <span class="o">-&gt;</span> <span class="o">{</span>
+            <span class="n">tr</span><span class="o">.</span><span class="na">set</span><span class="o">(</span><span class="n">vector</span><span class="o">.</span><span class="na">pack</span><span class="o">(</span><span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">index</span><span class="o">)),</span> <span class="n">Tuple</span><span class="o">.</span><span class="na">from</span><span class="o">(</span><span class="n">value</span><span class="o">).</span><span class="na">pack</span><span class="o">());</span>
+            <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+        <span class="o">});</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</pre></div>
+</div>
+</div>
+</div>
+
+
+    </div>
+      
+  </div>
+</div>
+<footer class="footer">
+  <div class="container">
+    <p class="pull-right">
+      <a href="#">Back to top</a>
+      
+        <br/>
+        
+<div id="sourcelink">
+  <a href="_sources/vector-java.rst.txt"
+     rel="nofollow">Source</a>
+</div>
+      
+    </p>
+    <p>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Apr 18, 2018.<br/>
+    </p>
+  </div>
+</footer>
+  </body>
+</html>
