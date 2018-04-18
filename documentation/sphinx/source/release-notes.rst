@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+5.1.6
+=====
+
+Fixes
+-----
+
+* Expiring a backup could cause the fdbbackup process to hang indefinately. <rdar://problem/39382121>
+
 5.1.5
 =====
 

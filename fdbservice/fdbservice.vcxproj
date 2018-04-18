@@ -52,7 +52,6 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions>FDB_VT_VERSION="$(Version)$(PreReleaseDecoration)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <PreprocessorDefinitions Condition="'$(SolutionName)'=='bigdoc'">__FDB_DOC_MONITOR__;FDB_VT_VERSION="$(Version)$(PreReleaseDecoration)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -66,9 +65,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
     </Link>
-    <PostBuildEvent Condition="'$(SolutionName)'=='bigdoc'">
-      <Command>copy "$(TargetDir)fdbmonitor.exe" "$(TargetDir)fdbdocmonitor.exe" /y</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -85,9 +81,6 @@
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>Console</SubSystem>
     </Link>
-    <PostBuildEvent Condition="'$(SolutionName)'=='bigdoc'">
-      <Command>copy "$(TargetDir)fdbmonitor.exe" "$(TargetDir)fdbdocmonitor.exe" /y</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="FDBService.cpp" />

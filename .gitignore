@@ -14,7 +14,6 @@ packaging/msi/FDBInstaller.msi
 *.g.S
 *.g.asm
 *.pom
-bindings/go/src/fdb/generated.go
 bindings/java/pom*.xml
 bindings/java/src*/main/overview.html
 bindings/java/src*/main/com/apple/foundationdb/*Options.java
