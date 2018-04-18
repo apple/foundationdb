@@ -1536,7 +1536,6 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_CAUSAL_READ_RISKY);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_CAUSAL_WRITE_RISKY);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
-		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_AHEAD_DISABLE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_DURABILITY_DEV_NULL_IS_WEB_SCALE);
