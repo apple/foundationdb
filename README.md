@@ -40,7 +40,7 @@ Developers on a OS for which there is no binary package, or who would like to st
 1. Navigate to the directory where you checked out the foundationdb repo.
 1. Run `make`.
 
-## Linux
+#### Linux
 
 1. Install [Docker] (https://www.docker.com/).
 1. Build Linux docker image using the file `Dockerfile` located in the `build` source directory.
