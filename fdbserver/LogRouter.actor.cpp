@@ -321,7 +321,8 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 	}
 
 	if(self->logSystem->get() && self->allowPops) {
-		self->logSystem->get()->pop(minPopped - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, self->routerTag);
+		//FIXME: this is overly conservative in what it pops
+		self->logSystem->get()->pop(minPopped - 2*SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, self->routerTag);
 	}
 	req.reply.send(Void());
 	self->minPopped.set(std::max(minPopped, self->minPopped.get()));
