@@ -28,7 +28,6 @@
 struct BackupToDBUpgradeWorkload : TestWorkload {
 	double backupAfter, stopDifferentialAfter;
 	Key backupTag, backupPrefix, extraPrefix;
-	bool beforePrefix;
 	int  backupRangesCount, backupRangeLengthMax;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	Database extraDB;
@@ -40,16 +39,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		stopDifferentialAfter = getOption(options, LiteralStringRef("stopDifferentialAfter"), 60.0);
 		backupTag = getOption(options, LiteralStringRef("backupTag"), BackupAgentBase::getDefaultTag());
 		backupRangesCount = getOption(options, LiteralStringRef("backupRangesCount"), 5);
-
-		beforePrefix = g_random->random01() < 0.5;
-		if (beforePrefix) {
-			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
-			backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xff"));
-		}
-		else {
-			extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\x00\x00\x01"));
-			backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\x00\x00\00"));
-		}
+		extraPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xfe"));
+		backupPrefix = backupPrefix.withPrefix(LiteralStringRef("\xfe\xff\xff"));
 
 		ASSERT(backupPrefix != StringRef());
 
@@ -57,10 +48,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		KeyRef endRange;
 
 		if(backupRangesCount <= 0) {
-			if (beforePrefix)
-				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, std::min(backupPrefix, extraPrefix)));
-			else
-				backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(strinc(std::max(backupPrefix, extraPrefix)), normalKeys.end));
+			backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef(normalKeys.begin, std::min(backupPrefix, extraPrefix)));
 		} else {
 			// Add backup ranges
 			for (int rangeLoop = 0; rangeLoop < backupRangesCount; rangeLoop++)

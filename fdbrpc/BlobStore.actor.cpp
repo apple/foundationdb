@@ -230,7 +230,9 @@ ACTOR Future<Void> deleteRecursively_impl(Reference<BlobStoreEndpoint> b, std::s
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(Void _ = wait(done)) {}
+				when(Void _ = wait(done)) {
+					done = Never();
+				}
 
 				when(BlobStoreEndpoint::ListResult list = waitNext(resultStream.getFuture())) {
 					for(auto &object : list.objects) {
@@ -692,7 +694,9 @@ ACTOR Future<BlobStoreEndpoint::ListResult> listBucket_impl(Reference<BlobStoreE
 		loop {
 			choose {
 				// Throw if done throws, otherwise don't stop until end_of_stream
-				when(Void _ = wait(done)) {}
+				when(Void _ = wait(done)) {
+					done = Never();
+				}
 
 				when(BlobStoreEndpoint::ListResult info = waitNext(resultStream.getFuture())) {
 					results.commonPrefixes.insert(results.commonPrefixes.end(), info.commonPrefixes.begin(), info.commonPrefixes.end());
