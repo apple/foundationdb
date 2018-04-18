@@ -41,6 +41,8 @@ Choose a machine to be the starting machine for your cluster. The database on th
     user@host1$ sudo /usr/lib/foundationdb/make_public.py
     /etc/foundationdb/fdb.cluster is now using address 10.0.1.1
 
+.. note:: A FoundationDB cluster has the option of supporting :doc:`Transport Layer Security (TLS) <tls>` for all connections (between server processes and between clients and servers). To enable TLS on a new cluster, see :ref:`Enabling TLS <enable-TLS>`.
+
 By default, the script will pick a local network interface that can access the internet. To specify the address manually, use the ``-a`` flag and choose an address that is accessible by all machines in the cluster as well as by all intended clients.::
 
     user@host1$ sudo /usr/lib/foundationdb/make_public.py -a 10.0.1.1
