@@ -242,7 +242,7 @@ void peekMessagesFromMemory( LogRouterData* self, TLogPeekRequest const& req, Bi
 	for(; it != deque.end(); ++it) {
 		if(it->first != currentVersion) {
 			if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-				endVersion = it->first;
+				endVersion = currentVersion + 1;
 				//TraceEvent("tLogPeekMessagesReached2", self->dbgid);
 				break;
 			}

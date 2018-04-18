@@ -931,7 +931,7 @@ void peekMessagesFromMemory( Reference<LogData> self, TLogPeekRequest const& req
 	for(; it != deque.end(); ++it) {
 		if(it->first != currentVersion) {
 			if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
-				endVersion = it->first;
+				endVersion = currentVersion + 1;
 				//TraceEvent("tLogPeekMessagesReached2", self->dbgid);
 				break;
 			}

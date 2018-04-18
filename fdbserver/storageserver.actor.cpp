@@ -2370,7 +2370,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		start = now();
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
-		state Version minNewOldestVersion = 0;
 		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
 
 		loop{
@@ -2436,7 +2435,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		data->updateEagerReads = &eager;
 		data->debug_inApplyUpdate = true;
 
-		StorageUpdater updater(data->lastVersionWithData, std::max( std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), minNewOldestVersion ), data->restoredVersion);
+		StorageUpdater updater(data->lastVersionWithData, std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), data->restoredVersion);
 
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);
@@ -2489,7 +2488,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		if(ver != invalidVersion) {
 			data->lastVersionWithData = ver;
-		} else if(cloneCursor2->version().version - data->version.get() < SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+		} else {
 			ver = cloneCursor2->version().version - 1;
 		}
 		if(injectedChanges) data->lastVersionWithData = ver;
