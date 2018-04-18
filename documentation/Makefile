@@ -3,7 +3,6 @@ include ../build/scver.mk
 docprereqs:
 	$(MAKE) -C sphinx html
 	cp -r ../bindings/java/javadoc sphinx/.out/html
-	cp -r ../bindings/go/godoc sphinx/.out/html
 	rm -f sphinx/.out/html/documentation
 	ln -s . sphinx/.out/html/documentation
 

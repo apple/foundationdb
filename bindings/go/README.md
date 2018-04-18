@@ -27,5 +27,5 @@ of downloading from the remote repository.
 Documentation
 -------------
 
-* [API documentation](https://www.foundationdb.org/documentation/godoc/fdb.html)
+* [API documentation](https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb)
 * [Tutorial](https://www.foundationdb.org/documentation/class-scheduling-go.html)
