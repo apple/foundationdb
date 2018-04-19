@@ -171,7 +171,7 @@ func (t Transaction) SetReadVersion(version int64) {
 // but making it harder to reason about concurrency.
 //
 // For more information on snapshot reads, see
-// https://www.foundationdb.org/documentation/developer-guide.html#using-snapshot-reads.
+// https://apple.github.io/foundationdb/developer-guide.html#snapshot-reads.
 func (t Transaction) Snapshot() Snapshot {
 	return Snapshot{t.transaction}
 }
@@ -196,7 +196,7 @@ func (t Transaction) OnError(e Error) FutureNil {
 // As with other client/server databases, in some failure scenarios a client may
 // be unable to determine whether a transaction succeeded. For more information,
 // see
-// https://www.foundationdb.org/documentation/developer-guide.html#developer-guide-unknown-results.
+// https://apple.github.io/foundationdb/developer-guide.html#transactions-with-unknown-results.
 func (t Transaction) Commit() FutureNil {
 	return &futureNil{newFuture(C.fdb_transaction_commit(t.ptr))}
 }
@@ -396,7 +396,7 @@ func addConflictRange(t *transaction, er ExactRange, crtype conflictRangeType) e
 // conflict.
 //
 // For more information on conflict ranges, see
-// https://www.foundationdb.org/documentation/developer-guide.html#conflict-ranges.
+// https://apple.github.io/foundationdb/developer-guide.html#conflict-ranges.
 func (t Transaction) AddReadConflictRange(er ExactRange) error {
 	return addConflictRange(t.transaction, er, conflictRangeTypeRead)
 }
@@ -413,7 +413,7 @@ func copyAndAppend(orig []byte, b byte) []byte {
 // this key could cause the transaction to fail with a conflict.
 //
 // For more information on conflict ranges, see
-// https://www.foundationdb.org/documentation/developer-guide.html#conflict-ranges.
+// https://apple.github.io/foundationdb/developer-guide.html#conflict-ranges.
 func (t Transaction) AddReadConflictKey(key KeyConvertible) error {
 	return addConflictRange(t.transaction, KeyRange{key, Key(copyAndAppend(key.FDBKey(), 0x00))}, conflictRangeTypeRead)
 }
@@ -424,7 +424,7 @@ func (t Transaction) AddReadConflictKey(key KeyConvertible) error {
 // conflict.
 //
 // For more information on conflict ranges, see
-// https://www.foundationdb.org/documentation/developer-guide.html#conflict-ranges.
+// https://apple.github.io/foundationdb/developer-guide.html#conflict-ranges.
 func (t Transaction) AddWriteConflictRange(er ExactRange) error {
 	return addConflictRange(t.transaction, er, conflictRangeTypeWrite)
 }
@@ -434,7 +434,7 @@ func (t Transaction) AddWriteConflictRange(er ExactRange) error {
 // read this key could fail with a conflict.
 //
 // For more information on conflict ranges, see
-// https://www.foundationdb.org/documentation/developer-guide.html#conflict-ranges.
+// https://apple.github.io/foundationdb/developer-guide.html#conflict-ranges.
 func (t Transaction) AddWriteConflictKey(key KeyConvertible) error {
 	return addConflictRange(t.transaction, KeyRange{key, Key(copyAndAppend(key.FDBKey(), 0x00))}, conflictRangeTypeWrite)
 }

@@ -79,7 +79,7 @@ namespace vexillographer
 # THE SOFTWARE.
 
 # Documentation for this API can be found at
-# https://www.foundationdb.org/documentation/api-ruby.html
+# https://apple.github.io/foundationdb/api-ruby.html
 
 module FDB");
                 foreach (Scope s in Enum.GetValues(typeof(Scope)))
