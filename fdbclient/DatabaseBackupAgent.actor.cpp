@@ -1426,19 +1426,6 @@ public:
 
 		TraceEvent("DBA_switchover_stopped");
 
-		try {
-			Void _ = wait( drAgent.submitBackup(backupAgent->taskBucket->src, tagName, backupRanges, false, addPrefix, removePrefix, true, true) );
-		} catch( Error &e ) {
-			if( e.code() != error_code_backup_duplicate )
-				throw;
-		}
-
-		TraceEvent("DBA_switchover_submitted");
-
-		int _ = wait( drAgent.waitSubmitted(backupAgent->taskBucket->src, tagName) );
-
-		TraceEvent("DBA_switchover_started");
-
 		state ReadYourWritesTransaction tr3(dest);
 		loop {
 			try {
@@ -1459,6 +1446,19 @@ public:
 		}
 
 		TraceEvent("DBA_switchover_version_upgraded");
+
+		try {
+			Void _ = wait( drAgent.submitBackup(backupAgent->taskBucket->src, tagName, backupRanges, false, addPrefix, removePrefix, true, true) );
+		} catch( Error &e ) {
+			if( e.code() != error_code_backup_duplicate )
+				throw;
+		}
+
+		TraceEvent("DBA_switchover_submitted");
+
+		int _ = wait( drAgent.waitSubmitted(backupAgent->taskBucket->src, tagName) );
+
+		TraceEvent("DBA_switchover_started");
 
 		Void _ = wait( backupAgent->unlockBackup(dest, tagName) );
 

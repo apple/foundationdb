@@ -832,8 +832,19 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	ASSERT( coordinatorAddresses.size() == coordinatorCount );
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
-	g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, ((extraDB==0 || (extraDB==1 && BUGGIFY)) ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0")));
-
+	
+	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
+	if(extraDB==1) {
+		// The DR database can be either a new database or itself
+		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, BUGGIFY ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0"));
+	} else if(extraDB==2) {
+		// The DR database is a new database
+		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
+	} else if(extraDB==3) {
+		// The DR database is the same database
+		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
+	}
+	
 	*pConnString = conn;
 
 	TraceEvent("SimulatedConnectionString").detail("String", conn.toString()).detail("ConfigString", startingConfigString);
@@ -874,7 +885,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled,
 				localities, processClass, baseFolder, false, machine == useSeedForMachine, true ), "SimulatedMachine"));
 
-			if (extraDB) {
+			if (extraDB && g_simulator.extraDB->toString() != conn.toString()) {
 				std::vector<uint32_t> extraIps;
 				for (int i = 0; i < processesPerMachine; i++){
 					extraIps.push_back(4 << 24 | dc << 16 | g_random->randomInt(1, i + 2) << 8 | machine);
