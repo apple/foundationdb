@@ -121,7 +121,7 @@ The cluster file contains a connection string consisting of a cluster identifier
 
 Together the ``description`` and the ``ID`` should uniquely identify a FoundationDB cluster.
 
-A cluster file may contain comments, marked by the ``#`` character. All characters on a line after the first occurance of a ``#`` will be ignored.
+A cluster file may contain comments, marked by the ``#`` character. All characters on a line after the first occurrence of a ``#`` will be ignored.
 
 Generally, a cluster file should not be modified manually. Incorrect modifications after a cluster is created could result in data loss. To change the set of coordination servers used by a cluster, see :ref:`configuration-choosing-coordination-servers`. To change the cluster ``description``, see :ref:`configuration-setting-cluster-description`.
 
@@ -186,7 +186,7 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
         It is now safe to remove these machines or processes from the cluster.
 
     
-    ``exclude`` can be used to exclude either machines (by specifiying an IP address) or individual processes (by specificying an ``IP``:``PORT`` pair).
+    ``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
 
     .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
     
