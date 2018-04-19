@@ -402,14 +402,14 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Tag remoteTag;
 	bool isPrimary;
 	int logRouterTags;
-	Version logRouterPoppedVersion, logRouterPopToVersion;
+	Version logRouterPoppedVersion, logRouterPopToVersion, logRouterKnownCommittedVersion;
 	int8_t locality;
 
 	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), logSystem(new AsyncVar<Reference<ILogSystem>>()),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), unpoppedRecoveredTags(0),
-			logRouterPoppedVersion(0), logRouterPopToVersion(0), locality(tagLocalityInvalid)
+			logRouterPoppedVersion(0), logRouterPopToVersion(0), logRouterKnownCommittedVersion(0), locality(tagLocalityInvalid)
 	{
 		startRole(interf.id(), UID(), "TLog");
 
@@ -1097,6 +1097,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 	TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 	if(logData->logSystem->get() && (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
+		logData->logRouterKnownCommittedVersion = knownCommittedVersion;
 		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 
@@ -1364,6 +1365,10 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			}
 			if(found) {
 				logData->logSystem->set(ILogSystem::fromServerDBInfo( self->dbgid, self->dbInfo->get() ));
+				if(!logData->isPrimary) {
+					logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->logRouterKnownCommittedVersion, logData->locality);
+				}
+
 				if(!logData->isPrimary && logData->stopped) {
 					TraceEvent("TLogAlreadyStopped", self->dbgid);
 					logData->removed = logData->removed && logData->logSystem->get()->endEpoch();
@@ -1520,7 +1525,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 			r->nextMessage();
 		}
 
-		tagAt = r->version().version;
+		tagAt = std::max( r->version().version, logData->version.get() + 1 );
 	}
 	return Void();
 }
@@ -1815,6 +1820,8 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 		}
 		if( !found ) {
 			logSystem->set(Reference<ILogSystem>());
+		} else {
+			logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->logRouterKnownCommittedVersion, logData->locality);
 		}
 		TraceEvent("TLogUpdate", self->dbgid).detail("logId", logData->logId).detail("recoverFrom", recoverFrom.toString()).detail("dbInfo", self->dbInfo->get().logSystemConfig.toString()).detail("found", found).detail("logSystem", (bool) logSystem->get() ).detail("recoveryState", self->dbInfo->get().recoveryState);
 		for(auto it : self->dbInfo->get().logSystemConfig.oldTLogs) {

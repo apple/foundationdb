@@ -217,7 +217,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 			r->nextMessage();
 		}
 
-		tagAt = r->version().version;
+		tagAt = std::max( r->version().version, self->version.get() + 1 );
 	}
 }
 
