@@ -8,7 +8,7 @@ FoundationDB supports language bindings for application development using the or
 
 * :doc:`getting-started-linux` explains how to install a local FoundationDB server suitable for development on Linux.
 
-* :doc:`downloads` describes the FoundationDB packages available on Artifactory.
+* :doc:`downloads` describes the FoundationDB packages available on our website.
 
 * :doc:`developer-guide` explains principles of application development applicable across all language bindings.
 
