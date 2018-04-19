@@ -1,7 +1,7 @@
 fdb-go
 ======
 
-[Go language](http://golang.org) bindings for [FoundationDB](https://www.foundationdb.org/documentation/), a distributed key-value store with ACID transactions.
+[Go language](http://golang.org) bindings for [FoundationDB](https://apple.github.io/foundationdb/), a distributed key-value store with ACID transactions.
 
 This package requires:
 
