@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+5.1.7
+=====
+
+Fixes
+-----
+
+* fdbdr switch could take a long time to complete if the two clusters were not created at the same time. <rdar://problem/37551521>
+
 5.1.6
 =====
 

@@ -158,7 +158,7 @@ You can add new machines to a cluster at any time:
 
 5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` command of fdbcli before it can be a full participant in the cluster.
 
-    .. note:: Addresses have the form ``IP``:``PORT``.
+    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
 .. _removing-machines-from-a-cluster:
 
@@ -188,7 +188,7 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
     
     ``exclude`` can be used to exclude either machines (by specifiying an IP address) or individual processes (by specificying an ``IP``:``PORT`` pair).
 
-    .. note:: Addresses have the form ``IP``:``PORT``.
+    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
     
     Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
     
@@ -209,6 +209,11 @@ Moving a cluster
 ================
 
 The procedures for adding and removing machines can be combined into a recipe for :doc:`moving an existing cluster to new machines <moving-a-cluster>`.
+
+Converting an existing cluster to use TLS
+=========================================
+
+A FoundationDB cluster has the option of supporting :doc:`Transport Layer Security (TLS) <tls>`. To enable TLS on an existing, non-TLS cluster, see :ref:`Converting a running cluster <converting-existing-cluster>`.
 
 .. _administration-monitoring-cluster-status:
 
