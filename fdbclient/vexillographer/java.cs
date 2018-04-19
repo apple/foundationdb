@@ -211,7 +211,7 @@ public class FDBException extends RuntimeException implements CloneableException
 
     /**
      * Gets the code for this error. A list of common errors codes
-     *  are published <a href=""/api-error-codes.html"">elsewhere within
+     *  are published <a href=""/foundationdb/api-error-codes.html"">elsewhere within
      *  our documentation</a>.
      *
      * @return the internal FDB error code

@@ -38,7 +38,7 @@ import com.apple.foundationdb.tuple.Versionstamp;
  *
  * <p>
  *   For general guidance on subspace usage, see the discussion in
- *   <a href="/developer-guide.html#developer-guide-sub-keyspaces" target="_blank">Developer Guide</a>.
+ *   <a href="/foundationdb/developer-guide.html#developer-guide-sub-keyspaces" target="_blank">Developer Guide</a>.
  * </p>
  *
  * <p>
