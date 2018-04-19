@@ -148,7 +148,7 @@ There is also a convenience option, ``coordinators auto``, that will automatical
 
 .. note:: |coordinators-auto|
 
-You can also change the cluster ``description``, as decribed in :ref:`configuration-setting-cluster-description`.
+You can also change the cluster ``description``, as described in :ref:`configuration-setting-cluster-description`.
 
 Next steps
 ==========

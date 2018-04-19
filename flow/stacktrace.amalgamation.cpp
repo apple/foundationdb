@@ -1191,7 +1191,7 @@ int GetCPU();
 // family of functions as standardized in POSIX.1-2001.
 //
 // Note: While Apple provides <semaphore.h> for both iOS and macOS, it is
-// explicity deprecated and will cause build failures if enabled for those
+// explicitly deprecated and will cause build failures if enabled for those
 // platforms.  We side-step the issue by not defining it here for Apple
 // platforms.
 #ifdef ABSL_HAVE_SEMAPHORE_H
@@ -1250,7 +1250,7 @@ int GetCPU();
 
 // ABSL_HAVE_STD_ANY
 //
-// Checks whether C++17 std::any is availble by checking whether <any> exists.
+// Checks whether C++17 std::any is available by checking whether <any> exists.
 #ifdef ABSL_HAVE_STD_ANY
 #error "ABSL_HAVE_STD_ANY cannot be directly set."
 #endif
