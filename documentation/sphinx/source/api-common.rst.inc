@@ -236,6 +236,34 @@
 
     It is an error to set these options after the first call to |open-func| or |init-func| anywhere in your application.
 
+.. |tls-options-burb| replace::
+
+    The following options are only used when connecting to a :doc:`TLS-enabled cluster <tls>`.
+
+.. |option-tls-plugin-blurb| replace::
+
+    Sets the :ref:`TLS plugin <configuring-tls-plugin>` to load. This option, if used, must be set before any other TLS options.
+
+.. |option-tls-cert-path-blurb| replace::
+   
+    Sets the path for the file from which the :ref:`certificate chain <tls-certificate-file>` will be loaded.
+
+.. |option-tls-key-path-blurb| replace::
+
+    Sets the path for the file from which to load the :ref:`private key <tls-key-file>` corresponding to your own certificate.
+
+.. |option-tls-verify-peers-blurb| replace::
+
+    Sets the :ref:`peer certificate field verification criteria <tls-verify-peers>`.
+
+.. |option-tls-cert-bytes| replace::
+
+    Sets the certificate chain.
+
+.. |option-tls-key-bytes| replace::
+
+    Set the private key corresponding to your own certificate.
+
 .. |option-disable-multi-version-client-api| replace::
 
     Disables the :ref:`multi-version client API <multi-version-client-api>` and instead uses the local client directly. Must be set before setting up the network.

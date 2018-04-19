@@ -263,6 +263,7 @@ Contains default parameters for all fdbserver processes on this machine. These s
 * ``locality_dcid``: Data center identifier key. All processes physically located in a data center should share the id. No default value. If you are depending on data center based replication this must be set on all processes.
 * ``locality_data_hall``: Data hall identifier key. All processes physically located in a data hall should share the id. No default value. If you are depending on data hall based replication this must be set on all processes.
 * ``io_trust_seconds``: Time in seconds that a read or write operation is allowed to take before timing out with an error. If an operation times out, all future operations on that file will fail with an error as well. Only has an effect when using AsyncFileKAIO in Linux. If unset, defaults to 0 which means timeout is disabled.
+.. note:: In addition to the options above, TLS settings as described for the :ref:`TLS plugin <configuring-tls-plugin>` can be specified in the [fdbserver] section.
 
 ``[fdbserver.<ID>]`` section(s)
 ---------------------------------
