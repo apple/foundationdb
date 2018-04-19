@@ -110,7 +110,7 @@ We're going to rely on the powerful guarantees of transactions to help keep all 
 
     @fdb.transactional
     def add_class(tr, c):
-        tr[course.pack((c,))] = bytes(100)
+        tr[course.pack((c,))] = fdb.tuple.pack((100,))
 
 :py:func:`@fdb.transactional <fdb.transactional>` is a Python decorator that makes a normal function a transactional function. All functions decorated this way *need to have a parameter named* ``tr``. This parameter is passed the transaction that the function should use to do reads and writes.
 
@@ -180,7 +180,7 @@ We finally get to the crucial function. A student has decided on a class (by nam
     @fdb.transactional
     def signup(tr, s, c):
         rec = attends.pack((s, c))
-        tr[rec] = ''
+        tr[rec] = b''
 
 We simply insert the appropriate record (with a blank value).
 
@@ -212,7 +212,7 @@ Let's go back to the data model. Remember that we stored the number of seats in 
     @fdb.transactional
     def available_classes(tr):
         return [course.unpack(k)[0] for k, v in tr[course.range(())]
-                if int(v)]
+                if fdb.tuple.unpack(v)[0]]
 
 This is easy -- we simply add a condition to check that the value is non-zero. Let's check out ``signup`` next:
 
@@ -224,11 +224,11 @@ This is easy -- we simply add a condition to check that the value is non-zero. L
         rec = attends.pack((s, c))
         if tr[rec].present(): return  # already signed up
 
-        seats_left = int(tr[course.pack((c,))])
+        seats_left = fdb.tuple.unpack(tr[course.pack((c,))])[0]
         if not seats_left: raise Exception('No remaining seats')
 
-        tr[course.pack((c,))] = bytes(seats_left - 1)
-        tr[rec] = ''
+        tr[course.pack((c,))] = fdb.tuple.pack((seats_left - 1,))
+        tr[rec] = b''
 
 We now have to check that we aren't already signed up, since we don't want a double sign up to decrease the number of seats twice. Then we look up how many seats are left to make sure there is a seat remaining so we don't push the counter into the negative. If there is a seat remaining, we decrement the counter.
 
@@ -259,7 +259,7 @@ Let's finish up the limited seats feature by modifying the drop function:
     def drop(tr, s, c):
         rec = attends.pack((s, c))
         if not tr[rec].present(): return  # not taking this class
-        tr[course.pack((c,))] = bytes(int(tr[course.pack((c,))]) + 1)
+        tr[course.pack((c,))] = fdb.tuple.pack((fdb.tuple.unpack(tr[course.pack((c,))])[0] + 1,))
         del tr[rec]
 
 This case is easier than signup because there are no constraints we can hit. We just need to make sure the student is in the class and to "give back" one seat when the student drops.
@@ -277,14 +277,14 @@ Of course, as soon as our new version of the system goes live, we hear of a tric
         rec = attends.pack((s, c))
         if tr[rec].present(): return  # already signed up
 
-        seats_left = int(tr[course.pack((c,))])
+        seats_left = fdb.tuple.unpack(tr[course.pack((c,))])[0]
         if not seats_left: raise Exception('No remaining seats')
 
         classes = tr[attends.range((s,))]
         if len(list(classes)) == 5: raise Exception('Too many classes')
 
-        tr[course.pack((c,))] = bytes(seats_left - 1)
-        tr[rec] = ''
+        tr[course.pack((c,))] = fdb.tuple.pack((seats_left - 1,))
+        tr[rec] = b''
 
 Fortunately, we decided on a data model that keeps all of the attending records for a single student together. With this approach, we can use a single range read in the ``attends`` subspace to retrieve all the classes that a student is signed up for. We simply throw an exception if the number of classes has reached the limit of five.
 
@@ -331,8 +331,10 @@ Appendix: SchedulingTutorial.py
 Here's the code for the scheduling tutorial::
 
     import itertools
+    import traceback
 
     import fdb
+    import fdb.tuple
 
     fdb.api_version(510)
 
@@ -352,7 +354,7 @@ Here's the code for the scheduling tutorial::
 
     @fdb.transactional
     def add_class(tr, c):
-        tr[course.pack((c,))] = bytes(100)
+        tr[course.pack((c,))] = fdb.tuple.pack((100,))
 
     # Generate 1,620 classes like '9:00 chem for dummies'
     levels = ['intro', 'for dummies', 'remedial', '101',
@@ -378,7 +380,7 @@ Here's the code for the scheduling tutorial::
     @fdb.transactional
     def available_classes(tr):
         return [course.unpack(k)[0] for k, v in tr[course.range(())]
-                if int(v)]
+                if fdb.tuple.unpack(v)[0]]
 
 
     @fdb.transactional
@@ -386,21 +388,21 @@ Here's the code for the scheduling tutorial::
         rec = attends.pack((s, c))
         if tr[rec].present(): return  # already signed up
 
-        seats_left = int(tr[course.pack((c,))])
+        seats_left = fdb.tuple.unpack(tr[course.pack((c,))])[0]
         if not seats_left: raise Exception('No remaining seats')
 
         classes = tr[attends.range((s,))]
         if len(list(classes)) == 5: raise Exception('Too many classes')
 
-        tr[course.pack((c,))] = bytes(seats_left - 1)
-        tr[rec] = ''
+        tr[course.pack((c,))] = fdb.tuple.pack((seats_left - 1,))
+        tr[rec] = b''
 
 
     @fdb.transactional
     def drop(tr, s, c):
         rec = attends.pack((s, c))
         if not tr[rec].present(): return  # not taking this class
-        tr[course.pack((c,))] = bytes(int(tr[course.pack((c,))]) + 1)
+        tr[course.pack((c,))] = fdb.tuple.pack((fdb.tuple.unpack(tr[course.pack((c,))])[0] + 1,))
         del tr[rec]
 
 
@@ -446,7 +448,8 @@ Here's the code for the scheduling tutorial::
                     my_classes.remove(old_c)
                     my_classes.append(new_c)
             except Exception as e:
-                print e, "Need to recheck available classes."
+                traceback.print_exc()
+                print("Need to recheck available classes.")
                 all_classes = []
 
     def run(students, ops_per_student):
@@ -455,9 +458,9 @@ Here's the code for the scheduling tutorial::
             for i in range(students)]
         for thr in threads: thr.start()
         for thr in threads: thr.join()
-        print "Ran", students * ops_per_student, "transactions"
+        print("Ran {} transactions".format(students * ops_per_student))
 
     if __name__ == "__main__":
         init(db)
-        print "initialized"
+        print("initialized")
         run(10, 10)
