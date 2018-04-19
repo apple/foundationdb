@@ -1,0 +1,6 @@
+build_task:
+  container:
+    dockerfile: build/Dockerfile
+    cpu: 8
+    memory: 20G
+  make_script: make
