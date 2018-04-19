@@ -38,7 +38,7 @@ import com.apple.foundationdb.tuple.Tuple;
  * </p>
  *
  * For general guidance on partition usage, see the
- * <a href="/developer-guide.html#directory-partitions" target="_blank">Developer Guide</a>.
+ * <a href="/foundationdb/developer-guide.html#directory-partitions" target="_blank">Developer Guide</a>.
  */
 class DirectoryPartition extends DirectorySubspace {
 
