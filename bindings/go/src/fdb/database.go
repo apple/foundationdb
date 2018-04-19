@@ -111,7 +111,7 @@ func retryable(wrapped func() (interface{}, error), onError func(Error) FutureNi
 // retried or, if fatal, return the error to the caller.
 //
 // When working with Future objects in a transactional function, you may either
-// explicity check and return error values using Get, or call MustGet. Transact
+// explicitly check and return error values using Get, or call MustGet. Transact
 // will recover a panicked Error and either retry the transaction or return the
 // error.
 //
@@ -151,7 +151,7 @@ func (d Database) Transact(f func(Transaction) (interface{}, error)) (interface{
 // retried or, if fatal, return the error to the caller.
 //
 // When working with Future objects in a read-only transactional function, you
-// may either explicity check and return error values using Get, or call
+// may either explicitly check and return error values using Get, or call
 // MustGet. ReadTransact will recover a panicked Error and either retry the
 // transaction or return the error.
 //
