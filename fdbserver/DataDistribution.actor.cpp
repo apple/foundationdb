@@ -222,7 +222,7 @@ public:
 	}
 
 private:
-	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receieve all replies.
+	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all replies.
 	int64_t getLoadAverage() {
 		int64_t bytesSum = 0;
 		int added = 0;
@@ -2072,7 +2072,7 @@ ACTOR Future<Void> popOldTags( Database cx, Reference<ILogSystem> logSystem, Ver
 				tags.push_back(decodeServerTagValue( kv.value ));
 			}
 
-			//FIXME: we have to check the old locality indefinately, because we can never be sure when pops have succeeded, we can remove this code when we no longer need to support upgrades from 5.X to 6.0
+			//FIXME: we have to check the old locality indefinitely, because we can never be sure when pops have succeeded, we can remove this code when we no longer need to support upgrades from 5.X to 6.0
 			popActors.push_back(popOldTags(&tr, logSystem, recoveryCommitVersion, tagLocalityUpgraded, tags));
 			for(auto& kv : fTagLocalities.get()) {
 				popActors.push_back(popOldTags(&tr, logSystem, recoveryCommitVersion, decodeTagLocalityListValue(kv.value), tags));
