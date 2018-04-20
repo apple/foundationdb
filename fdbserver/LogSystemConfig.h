@@ -155,7 +155,7 @@ struct LogSystemConfig {
 	int32_t logRouterTags;
 	std::vector<OldTLogConf> oldTLogs;
 	int32_t expectedLogSets;
-	UID logRouterSetID;
+	UID recruitmentID;
 
 	LogSystemConfig() : logSystemType(0), logRouterTags(0), expectedLogSets(0) {}
 
@@ -202,7 +202,7 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && logRouterSetID == r.logRouterSetID;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -233,7 +233,7 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & logRouterSetID;
+		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID;
 	}
 };
 

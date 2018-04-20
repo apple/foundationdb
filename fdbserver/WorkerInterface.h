@@ -81,7 +81,6 @@ struct InitializeTLogRequest {
 	bool isPrimary;
 	Version startVersion;
 	int logRouterTags;
-	UID logRouterSetID;
 
 	ReplyPromise< struct TLogInterface > reply;
 
@@ -89,7 +88,7 @@ struct InitializeTLogRequest {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & allTags & storeType & remoteTag & locality & isPrimary & startVersion & logRouterTags & logRouterSetID & reply;
+		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & allTags & storeType & remoteTag & locality & isPrimary & startVersion & logRouterTags & reply;
 	}
 };
 

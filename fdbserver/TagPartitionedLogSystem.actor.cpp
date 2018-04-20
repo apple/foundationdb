@@ -62,7 +62,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::vector<Reference<LogSet>> tLogs;
 	int expectedLogSets;
 	int logRouterTags;
-	UID logRouterSetID;
+	UID recruitmentID;
 
 	// new members
 	Future<Void> rejoins;
@@ -124,7 +124,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogs.reserve(lsConf.tLogs.size());
 		logSystem->expectedLogSets = lsConf.expectedLogSets;
 		logSystem->logRouterTags = lsConf.logRouterTags;
-		logSystem->logRouterSetID = lsConf.logRouterSetID;
+		logSystem->recruitmentID = lsConf.recruitmentID;
 		for( int i = 0; i < lsConf.tLogs.size(); i++ ) {
 			TLogSet const& tLogSet = lsConf.tLogs[i];
 			if(!excludeRemote || tLogSet.isLocal) {
@@ -401,15 +401,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return waitForAll(quorumResults);
 	}
 
-	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, UID routerSetID, bool parallelGetMore ) {
+	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, bool parallelGetMore ) {
 		if(!tLogs.size()) {
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 		}
 		
 		if(tag.locality == tagLocalityRemoteLog) {
-			if(logRouterSetID != routerSetID) {
-				return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
-			}
 			int bestSet = -1;
 			for(int t = 0; t < tLogs.size(); t++) {
 				if(tLogs[t]->logRouters.size()) {
@@ -500,18 +497,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peek( Version begin, std::vector<Tag> tags, UID routerSetID, bool parallelGetMore ) {
+	virtual Reference<IPeekCursor> peek( Version begin, std::vector<Tag> tags, bool parallelGetMore ) {
 		if(tags.empty()) {
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), invalidTag, begin, getPeekEnd(), false, false ) );
 		}
 		
 		if(tags.size() == 1) {
-			return peek(begin, tags[0], routerSetID, parallelGetMore);
+			return peek(begin, tags[0], parallelGetMore);
 		}
 		
 		std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 		for(auto tag : tags) {
-			cursors.push_back(peek(begin, tag, routerSetID, parallelGetMore));
+			cursors.push_back(peek(begin, tag, parallelGetMore));
 		}
 		return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(cursors, begin, tLogs.size() && tLogs[0]->locality == tagLocalityUpgraded) );
 	}
@@ -803,7 +800,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystemConfig.logSystemType = logSystemType;
 		logSystemConfig.expectedLogSets = expectedLogSets;
 		logSystemConfig.logRouterTags = logRouterTags;
-		logSystemConfig.logRouterSetID = logRouterSetID;
+		logSystemConfig.recruitmentID = recruitmentID;
 		for( int i = 0; i < tLogs.size(); i++ ) {
 			Reference<LogSet> logSet = tLogs[i];
 			if(logSet->isLocal || remoteLogsWrittenToCoreState) {
@@ -1523,8 +1520,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		state double startTime = now();
-		state UID remoteRecruitmentID = g_random->randomUniqueID();
-
 		state vector<Future<TLogInterface>> remoteTLogInitializationReplies;
 		
 		vector< InitializeTLogRequest > remoteTLogReqs( remoteWorkers.remoteTLogs.size() );
@@ -1532,7 +1527,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::vector<Tag> allTags(self->epochEndTags.begin(), self->epochEndTags.end());
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
-			req.recruitmentID = remoteRecruitmentID;
+			req.recruitmentID = self->recruitmentID;
 			req.storeType = configuration.tLogDataStoreType;
 			req.recoverFrom = oldLogSystem->getLogSystemConfig();
 			req.recoverAt = oldLogSystem->epochEndVersion.get();
@@ -1544,7 +1539,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.allTags = allTags;
 			req.startVersion = logSet->startVersion;
 			req.logRouterTags = 0;
-			req.logRouterSetID = self->logRouterSetID;
 		}
 
 		logSet->tLogLocalities.resize( remoteWorkers.remoteTLogs.size() );
@@ -1577,12 +1571,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	{
 		state double startTime = now();
 		state Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality) );
-		state UID recruitmentID = g_random->randomUniqueID();
 		logSystem->logSystemType = 2;
 		logSystem->expectedLogSets = 1;
 		logSystem->epochEndTags = oldLogSystem->getEpochEndTags();
-		logSystem->logRouterSetID = g_random->randomUniqueID();
-		oldLogSystem->logRouterSetID = logSystem->logRouterSetID;
+		logSystem->recruitmentID = g_random->randomUniqueID();
+		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 		
 		logSystem->tLogs.push_back( Reference<LogSet>( new LogSet() ) );
 		logSystem->tLogs[0]->tLogWriteAntiQuorum = configuration.tLogWriteAntiQuorum;
@@ -1646,7 +1639,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		std::vector<Tag> allTags(logSystem->epochEndTags.begin(), logSystem->epochEndTags.end());
 		for( int i = 0; i < recr.tLogs.size(); i++ ) {
 			InitializeTLogRequest &req = reqs[i];
-			req.recruitmentID = recruitmentID;
+			req.recruitmentID = logSystem->recruitmentID;
 			req.storeType = configuration.tLogDataStoreType;
 			req.recoverFrom = oldLogSystem->getLogSystemConfig();
 			req.recoverAt = oldLogSystem->epochEndVersion.get();
@@ -1658,7 +1651,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.allTags = allTags;
 			req.startVersion = logSystem->tLogs[0]->startVersion;
 			req.logRouterTags = logSystem->logRouterTags;
-			req.logRouterSetID = logSystem->logRouterSetID;
 		}
 
 		logSystem->tLogs[0]->tLogLocalities.resize( recr.tLogs.size() );
@@ -1685,7 +1677,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ ) {
 				InitializeTLogRequest &req = sreqs[i];
-				req.recruitmentID = recruitmentID;
+				req.recruitmentID = logSystem->recruitmentID;
 				req.storeType = configuration.tLogDataStoreType;
 				req.recoverFrom = oldLogSystem->getLogSystemConfig();
 				req.recoverAt = oldLogSystem->epochEndVersion.get();
@@ -1697,7 +1689,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.allTags = allTags;
 				req.startVersion = oldLogSystem->knownCommittedVersion + 1;
 				req.logRouterTags = logSystem->logRouterTags;
-				req.logRouterSetID = logSystem->logRouterSetID;
 			}
 
 			logSystem->tLogs[1]->tLogLocalities.resize( recr.satelliteTLogs.size() );

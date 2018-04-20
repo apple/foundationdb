@@ -404,10 +404,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	int logRouterTags;
 	Version logRouterPoppedVersion, logRouterPopToVersion, logRouterKnownCommittedVersion;
 	int8_t locality;
-	UID logRouterSetID;
+	UID recruitmentID;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID logRouterSetID) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
-			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterSetID(logRouterSetID),
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
+			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID),
 			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), logRouterKnownCommittedVersion(0),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), unpoppedRecoveredTags(0),
@@ -1365,7 +1365,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 					}
 				}
 			}
-			if(found) {
+			if(found && self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID) {
 				logData->logSystem->set(ILogSystem::fromServerDBInfo( self->dbgid, self->dbInfo->get() ));
 				if(!logData->isPrimary) {
 					logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->logRouterKnownCommittedVersion, logData->locality);
@@ -1448,7 +1448,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				}
 				when( Void _ = wait( dbInfoChange ) ) {
 					if( logData->logSystem->get() ) {
-						r = logData->logSystem->get()->peek( tagAt, tags, logData->logRouterSetID );
+						r = logData->logSystem->get()->peek( tagAt, tags );
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
@@ -1809,16 +1809,18 @@ bool tlogTerminated( TLogData* self, IKeyValueStore* persistentData, TLogQueue* 
 ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, LogSystemConfig recoverFrom, Reference<AsyncVar<Reference<ILogSystem>>> logSystem) {
 	loop {
 		bool found = false;
-		if( self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom) ) {
-			logSystem->set(ILogSystem::fromOldLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
-			found = true;
-		} else if( self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom) ) {
-			logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
-			found = true;
-		}
-		else if( self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
-			logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, true ));
-			found = true;
+		if(self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID) {
+			if( self->dbInfo->get().logSystemConfig.isNextGenerationOf(recoverFrom) ) {
+				logSystem->set(ILogSystem::fromOldLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
+				found = true;
+			} else if( self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom) ) {
+				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
+				found = true;
+			}
+			else if( self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
+				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, true ));
+				found = true;
+			}
 		}
 		if( !found ) {
 			logSystem->set(Reference<ILogSystem>());
@@ -1859,7 +1861,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		it.second->stopCommit.trigger();
 	}
 
-	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.logRouterSetID) );
+	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.recruitmentID) );
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;
