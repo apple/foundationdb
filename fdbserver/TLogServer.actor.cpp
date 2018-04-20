@@ -404,12 +404,14 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	int logRouterTags;
 	Version logRouterPoppedVersion, logRouterPopToVersion, logRouterKnownCommittedVersion;
 	int8_t locality;
+	UID logRouterSetID;
 
-	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
-			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), logSystem(new AsyncVar<Reference<ILogSystem>>()),
+	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID logRouterSetID) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
+			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), logRouterSetID(logRouterSetID),
+			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), logRouterKnownCommittedVersion(0),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), unpoppedRecoveredTags(0),
-			logRouterPoppedVersion(0), logRouterPopToVersion(0), logRouterKnownCommittedVersion(0), locality(tagLocalityInvalid)
+			logRouterPopToVersion(0), locality(tagLocalityInvalid)
 	{
 		startRole(interf.id(), UID(), "TLog");
 
@@ -1446,7 +1448,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				}
 				when( Void _ = wait( dbInfoChange ) ) {
 					if( logData->logSystem->get() ) {
-						r = logData->logSystem->get()->peek( tagAt, tags );
+						r = logData->logSystem->get()->peek( tagAt, tags, logData->logRouterSetID );
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
@@ -1678,7 +1680,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		DUMPTOKEN( recruited.confirmRunning );
 
 		//We do not need the remoteTag, because we will not be loading any additional data
-		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1]) );
+		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID()) );
 		logData->stopped = true;
 		self->id_data[id1] = logData;
 		id_interf[id1] = recruited;
@@ -1857,7 +1859,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		it.second->stopCommit.trigger();
 	}
 
-	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags) );
+	state Reference<LogData> logData = Reference<LogData>( new LogData(self, recruited, req.remoteTag, req.isPrimary, req.logRouterTags, req.logRouterSetID) );
 	self->id_data[recruited.id()] = logData;
 	logData->locality = req.locality;
 	logData->recoveryCount = req.epoch;

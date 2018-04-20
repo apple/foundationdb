@@ -425,12 +425,12 @@ struct ILogSystem {
 		// Returns when the preceding changes are durable.  (Later we will need multiple return signals for diffferent durability levels)
 		// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any subsequent epoch (but may become visible in this epoch)
 
-	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, bool parallelGetMore = false ) = 0;
+	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, UID logRouterSetID = UID(), bool parallelGetMore = false ) = 0;
 		// Returns (via cursor interface) a stream of messages with the given tag and message versions >= (begin, 0), ordered by message version
 		// If pop was previously or concurrently called with upTo > begin, the cursor may not return all such messages.  In that case cursor->popped() will
 		// be greater than begin to reflect that.
 
-	virtual Reference<IPeekCursor> peek( Version begin, std::vector<Tag> tags, bool parallelGetMore = false ) = 0;
+	virtual Reference<IPeekCursor> peek( Version begin, std::vector<Tag> tags, UID logRouterSetID = UID(), bool parallelGetMore = false ) = 0;
 		// Same contract as peek(), but for a set of tags
 
 	virtual Reference<IPeekCursor> peekSingle( Version begin, Tag tag, vector<pair<Version,Tag>> history = vector<pair<Version,Tag>>() ) = 0;
