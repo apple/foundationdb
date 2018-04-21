@@ -81,7 +81,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::map< std::pair<UID, Tag>, std::pair<Version, Version> > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
 	ActorCollection actors;
 	std::vector<OldLogData> oldLogData;
-	AsyncTrigger logRoutersChanged;
+	AsyncTrigger logSystemConfigChanged;
 
 	TagPartitionedLogSystem( UID dbgid, LocalityData locality ) : dbgid(dbgid), locality(locality), actors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(0), logRouterTags(0), expectedLogSets(0), hasRemoteServers(false) {}
 
@@ -881,7 +881,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual Future<Void> onLogSystemConfigChange() {
 		std::vector<Future<Void>> changes;
-		changes.push_back(logRoutersChanged.onTrigger());
+		changes.push_back(logSystemConfigChanged.onTrigger());
 		for(auto& t : tLogs) {
 			for( int i = 0; i < t->logServers.size(); i++ ) {
 				changes.push_back( t->logServers[i]->onChange() );
@@ -1465,7 +1465,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}	
 
-		self->logRoutersChanged.trigger();
 		return Void();
 	}
 
@@ -1632,6 +1631,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
 			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0, false);
 		}
+		oldLogSystem->logSystemConfigChanged.trigger();
 
 		state vector<Future<TLogInterface>> initializationReplies;
 		vector< InitializeTLogRequest > reqs( recr.tLogs.size() );
