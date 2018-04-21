@@ -74,7 +74,7 @@ In this example, we’re storing user data based on user_ID but sometimes need t
  
  @fdb.transactional
  def set_user(tr, ID, name, zipcode):
-         tr[user[ID][zipcode]] = name
+         tr[user[ID]] = name
          tr[index[zipcode][ID]] = ''
   
  # Normal lookup
