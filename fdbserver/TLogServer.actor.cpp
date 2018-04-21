@@ -1888,6 +1888,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 		if (req.recoverFrom.logSystemType == 2) {
 			logData->unrecoveredBefore = req.startVersion;
+			logData->knownCommittedVersion = req.startVersion - 1;
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
 			logData->persistentDataDurableVersion = logData->unrecoveredBefore - 1;
 			logData->queueCommittedVersion.set( logData->unrecoveredBefore - 1 );
