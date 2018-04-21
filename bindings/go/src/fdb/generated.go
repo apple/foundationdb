@@ -254,24 +254,9 @@ func (o TransactionOptions) SetNextWriteNoWriteConflictRange() error {
 	return o.setOpt(30, nil)
 }
 
-// Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'.
-func (o TransactionOptions) SetCommitOnFirstProxy() error {
-	return o.setOpt(40, nil)
-}
-
-// Not yet implemented.
-func (o TransactionOptions) SetCheckWritesEnable() error {
-	return o.setOpt(50, nil)
-}
-
 // Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction.
 func (o TransactionOptions) SetReadYourWritesDisable() error {
 	return o.setOpt(51, nil)
-}
-
-// Disables read-ahead caching for range reads. Under normal operation, a transaction will read extra rows from the database into cache if range reads are used to page through a series of data one row at a time (i.e. if a range read with a one row limit is followed by another one row range read starting immediately after the result of the first).
-func (o TransactionOptions) SetReadAheadDisable() error {
-	return o.setOpt(52, nil)
 }
 
 // Not yet implemented.
@@ -312,11 +297,6 @@ func (o TransactionOptions) SetAccessSystemKeys() error {
 // Allows this transaction to read system keys (those that start with the byte 0xFF)
 func (o TransactionOptions) SetReadSystemKeys() error {
 	return o.setOpt(302, nil)
-}
-
-// Not yet implemented.
-func (o TransactionOptions) SetDebugDump() error {
-	return o.setOpt(400, nil)
 }
 
 // Not yet implemented.
@@ -453,6 +433,11 @@ func (t Transaction) BitOr(key KeyConvertible, param []byte) {
 // BitXor performs a bitwise ``xor`` operation.  If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``.
 func (t Transaction) BitXor(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 8)
+}
+
+// AppendIfFits appends ``param`` to the end of the existing value already in the database at the given key (or creates the key and sets the value to ``param`` if the key is empty). This will only append the value if the final concatenated value size is less than or equal to the maximum value size (i.e., if it fits). WARNING: No error is surfaced back to the user if the final value is too large because the mutation will not be applied until after the transaction has been committed. Therefore, it is only safe to use this mutation type if one can guarantee that one will keep the total value size under the maximum size.
+func (t Transaction) AppendIfFits(key KeyConvertible, param []byte) {
+	t.atomicOp(key.FDBKey(), param, 9)
 }
 
 // Max performs a little-endian comparison of byte strings. If the existing value in the database is not present or shorter than ``param``, it is first extended to the length of ``param`` with zero bytes.  If ``param`` is shorter than the existing value in the database, the existing value is truncated to match the length of ``param``. The larger of the two values is then stored in the database.
