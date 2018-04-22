@@ -1362,6 +1362,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(!onlyOld) {
 			lastStart = std::max(startVersion, self->tLogs[0]->startVersion);
 			if( self->logRouterTags == 0 ) {
+				self->logSystemConfigChanged.trigger();
 				return Void();
 			}
 
@@ -1471,6 +1472,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}	
 
+		self->logSystemConfigChanged.trigger();
 		return Void();
 	}
 
@@ -1639,8 +1641,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state Future<Void> oldRouterRecruitment = Void();
 		if(logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
 			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0, false);
+		} else {
+			oldLogSystem->logSystemConfigChanged.trigger();
 		}
-		oldLogSystem->logSystemConfigChanged.trigger();
 
 		state vector<Future<TLogInterface>> initializationReplies;
 		vector< InitializeTLogRequest > reqs( recr.tLogs.size() );
