@@ -352,9 +352,8 @@ func (t Transaction) Reset() {
 func boolToInt(b bool) int {
 	if b {
 		return 1
-	} else {
-		return 0
 	}
+	return 0
 }
 
 func (t *transaction) getKey(sel KeySelector, snapshot int) FutureKey {

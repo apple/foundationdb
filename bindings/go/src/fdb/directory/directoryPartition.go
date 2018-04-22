@@ -72,9 +72,8 @@ func (dp directoryPartition) GetLayer() []byte {
 func (dp directoryPartition) getLayerForPath(path []string) directoryLayer {
 	if len(path) == 0 {
 		return dp.parentDirectoryLayer
-	} else {
-		return dp.directoryLayer
 	}
+	return dp.directoryLayer
 }
 
 func (dp directoryPartition) MoveTo(t fdb.Transactor, newAbsolutePath []string) (DirectorySubspace, error) {
