@@ -477,7 +477,7 @@ To make configuring, starting, stopping, and restarting ``fdbserver`` processes 
 
 During normal operation, ``fdbmonitor`` is transparent, and you interact with it only by modifying the configuration in :ref:`foundationdb.conf <foundationdb-conf>` and perhaps occasionally by :ref:`starting and stopping <administration-running-foundationdb>` it manually. If some problem prevents an ``fdbserver`` or ``backup-agent`` process from starting or causes it to stop unexpectedly, ``fdbmonitor`` will log errors to the system log.
 
-If kill_on_configuration_change parameter is unset or set to `true` in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to `false` it will not restart on changes.
+If ``kill_on_configuration_change`` parameter is unset or set to ``true`` in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to ``false`` it will not restart on changes.
 
 .. _administration-managing-trace-files:
 
