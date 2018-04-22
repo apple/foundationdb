@@ -397,7 +397,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	PromiseStream<Future<Void>> addActor;
 	TLogData* tLogData;
 	Promise<Void> recoveryComplete;
-	Version unrecoveredBefore;
+	Version unrecoveredBefore, recoveredAt;
 
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
 	Tag remoteTag;
@@ -411,7 +411,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID),
 			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), logRouterKnownCommittedVersion(0),
 			// These are initialized differently on init() or recovery
-			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), unpoppedRecoveredTags(0),
+			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
 			logRouterPopToVersion(0), locality(tagLocalityInvalid)
 	{
 		startRole(interf.id(), UID(), "TLog");
@@ -880,8 +880,9 @@ void commitMessages( Reference<LogData> self, Version version, Arena arena, Stri
 
 Version poppedVersion( Reference<LogData> self, Tag tag) {
 	auto tagData = self->getTagData(tag);
-	if (!tagData)
-		return Version(0);
+	if (!tagData) {
+		return self->recoveredAt;
+	}
 	return tagData->popped;
 }
 
@@ -1696,6 +1697,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		id_interf[id1] = recruited;
 
 		logData->unrecoveredBefore = id_unrecoveredBefore[id1];
+		logData->recoveredAt = logData->unrecoveredBefore + 1;
 		logData->knownCommittedVersion = id_knownCommitted[id1];
 		Version ver = BinaryReader::fromStringRef<Version>( fVers.get()[idx].value, Unversioned() );
 		logData->persistentDataVersion = ver;
@@ -1888,6 +1890,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 		if (req.recoverFrom.logSystemType == 2) {
 			logData->unrecoveredBefore = req.startVersion;
+			logData->recoveredAt = req.recoverAt;
 			logData->knownCommittedVersion = req.startVersion - 1;
 			logData->persistentDataVersion = logData->unrecoveredBefore - 1;
 			logData->persistentDataDurableVersion = logData->unrecoveredBefore - 1;
@@ -1941,15 +1944,19 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 			//PullAsyncData will add tags that were popped in the previous generation,
 			//so we need to pop all tags that did not have data at the recovery version.
+			std::vector<Future<Void>> popFutures;
 			std::set<Tag> allTags(req.allTags.begin(), req.allTags.end());
 			for(int tag_locality = 0; tag_locality < logData->tag_data.size(); tag_locality++) {
 				for(int tag_id = 0; tag_id < logData->tag_data[tag_locality].size(); tag_id++) {
 					auto data = logData->tag_data[tag_locality][tag_id];
 					if(data && !allTags.count(data->tag) && data->tag.locality != tagLocalityLogRouter) {
-						tLogPop(self, TLogPopRequest(req.recoverAt, 0, data->tag), logData);
+						TraceEvent("TLogPopOnRecover", self->dbgid).detail("logId", logData->logId).detail("tag", data->tag.toString()).detail("ver", req.recoverAt);
+						popFutures.push_back(tLogPop(self, TLogPopRequest(req.recoverAt, 0, data->tag), logData));
 					}
 				}
 			}
+
+			Void _ = wait(waitForAll(popFutures));
 
 			TraceEvent("TLogPull2Complete", self->dbgid).detail("logId", logData->logId);
 			logData->addActor.send( respondToRecovered( recruited, logData->recoveryComplete ) );
