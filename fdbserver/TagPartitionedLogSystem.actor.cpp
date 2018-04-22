@@ -53,10 +53,11 @@ struct OldLogData {
 
 struct LogLockInfo {
 	Version epochEnd;
+	bool isCurrent;
 	Reference<LogSet> logSet;
 	std::vector<Future<TLogLockResult>> replies;
 
-	LogLockInfo() : epochEnd(std::numeric_limits<Version>::max()) {}
+	LogLockInfo() : epochEnd(std::numeric_limits<Version>::max()), isCurrent(false) {}
 };
 
 struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogSystem> {
@@ -1122,6 +1123,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				foundSpecial = true;
 			}
 			lockedLocalities.insert(logServers[i]->locality);
+			lockResults[i].isCurrent = true;
 			lockResults[i].logSet = logServers[i];
 			for(int t=0; t<logServers[i]->logServers.size(); t++) {
 				lockResults[i].replies.push_back( lockTLog( dbgid, logServers[i]->logServers[t]) );
@@ -1153,9 +1155,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state Optional<Version> last_end;
 		state int cycles = 0;
 
+		state Version knownCommittedVersion = 0;
 		loop {
 			Optional<Version> end;
-			Version knownCommittedVersion = 0;
 			for(int log = 0; log < logServers.size(); log++) {
 				if(!logServers[log]->isLocal) {
 					continue;
@@ -1624,6 +1626,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state int lockNum = 0;
 		while(lockNum < oldLogSystem->lockResults.size()) {
 			if(oldLogSystem->lockResults[lockNum].logSet->locality == primaryLocality) {
+				if(oldLogSystem->lockResults[lockNum].isCurrent && oldLogSystem->lockResults[lockNum].logSet->isLocal) {
+					break;
+				}
 				std::pair<Version,Version> versions = wait(TagPartitionedLogSystem::getDurableVersion(logSystem->dbgid, oldLogSystem->lockResults[lockNum]));
 				logSystem->tLogs[0]->startVersion = std::min(versions.first, logSystem->tLogs[0]->startVersion);
 				break;
