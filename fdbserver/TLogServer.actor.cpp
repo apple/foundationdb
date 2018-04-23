@@ -1689,7 +1689,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 		id_interf[id1] = recruited;
 
 		logData->unrecoveredBefore = id_unrecoveredBefore[id1];
-		logData->recoveredAt = logData->unrecoveredBefore + 1;
+		logData->recoveredAt = logData->unrecoveredBefore;
 		logData->knownCommittedVersion = id_knownCommitted[id1];
 		Version ver = BinaryReader::fromStringRef<Version>( fVers.get()[idx].value, Unversioned() );
 		logData->persistentDataVersion = ver;
