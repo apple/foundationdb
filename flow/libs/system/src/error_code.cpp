@@ -35,6 +35,11 @@ using namespace boost::system::errc;
 #   endif
 # endif
 
+#if BOOST_VERSION > 105200
+#define FOUNDATIONDB_NOEXCEPT BOOST_SYSTEM_NOEXCEPT
+#else
+#define FOUNDATIONDB_NOEXCEPT
+#endif
 //----------------------------------------------------------------------------//
 
 namespace
@@ -48,7 +53,7 @@ namespace
   {
   public:
     generic_error_category(){}
-    const char *   name() const;
+    const char *   name() const FOUNDATIONDB_NOEXCEPT ; 
     std::string    message( int ev ) const;
   };
 
@@ -56,14 +61,14 @@ namespace
   {
   public:
     system_error_category(){}
-    const char *        name() const;
+    const char *        name() const FOUNDATIONDB_NOEXCEPT;
     std::string         message( int ev ) const;
     error_condition     default_error_condition( int ev ) const;
   };
 
   //  generic_error_category implementation  ---------------------------------//
 
-  const char * generic_error_category::name() const
+  const char * generic_error_category::name() const FOUNDATIONDB_NOEXCEPT
   {
     return "generic";
   }
@@ -154,7 +159,7 @@ namespace
   }
   //  system_error_category implementation  --------------------------------// 
 
-  const char * system_error_category::name() const
+  const char * system_error_category::name() const FOUNDATIONDB_NOEXCEPT
   {
     return "system";
   }
