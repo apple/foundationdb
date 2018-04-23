@@ -2042,41 +2042,6 @@ static std::set<int> const& normalDDQueueErrors() {
 	return s;
 }
 
-ACTOR Future<Void> popOldTags( Database cx, Reference<ILogSystem> logSystem, Version recoveryCommitVersion ) {
-	state Transaction tr(cx);
-
-	if( recoveryCommitVersion == 1 )
-		return Void();
-
-	loop {
-		try {
-			state Future<Standalone<RangeResultRef>> fTags = tr.getRange( serverTagKeys, CLIENT_KNOBS->TOO_MANY );
-			state Future<Standalone<RangeResultRef>> fHistoryTags = tr.getRange( serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY );
-
-			Void _ = wait( success(fTags) && success(fHistoryTags) );
-
-			state std::set<Tag> tags;
-
-			for(auto& kv : fTags.get()) {
-				tags.insert(decodeServerTagValue( kv.value ));
-			}
-
-			for(auto& kv : fHistoryTags.get()) {
-				tags.insert(decodeServerTagValue( kv.value ));
-			}
-
-			for(auto tag : logSystem->getEpochEndTags()) {
-				if(!tags.count(tag)) {
-					logSystem->pop(recoveryCommitVersion, tag);
-				}
-			}
-			return Void();
-		} catch( Error &e ) {
-			Void _ = wait( tr.onError(e) );
-		}
-	}
-}
-
 ACTOR Future<Void> pollMoveKeysLock( Database cx, MoveKeysLock lock ) {
 	loop {
 		Void _ = wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
@@ -2219,7 +2184,6 @@ ACTOR Future<Void> dataDistribution(
 			}
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
-			actors.push_back( popOldTags( cx, logSystem, recoveryCommitVersion) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, configuration.durableStorageQuorum, lastLimited ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[0], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, primaryDcId, configuration.remoteTLogReplicationFactor > 0 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );

@@ -185,6 +185,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	IKeyValueStore* txnStateStore;
 	int64_t memoryLimit;
 	std::map<Optional<Value>,int8_t> dcId_locality;
+	std::vector<Tag> allTags;
 
 	int8_t getNextLocality() {
 		int8_t maxLocality = -1;
@@ -310,10 +311,10 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 
 		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.tLogs.size() ) ) );
 
-		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[recr.dcId], self->dcId_locality[remoteDcId] ) );
+		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[recr.dcId], self->dcId_locality[remoteDcId], self->allTags ) );
 		self->logSystem = newLogSystem;
 	} else {
-		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, tagLocalitySpecial, tagLocalitySpecial ) );
+		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, tagLocalitySpecial, tagLocalitySpecial, self->allTags ) );
 		self->logSystem = newLogSystem;
 	}
 	return Void();
@@ -626,6 +627,20 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 	for(auto& kv : rawLocalities) {
 		self->dcId_locality[decodeTagLocalityListKey(kv.key)] = decodeTagLocalityListValue(kv.value);
 	}
+
+	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
+	self->allTags.clear();
+	self->allTags.push_back(txsTag);
+	for(auto& kv : rawTags) {
+		self->allTags.push_back(decodeServerTagValue( kv.value ));
+	}
+
+	Standalone<VectorRef<KeyValueRef>> rawHistoryTags = wait( self->txnStateStore->readRange( serverTagHistoryKeys ) );
+	for(auto& kv : rawHistoryTags) {
+		self->allTags.push_back(decodeServerTagValue( kv.value ));
+	}
+
+	uniquify(self->allTags);
 
 	//auto kvs = self->txnStateStore->readRange( systemKeys );
 	//for( auto & kv : kvs.get() )

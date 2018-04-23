@@ -475,10 +475,8 @@ namespace oldTLog {
 		TLogLockResult result;
 		result.end = stopVersion;
 		result.knownCommittedVersion = logData->knownCommittedVersion;
-		for( auto & tag : logData->tag_data )
-			result.tags.push_back( convertOldTag(tag.key) );
 
-		TraceEvent("TLogStop2", self->dbgid).detail("logId", logData->logId).detail("Ver", stopVersion).detail("isStopped", logData->stopped).detail("queueCommitted", logData->queueCommittedVersion.get()).detail("tags", describe(result.tags));
+		TraceEvent("TLogStop2", self->dbgid).detail("logId", logData->logId).detail("Ver", stopVersion).detail("isStopped", logData->stopped).detail("queueCommitted", logData->queueCommittedVersion.get());
 
 
 		reply.send( result );

@@ -82,11 +82,10 @@ struct TLogRecoveryFinishedRequest {
 struct TLogLockResult {
 	Version end;
 	Version knownCommittedVersion;
-	std::vector<Tag> tags;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & end & knownCommittedVersion & tags;
+		ar & end & knownCommittedVersion;
 	}
 };
 

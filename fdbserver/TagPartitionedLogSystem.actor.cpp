@@ -79,7 +79,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	bool hasRemoteServers;
 
 	Optional<Version> epochEndVersion;
-	std::set<Tag> epochEndTags;
 	Version knownCommittedVersion;
 	LocalityData locality;
 	std::map< std::pair<UID, Tag>, std::pair<Version, Version> > outstandingPops;  // For each currently running popFromLog actor, (log server #, tag)->popped version
@@ -793,10 +792,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return waitForAll(lockResults);
 	}
 
-	virtual Future<Reference<ILogSystem>> newEpoch( RecruitFromConfigurationReply const& recr, Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers, DatabaseConfiguration const& config, LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality ) {
+	virtual Future<Reference<ILogSystem>> newEpoch( RecruitFromConfigurationReply const& recr, Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers, DatabaseConfiguration const& config, LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality, std::vector<Tag> const& allTags ) {
 		// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.  The new epoch
 		// is only provisional until the caller updates the coordinated DBCoreState
-		return newEpoch( Reference<TagPartitionedLogSystem>::addRef(this), recr, fRemoteWorkers, config, recoveryCount, primaryLocality, remoteLocality );
+		return newEpoch( Reference<TagPartitionedLogSystem>::addRef(this), recr, fRemoteWorkers, config, recoveryCount, primaryLocality, remoteLocality, allTags );
 	}
 
 	virtual LogSystemConfig getLogSystemConfig() {
@@ -938,10 +937,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual Tag getRandomRouterTag() {
 		return Tag(tagLocalityLogRouter, g_random->randomInt(0, logRouterTags));
-	}
-
-	virtual const std::set<Tag>& getEpochEndTags() { 
-		return epochEndTags; 
 	}
 
 	ACTOR static Future<Void> monitorLog(Reference<AsyncVar<OptionalInterface<TLogInterface>>> logServer, Reference<AsyncVar<bool>> failed) {
@@ -1321,16 +1316,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->knownCommittedVersion = knownCommittedVersion;
 				logSystem->remoteLogsWrittenToCoreState = true;
 
-				for(int log = 0; log < logServers.size(); log++) {
-					if(lockResults[log].logSet->isLocal) {
-						for(auto& r : lockResults[log].replies) {
-							if( r.isReady() && !r.isError() ) {
-								logSystem->epochEndTags.insert( r.get().tags.begin(), r.get().tags.end() );
-							}
-						}
-					}
-				}
-
 				outLogSystem->set(logSystem);
 			}
 
@@ -1476,8 +1461,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Void();
 	}
 
-	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, int8_t remoteLocality ) 
-	{
+	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, int8_t remoteLocality, std::vector<Tag> allTags ) {
 		TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
 		state RecruitRemoteFromConfigurationReply remoteWorkers = wait( fRemoteWorkers );
 
@@ -1531,7 +1515,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		
 		vector< InitializeTLogRequest > remoteTLogReqs( remoteWorkers.remoteTLogs.size() );
 
-		std::vector<Tag> allTags(self->epochEndTags.begin(), self->epochEndTags.end());
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = self->recruitmentID;
@@ -1574,13 +1557,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Void();
 	}
 
-	ACTOR static Future<Reference<ILogSystem>> newEpoch( Reference<TagPartitionedLogSystem> oldLogSystem, RecruitFromConfigurationReply recr, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality )
-	{
+	ACTOR static Future<Reference<ILogSystem>> newEpoch( Reference<TagPartitionedLogSystem> oldLogSystem, RecruitFromConfigurationReply recr, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality, std::vector<Tag> allTags ) {
 		state double startTime = now();
 		state Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(oldLogSystem->getDebugID(), oldLogSystem->locality) );
 		logSystem->logSystemType = 2;
 		logSystem->expectedLogSets = 1;
-		logSystem->epochEndTags = oldLogSystem->getEpochEndTags();
 		logSystem->recruitmentID = g_random->randomUniqueID();
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 		
@@ -1648,7 +1629,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state vector<Future<TLogInterface>> initializationReplies;
 		vector< InitializeTLogRequest > reqs( recr.tLogs.size() );
 
-		std::vector<Tag> allTags(logSystem->epochEndTags.begin(), logSystem->epochEndTags.end());
 		for( int i = 0; i < recr.tLogs.size(); i++ ) {
 			InitializeTLogRequest &req = reqs[i];
 			req.recruitmentID = logSystem->recruitmentID;
@@ -1671,7 +1651,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
 
 		std::vector<int> locations;
-		for( Tag tag : oldLogSystem->getEpochEndTags() ) {
+		for( Tag tag : allTags ) {
 			locations.clear();
 			logSystem->tLogs[0]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
 			for(int loc : locations)
@@ -1708,7 +1688,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogs[1]->updateLocalitySet(recr.satelliteTLogs);
 			filterLocalityDataForPolicy(logSystem->tLogs[1]->tLogPolicy, &logSystem->tLogs[1]->tLogLocalities);
 
-			for( Tag tag : oldLogSystem->getEpochEndTags() ) {
+			for( Tag tag : allTags ) {
 				locations.clear();
 				logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
 				for(int loc : locations)
@@ -1746,7 +1726,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		
 		if(configuration.remoteTLogReplicationFactor > 0) {
 			logSystem->hasRemoteServers = true;
-			logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), oldLogSystem, fRemoteWorkers, configuration, recoveryCount, remoteLocality);
+			logSystem->remoteRecovery = TagPartitionedLogSystem::newRemoteEpoch(logSystem.getPtr(), oldLogSystem, fRemoteWorkers, configuration, recoveryCount, remoteLocality, allTags);
 		} else {
 			logSystem->hasRemoteServers = false;
 			logSystem->remoteRecovery = logSystem->recoveryComplete;

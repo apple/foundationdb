@@ -467,7 +467,7 @@ struct ILogSystem {
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 		// Returns the first unreadable version number of the recovered epoch (i.e. message version numbers < (get_end(), 0) will be readable)
 
-	virtual Future<Reference<ILogSystem>> newEpoch( struct RecruitFromConfigurationReply const& recr, Future<struct RecruitRemoteFromConfigurationReply> const& fRemoteWorkers, DatabaseConfiguration const& config, LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality ) = 0;
+	virtual Future<Reference<ILogSystem>> newEpoch( struct RecruitFromConfigurationReply const& recr, Future<struct RecruitRemoteFromConfigurationReply> const& fRemoteWorkers, DatabaseConfiguration const& config, LogEpoch recoveryCount, int8_t primaryLocality, int8_t remoteLocality, std::vector<Tag> const& allTags ) = 0;
 		// Call only on an ILogSystem obtained from recoverAndEndEpoch()
 		// Returns an ILogSystem representing a new epoch immediately following this one.  The new epoch is only provisional until the caller updates the coordinated DBCoreState
 
@@ -488,9 +488,6 @@ struct ILogSystem {
 	virtual Tag getRandomRouterTag() = 0;
 
 	virtual void stopRejoins() = 0;
-
-	virtual const std::set<Tag>& getEpochEndTags() = 0;
-		// Returns the list of tags recovered from the previous generation of logs. This is not initialized on log systems created with fromServerDBInfo, fromLogSystemConfig, or fromOldLogSystemConfig.
 };
 
 struct LengthPrefixedStringRef {
