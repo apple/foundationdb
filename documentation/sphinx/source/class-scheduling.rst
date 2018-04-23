@@ -170,7 +170,7 @@ Before students can do anything else, they need to be able to retrieve a list of
     def available_classes(tr):
         return [course.unpack(k)[0] for k, v in tr[course.range(())]]
 
-In general, the :meth:`Subspace.range` method returns a Python ``slice`` representing all the key-value pairs starting with the specified tuple. In this case, we want all classes, so we call :meth:`course.range` with the empty tuple ``()``. FoundationDB's ``tr[slice]`` function returns an iterable list of key-values in the range specified by the slice. We unpack the key ``k`` and value ``v`` in a comprehension. To extract the class name itself, we unpack the key into a tuple using the :py:mod:`fdb.tuple` module and take its third part. (The first and second parts are the prefixes for the ``scheduling`` and ``course`` subspaces, respectively.)
+In general, the :meth:`Subspace.range` method returns a Python ``slice`` representing all the key-value pairs starting with the specified tuple. In this case, we want all classes, so we call :meth:`course.range` with the empty tuple ``()``. FoundationDB's ``tr[slice]`` function returns an iterable list of key-values in the range specified by the slice. We unpack the key ``k`` and value ``v`` in a comprehension. To extract the class name itself, we unpack the key into a tuple using the :meth:`Subspace.unpack` method and take the first field. (The first and second parts of the tuple, the ``scheduling`` and ``course`` subspace prefixes, are removed by the ``unpack`` hence the reason we take the first field of the tuple.)
 
 Signing up for a class
 ----------------------
@@ -232,6 +232,19 @@ This is easy -- we simply add a condition to check that the value is non-zero. L
 
 We now have to check that we aren't already signed up, since we don't want a double sign up to decrease the number of seats twice. Then we look up how many seats are left to make sure there is a seat remaining so we don't push the counter into the negative. If there is a seat remaining, we decrement the counter.
 
+Similarly, the ``drop`` function is modified as follows:
+
+.. code-block:: python
+    :emphasize-lines: 4,5
+
+    @fdb.transactional
+    def drop(tr, s, c):
+        rec = attends.pack((s, c))
+        if not tr[rec].present(): return  # not taking this class
+        tr[course.pack((c,))] = fdb.tuple.pack((fdb.tuple.unpack(tr[course.pack((c,))])[0] + 1,))
+        del tr[rec]
+
+Once again we check to see if the student is signed up and if not, we can just return as we don't want to incorrectly increase the number of seats. We then adjust the number of seats by one by taking the current value, incrementing it by one, and then storing back.
 
 Concurrency and consistency
 ---------------------------
