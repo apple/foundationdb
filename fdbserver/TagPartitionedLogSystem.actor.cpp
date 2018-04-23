@@ -434,7 +434,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				int i = 0;
 				while(begin < lastBegin) {
 					if(i == oldLogData.size()) {
-						throw worker_removed();
+						return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 					}
 					
 					int bestOldSet = -1;
@@ -496,7 +496,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						if(tag == txsTag) {
 							break;
 						}
-						throw worker_removed();
+						return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 					}
 
 					int bestOldSet = -1;

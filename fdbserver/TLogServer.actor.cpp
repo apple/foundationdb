@@ -898,7 +898,7 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 			TraceEvent("TLogPoppedUn", logData->logId).detail("tag", req.tag.toString()).detail("to", req.to).detail("unrecovered", logData->unrecoveredBefore);
 		}
 
-		if(tagData->unpoppedRecovered && req.to > logData->unrecoveredBefore) {
+		if(tagData->unpoppedRecovered && req.to > logData->recoveredAt) {
 			tagData->unpoppedRecovered = false;
 			logData->unpoppedRecoveredTags--;
 			TraceEvent("TLogPoppedTag", logData->logId).detail("tags", logData->unpoppedRecoveredTags).detail("tag", req.tag.toString());
