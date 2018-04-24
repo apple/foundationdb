@@ -987,6 +987,7 @@ static std::set<int> const& normalMasterErrors() {
 		s.insert( error_code_master_max_versions_in_flight );
 		s.insert( error_code_worker_removed );
 		s.insert( error_code_new_coordinators_timed_out );
+		s.insert( error_code_broken_promise );
 	}
 	return s;
 }
@@ -1308,16 +1309,25 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 			when (Void _ = wait(collection) ) { ASSERT(false); throw internal_error(); }
 		}
 	} catch (Error& e) {
-		TEST(e.code() == error_code_master_tlog_failed);  // Master: terminated because of a tLog failure
-		TEST(e.code() == error_code_master_proxy_failed);  // Master: terminated because of a proxy failure
-		TEST(e.code() == error_code_master_resolver_failed);  // Master: terminated because of a resolver failure
+		state Error err = e;
+		if(e.code() != error_code_actor_cancelled) {
+			Void _ = wait(delay(0.0));
+		}
 
-		if (normalMasterErrors().count(e.code()))
+		while(!self->addActor.isEmpty()) {
+			self->addActor.getFuture().pop();
+		}
+			
+		TEST(err.code() == error_code_master_tlog_failed);  // Master: terminated because of a tLog failure
+		TEST(err.code() == error_code_master_proxy_failed);  // Master: terminated because of a proxy failure
+		TEST(err.code() == error_code_master_resolver_failed);  // Master: terminated because of a resolver failure
+
+		if (normalMasterErrors().count(err.code()))
 		{
-			TraceEvent("MasterTerminated", mi.id()).error(e);
+			TraceEvent("MasterTerminated", mi.id()).error(err);
 			return Void();
 		}
-		throw;
+		throw err;
 	}
 	return Void();
 }

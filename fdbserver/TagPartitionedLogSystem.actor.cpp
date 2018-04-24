@@ -368,7 +368,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 
-			if(self->hasRemoteServers && !self->remoteRecovery.isReady()) {
+			if(self->hasRemoteServers && ( !self->remoteRecovery.isReady() || self->remoteRecovery.isError() )) {
 				changes.push_back(self->remoteRecovery);
 			}
 
