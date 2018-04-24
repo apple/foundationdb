@@ -38,6 +38,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 )
 
@@ -114,7 +115,7 @@ func encodeBytes(buf *bytes.Buffer, code byte, b []byte) {
 func bisectLeft(u uint64) int {
 	var n int
 	for sizeLimits[n] < u {
-		n += 1
+		n++
 	}
 	return n
 }
@@ -356,7 +357,7 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 			if err != nil {
 				return nil, i, err
 			}
-			off += 1
+			off++
 		default:
 			return nil, i, fmt.Errorf("unable to decode tuple element with unknown typecode %02x", b[i])
 		}
