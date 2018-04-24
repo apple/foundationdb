@@ -390,17 +390,19 @@
 
 To allow path variables to update, please restart your IDE and any open terminal sessions." />
 
-		<UIRef Id='WixUI_FeatureTree' />
-		<Publish Dialog="WelcomeDlg"
-					Control="Next"
-					Event="NewDialog"
-					Value="FeatureDlg"
-					Order="2">1</Publish>
-		<Publish Dialog="FeatureDlg"
-					Control="Back"
-					Event="NewDialog"
-					Value="WelcomeDlg"
-					Order="2">1</Publish>
+    <UIRef Id='WixUI_FeatureTree' />
+    <UI>
+      <Publish Dialog="WelcomeDlg"
+            Control="Next"
+            Event="NewDialog"
+            Value="FeaturesDlg"
+            Order="2">1</Publish>
+      <Publish Dialog="FeaturesDlg"
+            Control="Back"
+            Event="NewDialog"
+            Value="WelcomeDlg"
+            Order="2">1</Publish>
+    </UI>
     <UIRef Id='WixUI_ErrorProgressText' />
 
     <WixVariable Id="WixUIDialogBmp" Value="$(var.ProjectRoot)\art\dialog.jpg" />
