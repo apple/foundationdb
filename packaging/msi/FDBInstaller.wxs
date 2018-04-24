@@ -408,6 +408,4 @@ To allow path variables to update, please restart your IDE and any open terminal
     <WixVariable Id="WixUIDialogBmp" Value="$(var.ProjectRoot)\art\dialog.jpg" />
     <WixVariable Id="WixUIBannerBmp" Value="$(var.ProjectRoot)\art\banner.jpg" />
   </Product>
-	<UI>
-	</UI>
 </Wix>
