@@ -2351,7 +2351,13 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
 		//TraceEvent("SSUpdatePeeking", data->thisServerID).detail("MyVer", data->version.get()).detail("Epoch", data->updateEpoch).detail("Seq", data->updateSequence);
-		Void _ = wait( cursor->getMore() );
+		
+		loop {
+			Void _ = wait( cursor->getMore() );
+			if(!cursor->isExhausted()) {
+				break;
+			}
+		}
 		if(cursor->popped() > 0)
 			throw worker_removed();
 

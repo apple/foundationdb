@@ -480,8 +480,7 @@ bool ILogSystem::MergedPeekCursor::isActive() {
 }
 
 bool ILogSystem::MergedPeekCursor::isExhausted() {
-	ASSERT(false);
-	return false;
+	return serverCursors[currentCursor]->isExhausted();
 }
 
 LogMessageVersion ILogSystem::MergedPeekCursor::version() { return messageVersion; }
@@ -755,8 +754,7 @@ bool ILogSystem::SetPeekCursor::isActive() {
 }
 
 bool ILogSystem::SetPeekCursor::isExhausted() {
-	ASSERT(false);
-	return false;
+	return serverCursors[currentSet][currentCursor]->isExhausted();
 }
 
 LogMessageVersion ILogSystem::SetPeekCursor::version() { return messageVersion; }
@@ -836,7 +834,7 @@ bool ILogSystem::MultiCursor::isActive() {
 }
 
 bool ILogSystem::MultiCursor::isExhausted() {
-	return cursors.back()->isActive();
+	return cursors.back()->isExhausted();
 }
 
 LogMessageVersion ILogSystem::MultiCursor::version() {
