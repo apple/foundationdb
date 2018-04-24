@@ -27,6 +27,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/subspace"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
@@ -78,9 +79,8 @@ func (dl directoryLayer) createOrOpen(rtr fdb.ReadTransaction, tr *fdb.Transacti
 	if prefix != nil && !dl.allowManualPrefixes {
 		if len(dl.path) == 0 {
 			return nil, errors.New("cannot specify a prefix unless manual prefixes are enabled")
-		} else {
-			return nil, errors.New("cannot specify a prefix in a partition")
 		}
+		return nil, errors.New("cannot specify a prefix in a partition")
 	}
 
 	if len(path) == 0 {
@@ -562,9 +562,8 @@ func (dl directoryLayer) contentsOfNode(node subspace.Subspace, path []string, l
 		ndl := NewDirectoryLayer(subspace.FromBytes(nssb), ss, false).(directoryLayer)
 		ndl.path = newPath
 		return directoryPartition{ndl, dl}, nil
-	} else {
-		return directorySubspace{ss, dl, newPath, layer}, nil
 	}
+	return directorySubspace{ss, dl, newPath, layer}, nil
 }
 
 func (dl directoryLayer) nodeWithPrefix(prefix []byte) subspace.Subspace {
