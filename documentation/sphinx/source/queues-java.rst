@@ -87,7 +87,7 @@ The following is a simple implementation of the basic pattern:
             }
 
             // Remove from the top of the queue.
-            tcx.run((Transaction tr) ->
+            tcx.run((Transaction tr) -> {
                 tr.clear(item.getKey());
                 return null;
             });
