@@ -902,7 +902,7 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 			tagData->unpoppedRecovered = false;
 			logData->unpoppedRecoveredTags--;
 			TraceEvent("TLogPoppedTag", logData->logId).detail("tags", logData->unpoppedRecoveredTags).detail("tag", req.tag.toString());
-			if(logData->unpoppedRecoveredTags == 0 && logData->recoveryComplete.canBeSet()) {
+			if(logData->unpoppedRecoveredTags == 0 && logData->version.get() >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
 				logData->recoveryComplete.send(Void());
 			}
 		}
@@ -1487,6 +1487,9 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 					self->prevVersion = logData->version.get();
 					logData->version.set( ver );
+					if(logData->unpoppedRecoveredTags == 0 && logData->version.get() >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+						logData->recoveryComplete.send(Void());
+					}
 				}
 				lastVer = ver;
 				ver = r->version().version;
@@ -1515,6 +1518,9 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 						self->prevVersion = logData->version.get();
 						logData->version.set( ver );
+						if(logData->unpoppedRecoveredTags == 0 && logData->version.get() >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+							logData->recoveryComplete.send(Void());
+						}
 					}
 					break;
 				}
@@ -1952,10 +1958,6 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 			TraceEvent("TLogPull2Complete", self->dbgid).detail("logId", logData->logId);
 			logData->addActor.send( respondToRecovered( recruited, logData->recoveryComplete ) );
-
-			if(req.recoverTags.empty() && logData->recoveryComplete.canBeSet()) {
-				logData->recoveryComplete.send(Void());
-			}
 		} else {
 			// Brand new tlog, initialization has already been done by caller
 			Void _ = wait( initPersistentState( self, logData, std::vector<Tag>() ) || logData->removed );
