@@ -6,4 +6,4 @@ FoundationDB makes your architecture flexible and easy to operate. Your applicat
   
 The following diagram details the logical architecture.
 
-.. image:: /images/Architecture.pdf
+.. image:: /images/Architecture.png
