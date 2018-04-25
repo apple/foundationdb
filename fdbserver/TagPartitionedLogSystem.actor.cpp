@@ -1593,21 +1593,20 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.logRouterTags = 0;
 		}
 
-		logSet->tLogLocalities.resize( remoteWorkers.remoteTLogs.size() );
-		logSet->logServers.resize( remoteWorkers.remoteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
-		logSet->updateLocalitySet(remoteWorkers.remoteTLogs);
-		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
-
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ )
 			remoteTLogInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor( remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
 		TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs");
 		Void _ = wait( waitForAll(remoteTLogInitializationReplies) );
 
+		logSet->tLogLocalities.resize( remoteWorkers.remoteTLogs.size() );
+		logSet->logServers.resize( remoteWorkers.remoteTLogs.size() );
 		for( int i = 0; i < remoteTLogInitializationReplies.size(); i++ ) {
 			logSet->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(remoteTLogInitializationReplies[i].get()) ) );
 			logSet->tLogLocalities[i] = remoteWorkers.remoteTLogs[i].locality;
 		}
+		logSet->updateLocalitySet();
+		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
 
 		std::vector<Future<Void>> recoveryComplete;
 		for( int i = 0; i < logSet->logServers.size(); i++)
@@ -1766,6 +1765,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->tLogs[1]->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(satelliteInitializationReplies[i].get()) ) );
 				logSystem->tLogs[1]->tLogLocalities[i] = recr.satelliteTLogs[i].locality;
 			}
+			filterLocalityDataForPolicy(logSystem->tLogs[1]->tLogPolicy, &logSystem->tLogs[1]->tLogLocalities);
 
 			for( int i = 0; i < logSystem->tLogs[1]->logServers.size(); i++)
 				recoveryComplete.push_back( transformErrors( throwErrorOr( logSystem->tLogs[1]->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor( TLogRecoveryFinishedRequest(), SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
