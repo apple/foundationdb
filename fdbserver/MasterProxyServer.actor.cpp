@@ -1177,7 +1177,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		Void _ = wait(db->onChange());
 	}
-
+	state Future<Void> dbInfoChange = db->onChange();
 	//TraceEvent("ProxyInit3", proxy.id());
 
 	commitData.resolvers = db->get().resolvers;
@@ -1204,6 +1204,12 @@ ACTOR Future<Void> masterProxyServerCore(
 				SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE * pow(db->get().client.proxies.size(), SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER)));
 	commitBatcher = batcher(batchedCommits, proxy.commit.getFuture(), SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_FROM_IDLE, &commitBatchInterval, SERVER_KNOBS->MAX_COMMIT_BATCH_INTERVAL, SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_COUNT_MAX, commitBatchByteLimit, CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT, commitData.commitBatchStartNotifications, TaskProxyCommitBatcher, &commitData.stats.txnCommitIn);
 	loop choose{
+		when( Void _ = wait( dbInfoChange ) ) {
+			dbInfoChange = db->onChange();
+			if(db->get().master.id() == master.id() && db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
+				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get());
+			}
+		}
 		when(Void _ = wait(onError)) {}
 		when(vector<CommitTransactionRequest> trs = waitNext(batchedCommits.getFuture())) {
 			//TraceEvent("MasterProxyCTR", proxy.id()).detail("CommitTransactions", trs.size()).detail("TransactionRate", transactionRate).detail("TransactionQueue", transactionQueue.size()).detail("ReleasedTransactionCount", transactionCount);
