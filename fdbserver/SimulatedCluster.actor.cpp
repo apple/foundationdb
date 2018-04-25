@@ -250,7 +250,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				//SOMEDAY: test lower memory limits, without making them too small and causing the database to stop making progress
 				FlowTransport::createInstance(1);
 				Sim2FileSystem::newFileSystem();
-				simInitTLS();
+				if (useSSL) {
+					simInitTLS();
+				}
 				NetworkAddress n(ip, port, true, useSSL);
 				Future<Void> listen = FlowTransport::transport().bind( n, n );
 				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "");
@@ -1135,7 +1137,7 @@ void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication) {
 	ifs.close();
 }
 
-ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting ) {
+ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting, bool useSSL ) {
 	state vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connFile;
 	state Standalone<StringRef> startingConfiguration;
@@ -1148,7 +1150,9 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 			"TestSystem", 0x01010101, 1, LocalityData(Optional<Standalone<StringRef>>(), Standalone<StringRef>(g_random->randomUniqueID().toString()), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()), ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "" ), TaskDefaultYield ) );
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(1);
-	simInitTLS();
+	if (useSSL) {
+		simInitTLS();
+	}
 
 	TEST(true);  // Simulation start
 

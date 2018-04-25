@@ -1471,7 +1471,8 @@ int main(int argc, char* argv[]) {
 			if ( tlsVerifyPeers.size() )
 				tlsOptions->set_verify_peers( tlsVerifyPeers );
 
-			tlsOptions->register_network();
+			if (tlsOptions->get_policy())
+				tlsOptions->register_network();
 
 			if (role == FDBD || role == NetworkTestServer) {
 				try {
@@ -1585,7 +1586,7 @@ int main(int argc, char* argv[]) {
 				platform::createDirectory( dataFolder );
 			}
 
-			setupAndRun( dataFolder, testFile, restarting );
+			setupAndRun( dataFolder, testFile, restarting, tlsOptions->enabled() );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
