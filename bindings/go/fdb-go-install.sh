@@ -167,7 +167,7 @@ else
 
         if [[ "${status}" -eq 0 ]] ; then
             destdir=$( cd "${destdir}" && pwd ) # Get absolute path of destination dir.
-            fdbdir="${destdir}/foundation"
+            fdbdir="${destdir}/foundationdb"
 
             if [[ ! -d "${destdir}" ]] ; then
                 cmd=("mkdir" "-p" "${destdir}")
