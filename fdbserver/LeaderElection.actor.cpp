@@ -75,14 +75,14 @@ ACTOR Future<Void> changeLeaderCoordinators( ServerCoordinators coordinators, Va
 	return Void();
 }
 
-ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ProcessClass>> asyncProcessClass, Reference<AsyncVar<bool>> asyncIsExcluded ) {
+ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Value proposedSerializedInterface, Reference<AsyncVar<Value>> outSerializedLeader, bool hasConnected, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo ) {
 	state Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees( new AsyncVar<vector<Optional<LeaderInfo>>>() );
 	state LeaderInfo myInfo;
 	state Future<Void> candidacies;
 	state bool iAmLeader = false;
 	state UID prevChangeID;
 
-	if( asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController) > ProcessClass::UnsetFit || asyncIsExcluded->get() ) {
+	if( asyncPriorityInfo->get().processClassFitness > ProcessClass::UnsetFit || asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad || asyncPriorityInfo->get().isExcluded ) {
 		Void _ = wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
 
@@ -98,7 +98,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 
 		myInfo.changeID = g_random->randomUniqueID();
 		prevChangeID = myInfo.changeID;
-		myInfo.updateChangeID( asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController), asyncIsExcluded->get() );
+		myInfo.updateChangeID( asyncPriorityInfo->get() );
 
 		vector<Future<Void>> cand;
 		for(int i=0; i<coordinators.leaderElectionServers.size(); i++)
@@ -157,7 +157,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 					break;
 				}
 				when (Void _ = wait(candidacies)) { ASSERT(false); }
-				when (Void _ = wait( asyncProcessClass->onChange() || asyncIsExcluded->onChange() )) {
+				when (Void _ = wait( asyncPriorityInfo->onChange() )) {
 					break;
 				}
 			}
@@ -170,7 +170,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 
 	loop {
 		prevChangeID = myInfo.changeID;
-		myInfo.updateChangeID( asyncProcessClass->get().machineClassFitness(ProcessClass::ClusterController), asyncIsExcluded->get() );
+		myInfo.updateChangeID( asyncPriorityInfo->get() );
 		if (myInfo.changeID != prevChangeID) {
 			TraceEvent("ChangeLeaderChangeID").detail("PrevChangeID", prevChangeID).detail("NewChangeID", myInfo.changeID);
 		}

@@ -26,7 +26,7 @@
  *  from the result. As a best practice, API clients should use at least one
  *  subspace for application data.<br>
  *  <br>
- *  See <a href="/developer-guide.html#developer-guide-sub-keyspaces">general
+ *  See <a href="/foundationdb/developer-guide.html#developer-guide-sub-keyspaces">general
  *   subspace documentation</a> for information about how subspaces work and
  *   interact with other parts of the built-in keyspace management features.
  */

@@ -460,7 +460,6 @@ class Tester
               tr.options.set_causal_read_risky
               tr.options.set_causal_write_risky
               tr.options.set_read_your_writes_disable
-              tr.options.set_read_ahead_disable
               tr.options.set_read_system_keys
               tr.options.set_access_system_keys
               tr.options.set_durability_dev_null_is_web_scale

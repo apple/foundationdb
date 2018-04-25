@@ -27,7 +27,7 @@
 // of higher-level data models.
 //
 // For general guidance on tuple usage, see the Tuple section of Data Modeling
-// (https://www.foundationdb.org/documentation/data-modeling.html#data-modeling-tuples).
+// (https://apple.github.io/foundationdb/data-modeling.html#tuples).
 //
 // FoundationDB tuples can currently encode byte and unicode strings, integers
 // and NULL values. In Go these are represented as []byte, string, int64 and
@@ -38,6 +38,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 )
 
@@ -114,7 +115,7 @@ func encodeBytes(buf *bytes.Buffer, code byte, b []byte) {
 func bisectLeft(u uint64) int {
 	var n int
 	for sizeLimits[n] < u {
-		n += 1
+		n++
 	}
 	return n
 }
@@ -356,7 +357,7 @@ func decodeTuple(b []byte, nested bool) (Tuple, int, error) {
 			if err != nil {
 				return nil, i, err
 			}
-			off += 1
+			off++
 		default:
 			return nil, i, fmt.Errorf("unable to decode tuple element with unknown typecode %02x", b[i])
 		}

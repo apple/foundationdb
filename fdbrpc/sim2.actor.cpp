@@ -1026,62 +1026,118 @@ public:
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const
 	{
-		bool	canSurvive = true;
-		int		nQuorum = ((desiredCoordinators+1)/2)*2-1;
+		bool canSurvive = true;
+		int nQuorum = ((desiredCoordinators+1)/2)*2-1;
 
-		KillType	newKt = kt;
+		KillType newKt = kt;
 		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
 		{
-			LocalityGroup	processesLeft, processesDead;
-			std::vector<LocalityData>	localitiesDead, localitiesLeft, badCombo;
-			std::set<Optional<Standalone<StringRef>>>	uniqueMachines;
-			ASSERT(storagePolicy);
-			ASSERT(tLogPolicy);
-			for (auto processInfo : availableProcesses) {
-				processesLeft.add(processInfo->locality);
-				localitiesLeft.push_back(processInfo->locality);
-				uniqueMachines.insert(processInfo->locality.machineId());
+			LocalityGroup primaryProcessesLeft, primaryProcessesDead;
+			LocalityGroup primarySatelliteProcessesLeft, primarySatelliteProcessesDead;
+			LocalityGroup remoteProcessesLeft, remoteProcessesDead;
+			LocalityGroup remoteSatelliteProcessesLeft, remoteSatelliteProcessesDead;
+
+			std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
+			std::vector<LocalityData> primarySatelliteLocalitiesDead, primarySatelliteLocalitiesLeft;
+			std::vector<LocalityData> remoteLocalitiesDead, remoteLocalitiesLeft;
+			std::vector<LocalityData> remoteSatelliteLocalitiesDead, remoteSatelliteLocalitiesLeft;
+
+			std::vector<LocalityData> badCombo;
+			std::set<Optional<Standalone<StringRef>>> uniqueMachines;
+
+			if(!primaryDcId.present()) {
+				for (auto processInfo : availableProcesses) {
+					primaryProcessesLeft.add(processInfo->locality);
+					primaryLocalitiesLeft.push_back(processInfo->locality);
+					uniqueMachines.insert(processInfo->locality.machineId());
+				}
+				for (auto processInfo : deadProcesses) {
+					primaryProcessesDead.add(processInfo->locality);
+					primaryLocalitiesDead.push_back(processInfo->locality);
+				}
+			} else {
+				for (auto processInfo : availableProcesses) {
+					uniqueMachines.insert(processInfo->locality.machineId());
+					if(processInfo->locality.dcId() == primaryDcId) {
+						primaryProcessesLeft.add(processInfo->locality);
+						primaryLocalitiesLeft.push_back(processInfo->locality);
+					} else if(processInfo->locality.dcId() == remoteDcId) {
+						remoteProcessesLeft.add(processInfo->locality);
+						remoteLocalitiesLeft.push_back(processInfo->locality);
+					} else if(std::find(primarySatelliteDcIds.begin(), primarySatelliteDcIds.end(), processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
+						primarySatelliteProcessesLeft.add(processInfo->locality);
+						primarySatelliteLocalitiesLeft.push_back(processInfo->locality);
+					} else if(std::find(remoteSatelliteDcIds.begin(), remoteSatelliteDcIds.end(), processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
+						remoteSatelliteProcessesLeft.add(processInfo->locality);
+						remoteSatelliteLocalitiesLeft.push_back(processInfo->locality);
+					}
+				}
+				for (auto processInfo : deadProcesses) {
+					if(processInfo->locality.dcId() == primaryDcId) {
+						primaryProcessesDead.add(processInfo->locality);
+						primaryLocalitiesDead.push_back(processInfo->locality);
+					} else if(processInfo->locality.dcId() == remoteDcId) {
+						remoteProcessesDead.add(processInfo->locality);
+						remoteLocalitiesDead.push_back(processInfo->locality);
+					} else if(std::find(primarySatelliteDcIds.begin(), primarySatelliteDcIds.end(), processInfo->locality.dcId()) != primarySatelliteDcIds.end()) {
+						primarySatelliteProcessesDead.add(processInfo->locality);
+						primarySatelliteLocalitiesDead.push_back(processInfo->locality);
+					} else if(std::find(remoteSatelliteDcIds.begin(), remoteSatelliteDcIds.end(), processInfo->locality.dcId()) != remoteSatelliteDcIds.end()) {
+						remoteSatelliteProcessesDead.add(processInfo->locality);
+						remoteSatelliteLocalitiesDead.push_back(processInfo->locality);
+					}
+				}
 			}
-			for (auto processInfo : deadProcesses) {
-				processesDead.add(processInfo->locality);
-				localitiesDead.push_back(processInfo->locality);
+
+			bool tooManyDead = false;
+			bool notEnoughLeft = false;
+			bool primaryTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false) : primaryProcessesDead.validate(tLogPolicy);
+
+			if(!primaryDcId.present()) {
+				tooManyDead = primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
+				notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy);
+			} else {
+				bool remoteTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo, remoteProcessesDead, tLogPolicy, remoteLocalitiesLeft, tLogWriteAntiQuorum, false) : remoteProcessesDead.validate(tLogPolicy);
+				
+				if(!hasSatelliteReplication) {
+					notEnoughLeft = ( !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) ) && ( !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy) );
+					if(hasRemoteReplication) {
+						tooManyDead = primaryTLogsDead || remoteTLogsDead || ( primaryProcessesDead.validate(storagePolicy) && remoteProcessesDead.validate(storagePolicy) );
+					} else {
+						tooManyDead = primaryTLogsDead || remoteTLogsDead || primaryProcessesDead.validate(storagePolicy) || remoteProcessesDead.validate(storagePolicy);
+					}
+				} else {
+					bool primarySatelliteTLogsDead = satelliteTLogWriteAntiQuorum ? !validateAllCombinations(badCombo, primarySatelliteProcessesDead, satelliteTLogPolicy, primarySatelliteLocalitiesLeft, satelliteTLogWriteAntiQuorum, false) : primarySatelliteProcessesDead.validate(satelliteTLogPolicy);
+					bool remoteSatelliteTLogsDead = satelliteTLogWriteAntiQuorum ? !validateAllCombinations(badCombo, remoteSatelliteProcessesDead, satelliteTLogPolicy, remoteSatelliteLocalitiesLeft, satelliteTLogWriteAntiQuorum, false) : remoteSatelliteProcessesDead.validate(satelliteTLogPolicy);
+
+					notEnoughLeft = ( !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) || !primarySatelliteProcessesLeft.validate(satelliteTLogPolicy) ) && ( !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy) || !remoteSatelliteProcessesLeft.validate(satelliteTLogPolicy) );
+					if(hasRemoteReplication) {
+						tooManyDead = ( primaryTLogsDead && primarySatelliteTLogsDead ) || ( remoteTLogsDead && remoteSatelliteTLogsDead ) || ( primaryProcessesDead.validate(storagePolicy) && remoteProcessesDead.validate(storagePolicy) );
+					} else {
+						tooManyDead = ( primaryTLogsDead && primarySatelliteTLogsDead ) || ( remoteTLogsDead && remoteSatelliteTLogsDead ) || primaryProcessesDead.validate(storagePolicy) || remoteProcessesDead.validate(storagePolicy);
+					}
+				}
 			}
+
 			// Reboot if dead machines do fulfill policies
-			if (processesDead.validate(tLogPolicy)) {
+			if (tooManyDead) {
 				newKt = Reboot;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("tLogPolicy", tLogPolicy->info()).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("DeadZones", ::describeZones(localitiesDead)).detail("DeadDataHalls", ::describeDataHalls(localitiesDead)).detail("Reason", "tLogPolicy validates against dead processes.");
-			}
-			else if (processesDead.validate(storagePolicy)) {
-				newKt = Reboot;
-				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("storagePolicy", storagePolicy->info()).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("DeadZones", ::describeZones(localitiesDead)).detail("DeadDataHalls", ::describeDataHalls(localitiesDead)).detail("Reason", "storagePolicy validates against dead processes.");
-			}
-			// Check all combinations of the AntiQuorum within the failed
-			else if ((tLogWriteAntiQuorum) && (!validateAllCombinations(badCombo, processesDead, tLogPolicy, localitiesLeft, tLogWriteAntiQuorum, false)))
-			{
-				newKt = Reboot;
-				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("storagePolicy", storagePolicy->info()).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("BadZones", ::describeZones(badCombo)).detail("BadDataHalls", ::describeDataHalls(badCombo)).detail("Reason", "tLog AntiQuorum does not validates against dead processes.");
+				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("tLogPolicy", tLogPolicy->info()).detail("Reason", "tLogPolicy validates against dead processes.");
 			}
 			// Reboot and Delete if remaining machines do NOT fulfill policies
-			else if ((kt != RebootAndDelete) && (kt != RebootProcessAndDelete) && (!processesLeft.validate(tLogPolicy))) {
+			else if ((kt != RebootAndDelete) && (kt != RebootProcessAndDelete) && notEnoughLeft) {
 				newKt = (g_random->random01() < 0.33) ? RebootAndDelete : Reboot;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("tLogPolicy", tLogPolicy->info()).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("RemainingZones", ::describeZones(localitiesLeft)).detail("RemainingDataHalls", ::describeDataHalls(localitiesLeft)).detail("Reason", "tLogPolicy does not validates against remaining processes.");
-			}
-			else if ((kt != RebootAndDelete) && (kt != RebootProcessAndDelete) && (!processesLeft.validate(storagePolicy))) {
-				newKt = (g_random->random01() < 0.33) ? RebootAndDelete : Reboot;
-				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("storagePolicy", storagePolicy->info()).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("RemainingZones", ::describeZones(localitiesLeft)).detail("RemainingDataHalls", ::describeDataHalls(localitiesLeft)).detail("Reason", "storagePolicy does not validates against remaining processes.");
+				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("tLogPolicy", tLogPolicy->info()).detail("Reason", "tLogPolicy does not validates against remaining processes.");
 			}
 			else if ((kt != RebootAndDelete) && (kt != RebootProcessAndDelete) && (nQuorum > uniqueMachines.size())) {
 				newKt = (g_random->random01() < 0.33) ? RebootAndDelete : Reboot;
 				canSurvive = false;
-				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("storagePolicy", storagePolicy->info()).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("RemainingZones", ::describeZones(localitiesLeft)).detail("RemainingDataHalls", ::describeDataHalls(localitiesLeft)).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size()).detail("Reason", "Not enough unique machines to perform auto configuration of coordinators.");
+				TraceEvent("KillChanged").detail("KillType", kt).detail("NewKillType", newKt).detail("storagePolicy", storagePolicy->info()).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size()).detail("Reason", "Not enough unique machines to perform auto configuration of coordinators.");
 			}
 			else {
-				TraceEvent("CanSurviveKills").detail("KillType", kt).detail("ProcessesLeft", processesLeft.size()).detail("ProcessesDead", processesDead.size()).detail("DeadZones", ::describeZones(localitiesDead)).detail("DeadDataHalls", ::describeDataHalls(localitiesDead)).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info()).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size()).detail("ZonesLeft", ::describeZones(localitiesLeft)).detail("DataHallsLeft", ::describeDataHalls(localitiesLeft)).detail("ValidateRemaining", processesLeft.validate(tLogPolicy));
+				TraceEvent("CanSurviveKills").detail("KillType", kt).detail("tLogPolicy", tLogPolicy->info()).detail("storagePolicy", storagePolicy->info()).detail("Quorum", nQuorum).detail("Machines", uniqueMachines.size());
 			}
 		}
 		if (newKillType) *newKillType = newKt;
@@ -1146,10 +1202,9 @@ public:
 		}
 	}
 	virtual void killProcess( ProcessInfo* machine, KillType kt ) {
-		TraceEvent("attemptingKillProcess").detail("killedMachines", killedMachines).detail("killableMachines", killableMachines);
+		TraceEvent("attemptingKillProcess");
 		if (kt < RebootAndDelete ) {
 			killProcess_internal( machine, kt );
-			killedMachines++;
 		}
 	}
 	virtual void killInterface( NetworkAddress address, KillType kt  ) {
@@ -1157,7 +1212,6 @@ public:
 			std::vector<ProcessInfo*>& processes = machines[ addressMap[address]->locality.zoneId() ].processes;
 			for( int i = 0; i < processes.size(); i++ )
 				killProcess_internal( processes[i], kt );
-			killedMachines++;
 		}
 	}
 	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType kt, bool killIsSafe, bool forceKill, KillType* ktFinal) {
@@ -1195,7 +1249,7 @@ public:
 		// Check if machine can be removed, if requested
 		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
 		{
-			std::vector<ProcessInfo*>	processesLeft, processesDead;
+			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int	protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
 			for (auto machineRec : machines) {
@@ -1205,19 +1259,19 @@ public:
 						// Do not include any excluded machines
 						if (processInfo->isExcluded()) {
 							processesDead.push_back(processInfo);
-							excluded ++;
+							excluded++;
 						}
 						else if (!processInfo->isCleared()) {
 							processesDead.push_back(processInfo);
-							cleared ++;
+							cleared++;
 						}
 						else if (!processInfo->isAvailable()) {
 							processesDead.push_back(processInfo);
-							unavailable ++;
+							unavailable++;
 						}
 						else if (protectedAddresses.count(processInfo->address)) {
 							processesLeft.push_back(processInfo);
-							protectedWorker ++;
+							protectedWorker++;
 						}
 						else if (machineRec.second.zoneId != zoneId)
 							processesLeft.push_back(processInfo);
@@ -1271,7 +1325,7 @@ public:
 			return false;
 		}
 
-		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KilledMachines", killedMachines).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig).detail("killIsSafe", killIsSafe);
+		TraceEvent("KillMachine", zoneId).detailext("ZoneId", zoneId).detail("Kt", kt).detail("KtOrig", ktOrig).detail("KillableMachines", processesOnMachine).detail("ProcessPerMachine", processesPerMachine).detail("KillChanged", kt!=ktOrig).detail("killIsSafe", killIsSafe);
 		if (kt < RebootAndDelete ) {
 			if(kt == InjectFaults && machines[zoneId].machineProcess != nullptr)
 				killProcess_internal( machines[zoneId].machineProcess, kt );
@@ -1377,10 +1431,6 @@ public:
 		}
 
 		TraceEvent("killDataCenter")
-			.detail("killedMachines", killedMachines)
-			.detail("killableMachines", killableMachines)
-			.detail("killableDatacenters", killableDatacenters)
-			.detail("maxCoordinatorsInDatacenter", maxCoordinatorsInDatacenter)
 			.detail("DcZones", datacenterZones.size())
 			.detail("DcProcesses", dcProcesses)
 			.detailext("DCID", dcId)

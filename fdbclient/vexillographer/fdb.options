@@ -82,7 +82,7 @@ description is not currently required but encouraged.
     <Option name="disable_multi_version_client_api" code="60"
             description="Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network." />
     <Option name="callbacks_on_external_threads" code="61"
-            description="If set, callbacks from external client libraries can be called from threads created by the FoundationDB client library. Otherwise, callbacks will be called from either the thread used to add the callback or the network thread. Setting this option can improve performance when connected using an external client, but may not be safe to use in all environments. Must be set before setting up the network. WARNING: This feature is considered experimental at this time. " />
+            description="If set, callbacks from external client libraries can be called from threads created by the FoundationDB client library. Otherwise, callbacks will be called from either the thread used to add the callback or the network thread. Setting this option can improve performance when connected using an external client, but may not be safe to use in all environments. Must be set before setting up the network. WARNING: This feature is considered experimental at this time." />
     <Option name="external_client_library" code="62"
             paramType="String" paramDescription="path to client library"
             description="Adds an external client library for use by the multi-version client API. Must be set before setting up the network." />
@@ -132,12 +132,14 @@ description is not currently required but encouraged.
     <Option name="next_write_no_write_conflict_range" code="30"
             description="The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on." />
     <Option name="commit_on_first_proxy" code="40"
-            description="Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'." />
-    <Option name="check_writes_enable" code="50" />
+            description="Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'."
+            hidden="true" />
+    <Option name="check_writes_enable" code="50"
+            hidden="true" />
     <Option name="read_your_writes_disable" code="51"
             description="Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction."/>
     <Option name="read_ahead_disable" code="52"
-            description="Disables read-ahead caching for range reads. Under normal operation, a transaction will read extra rows from the database into cache if range reads are used to page through a series of data one row at a time (i.e. if a range read with a one row limit is followed by another one row range read starting immediately after the result of the first)." />
+            description="Deprecated" />
     <Option name="durability_datacenter" code="110" />
     <Option name="durability_risky" code="120" />
     <Option name="durability_dev_null_is_web_scale" code="130" />
@@ -151,7 +153,8 @@ description is not currently required but encouraged.
             description="Allows this transaction to read and modify system keys (those that start with the byte 0xFF)"/>
     <Option name="read_system_keys" code="302"
             description="Allows this transaction to read system keys (those that start with the byte 0xFF)"/>
-    <Option name="debug_dump" code="400" />
+    <Option name="debug_dump" code="400" 
+            hidden="true" />
     <Option name="debug_retry_logging" code="401" paramType="String" paramDescription="Optional transaction name" />
     <Option name="transaction_logging_enable" code="402" paramType="String" paramDescription="String identifier to be used in the logs when tracing this transaction. The identifier must not exceed 100 characters."
             description="Enables tracing for this transaction and logs results to the client trace logs. Client trace logging must be enabled to get log output." />
@@ -174,6 +177,8 @@ description is not currently required but encouraged.
             description="By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail."/>
     <Option name="read_lock_aware" code="702"
             description="The transaction can read from locked databases."/>
+    <Option name="first_in_batch" code="710"
+            description="No other transactions will be applied before this transaction within the same commit version."/>
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

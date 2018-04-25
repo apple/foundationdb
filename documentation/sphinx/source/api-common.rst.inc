@@ -236,6 +236,34 @@
 
     It is an error to set these options after the first call to |open-func| or |init-func| anywhere in your application.
 
+.. |tls-options-burb| replace::
+
+    The following options are only used when connecting to a :doc:`TLS-enabled cluster <tls>`.
+
+.. |option-tls-plugin-blurb| replace::
+
+    Sets the :ref:`TLS plugin <configuring-tls-plugin>` to load. This option, if used, must be set before any other TLS options.
+
+.. |option-tls-cert-path-blurb| replace::
+   
+    Sets the path for the file from which the :ref:`certificate chain <tls-certificate-file>` will be loaded.
+
+.. |option-tls-key-path-blurb| replace::
+
+    Sets the path for the file from which to load the :ref:`private key <tls-key-file>` corresponding to your own certificate.
+
+.. |option-tls-verify-peers-blurb| replace::
+
+    Sets the :ref:`peer certificate field verification criteria <tls-verify-peers>`.
+
+.. |option-tls-cert-bytes| replace::
+
+    Sets the certificate chain.
+
+.. |option-tls-key-bytes| replace::
+
+    Set the private key corresponding to your own certificate.
+
 .. |option-disable-multi-version-client-api| replace::
 
     Disables the :ref:`multi-version client API <multi-version-client-api>` and instead uses the local client directly. Must be set before setting up the network.
@@ -443,7 +471,6 @@
 .. |directory-create-or-open-blurb| replace::
     Opens the directory with ``path`` specified as |dir-path-type| of strings. ``path`` can also be a string, in which case it will be automatically wrapped in |dir-path-type|. All string values in a path will be converted to unicode. If the directory does not exist, it is created (creating parent directories if necessary).
 
-.. **NOTE** this blurb is not used in api-node
 .. |directory-create-or-open-return-blurb| replace::
     Returns the directory and its contents as a |directory-subspace|.
 
@@ -456,7 +483,6 @@
 .. |directory-move-blurb| replace::
     Moves the directory at ``old_path`` to ``new_path``. There is no effect on the physical prefix of the given directory or on clients that already have the directory open. The method will |error-raise-type| an |error-type| if a directory does not exist at ``old_path``, a directory already exists at ``new_path``, or the parent directory of ``new_path`` does not exist.
 
-.. **NOTE** this blurb is not used in api-node
 .. |directory-move-return-blurb| replace::
     Returns the directory at its new location as a |directory-subspace|.
 

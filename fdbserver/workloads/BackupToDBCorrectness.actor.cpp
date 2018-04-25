@@ -360,7 +360,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					TraceEvent("BARW_NonzeroTaskWait", randomID).detail("backupTag", printable(tag)).detail("taskCount", taskCount).detail("waitCycles", waitCycles);
 					printf("%.6f %-10s Wait #%4d for %lld tasks to end\n", now(), randomID.toString().c_str(), waitCycles, (long long) taskCount);
 
-					Void _ = wait(delay(20.0));
+					Void _ = wait(delay(5.0));
 					tr->commit();
 					tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 					int64_t _taskCount = wait( backupAgent->getTaskCount(tr) );
@@ -440,7 +440,6 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
 		state Future<Void> extraBackup;
 		state bool extraTasks = false;
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "backupAndRestore");
 		TraceEvent("BARW_Arguments").detail("backupTag", printable(self->backupTag)).detail("backupAfter", self->backupAfter)
 			.detail("abortAndRestartAfter", self->abortAndRestartAfter).detail("differentialAfter", self->stopDifferentialAfter);
 

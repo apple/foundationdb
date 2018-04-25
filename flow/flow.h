@@ -70,6 +70,8 @@ extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string def
 extern std::string format(const char* form, ...);
 extern Standalone<StringRef> strinc(StringRef const& str);
 extern StringRef strinc(StringRef const& str, Arena& arena);
+extern Standalone<StringRef> addVersionStampAtEnd(StringRef const& str);
+extern StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena);
 
 template <typename Iter>
 StringRef concatenate( Iter b, Iter const& e, Arena& arena ) {

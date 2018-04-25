@@ -121,7 +121,7 @@ The cluster file contains a connection string consisting of a cluster identifier
 
 Together the ``description`` and the ``ID`` should uniquely identify a FoundationDB cluster.
 
-A cluster file may contain comments, marked by the ``#`` character. All characters on a line after the first occurance of a ``#`` will be ignored.
+A cluster file may contain comments, marked by the ``#`` character. All characters on a line after the first occurrence of a ``#`` will be ignored.
 
 Generally, a cluster file should not be modified manually. Incorrect modifications after a cluster is created could result in data loss. To change the set of coordination servers used by a cluster, see :ref:`configuration-choosing-coordination-servers`. To change the cluster ``description``, see :ref:`configuration-setting-cluster-description`.
 
@@ -158,7 +158,7 @@ You can add new machines to a cluster at any time:
 
 5) If you have previously :ref:`excluded <removing-machines-from-a-cluster>` a machine from the cluster, you will need to take it off the exclusion list using the ``include <ip>`` command of fdbcli before it can be a full participant in the cluster.
 
-    .. note:: Addresses have the form ``IP``:``PORT``.
+    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
 
 .. _removing-machines-from-a-cluster:
 
@@ -186,9 +186,9 @@ To temporarily or permanently remove one or more machines from a FoundationDB cl
         It is now safe to remove these machines or processes from the cluster.
 
     
-    ``exclude`` can be used to exclude either machines (by specifiying an IP address) or individual processes (by specificying an ``IP``:``PORT`` pair).
+    ``exclude`` can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an ``IP``:``PORT`` pair).
 
-    .. note:: Addresses have the form ``IP``:``PORT``.
+    .. note:: Addresses have the form ``IP``:``PORT``. This form is used even if TLS is enabled.
     
     Excluding a server doesn't shut it down immediately; data on the machine is first moved away. When the ``exclude`` command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.
     
@@ -209,6 +209,11 @@ Moving a cluster
 ================
 
 The procedures for adding and removing machines can be combined into a recipe for :doc:`moving an existing cluster to new machines <moving-a-cluster>`.
+
+Converting an existing cluster to use TLS
+=========================================
+
+A FoundationDB cluster has the option of supporting :doc:`Transport Layer Security (TLS) <tls>`. To enable TLS on an existing, non-TLS cluster, see :ref:`Converting a running cluster <converting-existing-cluster>`.
 
 .. _administration-monitoring-cluster-status:
 
@@ -611,7 +616,7 @@ For **RHEL/CentOS**, perform the upgrade using the rpm command:
     user@host$ sudo rpm -Uvh |package-rpm-clients| \\
     |package-rpm-server|
 
-The ``foundationdb-clients`` package also installs the :doc:`Python <api-python>` and :doc:`C <api-c>` APIs. If your clients use :doc:`Ruby <api-ruby>`, `Java <javadoc/index.html>`_, :doc:`Node.js <api-node>`, or `Go <godoc/fdb.html>`_, follow the instructions in the corresponding language documentation to install the APIs.
+The ``foundationdb-clients`` package also installs the :doc:`Python <api-python>` and :doc:`C <api-c>` APIs. If your clients use :doc:`Ruby <api-ruby>`, `Java <javadoc/index.html>`_, or `Go <https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb>`_, follow the instructions in the corresponding language documentation to install the APIs.
 
 Test the database
 -----------------

@@ -22,7 +22,6 @@ package com.apple.foundationdb.test;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.TransactionContext;

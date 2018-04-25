@@ -355,7 +355,7 @@ template <> inline void FieldHeader<Standalone<StringRef>>::update(Standalone<St
 // data block or to read all field values from a metric value block.  This usage pattern enables enables
 // encoding and decoding values as deltas from previous values.
 //
-// The default implemenation works for ints and writes delta from the previous value.
+// The default implementation works for ints and writes delta from the previous value.
 template <typename T>
 struct FieldValueBlockEncoding {
 	FieldValueBlockEncoding() : prev(0) {}
@@ -1156,7 +1156,7 @@ struct FieldValueBlockEncoding<TimeAndValue<T>> {
 	FieldValueBlockEncoding<T> value_encoding;
 };
 
-// ValueBlock encoder/decoder specialization for continous bool metrics because they are encoded
+// ValueBlock encoder/decoder specialization for continuous bool metrics because they are encoded
 // more efficiently than encoding the time and bool types separately.
 // Instead, time and value are combined to a single value (time delta << 1) + (value ? 1 : 0) and then
 // that value is encoded as a delta.

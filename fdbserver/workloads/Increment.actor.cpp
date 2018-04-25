@@ -135,7 +135,6 @@ struct Increment : TestWorkload {
 		return true;
 	}
 	ACTOR Future<bool> incrementCheck( Database cx, Increment* self, bool ok ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "Increment");
 		if (self->transactions.getMetric().value() < self->testDuration * self->minExpectedTransactionsPerSecond) {
 			TraceEvent(SevWarnAlways, "TestFailure").detail("Reason", "Rate below desired rate").detail("Details", format("%.2f", self->transactions.getMetric().value() / (self->transactionsPerSecond * self->testDuration)))
 				.detail("TransactionsAchieved", self->transactions.getMetric().value())

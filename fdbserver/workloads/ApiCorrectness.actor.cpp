@@ -155,7 +155,7 @@ public:
 		if(!self->hasFailed()) {
 			//Return database to original state (for a maximum of 1200 seconds)
 			try {
-				Void _ = wait(disableConnectionFailuresAfter(timeoutError(::success(self->runSet(data, self)), 1200), 600, "ApiCorrectnessReset"));
+				Void _ = wait(timeoutError(::success(self->runSet(data, self)), 1200));
 			}
 			catch(Error &e) {
 				if(e.code() == error_code_timed_out) {

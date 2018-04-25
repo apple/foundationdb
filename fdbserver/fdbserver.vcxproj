@@ -55,6 +55,7 @@
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
     <ActorCompiler Include="MemoryPager.actor.cpp" />
+    <ActorCompiler Include="LogRouter.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
@@ -99,6 +100,7 @@
     <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBAbort.actor.cpp" />
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp" />
+    <ActorCompiler Include="workloads\BackupToDBUpgrade.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicSwitchover.actor.cpp" />
     <ActorCompiler Include="workloads\AtomicRestore.actor.cpp" />
     <ClCompile Include="workloads\Fuzz.cpp" />
@@ -134,7 +136,6 @@
     <ActorCompiler Include="workloads\MetricLogging.actor.cpp" />
     <ActorCompiler Include="workloads\RYWPerformance.actor.cpp" />
     <ActorCompiler Include="workloads\RYWDisable.actor.cpp" />
-    <ActorCompiler Include="workloads\RestartRecovery.actor.cpp" />
     <ActorCompiler Include="workloads\UnitTests.actor.cpp" />
     <ActorCompiler Include="workloads\WorkerErrors.actor.cpp" />
     <ActorCompiler Include="workloads\MemoryLifetime.actor.cpp" />

@@ -116,7 +116,6 @@ struct LockDatabaseWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> lockWorker( Database cx, LockDatabaseWorkload* self ) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "lockDb");
 		state UID lockID = g_random->randomUniqueID();
 		Void _ = wait(delay(self->lockAfter));
 		state Standalone<RangeResultRef> data = wait(lockAndSave(cx, self, lockID));

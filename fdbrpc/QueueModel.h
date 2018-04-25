@@ -32,14 +32,17 @@ struct QueueData {
 	Smoother smoothOutstanding;
 	double latency;
 	double penalty;
-	QueueData() : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT) {}
+	double failedUntil;
+	double futureVersionBackoff;
+	double increaseBackoffTime;
+	QueueData() : latency(0.001), penalty(1.0), smoothOutstanding(FLOW_KNOBS->QUEUE_MODEL_SMOOTHING_AMOUNT), failedUntil(0), futureVersionBackoff(FLOW_KNOBS->FUTURE_VERSION_INITIAL_BACKOFF), increaseBackoffTime(0) {}
 };
 
 typedef double TimeEstimate;
 
 class QueueModel {
 public:
-	void endRequest( uint64_t id, double latency, double penalty, double delta, bool clean );
+	void endRequest( uint64_t id, double latency, double penalty, double delta, bool clean, bool futureVersion );
 	QueueData& getMeasurement( uint64_t id );
 	double addRequest( uint64_t id );
 	double secondMultiplier;
