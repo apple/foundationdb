@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.5',
+        VERSION:     '5.1.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -96,6 +96,7 @@
 <li><a class="reference internal" href="#adding-machines-to-a-cluster">Adding machines to a cluster</a></li>
 <li><a class="reference internal" href="#removing-machines-from-a-cluster">Removing machines from a cluster</a></li>
 <li><a class="reference internal" href="#moving-a-cluster">Moving a cluster</a></li>
+<li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
 <li><a class="reference internal" href="#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li><a class="reference internal" href="#process-details">Process details</a></li>
 </ul>
@@ -185,6 +186,7 @@
 <li><a class="reference internal" href="#adding-machines-to-a-cluster">Adding machines to a cluster</a></li>
 <li><a class="reference internal" href="#removing-machines-from-a-cluster">Removing machines from a cluster</a></li>
 <li><a class="reference internal" href="#moving-a-cluster">Moving a cluster</a></li>
+<li><a class="reference internal" href="#converting-an-existing-cluster-to-use-tls">Converting an existing cluster to use TLS</a></li>
 <li><a class="reference internal" href="#monitoring-cluster-status">Monitoring cluster status</a><ul>
 <li><a class="reference internal" href="#process-details">Process details</a></li>
 </ul>
@@ -330,7 +332,7 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 <li>The list of <code class="docutils literal"><span class="pre">IP:PORT</span></code> pairs specify the set of coordination servers. A majority of these servers must be available for the database to be operational so they should be chosen carefully. The number of coordination servers should therefore be odd and must be more than one to support fault-tolerance. We recommend using five coordination servers when using <code class="docutils literal"><span class="pre">triple</span></code> mode to maintain the ability to tolerate two simultaneous machine failures.</li>
 </ul>
 <p>Together the <code class="docutils literal"><span class="pre">description</span></code> and the <code class="docutils literal"><span class="pre">ID</span></code> should uniquely identify a FoundationDB cluster.</p>
-<p>A cluster file may contain comments, marked by the <code class="docutils literal"><span class="pre">#</span></code> character. All characters on a line after the first occurance of a <code class="docutils literal"><span class="pre">#</span></code> will be ignored.</p>
+<p>A cluster file may contain comments, marked by the <code class="docutils literal"><span class="pre">#</span></code> character. All characters on a line after the first occurrence of a <code class="docutils literal"><span class="pre">#</span></code> will be ignored.</p>
 <p>Generally, a cluster file should not be modified manually. Incorrect modifications after a cluster is created could result in data loss. To change the set of coordination servers used by a cluster, see <a class="reference internal" href="configuration.html#configuration-choosing-coordination-servers"><span class="std std-ref">Choosing coordination servers</span></a>. To change the cluster <code class="docutils literal"><span class="pre">description</span></code>, see <a class="reference internal" href="configuration.html#configuration-setting-cluster-description"><span class="std std-ref">Changing the cluster description</span></a>.</p>
 <p>It is very important that each cluster use a unique random ID. If multiple processes use the same database description and ID but different sets of coordination servers, data corruption could result.</p>
 </div>
@@ -366,7 +368,7 @@ host:~ user$ sudo launchctl unload /Library/LaunchDaemons/com.foundationdb.fdbmo
 <blockquote>
 <div><div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Addresses have the form <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code>.</p>
+<p class="last">Addresses have the form <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code>. This form is used even if TLS is enabled.</p>
 </div>
 </div></blockquote>
 </li>
@@ -393,10 +395,10 @@ Waiting for state to be removed from all excluded servers.  This may take a whil
 It is now safe to remove these machines or processes from the cluster.
 </pre></div>
 </div>
-<p><code class="docutils literal"><span class="pre">exclude</span></code> can be used to exclude either machines (by specifiying an IP address) or individual processes (by specificying an <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code> pair).</p>
+<p><code class="docutils literal"><span class="pre">exclude</span></code> can be used to exclude either machines (by specifying an IP address) or individual processes (by specifying an <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code> pair).</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Addresses have the form <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code>.</p>
+<p class="last">Addresses have the form <code class="docutils literal"><span class="pre">IP</span></code>:<code class="docutils literal"><span class="pre">PORT</span></code>. This form is used even if TLS is enabled.</p>
 </div>
 <p>Excluding a server doesn&#8217;t shut it down immediately; data on the machine is first moved away. When the <code class="docutils literal"><span class="pre">exclude</span></code> command completes successfully (by returning control to the command prompt), the machines that you specified are no longer required to maintain the configured redundancy mode. A large amount of data might need to be transferred first, so be patient. When the process is complete, the excluded machine or process can be shut down without fault tolerance or availability consequences.</p>
 <p>If you interrupt the exclude command with Ctrl-C after seeing the &#8220;waiting for state to be removed&#8221; message, the exclusion work will continue in the background. Repeating the command will continue waiting for the exclusion to complete. To reverse the effect of the <code class="docutils literal"><span class="pre">exclude</span></code> command, use the <code class="docutils literal"><span class="pre">include</span></code> command.</p>
@@ -419,6 +421,10 @@ user@host3$ sudo update-rc.d foundationdb disable
 <div class="section" id="moving-a-cluster">
 <h2>Moving a cluster</h2>
 <p>The procedures for adding and removing machines can be combined into a recipe for <a class="reference internal" href="moving-a-cluster.html"><span class="doc">moving an existing cluster to new machines</span></a>.</p>
+</div>
+<div class="section" id="converting-an-existing-cluster-to-use-tls">
+<h2>Converting an existing cluster to use TLS</h2>
+<p>A FoundationDB cluster has the option of supporting <a class="reference internal" href="tls.html"><span class="doc">Transport Layer Security (TLS)</span></a>. To enable TLS on an existing, non-TLS cluster, see <a class="reference internal" href="tls.html#converting-existing-cluster"><span class="std std-ref">Converting a running cluster</span></a>.</p>
 </div>
 <div class="section" id="monitoring-cluster-status">
 <span id="administration-monitoring-cluster-status"></span><h2>Monitoring cluster status</h2>
@@ -746,7 +752,7 @@ Several details about individual FoundationDB processes are displayed in a list 
 <p class="last">Whenever the <code class="docutils literal"><span class="pre">foundationdb.conf</span></code> file changes, the <code class="docutils literal"><span class="pre">fdbmonitor</span></code> daemon automatically detects the changes and starts, stops, or restarts child processes as necessary.</p>
 </div>
 <p>During normal operation, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> is transparent, and you interact with it only by modifying the configuration in <a class="reference internal" href="configuration.html#foundationdb-conf"><span class="std std-ref">foundationdb.conf</span></a> and perhaps occasionally by <a class="reference internal" href="#administration-running-foundationdb"><span class="std std-ref">starting and stopping</span></a> it manually. If some problem prevents an <code class="docutils literal"><span class="pre">fdbserver</span></code> or <code class="docutils literal"><span class="pre">backup-agent</span></code> process from starting or causes it to stop unexpectedly, <code class="docutils literal"><span class="pre">fdbmonitor</span></code> will log errors to the system log.</p>
-<p>If kill_on_configuration_change parameter is unset or set to <a href="#id5"><span class="problematic" id="id6">`true`</span></a> in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to <a href="#id7"><span class="problematic" id="id8">`false`</span></a> it will not restart on changes.</p>
+<p>If <code class="docutils literal"><span class="pre">kill_on_configuration_change</span></code> parameter is unset or set to <code class="docutils literal"><span class="pre">true</span></code> in foundationdb.conf then fdbmonitor will restart on changes automatically. If this parameter is set to <code class="docutils literal"><span class="pre">false</span></code> it will not restart on changes.</p>
 </div>
 <div class="section" id="managing-trace-files">
 <span id="administration-managing-trace-files"></span><h2>Managing trace files</h2>
@@ -766,7 +772,7 @@ Several details about individual FoundationDB processes are displayed in a list 
 <div class="section" id="other-administrative-concerns">
 <span id="administration-other-administrative-concerns"></span><h2>Other administrative concerns</h2>
 <div class="section" id="storage-space-requirements">
-<span id="id9"></span><h3>Storage space requirements</h3>
+<span id="id5"></span><h3>Storage space requirements</h3>
 <p>FoundationDB&#8217;s storage space requirements depend on which storage engine is used.</p>
 <p>Using the <code class="docutils literal"><span class="pre">ssd</span></code> storage engine, data is stored in B-trees that add some overhead.</p>
 <ul class="simple">
@@ -847,13 +853,13 @@ Several details about individual FoundationDB processes are displayed in a list 
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_5.1.5-1_amd64.deb \
-foundationdb-server_5.1.5-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_5.1.7-1_amd64.deb \
+foundationdb-server_5.1.7-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-5.1.5-1.el7.x86_64.rpm \
-foundationdb-server-5.1.5-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-5.1.7-1.el7.x86_64.rpm \
+foundationdb-server-5.1.7-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a> and <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> APIs. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -909,7 +915,7 @@ foundationdb-server-5.1.5-1.el7.x86_64.rpm
 <p>To upgrade from versions prior to 4.0, you should first upgrade to 4.0 and then to the current version.</p>
 </div>
 <div class="section" id="upgrading-from-older-versions">
-<span id="id10"></span><h3>Upgrading from Older Versions</h3>
+<span id="id6"></span><h3>Upgrading from Older Versions</h3>
 <p>Upgrades from versions older than 3.0.0 are no longer supported. To upgrade from an older version, first upgrade to 4.0.x, then upgrade to the desired version.</p>
 </div>
 </div>
@@ -934,8 +940,8 @@ foundationdb-server-5.1.5-1.el7.x86_64.rpm
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 18, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
+      Last updated on Apr 26, 2018.<br/>
     </p>
   </div>
 </footer>

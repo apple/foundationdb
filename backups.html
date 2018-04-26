@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.5',
+        VERSION:     '5.1.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -222,7 +222,7 @@
 <dt><code class="docutils literal"><span class="pre">backup_agent</span></code></dt>
 <dd>The backup agent is a daemon that actually executes the work of the backup and restore jobs.  Any number of backup agents pointed at the same database will cooperate to perform  backups and restores. The Backup URL specified for a backup or restore must be accessible by all <code class="docutils literal"><span class="pre">backup_agent</span></code> processes.</dd>
 <dt><code class="docutils literal"><span class="pre">fdbdr</span></code></dt>
-<dd>This command line tool is used to control (but not execute) DR jobs - backups from one database to anothher.  It can <code class="docutils literal"><span class="pre">start</span></code>, <code class="docutils literal"><span class="pre">abort</span></code> a DR job, or <code class="docutils literal"><span class="pre">switch</span></code> the DR direction.  It can also get the <code class="docutils literal"><span class="pre">status</span></code> of a running DR job.</dd>
+<dd>This command line tool is used to control (but not execute) DR jobs - backups from one database to another.  It can <code class="docutils literal"><span class="pre">start</span></code>, <code class="docutils literal"><span class="pre">abort</span></code> a DR job, or <code class="docutils literal"><span class="pre">switch</span></code> the DR direction.  It can also get the <code class="docutils literal"><span class="pre">status</span></code> of a running DR job.</dd>
 <dt><code class="docutils literal"><span class="pre">dr_agent</span></code></dt>
 <dd>The database backup agent is a daemon that actually executes the work of the DR jobs, writing snapshot and log data to the destination database.  Any number of agents pointed at the same databases will cooperate to perform the backup.</dd>
 </dl>
@@ -318,7 +318,7 @@ will be used to obtain the secret key.</p>
 <dt><code class="docutils literal"><span class="pre">-z</span></code></dt>
 <dd>Perform the backup continuously rather than terminating once a restorable backup is achieved.  Database mutations within the backup&#8217;s target key ranges will be continuously written to the backup as well as repeated inconsistent snapshots at the configured snapshot rate.</dd>
 <dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;DURATION&gt;</span></code> or <code class="docutils literal"><span class="pre">--snapshot_interval</span> <span class="pre">&lt;DURATION&gt;</span></code></dt>
-<dd>Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continous mode.  The default is 864000 which is 10 days.</dd>
+<dd>Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continuous mode.  The default is 864000 which is 10 days.</dd>
 <dt><code class="docutils literal"><span class="pre">-w</span></code></dt>
 <dd>Wait for the backup to complete with behavior identical to that of the <a class="reference internal" href="#backup-wait"><span class="std std-ref">wait command</span></a>.</dd>
 <dt><code class="docutils literal"><span class="pre">-k</span> <span class="pre">'&lt;BEGIN&gt;[</span> <span class="pre">&lt;END&gt;]'</span></code></dt>
@@ -340,7 +340,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 </div>
 <div class="section" id="discontinue">
 <h3><code class="docutils literal"><span class="pre">discontinue</span></code></h3>
-<p>The <code class="docutils literal"><span class="pre">discontinue</span></code> subcommand is only available for backups that were started with the continuous (<code class="docutils literal"><span class="pre">-z</span></code>) option. Its effect is to discontinue the continous backup. Note that the subcommand does <em>not</em> abort the backup; it simply allows the backup to complete as a noncontinuous backup would.</p>
+<p>The <code class="docutils literal"><span class="pre">discontinue</span></code> subcommand is only available for backups that were started with the continuous (<code class="docutils literal"><span class="pre">-z</span></code>) option. Its effect is to discontinue the continuous backup. Note that the subcommand does <em>not</em> abort the backup; it simply allows the backup to complete as a noncontinuous backup would.</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbbackup discontinue [-t &lt;TAG&gt;] [-w]
 </pre></div>
 </div>
@@ -389,7 +389,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <dd>Specifies the cutoff by a database commit version.</dd>
 </dl>
 </div></blockquote>
-<p>Optionally, the user can specify a minimum RESTORABILITY guarauntee with one of the following options.</p>
+<p>Optionally, the user can specify a minimum RESTORABILITY guarantee with one of the following options.</p>
 <blockquote>
 <div><dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">--restorable_after_timestamp</span> <span class="pre">&lt;DATETIME&gt;</span></code></dt>
@@ -461,7 +461,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <dt><code class="docutils literal"><span class="pre">-r</span> <span class="pre">&lt;BACKUP_URL&gt;</span></code></dt>
 <dd>Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the <code class="docutils literal"><span class="pre">backup_agent</span></code> processes for the cluster.</dd>
 <dt><code class="docutils literal"><span class="pre">-w</span></code></dt>
-<dd>Wait for the the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.</dd>
+<dd>Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.</dd>
 <dt><code class="docutils literal"><span class="pre">-k</span> <span class="pre">&lt;KEYS&gt;</span></code></dt>
 <dd>Specify list of key ranges from the backup to restore to the database</dd>
 <dt><code class="docutils literal"><span class="pre">--remove_prefix</span> <span class="pre">&lt;PREFIX&gt;</span></code></dt>
@@ -512,14 +512,14 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbdr [-h] &lt;SUBCOMMAND&gt; [&lt;SUBCOMMAND_OPTIONS&gt;] -d &lt;CLUSTER_FILE&gt; -s &lt;CLUSTER_FILE&gt; [-v]
 </pre></div>
 </div>
-<p>The following arguments are used by mutiple subcommands:</p>
+<p>The following arguments are used by multiple subcommands:</p>
 <dl class="docutils">
 <dt><code class="docutils literal"><span class="pre">-h</span></code></dt>
 <dd>Get help on the <code class="docutils literal"><span class="pre">fdbdr</span></code> command.</dd>
 <dt><code class="docutils literal"><span class="pre">-v</span></code></dt>
 <dd>Get the version of FoundationDB in use.</dd>
 <dt><code class="docutils literal"><span class="pre">-d</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the destination cluster of the DR operaiton.</dd>
+<dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the destination cluster of the DR operation.</dd>
 <dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
 <dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the source cluster of the DR operation.</dd>
 </dl>
@@ -567,7 +567,7 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
 <dt><code class="docutils literal"><span class="pre">-v</span></code></dt>
 <dd>Get the version of FoundationDB in use.</dd>
 <dt><code class="docutils literal"><span class="pre">-d</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
-<dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the destination cluster of the DR operaiton.</dd>
+<dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the destination cluster of the DR operation.</dd>
 <dt><code class="docutils literal"><span class="pre">-s</span> <span class="pre">&lt;CLUSTER_FILE&gt;</span></code></dt>
 <dd>Specify the path to the <code class="docutils literal"><span class="pre">fdb.cluster</span></code> file for the source cluster of the DR operation.</dd>
 </dl>
@@ -593,8 +593,8 @@ user@host$ fdbbackup start -k &#39;@pp1e b*n*nn*&#39; -k &#39;#an&amp;0 p^n3app!
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 18, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
+      Last updated on Apr 26, 2018.<br/>
     </p>
   </div>
 </footer>

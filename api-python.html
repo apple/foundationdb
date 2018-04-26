@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.5',
+        VERSION:     '5.1.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -342,6 +342,46 @@
 <dt id="fdb.fdb.options.set_external_client_directory">
 <code class="descclassname">fdb.options.</code><code class="descname">set_external_client_directory</code><span class="sig-paren">(</span><em>path_to_lib_directory</em><span class="sig-paren">)</span></dt>
 <dd><p>Searches the specified path for dynamic libraries and adds them to the list of client libraries for use by the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>. Must be set before setting up the network.</p>
+</dd></dl>
+
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The following options are only used when connecting to a <a class="reference internal" href="tls.html"><span class="doc">TLS-enabled cluster</span></a>.</p>
+</div>
+<dl class="method">
+<dt id="fdb.fdb.options.set_tls_plugin">
+<code class="descclassname">fdb.options.</code><code class="descname">set_tls_plugin</code><span class="sig-paren">(</span><em>plugin_path_or_name</em><span class="sig-paren">)</span></dt>
+<dd><p>Sets the <a class="reference internal" href="tls.html#configuring-tls-plugin"><span class="std std-ref">TLS plugin</span></a> to load. This option, if used, must be set before any other TLS options.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="fdb.fdb.options.set_tls_cert_path">
+<code class="descclassname">fdb.options.</code><code class="descname">set_tls_cert_path</code><span class="sig-paren">(</span><em>path_to_file</em><span class="sig-paren">)</span></dt>
+<dd><p>Sets the path for the file from which the <a class="reference internal" href="tls.html#tls-certificate-file"><span class="std std-ref">certificate chain</span></a> will be loaded.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="fdb.fdb.options.set_tls_key_path">
+<code class="descclassname">fdb.options.</code><code class="descname">set_tls_key_path</code><span class="sig-paren">(</span><em>path_to_file</em><span class="sig-paren">)</span></dt>
+<dd><p>Sets the path for the file from which to load the <a class="reference internal" href="tls.html#tls-key-file"><span class="std std-ref">private key</span></a> corresponding to your own certificate.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="fdb.fdb.options.set_tls_verify_peers">
+<code class="descclassname">fdb.options.</code><code class="descname">set_tls_verify_peers</code><span class="sig-paren">(</span><em>criteria</em><span class="sig-paren">)</span></dt>
+<dd><p>Sets the <a class="reference internal" href="tls.html#tls-verify-peers"><span class="std std-ref">peer certificate field verification criteria</span></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="fdb.fdb.options.set_tls_cert_bytes">
+<code class="descclassname">fdb.options.</code><code class="descname">set_tls_cert_bytes</code><span class="sig-paren">(</span><em>bytes</em><span class="sig-paren">)</span></dt>
+<dd><p>Sets the certificate chain.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="fdb.fdb.options.set_tls_key_bytes">
+<code class="descclassname">fdb.options.</code><code class="descname">set_tls_key_bytes</code><span class="sig-paren">(</span><em>bytes</em><span class="sig-paren">)</span></dt>
+<dd><p>Set the private key corresponding to your own certificate.</p>
 </dd></dl>
 
 </dd></dl>
@@ -1158,12 +1198,6 @@ both the caching and the increased network bandwidth.</p>
 <p>Like all transaction options, a timeout must be reset after a call to <a class="reference internal" href="#fdb.Transaction.on_error" title="fdb.Transaction.on_error"><code class="xref py py-meth docutils literal"><span class="pre">Transaction.on_error()</span></code></a>. This behavior allows the user to make the timeout dynamic. Note that resetting this option resets only the timeout <em>duration</em>, not the starting point from which the time is measured.</p>
 </dd></dl>
 
-<dl class="method">
-<dt id="fdb.Transaction.options.set_durability_dev_null_is_web_scale">
-<code class="descclassname">Transaction.options.</code><code class="descname">set_durability_dev_null_is_web_scale</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
-<dd><p>This option has no effect yet, but may make users migrating from MongoDB more comfortable.</p>
-</dd></dl>
-
 </div>
 </div>
 <div class="section" id="future-objects">
@@ -1928,8 +1962,8 @@ this subspace and the passed tuple.</p>
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 18, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
+      Last updated on Apr 26, 2018.<br/>
     </p>
   </div>
 </footer>

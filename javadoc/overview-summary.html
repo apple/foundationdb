@@ -128,22 +128,10 @@
 <h3>Installation</h3>
 FoundationDB's Java bindings rely on native libraries that are installed as part of the 
 FoundationDB client binaries installation (see 
-<a href="/api-general.html#installing-client-binaries" target="_blank">
-Installing FoundationDB client binaries</a>). The FoundationDB Java bindings are available
-through Artifactory. To use them in your Maven-enabled project, add a dependency to your 
-pom.xml like: <br>
-<pre>
-<code>
-&lt;dependency&gt;
-    &lt;groupId&gt;com.apple.cie.foundationdb&lt;/groupId&gt;
-    &lt;artifactId&gt;fdb-java&lt;/artifactId&gt;
-    &lt;version&gt;5.1.5&lt;/version&gt;
-&lt;/dependency&gt;
-</code>
-</pre>
-Alternatively, simply download the JAR from
-<a href="https://www.foundationdb.org/downloads/fdb-java/">Artifactory</a>
-and add it to your classpath.<br>
+<a href="/foundationdb/api-general.html#installing-client-binaries" target="_blank">
+Installing FoundationDB client binaries</a>). The JAR can be downloaded from
+<a href="https://www.foundationdb.org/download/">our website</a>
+and then added to your classpath.<br>
 <br>
 <h3>Getting started</h3>
 To start using FoundationDB from Java, create an instance of the 
@@ -153,7 +141,7 @@ With this API object you can then open <a href="com/apple/foundationdb/Cluster.h
 <a href="com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb"><code>Database</code></a>s and start using
 <a href="com/apple/foundationdb/Transaction.html" title="interface in com.apple.foundationdb"><code>Transaction</code></a>s.
 Here we give an example. The example relies on a cluster file at the
-<a href="/administration.html#default-cluster-file">default location</a> 
+<a href="/foundationdb/administration.html#default-cluster-file">default location</a>
 for your platform and a running server.<br>
 <br>
 <pre>
@@ -192,7 +180,7 @@ cross-language support for storing and retrieving typed data from the
 binary data that FoundationDB supports. And, just as importantly, data packed into 
 <code>Tuple</code>s and used as keys sort in predictable and useful ways. See the 
 <a href="com/apple/foundationdb/tuple/package-summary.html"><code>Tuple class documentation</code></a> for information about use in Java
-and <a href="/data-modeling.html#data-modeling-tuples">general Tuple documentation</a>
+and <a href="/foundationdb/data-modeling.html#data-modeling-tuples">general Tuple documentation</a>
 for information about how Tuples sort and can be used to efficiently model data.
 <br>
 <h3>FoundationDB <a href="com/apple/foundationdb/directory/package-summary.html"><code>Directory API</code></a></h3>

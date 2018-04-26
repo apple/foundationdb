@@ -113,12 +113,12 @@ extends java.lang.AutoCloseable, <a href="../../../com/apple/foundationdb/ReadTr
   the underlying database if and when the transaction is committed. Read operations do see the
   effects of previous write operations on the same transaction. Committing a transaction usually
   succeeds in the absence of
-  <a href="/developer-guide.html#developer-guide-transaction-conflicts" target="_blank">conflicts</a>.<br>
+  <a href="/foundationdb/developer-guide.html#developer-guide-transaction-conflicts" target="_blank">conflicts</a>.<br>
   <br>
  Transactions group operations into a unit with the properties of atomicity, isolation, and
   durability. Transactions also provide the ability to maintain an application's invariants or
   integrity constraints, supporting the property of consistency. Together these properties are
-  known as <a href="/developer-guide.html#acid" target="_blank">ACID</a>.<br>
+  known as <a href="/foundationdb/developer-guide.html#acid" target="_blank">ACID</a>.<br>
   <br>
  Transactions are also causally consistent: once a transaction has been successfully committed,
   all subsequently created transactions will see the modifications made by it.
@@ -128,7 +128,7 @@ extends java.lang.AutoCloseable, <a href="../../../com/apple/foundationdb/ReadTr
  <br>
  Keys and values in FoundationDB are byte arrays. To encode other data types, see the
   <a href="../../../com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple"><code>Tuple API</code></a> and
-  <a href="/data-modeling.html#data-modeling-tuples" target="_blank">tuple layer documentation</a>.<br>
+  <a href="/foundationdb/data-modeling.html#data-modeling-tuples" target="_blank">tuple layer documentation</a>.<br>
  <br>
  When used as a <a href="../../../com/apple/foundationdb/TransactionContext.html" title="interface in com.apple.foundationdb"><code>TransactionContext</code></a>, the methods <code>run()</code> and
   <code>runAsync()</code> on a <code>Transaction</code> will simply attempt the operations
@@ -372,11 +372,11 @@ extends java.lang.AutoCloseable, <a href="../../../com/apple/foundationdb/ReadTr
 <pre><a href="../../../com/apple/foundationdb/ReadTransaction.html" title="interface in com.apple.foundationdb">ReadTransaction</a>&nbsp;snapshot()</pre>
 <div class="block">Return special-purpose, read-only view of the database. Reads done through this interface are known as "snapshot reads".
  Snapshot reads selectively relax FoundationDB's isolation property, reducing
- <a href="/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
+ <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">Transaction conflicts</a>
  but making reasoning about concurrency harder.<br>
  <br>
  For more information about how to use snapshot reads correctly, see
- <a href="/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
+ <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.</div>
 <dl>
 <dt><span class="returnLabel">Returns:</span></dt>
 <dd>a read-only view of this <code>Transaction</code> with relaxed isolation properties</dd>

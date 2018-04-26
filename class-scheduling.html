@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.5',
+        VERSION:     '5.1.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -276,7 +276,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <p>We&#8217;re going to rely on the powerful guarantees of transactions to help keep all of our modifications straight, so let&#8217;s look at a nice way that the FoundationDB Python API lets you write a transactional function. By using a decorator, an entire function is wrapped in a transaction. Let&#8217;s write the very simple <code class="docutils literal"><span class="pre">add_class</span></code> function we will use to populate the database&#8217;s class list:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_class</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
-    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="mi">100</span><span class="p">,))</span>
 </pre></div>
 </div>
 <p><a class="reference internal" href="api-python.html#fdb.transactional" title="fdb.transactional"><code class="xref py py-func docutils literal"><span class="pre">&#64;fdb.transactional</span></code></a> is a Python decorator that makes a normal function a transactional function. All functions decorated this way <em>need to have a parameter named</em> <code class="docutils literal"><span class="pre">tr</span></code>. This parameter is passed the transaction that the function should use to do reads and writes.</p>
@@ -342,7 +342,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">signup</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
-    <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span>
 </pre></div>
 </div>
 <p>We simply insert the appropriate record (with a blank value).</p>
@@ -368,7 +368,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
 <span class="k">def</span> <span class="nf">available_classes</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">range</span><span class="p">(())]</span>
-<span class="hll">            <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)]</span>
+<span class="hll">            <span class="k">if</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">v</span><span class="p">)[</span><span class="mi">0</span><span class="p">]]</span>
 </span></pre></div>
 </div>
 <p>This is easy &#8211; we simply add a condition to check that the value is non-zero. Let&#8217;s check out <code class="docutils literal"><span class="pre">signup</span></code> next:</p>
@@ -377,11 +377,11 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
 <span class="hll">    <span class="k">if</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># already signed up</span>
 </span><span class="hll">
-</span><span class="hll">    <span class="n">seats_left</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])</span>
+</span><span class="hll">    <span class="n">seats_left</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])[</span><span class="mi">0</span><span class="p">]</span>
 </span><span class="hll">    <span class="k">if</span> <span class="ow">not</span> <span class="n">seats_left</span><span class="p">:</span> <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;No remaining seats&#39;</span><span class="p">)</span>
 </span><span class="hll">
-</span><span class="hll">    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">seats_left</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
-</span>    <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+</span><span class="hll">    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">seats_left</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,))</span>
+</span>    <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span>
 </pre></div>
 </div>
 <p>We now have to check that we aren&#8217;t already signed up, since we don&#8217;t want a double sign up to decrease the number of seats twice. Then we look up how many seats are left to make sure there is a seat remaining so we don&#8217;t push the counter into the negative. If there is a seat remaining, we decrement the counter.</p>
@@ -403,7 +403,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <span class="k">def</span> <span class="nf">drop</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
 <span class="hll">    <span class="k">if</span> <span class="ow">not</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># not taking this class</span>
-</span><span class="hll">    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+</span><span class="hll">    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,))</span>
 </span>    <span class="k">del</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span>
 </pre></div>
 </div>
@@ -417,14 +417,14 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
     <span class="k">if</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># already signed up</span>
 
-    <span class="n">seats_left</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])</span>
+    <span class="n">seats_left</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])[</span><span class="mi">0</span><span class="p">]</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">seats_left</span><span class="p">:</span> <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;No remaining seats&#39;</span><span class="p">)</span>
 
 <span class="hll">    <span class="n">classes</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="n">attends</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">s</span><span class="p">,))]</span>
 </span><span class="hll">    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">classes</span><span class="p">))</span> <span class="o">==</span> <span class="mi">5</span><span class="p">:</span> <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Too many classes&#39;</span><span class="p">)</span>
 </span>
-    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">seats_left</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">seats_left</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,))</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span>
 </pre></div>
 </div>
 <p>Fortunately, we decided on a data model that keeps all of the attending records for a single student together. With this approach, we can use a single range read in the <code class="docutils literal"><span class="pre">attends</span></code> subspace to retrieve all the classes that a student is signed up for. We simply throw an exception if the number of classes has reached the limit of five.</p>
@@ -464,8 +464,10 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <span id="tutorial-appendix"></span><h2>Appendix: SchedulingTutorial.py</h2>
 <p>Here&#8217;s the code for the scheduling tutorial:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">itertools</span>
+<span class="kn">import</span> <span class="nn">traceback</span>
 
 <span class="kn">import</span> <span class="nn">fdb</span>
+<span class="kn">import</span> <span class="nn">fdb.tuple</span>
 
 <span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">510</span><span class="p">)</span>
 
@@ -485,7 +487,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">add_class</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
-    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="mi">100</span><span class="p">)</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="mi">100</span><span class="p">,))</span>
 
 <span class="c1"># Generate 1,620 classes like &#39;9:00 chem for dummies&#39;</span>
 <span class="n">levels</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;intro&#39;</span><span class="p">,</span> <span class="s1">&#39;for dummies&#39;</span><span class="p">,</span> <span class="s1">&#39;remedial&#39;</span><span class="p">,</span> <span class="s1">&#39;101&#39;</span><span class="p">,</span>
@@ -511,7 +513,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">available_classes</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
     <span class="k">return</span> <span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">range</span><span class="p">(())]</span>
-            <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">v</span><span class="p">)]</span>
+            <span class="k">if</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">v</span><span class="p">)[</span><span class="mi">0</span><span class="p">]]</span>
 
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
@@ -519,21 +521,21 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
     <span class="k">if</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># already signed up</span>
 
-    <span class="n">seats_left</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])</span>
+    <span class="n">seats_left</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])[</span><span class="mi">0</span><span class="p">]</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">seats_left</span><span class="p">:</span> <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;No remaining seats&#39;</span><span class="p">)</span>
 
     <span class="n">classes</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="n">attends</span><span class="o">.</span><span class="n">range</span><span class="p">((</span><span class="n">s</span><span class="p">,))]</span>
     <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">classes</span><span class="p">))</span> <span class="o">==</span> <span class="mi">5</span><span class="p">:</span> <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s1">&#39;Too many classes&#39;</span><span class="p">)</span>
 
-    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="n">seats_left</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">seats_left</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,))</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;&#39;</span>
 
 
 <span class="nd">@fdb</span><span class="o">.</span><span class="n">transactional</span>
 <span class="k">def</span> <span class="nf">drop</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
     <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
     <span class="k">if</span> <span class="ow">not</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># not taking this class</span>
-    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="nb">bytes</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,))</span>
     <span class="k">del</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span>
 
 
@@ -579,7 +581,8 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
                 <span class="n">my_classes</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">old_c</span><span class="p">)</span>
                 <span class="n">my_classes</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">new_c</span><span class="p">)</span>
         <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-            <span class="nb">print</span> <span class="n">e</span><span class="p">,</span> <span class="s2">&quot;Need to recheck available classes.&quot;</span>
+            <span class="n">traceback</span><span class="o">.</span><span class="n">print_exc</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Need to recheck available classes.&quot;</span><span class="p">)</span>
             <span class="n">all_classes</span> <span class="o">=</span> <span class="p">[]</span>
 
 <span class="k">def</span> <span class="nf">run</span><span class="p">(</span><span class="n">students</span><span class="p">,</span> <span class="n">ops_per_student</span><span class="p">):</span>
@@ -588,11 +591,11 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
         <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">students</span><span class="p">)]</span>
     <span class="k">for</span> <span class="n">thr</span> <span class="ow">in</span> <span class="n">threads</span><span class="p">:</span> <span class="n">thr</span><span class="o">.</span><span class="n">start</span><span class="p">()</span>
     <span class="k">for</span> <span class="n">thr</span> <span class="ow">in</span> <span class="n">threads</span><span class="p">:</span> <span class="n">thr</span><span class="o">.</span><span class="n">join</span><span class="p">()</span>
-    <span class="nb">print</span> <span class="s2">&quot;Ran&quot;</span><span class="p">,</span> <span class="n">students</span> <span class="o">*</span> <span class="n">ops_per_student</span><span class="p">,</span> <span class="s2">&quot;transactions&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Ran </span><span class="si">{}</span><span class="s2"> transactions&quot;</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">students</span> <span class="o">*</span> <span class="n">ops_per_student</span><span class="p">))</span>
 
 <span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
     <span class="n">init</span><span class="p">(</span><span class="n">db</span><span class="p">)</span>
-    <span class="nb">print</span> <span class="s2">&quot;initialized&quot;</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;initialized&quot;</span><span class="p">)</span>
     <span class="n">run</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
 </pre></div>
 </div>
@@ -618,8 +621,8 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 18, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
+      Last updated on Apr 26, 2018.<br/>
     </p>
   </div>
 </footer>

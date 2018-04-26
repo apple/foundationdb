@@ -2,6 +2,22 @@
 Release Notes
 #############
 
+5.1.7
+=====
+
+Fixes
+-----
+
+* fdbdr switch could take a long time to complete if the two clusters were not created at the same time. <rdar://problem/37551521>
+
+5.1.6
+=====
+
+Fixes
+-----
+
+* Expiring a backup could cause the fdbbackup process to hang indefinitely. <rdar://problem/39382121>
+
 5.1.5
 =====
 
@@ -87,7 +103,7 @@ Features
 * The behavior of atomic "and" and "min" operations has changed when the key doesn't exist in the database. If the key is not present, then an "and" or "min" is now equivalent to a set. <rdar://problem/29255441>
 * Exception messages are more descriptive. <rdar://problem/33665340> 
 * Clients can view a sample of committed mutations. <rdar://problem/33324935>
-* When switching to a DR cluster, the commit verisons on that cluster will be higher than the versions on the primary cluster. <rdar://problem/33572665>
+* When switching to a DR cluster, the commit versions on that cluster will be higher than the versions on the primary cluster. <rdar://problem/33572665>
 * Added a read-only lock aware transaction option. <rdar://problem/34579176>
 * Automatically suppress trace log events which occur too frequently. <rdar://problem/33764208>
 * Added a new ``multi_dc`` replication mode designed for cross data center deployments. <rdar://problem/36489132>
@@ -106,7 +122,7 @@ Performance
 * Excluded servers no longer take on stateless roles. <rdar://problem/27110802>
 * Stateless roles will be proactively moved off of excluded processes. <rdar://problem/27110802> <rdar://problem/35155044>
 * Dramatically improved restore speeds of large disk queue files. <rdar://problem/35567320>
-* Clients get key location information directly from the proxies, sigificantly reducing the latency of worst case read patterns. <rdar://problem/35953920>
+* Clients get key location information directly from the proxies, significantly reducing the latency of worst case read patterns. <rdar://problem/35953920>
 * Reduced the amount of work incompatible clients generate for coordinators and the cluster controller. In particular, this reduces the load on the cluster caused by using the multi-version client. <rdar://problem/30897631> 
 * Pop partially recovered mutations from the transaction log to save disk space after multiple successive recoveries. <rdar://problem/33755270>
 * Stopped using network checksums when also using TLS. <rdar://problem/32157852>
@@ -120,7 +136,7 @@ Fixes
 * Exclude considered the free space of non-storage processes when determining if an exclude was safe.
 * ``fdbmonitor`` failed to start processes after fork failure. <rdar://problem/34743257> 
 * ``fdbmonitor`` will only stop processes when the configuration file is deleted if ``kill_on_configuration_change`` is set. <rdar://problem/35497412>
-* The data distribution algorithm would hang indefinately when asked to build storage teams with more than three servers.
+* The data distribution algorithm would hang indefinitely when asked to build storage teams with more than three servers.
 * Mutations from a restore could continue to be applied for a very short amount of time after a restore was successfully aborted.
 
 Extremely Rare Bug Fixes

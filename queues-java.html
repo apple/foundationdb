@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.5',
+        VERSION:     '5.1.7',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -214,7 +214,7 @@
         <span class="o">}</span>
 
         <span class="c1">// Remove from the top of the queue.</span>
-        <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span>
+        <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
             <span class="n">tr</span><span class="o">.</span><span class="na">clear</span><span class="o">(</span><span class="n">item</span><span class="o">.</span><span class="na">getKey</span><span class="o">());</span>
             <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
         <span class="o">});</span>
@@ -237,7 +237,7 @@
 
     <span class="c1">// Get the top element of the queue.</span>
     <span class="kd">private</span> <span class="kd">static</span> <span class="n">KeyValue</span> <span class="nf">firstItem</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">){</span>
-        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
             <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">getRange</span><span class="o">(</span><span class="n">queue</span><span class="o">.</span><span class="na">range</span><span class="o">(),</span> <span class="mi">1</span><span class="o">)){</span>
                 <span class="k">return</span> <span class="n">kv</span><span class="o">;</span>
             <span class="o">}</span>
@@ -248,7 +248,7 @@
 
     <span class="c1">// Get the last index in the queue.</span>
     <span class="kd">private</span> <span class="kd">static</span> <span class="kt">long</span> <span class="nf">lastIndex</span><span class="o">(</span><span class="n">TransactionContext</span> <span class="n">tcx</span><span class="o">){</span>
-        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span>
+        <span class="k">return</span> <span class="n">tcx</span><span class="o">.</span><span class="na">run</span><span class="o">((</span><span class="n">Transaction</span> <span class="n">tr</span><span class="o">)</span> <span class="o">-&gt;</span> <span class="o">{</span>
             <span class="k">for</span><span class="o">(</span><span class="n">KeyValue</span> <span class="n">kv</span> <span class="o">:</span> <span class="n">tr</span><span class="o">.</span><span class="na">snapshot</span><span class="o">().</span><span class="na">getRange</span><span class="o">(</span><span class="n">queue</span><span class="o">.</span><span class="na">range</span><span class="o">(),</span> <span class="mi">1</span><span class="o">,</span> <span class="kc">true</span><span class="o">)){</span>
                 <span class="k">return</span> <span class="o">(</span><span class="kt">long</span><span class="o">)</span><span class="n">queue</span><span class="o">.</span><span class="na">unpack</span><span class="o">(</span><span class="n">kv</span><span class="o">.</span><span class="na">getKey</span><span class="o">()).</span><span class="na">get</span><span class="o">(</span><span class="mi">0</span><span class="o">);</span>
             <span class="o">}</span>
@@ -280,8 +280,8 @@
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 18, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
+      Last updated on Apr 26, 2018.<br/>
     </p>
   </div>
 </footer>
