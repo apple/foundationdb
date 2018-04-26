@@ -506,9 +506,26 @@ ILogSystem::SetPeekCursor::SetPeekCursor( std::vector<Reference<LogSet>> const& 
 	sortedVersions.resize(maxServers);
 }
 
+ILogSystem::SetPeekCursor::SetPeekCursor( std::vector<Reference<LogSet>> const& logSets, std::vector< std::vector< Reference<IPeekCursor> > > const& serverCursors, LogMessageVersion const& messageVersion, int bestSet, int bestServer, 
+	Optional<LogMessageVersion> nextVersion ) : logSets(logSets), serverCursors(serverCursors), messageVersion(messageVersion), bestSet(bestSet), bestServer(bestServer), nextVersion(nextVersion), currentSet(bestSet), currentCursor(0),
+	hasNextMessage(false), useBestSet(true), randomID(g_random->randomUniqueID()) {
+	int maxServers = 0;
+	for( int i = 0; i < logSets.size(); i++ ) {
+		maxServers = std::max<int>(maxServers, serverCursors[i].size());
+	}
+	sortedVersions.resize(maxServers);
+	calcHasMessage();
+}
+
 Reference<ILogSystem::IPeekCursor> ILogSystem::SetPeekCursor::cloneNoMore() {
-	ASSERT(false); //not implemented
-	throw internal_error();
+	vector< vector< Reference<ILogSystem::IPeekCursor> > > cursors;
+	cursors.resize(logSets.size());
+	for( int i = 0; i < logSets.size(); i++ ) {
+		for( int j = 0; j < logSets[i]->logServers.size(); j++) {
+			cursors[i].push_back( serverCursors[i][j]->cloneNoMore() );
+		}
+	}
+	return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( logSets, cursors, messageVersion, bestSet, bestServer, nextVersion ) );
 }
 
 void ILogSystem::SetPeekCursor::setProtocolVersion( uint64_t version ) {
