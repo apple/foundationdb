@@ -775,10 +775,6 @@ Transaction options
 
     |option-set-timeout-blurb3|
 
-.. method:: Transaction.options.set_durability_dev_null_is_web_scale() -> nil
-
-    |option-durability-dev-null-is-web-scale-blurb|
-
 .. _transact:
 
 The transact method
