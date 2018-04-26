@@ -38,11 +38,11 @@ Next, we open a FoundationDB database.  The API will connect to the FoundationDB
 
 We are ready to use the database. In Python, using the ``[]`` operator on the db object is a convenient syntax for performing a read or write on the database. First, let's simply write a key-value pair:
 
-    >>> db['hello'] = 'world'
+    >>> db[b'hello'] = b'world'
 
 When this command returns without exception, the modification is durably stored in FoundationDB! Under the covers, this function creates a transaction with a single modification. We'll see later how to do multiple operations in a single transaction. For now, let's read back the data::
 
-    >>> print 'hello', db['hello']
+    >>> print 'hello', db[b'hello']
     hello world
 
 If this is all working, it looks like we are ready to start building a real application. For reference, here's the full code for "hello world"::
@@ -50,8 +50,8 @@ If this is all working, it looks like we are ready to start building a real appl
     import fdb
     fdb.api_version(510)
     db = fdb.open()
-    db['hello'] = 'world'
-    print 'hello', db['hello']
+    db[b'hello'] = b'world'
+    print 'hello', db[b'hello']
 
 Class scheduling application
 ============================
