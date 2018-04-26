@@ -540,7 +540,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(tag.locality == tagLocalityRemoteLog) {
 			return peekRemote(begin, tag, parallelGetMore);
 		} else {
-			return peekAll(begin, std::numeric_limits<Version>::max(), tag, parallelGetMore);
+			return peekAll(begin, getPeekEnd(), tag, parallelGetMore);
 		}
 	}
 
