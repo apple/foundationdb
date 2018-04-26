@@ -1720,7 +1720,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state Future<Void> oldRouterRecruitment = Never();
 		if(logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
-			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0, false, false);
+			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0, false, true);
 		} else {
 			oldLogSystem->logSystemConfigChanged.trigger();
 		}
