@@ -602,15 +602,16 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						break;
 					}
 				}
+
+				if(foundSpecial) {
+					cursors.push_back(peekAll(begin, std::min(lastBegin, end), tag, false));
+					epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
+					break;
+				}
+
 				if(bestOldSet == -1) {
-					if(!foundSpecial) {
-						i++;
-						continue;
-					} else {
-						cursors.push_back(peekAll(begin, std::min(lastBegin, end), tag, false));
-						epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
-						break;
-					}
+					i++;
+					continue;
 				}
 
 				Version thisBegin = std::max(oldLogData[i].tLogs[bestOldSet]->startVersion, begin);
@@ -1510,6 +1511,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		int nextReplies = 0;
 		Version lastStart = std::numeric_limits<Version>::max();
+		vector<Future<Void>> failed;
+		
 		if(!onlyOld) {
 			Version maxStart = 0;
 			for(auto& logSet : self->tLogs) {
@@ -1523,6 +1526,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
 						tLogs->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get()) ) ) );
+						failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
 					}
 					nextReplies++;
 				}
@@ -1544,6 +1548,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
 						tLogs->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get()) ) ) );
+						failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
 					}
 					nextReplies++;
 				}
@@ -1551,7 +1556,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}	
 
 		self->logSystemConfigChanged.trigger();
-		return Void();
+		Void _ = wait( failed.size() ? tagError<Void>( quorum( failed, 1 ), master_tlog_failed() ) : Future<Void>(Never()) );
+		throw internal_error();
 	}
 
 	ACTOR static Future<Void> newRemoteEpoch( TagPartitionedLogSystem* self, Reference<TagPartitionedLogSystem> oldLogSystem, Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers, DatabaseConfiguration configuration, LogEpoch recoveryCount, int8_t remoteLocality, std::vector<Tag> allTags ) {
@@ -1581,7 +1587,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			lockNum++;
 		}
 
-		state Future<Void> oldRouterRecruitment = Void();
+		state Future<Void> oldRouterRecruitment = Never();
 		if(logSet->startVersion < oldLogSystem->knownCommittedVersion + 1) {
 			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(self, remoteWorkers.logRouters, recoveryCount, remoteLocality, logSet->startVersion, self->tLogs.size(), true);
 		}
@@ -1596,18 +1602,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logRouterInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.logRouters[i].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		}
 
-		TraceEvent("RemoteLogRecruitment_RecruitingLogRouters").detail("startVersion", logSet->startVersion);
-		Void _ = wait( waitForAll(logRouterInitializationReplies) && oldRouterRecruitment );
-
-		for( int i = 0; i < logRouterInitializationReplies.size(); i++ ) {
-			logSet->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(logRouterInitializationReplies[i].get()) ) ) );
-		}
-
-		state double startTime = now();
 		state vector<Future<TLogInterface>> remoteTLogInitializationReplies;
-		
 		vector< InitializeTLogRequest > remoteTLogReqs( remoteWorkers.remoteTLogs.size() );
-
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ ) {
 			InitializeTLogRequest &req = remoteTLogReqs[i];
 			req.recruitmentID = self->recruitmentID;
@@ -1627,8 +1623,12 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ )
 			remoteTLogInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor( remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
-		TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs");
-		Void _ = wait( waitForAll(remoteTLogInitializationReplies) );
+		TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs").detail("startVersion", logSet->startVersion).detail("localStart", self->tLogs[0]->startVersion);
+		Void _ = wait( waitForAll(remoteTLogInitializationReplies) && waitForAll(logRouterInitializationReplies) );
+
+		for( int i = 0; i < logRouterInitializationReplies.size(); i++ ) {
+			logSet->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(logRouterInitializationReplies[i].get()) ) ) );
+		}
 
 		logSet->tLogLocalities.resize( remoteWorkers.remoteTLogs.size() );
 		logSet->logServers.resize( remoteWorkers.remoteTLogs.size() );
@@ -1711,7 +1711,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			lockNum++;
 		}
 
-		state Future<Void> oldRouterRecruitment = Void();
+		state Future<Void> oldRouterRecruitment = Never();
 		if(logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
 			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0, false);
 		} else {
@@ -1802,7 +1802,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				recoveryComplete.push_back( transformErrors( throwErrorOr( logSystem->tLogs[1]->logServers[i]->get().interf().recoveryFinished.getReplyUnlessFailedFor( TLogRecoveryFinishedRequest(), SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		}
 
-		Void _ = wait( waitForAll( initializationReplies ) && oldRouterRecruitment );
+		Void _ = wait( waitForAll( initializationReplies ) || oldRouterRecruitment );
 
 		for( int i = 0; i < initializationReplies.size(); i++ ) {
 			logSystem->tLogs[0]->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(initializationReplies[i].get()) ) );
