@@ -1192,7 +1192,8 @@ int main(int argc, char* argv[]) {
 					break;
 				case TLSOptions::OPT_TLS_PLUGIN:
 					try {
-						tlsOptions->set_plugin_name_or_path( args.OptionArg() );
+						const char* plugin_path = args.OptionArg();
+						tlsOptions->set_plugin_name_or_path( plugin_path ? plugin_path : "" );
 					} catch (Error& e) {
 						fprintf(stderr, "ERROR: cannot load TLS plugin `%s' (%s)\n", args.OptionArg(), e.what());
 						printHelpTeaser(argv[0]);
@@ -1471,8 +1472,7 @@ int main(int argc, char* argv[]) {
 			if ( tlsVerifyPeers.size() )
 				tlsOptions->set_verify_peers( tlsVerifyPeers );
 
-			if (tlsOptions->get_policy())
-				tlsOptions->register_network();
+			tlsOptions->register_network();
 
 			if (role == FDBD || role == NetworkTestServer) {
 				try {
@@ -1586,7 +1586,7 @@ int main(int argc, char* argv[]) {
 				platform::createDirectory( dataFolder );
 			}
 
-			setupAndRun( dataFolder, testFile, restarting, tlsOptions->enabled() );
+			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
