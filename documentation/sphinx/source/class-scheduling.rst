@@ -247,23 +247,6 @@ Idempotence
 
 Occasionally, a transaction might be retried even after it succeeds (for example, if the client loses contact with the cluster at just the wrong moment). This can cause problems if transactions are not written to be idempotent, i.e. to have the same effect if committed twice as if committed once. There are generic design patterns for :ref:`making any transaction idempotent <developer-guide-unknown-results>`, but many transactions are naturally idempotent. For example, all of the transactions in this tutorial are idempotent.
 
-Dropping with limited seats
----------------------------
-
-Let's finish up the limited seats feature by modifying the drop function:
-
-.. code-block:: python
-    :emphasize-lines: 4,5
-
-    @fdb.transactional
-    def drop(tr, s, c):
-        rec = attends.pack((s, c))
-        if not tr[rec].present(): return  # not taking this class
-        tr[course.pack((c,))] = fdb.tuple.pack((fdb.tuple.unpack(tr[course.pack((c,))])[0] + 1,))
-        del tr[rec]
-
-This case is easier than signup because there are no constraints we can hit. We just need to make sure the student is in the class and to "give back" one seat when the student drops.
-
 More features?!
 ---------------
 
