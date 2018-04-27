@@ -394,8 +394,8 @@ Transactional decoration
 
         @fdb.transactional
         def simple_function(tr, x, y):
-            tr['foo'] = x
-            tr['bar'] = y
+            tr[b'foo'] = x
+            tr[b'bar'] = y
 
     The ``@fdb.transactional`` decorator makes ``simple_function`` a transactional function.  All functions using this decorator must have an argument **named** ``tr``.  This specially named argument is passed a transaction that the function can use to do reads and writes.
 
@@ -893,7 +893,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
         @fdb.transactional
         def foo(tr):
-            val = tr['foo']
+            val = tr[b'foo']
             if val.present():
                 print 'Got value: %s' % val
             else:
