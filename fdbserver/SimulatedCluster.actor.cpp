@@ -609,6 +609,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
+		g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
 		*pConnString = conn;
 		*pTesterCount = testerCount;
 		bool usingSSL = conn.toString().find(":tls") != std::string::npos;
@@ -643,7 +644,7 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
 			systemActors->push_back( reportErrors( simulatedMachine(
-				conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true, i == useSeedForMachine, false ),
+				conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true, i == useSeedForMachine, true ),
 				processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine") );
 		}
 
@@ -845,7 +846,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	ASSERT( coordinatorAddresses.size() == coordinatorCount );
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
-	
+
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
 	if(extraDB==1) {
 		// The DR database can be either a new database or itself
@@ -857,7 +858,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		// The DR database is the same database
 		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
 	}
-	
+
 	*pConnString = conn;
 
 	TraceEvent("SimulatedConnectionString").detail("String", conn.toString()).detail("ConfigString", startingConfigString);
