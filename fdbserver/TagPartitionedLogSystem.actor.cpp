@@ -1571,11 +1571,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		TraceEvent("RemoteLogRecruitment_WaitingForWorkers");
 		state RecruitRemoteFromConfigurationReply remoteWorkers = wait( fRemoteWorkers );
 
-		if(remoteWorkers.logRouters.size() != self->logRouterTags) {
-			TraceEvent("RemoteLogRecruitment_MismatchedLogRouters").detail("logRouterCount", self->logRouterTags).detail("workers", remoteWorkers.logRouters.size());
-			throw master_recovery_failed();
-		}
-
 		state Reference<LogSet> logSet = Reference<LogSet>( new LogSet() );
 		logSet->tLogReplicationFactor = configuration.remoteTLogReplicationFactor;
 		logSet->tLogPolicy = configuration.remoteTLogPolicy;
@@ -1606,7 +1601,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.routerTag = Tag(tagLocalityLogRouter, i);
 			req.logSet = self->tLogs.size();
 			req.startVersion = std::max(self->tLogs[0]->startVersion, logSet->startVersion);
-			logRouterInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.logRouters[i].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
+			logRouterInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.logRouters[i%remoteWorkers.logRouters.size()].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		}
 
 		state vector<Future<TLogInterface>> remoteTLogInitializationReplies;

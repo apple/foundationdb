@@ -745,6 +745,7 @@ public:
 		std::vector<std::pair<WorkerInterface, ProcessClass>> remote_tlogs;
 		std::vector<std::pair<WorkerInterface, ProcessClass>> satellite_tlogs;
 		std::vector<std::pair<WorkerInterface, ProcessClass>> log_routers;
+		std::set<NetworkAddress> logRouterAddresses;
 
 		for( auto& logSet : dbi.logSystemConfig.tLogs ) {
 			for( auto& it : logSet.tLogs ) {
@@ -769,7 +770,10 @@ public:
 					return false;
 				if ( tlogWorker->second.priorityInfo.isExcluded )
 					return true;
-				log_routers.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
+				if( !logRouterAddresses.count( tlogWorker->second.interf.address() ) ) {
+					logRouterAddresses.insert( tlogWorker->second.interf.address() );
+					log_routers.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
+				}
 			}
 		}
 
@@ -852,6 +856,13 @@ public:
 
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter);
 		RoleFitness newLogRoutersFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newTLogFit.count, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
+
+		if(oldLogRoutersFit.count < oldTLogFit.count) {
+			oldLogRoutersFit.worstFit = ProcessClass::NeverAssign;
+		}
+		if(newLogRoutersFit.count < newTLogFit.count) {
+			newLogRoutersFit.worstFit = ProcessClass::NeverAssign;
+		}
 
 		if(oldLogRoutersFit < newLogRoutersFit) return false;
 
