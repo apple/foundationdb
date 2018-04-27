@@ -351,7 +351,7 @@ ACTOR Future<Void> logRouterCore(
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
 			logRouterData.allowPops = db->get().recoveryState == 7;
-			if( db->get().logSystemConfig.tLogs.size() > logSet ) {
+			if( db->get().logSystemConfig.tLogs.size() > logSet && db->get().logSystemConfig.tLogs[logSet].tLogs.size() ) {
 				bool found = false;
 				for(auto& it : db->get().logSystemConfig.tLogs[logSet].tLogs) {
 					if( !it.present() ) {
