@@ -34,7 +34,7 @@ type Selectable interface {
 //
 // The most common key selectors are constructed with the functions documented
 // below. For details of how KeySelectors are specified and resolved, see
-// https://www.foundationdb.org/documentation/developer-guide.html#key-selectors.
+// https://apple.github.io/foundationdb/developer-guide.html#key-selectors.
 type KeySelector struct {
 	Key     KeyConvertible
 	OrEqual bool

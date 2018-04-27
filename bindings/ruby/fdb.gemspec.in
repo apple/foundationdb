@@ -9,7 +9,7 @@ Gem::Specification.new do |s|
 Ruby bindings for the FoundationDB database.
 
 Complete documentation of the FoundationDB Ruby API can be found at:
-https://www.foundationdb.org/documentation/api-ruby.html.
+https://apple.github.io/foundationdb/api-ruby.html.
 EOF
   s.authors = ["FoundationDB"]
   s.email = 'fdb-dist@apple.com'

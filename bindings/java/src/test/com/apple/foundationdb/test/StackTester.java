@@ -429,7 +429,6 @@ public class StackTester {
 						tr.options().setReadYourWritesDisable();
 						tr.options().setReadSystemKeys();
 						tr.options().setAccessSystemKeys();
-						tr.options().setDurabilityDevNullIsWebScale();
 						tr.options().setTimeout(60*1000);
 						tr.options().setRetryLimit(50);
 						tr.options().setMaxRetryDelay(100);

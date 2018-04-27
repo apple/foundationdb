@@ -87,7 +87,7 @@ The following is a simple implementation of the basic pattern:
             }
 
             // Remove from the top of the queue.
-            tcx.run((Transaction tr) ->
+            tcx.run((Transaction tr) -> {
                 tr.clear(item.getKey());
                 return null;
             });
@@ -110,7 +110,7 @@ The following is a simple implementation of the basic pattern:
 
         // Get the top element of the queue.
         private static KeyValue firstItem(TransactionContext tcx){
-            return tcx.run((Transaction tr) ->
+            return tcx.run((Transaction tr) -> {
                 for(KeyValue kv : tr.getRange(queue.range(), 1)){
                     return kv;
                 }
@@ -121,7 +121,7 @@ The following is a simple implementation of the basic pattern:
 
         // Get the last index in the queue.
         private static long lastIndex(TransactionContext tcx){
-            return tcx.run((Transaction tr) ->
+            return tcx.run((Transaction tr) -> {
                 for(KeyValue kv : tr.snapshot().getRange(queue.range(), 1, true)){
                     return (long)queue.unpack(kv.getKey()).get(0);
                 }
