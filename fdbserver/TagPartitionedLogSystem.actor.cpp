@@ -1595,7 +1595,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		state vector<Future<TLogInterface>> logRouterInitializationReplies;
-		for( int i = 0; i < remoteWorkers.logRouters.size(); i++) {
+		for( int i = 0; i < self->logRouterTags; i++) {
 			InitializeLogRouterRequest req;
 			req.recoveryCount = recoveryCount;
 			req.routerTag = Tag(tagLocalityLogRouter, i);
