@@ -761,7 +761,6 @@ func (sm *StackMachine) processInst(idx int, inst tuple.Tuple) {
 			tr.Options().SetReadAheadDisable()
 			tr.Options().SetReadSystemKeys()
 			tr.Options().SetAccessSystemKeys()
-			tr.Options().SetDurabilityDevNullIsWebScale()
 			tr.Options().SetTimeout(60 * 1000)
 			tr.Options().SetRetryLimit(50)
 			tr.Options().SetMaxRetryDelay(100)
