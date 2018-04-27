@@ -63,7 +63,7 @@ Command-line Option      Client Option        Environment Variable         Purpo
 
 The value for each setting can be specified in more than one way.  The actual valued used is determined in the following order:
 
-1. An explicity specified value as a command-line option or client option, if one is given;
+1. An explicitly specified value as a command-line option or client option, if one is given;
 2. The value of the environment variable, if one has been set;
 3. The default value
 
@@ -194,7 +194,7 @@ Setting                Result
 Adding verification requirements
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Requirements can be placed on the fields of the Issuer and Subject DNs in the peer's own certificate. These reqirements take the form of a comma-separated list of conditions. Each condition takes the form of ``field=value``. Only certain fields from a DN can be matched against.
+Requirements can be placed on the fields of the Issuer and Subject DNs in the peer's own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of ``field=value``. Only certain fields from a DN can be matched against.
 
 ======  ===================
 Field   Well known name
