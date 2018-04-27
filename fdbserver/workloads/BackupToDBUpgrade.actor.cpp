@@ -32,7 +32,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	Database extraDB;
 	bool shareLogRange;
-	UID destUid;
 
 	BackupToDBUpgradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, LiteralStringRef("backupAfter"), g_random->random01() * 10.0);
@@ -128,10 +127,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			}
 		}
 
-		state UID logUid = wait(backupAgent->getLogUid(cx, tag));
-		UID _destUid = wait(backupAgent->getDestUid(cx, logUid));
-		self->destUid = _destUid;
-
 		int _ = wait( backupAgent->waitBackup(self->extraDB, tag, false) );
 
 		return Void();
@@ -143,6 +138,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		state Key backupLatestVersionsPath = uidPrefixKey(backupLatestVersionsPrefix, destUid);
 		state Key backupLatestVersionsKey = uidPrefixKey(backupLatestVersionsPath, logUid);
 		state int displaySystemKeys = 0;
+
+		ASSERT(destUid.isValid());
 
 		// Ensure that there is no left over key within the backup subspace
 		loop {
@@ -347,7 +344,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			int _ = wait(restoreAgent.waitBackup(cx, self->restoreTag));
 			Void _ = wait(restoreAgent.unlockBackup(cx, self->restoreTag));
-			Void _ = wait(checkData(self->extraDB, logUid, self->destUid, self->backupTag, &backupAgent, self->shareLogRange));
+			Void _ = wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent, self->shareLogRange));
 
 			state UID restoreUid = wait(restoreAgent.getLogUid(cx, self->restoreTag));
 			Void _ = wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreAgent, self->shareLogRange));

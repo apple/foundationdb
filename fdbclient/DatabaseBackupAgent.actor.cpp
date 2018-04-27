@@ -999,12 +999,6 @@ namespace dbBackup {
 			return Void();
 		}
 
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			// Should not be called
-			ASSERT(false);
-			return LiteralStringRef("OnSetAddTask");
-		}
-
 		StringRef getName() const { return name; };
 
 		Future<Void> execute(Database cx, Reference<TaskBucket> tb, Reference<FutureBucket> fb, Reference<Task> task) { return Void(); };
@@ -1330,25 +1324,6 @@ namespace dbBackup {
 				}
 			}
 
-			// Set destUidValue and DR version on dest side
-			state Reference<ReadYourWritesTransaction> tr2(new ReadYourWritesTransaction(cx));
-			loop {
-				try {
-					tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
-					tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					state Future<Void> verified = taskBucket->keepRunning(tr2, task);
-					Void _ = wait(verified);
-
-					tr2->set(config.pack(BackupAgentBase::destUid), destUidValue);
-					tr2->set(config.pack(BackupAgentBase::keyDrVersion), BinaryWriter::toValue(DatabaseBackupAgent::LATEST_DR_VERSION, Unversioned()));
-
-					Void _ = wait(tr2->commit());
-					break;
-				} catch (Error &e) {
-					Void _ = wait(tr2->onError(e));
-				}
-			}
-
 			task->params[BackupAgentBase::destUid] = destUidValue;
 			ASSERT(destUidValue == logUidValue);
 
@@ -1365,27 +1340,14 @@ namespace dbBackup {
 				Key _ = wait(AbortOldBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::signal(onDone)));
 			} else {
 				Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
+				Subspace config = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(task->params[DatabaseBackupAgent::keyConfigLogUid]);
+				tr->set(config.pack(BackupAgentBase::destUid), task->params[BackupAgentBase::destUid]);
+				tr->set(config.pack(BackupAgentBase::keyDrVersion), BinaryWriter::toValue(DatabaseBackupAgent::LATEST_DR_VERSION, Unversioned()));
 				Key _ = wait(CopyDiffLogsTaskFunc::addTask(tr, taskBucket, task, 0, beginVersion, TaskCompletionKey::signal(onDone)));
 			}
 
 			Void _ = wait(taskBucket->finish(tr, task));
 			return Void();
-		}
-
-		ACTOR static Future<Key> addTask(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<Task> parentTask, Version prevBeginVersion, Version beginVersion, TaskCompletionKey completionKey, Reference<TaskFuture> waitFor = Reference<TaskFuture>()) {
-			Key doneKey = wait(completionKey.get(tr, taskBucket));
-			Reference<Task> task(new Task(CopyDiffLogsUpgradeTaskFunc::name, CopyDiffLogsUpgradeTaskFunc::version, doneKey, 1));
-
-			copyDefaultParameters(parentTask, task);
-
-			task->params[DatabaseBackupAgent::keyBeginVersion] = BinaryWriter::toValue(beginVersion, Unversioned());
-
-			if (!waitFor) {
-				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
-			}
-
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
-			return LiteralStringRef("OnSetAddTask");
 		}
 
 		StringRef getName() const { return name; };
@@ -1677,20 +1639,23 @@ public:
 		loop {
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> drVersion = wait(tr->get(drVersionKey));
+			loop {
+				try {
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+					Optional<Value> drVersion = wait(tr->get(drVersionKey));
 
-				if (drVersion.present() && BinaryReader::fromStringRef<int>(drVersion.get(), Unversioned()) == DatabaseBackupAgent::LATEST_DR_VERSION) {
-					return Void();
+					if (drVersion.present() && BinaryReader::fromStringRef<int>(drVersion.get(), Unversioned()) == DatabaseBackupAgent::LATEST_DR_VERSION) {
+						return Void();
+					}
+
+					state Future<Void> watchDrVersionFuture = tr->watch(drVersionKey);
+					Void _ = wait(tr->commit());
+					Void _ = wait(watchDrVersionFuture);
+					break;
+				} catch (Error &e) {
+					Void _ = wait(tr->onError(e));
 				}
-
-				state Future<Void> watchDrVersionFuture = tr->watch(drVersionKey);
-				Void _ = wait(tr->commit());
-				Void _ = wait(watchDrVersionFuture);
-			} catch (Error &e) {
-				Void _ = wait(tr->onError(e));
 			}
 		}
 	}
