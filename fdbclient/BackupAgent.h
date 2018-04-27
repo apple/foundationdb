@@ -56,6 +56,7 @@ public:
 	static const Key keyLastUid;
 	static const Key keyBeginKey;
 	static const Key keyEndKey;
+	static const Key keyDrVersion;
 	static const Key destUid;
 	static const Key backupStartVersion;
 
@@ -347,7 +348,7 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false);
+	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
@@ -373,12 +374,14 @@ public:
 	// will return when the backup directory is restorable.
 	Future<int> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
 	Future<int> waitSubmitted(Database cx, Key tagName);
+	Future<Void> waitUpgradeToLatestDrVersion(Database cx, Key tagName);
 
 	static const Key keyAddPrefix;
 	static const Key keyRemovePrefix;
 	static const Key keyRangeVersions;
 	static const Key keyCopyStop;
 	static const Key keyDatabasesInSync;
+	static const int LATEST_DR_VERSION;
 
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
 	Future<int64_t> getTaskCount(Database cx) { return taskBucket->getTaskCount(cx); }
