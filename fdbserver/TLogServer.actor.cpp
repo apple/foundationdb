@@ -360,7 +360,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion;  // The last version number in the portion of the log (written|durable) to persistentData
 	NotifiedVersion version, queueCommittedVersion;
 	Version queueCommittingVersion;
-	Version knownCommittedVersion;
+	Version knownCommittedVersion, durableKnownCommittedVersion;
 
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; //tag.locality | tag.id
@@ -403,13 +403,13 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Tag remoteTag;
 	bool isPrimary;
 	int logRouterTags;
-	Version logRouterPoppedVersion, logRouterPopToVersion, logRouterKnownCommittedVersion;
+	Version logRouterPoppedVersion, logRouterPopToVersion;
 	int8_t locality;
 	UID recruitmentID;
 
 	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("bytesInput", cc), bytesDurable("bytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID),
-			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), logRouterKnownCommittedVersion(0),
+			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
 			logRouterPopToVersion(0), locality(tagLocalityInvalid)
@@ -902,7 +902,7 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 			tagData->unpoppedRecovered = false;
 			logData->unpoppedRecoveredTags--;
 			TraceEvent("TLogPoppedTag", logData->logId).detail("tags", logData->unpoppedRecoveredTags).detail("tag", req.tag.toString());
-			if(logData->unpoppedRecoveredTags == 0 && logData->version.get() >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+			if(logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
 				logData->recoveryComplete.send(Void());
 			}
 		}
@@ -1091,11 +1091,14 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 	logData->queueCommittedVersion.set(ver);
 	self->queueCommitEnd.set(commitNumber);
 
+	logData->durableKnownCommittedVersion = knownCommittedVersion;
+	if(logData->unpoppedRecoveredTags == 0 && knownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+		logData->recoveryComplete.send(Void());
+	}
 
 	TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 	if(logData->logSystem->get() && (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
-		logData->logRouterKnownCommittedVersion = knownCommittedVersion;
 		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
 
@@ -1365,7 +1368,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 			if(found && self->dbInfo->get().logSystemConfig.recruitmentID == logData->recruitmentID) {
 				logData->logSystem->set(ILogSystem::fromServerDBInfo( self->dbgid, self->dbInfo->get() ));
 				if(!logData->isPrimary) {
-					logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->logRouterKnownCommittedVersion, logData->locality);
+					logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->durableKnownCommittedVersion, logData->locality);
 				}
 
 				if(!logData->isPrimary && logData->stopped) {
@@ -1487,9 +1490,6 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 					self->prevVersion = logData->version.get();
 					logData->version.set( ver );
-					if(logData->unpoppedRecoveredTags == 0 && logData->version.get() >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
-						logData->recoveryComplete.send(Void());
-					}
 				}
 				lastVer = ver;
 				ver = r->version().version;
@@ -1518,9 +1518,6 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 						self->prevVersion = logData->version.get();
 						logData->version.set( ver );
-						if(logData->unpoppedRecoveredTags == 0 && logData->version.get() >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
-							logData->recoveryComplete.send(Void());
-						}
 					}
 					break;
 				}
@@ -1836,7 +1833,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 		if( !found ) {
 			logSystem->set(Reference<ILogSystem>());
 		} else {
-			logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->logRouterKnownCommittedVersion, logData->locality);
+			logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->durableKnownCommittedVersion, logData->locality);
 		}
 		TraceEvent("TLogUpdate", self->dbgid).detail("logId", logData->logId).detail("recoverFrom", recoverFrom.toString()).detail("dbInfo", self->dbInfo->get().logSystemConfig.toString()).detail("found", found).detail("logSystem", (bool) logSystem->get() ).detail("recoveryState", self->dbInfo->get().recoveryState);
 		for(auto it : self->dbInfo->get().logSystemConfig.oldTLogs) {
