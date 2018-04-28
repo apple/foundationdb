@@ -1937,6 +1937,10 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 				logData->version.set( req.recoverAt );
 			}
 
+			if(logData->recoveryComplete.isSet()) {
+				throw worker_removed();
+			}
+
 			//PullAsyncData will add tags that were popped in the previous generation,
 			//so we need to pop all tags that did not have data at the recovery version.
 			std::vector<Future<Void>> popFutures;
