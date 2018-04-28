@@ -1744,6 +1744,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->tLogs[0]->updateLocalitySet(recr.tLogs);
 		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
 
+		for(int i = 0; i < oldLogSystem->logRouterTags; i++) {
+			Tag tag = Tag(tagLocalityLogRouter, i);
+			reqs[ logSystem->tLogs[0]->bestLocationFor( tag ) ].recoverTags.push_back( tag );
+		}
 		std::vector<int> locations;
 		for( Tag tag : allTags ) {
 			locations.clear();
