@@ -1452,6 +1452,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						req.routerTag = Tag(tagLocalityLogRouter, i);
 						req.logSet = logSet;
 						req.startVersion = lastStart;
+						req.recruitmentID = self->recruitmentID;
 						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
 						logRouterInitializationReplies.back().push_back( reply );
 						allReplies.push_back( reply );
@@ -1498,6 +1499,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						req.routerTag = Tag(tagLocalityLogRouter, i);
 						req.logSet = logSet;
 						req.startVersion = lastStart;
+						req.recruitmentID = self->recruitmentID;
 						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
 						logRouterInitializationReplies.back().push_back( reply );
 						allReplies.push_back( reply );
@@ -1601,6 +1603,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.routerTag = Tag(tagLocalityLogRouter, i);
 			req.logSet = self->tLogs.size();
 			req.startVersion = std::max(self->tLogs[0]->startVersion, logSet->startVersion);
+			req.recruitmentID = self->recruitmentID;
 			logRouterInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.logRouters[i%remoteWorkers.logRouters.size()].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		}
 

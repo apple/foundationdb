@@ -97,11 +97,12 @@ struct InitializeLogRouterRequest {
 	int logSet;
 	Tag routerTag;
 	Version startVersion;
+	UID recruitmentID;
 	ReplyPromise<struct TLogInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & routerTag & logSet & startVersion & reply;
+		ar & recoveryCount & routerTag & logSet & startVersion & recruitmentID & reply;
 	}
 };
 

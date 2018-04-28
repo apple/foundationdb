@@ -338,6 +338,7 @@ ACTOR Future<Void> logRouterCore(
 	Tag tag,
 	int logSet,
 	Version startVersion,
+	UID recruitmentID,
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
 	state LogRouterData logRouterData(interf.id(), tag, logSet, startVersion);
@@ -350,8 +351,8 @@ ACTOR Future<Void> logRouterCore(
 	loop choose {
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			logRouterData.allowPops = db->get().recoveryState == 7;
-			if( db->get().logSystemConfig.tLogs.size() > logSet && db->get().logSystemConfig.tLogs[logSet].tLogs.size() ) {
+			if( db->get().logSystemConfig.tLogs.size() > logSet && db->get().logSystemConfig.tLogs[logSet].tLogs.size() && recruitmentID == db->get().logSystemConfig.recruitmentID ) {
+				logRouterData.allowPops = db->get().recoveryState == 7;
 				bool found = false;
 				for(auto& it : db->get().logSystemConfig.tLogs[logSet].tLogs) {
 					if( !it.present() ) {
@@ -409,7 +410,7 @@ ACTOR Future<Void> logRouter(
 {
 	try {
 		TraceEvent("LogRouterStart", interf.id()).detail("start", req.startVersion).detail("logSet", req.logSet).detail("tag", req.routerTag.toString());
-		state Future<Void> core = logRouterCore(interf, req.routerTag, req.logSet, req.startVersion, db);
+		state Future<Void> core = logRouterCore(interf, req.routerTag, req.logSet, req.startVersion, req.recruitmentID, db);
 		loop choose{
 			when(Void _ = wait(core)) { return Void(); }
 			when(Void _ = wait(checkRemoved(db, req.recoveryCount, interf))) {}
