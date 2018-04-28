@@ -139,9 +139,8 @@ func APIVersion(version int) error {
 				maxSupportedVersion := C.fdb_get_max_api_version()
 				if headerVersion > int(maxSupportedVersion) {
 					return fmt.Errorf("This version of the FoundationDB Go binding is not supported by the installed FoundationDB C library. The binding requires a library that supports API version %d, but the installed library supports a maximum version of %d.", version, maxSupportedVersion)
-				} else {
-					return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 				}
+				return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 			}
 			return Error{int(e)}
 		}
@@ -355,9 +354,8 @@ func CreateCluster(clusterFile string) (Cluster, error) {
 func byteSliceToPtr(b []byte) *C.uint8_t {
 	if len(b) > 0 {
 		return (*C.uint8_t)(unsafe.Pointer(&b[0]))
-	} else {
-		return nil
 	}
+	return nil
 }
 
 // A KeyConvertible can be converted to a FoundationDB Key. All functions in the

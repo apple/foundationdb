@@ -214,7 +214,7 @@ public:
 	virtual void delref() { ReferenceCounted<TCTeamInfo>::delref(); }
 
 private:
-	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receieve all replies.
+	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all replies.
 	int64_t getLoadAverage() {
 		int64_t bytesSum = 0;
 		int added = 0;

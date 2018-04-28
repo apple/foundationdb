@@ -357,10 +357,6 @@
 .. |option-read-system-keys-warning| replace::
 
     The format of data in the system keys may change from version to version in FoundationDB.
-
-.. |option-durability-dev-null-is-web-scale-blurb| replace::
-
-    This option has no effect yet, but may make users migrating from MongoDB more comfortable.
     
 ..  |option-set-retry-limit-blurb1| replace::
     

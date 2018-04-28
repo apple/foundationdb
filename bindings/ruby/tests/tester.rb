@@ -462,7 +462,6 @@ class Tester
               tr.options.set_read_your_writes_disable
               tr.options.set_read_system_keys
               tr.options.set_access_system_keys
-              tr.options.set_durability_dev_null_is_web_scale
               tr.options.set_timeout(60*1000)
               tr.options.set_retry_limit(50)
               tr.options.set_max_retry_delay(100)

@@ -269,11 +269,6 @@ func (o TransactionOptions) SetDurabilityRisky() error {
 	return o.setOpt(120, nil)
 }
 
-// Not yet implemented.
-func (o TransactionOptions) SetDurabilityDevNullIsWebScale() error {
-	return o.setOpt(130, nil)
-}
-
 // Specifies that this transaction should be treated as highest priority and that lower priority transactions should block behind this one. Use is discouraged outside of low-level tools
 func (o TransactionOptions) SetPrioritySystemImmediate() error {
 	return o.setOpt(200, nil)

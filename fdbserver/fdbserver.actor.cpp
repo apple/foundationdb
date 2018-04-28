@@ -38,6 +38,7 @@
 #include "IKeyValueStore.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <fstream>
 #include "pubsub.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
