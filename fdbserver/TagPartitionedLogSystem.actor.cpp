@@ -1451,6 +1451,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						req.tLogLocalities = tLogLocalities;
 						req.tLogPolicy = tLogPolicy;
 						req.hasBestPolicy = hasBestPolicy;
+						req.locality = locality;
 						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
 						logRouterInitializationReplies.back().push_back( reply );
 						allReplies.push_back( reply );
@@ -1499,6 +1500,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						req.tLogLocalities = tLogLocalities;
 						req.tLogPolicy = tLogPolicy;
 						req.hasBestPolicy = hasBestPolicy;
+						req.locality = locality;
 						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
 						logRouterInitializationReplies.back().push_back( reply );
 						allReplies.push_back( reply );
@@ -1610,6 +1612,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			req.tLogLocalities = localities;
 			req.tLogPolicy = logSet->tLogPolicy;
 			req.hasBestPolicy = logSet->hasBestPolicy;
+			req.locality = remoteLocality;
 			logRouterInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.logRouters[i%remoteWorkers.logRouters.size()].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		}
 

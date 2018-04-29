@@ -106,6 +106,7 @@ struct LogRouterData {
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
 		logSet.hasBestPolicy = req.hasBestPolicy;
+		logSet.locality = req.locality;
 		logSet.updateLocalitySet(req.tLogLocalities);
 	}
 };
@@ -354,6 +355,7 @@ ACTOR Future<Void> logRouterCore(
 	loop choose {
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
+			logRouterData.allowPops = db->get().recoveryState == 7;
 			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {
