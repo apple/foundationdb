@@ -998,10 +998,6 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return logRouterTags > 0;
 	}
 
-	virtual void addRemoteTags( int logSet, std::vector<Tag> const& originalTags, std::vector<int>& tags ) {
-		tLogs[logSet]->getPushLocations(originalTags, tags, 0);
-	}
-
 	virtual Tag getRandomRouterTag() {
 		return Tag(tagLocalityLogRouter, g_random->randomInt(0, logRouterTags));
 	}
@@ -1405,7 +1401,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	ACTOR static Future<Void> recruitOldLogRouters( TagPartitionedLogSystem* self, vector<WorkerInterface> workers, LogEpoch recoveryCount, int8_t locality, Version startVersion, int logSet, bool onlyOld, bool waitForFailures ) {
+	ACTOR static Future<Void> recruitOldLogRouters( TagPartitionedLogSystem* self, vector<WorkerInterface> workers, LogEpoch recoveryCount, int8_t locality, Version startVersion,
+		std::vector<LocalityData> tLogLocalities, IRepPolicyRef tLogPolicy, int32_t hasBestPolicy, bool onlyOld, bool waitForFailures ) {
 		state vector<vector<Future<TLogInterface>>> logRouterInitializationReplies;
 		state vector<Future<TLogInterface>> allReplies;
 		int nextRouter = 0;
@@ -1450,9 +1447,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						InitializeLogRouterRequest req;
 						req.recoveryCount = recoveryCount;
 						req.routerTag = Tag(tagLocalityLogRouter, i);
-						req.logSet = logSet;
 						req.startVersion = lastStart;
-						req.recruitmentID = self->recruitmentID;
+						req.tLogLocalities = tLogLocalities;
+						req.tLogPolicy = tLogPolicy;
+						req.hasBestPolicy = hasBestPolicy;
 						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
 						logRouterInitializationReplies.back().push_back( reply );
 						allReplies.push_back( reply );
@@ -1497,9 +1495,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						InitializeLogRouterRequest req;
 						req.recoveryCount = recoveryCount;
 						req.routerTag = Tag(tagLocalityLogRouter, i);
-						req.logSet = logSet;
 						req.startVersion = lastStart;
-						req.recruitmentID = self->recruitmentID;
+						req.tLogLocalities = tLogLocalities;
+						req.tLogPolicy = tLogPolicy;
+						req.hasBestPolicy = hasBestPolicy;
 						auto reply = transformErrors( throwErrorOr( workers[nextRouter].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() );
 						logRouterInitializationReplies.back().push_back( reply );
 						allReplies.push_back( reply );
@@ -1591,9 +1590,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			lockNum++;
 		}
 
+		vector<LocalityData> localities;
+		localities.resize(remoteWorkers.remoteTLogs.size());
+		for(int i = 0; i < remoteWorkers.remoteTLogs.size(); i++) {
+			localities[i] = remoteWorkers.remoteTLogs[i].locality;
+		}
+
 		state Future<Void> oldRouterRecruitment = Void();
 		if(logSet->startVersion < oldLogSystem->knownCommittedVersion + 1) {
-			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(self, remoteWorkers.logRouters, recoveryCount, remoteLocality, logSet->startVersion, self->tLogs.size(), true, false);
+			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(self, remoteWorkers.logRouters, recoveryCount, remoteLocality, logSet->startVersion, localities, logSet->tLogPolicy, logSet->hasBestPolicy, true, false);
 		}
 
 		state vector<Future<TLogInterface>> logRouterInitializationReplies;
@@ -1601,9 +1606,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			InitializeLogRouterRequest req;
 			req.recoveryCount = recoveryCount;
 			req.routerTag = Tag(tagLocalityLogRouter, i);
-			req.logSet = self->tLogs.size();
 			req.startVersion = std::max(self->tLogs[0]->startVersion, logSet->startVersion);
-			req.recruitmentID = self->recruitmentID;
+			req.tLogLocalities = localities;
+			req.tLogPolicy = logSet->tLogPolicy;
+			req.hasBestPolicy = logSet->hasBestPolicy;
 			logRouterInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.logRouters[i%remoteWorkers.logRouters.size()].logRouter.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 		}
 
@@ -1716,9 +1722,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			lockNum++;
 		}
 
+		vector<LocalityData> localities;
+		localities.resize(recr.tLogs.size());
+		for(int i = 0; i < recr.tLogs.size(); i++) {
+			localities[i] = recr.tLogs[i].locality;
+		}
+
 		state Future<Void> oldRouterRecruitment = Never();
 		if(logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
-			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, 0, false, true);
+			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, localities, logSystem->tLogs[0]->tLogPolicy, logSystem->tLogs[0]->hasBestPolicy, false, true);
 		} else {
 			oldLogSystem->logSystemConfigChanged.trigger();
 		}
@@ -1744,8 +1756,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		logSystem->tLogs[0]->tLogLocalities.resize( recr.tLogs.size() );
 		logSystem->tLogs[0]->logServers.resize( recr.tLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
-		logSystem->tLogs[0]->updateLocalitySet(recr.tLogs);
-		filterLocalityDataForPolicy(logSystem->tLogs[0]->tLogPolicy, &logSystem->tLogs[0]->tLogLocalities);
+		logSystem->tLogs[0]->updateLocalitySet(localities);
 
 		for(int i = 0; i < oldLogSystem->logRouterTags; i++) {
 			Tag tag = Tag(tagLocalityLogRouter, i);
@@ -1784,10 +1795,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.logRouterTags = logSystem->logRouterTags;
 			}
 
+			vector<LocalityData> satelliteLocalities;
+			satelliteLocalities.resize(recr.satelliteTLogs.size());
+			for(int i = 0; i < recr.satelliteTLogs.size(); i++) {
+				satelliteLocalities[i] = recr.satelliteTLogs[i].locality;
+			}
+
 			logSystem->tLogs[1]->tLogLocalities.resize( recr.satelliteTLogs.size() );
 			logSystem->tLogs[1]->logServers.resize( recr.satelliteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
-			logSystem->tLogs[1]->updateLocalitySet(recr.satelliteTLogs);
-			filterLocalityDataForPolicy(logSystem->tLogs[1]->tLogPolicy, &logSystem->tLogs[1]->tLogLocalities);
+			logSystem->tLogs[1]->updateLocalitySet(satelliteLocalities);
 
 			for( Tag tag : allTags ) {
 				locations.clear();

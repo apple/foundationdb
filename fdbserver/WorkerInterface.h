@@ -94,15 +94,16 @@ struct InitializeTLogRequest {
 
 struct InitializeLogRouterRequest {
 	uint64_t recoveryCount;
-	int logSet;
 	Tag routerTag;
 	Version startVersion;
-	UID recruitmentID;
+	std::vector<LocalityData> tLogLocalities;
+	IRepPolicyRef tLogPolicy;
+	int32_t hasBestPolicy;
 	ReplyPromise<struct TLogInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & routerTag & logSet & startVersion & recruitmentID & reply;
+		ar & recoveryCount & routerTag & startVersion & tLogLocalities & tLogPolicy & hasBestPolicy & reply;
 	}
 };
 

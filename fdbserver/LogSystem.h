@@ -83,7 +83,7 @@ public:
 		}
 	}
 
-	void updateLocalitySet( vector<WorkerInterface> const& workers ) {
+	void updateLocalitySet( vector<LocalityData> const& localities ) {
 		LocalityMap<int>* logServerMap;
 
 		logServerSet = LocalitySetRef(new LocalityMap<int>());
@@ -91,12 +91,12 @@ public:
 
 		logEntryMap.clear();
 		logIndexArray.clear();
-		logIndexArray.reserve(workers.size());
+		logIndexArray.reserve(localities.size());
 
-		for( int i = 0; i < workers.size(); i++ ) {
+		for( int i = 0; i < localities.size(); i++ ) {
 			ASSERT(logEntryMap.find(i) == logEntryMap.end());
 			logIndexArray.push_back(i);
-			logEntryMap[logIndexArray.back()] = logServerMap->add(workers[i].locality, &logIndexArray.back());
+			logEntryMap[logIndexArray.back()] = logServerMap->add(localities[i], &logIndexArray.back());
 		}
 	}
 
@@ -483,8 +483,6 @@ struct ILogSystem {
 	virtual void getPushLocations( std::vector<Tag> const& tags, vector<int>& locations ) = 0;
 
 	virtual bool hasRemoteLogs() = 0;
-
-	virtual void addRemoteTags( int logSet, std::vector<Tag> const& originalTags, std::vector<int>& tags ) = 0;
 
 	virtual Tag getRandomRouterTag() = 0;
 

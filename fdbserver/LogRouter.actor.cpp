@@ -81,8 +81,8 @@ struct LogRouterData {
 	Version startVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Tag routerTag;
-	int logSet;
 	bool allowPops;
+	LogSet logSet;
 
 	std::vector<Reference<TagData>> tag_data; //we only store data for the remote tag locality
 
@@ -101,7 +101,13 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, Tag routerTag, int logSet, Version startVersion) : dbgid(dbgid), routerTag(routerTag), logSet(logSet), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(startVersion-1), minPopped(startVersion-1), startVersion(startVersion), allowPops(false) {}
+	LogRouterData(UID dbgid, InitializeLogRouterRequest req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(req.startVersion-1), startVersion(req.startVersion), allowPops(false) {
+		//setup just enough of a logSet to be able to call getPushLocations
+		logSet.logServers.resize(req.tLogLocalities.size());
+		logSet.tLogPolicy = req.tLogPolicy;
+		logSet.hasBestPolicy = req.hasBestPolicy;
+		logSet.updateLocalitySet(req.tLogLocalities);
+	}
 };
 
 void commitMessages( LogRouterData* self, Version version, const std::vector<TagsAndMessage>& taggedMessages ) {
@@ -154,7 +160,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 	self->messageBlocks.push_back( std::make_pair(version, block) );
 }
 
-ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
+ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = self->version.get() + 1;
@@ -171,7 +177,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 				when( Void _ = wait( dbInfoChange ) ) { //FIXME: does this actually happen?
 					if(r) tagPopped = std::max(tagPopped, r->popped());
 					if( self->logSystem->get() )
-						r = self->logSystem->get()->peekLogRouter( tagAt, tag, self->dbgid );
+						r = self->logSystem->get()->peekLogRouter( tagAt, self->routerTag, self->dbgid );
 					else
 						r = Reference<ILogSystem::IPeekCursor>();
 					dbInfoChange = self->logSystem->onChange();
@@ -208,7 +214,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self, Tag tag ) {
 			TagsAndMessage tagAndMsg;
 			tagAndMsg.message = r->getMessageWithTags();
 			tags.clear();
-			self->logSystem->get()->addRemoteTags(self->logSet, r->getTags(), tags);
+			self->logSet.getPushLocations(r->getTags(), tags, 0);
 			for(auto t : tags) {
 				tagAndMsg.tags.push_back(Tag(tagLocalityRemoteLog, t));
 			}
@@ -335,35 +341,20 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 
 ACTOR Future<Void> logRouterCore(
 	TLogInterface interf,
-	Tag tag,
-	int logSet,
-	Version startVersion,
-	UID recruitmentID,
+	InitializeLogRouterRequest req,
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
-	state LogRouterData logRouterData(interf.id(), tag, logSet, startVersion);
+	state LogRouterData logRouterData(interf.id(), req);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection( addActor.getFuture() );
 	state Future<Void> dbInfoChange = Void();
 
-	addActor.send( pullAsyncData(&logRouterData, tag) );
+	addActor.send( pullAsyncData(&logRouterData) );
 
 	loop choose {
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
-			if( db->get().logSystemConfig.tLogs.size() > logSet && db->get().logSystemConfig.tLogs[logSet].tLogs.size() && recruitmentID == db->get().logSystemConfig.recruitmentID ) {
-				logRouterData.allowPops = db->get().recoveryState == 7;
-				bool found = false;
-				for(auto& it : db->get().logSystemConfig.tLogs[logSet].tLogs) {
-					if( !it.present() ) {
-						found = true;
-						break;
-					}
-				}
-				if(!found) {
-					logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
-				}
-			}
+			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {
 			addActor.send( logRouterPeekMessages( &logRouterData, req ) );
@@ -409,8 +400,8 @@ ACTOR Future<Void> logRouter(
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
 	try {
-		TraceEvent("LogRouterStart", interf.id()).detail("start", req.startVersion).detail("logSet", req.logSet).detail("tag", req.routerTag.toString());
-		state Future<Void> core = logRouterCore(interf, req.routerTag, req.logSet, req.startVersion, req.recruitmentID, db);
+		TraceEvent("LogRouterStart", interf.id()).detail("start", req.startVersion).detail("tag", req.routerTag.toString());
+		state Future<Void> core = logRouterCore(interf, req, db);
 		loop choose{
 			when(Void _ = wait(core)) { return Void(); }
 			when(Void _ = wait(checkRemoved(db, req.recoveryCount, interf))) {}
