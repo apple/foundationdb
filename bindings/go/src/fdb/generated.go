@@ -364,6 +364,11 @@ func (o TransactionOptions) SetReadLockAware() error {
 	return o.setOpt(702, nil)
 }
 
+// No other transactions will be applied before this transaction within the same commit version.
+func (o TransactionOptions) SetFirstInBatch() error {
+	return o.setOpt(710, nil)
+}
+
 type StreamingMode int
 
 const (
