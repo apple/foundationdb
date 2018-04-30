@@ -13,7 +13,7 @@ Please check for the issues list for already opened issue for your problem, if n
 
 **Any additional information?**
 
-**Are you trying to deploy in Bare metal or Docker or Clpud?**
+**Are you trying to deploy in Bare metal or Docker or Cloud?**
 
 **Environment**
 - Operating System:
