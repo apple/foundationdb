@@ -108,6 +108,14 @@ struct LogRouterData {
 		logSet.hasBestPolicy = req.hasBestPolicy;
 		logSet.locality = req.locality;
 		logSet.updateLocalitySet(req.tLogLocalities);
+
+		for(int i = 0; i < req.tLogLocalities.size(); i++) {
+			Tag tag(tagLocalityRemoteLog, i);
+			auto tagData = getTagData(tag);
+			if(!tagData) {
+				tagData = createTagData(tag, 0, 0);
+			}
+		}
 	}
 };
 
