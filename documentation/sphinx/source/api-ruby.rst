@@ -117,8 +117,6 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
 
         |option-trace-roll-size-blurb|
 
-    .. method :: FDB.options.set_disable_multi_version_client_api() -> nil
-
        |option-disable-multi-version-client-api|
 
     .. method :: FDB.options.set_callbacks_on_external_threads() -> nil
@@ -132,6 +130,34 @@ After requiring the ``FDB`` gem and selecting an API version, you probably want 
     .. method :: FDB.options.set_external_client_directory(path_to_lib_directory) -> nil
 
        |option-external-client-directory|
+
+    .. note:: |tls-options-burb|
+
+    .. method :: FDB.options.set_tls_plugin(plugin_path_or_name) -> nil
+
+       |option-tls-plugin-blurb|
+
+    .. method :: FDB.options.set_tls_cert_path(path_to_file) -> nil
+
+       |option-tls-cert-path-blurb|
+
+    .. method :: FDB.options.set_tls_key_path(path_to_file) -> nil
+
+       |option-tls-key-path-blurb|
+
+    .. method :: FDB.options.set_tls_verify_peers(criteria) -> nil
+
+       |option-tls-verify-peers-blurb|
+
+    .. method :: FDB.options.set_tls_cert_bytes(bytes) -> nil
+
+       |option-tls-cert-bytes|
+
+    .. method :: FDB.options.set_tls_key_bytes(bytes) -> nil
+
+       |option-tls-key-bytes|
+
+    .. method :: FDB.options.set_disable_multi_version_client_api() -> nil
 
 
 Cluster objects
@@ -748,10 +774,6 @@ Transaction options
     |option-set-timeout-blurb2|
 
     |option-set-timeout-blurb3|
-
-.. method:: Transaction.options.set_durability_dev_null_is_web_scale() -> nil
-
-    |option-durability-dev-null-is-web-scale-blurb|
 
 .. _transact:
 

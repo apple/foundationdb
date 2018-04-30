@@ -32,7 +32,7 @@
 
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
   <Product Name='$(var.Title)'
-           Id='{C5A52D50-7162-4EDC-ADE3-481133E5D407}'
+           Id='{2F0D2748-11CD-496F-B4B5-77FABB98E362}'
            UpgradeCode='{A95EA002-686E-4164-8356-C715B7F8B1C8}'
            Version='$(var.Version)'
            Manufacturer='$(var.Manufacturer)'
@@ -98,9 +98,6 @@
           <Component Id='InstallPathEnvVar' Guid='{D6DDFEEC-154E-4684-BCBE-D079BB121B1B}' Win64='yes'>
             <CreateFolder />
                   <Environment Action='set' Name='FOUNDATIONDB_INSTALL_PATH' Value='[INSTALLDIR]' Part='all' Id='InstallPathSetEnvVar' System='yes' Permanent='no' />
-          </Component>
-          <Component Id='LicenseFiles' Guid='{071FFA9B-EDE5-42E3-A8EC-B9AFA6B260D2}' Win64='yes'>
-            <File Id='README' Name='README.txt' DiskId='1' Source='$(var.SolutionRoot)README.md'/>
           </Component>
           <Directory Id='IncludeDir' Name='include'>
             <Directory Id='IncludeFDBDir' Name='foundationdb'>
@@ -301,7 +298,6 @@
         <ComponentRef Id='CreateClusterFileDir'/>  <!-- In a client only install, we don't make any files here, but want it to be easy to drop fdb.cluster here -->
         <ComponentRef Id='PathAddition'/>
         <ComponentRef Id='InstallPathEnvVar'/>
-        <ComponentRef Id='LicenseFiles'/>
         <ComponentRef Id='FDBCLibraryPFiles' />
         <ComponentRef Id='FDBCLibraryHeader'/>
         <ComponentRef Id='FDBCLibraryLib' />
@@ -390,10 +386,23 @@
     </InstallExecuteSequence>
 
     <Property Id="WIXUI_EXITDIALOGOPTIONALTEXT"
-              Value="Thank you for installing FoundationDB. For documentation, please visit https://www.foundationdb.org/documentation.
+              Value="Thank you for installing FoundationDB. For documentation, please visit https://apple.github.io/foundationdb/index.html#documentation.
 
 To allow path variables to update, please restart your IDE and any open terminal sessions." />
+
     <UIRef Id='WixUI_FeatureTree' />
+    <UI>
+      <Publish Dialog="WelcomeDlg"
+            Control="Next"
+            Event="NewDialog"
+            Value="FeaturesDlg"
+            Order="2">1</Publish>
+      <Publish Dialog="FeaturesDlg"
+            Control="Back"
+            Event="NewDialog"
+            Value="WelcomeDlg"
+            Order="2">1</Publish>
+    </UI>
     <UIRef Id='WixUI_ErrorProgressText' />
 
     <WixVariable Id="WixUIDialogBmp" Value="$(var.ProjectRoot)\art\dialog.jpg" />

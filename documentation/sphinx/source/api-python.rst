@@ -149,6 +149,32 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
 
        |option-external-client-directory|
 
+    .. note:: |tls-options-burb|
+
+    .. method :: fdb.options.set_tls_plugin(plugin_path_or_name)
+
+       |option-tls-plugin-blurb|
+
+    .. method :: fdb.options.set_tls_cert_path(path_to_file)
+
+       |option-tls-cert-path-blurb|
+
+    .. method :: fdb.options.set_tls_key_path(path_to_file)
+
+       |option-tls-key-path-blurb|
+
+    .. method :: fdb.options.set_tls_verify_peers(criteria)
+
+       |option-tls-verify-peers-blurb|
+
+    .. method :: fdb.options.set_tls_cert_bytes(bytes)
+
+       |option-tls-cert-bytes|
+
+    .. method :: fdb.options.set_tls_key_bytes(bytes)
+
+       |option-tls-key-bytes|
+
 Cluster objects
 ===============
 
@@ -368,8 +394,8 @@ Transactional decoration
 
         @fdb.transactional
         def simple_function(tr, x, y):
-            tr['foo'] = x
-            tr['bar'] = y
+            tr[b'foo'] = x
+            tr[b'bar'] = y
 
     The ``@fdb.transactional`` decorator makes ``simple_function`` a transactional function.  All functions using this decorator must have an argument **named** ``tr``.  This specially named argument is passed a transaction that the function can use to do reads and writes.
 
@@ -814,10 +840,6 @@ Transaction options
 
     |option-set-timeout-blurb3|
 
-.. method:: Transaction.options.set_durability_dev_null_is_web_scale
-
-    |option-durability-dev-null-is-web-scale-blurb|
-
 .. _api-python-future:
 
 Future objects
@@ -871,7 +893,7 @@ Asynchronous methods return one of the following subclasses of :class:`Future`:
 
         @fdb.transactional
         def foo(tr):
-            val = tr['foo']
+            val = tr[b'foo']
             if val.present():
                 print 'Got value: %s' % val
             else:

@@ -214,7 +214,7 @@ public:
 	virtual void delref() { ReferenceCounted<TCTeamInfo>::delref(); }
 
 private:
-	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receieve all replies.
+	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all replies.
 	int64_t getLoadAverage() {
 		int64_t bytesSum = 0;
 		int added = 0;
@@ -1748,6 +1748,7 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection *self, Reference<AsyncVar<
 				}
 				when( Void _ = wait( self->restartRecruiting.onTrigger() ) ) {}
 			}
+			Void _ = wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 		} catch( Error &e ) {
 			if(e.code() != error_code_timed_out) {
 				throw;

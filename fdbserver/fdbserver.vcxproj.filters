@@ -250,6 +250,9 @@
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\BackupToDBUpgrade.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\AtomicSwitchover.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>

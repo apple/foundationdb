@@ -26,13 +26,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.apple.foundationdb.async.AsyncUtil;
 
 public class WhileTrueTest {
-    public static void main(String[] args) {
-        // This should cause memory issues using the old implementation but not the new one.
-        // Pro tip: Run with options -Xms16m -Xmx16m -XX:+HeadDumpOnOutOfMemoryError
-        AtomicInteger count = new AtomicInteger(1000000);
-        AsyncUtil.whileTrue(() -> CompletableFuture.completedFuture(count.decrementAndGet()).thenApplyAsync(c -> c > 0)).join();
-        System.out.println("Final value: " + count.get());
-    }
+	public static void main(String[] args) {
+		// This should cause memory issues using the old implementation but not the new one.
+		// Pro tip: Run with options -Xms16m -Xmx16m -XX:+HeadDumpOnOutOfMemoryError
+		AtomicInteger count = new AtomicInteger(1000000);
+		AsyncUtil.whileTrue(() -> CompletableFuture.completedFuture(count.decrementAndGet()).thenApplyAsync(c -> c > 0)).join();
+		System.out.println("Final value: " + count.get());
+	}
 
-    private WhileTrueTest() {}
+	private WhileTrueTest() {}
 }

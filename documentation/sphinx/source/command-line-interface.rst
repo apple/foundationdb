@@ -59,7 +59,7 @@ The ``commit`` command commits the current transaction. Any sets or clears execu
 configure
 ---------
 
-The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|multi_dc] [ssd|memory] [proxies=<N>] [resolvers=<N>] [logs=<N>]``.
+The ``configure`` command changes the database configuration. Its syntax is ``configure [new] [single|double|triple|three_data_hall|three_datacenter] [ssd|memory] [proxies=<N>] [resolvers=<N>] [logs=<N>]``.
 
 The ``new`` option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When ``new`` is used, both a redundancy mode and a storage engine must be specified.
 
@@ -72,9 +72,9 @@ Redundancy modes define storage requirements, required cluster size, and resilie
 * ``double``
 * ``triple``
 * ``three_data_hall``
-* ``multi_dc``
+* ``three_datacenter``
 
-For descriptions of redundacy modes, see :ref:`configuration-choosing-redundancy-mode`.
+For descriptions of redundancy modes, see :ref:`configuration-choosing-redundancy-mode`.
 
 storage engine
 ^^^^^^^^^^^^^^^
@@ -108,7 +108,7 @@ The ``coordinators`` command is used to change cluster coordinators or descripti
 
 Addresses may be specified as a list of IP:port pairs (such as ``coordinators 10.0.0.1:4000 10.0.0.2:4000 10.0.0.3:4000``). If addresses are specified, the coordinators will be set to them. An ``fdbserver`` process must be running on each of the specified addresses.
 
-If ``auto`` is specified, coordinator addresses will be choosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
+If ``auto`` is specified, coordinator addresses will be chosen automatically to support the configured redundancy level. (If the current set of coordinators are healthy and already support the configured redundancy level, nothing will be changed.)
 
 For more information on setting coordinators, see :ref:`configuration-changing-coordination-servers`.
 
@@ -194,7 +194,7 @@ The following options are available for use with the ``option`` command:
 
 ``READ_AHEAD_DISABLE`` - Disables read-ahead caching for range reads. Under normal operation, a transaction will read extra rows from the database into cache if range reads are used to page through a series of data one row at a time (i.e. if a range read with a one row limit is followed by another one row range read starting immediately after the result of the first).
 
-``READ_YOUR_WRITES_DISABLE`` - Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction.
+``READ_YOUR_WRITES_DISABLE`` - Reads performed by a transaction will not see any prior mutations that occurred in that transaction, instead seeing the value which was in the database at the transaction's read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction.
 
 ``RETRY_LIMIT`` - Set a maximum number of retries after which additional calls to ``onError`` will throw the most recently seen error code. Valid parameter values are ``[-1, INT_MAX]``. If set to -1, will disable the retry limit. Like all transaction options, the retry limit must be reset after a call to ``onError``. This behavior allows the user to make the retry limit dynamic.
 

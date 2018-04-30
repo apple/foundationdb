@@ -477,10 +477,8 @@ public class AsyncStackTester {
 				tr.options().setCausalReadRisky();
 				tr.options().setCausalWriteRisky();
 				tr.options().setReadYourWritesDisable();
-				tr.options().setReadAheadDisable();
 				tr.options().setReadSystemKeys();
 				tr.options().setAccessSystemKeys();
-				tr.options().setDurabilityDevNullIsWebScale();
 				tr.options().setTimeout(60*1000);
 				tr.options().setRetryLimit(50);
 				tr.options().setMaxRetryDelay(100);

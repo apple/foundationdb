@@ -18,7 +18,7 @@ We have a number of customers, ranging from network analytics providers to VoIP/
 Time-series Data and FoundationDB
 =================================
 
-If you only have a few fields to store per database record, it’s pretty simple to picture what a time-oriented record would look like. If you were tracking analytics for a website, you might have a few fields, such as a website identifer, a page identfier, and a browser type. That’s pretty simple to picture fitting into a defined, relational-database table that looks like this:
+If you only have a few fields to store per database record, it’s pretty simple to picture what a time-oriented record would look like. If you were tracking analytics for a website, you might have a few fields, such as a website identifier, a page identifier, and a browser type. That’s pretty simple to picture fitting into a defined, relational-database table that looks like this:
 
 ============= ========== ======= ==========
 Timestamp     website_ID page_ID browser_ID

@@ -55,7 +55,7 @@ import com.apple.foundationdb.tuple.Tuple;
  *     to manage its subspaces.
  *
  *     For general guidance on directory usage, see the discussion in the
- *     <a href="/developer-guide.html#developer-guide-directories" target="_blank">Developer Guide</a>.
+ *     <a href="/foundationdb/developer-guide.html#developer-guide-directories" target="_blank">Developer Guide</a>.
  * </p>
  * <p>
  *     Directories are identified by hierarchical paths analogous to the paths
@@ -526,7 +526,7 @@ public class DirectoryLayer implements Directory {
 
 			return AsyncUtil.collect(
 					AsyncUtil.mapIterable(tr.getRange(subdir.range()),
-						kv -> subdir.unpack(kv.getKey()).getString(0)
+							kv -> subdir.unpack(kv.getKey()).getString(0)
 					),
 					tr.getExecutor()
 			);

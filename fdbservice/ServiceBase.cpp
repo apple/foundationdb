@@ -218,7 +218,7 @@ void CServiceBase::Stop()
         // Log the error.
         WriteErrorLogEntry("Service Stop", dwError);
 
-        // Set the orginal service status.
+        // Set the original service status.
         SetServiceStatus(dwOriginalState);
     }
     catch (...)
@@ -226,7 +226,7 @@ void CServiceBase::Stop()
         // Log the error.
         WriteEventLogEntry("Service failed to stop.", EVENTLOG_ERROR_TYPE);
 
-        // Set the orginal service status.
+        // Set the original service status.
         SetServiceStatus(dwOriginalState);
     }
 }

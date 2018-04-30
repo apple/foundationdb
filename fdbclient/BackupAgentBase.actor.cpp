@@ -35,6 +35,7 @@ const Key BackupAgentBase::keyStateStatus = LiteralStringRef("state_status");
 const Key BackupAgentBase::keyLastUid = LiteralStringRef("last_uid");
 const Key BackupAgentBase::keyBeginKey = LiteralStringRef("beginKey");
 const Key BackupAgentBase::keyEndKey = LiteralStringRef("endKey");
+const Key BackupAgentBase::keyDrVersion = LiteralStringRef("drVersion");
 const Key BackupAgentBase::destUid = LiteralStringRef("destUid");
 const Key BackupAgentBase::backupStartVersion = LiteralStringRef("backupStartVersion");
 
@@ -628,7 +629,7 @@ ACTOR Future<Void> _clearLogRanges(Reference<ReadYourWritesTransaction> tr, bool
 	state Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	
+
 	state Standalone<RangeResultRef> backupVersions = wait(tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 
 	// Make sure version history key does exist and lower the beginVersion if needed

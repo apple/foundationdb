@@ -592,7 +592,7 @@ ACTOR Future<Void> simulatedMachine(
 #include "fdbclient/MonitorLeader.h"
 
 ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, std::string baseFolder,
-										  int* pTesterCount, Optional<ClusterConnectionString> *pConnString) {
+										  int* pTesterCount, Optional<ClusterConnectionString> *pConnString, int extraDB) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
@@ -608,7 +608,11 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 		int processesPerMachine = atoi(ini.GetValue("META", "processesPerMachine"));
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
+		bool enableExtraDB = (extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
+		if (enableExtraDB) {
+			g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
+		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
 		bool usingSSL = conn.toString().find(":tls") != std::string::npos;
@@ -642,8 +646,9 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, zoneId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
+			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back( reportErrors( simulatedMachine(
-				conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true, i == useSeedForMachine, false ),
+				conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true, i == useSeedForMachine, enableExtraDB ),
 				processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine") );
 		}
 
@@ -748,13 +753,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		break;
 	}
 	case 3: {
-		if( datacenters == 1 ) {
+		if( datacenters <= 2 ) {
 			TEST( true );  // Simulated cluster running in triple redundancy mode
 			set_config("triple");
-		}
-		else if( datacenters == 2 ) {
-			TEST( true );  // Simulated cluster running in 2 datacenter mode
-			set_config("two_datacenter");
 		}
 		else if( datacenters == 3 ) {
 			TEST( true );  // Simulated cluster running in 3 data-hall mode
@@ -849,7 +850,18 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	ASSERT( coordinatorAddresses.size() == coordinatorCount );
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
-	g_simulator.extraDB = extraDB ? new ClusterConnectionString(coordinatorAddresses, ((extraDB==1 && BUGGIFY) ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0"))) : NULL;
+
+	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
+	if(extraDB==1) {
+		// The DR database can be either a new database or itself
+		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, BUGGIFY ? LiteralStringRef("TestCluster:0") : LiteralStringRef("ExtraCluster:0"));
+	} else if(extraDB==2) {
+		// The DR database is a new database
+		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("ExtraCluster:0"));
+	} else if(extraDB==3) {
+		// The DR database is the same database
+		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
+	}
 
 	*pConnString = conn;
 
@@ -891,7 +903,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled,
 				localities, processClass, baseFolder, false, machine == useSeedForMachine, true ), "SimulatedMachine"));
 
-			if (extraDB) {
+			if (extraDB && g_simulator.extraDB->toString() != conn.toString()) {
 				std::vector<uint32_t> extraIps;
 				for (int i = 0; i < processesPerMachine; i++){
 					extraIps.push_back(4 << 24 | dc << 16 | g_random->randomInt(1, i + 2) << 8 | machine);
@@ -1035,7 +1047,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 	try {
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			Void _ = wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile), 100.0 ) );
+			Void _ = wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, extraDB), 100.0 ) );
 		}
 		else {
 			g_expect_full_pointermap = 1;

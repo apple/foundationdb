@@ -92,8 +92,8 @@ STATIC_LIBS :=
 VPATH += $(addprefix :,$(filter-out lib,$(patsubst -L%,%,$(filter -L%,$(LDFLAGS)))))
 
 CS_PROJECTS := flow/actorcompiler flow/coveragetool fdbclient/vexillographer
-CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow
-OTHER_PROJECTS := bindings/python bindings/ruby bindings/nodejs bindings/go
+CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow FDBLibTLS
+OTHER_PROJECTS := bindings/python bindings/ruby bindings/go
 
 CS_MK_GENERATED := $(CS_PROJECTS:=/generated.mk)
 CPP_MK_GENERATED := $(CPP_PROJECTS:=/generated.mk)
@@ -127,7 +127,7 @@ else
 endif
 	@echo "#define FDB_VT_PACKAGE_NAME \"$(PACKAGE_NAME)\"" >> $@
 
-bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_node fdb_flow fdb_flow_tester fdb_go fdb_go_tester
+bindings: fdb_c fdb_python fdb_ruby fdb_java fdb_flow fdb_flow_tester fdb_go fdb_go_tester
 
 Makefiles: $(MK_GENERATED)
 
@@ -148,7 +148,7 @@ clean: $(CLEAN_TARGETS) docpreview_clean
 	@echo "Cleaning       toplevel"
 	@rm -rf $(OBJDIR)
 	@rm -rf $(DEPSDIR)
-	@rm -rf lib/libstdc++.a
+	@rm -rf lib/
 	@rm -rf bin/coverage.*.xml
 
 targets:
@@ -174,13 +174,13 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	@ar rcs $@ .libstdc++/*.o
 	@rm -r .libstdc++
 
-docpreview: javadoc godoc
+docpreview: javadoc
 	TARGETS= $(MAKE) -C documentation docpreview
 
 docpreview_clean:
 	CLEAN_TARGETS= $(MAKE) -C documentation docpreview_clean
 
-packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc godoc
+packages/foundationdb-docs-$(VERSION).tar.gz: FORCE javadoc
 	TARGETS= $(MAKE) -C documentation docpackage
 	@mkdir -p packages
 	@rm -f packages/foundationdb-docs-$(VERSION).tar.gz
