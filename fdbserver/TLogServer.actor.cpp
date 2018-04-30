@@ -1973,6 +1973,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 			logData->recoveryComplete.send(Void());
 		}
+		Void _ = wait(logData->committingQueue.getFuture() || logData->removed );
 	} catch( Error &e ) {
 		if(e.code() != error_code_actor_cancelled) {
 			req.reply.sendError(e);
@@ -1988,7 +1989,6 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		return Void();
 	}
 
-	Void _ = wait(logData->committingQueue.getFuture() || logData->removed );
 	req.reply.send( recruited );
 
 	TraceEvent("TLogReady", logData->logId).detail("allTags", describe(req.allTags));
