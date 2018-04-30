@@ -63,7 +63,9 @@ struct ChangeConfigWorkload : TestWorkload {
 			Void _ = wait(delay(5*g_random->random01()));
 			if (self->configMode.size()) {
 				ConfigurationResult::Type _ = wait(changeConfig(extraDB, self->configMode));
+				TraceEvent("WaitForReplicasExtra");
 				Void _ = wait( waitForFullReplication( extraDB ) );
+				TraceEvent("WaitForReplicasExtraEnd");
 			} if (self->networkAddresses.size()) {
 				if (self->networkAddresses == "auto")
 					CoordinatorsResult::Type _ = wait(changeQuorum(extraDB, autoQuorumChange()));
@@ -86,7 +88,9 @@ struct ChangeConfigWorkload : TestWorkload {
 
 		if( self->configMode.size() ) {
 			ConfigurationResult::Type _ = wait( changeConfig( cx, self->configMode ) );
+			TraceEvent("WaitForReplicas");
 			Void _ = wait( waitForFullReplication( cx ) );
+			TraceEvent("WaitForReplicasEnd");
 		}
 		if( self->networkAddresses.size() ) {
 			if (self->networkAddresses == "auto")

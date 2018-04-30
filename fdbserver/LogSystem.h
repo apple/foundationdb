@@ -51,6 +51,28 @@ public:
 
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 
+	std::string logRouterString() {
+		std::string result;
+		for(int i = 0; i < logRouters.size(); i++) {
+			if(i>0) {
+				result += ", ";
+			}
+			result += logRouters[i]->get().id().toString();
+		}
+		return result;
+	}
+
+	std::string logServerString() {
+		std::string result;
+		for(int i = 0; i < logServers.size(); i++) {
+			if(i>0) {
+				result += ", ";
+			}
+			result += logServers[i]->get().id().toString();
+		}
+		return result;
+	}
+
 	int bestLocationFor( Tag tag ) {
 		if(hasBestPolicy == HasBestPolicyNone) {
 			return -1;

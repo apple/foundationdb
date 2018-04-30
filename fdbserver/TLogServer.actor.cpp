@@ -894,14 +894,11 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 	} else if (req.to > tagData->popped) {
 		tagData->popped = req.to;
 		tagData->popped_recently = true;
-		if(tagData->unpoppedRecovered) {
-			TraceEvent("TLogPoppedUn", logData->logId).detail("tag", req.tag.toString()).detail("to", req.to).detail("unrecovered", logData->unrecoveredBefore);
-		}
 
 		if(tagData->unpoppedRecovered && req.to > logData->recoveredAt) {
 			tagData->unpoppedRecovered = false;
 			logData->unpoppedRecoveredTags--;
-			TraceEvent("TLogPoppedTag", logData->logId).detail("tags", logData->unpoppedRecoveredTags).detail("tag", req.tag.toString());
+			TraceEvent("TLogPoppedTag", logData->logId).detail("tags", logData->unpoppedRecoveredTags).detail("tag", req.tag.toString()).detail("durableKCVer", logData->durableKnownCommittedVersion).detail("recoveredAt", logData->recoveredAt);
 			if(logData->unpoppedRecoveredTags == 0 && logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
 				logData->recoveryComplete.send(Void());
 			}
@@ -1093,6 +1090,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 
 	logData->durableKnownCommittedVersion = knownCommittedVersion;
 	if(logData->unpoppedRecoveredTags == 0 && knownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
+		TraceEvent("TLogRecoveryComplete", logData->logId).detail("tags", logData->unpoppedRecoveredTags).detail("durableKCVer", logData->durableKnownCommittedVersion).detail("recoveredAt", logData->recoveredAt);
 		logData->recoveryComplete.send(Void());
 	}
 

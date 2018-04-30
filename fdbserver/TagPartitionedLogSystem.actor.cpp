@@ -324,6 +324,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 		for(auto& t : newState.tLogs) {
 			if(!t.isLocal) {
+				TraceEvent("RemoteLogsWritten", dbgid);
 				remoteLogsWrittenToCoreState = true;
 				break;
 			}
@@ -424,6 +425,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 			
 		if(begin >= lastBegin) {
+			TraceEvent("TLogPeekAllCurrentOnly").detail("tag", tag.toString()).detail("begin", begin).detail("end", end).detail("bestLogs", bestSet >= 0 ? localSets[bestSet]->logServerString() : "no best set");
 			return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet == -1 ? nextBestSet : bestSet, 
 				bestSet >= 0 ? localSets[bestSet]->bestLocationFor( tag ) : -1, tag, begin, end, parallelGetMore ) );
 		} else {
@@ -431,6 +433,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			std::vector< LogMessageVersion > epochEnds;
 			
 			if(lastBegin < end) {
+				TraceEvent("TLogPeekAllAddingCurrent").detail("tag", tag.toString()).detail("begin", begin).detail("end", end).detail("bestLogs", bestSet >= 0 ? localSets[bestSet]->logServerString() : "no best set");
 				cursors.push_back( Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet == -1 ? nextBestSet : bestSet, 
 					bestSet >= 0 ? localSets[bestSet]->bestLocationFor( tag ) : -1, tag, lastBegin, end, parallelGetMore)) );
 			}
@@ -440,6 +443,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					if(tag == txsTag) {
 						break;
 					}
+					TraceEvent("TLogPeekAllDead").detail("tag", tag.toString()).detail("begin", begin).detail("end", end).detail("lastBegin", lastBegin).detail("oldLogDataSize", oldLogData.size());
 					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 				}
 
@@ -462,6 +466,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 				if(thisBegin < lastBegin) {
 					if(thisBegin < end) {
+						TraceEvent("TLogPeekAllAddingOld").detail("tag", tag.toString()).detail("begin", begin).detail("end", end)
+							.detail("bestLogs", bestOldSet >= 0 ? localOldSets[bestOldSet]->logServerString() : "no best set").detail("lastBegin", lastBegin).detail("thisBegin", thisBegin);
 						cursors.push_back( Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localOldSets, bestOldSet == -1 ? nextBestOldSet : bestOldSet, 
 							bestOldSet >= 0 ? localOldSets[bestOldSet]->bestLocationFor( tag ) : -1, tag, thisBegin, std::min(lastBegin, end), parallelGetMore)) );
 						epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
@@ -489,17 +495,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 		if(bestSet == -1) {
+			TraceEvent("TLogPeekRemoteNoBestSet").detail("tag", tag.toString()).detail("begin", begin);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 		}
 		if(begin >= lastBegin) {
+			TraceEvent("TLogPeekRemoteBestOnly").detail("tag", tag.toString()).detail("begin", begin).detail("bestSet", bestSet).detail("bestSetStart", lastBegin).detail("logRouterIds", tLogs[bestSet]->logRouterString());
 			return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logRouters, -1, (int)tLogs[bestSet]->logRouters.size(), tag, begin, getPeekEnd(), false, std::vector<LocalityData>(), IRepPolicyRef(), 0 ) );
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
+			TraceEvent("TLogPeekRemoteAddingBest").detail("tag", tag.toString()).detail("begin", begin).detail("bestSet", bestSet).detail("bestSetStart", lastBegin).detail("logRouterIds", tLogs[bestSet]->logRouterString());
 			cursors.push_back( Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( tLogs[bestSet]->logRouters, -1, (int)tLogs[bestSet]->logRouters.size(), tag, lastBegin, getPeekEnd(), false, std::vector<LocalityData>(), IRepPolicyRef(), 0 ) ) );
 			int i = 0;
 			while(begin < lastBegin) {
 				if(i == oldLogData.size()) {
+					TraceEvent("TLogPeekRemoteDead").detail("tag", tag.toString()).detail("begin", begin).detail("lastBegin", lastBegin).detail("oldLogDataSize", oldLogData.size());
 					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 				}
 					
@@ -516,10 +526,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 				}
 				if(bestOldSet == -1) {
+					TraceEvent("TLogPeekRemoteNoOldBestSet").detail("tag", tag.toString()).detail("begin", begin);
 					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 				}
 
 				if(thisBegin < lastBegin) {
+					TraceEvent("TLogPeekRemoteAddingOldBest").detail("tag", tag.toString()).detail("begin", begin).detail("bestOldSet", bestOldSet).detail("logRouterIds", oldLogData[i].tLogs[bestOldSet]->logRouterString())
+					.detail("lastBegin", lastBegin).detail("thisBegin", thisBegin).detail("bestStartVer", oldLogData[i].tLogs[bestOldSet]->startVersion);
 					cursors.push_back( Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(  oldLogData[i].tLogs[bestOldSet]->logRouters, -1, (int)oldLogData[i].tLogs[bestOldSet]->logRouters.size(), tag,
 						thisBegin, lastBegin, false, std::vector<LocalityData>(), IRepPolicyRef(), 0 ) ) );
 					epochEnds.push_back(LogMessageVersion(lastBegin));
@@ -534,6 +547,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, bool parallelGetMore ) {
 		if(!tLogs.size()) {
+			TraceEvent("TLogPeekNoLogSets").detail("tag", tag.toString()).detail("begin", begin);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 		}
 		
@@ -546,6 +560,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 	virtual Reference<IPeekCursor> peek( Version begin, std::vector<Tag> tags, bool parallelGetMore ) {
 		if(tags.empty()) {
+			TraceEvent("TLogPeekNoTags").detail("begin", begin);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), invalidTag, begin, getPeekEnd(), false, false ) );
 		}
 		
@@ -573,22 +588,26 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 		if(bestSet == -1) {
+			TraceEvent("TLogPeekLocalNoBestSet").detail("tag", tag.toString()).detail("begin", begin).detail("end", end);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
 		}
 
 		if(begin >= tLogs[bestSet]->startVersion) {
+			TraceEvent("TLogPeekLocalBestOnly").detail("tag", tag.toString()).detail("begin", begin).detail("end", end).detail("bestSet", bestSet).detail("bestSetStart", tLogs[bestSet]->startVersion).detail("logId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )]->get().id());
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )], tag, begin, end, false, false ) );
 		} else {
 			std::vector< Reference<ILogSystem::IPeekCursor> > cursors;
 			std::vector< LogMessageVersion > epochEnds;
 
 			if(tLogs[bestSet]->startVersion < end) {
+				TraceEvent("TLogPeekLocalAddingBest").detail("tag", tag.toString()).detail("begin", begin).detail("end", end).detail("bestSet", bestSet).detail("bestSetStart", tLogs[bestSet]->startVersion).detail("logId", tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )]->get().id());
 				cursors.push_back( Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( tLogs[bestSet]->logServers[tLogs[bestSet]->bestLocationFor( tag )], tag, tLogs[bestSet]->startVersion, end, false, false ) ) );
 			}
 			Version lastBegin = tLogs[bestSet]->startVersion;
 			int i = 0;
 			while(begin < lastBegin) {
 				if(i == oldLogData.size()) {
+					TraceEvent("TLogPeekLocalDead").detail("tag", tag.toString()).detail("begin", begin).detail("end", end).detail("lastBegin", lastBegin).detail("oldLogDataSize", oldLogData.size());
 					throw worker_removed();
 				}
 				
@@ -604,6 +623,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 
 				if(foundSpecial) {
+					TraceEvent("TLogPeekLocalFoundSpecial").detail("tag", tag.toString()).detail("begin", begin).detail("end", end);
 					cursors.push_back(peekAll(begin, std::min(lastBegin, end), tag, false));
 					epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
 					break;
@@ -617,6 +637,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				Version thisBegin = std::max(oldLogData[i].tLogs[bestOldSet]->startVersion, begin);
 				if(thisBegin < lastBegin) {
 					if(thisBegin < end) {
+						TraceEvent("TLogPeekLocalAddingOldBest").detail("tag", tag.toString()).detail("begin", begin).detail("end", end)
+							.detail("logServers", oldLogData[i].tLogs[bestOldSet]->logServerString()).detail("thisBegin", thisBegin).detail("lastBegin", lastBegin);
 						cursors.push_back( Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor( oldLogData[i].tLogs[bestOldSet]->logServers, oldLogData[i].tLogs[bestOldSet]->bestLocationFor( tag ), oldLogData[i].tLogs[bestOldSet]->logServers.size() + 1 - oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor, tag,
 							thisBegin, std::min(lastBegin, end), false, oldLogData[i].tLogs[bestOldSet]->tLogLocalities, oldLogData[i].tLogs[bestOldSet]->tLogPolicy, oldLogData[i].tLogs[bestOldSet]->tLogReplicationFactor)));
 						epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
@@ -668,6 +690,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if( found ) {
 			for( auto& log : tLogs ) {
 				if( log->logServers.size() && log->isLocal && log->hasBestPolicy ) {
+					TraceEvent("TLogPeekLogRouterBestOnly", logRouterID).detail("tag", tag.toString()).detail("begin", begin).detail("logId", log->logServers[log->bestLocationFor( tag )]->get().id());
 					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( log->logServers[log->bestLocationFor( tag )], tag, begin, getPeekEnd(), false, false ) );
 				}
 			}
@@ -691,6 +714,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				std::vector<Reference<LogSet>> localSets;
 				for(auto& log : old.tLogs) {
 					if(log->isLocal && log->logServers.size()) {
+						TraceEvent("TLogPeekLogRouterOldLocalSet", logRouterID).detail("tag", tag.toString()).detail("begin", begin).detail("logServers", log->logServerString());
 						localSets.push_back(log);
 						if(log->hasBestPolicy && (log->locality == tag.locality || tag.locality == tagLocalitySpecial || log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded)) {
 							bestSet = localSets.size()-1;
@@ -702,6 +726,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					}
 				}
 
+				TraceEvent("TLogPeekLogRouterOldSets", logRouterID).detail("tag", tag.toString()).detail("begin", begin).detail("oldEpoch", old.epochEnd);
 				//FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies across the WAN
 				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet == -1 ? nextBestSet : bestSet, 
 					bestSet >= 0 ? localSets[bestSet]->bestLocationFor( tag ) : -1, tag, begin, old.epochEnd, false ) );
@@ -1198,6 +1223,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					break;
 				}
 				if(!lockedLocalities.count(log->locality)) {
+					TraceEvent("EpochEndLockExtra").detail("locality", log->locality);
+					TEST(true); //locking old generations for version information
 					lockedLocalities.insert(log->locality);
 					LogLockInfo lockResult;
 					lockResult.epochEnd = old.epochEnd;
@@ -1402,13 +1429,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	ACTOR static Future<Void> recruitOldLogRouters( TagPartitionedLogSystem* self, vector<WorkerInterface> workers, LogEpoch recoveryCount, int8_t locality, Version startVersion,
-		std::vector<LocalityData> tLogLocalities, IRepPolicyRef tLogPolicy, int32_t hasBestPolicy, bool onlyOld, bool waitForFailures ) {
+		std::vector<LocalityData> tLogLocalities, IRepPolicyRef tLogPolicy, int32_t hasBestPolicy, bool forRemote ) {
 		state vector<vector<Future<TLogInterface>>> logRouterInitializationReplies;
 		state vector<Future<TLogInterface>> allReplies;
 		int nextRouter = 0;
 		Version lastStart = std::numeric_limits<Version>::max();
 
-		if(!onlyOld) {
+		if(!forRemote) {
 			Version maxStart = 0;
 			for(auto& logSet : self->tLogs) {
 				if(logSet->isLocal) {
@@ -1418,6 +1445,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			
 			lastStart = std::max(startVersion, maxStart);
 			if( self->logRouterTags == 0 ) {
+				ASSERT_WE_THINK(false);
 				self->logSystemConfigChanged.trigger();
 				return Void();
 			}
@@ -1432,6 +1460,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			
 			if(!found) {
+				TraceEvent("RecruitingOldLogRoutersAddingLocality").detail("locality", locality).detail("lastStart", lastStart);
 				Reference<LogSet> newLogSet( new LogSet() );
 				newLogSet->locality = locality;
 				newLogSet->startVersion = lastStart;
@@ -1482,6 +1511,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 			
 			if(!found) {
+				TraceEvent("RecruitingOldLogRoutersAddingLocality").detail("locality", locality).detail("lastStart", lastStart);
 				Reference<LogSet> newLogSet( new LogSet() );
 				newLogSet->locality = locality;
 				newLogSet->startVersion = lastStart;
@@ -1516,7 +1546,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		Version lastStart = std::numeric_limits<Version>::max();
 		vector<Future<Void>> failed;
 		
-		if(!onlyOld) {
+		if(!forRemote) {
 			Version maxStart = 0;
 			for(auto& logSet : self->tLogs) {
 				if(logSet->isLocal) {
@@ -1529,9 +1559,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
 						tLogs->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get()) ) ) );
-						if(waitForFailures) {
-							failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
-						}
+						failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
 					}
 					nextReplies++;
 				}
@@ -1553,7 +1581,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(tLogs->locality == locality) {
 					for( int i = 0; i < logRouterInitializationReplies[nextReplies].size(); i++ ) {
 						tLogs->logRouters.push_back( Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(logRouterInitializationReplies[nextReplies][i].get()) ) ) );
-						if(waitForFailures) {
+						if(!forRemote) {
 							failed.push_back( waitFailureClient( logRouterInitializationReplies[nextReplies][i].get().waitFailure, SERVER_KNOBS->TLOG_TIMEOUT, -SERVER_KNOBS->TLOG_TIMEOUT/SERVER_KNOBS->SECONDS_BEFORE_NO_FAILURE_DELAY ) );
 						}
 					}
@@ -1562,7 +1590,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}	
 
-		if(waitForFailures) {
+		if(!forRemote) {
 			self->logSystemConfigChanged.trigger();
 			Void _ = wait( failed.size() ? tagError<Void>( quorum( failed, 1 ), master_tlog_failed() ) : Future<Void>(Never()) );
 			throw internal_error();
@@ -1600,7 +1628,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		state Future<Void> oldRouterRecruitment = Void();
 		if(logSet->startVersion < oldLogSystem->knownCommittedVersion + 1) {
-			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(self, remoteWorkers.logRouters, recoveryCount, remoteLocality, logSet->startVersion, localities, logSet->tLogPolicy, logSet->hasBestPolicy, true, false);
+			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(self, remoteWorkers.logRouters, recoveryCount, remoteLocality, logSet->startVersion, localities, logSet->tLogPolicy, logSet->hasBestPolicy, true);
 		}
 
 		state vector<Future<TLogInterface>> logRouterInitializationReplies;
@@ -1637,7 +1665,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for( int i = 0; i < remoteWorkers.remoteTLogs.size(); i++ )
 			remoteTLogInitializationReplies.push_back( transformErrors( throwErrorOr( remoteWorkers.remoteTLogs[i].tLog.getReplyUnlessFailedFor( remoteTLogReqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
-		TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs").detail("startVersion", logSet->startVersion).detail("localStart", self->tLogs[0]->startVersion);
+		TraceEvent("RemoteLogRecruitment_InitializingRemoteLogs").detail("startVersion", logSet->startVersion).detail("localStart", self->tLogs[0]->startVersion).detail("logRouterTags", self->logRouterTags);
 		Void _ = wait( waitForAll(remoteTLogInitializationReplies) && waitForAll(logRouterInitializationReplies) && oldRouterRecruitment );
 
 		for( int i = 0; i < logRouterInitializationReplies.size(); i++ ) {
@@ -1732,8 +1760,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		state Future<Void> oldRouterRecruitment = Never();
+		TraceEvent("NewEpochStartVersion").detail("startVersion", logSystem->tLogs[0]->startVersion).detail("epochEnd", oldLogSystem->knownCommittedVersion + 1).detail("locality", primaryLocality);
 		if(logSystem->tLogs[0]->startVersion < oldLogSystem->knownCommittedVersion + 1) {
-			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, localities, logSystem->tLogs[0]->tLogPolicy, logSystem->tLogs[0]->hasBestPolicy, false, true);
+			oldRouterRecruitment = TagPartitionedLogSystem::recruitOldLogRouters(oldLogSystem.getPtr(), recr.oldLogRouters, recoveryCount, primaryLocality, logSystem->tLogs[0]->startVersion, localities, logSystem->tLogs[0]->tLogPolicy, logSystem->tLogs[0]->hasBestPolicy, false);
 		} else {
 			oldLogSystem->logSystemConfigChanged.trigger();
 		}

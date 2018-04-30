@@ -1865,6 +1865,7 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 	Void _ = wait(self->initialFailureReactionDelay);
 	Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
 	while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
+		TraceEvent("DDUpdatingStalled", self->masterId).detail("dcId", printable(dcId)).detail("zeroHealthy", self->zeroHealthyTeams->get()).detail("processingUnhealthy", self->processingUnhealthy->get());
 		Void _ = wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
 	}
 	TraceEvent("DDUpdatingReplicas", self->masterId).detail("dcId", printable(dcId)).detail("replicas", self->configuration.storageTeamSize);
@@ -1906,8 +1907,9 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	state PromiseStream<Void> serverRemoved;
 	state Future<Void> error = actorCollection( self.addActor.getFuture() );
 
+	TraceEvent("DDTeamCollectionBegin", masterId).detail("primary", primary);
 	Void _ = wait( readyToStart );
-
+	TraceEvent("DDTeamCollectionReadyToStart", masterId).detail("primary", primary);
 	try {
 		self.init( *initData );
 		initData = Reference<InitialDataDistribution>();

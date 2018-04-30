@@ -289,7 +289,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 	if(poppedVer > req.begin || req.begin < self->startVersion) {
 		//This should only happen if a packet is sent multiple times and the reply is not needed. 
 		// Since we are using popped differently, do not send a reply.
-		TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid);
+		TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid).detail("begin", req.begin).detail("popped", poppedVer).detail("start", self->startVersion);
 		req.reply.send( Never() );
 		return Void();
 	}
@@ -402,7 +402,7 @@ ACTOR Future<Void> logRouter(
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
 	try {
-		TraceEvent("LogRouterStart", interf.id()).detail("start", req.startVersion).detail("tag", req.routerTag.toString());
+		TraceEvent("LogRouterStart", interf.id()).detail("start", req.startVersion).detail("tag", req.routerTag.toString()).detail("localities", req.tLogLocalities.size()).detail("hasBestPolicy", req.hasBestPolicy).detail("locality", req.locality);
 		state Future<Void> core = logRouterCore(interf, req, db);
 		loop choose{
 			when(Void _ = wait(core)) { return Void(); }
