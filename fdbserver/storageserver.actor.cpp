@@ -3152,7 +3152,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 						if(self->logSystem->getLogSystemConfig().oldTLogs.size()) {
 							self->poppedAllAfter = self->logSystem->getLogSystemConfig().oldTLogs[0].epochEnd;
 						}
-						self->logCursor = self->logSystem->peekSingle( self->version.get() + 1, self->tag, self->history );
+						self->logCursor = self->logSystem->peekSingle( self->thisServerID, self->version.get() + 1, self->tag, self->history );
 						self->popVersion( self->durableVersion.get() + 1, true );
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be cancelled.  But if it is waiting later,

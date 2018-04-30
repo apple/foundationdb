@@ -186,7 +186,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 				when( Void _ = wait( dbInfoChange ) ) { //FIXME: does this actually happen?
 					if(r) tagPopped = std::max(tagPopped, r->popped());
 					if( self->logSystem->get() )
-						r = self->logSystem->get()->peekLogRouter( tagAt, self->routerTag, self->dbgid );
+						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
 					else
 						r = Reference<ILogSystem::IPeekCursor>();
 					dbInfoChange = self->logSystem->onChange();

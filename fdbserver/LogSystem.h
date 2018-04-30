@@ -448,18 +448,18 @@ struct ILogSystem {
 		// Returns when the preceding changes are durable.  (Later we will need multiple return signals for diffferent durability levels)
 		// If the current epoch has ended, push will not return, and the pushed messages will not be visible in any subsequent epoch (but may become visible in this epoch)
 
-	virtual Reference<IPeekCursor> peek( Version begin, Tag tag, bool parallelGetMore = false ) = 0;
+	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Tag tag, bool parallelGetMore = false ) = 0;
 		// Returns (via cursor interface) a stream of messages with the given tag and message versions >= (begin, 0), ordered by message version
 		// If pop was previously or concurrently called with upTo > begin, the cursor may not return all such messages.  In that case cursor->popped() will
 		// be greater than begin to reflect that.
 
-	virtual Reference<IPeekCursor> peek( Version begin, std::vector<Tag> tags, bool parallelGetMore = false ) = 0;
+	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, std::vector<Tag> tags, bool parallelGetMore = false ) = 0;
 		// Same contract as peek(), but for a set of tags
 
-	virtual Reference<IPeekCursor> peekSingle( Version begin, Tag tag, vector<pair<Version,Tag>> history = vector<pair<Version,Tag>>() ) = 0;
+	virtual Reference<IPeekCursor> peekSingle( UID dbgid, Version begin, Tag tag, vector<pair<Version,Tag>> history = vector<pair<Version,Tag>>() ) = 0;
 		// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is correspondingly less expensive)
 
-	virtual Reference<IPeekCursor> peekLogRouter( Version begin, Tag tag, UID logRouterID ) = 0;
+	virtual Reference<IPeekCursor> peekLogRouter( UID dbgid, Version begin, Tag tag ) = 0;
 		// Same contract as peek(), but can only peek from the logs elected in the same generation. 
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 

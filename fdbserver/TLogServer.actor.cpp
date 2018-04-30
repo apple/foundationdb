@@ -1449,7 +1449,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				}
 				when( Void _ = wait( dbInfoChange ) ) {
 					if( logData->logSystem->get() ) {
-						r = logData->logSystem->get()->peek( tagAt, tags );
+						r = logData->logSystem->get()->peek( logData->logId, tagAt, tags );
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
