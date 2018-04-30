@@ -396,7 +396,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Future<Void> removed;
 	PromiseStream<Future<Void>> addActor;
 	TLogData* tLogData;
-	Promise<Void> recoveryComplete;
+	Promise<Void> recoveryComplete, committingQueue;
 	Version unrecoveredBefore, recoveredAt;
 
 	Reference<AsyncVar<Reference<ILogSystem>>> logSystem;
@@ -1122,6 +1122,9 @@ ACTOR Future<Void> commitQueue( TLogData* self ) {
 		}
 
 		TraceEvent("commitQueueNewLog", self->dbgid).detail("logId", logData->logId).detail("version", logData->version.get()).detail("committing", logData->queueCommittingVersion).detail("commmitted", logData->queueCommittedVersion.get());
+		if(logData->committingQueue.canBeSet()) {
+			logData->committingQueue.send(Void());
+		}
 
 		loop {
 			if(logData->stopped && logData->version.get() == std::max(logData->queueCommittingVersion, logData->queueCommittedVersion.get())) {
@@ -1985,6 +1988,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 		return Void();
 	}
 
+	Void _ = wait(logData->committingQueue.getFuture() || logData->removed );
 	req.reply.send( recruited );
 
 	TraceEvent("TLogReady", logData->logId).detail("allTags", describe(req.allTags));
