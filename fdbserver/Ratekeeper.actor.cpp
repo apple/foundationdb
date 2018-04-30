@@ -91,7 +91,7 @@ struct StorageQueueInfo {
 		smoothDurableVersion(1.), smoothLatestVersion(1.), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), readReplyRate(0.0), limitReason(limitReason_t::unlimited)
 	{
-		// FIXME: this is a tacky workaround for a potential unitialized use in trackStorageServerQueueInfo
+		// FIXME: this is a tacky workaround for a potential uninitalized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
 };
