@@ -1037,7 +1037,8 @@ public class DirectoryLayer implements Directory {
 				CompletableFuture<byte[]> newCountRead;
 				// SOMEDAY: this code would work as written if synchronized on something transaction local.
 				// The reason we don't synchronize on the Transaction tr itself is that the user could also be using it 
-				// for synchronization.
+				// for synchronization. If they did, then synchronizing on tr here could lead to performance issues or 
+				// deadlocks.
 				synchronized(HighContentionAllocator.class) {
 					if(windowStart > initialWindowStart) {
 						tr.clear(oldCounters);
@@ -1077,7 +1078,8 @@ public class DirectoryLayer implements Directory {
 				CompletableFuture<byte[]> allocationTemp;
 				// SOMEDAY: this code would work as written if synchronized on something transaction local.
 				// The reason we don't synchronize on the Transaction tr itself is that the user could also be using it 
-				// for synchronization.
+				// for synchronization. If they did, then synchronizing on tr here could lead to performance issues or 
+				// deadlocks.
 				synchronized(HighContentionAllocator.class) {
 					counterRange = tr.snapshot().getRange(countersRange, 1, true);
 					allocationTemp = tr.get(allocationKey);
