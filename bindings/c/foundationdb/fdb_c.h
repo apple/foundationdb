@@ -28,10 +28,10 @@
 #endif
 
 #if !defined(FDB_API_VERSION)
-#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 510)
+#error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 520)
 #elif FDB_API_VERSION < 13
 #error API version no longer supported (upgrade to 13)
-#elif FDB_API_VERSION > 510
+#elif FDB_API_VERSION > 520
 #error Requested API version requires a newer version of this header
 #endif
 
@@ -241,7 +241,7 @@ extern "C" {
     fdb_transaction_get_committed_version( FDBTransaction* tr,
                                            int64_t* out_version );
 
-	DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr );
+    DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_versionstamp( FDBTransaction* tr );
 
     DLLEXPORT WARN_UNUSED_RESULT FDBFuture*
     fdb_transaction_on_error( FDBTransaction* tr, fdb_error_t error );
@@ -276,7 +276,7 @@ extern "C" {
 
     DLLEXPORT fdb_bool_t fdb_future_is_error( FDBFuture* f );
 #else
-	#define fdb_future_is_error(x) FDB_REMOVED_FUNCTION
+    #define fdb_future_is_error(x) FDB_REMOVED_FUNCTION
 #endif
 
 #if FDB_API_VERSION < 14
@@ -307,7 +307,7 @@ extern "C" {
         int end_key_name_length, fdb_bool_t end_or_equal, int end_offset,
         int limit );
 #else
-	#define fdb_transaction_get_range_selector(tr,bkn,bknl,boe,bo,ekn,eknl,eoe,eo,lim) FDB_REMOVED_FUNCTION
+    #define fdb_transaction_get_range_selector(tr,bkn,bknl,boe,bo,ekn,eknl,eoe,eo,lim) FDB_REMOVED_FUNCTION
 #endif
 
 #ifdef __cplusplus

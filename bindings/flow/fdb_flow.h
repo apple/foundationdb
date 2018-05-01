@@ -23,7 +23,7 @@
 
 #include <flow/flow.h>
 
-#define FDB_API_VERSION 510
+#define FDB_API_VERSION 520
 #include <bindings/c/foundationdb/fdb_c.h>
 #undef DLLEXPORT
 
@@ -64,6 +64,8 @@ namespace FDB {
 	class API {
 	public:
 		static API* selectAPIVersion(int apiVersion);
+		static API* getInstance();
+		static bool isAPIVersionSelected();
 
 		void setNetworkOption(FDBNetworkOption option, Optional<StringRef> value = Optional<StringRef>());
 
@@ -74,6 +76,7 @@ namespace FDB {
 		Reference<Cluster> createCluster( std::string const& connFilename );
 
 		bool evaluatePredicate(FDBErrorPredicate pred, Error const& e);
+		int getAPIVersion() const;
 
 	private:
 		static API* instance;

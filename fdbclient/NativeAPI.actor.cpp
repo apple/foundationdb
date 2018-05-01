@@ -93,7 +93,7 @@ LocationInfo::~LocationInfo() {
 		for( auto const& alternative : getAlternatives() )
 			handles.push_back( alternative.v.getVersion.getEndpoint().token ); // must match above choice of UID
 		std::sort( handles.begin(), handles.end() );
-		ASSERT( handles.size() );
+		ASSERT_ABORT( handles.size() );
 
 		auto it = cx->ssid_locationInfo.find( handles );
 		if( it != cx->ssid_locationInfo.end() )
@@ -364,7 +364,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 				for (int i = 0; i < num_chunks; i++) {
 					TrInfoChunk chunk;
 					BinaryWriter chunkBW(Unversioned());
-					chunkBW << i+1 << num_chunks;
+					chunkBW << bigEndian32(i+1) << bigEndian32(num_chunks);
 					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + std::string(2, '\x00'));
 					int16_t pos = littleEndian16(clientLatencyName.size());
 					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int16_t), &pos, sizeof(int16_t));
@@ -545,7 +545,7 @@ DatabaseContext::~DatabaseContext() {
 	monitorMasterProxiesInfoChange.cancel();
 	for(auto it = ssid_locationInfo.begin(); it != ssid_locationInfo.end(); it = ssid_locationInfo.erase(it))
 		it->second->notifyContextDestroyed();
-	ASSERT( ssid_locationInfo.empty() );
+	ASSERT_ABORT( ssid_locationInfo.empty() );
 	locationCache.insert( allKeys, Reference<LocationInfo>() );
 }
 

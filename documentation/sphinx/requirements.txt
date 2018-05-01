@@ -1,0 +1,4 @@
+--index-url https://pypi.python.org/simple
+sphinx==1.5.6
+sphinx-bootstrap-theme==0.4.8
+pygments-style-solarized

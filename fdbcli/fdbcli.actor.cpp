@@ -438,9 +438,9 @@ void initHelp() {
 		"clear a range of keys from the database",
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
-		"configure [new] <single|double|triple|three_data_hall|three_datacenter|multi_dc|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
+		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
 		"change database configuration",
-		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n  multi_dc - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
+		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
 	helpMap["coordinators"] = CommandHelp(
 		"coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
 		"change cluster coordinators or description",
@@ -1984,7 +1984,7 @@ void onoff_generator(const char* text, const char *line, std::vector<std::string
 }
 
 void configure_generator(const char* text, const char *line, std::vector<std::string>& lc) {
-	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "multi_dc", "ssd", "ssd-1", "ssd-2", "memory", "proxies=", "logs=", "resolvers=", NULL};
+	const char* opts[] = {"new", "single", "double", "triple", "three_data_hall", "three_datacenter", "ssd", "ssd-1", "ssd-2", "memory", "proxies=", "logs=", "resolvers=", NULL};
 	array_generator(text, line, opts, lc);
 }
 
@@ -2513,7 +2513,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						printf("ERROR: No active transaction\n");
 						is_error = true;
 					} else {
-						commitTransaction( tr );
+						Void _ = wait( commitTransaction( tr ) );
 						intrans = false;
 						options = &globalOptions;
 					}
@@ -2583,7 +2583,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						} else if(address_interface.size() == 1) {
 							printf("\nThe following address can be killed:\n");
 						} else {
-							printf("\nThe following %lu addresses can be killed:\n", address_interface.size());
+							printf("\nThe following %zu addresses can be killed:\n", address_interface.size());
 						}
 						for( auto it : address_interface ) {
 							printf("%s\n", printable(it.first).c_str());
@@ -2596,7 +2596,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to kill. You must run the `kill’ command before running `kill all’.\n");
 						} else {
-							printf("Attempted to kill %lu processes\n", address_interface.size());
+							printf("Attempted to kill %zu processes\n", address_interface.size());
 						}
 					} else {
 						for(int i = 1; i < tokens.size(); i++) {
@@ -2611,7 +2611,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							for(int i = 1; i < tokens.size(); i++) {
 								tr->set(LiteralStringRef("\xff\xff/reboot_worker"), address_interface[tokens[i]]);
 							}
-							printf("Attempted to kill %lu processes\n", tokens.size() - 1);
+							printf("Attempted to kill %zu processes\n", tokens.size() - 1);
 						}
 					}
 					continue;
@@ -2807,7 +2807,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						} else if(address_interface.size() == 1) {
 							printf("\nThe following address can be checked:\n");
 						} else {
-							printf("\nThe following %lu addresses can be checked:\n", address_interface.size());
+							printf("\nThe following %zu addresses can be checked:\n", address_interface.size());
 						}
 						for( auto it : address_interface ) {
 							printf("%s\n", printable(it.first).c_str());
@@ -2820,7 +2820,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						if (address_interface.size() == 0) {
 							printf("ERROR: no processes to check. You must run the `expensive_data_check’ command before running `expensive_data_check all’.\n");
 						} else {
-							printf("Attempted to kill and check %lu processes\n", address_interface.size());
+							printf("Attempted to kill and check %zu processes\n", address_interface.size());
 						}
 					} else {
 						for(int i = 1; i < tokens.size(); i++) {
@@ -2835,7 +2835,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							for(int i = 1; i < tokens.size(); i++) {
 								tr->set(LiteralStringRef("\xff\xff/reboot_and_check_worker"), address_interface[tokens[i]]);
 							}
-							printf("Attempted to kill and check %lu processes\n", tokens.size() - 1);
+							printf("Attempted to kill and check %zu processes\n", tokens.size() - 1);
 						}
 					}
 					continue;

@@ -38,6 +38,7 @@
 #include "IKeyValueStore.h"
 #include <stdarg.h>
 #include <stdio.h>
+#include <fstream>
 #include "pubsub.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -623,8 +624,9 @@ static void printUsage( const char *name, bool devhelp ) {
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
 	printf("  -c CLASS, --class CLASS\n"
-		   "                 Machine class (valid options are storage, transaction,\n");
-	printf("                 resolution, proxy, master, test, unset, stateless, log, cluster_controller).\n");
+		   "                 Machine class (valid options are storage, transaction,\n"
+		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
+		   "                 and cluster_controller).\n");
 	printf(TLS_HELP);
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, -?, --help Display this help and exit.\n");
@@ -1469,7 +1471,8 @@ int main(int argc, char* argv[]) {
 			if ( tlsVerifyPeers.size() )
 				tlsOptions->set_verify_peers( tlsVerifyPeers );
 
-			tlsOptions->register_network();
+			if (tlsOptions->get_policy())
+				tlsOptions->register_network();
 
 			if (role == FDBD || role == NetworkTestServer) {
 				try {
@@ -1583,7 +1586,7 @@ int main(int argc, char* argv[]) {
 				platform::createDirectory( dataFolder );
 			}
 
-			setupAndRun( dataFolder, testFile, restarting );
+			setupAndRun( dataFolder, testFile, restarting, tlsOptions->enabled() );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );

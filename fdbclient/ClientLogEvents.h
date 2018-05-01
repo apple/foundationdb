@@ -37,6 +37,7 @@ namespace FdbClientLogEvents {
 
 	struct Event {
 		Event(EventType t, double ts) : type(t), startTs(ts) { }
+		Event() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) { return ar & type & startTs; }
 
@@ -48,6 +49,7 @@ namespace FdbClientLogEvents {
 
 	struct EventGetVersion : public Event {
 		EventGetVersion(double ts, double lat) : Event(GET_VERSION_LATENCY, ts), latency(lat) { }
+		EventGetVersion() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -65,6 +67,7 @@ namespace FdbClientLogEvents {
 
 	struct EventGet : public Event {
 		EventGet(double ts, double lat, int size, const KeyRef &in_key) : Event(GET_LATENCY, ts), latency(lat), valueSize(size), key(in_key) { }
+		EventGet() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -84,6 +87,7 @@ namespace FdbClientLogEvents {
 
 	struct EventGetRange : public Event {
 		EventGetRange(double ts, double lat, int size, const KeyRef &start_key, const KeyRef & end_key) : Event(GET_RANGE_LATENCY, ts), latency(lat), rangeSize(size), startKey(start_key), endKey(end_key) { }
+		EventGetRange() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -104,6 +108,7 @@ namespace FdbClientLogEvents {
 
 	struct EventCommit : public Event {
 		EventCommit(double ts, double lat, int mut, int bytes, const CommitTransactionRequest &commit_req) : Event(COMMIT_LATENCY, ts), latency(lat), numMutations(mut), commitBytes(bytes), req(commit_req) { }
+		EventCommit() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -136,6 +141,7 @@ namespace FdbClientLogEvents {
 
 	struct EventGetError : public Event {
 		EventGetError(double ts, int err_code, const KeyRef &in_key) : Event(ERROR_GET, ts), errCode(err_code), key(in_key) { }
+		EventGetError() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -154,6 +160,7 @@ namespace FdbClientLogEvents {
 
 	struct EventGetRangeError : public Event {
 		EventGetRangeError(double ts, int err_code, const KeyRef &start_key, const KeyRef & end_key) : Event(ERROR_GET_RANGE, ts), errCode(err_code), startKey(start_key), endKey(end_key) { }
+		EventGetRangeError() { }
 
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
@@ -173,7 +180,8 @@ namespace FdbClientLogEvents {
 
 	struct EventCommitError : public Event {
 		EventCommitError(double ts, int err_code, const CommitTransactionRequest &commit_req) : Event(ERROR_COMMIT, ts), errCode(err_code), req(commit_req) { }
-	
+		EventCommitError() { }
+
 		template <typename Ar>	Ar& serialize(Ar &ar) {
 			if (!ar.isDeserializing)
 				return Event::serialize(ar) & errCode & req.transaction & req.arena;

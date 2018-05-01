@@ -1510,6 +1510,25 @@ struct UnitTestsFunc : InstructionFunc {
 		ASSERT(data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(1020)));
 		ASSERT(!data->api->evaluatePredicate(FDBErrorPredicate::FDB_ERROR_PREDICATE_RETRYABLE, Error(10)));
 
+		ASSERT(API::isAPIVersionSelected());
+		state API *fdb = API::getInstance();
+		ASSERT(fdb->getAPIVersion() <= FDB_API_VERSION);
+		try {
+			API::selectAPIVersion(fdb->getAPIVersion() + 1);
+			ASSERT(false);
+		}
+		catch(Error &e) {
+			ASSERT(e.code() == error_code_api_version_already_set);
+		}
+		try {
+			API::selectAPIVersion(fdb->getAPIVersion() - 1);
+			ASSERT(false);
+		}
+		catch(Error &e) {
+			ASSERT(e.code() == error_code_api_version_already_set);
+		}
+		API::selectAPIVersion(fdb->getAPIVersion());
+
 		state Reference<Transaction> tr(new Transaction(data->db));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_PRIORITY_SYSTEM_IMMEDIATE);
@@ -1517,10 +1536,8 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_CAUSAL_READ_RISKY);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_CAUSAL_WRITE_RISKY);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
-		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_AHEAD_DISABLE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_DURABILITY_DEV_NULL_IS_WEB_SCALE);
 		const uint64_t timeout = 60*1000;
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
 		const uint64_t retryLimit = 50;
@@ -1574,7 +1591,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 		try {
 			if(LOG_INSTRUCTIONS) {
 				if(op != LiteralStringRef("SWAP") && op != LiteralStringRef("PUSH")) {
-					printf("%lu. %s\n", idx, tupleToString(opTuple).c_str());
+					printf("%zu. %s\n", idx, tupleToString(opTuple).c_str());
 					fflush(stdout);
 				}
 			}
@@ -1682,7 +1699,18 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		// This is "our" network
 		g_network = newNet2(NetworkAddress(), false);
 
+		ASSERT(!API::isAPIVersionSelected());
+		try {
+			API::getInstance();
+			ASSERT(false);
+		}
+		catch(Error& e) {
+			ASSERT(e.code() == error_code_api_version_unset);
+		}
+
 		API *fdb = API::selectAPIVersion(apiVersion);
+		ASSERT(API::isAPIVersionSelected());
+		ASSERT(fdb->getAPIVersion() == apiVersion);
 		//fdb->setNetworkOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE);
 
 		// We have to start the fdb_flow network and thread separately!

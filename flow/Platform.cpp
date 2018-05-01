@@ -701,7 +701,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 			disk_stream.ignore( std::numeric_limits<std::streamsize>::max(), '\n');
 	}
 
-	if(!g_network->isSimulated()) TraceEvent(SevWarnAlways, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
+	if(!g_network->isSimulated()) TraceEvent(SevWarn, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
 }
 
 dev_t getDeviceId(std::string path) {
@@ -2644,6 +2644,28 @@ void setupSlowTaskProfiler() {
 	// No slow task profiling for other platforms!
 #endif
 }
+
+#ifdef __linux__
+// There's no good place to put this, so it's here.
+// Ubuntu's packaging of libstdc++_pic offers different symbols than libstdc++.  Go figure.
+// Notably, it's missing a definition of std::istream::ignore(long), which causes compilation errors
+// in the bindings.  Thus, we provide weak versions of their definitions, so that if the
+// linked-against libstdc++ is missing their definitions, we'll be able to use the provided
+// ignore(long, int) version.
+#include <istream>
+namespace std {
+typedef basic_istream<char, std::char_traits<char>> char_basic_istream;
+template <>
+char_basic_istream& __attribute__((weak)) char_basic_istream::ignore(streamsize count) {
+  return ignore(count, std::char_traits<char>::eof());
+}
+typedef basic_istream<wchar_t, std::char_traits<wchar_t>> wchar_basic_istream;
+template <>
+wchar_basic_istream& __attribute__((weak)) wchar_basic_istream::ignore(streamsize count) {
+  return ignore(count, std::char_traits<wchar_t>::eof());
+}
+}
+#endif
 
 // UnitTest for getMemoryInfo
 #ifdef __linux__

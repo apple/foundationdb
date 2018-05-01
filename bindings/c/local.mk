@@ -26,6 +26,8 @@ fdb_c_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
 fdb_c_tests_LIBS := -Llib -lfdb_c
 fdb_c_tests_HEADERS := -Ibindings/c
 
+CLEAN_TARGETS += fdb_c_tests_clean
+
 ifeq ($(PLATFORM),linux)
   fdb_c_LIBS += lib/libstdc++.a -lm -lpthread -lrt -ldl
   fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -static-libgcc -Wl,-z,nodelete
@@ -98,4 +100,5 @@ packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz: bin/fdb_c_performance_test b
 
 fdb_c_tests: packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz
 
-packages: fdb_c_tests
+fdb_c_tests_clean:
+	@rm -f packages/fdb-c-tests-$(VERSION)-$(PLATFORM).tar.gz

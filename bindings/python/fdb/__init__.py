@@ -21,7 +21,7 @@
 # FoundationDB Python API
 
 """Documentation for this API can be found at
-https://foundationdb.org/documentation/api-python.html"""
+https://apple.github.io/foundationdb/api-python.html"""
 
 
 def open(*args, **kwargs):
@@ -40,8 +40,19 @@ def _add_symbols(module, symbols):
         globals()[symbol] = getattr(module, symbol)
 
 
+def is_api_version_selected():
+    return '_version' in globals()
+
+
+def get_api_version():
+    if is_api_version_selected():
+        return globals()['_version']
+    else:
+        raise RuntimeError('API version is not set')
+
+
 def api_version(ver):
-    header_version = 510
+    header_version = 520
 
     if '_version' in globals():
         if globals()['_version'] != ver:

@@ -584,6 +584,7 @@ public:
 	T const& front() const { return *begin(); }
 	T const& back() const { return end()[-1]; }
 	int size() const { return m_size; }
+	bool empty() const { return m_size == 0; }
 	const T& operator[](int i) const { return data[i]; }
 
 	std::reverse_iterator<const T*> rbegin() const { return std::reverse_iterator<const T*>( end() ); }

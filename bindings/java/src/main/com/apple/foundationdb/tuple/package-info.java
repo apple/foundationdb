@@ -22,7 +22,7 @@
  * Provides a set of utilities for serializing and deserializing typed data
  *  for use in FoundationDB. When packed together into a {@link com.apple.foundationdb.tuple.Tuple}
  *  this data is suitable for use as an index or organizational structure within FoundationDB
- *  keyspace. See <a href="/foundationdb/data-modeling.html#tuples">general Tuple
+ *  keyspace. See <a href="/foundationdb/data-modeling.html#data-modeling-tuples">general Tuple
  *  documentation</a> for information about how Tuples sort and can be used to efficiently
  *  model data.
  */

@@ -80,6 +80,9 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
+	 * @param <T> the return type of {@code retryable}
+	 *
+	 * @return the result of the last run of {@code retryable}
 	 */
 	@Override
 	default <T> T read(Function<? super ReadTransaction, T> retryable) {
@@ -94,6 +97,8 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 * @param <T> the return type of {@code retryable}
+	 * @return the result of the last run of {@code retryable}
 	 * 
 	 * @see #read(Function)
 	 */
@@ -113,6 +118,10 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *
 	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
 	 *  this database
+	 * @param <T> the return type of {@code retryable}
+	 *
+	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
+	 *  to {@code retryable}
 	 */
 	@Override
 	default <T> CompletableFuture<T> readAsync(
@@ -128,7 +137,11 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param retryable the block of logic to execute in a {@link ReadTransaction} against
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
-	 * 
+	 * @param <T> the return type of {@code retryable}
+	 *
+	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
+	 *  to {@code retryable}
+	 *
 	 * @see #readAsync(Function)
 	 */
 	<T> CompletableFuture<T> readAsync(
@@ -152,6 +165,9 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
+	 * @param <T> the return type of {@code retryable}
+	 *
+	 * @return the result of the last run of {@code retryable}
 	 */
 	@Override
 	default <T> T run(Function<? super Transaction, T> retryable) {
@@ -166,6 +182,9 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 * @param <T> the return type of {@code retryable}
+	 *
+	 * @return the result of the last run of {@code retryable}
 	 */
 	<T> T run(Function<? super Transaction, T> retryable, Executor e);
 
@@ -191,6 +210,10 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 *
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
+	 * @param <T> the return type of {@code retryable}
+	 *
+	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
+	 *  to {@code retryable}
 	 */
 	@Override
 	default <T> CompletableFuture<T> runAsync(
@@ -206,6 +229,10 @@ public interface Database extends AutoCloseable, TransactionContext {
 	 * @param retryable the block of logic to execute in a {@link Transaction} against
 	 *  this database
 	 * @param e the {@link Executor} to use for asynchronous callbacks
+	 * @param <T> the return type of {@code retryable}
+	 *
+	 * @return a {@code CompletableFuture} that will be set to the value returned by the last call
+	 *  to {@code retryable}
 	 *
 	 * @see #run(Function)
 	 */

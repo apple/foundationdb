@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.TransactionContext;
@@ -34,7 +33,7 @@ import com.apple.foundationdb.directory.DirectorySubspace;
 public class DirectoryTest {
 	public static void main(String[] args) throws Exception {
 		try {
-			FDB fdb = FDB.selectAPIVersion(510);
+			FDB fdb = FDB.selectAPIVersion(520);
 			try(Database db = fdb.open()) {
 				runTests(db);
 			}

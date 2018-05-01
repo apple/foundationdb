@@ -2,7 +2,7 @@
 ##
 ## Configuration file for FoundationDB server processes
 ## Full documentation is available at
-## https://foundationdb.org/documentation/configuration.html#foundationdb-conf
+## https://apple.github.io/foundationdb/configuration.html#the-configuration-file
 
 [general]
 restart_delay = 60

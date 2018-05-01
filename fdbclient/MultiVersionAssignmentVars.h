@@ -135,7 +135,7 @@ public:
 	~DLThreadSingleAssignmentVar() {
 		lock.assertNotEntered();
 		if(f) {
-			ASSERT(futureRefCount == 1);
+			ASSERT_ABORT(futureRefCount == 1);
 			api->futureDestroy(f);
 		}
 	}

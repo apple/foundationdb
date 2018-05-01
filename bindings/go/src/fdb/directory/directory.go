@@ -26,7 +26,7 @@
 //
 // For general guidance on directory usage, see the Directories section of the
 // Developer Guide
-// (https://foundationdb.org/documentation/developer-guide.html#developer-guide-directories).
+// (https://apple.github.io/foundationdb/developer-guide.html#directories).
 //
 // Directories are identified by hierarchical paths analogous to the paths in a
 // Unix-like file system. A path is represented as a slice of strings. Each

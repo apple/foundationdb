@@ -61,6 +61,12 @@ USERID := $(shell id -u)
 USER := $(shell whoami)
 PROCESSID := $(shell echo "$$$$")
 
+ifeq ($(PLATFORM),osx)
+  MD5SUM=md5
+else
+  MD5SUM=md5sum
+endif
+
 
 #
 # Define the Java Variables
@@ -141,10 +147,8 @@ info:
 	@echo "Package:        $(PACKAGE_NAME)"
 	@echo "Version ID:     $(VERSION_ID)"
 	@echo "Package ID:     $(PKGRELEASE)"
-	@echo "Source Control: $(SOURCE_CONTROL)"
 	@echo "SC Branch:      $(SCBRANCH)"
 	@echo "Git Dir:        $(GITPRESENT)"
-	@echo "Mercurial Dir:  $(HGPRESENT)"
 	@echo "Make Dir:       $(MAKEDIR)"
 	@echo "Foundation Dir: $(FDBDIR)"
 	@echo "Fdb Dir Base:   $(FDBDIRBASE)"

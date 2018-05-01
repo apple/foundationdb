@@ -23,7 +23,7 @@
 # FoundationDB Ruby API
 
 # Documentation for this API can be found at
-# https://foundationdb.org/documentation/api-ruby.html
+# https://apple.github.io/foundationdb/api-ruby.html
 
 require 'thread'
 
@@ -472,7 +472,7 @@ module FDB
       prefix && 
         prefix.length > 0 &&
         !node_containing_key(tr, prefix) && 
-        tr.get_range(@node_subspace.pack([prefix]), @node_subspace.pack([tr.send(:strinc, prefix)]), 
+        tr.get_range(@node_subspace.pack([prefix]), @node_subspace.pack([FDB.strinc(prefix)]), 
                      { :limit => 1 }).to_a.empty?
     end
 

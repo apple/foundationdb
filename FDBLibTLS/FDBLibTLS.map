@@ -1,0 +1,6 @@
+{
+  global:
+    get_plugin;
+  local:
+    *;
+};

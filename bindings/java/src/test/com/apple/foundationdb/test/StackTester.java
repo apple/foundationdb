@@ -400,15 +400,35 @@ public class StackTester {
 				try {
 					inst.context.db.options().setLocationCacheSize(100001);
 					inst.context.db.run(tr -> {
+						FDB fdb = FDB.instance();
+
+						String alreadyStartedMessage = "FoundationDB API already started at different version";
+						try {
+							FDB.selectAPIVersion(fdb.getAPIVersion() + 1);
+							throw new IllegalStateException("Was not stopped from selecting two API versions");
+						}
+						catch(IllegalArgumentException e) {
+							if(!e.getMessage().equals(alreadyStartedMessage)) {
+								throw e;
+							}
+						}
+						try {
+							FDB.selectAPIVersion(fdb.getAPIVersion() - 1);
+							throw new IllegalStateException("Was not stopped from selecting two API versions");
+						}
+						catch(IllegalArgumentException e) {
+							if(!e.getMessage().equals(alreadyStartedMessage)) {
+								throw e;
+							}
+						}
+
 						tr.options().setPrioritySystemImmediate();
 						tr.options().setPriorityBatch();
 						tr.options().setCausalReadRisky();
 						tr.options().setCausalWriteRisky();
 						tr.options().setReadYourWritesDisable();
-						tr.options().setReadAheadDisable();
 						tr.options().setReadSystemKeys();
 						tr.options().setAccessSystemKeys();
-						tr.options().setDurabilityDevNullIsWebScale();
 						tr.options().setTimeout(60*1000);
 						tr.options().setRetryLimit(50);
 						tr.options().setMaxRetryDelay(100);
@@ -439,15 +459,15 @@ public class StackTester {
 				byte[] prefix = (byte[]) params.get(0);
 
 				Map<Integer, StackEntry> entries = new HashMap<>();
-                while(inst.size() > 0) {
+				while(inst.size() > 0) {
 					entries.put(inst.size()-1, inst.pop());
 					if(entries.size() == 100) {
 						logStack(inst.context.db, entries, prefix);
 						entries.clear();
 					}
-                }
+				}
 
-                logStack(inst.context.db, entries, prefix);
+				logStack(inst.context.db, entries, prefix);
 			}
 			else {
 				throw new IllegalArgumentException("Unrecognized (or unimplemented) operation");
@@ -576,7 +596,7 @@ public class StackTester {
 	}
 
 	private static void logStack(Database db, Map<Integer, StackEntry> entries, byte[] prefix) {
-	    db.run(tr -> {
+		db.run(tr -> {
 			for(Map.Entry<Integer, StackEntry> it : entries.entrySet()) {
 				byte[] pk = Tuple.from(it.getKey(), it.getValue().idx).pack(prefix);
 				byte[] pv = Tuple.from(StackUtils.serializeFuture(it.getValue().value)).pack();
@@ -588,7 +608,7 @@ public class StackTester {
 	}
 
 	private static boolean checkWatches(List<CompletableFuture<Void>> watches, Database db, boolean expected) {
-	    for(CompletableFuture<Void> w : watches) {
+		for(CompletableFuture<Void> w : watches) {
 			if(w.isDone() || expected) {
 				try {
 					w.join();
@@ -647,8 +667,8 @@ public class StackTester {
 				return null;
 			});
 
-            if(checkWatches(watches, db, true)) {
-            	return;
+			if(checkWatches(watches, db, true)) {
+				return;
 			}
 		}
 	}
@@ -692,7 +712,23 @@ public class StackTester {
 			throw new IllegalArgumentException("StackTester needs parameters <prefix> <optional_cluster_file>");
 		byte[] prefix = args[0].getBytes();
 
-		FDB fdb = FDB.selectAPIVersion(Integer.parseInt(args[1]));
+		if(FDB.isAPIVersionSelected()) {
+			throw new IllegalStateException("API version already set to " + FDB.instance().getAPIVersion());
+		}
+		try {
+			FDB.instance();
+			throw new IllegalStateException("Able to get API instance before selecting API version");
+		}
+		catch(FDBException e) {
+			if(e.getCode() != 2200) {
+				throw e;
+			}
+		}
+		int apiVersion = Integer.parseInt(args[1]);
+		FDB fdb = FDB.selectAPIVersion(apiVersion);
+		if(FDB.instance().getAPIVersion() != apiVersion) {
+			throw new IllegalStateException("API version not correctly set to " + apiVersion);
+		}
 		Database db;
 		if(args.length == 2)
 			db = fdb.open();

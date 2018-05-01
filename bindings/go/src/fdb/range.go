@@ -23,7 +23,7 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 510
+ #define FDB_API_VERSION 520
  #include <foundationdb/fdb_c.h>
 */
 import "C"
@@ -247,7 +247,7 @@ func (ri *RangeIterator) fetchNextBatch() {
 		ri.sr.Begin = FirstGreaterThan(ri.kvs[ri.index-1].Key)
 	}
 
-	ri.iteration += 1
+	ri.iteration++
 
 	f := ri.t.doGetRange(ri.sr, ri.options, ri.snapshot, ri.iteration)
 	ri.f = &f
@@ -265,7 +265,7 @@ func (ri *RangeIterator) Get() (kv KeyValue, e error) {
 
 	kv = ri.kvs[ri.index]
 
-	ri.index += 1
+	ri.index++
 
 	if ri.index == len(ri.kvs) {
 		ri.fetchNextBatch()
@@ -291,7 +291,7 @@ func Strinc(prefix []byte) ([]byte, error) {
 		if prefix[i] != 0xFF {
 			ret := make([]byte, i+1)
 			copy(ret, prefix[:i+1])
-			ret[i] += 1
+			ret[i]++
 			return ret, nil
 		}
 	}

@@ -47,7 +47,7 @@ abstract class NativeObjectWrapper implements AutoCloseable {
 
 	public void checkUnclosed(String context) {
 		try {
-			if(FDB.getInstance().warnOnUnclosed && !closed) {
+			if(FDB.instance().warnOnUnclosed && !closed) {
 				System.err.println(context + " not closed");
 			}
 		}

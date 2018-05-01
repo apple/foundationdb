@@ -34,7 +34,7 @@ import com.apple.foundationdb.tuple.Tuple;
  *  the underlying database if and when the transaction is committed. Read operations do see the
  *  effects of previous write operations on the same transaction. Committing a transaction usually
  *  succeeds in the absence of
- *  <a href="/foundationdb/developer-guide.html#transaction-conflicts" target="_blank">conflicts</a>.<br>
+ *  <a href="/foundationdb/developer-guide.html#developer-guide-transaction-conflicts" target="_blank">conflicts</a>.<br>
  *  <br>
  * Transactions group operations into a unit with the properties of atomicity, isolation, and
  *  durability. Transactions also provide the ability to maintain an application's invariants or
@@ -49,7 +49,7 @@ import com.apple.foundationdb.tuple.Tuple;
  * <br>
  * Keys and values in FoundationDB are byte arrays. To encode other data types, see the
  *  {@link Tuple Tuple API} and
- *  <a href="/foundationdb/data-modeling.html#tuples" target="_blank">tuple layer documentation</a>.<br>
+ *  <a href="/foundationdb/data-modeling.html#data-modeling-tuples" target="_blank">tuple layer documentation</a>.<br>
  * <br>
  * When used as a {@link TransactionContext}, the methods {@code run()} and
  *  {@code runAsync()} on a {@code Transaction} will simply attempt the operations
@@ -84,6 +84,8 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * <br>
 	 * For more information about how to use snapshot reads correctly, see
 	 * <a href="/foundationdb/developer-guide.html#using-snapshot-reads" target="_blank">Using snapshot reads</a>.
+	 *
+	 * @return a read-only view of this {@code Transaction} with relaxed isolation properties
 	 */
 	ReadTransaction snapshot();
 
@@ -143,8 +145,9 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *
 	 * @param key the key whose value is to be set
 	 * @param value the value to set in the database
-	 * @throws IllegalArgumentException
-	 * @throws FDBException
+	 *
+	 * @throws IllegalArgumentException if {@code key} or {@code value} is {@code null}
+	 * @throws FDBException if the set operation otherwise fails
 	 */
 	void set(byte[] key, byte[] value);
 
@@ -153,8 +156,9 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * database until {@link #commit} is called.
 	 *
 	 * @param key the key whose value is to be cleared
-	 * @throws IllegalArgumentException
-	 * @throws FDBException
+	 *
+	 * @throws IllegalArgumentException if {@code key} is {@code null}
+	 * @throws FDBException if clear operation otherwise fails
 	 */
 	void clear(byte[] key);
 
@@ -167,8 +171,9 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *
 	 * @param beginKey the first clear
 	 * @param endKey the key one past the last key to clear
-	 * @throws IllegalArgumentException
-	 * @throws FDBException
+	 *
+	 * @throws IllegalArgumentException if {@code beginKey} or {@code endKey} is {@code null}
+	 * @throws FDBException if the clear operation otherwise fails
 	 */
 	void clear(byte[] beginKey, byte[] endKey);
 
@@ -181,7 +186,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *
 	 * @param range the range of keys to clear
 	 *
-	 * @throws FDBException
+	 * @throws FDBException if the clear operation fails
 	 */
 	void clear(Range range);
 
@@ -191,7 +196,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *
 	 * @param prefix the starting bytes from the keys to be cleared.
 	 *
-	 * @throws FDBException
+	 * @throws FDBException if the clear-range operation fails
 	 */
 	@Deprecated
 	void clearRangeStartsWith(byte[] prefix);
@@ -209,15 +214,15 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * read. It can only cause other transactions performing reads of the key
 	 * to conflict.<br>
 	 * <br>
-     * By combining these logical steps into a single, read-free operation,
-     * FoundationDB can guarantee that the transaction will not conflict due to
-     * the operation. This makes atomic operations ideal for operating on keys
-     * that are frequently modified. A common example is the use of a key-value
-     * pair as a counter.<br>
-     * <br>
-     * <b>Note:</b> If a transaction uses both an atomic operation and a serializable
-     * read on the same key, the benefits of using the atomic operation (for both
-     * conflict checking and performance) are lost.
+	 * By combining these logical steps into a single, read-free operation,
+	 * FoundationDB can guarantee that the transaction will not conflict due to
+	 * the operation. This makes atomic operations ideal for operating on keys
+	 * that are frequently modified. A common example is the use of a key-value
+	 * pair as a counter.<br>
+	 * <br>
+	 * <b>Note:</b> If a transaction uses both an atomic operation and a serializable
+	 * read on the same key, the benefits of using the atomic operation (for both
+	 * conflict checking and performance) are lost.
 	 *
 	 * The behavior of each {@link MutationType} is documented at its definition.
 	 *
@@ -232,10 +237,7 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *  {@code Database}'s {@link Database#run(Function) run()} calls for managing
 	 *  transactional access to FoundationDB.
 	 *
-	 * @return a {@code CompletableFuture} that, when set without error, guarantees the
-	 *  {@code Transaction}'s modifications committed durably to the
-	 *  database. If the commit failed, it will throw an {@link FDBException}.
-	 * <br><br>
+	 * <p>
 	 * As with other client/server databases, in some failure scenarios a client may
 	 *  be unable to determine whether a transaction succeeded. In these cases, an
 	 *  {@link FDBException} will be thrown with error code {@code commit_unknown_result} (1021).
@@ -243,11 +245,18 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 *  retry loops that don't specifically detect {@code commit_unknown_result} could end
 	 *  up executing a transaction twice. For more information, see the FoundationDB
 	 *  Developer Guide documentation.
+	 * </p>
 	 *
-	 *  If any operation is performed on a transaction after a commit has been
+	 * <p>
+	 * If any operation is performed on a transaction after a commit has been
 	 *  issued but before it has returned, both the commit and the operation will
-	 *  throw an error code {@code used_during_commit}(2017). In this case, all
+	 *  throw an error code {@code used_during_commit} (2017). In this case, all
 	 *  subsequent operations on this transaction will throw this error.
+	 * </p>
+	 *
+	 * @return a {@code CompletableFuture} that, when set without error, guarantees the
+	 *  {@code Transaction}'s modifications committed durably to the
+	 *  database. If the commit failed, it will throw an {@link FDBException}.
 	 */
 	CompletableFuture<Void> commit();
 
@@ -355,7 +364,10 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	 * Run a function once against this {@code Transaction}. This call blocks while
 	 *  user code is executing, returning the result of that code on completion.
 	 *
-	 * @return the return value of {@code retryable}
+	 * @param retryable the block of logic to execute against this {@code Transaction}
+	 * @param <T> the return type of {@code retryable}
+	 *
+	 * @return a result of the single call to {@code retryable}
 	 */
 	@Override
 	<T> T run(Function<? super Transaction, T> retryable);
@@ -363,6 +375,9 @@ public interface Transaction extends AutoCloseable, ReadTransaction, Transaction
 	/**
 	 * Run a function once against this {@code Transaction}. This call returns
 	 *  immediately with a {@code CompletableFuture} handle to the result.
+	 *
+	 * @param retryable the block of logic to execute against this {@code Transaction}
+	 * @param <T> the return type of {@code retryable}
 	 *
 	 * @return a {@code CompletableFuture} that will be set to the return value of {@code retryable}
 	 */

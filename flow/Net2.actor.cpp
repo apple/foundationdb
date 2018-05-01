@@ -240,7 +240,7 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).detail("Message", error.value());
+				TraceEvent(SevWarn, errContext, errID).detail("Message", error.value()).suppressFor(1.0);
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -403,8 +403,7 @@ private:
 
 	void init() {
 		// Socket settings that have to be set after connect or accept succeeds
-		boost::asio::socket_base::non_blocking_io nbio(true);
-		socket.io_control(nbio);
+		socket.non_blocking(true);
 		socket.set_option(boost::asio::ip::tcp::no_delay(true));
 	}
 

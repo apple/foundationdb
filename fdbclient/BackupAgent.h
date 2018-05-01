@@ -46,6 +46,7 @@ public:
 	static const Key keyFolderId;
 	static const Key keyBeginVersion;
 	static const Key keyEndVersion;
+	static const Key keyPrevBeginVersion;
 	static const Key keyConfigBackupTag;
 	static const Key keyConfigLogUid;
 	static const Key keyConfigBackupRanges;
@@ -55,6 +56,9 @@ public:
 	static const Key keyLastUid;
 	static const Key keyBeginKey;
 	static const Key keyEndKey;
+	static const Key keyDrVersion;
+	static const Key destUid;
+	static const Key backupStartVersion;
 
 	static const Key keyTagName;
 	static const Key keyStates;
@@ -344,13 +348,18 @@ public:
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return discontinueBackup(tr, tagName); });
 	}
 
-	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false);
+	Future<Void> abortBackup(Database cx, Key tagName, bool partial = false, bool abortOldBackup = false);
 
 	Future<std::string> getStatus(Database cx, int errorLimit, Key tagName);
 
 	Future<int> getStateValue(Reference<ReadYourWritesTransaction> tr, UID logUid);
 	Future<int> getStateValue(Database cx, UID logUid) {
 		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getStateValue(tr, logUid); });
+	}
+
+	Future<UID> getDestUid(Reference<ReadYourWritesTransaction> tr, UID logUid);
+	Future<UID> getDestUid(Database cx, UID logUid) {
+		return runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr){ return getDestUid(tr, logUid); });
 	}
 
 	Future<UID> getLogUid(Reference<ReadYourWritesTransaction> tr, Key tagName);
@@ -365,12 +374,14 @@ public:
 	// will return when the backup directory is restorable.
 	Future<int> waitBackup(Database cx, Key tagName, bool stopWhenDone = true);
 	Future<int> waitSubmitted(Database cx, Key tagName);
+	Future<Void> waitUpgradeToLatestDrVersion(Database cx, Key tagName);
 
 	static const Key keyAddPrefix;
 	static const Key keyRemovePrefix;
 	static const Key keyRangeVersions;
 	static const Key keyCopyStop;
 	static const Key keyDatabasesInSync;
+	static const int LATEST_DR_VERSION;
 
 	Future<int64_t> getTaskCount(Reference<ReadYourWritesTransaction> tr) { return taskBucket->getTaskCount(tr); }
 	Future<int64_t> getTaskCount(Database cx) { return taskBucket->getTaskCount(cx); }
@@ -410,8 +421,9 @@ struct RCGroup {
 
 bool copyParameter(Reference<Task> source, Reference<Task> dest, Key key);
 Version getVersionFromString(std::string const& value);
-Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key backupUid, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
+Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version endVersion, Key destUidValue, int blockSize = CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE);
 Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version endVersion, Key backupUid);
+Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> beginVersion = Optional<Version>(), Optional<Version> endVersion = Optional<Version>(), bool checkBackupUid = false, Version backupUid = 0);
 Key getApplyKey( Version version, Key backupUid );
 std::pair<uint64_t, uint32_t> decodeBKMutationLogKey(Key key);
 Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value);
@@ -500,9 +512,14 @@ public:
 
 	KeyBackedConfig(StringRef prefix, Reference<Task> task) : KeyBackedConfig(prefix, TaskParams.uid().get(task)) {}
 
-	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
+	Future<Void> toTask(Reference<ReadYourWritesTransaction> tr, Reference<Task> task, bool setValidation = true) {
 		// Set the uid task parameter
 		TaskParams.uid().set(task, uid);
+
+		if (!setValidation) {
+			return Void();
+		}
+
 		// Set the validation condition for the task which is that the restore uid's tag's uid is the same as the restore uid.
 		// Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the validation key
 		// which TaskBucket will check, and its value must be this restore config's uid.
@@ -701,6 +718,10 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
+	KeyBackedProperty<Key> destUidValue() {
+		return configSpace.pack(LiteralStringRef(__FUNCTION__));
+	}
+
 	Future<Optional<Version>> getLatestRestorableVersion(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
@@ -720,9 +741,9 @@ public:
 		return configSpace.pack(LiteralStringRef(__FUNCTION__));
 	}
 
-	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange) {
-		Key mutationLogsDestKey = uidPrefixKey(backupLogKeys.begin, getUid());
-		tr->set(logRangesEncodeKey(backupRange.begin, getUid()), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
+	void startMutationLogs(Reference<ReadYourWritesTransaction> tr, KeyRangeRef backupRange, Key destUidValue) {
+		Key mutationLogsDestKey = destUidValue.withPrefix(backupLogKeys.begin);
+		tr->set(logRangesEncodeKey(backupRange.begin, BinaryReader::fromStringRef<UID>(destUidValue, Unversioned())), logRangesEncodeValue(backupRange.end, mutationLogsDestKey));
 	}
 
 	Future<Void> logError(Database cx, Error e, std::string details, void *taskInstance = nullptr) {

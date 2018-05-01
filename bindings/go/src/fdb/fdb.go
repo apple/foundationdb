@@ -23,7 +23,7 @@
 package fdb
 
 /*
- #define FDB_API_VERSION 510
+ #define FDB_API_VERSION 520
  #include <foundationdb/fdb_c.h>
  #include <stdlib.h>
 */
@@ -109,7 +109,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // library, an error will be returned. APIVersion must be called prior to any
 // other functions in the fdb package.
 //
-// Currently, this package supports API versions 200 through 510.
+// Currently, this package supports API versions 200 through 520.
 //
 // Warning: When using the multi-version client API, setting an API version that
 // is not supported by a particular client library will prevent that client from
@@ -117,7 +117,7 @@ func (opt NetworkOptions) setOpt(code int, param []byte) error {
 // the API version of your application after upgrading your client until the
 // cluster has also been upgraded.
 func APIVersion(version int) error {
-	headerVersion := 510
+	headerVersion := 520
 
 	networkMutex.Lock()
 	defer networkMutex.Unlock()
@@ -129,7 +129,7 @@ func APIVersion(version int) error {
 		return errAPIVersionAlreadySet
 	}
 
-	if version < 200 || version > 510 {
+	if version < 200 || version > 520 {
 		return errAPIVersionNotSupported
 	}
 
@@ -139,9 +139,8 @@ func APIVersion(version int) error {
 				maxSupportedVersion := C.fdb_get_max_api_version()
 				if headerVersion > int(maxSupportedVersion) {
 					return fmt.Errorf("This version of the FoundationDB Go binding is not supported by the installed FoundationDB C library. The binding requires a library that supports API version %d, but the installed library supports a maximum version of %d.", version, maxSupportedVersion)
-				} else {
-					return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 				}
+				return fmt.Errorf("API version %d is not supported by the installed FoundationDB C library.", version)
 			}
 			return Error{int(e)}
 		}
@@ -152,6 +151,24 @@ func APIVersion(version int) error {
 	return nil
 }
 
+// Determines if an API version has already been selected, i.e., if
+// APIVersion or MustAPIVersion have already been called.
+func IsAPIVersionSelected() bool {
+	return apiVersion != 0
+}
+
+// Returns the API version that has been selected through APIVersion
+// or MustAPIVersion. If the version has already been selected, then
+// the first value returned is the API version and the error is
+// nil. If the API version has not yet been set, then the error
+// will be non-nil.
+func GetAPIVersion() (int, error) {
+	if IsAPIVersionSelected() {
+		return apiVersion, nil
+	}
+	return 0, errAPIVersionUnset
+}
+
 // MustAPIVersion is like APIVersion but panics if the API version is not
 // supported.
 func MustAPIVersion(version int) {
@@ -159,6 +176,16 @@ func MustAPIVersion(version int) {
 	if err != nil {
 		panic(err)
 	}
+}
+
+// MustGetAPIVersion is like GetAPIVersion but panics if the API version
+// has not yet been set.
+func MustGetAPIVersion() int {
+	apiVersion, err := GetAPIVersion()
+	if err != nil {
+		panic(err)
+	}
+	return apiVersion
 }
 
 var apiVersion int
@@ -326,9 +353,8 @@ func CreateCluster(clusterFile string) (Cluster, error) {
 func byteSliceToPtr(b []byte) *C.uint8_t {
 	if len(b) > 0 {
 		return (*C.uint8_t)(unsafe.Pointer(&b[0]))
-	} else {
-		return nil
 	}
+	return nil
 }
 
 // A KeyConvertible can be converted to a FoundationDB Key. All functions in the

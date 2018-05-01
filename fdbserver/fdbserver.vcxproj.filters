@@ -219,6 +219,9 @@
     <ActorCompiler Include="workloads\AtomicOpsApiCorrectness.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
+    <ActorCompiler Include="workloads\ClientTransactionProfileCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
     <ActorCompiler Include="workloads\StatusWorkload.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
@@ -242,6 +245,9 @@
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="workloads\BackupToDBCorrectness.actor.cpp">
+      <Filter>workloads</Filter>
+    </ActorCompiler>
+    <ActorCompiler Include="workloads\BackupToDBUpgrade.actor.cpp">
       <Filter>workloads</Filter>
     </ActorCompiler>
     <ActorCompiler Include="workloads\AtomicSwitchover.actor.cpp">

@@ -63,6 +63,8 @@ public class AsyncUtil {
 	 *
 	 * @param func the {@code Function} to run
 	 * @param value the input to pass to {@code func}
+	 * @param <I> type of input to {@code func}
+	 * @param <O> type of output of {@code func}
 	 *
 	 * @return the output of {@code func}, or a {@code CompletableFuture} carrying any exception
 	 *  caught in the process.
@@ -159,9 +161,10 @@ public class AsyncUtil {
 	}
 
 	/**
-	 * Iterates over a set of items and returns the result as a list.
+	 * Iterates over a stream of items and returns the result as a list.
 	 *
 	 * @param iterable the source of data over which to iterate
+	 * @param <V> type of the items returned by the iterable
 	 *
 	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
 	 *  from iteration.
@@ -174,6 +177,7 @@ public class AsyncUtil {
 	 * Iterates over a set of items and returns the remaining results as a list.
 	 *
 	 * @param iterator the source of data over which to iterate. This function will exhaust the iterator.
+	 * @param <V> type of the items returned by the iterator
 	 *
 	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
 	 *  from iteration.
@@ -187,6 +191,7 @@ public class AsyncUtil {
 	 *
 	 * @param iterable the source of data over which to iterate
 	 * @param executor the {@link Executor} to use for asynchronous operations
+	 * @param <V> type of the items returned by the iterable
 	 *
 	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
 	 *  from iteration.
@@ -200,6 +205,7 @@ public class AsyncUtil {
 	 *
 	 * @param iterator the source of data over which to iterate. This function will exhaust the iterator.
 	 * @param executor the {@link Executor} to use for asynchronous operations
+	 * @param <V> type of the items returned by the iterator
 	 *
 	 * @return a {@code CompletableFuture} which will be set to the amalgamation of results
 	 *  from iteration.
@@ -215,6 +221,9 @@ public class AsyncUtil {
 	 *
 	 * @param iterable input
 	 * @param func mapping function applied to each element
+	 * @param <V> type of the items returned by the original iterable
+	 * @param <T> type of the items returned by the final iterable
+	 *
 	 * @return a new iterable with each element mapped to a different value
 	 */
 	public static <V, T> AsyncIterable<T> mapIterable(final AsyncIterable<V> iterable,
@@ -239,6 +248,9 @@ public class AsyncUtil {
 	 *
 	 * @param iterator input
 	 * @param func mapping function applied to each element
+	 * @param <V> type of the items returned by the original iterator
+	 * @param <T> type of the items returned by the final iterator
+	 *
 	 * @return a new iterator with each element mapped to a different value
 	 */
 	public static <V, T> AsyncIterator<T> mapIterator(final AsyncIterator<V> iterator,
@@ -277,6 +289,9 @@ public class AsyncUtil {
 	 *
 	 * @param iterator input
 	 * @param func mapping function applied to each element
+	 * @param <V> type of the items returned by the original iterator
+	 * @param <T> type of the items returned by the final iterator
+	 *
 	 * @return a new iterator with each element mapped to a different value
 	 */
 	public static <V, T> CloseableAsyncIterator<T> mapIterator(final CloseableAsyncIterator<V> iterator,
@@ -423,6 +438,7 @@ public class AsyncUtil {
 	 *  All errors from {@code task} will be passed to the resulting {@code CompletableFuture}.
 	 *
 	 * @param task the asynchronous process for which to signal completion
+	 * @param <V> type of element returned by {@code task}
 	 *
 	 * @return a newly created {@code CompletableFuture} that is set when {@code task} completes
 	 */
@@ -432,11 +448,12 @@ public class AsyncUtil {
 
 	/**
 	 * Maps the readiness of a {@link CompletableFuture} into a completion signal.  When
-	 * the given {@link CompletableFuture} is set to a value or an error, the returned {@link CompletableFuture}
-	 * will be set to null.  The returned {@link CompletableFuture} will never be set to an error unless
-	 * it is explicitly cancelled.
+	 *  the given {@link CompletableFuture} is set to a value or an error, the returned {@link CompletableFuture}
+	 *  will be set to null.  The returned {@link CompletableFuture} will never be set to an error unless
+	 *  it is explicitly cancelled.
 	 *
 	 * @param task the asynchronous process to monitor the readiness of
+	 * @param <V> return type of the asynchronous task
 	 *
 	 * @return a new {@link CompletableFuture} that is set when {@code task} is ready.
 	 */
@@ -444,6 +461,22 @@ public class AsyncUtil {
 		return task.handle((v, t) -> null);
 	}
 
+	/**
+	 * Composes an asynchronous task with an exception-handler that returns a {@link CompletableFuture}
+	 *  of the same type. If {@code task} completes normally, this will return a {@link CompletableFuture}
+	 *  with the same value as {@code task}. If {@code task} completes exceptionally,
+	 *  this will call {@code fn} with the exception returned by {@code task} and return
+	 *  the result of the {@link CompletableFuture} returned by that function.
+	 *
+	 * @param task the asynchronous process to handle exceptions from
+	 * @param fn a function mapping exceptions from {@code task} to a {@link CompletableFuture} of the same
+	 *           type as {@code task}
+	 * @param <V> return type of the asynchronous task
+	 *
+	 * @return a {@link CompletableFuture} that contains the value returned by {@code task}
+	 *         if {@code task} completes normally and the result of {@code fn} if {@code task}
+	 *         completes exceptionally
+	 */
 	public static <V> CompletableFuture<V> composeExceptionally(CompletableFuture<V> task, Function<Throwable, CompletableFuture<V>> fn) {
 		return task.handle((v,e) -> e)
 				.thenCompose(e -> {
@@ -521,6 +554,7 @@ public class AsyncUtil {
 	 *  any of the tasks returns an error, the output is set to that error.
 	 *
 	 * @param tasks the tasks whose output is to be added to the output
+	 * @param <V> return type of the asynchronous tasks
 	 *
 	 * @return a {@code CompletableFuture} that will be set to the collective result of the tasks
 	 */
@@ -539,8 +573,9 @@ public class AsyncUtil {
 	 * Replaces the output of an asynchronous task with a predetermined value.
 	 *
 	 * @param task the asynchronous process whose output is to be replaced
-	 *
 	 * @param value the predetermined value to be returned on success of {@code task}
+	 * @param <V> return type of original future
+	 * @param <T> return type of final future
 	 *
 	 * @return a {@code CompletableFuture} that will be set to {@code value} on completion of {@code task}
 	 */
@@ -554,6 +589,7 @@ public class AsyncUtil {
 	 *
 	 * @param input the list of {@link CompletableFuture}s to monitor. This list
 	 *  <b>must not</b> be modified during the execution of this call.
+	 * @param <V> return type of the asynchronous tasks
 	 *
 	 * @return a signal that will be set when any of the {@code CompletableFuture}s are done
 	 */
@@ -569,6 +605,7 @@ public class AsyncUtil {
 	 *
 	 * @param input the list of {@link CompletableFuture}s to monitor. This list
 	 *  <b>must not</b> be modified during the execution of this call.
+	 * @param <V> return type of the asynchronous tasks
 	 *
 	 * @return a signal that will be set when all of the {@code CompletableFuture}s are done
 	 */

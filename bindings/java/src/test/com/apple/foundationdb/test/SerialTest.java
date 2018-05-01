@@ -22,7 +22,6 @@ package com.apple.foundationdb.test;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
-import com.apple.foundationdb.Cluster;
 import com.apple.foundationdb.Database;
 import com.apple.foundationdb.FDB;
 import com.apple.foundationdb.TransactionContext;
@@ -31,7 +30,7 @@ public class SerialTest {
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(510);
+			FDB fdb = FDB.selectAPIVersion(520);
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
 			}
