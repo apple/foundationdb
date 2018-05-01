@@ -94,6 +94,7 @@ static std::string describe( std::set<T> const& items, int max_items = -1 ) {
 }
 
 std::string printable( const StringRef& val );
+std::string printable( const std::string& val );
 std::string printable( const Optional<StringRef>& val );
 std::string printable( const Optional<Standalone<StringRef>>& val );
 std::string printable( const KeyRangeRef& range );
