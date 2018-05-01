@@ -133,9 +133,9 @@ struct DBCoreState {
 				}
 
 				if(oldTLogData.size()) {
-					tLogs[0].startVersion = oldTLogData[0].epochEnd + 1;
+					tLogs[0].startVersion = oldTLogData[0].epochEnd;
 					for(int i = 0; i < oldTLogData.size() - 1; i++) {
-						oldTLogData[i].tLogs[0].startVersion = oldTLogData[i+1].epochEnd + 1;
+						oldTLogData[i].tLogs[0].startVersion = oldTLogData[i+1].epochEnd;
 					}
 				}
 			}
