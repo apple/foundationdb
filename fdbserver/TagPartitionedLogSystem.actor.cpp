@@ -1038,57 +1038,56 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	ACTOR static Future<std::pair<Version,Version>> getDurableVersion(UID dbgid, LogLockInfo lockInfo, std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>()) {
-		state Reference<LogSet> logSet = lockInfo.logSet;
-		loop {
-			// To ensure consistent recovery, the number of servers NOT in the write quorum plus the number of servers NOT in the read quorum
-			// have to be strictly less than the replication factor.  Otherwise there could be a replica set consistent entirely of servers that
-			// are out of date due to not being in the write quorum or unavailable due to not being in the read quorum.
-			// So with N = # of tlogs, W = antiquorum, R = required count, F = replication factor,
-			// W + (N - R) < F, and optimally (N-W)+(N-R)=F-1.  Thus R=N+1-F+W.
-			int requiredCount = (int)logSet->logServers.size()+1 - logSet->tLogReplicationFactor + logSet->tLogWriteAntiQuorum;
-			ASSERT( requiredCount > 0 && requiredCount <= logSet->logServers.size() );
-			ASSERT( logSet->tLogReplicationFactor >= 1 && logSet->tLogReplicationFactor <= logSet->logServers.size() );
-			ASSERT( logSet->tLogWriteAntiQuorum >= 0 && logSet->tLogWriteAntiQuorum < logSet->logServers.size() );
+	Optional<std::pair<Version,Version>> static getDurableVersion(UID dbgid, LogLockInfo lockInfo, std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>(), Optional<Version> lastEnd = Optional<Version>()) {
+		Reference<LogSet> logSet = lockInfo.logSet;
+		// To ensure consistent recovery, the number of servers NOT in the write quorum plus the number of servers NOT in the read quorum
+		// have to be strictly less than the replication factor.  Otherwise there could be a replica set consistent entirely of servers that
+		// are out of date due to not being in the write quorum or unavailable due to not being in the read quorum.
+		// So with N = # of tlogs, W = antiquorum, R = required count, F = replication factor,
+		// W + (N - R) < F, and optimally (N-W)+(N-R)=F-1.  Thus R=N+1-F+W.
+		int requiredCount = (int)logSet->logServers.size()+1 - logSet->tLogReplicationFactor + logSet->tLogWriteAntiQuorum;
+		ASSERT( requiredCount > 0 && requiredCount <= logSet->logServers.size() );
+		ASSERT( logSet->tLogReplicationFactor >= 1 && logSet->tLogReplicationFactor <= logSet->logServers.size() );
+		ASSERT( logSet->tLogWriteAntiQuorum >= 0 && logSet->tLogWriteAntiQuorum < logSet->logServers.size() );
 			
-			std::vector<LocalityData> availableItems, badCombo;
-			std::vector<TLogLockResult> results;
-			std::string sServerState;
-			LocalityGroup unResponsiveSet;
-			double t = timer();
+		std::vector<LocalityData> availableItems, badCombo;
+		std::vector<TLogLockResult> results;
+		std::string sServerState;
+		LocalityGroup unResponsiveSet;
 
-			for(int t=0; t<logSet->logServers.size(); t++) {
-				if (lockInfo.replies[t].isReady() && !lockInfo.replies[t].isError() && (!failed.size() || !failed[t]->get())) {
-					results.push_back(lockInfo.replies[t].get());
-					availableItems.push_back(logSet->tLogLocalities[t]);
-					sServerState += 'a';
-				}
-				else {
-					unResponsiveSet.add(logSet->tLogLocalities[t]);
-					sServerState += 'f';
-				}
+		for(int t=0; t<logSet->logServers.size(); t++) {
+			if (lockInfo.replies[t].isReady() && !lockInfo.replies[t].isError() && (!failed.size() || !failed[t]->get())) {
+				results.push_back(lockInfo.replies[t].get());
+				availableItems.push_back(logSet->tLogLocalities[t]);
+				sServerState += 'a';
 			}
-
-			// Check if the list of results is not larger than the anti quorum
-			bool bTooManyFailures = (results.size() <= logSet->tLogWriteAntiQuorum);
-
-			// Check if failed logs complete the policy
-			bTooManyFailures = bTooManyFailures || ((unResponsiveSet.size() >= logSet->tLogReplicationFactor)	&& (unResponsiveSet.validate(logSet->tLogPolicy)));
-
-			// Check all combinations of the AntiQuorum within the failed
-			if (!bTooManyFailures && (logSet->tLogWriteAntiQuorum) && (!validateAllCombinations(badCombo, unResponsiveSet, logSet->tLogPolicy, availableItems, logSet->tLogWriteAntiQuorum, false))) {
-				TraceEvent("EpochEndBadCombo", dbgid).detail("Required", requiredCount).detail("Present", results.size()).detail("ServerState", sServerState);
-				bTooManyFailures = true;
+			else {
+				unResponsiveSet.add(logSet->tLogLocalities[t]);
+				sServerState += 'f';
 			}
+		}
 
-			ASSERT(logSet->logServers.size() == lockInfo.replies.size());
-			if (!bTooManyFailures) {
-				std::sort( results.begin(), results.end(), sort_by_end() );
-				int absent = logSet->logServers.size() - results.size();
-				int safe_range_begin = logSet->tLogWriteAntiQuorum;
-				int new_safe_range_begin = std::min(logSet->tLogWriteAntiQuorum, (int)(results.size()-1));
-				int safe_range_end = logSet->tLogReplicationFactor - absent;
+		// Check if the list of results is not larger than the anti quorum
+		bool bTooManyFailures = (results.size() <= logSet->tLogWriteAntiQuorum);
 
+		// Check if failed logs complete the policy
+		bTooManyFailures = bTooManyFailures || ((unResponsiveSet.size() >= logSet->tLogReplicationFactor)	&& (unResponsiveSet.validate(logSet->tLogPolicy)));
+
+		// Check all combinations of the AntiQuorum within the failed
+		if (!bTooManyFailures && (logSet->tLogWriteAntiQuorum) && (!validateAllCombinations(badCombo, unResponsiveSet, logSet->tLogPolicy, availableItems, logSet->tLogWriteAntiQuorum, false))) {
+			TraceEvent("EpochEndBadCombo", dbgid).detail("Required", requiredCount).detail("Present", results.size()).detail("ServerState", sServerState);
+			bTooManyFailures = true;
+		}
+
+		ASSERT(logSet->logServers.size() == lockInfo.replies.size());
+		if (!bTooManyFailures) {
+			std::sort( results.begin(), results.end(), sort_by_end() );
+			int absent = logSet->logServers.size() - results.size();
+			int safe_range_begin = logSet->tLogWriteAntiQuorum;
+			int new_safe_range_begin = std::min(logSet->tLogWriteAntiQuorum, (int)(results.size()-1));
+			int safe_range_end = logSet->tLogReplicationFactor - absent;
+
+			if( !lastEnd.present() || ((safe_range_end > 0) && (safe_range_end-1 < results.size()) && results[ safe_range_end-1 ].end < lastEnd.get()) ) {
 				Version knownCommittedVersion = results[ new_safe_range_begin ].end - (g_network->isSimulated() ? 10*SERVER_KNOBS->VERSIONS_PER_SECOND : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS); //In simulation this must be the maximum MAX_READ_TRANSACTION_LIFE_VERSIONS
 				for(int i = 0; i < results.size(); i++) {
 					knownCommittedVersion = std::max(knownCommittedVersion, results[i].knownCommittedVersion);
@@ -1099,25 +1098,29 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					.detail("EndVersion", results[ new_safe_range_begin ].end).detail("SafeBegin", safe_range_begin).detail("SafeEnd", safe_range_end)
 					.detail("NewSafeBegin", new_safe_range_begin).detail("knownCommittedVersion", knownCommittedVersion).detail("epochEnd", lockInfo.epochEnd);
 
-				return std::make_pair(std::min(knownCommittedVersion+1,lockInfo.epochEnd), results[ new_safe_range_begin ].end);
+				return std::make_pair(knownCommittedVersion, results[ new_safe_range_begin ].end);
 			}
-			TraceEvent("GetDurableResultWaiting", dbgid).detail("Required", requiredCount).detail("Present", results.size()).detail("ServerState", sServerState);
+		}
+		TraceEvent("GetDurableResultWaiting", dbgid).detail("Required", requiredCount).detail("Present", results.size()).detail("ServerState", sServerState);
+		return Optional<std::pair<Version,Version>>();
+	}
 
-			// Wait for anything relevant to change
-			std::vector<Future<Void>> changes;
-			for(int j=0; j < logSet->logServers.size(); j++) {
-				if (!lockInfo.replies[j].isReady())
-					changes.push_back( ready(lockInfo.replies[j]) );
-				else {
-					changes.push_back( logSet->logServers[j]->onChange() );
-					if(failed.size()) {
-						changes.push_back( failed[j]->onChange() );
-					}
+	ACTOR static Future<Void> getDurableVersionChanged(LogLockInfo lockInfo, std::vector<Reference<AsyncVar<bool>>> failed = std::vector<Reference<AsyncVar<bool>>>()) {
+		// Wait for anything relevant to change
+		std::vector<Future<Void>> changes;
+		for(int j=0; j < lockInfo.logSet->logServers.size(); j++) {
+			if (!lockInfo.replies[j].isReady())
+				changes.push_back( ready(lockInfo.replies[j]) );
+			else {
+				changes.push_back( lockInfo.logSet->logServers[j]->onChange() );
+				if(failed.size()) {
+					changes.push_back( failed[j]->onChange() );
 				}
 			}
-			ASSERT(changes.size());
-			Void _ = wait(waitForAny(changes));
 		}
+		ASSERT(changes.size());
+		Void _ = wait(waitForAny(changes));
+		return Void();
 	}
 
 	ACTOR static Future<Void> epochEnd( Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem, UID dbgid, DBCoreState prevState, FutureStream<TLogRejoinRequest> rejoinRequests, LocalityData locality ) {
@@ -1237,194 +1240,45 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 
-		state Optional<Version> last_end;
-		state int cycles = 0;
-
+		state Optional<Version> lastEnd;
 		state Version knownCommittedVersion = 0;
 		loop {
-			Optional<Version> end;
+			Version minEnd = std::numeric_limits<Version>::max();
+			Version maxEnd = 0;
+			std::vector<Future<Void>> changes;
 			for(int log = 0; log < logServers.size(); log++) {
 				if(!logServers[log]->isLocal) {
 					continue;
 				}
-
-				// To ensure consistent recovery, the number of servers NOT in the write quorum plus the number of servers NOT in the read quorum
-				// have to be strictly less than the replication factor.  Otherwise there could be a replica set consistent entirely of servers that
-				// are out of date due to not being in the write quorum or unavailable due to not being in the read quorum.
-				// So with N = # of tlogs, W = antiquorum, R = required count, F = replication factor,
-				// W + (N - R) < F, and optimally (N-W)+(N-R)=F-1.  Thus R=N+1-F+W.
-				state int requiredCount = (int)logServers[log]->logServers.size()+1 - logServers[log]->tLogReplicationFactor + logServers[log]->tLogWriteAntiQuorum;
-				ASSERT( requiredCount > 0 && requiredCount <= logServers[log]->logServers.size() );
-				ASSERT( logServers[log]->tLogReplicationFactor >= 1 && logServers[log]->tLogReplicationFactor <= logServers[log]->logServers.size() );
-				ASSERT( logServers[log]->tLogWriteAntiQuorum >= 0 && logServers[log]->tLogWriteAntiQuorum < logServers[log]->logServers.size() );
-			
-				std::vector<LocalityData> availableItems, badCombo;
-				std::vector<TLogLockResult> results;
-				std::string sServerState;
-				LocalityGroup unResponsiveSet;
-				double t = timer();
-				cycles++;
-
-				for(int t=0; t<logServers[log]->logServers.size(); t++) {
-					if (lockResults[log].replies[t].isReady() && !lockResults[log].replies[t].isError() && !logFailed[log][t]->get()) {
-						results.push_back(lockResults[log].replies[t].get());
-						availableItems.push_back(logServers[log]->tLogLocalities[t]);
-						sServerState += 'a';
-					}
-					else {
-						unResponsiveSet.add(logServers[log]->tLogLocalities[t]);
-						sServerState += 'f';
-					}
+				auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, lockResults[log], logFailed[log], lastEnd);
+				if(versions.present()) {
+					knownCommittedVersion = std::max(knownCommittedVersion, versions.get().first);
+					maxEnd = std::max(maxEnd, versions.get().second);
+					minEnd = std::min(minEnd, versions.get().second);
 				}
-
-				// Check if the list of results is not larger than the anti quorum
-				bool bTooManyFailures = (results.size() <= logServers[log]->tLogWriteAntiQuorum);
-
-				// Check if failed logs complete the policy
-				bTooManyFailures = bTooManyFailures || ((unResponsiveSet.size() >= logServers[log]->tLogReplicationFactor)	&& (unResponsiveSet.validate(logServers[log]->tLogPolicy)));
-
-				// Check all combinations of the AntiQuorum within the failed
-				if ((!bTooManyFailures) && (logServers[log]->tLogWriteAntiQuorum) && (!validateAllCombinations(badCombo, unResponsiveSet, logServers[log]->tLogPolicy, availableItems, logServers[log]->tLogWriteAntiQuorum, false))) {
-					TraceEvent("EpochEndBadCombo", dbgid).detail("Cycles", cycles)
-						.detail("logNum", log)
-						.detail("Required", requiredCount)
-						.detail("Present", results.size())
-						.detail("Available", availableItems.size())
-						.detail("Absent", logServers[log]->logServers.size() - results.size())
-						.detail("ServerState", sServerState)
-						.detail("ReplicationFactor", logServers[log]->tLogReplicationFactor)
-						.detail("AntiQuorum", logServers[log]->tLogWriteAntiQuorum)
-						.detail("Policy", logServers[log]->tLogPolicy->info())
-						.detail("TooManyFailures", bTooManyFailures)
-						.detail("LogZones", ::describeZones(logServers[log]->tLogLocalities))
-						.detail("LogDataHalls", ::describeDataHalls(logServers[log]->tLogLocalities));
-					bTooManyFailures = true;
-				}
-
-				// If too many TLogs are failed for recovery to be possible, we could wait forever here.
-				//Void _ = wait( smartQuorum( tLogReply, requiredCount, SERVER_KNOBS->RECOVERY_TLOG_SMART_QUORUM_DELAY ) || rejoins );
-
-				ASSERT(logServers[log]->logServers.size() == lockResults[log].replies.size());
-				if (!bTooManyFailures) {
-					std::sort( results.begin(), results.end(), sort_by_end() );
-					int absent = logServers[log]->logServers.size() - results.size();
-					int safe_range_begin = logServers[log]->tLogWriteAntiQuorum;
-					int new_safe_range_begin = std::min(logServers[log]->tLogWriteAntiQuorum, (int)(results.size()-1));
-					int safe_range_end = logServers[log]->tLogReplicationFactor - absent;
-
-					if( ( prevState.logSystemType == 2 && (!last_end.present() || ((safe_range_end > 0) && (safe_range_end-1 < results.size()) && results[ safe_range_end-1 ].end < last_end.get())) ) ) {
-						knownCommittedVersion = std::max(knownCommittedVersion, results[ new_safe_range_begin ].end - (g_network->isSimulated() ? 10*SERVER_KNOBS->VERSIONS_PER_SECOND : SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)); //In simulation this must be the maximum MAX_READ_TRANSACTION_LIFE_VERSIONS
-						for(int i = 0; i < results.size(); i++) {
-							knownCommittedVersion = std::max(knownCommittedVersion, results[i].knownCommittedVersion);
-						}
-
-						TraceEvent("LogSystemRecovery", dbgid).detail("Cycles", cycles)
-							.detail("logNum", log)
-							.detail("TotalServers", logServers[log]->logServers.size())
-							.detail("Required", requiredCount)
-							.detail("Present", results.size())
-							.detail("Available", availableItems.size())
-							.detail("Absent", logServers[log]->logServers.size() - results.size())
-							.detail("ServerState", sServerState)
-							.detail("ReplicationFactor", logServers[log]->tLogReplicationFactor)
-							.detail("AntiQuorum", logServers[log]->tLogWriteAntiQuorum)
-							.detail("Policy", logServers[log]->tLogPolicy->info())
-							.detail("TooManyFailures", bTooManyFailures)
-							.detail("LastVersion", (last_end.present()) ? last_end.get() : -1L)
-							.detail("RecoveryVersion", ((safe_range_end > 0) && (safe_range_end-1 < results.size())) ? results[ safe_range_end-1 ].end : -1)
-							.detail("EndVersion", results[ new_safe_range_begin ].end)
-							.detail("SafeBegin", safe_range_begin)
-							.detail("SafeEnd", safe_range_end)
-							.detail("NewSafeBegin", new_safe_range_begin)
-							.detail("LogZones", ::describeZones(logServers[log]->tLogLocalities))
-							.detail("LogDataHalls", ::describeDataHalls(logServers[log]->tLogLocalities))
-							.detail("tLogs", (int)prevState.tLogs.size())
-							.detail("oldTlogsSize", (int)prevState.oldTLogData.size())
-							.detail("logSystemType", prevState.logSystemType)
-							.detail("knownCommittedVersion", knownCommittedVersion);
-
-						if( !end.present() || results[ new_safe_range_begin ].end < end.get() ) {
-							end = results[ new_safe_range_begin ].end;
-						}
-					}
-					else {
-						TraceEvent("LogSystemUnchangedRecovery", dbgid).detail("Cycles", cycles)
-							.detail("logNum", log)
-							.detail("TotalServers", logServers[log]->logServers.size())
-							.detail("Required", requiredCount)
-							.detail("Present", results.size())
-							.detail("Available", availableItems.size())
-							.detail("ServerState", sServerState)
-							.detail("ReplicationFactor", logServers[log]->tLogReplicationFactor)
-							.detail("AntiQuorum", logServers[log]->tLogWriteAntiQuorum)
-							.detail("Policy", logServers[log]->tLogPolicy->info())
-							.detail("TooManyFailures", bTooManyFailures)
-							.detail("LastVersion", (last_end.present()) ? last_end.get() : -1L)
-							.detail("RecoveryVersion", ((safe_range_end > 0) && (safe_range_end-1 < results.size())) ? results[ safe_range_end-1 ].end : -1)
-							.detail("EndVersion", results[ new_safe_range_begin ].end)
-							.detail("SafeBegin", safe_range_begin)
-							.detail("SafeEnd", safe_range_end)
-							.detail("NewSafeBegin", new_safe_range_begin)
-							.detail("LogZones", ::describeZones(logServers[log]->tLogLocalities))
-							.detail("LogDataHalls", ::describeDataHalls(logServers[log]->tLogLocalities))
-							.detail("logSystemType", prevState.logSystemType);
-					}
-				}
-				// Too many failures
-				else {
-					TraceEvent("LogSystemWaitingForRecovery", dbgid).detail("Cycles", cycles)
-						.detail("logNum", log)
-						.detail("AvailableServers", results.size())
-						.detail("RequiredServers", requiredCount)
-						.detail("TotalServers", logServers[log]->logServers.size())
-						.detail("Required", requiredCount)
-						.detail("Present", results.size())
-						.detail("Available", availableItems.size())
-						.detail("ServerState", sServerState)
-						.detail("ReplicationFactor", logServers[log]->tLogReplicationFactor)
-						.detail("AntiQuorum", logServers[log]->tLogWriteAntiQuorum)
-						.detail("Policy", logServers[log]->tLogPolicy->info())
-						.detail("TooManyFailures", bTooManyFailures)
-						.detail("LogZones", ::describeZones(logServers[log]->tLogLocalities))
-						.detail("LogDataHalls", ::describeDataHalls(logServers[log]->tLogLocalities));
-				}
+				changes.push_back(TagPartitionedLogSystem::getDurableVersionChanged(lockResults[log], logFailed[log]));
 			}
 
-			if(end.present()) {
-				TEST( last_end.present() );  // Restarting recovery at an earlier point
+			if(maxEnd > 0 && (!lastEnd.present() || maxEnd < lastEnd.get())) {
+				TEST( lastEnd.present() );  // Restarting recovery at an earlier point
 
 				Reference<TagPartitionedLogSystem> logSystem( new TagPartitionedLogSystem(dbgid, locality) );
 
-				last_end = end;
+				lastEnd = minEnd;
 				logSystem->tLogs = logServers;
 				logSystem->logRouterTags = prevState.logRouterTags;
 				logSystem->oldLogData = oldLogData;
 				logSystem->logSystemType = prevState.logSystemType;
 				logSystem->rejoins = rejoins;
 				logSystem->lockResults = lockResults;
-				logSystem->epochEndVersion = end.get();
+				logSystem->epochEndVersion = minEnd;
 				logSystem->knownCommittedVersion = knownCommittedVersion;
 				logSystem->remoteLogsWrittenToCoreState = true;
 
 				outLogSystem->set(logSystem);
 			}
 
-			// Wait for anything relevant to change
-			std::vector<Future<Void>> changes;
-			for(int i=0; i < logServers.size(); i++) {
-				if(logServers[i]->isLocal) {
-					for(int j=0; j < logServers[i]->logServers.size(); j++) {
-						if (!lockResults[i].replies[j].isReady())
-							changes.push_back( ready(lockResults[i].replies[j]) );
-						else {
-							changes.push_back( logServers[i]->logServers[j]->onChange() );
-							changes.push_back( logFailed[i][j]->onChange() );
-						}
-					}
-				}
-			}
-			ASSERT(changes.size());
-			Void _ = wait(waitForAny(changes));
+			Void _ = wait( waitForAny(changes) );
 		}
 	}
 
@@ -1613,8 +1467,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		state int lockNum = 0;
 		while(lockNum < oldLogSystem->lockResults.size()) {
 			if(oldLogSystem->lockResults[lockNum].logSet->locality == remoteLocality) {
-				std::pair<Version,Version> versions = wait(TagPartitionedLogSystem::getDurableVersion(self->dbgid, oldLogSystem->lockResults[lockNum]));
-				logSet->startVersion = std::min(versions.first, logSet->startVersion);
+				loop {
+					auto versions = TagPartitionedLogSystem::getDurableVersion(self->dbgid, oldLogSystem->lockResults[lockNum]);
+					if(versions.present()) {
+						logSet->startVersion = std::min(std::min(versions.get().first+1, oldLogSystem->lockResults[lockNum].epochEnd), logSet->startVersion);
+						break;
+					}
+					Void _ = wait( TagPartitionedLogSystem::getDurableVersionChanged(oldLogSystem->lockResults[lockNum]) );
+				}
 				break;
 			}
 			lockNum++;
@@ -1746,8 +1606,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				if(oldLogSystem->lockResults[lockNum].isCurrent && oldLogSystem->lockResults[lockNum].logSet->isLocal) {
 					break;
 				}
-				std::pair<Version,Version> versions = wait(TagPartitionedLogSystem::getDurableVersion(logSystem->dbgid, oldLogSystem->lockResults[lockNum]));
-				logSystem->tLogs[0]->startVersion = std::min(versions.first, logSystem->tLogs[0]->startVersion);
+				loop {
+					auto versions = TagPartitionedLogSystem::getDurableVersion(logSystem->dbgid, oldLogSystem->lockResults[lockNum]);
+					if(versions.present()) {
+						logSystem->tLogs[0]->startVersion = std::min(std::min(versions.get().first+1, oldLogSystem->lockResults[lockNum].epochEnd), logSystem->tLogs[0]->startVersion);
+						break;
+					}
+					Void _ = wait( TagPartitionedLogSystem::getDurableVersionChanged(oldLogSystem->lockResults[lockNum]) );
+				}
 				break;
 			}
 			lockNum++;
