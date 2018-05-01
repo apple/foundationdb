@@ -269,7 +269,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, BackupToDBUpgradeWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "BackupToDBUpgradeStart");
 		state Standalone<VectorRef<KeyRangeRef>> prevBackupRanges;
 		state UID logUid;
 

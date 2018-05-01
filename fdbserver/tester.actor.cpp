@@ -997,24 +997,6 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 	return result;
 }
 
-ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
-	Void _ = wait( delay(time) );
-
-	if(g_network->isSimulated()) {
-		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
-		g_simulator.hasRemoteReplication = false;
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "remote_none" ) );
-		if (g_network->isSimulated() && g_simulator.extraDB) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
-			Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
-			ConfigurationResult::Type _ = wait(changeConfig(extraDB, "remote_none"));
-		}
-	}
-
-	return Void();
-}
-
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
 	state Standalone<StringRef> database = LiteralStringRef("DB");
 	state Database cx;
@@ -1079,10 +1061,6 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 				TraceEvent("QuietDatabaseStartExternalError").error(e);
 			throw;
 		}
-	}
-
-	if (useDB) {
-		state Future<Void> reconfig = reconfigureAfter(cx, 300 + (g_random->random01()*300));
 	}
 
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
