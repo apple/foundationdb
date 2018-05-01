@@ -65,6 +65,10 @@ func (dp directoryPartition) FDBRangeKeySelectors() (fdb.Selectable, fdb.Selecta
 	panic("cannot get range for the root of a directory partition")
 }
 
+func (dp directoryPartition) PrefixRange(t tuple.Tuple) (fdb.KeyRange, error) {
+	panic("cannot get range for the root of a directory partition")
+}
+
 func (dp directoryPartition) GetLayer() []byte {
 	return []byte("partition")
 }

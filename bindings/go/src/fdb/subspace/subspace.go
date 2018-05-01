@@ -35,6 +35,7 @@ package subspace
 import (
 	"bytes"
 	"errors"
+
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
@@ -62,6 +63,11 @@ type Subspace interface {
 	// Contains returns true if the provided key starts with the prefix of this
 	// Subspace, indicating that the Subspace logically contains the key.
 	Contains(k fdb.KeyConvertible) bool
+
+	// PrefixRange returns the KeyRange describing the range of keys k such that
+	// bytes.HasPrefix(k, prefix) is true. PrefixRange returns an error if prefix
+	// is empty or entirely 0xFF bytes.
+	PrefixRange(t tuple.Tuple) (fdb.KeyRange, error)
 
 	// All Subspaces implement fdb.KeyConvertible and may be used as
 	// FoundationDB keys (corresponding to the prefix of this Subspace).
@@ -131,6 +137,19 @@ func (s subspace) FDBRangeKeys() (fdb.KeyConvertible, fdb.KeyConvertible) {
 func (s subspace) FDBRangeKeySelectors() (fdb.Selectable, fdb.Selectable) {
 	begin, end := s.FDBRangeKeys()
 	return fdb.FirstGreaterOrEqual(begin), fdb.FirstGreaterOrEqual(end)
+}
+
+func (s subspace) PrefixRange(t tuple.Tuple) (fdb.KeyRange, error) {
+	prefix := s.Pack(t)
+	// delete last 0x00 byte
+	prefix = prefix[:len(prefix)-1]
+
+	r, e := fdb.PrefixRange(prefix)
+	if e != nil {
+		return fdb.KeyRange{}, e
+	}
+
+	return r, nil
 }
 
 func concat(a []byte, b ...byte) []byte {
