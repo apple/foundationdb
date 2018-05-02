@@ -467,7 +467,7 @@ public:
 		newestDirtyVersion.insert(allKeys, invalidVersion);
 		addShard( ShardInfo::newNotAssigned( allKeys ) );
 
-		cx = openDBOnServer(db, TaskDefaultEndpoint, false, true);
+		cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
 	}
 	//~StorageServer() { fclose(log); }
 
