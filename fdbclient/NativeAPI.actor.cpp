@@ -124,6 +124,10 @@ std::string printable( const StringRef& val ) {
 	return val.printable();
 }
 
+std::string printable( const std::string& str ) {
+	return StringRef(str).printable();
+}
+
 std::string printable( const Optional<StringRef>& val ) {
 	if( val.present() )
 		return printable( val.get() );
