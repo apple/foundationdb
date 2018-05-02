@@ -1,0 +1,16 @@
+find_package(Curses)
+include(FindPackageHandleStandardArgs)
+
+if(CURSES_FOUND)
+  find_path(Editline_INCLUDE_DIR editline/readline.h)
+  find_library(Editline_LIBRARY edit)
+  find_package_handle_standard_args(
+    Editline DEFAULT_MSG Editline_LIBRARY Editline_INCLUDE_DIR)
+  if(Editline_FOUND)
+    set(Editline_LIBRARIES ${Editline_LIBRARY} ${CURSES_LIBRARIES})
+    set(Editline_INCLUDE_DIRS ${Editline_INCLUDE_DIR} ${CURSES_INCLUDE_DIRS})
+    mark_as_advanced(Editline_INCLUDE_DIR Editline_LIBRARY)
+  endif()
+else()
+  set(Editline_FOUND False)
+endif()
