@@ -17,26 +17,45 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#pragma once
 
-#ifndef POST_ACTOR_COMPILER
+#include <boost/preprocessor.hpp>
+#define FLOW_ACOMPILER_STATE 0
+#define FLOW_EMPTY_STR
 
-#include "flow.h"
+class Void {
+public:
+	template <class Ar>
+	void serialize(Ar&) {}
+};
 
-// These are for intellisense to do proper type inferring, etc. They are no included at build time.
+class Never {};
+
+// These are for intellisense to do proper type inferring, etc. They are no
+// included at build time.
 #ifndef NO_INTELLISENSE
-#define ACTOR
-#define DESCR
-#define state
-#define UNCANCELLABLE
-#define choose if(1)
-#define when(x) for(x;;)
-template <class T> T wait( const Future<T>& );
-template <class T> T waitNext( const FutureStream<T>& );
+#define ACTOR BOOST_PP_IF(FLOW_ACOMPILER_STATE, FLOW_EMPTY_STR, ACTOR)
+#define state BOOST_PP_IF(FLOW_ACOMPILER_STATE, FLOW_EMPTY_STR, state)
+#define UNCANCELLABLE BOOST_PP_IF(FLOW_ACOMPILER_STATE, FLOW_EMPTY_STR, UNCANCELLABLE)
+#define FLOW_CHOOSE if (1)
+#define FLOW_WHEN(...) for (__VA_ARGS__;;)
+#define choose BOOST_PP_IF(FLOW_ACOMPILER_STATE, FLOW_EMPTY_STR, FLOW_CHOSE)
+#define when(...) BOOST_PP_IF(FLOW_ACOMPILER_STATE, FLOW_WHEN(__VA_ARGS__), when(__VA_ARGS__))
+Void wait(const Never&);
+template <class T>
+typename T::type wait(const T&);
+template <class T>
+typename T::type waitNext(const T&);
+#define COMBINE1(x, y) x##y
+#define COMBINE(x, y) COMBINE1(x, y)
+#define _uvar COMBINE(uniqueVar, __COUNTER__)
+#else
+#define _uvar _
 #endif
 
-#endif
-
+#define FLOW_LOOP while (true)
+#undef loop
+#define loop BOOST_PP_IF(FLOW_ACOMPILER_STATE, FLOW_LOOP, loop)
 #include "flow.h"
-#define loop while(true)
 
-#pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
+#pragma warning(disable : 4355) // 'this' : used in base member initializer list

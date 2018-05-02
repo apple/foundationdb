@@ -32,6 +32,9 @@
 #include <memcheck.h>
 #endif
 
+#undef FLOW_ACOMPILER_STATE
+#define FLOW_ACOMPILER_STATE 1
+
 static NetworkAddress g_currentDeliveryPeerAddress;
 
 const UID WLTOKEN_ENDPOINT_NOT_FOUND(-1, 0);

@@ -20,12 +20,13 @@
 
 #pragma once
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
 #if defined(NO_INTELLISENSE) && !defined(FLOW_GENERICACTORS_ACTOR_G_H)
-	#define FLOW_GENERICACTORS_ACTOR_G_H
-	#include "genericactors.actor.g.h"
+#define FLOW_GENERICACTORS_ACTOR_G_H
+#include "flow/genericactors.actor.g.h"
 #elif !defined(GENERICACTORS_ACTOR_H)
-	#define GENERICACTORS_ACTOR_H
+#define GENERICACTORS_ACTOR_H
 
 #include <list>
 

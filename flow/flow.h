@@ -37,6 +37,7 @@
 #include <utility>
 #include <algorithm>
 
+#include "actorcompiler.h"
 #include "Platform.h"
 #include "FastAlloc.h"
 #include "IRandom.h"
@@ -97,14 +98,6 @@ Standalone<StringRef> concatenate( Iter b, Iter const& e ) {
 	((StringRef &)r) = concatenate(b, e, r.arena());
 	return r;
 }
-
-class Void {
-public:
-	template <class Ar>
-	void serialize(Ar&) {}
-};
-
-class Never {};
 
 template <class T>
 class Optional {
