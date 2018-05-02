@@ -155,8 +155,8 @@ public:
 			return waitAndCommit(this, sequential);
 
 		if(!disableSnapshot && replaceContent && !firstCommitWithSnapshot) {
-			transactionSize += 100000;
-			committedWriteBytes += 100000;
+			transactionSize += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
+			committedWriteBytes += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
 			semiCommit();
 		}
 

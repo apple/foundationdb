@@ -1216,7 +1216,7 @@ ACTOR Future<Void> tLogCommit(
 	return Void();
 }
 
-ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logData, std::vector<Tag> recoveredTags ) {
+ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logData, std::vector<Tag> allTags ) {
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	IKeyValueStore *storage = self->persistentData;
 	storage->set( persistFormat );
@@ -1226,9 +1226,8 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistLogRouterTagsKeys.begin), BinaryWriter::toValue(logData->logRouterTags, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistRecoveryCountKeys.begin), BinaryWriter::toValue(logData->recoveryCount, Unversioned()) ) );
 
-	for(auto tag : recoveredTags) {
+	for(auto tag : allTags) {
 		ASSERT(!logData->getTagData(tag));
-		TraceEvent("TLogCreateUnpopped", logData->logId).detail("tags", logData->unpoppedRecoveredTags).detail("tag", tag.toString());
 		logData->createTagData(tag, 0, true, true, true);
 		updatePersistentPopped( self, logData, logData->getTagData(tag) );
 	}
