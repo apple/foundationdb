@@ -21,6 +21,7 @@
 
 #include "Trace.h"
 #include "flow.h"
+#include "fdbclient/FDBTypes.h"
 #include "DeterministicRandom.h"
 #include <stdlib.h>
 #include <stdarg.h>
@@ -105,6 +106,7 @@ struct SuppressionMap {
 
 	// Returns -1 if this event is suppressed
 	int64_t checkAndInsertSuppression(std::string type, double duration) {
+		ASSERT(g_network);
 		if(suppressionMap.size() >= FLOW_KNOBS->MAX_TRACE_SUPPRESSIONS) {
 			TraceEvent(SevWarnAlways, "ClearingTraceSuppressionMap");
 			suppressionMap.clear();
@@ -135,8 +137,80 @@ SuppressionMap suppressedEvents;
 static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 
+struct XmlTraceLogFormatter : public TraceLogFormatter {
+	const char* getExtension() {
+		return "xml";
+	}
+
+	const char* getHeader() {
+		return "<?xml version=\"1.0\"?>\r\n<Trace>\r\n";
+	}
+
+	const char* getFooter() {
+		return "</Trace>\r\n";
+	}
+
+	std::string escape(std::string source) {
+		std::string result;
+		int offset = 0;
+		loop {
+			int index = source.find_first_of(std::string({'&', '"', '<', '>', '\r', '\n', '\0'}), offset);
+			if(index == source.npos) {
+				break;
+			}
+
+			result += source.substr(offset, index-offset);
+			if(source[index] == '&') {
+				result += "&amp;";
+			}
+			else if(source[index] == '"') {
+				result += "&quot;";
+			}
+			else if(source[index] == '<') {
+				result += "&lt;";
+			}
+			else if(source[index] == '>') {
+				result += "&gt;";
+			}
+			else if(source[index] == '\n' || source[index] == '\r') {
+				result += " ";
+			}
+			else if(source[index] == '\0') {
+				result += " ";
+				TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent").detail("Source", printable(source)).detail("Character", printable(source.substr(index, 1)));
+			}
+			else {
+				ASSERT(false);
+			}
+
+			offset = index+1;
+		}
+
+		if(offset == 0) {
+			return source;
+		}
+		else {
+			result += source.substr(offset);
+			return result;
+		}
+	}
+
+	std::string formatEvent(TraceEventFields fields) {
+		std::string event = "<Event ";
+
+		for(auto itr : fields) {
+			event += escape(itr.first) + "=\"" + escape(itr.second) + "\" ";
+		}
+
+		event += "/>\r\n";
+		return event;
+	}
+};
 
 struct TraceLog {
+
+private:
+	TraceLogFormatter *formatter = new XmlTraceLogFormatter(); // TODO: Memory handling
 	Standalone< VectorRef<StringRef> > buffer;
 	int file_length;
 	int buffer_length;
@@ -147,18 +221,20 @@ struct TraceLog {
 
 	std::string directory;
 	std::string processName;
-	NetworkAddress localAddress;
+	Optional<NetworkAddress> localAddress;
 
 	Reference<IThreadPool> writer;
 	uint64_t rollsize;
 	Mutex mutex;
 
-	bool logTraceEventMetrics;
 	EventMetricHandle<TraceEventNameID> SevErrorNames;
 	EventMetricHandle<TraceEventNameID> SevWarnAlwaysNames;
 	EventMetricHandle<TraceEventNameID> SevWarnNames;
 	EventMetricHandle<TraceEventNameID> SevInfoNames;
 	EventMetricHandle<TraceEventNameID> SevDebugNames;
+
+public:
+	bool logTraceEventMetrics;
 
 	void initMetrics()
 	{
@@ -202,16 +278,20 @@ struct TraceLog {
 	Reference<BarrierList> barriers;
 
 	struct WriterThread : IThreadPoolReceiver {
-		WriterThread( std::string directory, std::string processName, uint32_t maxLogsSize, std::string basename, Reference<BarrierList> barriers ) : directory(directory), processName(processName), maxLogsSize(maxLogsSize), basename(basename), traceFileFD(0), index(0), barriers(barriers) {}
+		WriterThread( std::string directory, std::string processName, uint32_t maxLogsSize, std::string basename, std::string logGroup, Optional<NetworkAddress> localAddress, Reference<BarrierList> barriers, TraceLogFormatter *formatter ) 
+			: directory(directory), processName(processName), maxLogsSize(maxLogsSize), basename(basename), logGroup(logGroup), localAddress(localAddress), traceFileFD(0), index(0), barriers(barriers), formatter(formatter) {}
 
 		virtual void init() {}
 
+		TraceLogFormatter *formatter;
 		Reference<BarrierList> barriers;
 		int traceFileFD;
 		std::string directory;
 		std::string processName;
 		int maxLogsSize;
 		std::string basename;
+		std::string logGroup;
+		Optional<NetworkAddress> localAddress;
 		int index;
 
 		void lastError(int err) {
@@ -251,18 +331,14 @@ struct TraceLog {
 			virtual double getTimeEstimate() { return 0; }
 		};
 		void action( Open& o ) {
-			if (traceFileFD) {
-				writeReliable("</Trace>");
-				while ( __close(traceFileFD) ) threadSleep(0.1);
-			}
-
+			close();
 			cleanupTraceFiles();
 
-			auto finalname = format("%s.%d.xml", basename.c_str(), ++index);
+			auto finalname = format("%s.%d.%s", basename.c_str(), ++index, formatter->getExtension());
 			while ( (traceFileFD = __open( finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE )) == -1 ) {
 				lastError(errno);
 				if (errno == EEXIST)
-					finalname = format("%s.%d.xml", basename.c_str(), ++index);
+					finalname = format("%s.%d.%s", basename.c_str(), ++index, formatter->getExtension());
 				else {
 					fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
 
@@ -279,7 +355,21 @@ struct TraceLog {
 			onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, NULL);
 			lastError(0);
 
-			writeReliable( "<?xml version=\"1.0\"?>\r\n<Trace>\r\n" );
+			writeReliable(formatter->getHeader());
+		}
+
+		struct Close : TypedAction<WriterThread,Close> {
+			virtual double getTimeEstimate() { return 0; }
+		};
+		void action( Close& c ) {
+			close();
+		}
+
+		void close() {
+			if (traceFileFD) {
+				writeReliable(formatter->getFooter());
+				while ( __close(traceFileFD) ) threadSleep(0.1);
+			}
 		}
 
 		struct Barrier : TypedAction<WriterThread, Barrier> {
@@ -297,8 +387,9 @@ struct TraceLog {
 		};
 		void action( WriteBuffer& a ) {
 			if ( traceFileFD ) {
-				for ( auto i = a.buffer.begin(); i != a.buffer.end(); ++i )
-					writeReliable( i->begin(), i->size() );
+				for ( auto i = a.buffer.begin(); i != a.buffer.end(); ++i ) {
+					writeReliable(i->begin(), i->size());
+				}
 
 				if(FLOW_KNOBS->TRACE_FSYNC_ENABLED) {
 					__fsync( traceFileFD );
@@ -343,7 +434,7 @@ struct TraceLog {
 
 	bool isOpen() const { return opened; }
 
-	void open( std::string const& directory, std::string const& processName, std::string const& timestamp, uint64_t rs, uint64_t maxLogsSize, NetworkAddress na ) {
+	void open( std::string const& directory, std::string const& processName, std::string logGroup, std::string const& timestamp, uint64_t rs, uint64_t maxLogsSize, Optional<NetworkAddress> na ) {
 		ASSERT( !writer && !opened );
 
 		this->directory = directory;
@@ -356,12 +447,24 @@ struct TraceLog {
 			writer = Reference<IThreadPool>(new DummyThreadPool());
 		else
 			writer = createGenericThreadPool();
-		writer->addThread( new WriterThread(directory, processName, maxLogsSize, basename, barriers) );
+		writer->addThread( new WriterThread(directory, processName, maxLogsSize, basename, logGroup, localAddress, barriers, formatter) );
 
 		rollsize = rs;
 
 		auto a = new WriterThread::Open;
 		writer->post(a);
+
+		MutexHolder holder(mutex);
+		if(g_network->isSimulated()) {
+			// We don't support early trace logs in simulation.
+			// This is because we don't know if we're being simulated prior to the network being created, which causes two ambiguities:
+			//
+			// 1. We need to employ two different methods to determine the time of an event prior to the network starting for real-world and simulated runs.
+			// 2. Simulated runs manually insert the Machine field at TraceEvent creation time. Real-world runs add this field at write time.
+			//
+			// Without the ability to resolve the ambiguity, we've chosen to always favor the real-world approach and not support such events in simulation.
+			buffer = Standalone<VectorRef<StringRef>>();
+		}
 
 		opened = true;
 		if(preopenOverflowCount > 0) {
@@ -399,16 +502,34 @@ struct TraceLog {
 		return compareTraceFileName(f2, f1);
 	}
 
-	void write( const void* data, int length ) {
+	void writeEvent( TraceEventFields fields, std::string trackLatestKey, bool trackError ) {
+		fields.addField("logGroup", logGroup);
+		if(localAddress.present()) {
+			fields.addField("Machine", format("%d.%d.%d.%d:%d", (localAddress.get().ip>>24)&0xff, (localAddress.get().ip>>16)&0xff, (localAddress.get().ip>>8)&0xff, localAddress.get().ip&0xff, localAddress.get().port));
+		}
+
+		if(!trackLatestKey.empty()) {
+			fields.addField("TrackLatestType", "Original");
+		}
+
+		std::string eventStr = formatter->formatEvent(fields);
+
 		MutexHolder hold(mutex);
-		if(!isOpen() && (preopenOverflowCount > 0 || buffer_length + length > FLOW_KNOBS->TRACE_LOG_MAX_PREOPEN_BUFFER)) {
+		if(!isOpen() && (preopenOverflowCount > 0 || buffer_length + eventStr.size() > FLOW_KNOBS->TRACE_LOG_MAX_PREOPEN_BUFFER)) {
 			++preopenOverflowCount;
 			return;
 		}
 
 		// FIXME: What if we are using way too much memory for buffer?
-		buffer.push_back_deep( buffer.arena(), StringRef((const uint8_t*)data,length) );
-		buffer_length += length;
+		buffer.push_back_deep( buffer.arena(), StringRef((const uint8_t*)eventStr.c_str(), eventStr.size()) );
+		buffer_length += eventStr.size();
+
+		if(trackError) {
+			latestEventCache.setLatestError(fields);
+		}
+		if(!trackLatestKey.empty()) {
+			latestEventCache.set(trackLatestKey, fields);
+		}
 	}
 
 	void log(int severity, const char *name, UID id, uint64_t event_ts)
@@ -452,16 +573,24 @@ struct TraceLog {
 		writer->post( a );
 
 		if (roll) {
-			std::vector<std::string> events = latestEventCache.getAllUnsafe();
+			std::vector<TraceEventFields> events = latestEventCache.getAllUnsafe();
 			for (int idx = 0; idx < events.size(); idx++) {
 				if(events[idx].size() > 0) {
-					int timeIndex = events[idx].find(" Time=");
-					ASSERT(timeIndex != events[idx].npos);
+					TraceEventFields rolledFields = events[idx];
 
-					double time = g_trace_clock == TRACE_CLOCK_NOW ? now() : timer();
-					std::string rolledEvent = format("%s Time=\"%.6f\" Original%s", events[idx].substr(0, timeIndex).c_str(), time, events[idx].substr(timeIndex+1).c_str());
+					// TODO: do this better
+					std::string originalTime;
+					for(int i = 0; i < rolledFields.size(); ++i) {
+						if(rolledFields[i].first == "Time") {
+							rolledFields.addField("OriginalTime", rolledFields[i].second);
+							rolledFields.replaceValue(i, format("%.6f", (g_trace_clock == TRACE_CLOCK_NOW) ? now() : timer()));
+						}
+						else if(rolledFields[i].first == "TrackLatestType") {
+							rolledFields.replaceValue(i, "Rolled");
+						}
+					}
 
-					buffer.push_back_deep( buffer.arena(), StringRef(rolledEvent) );
+					buffer.push_back_deep( buffer.arena(), StringRef(formatter->formatEvent(rolledFields)) );
 				}
 			}
 
@@ -479,14 +608,23 @@ struct TraceLog {
 
 	void close() {
 		if (opened) {
-			auto s = LiteralStringRef( "</Trace>\r\n" );
-			write( s.begin(), s.size() );
+			MutexHolder hold(mutex);
 
-			auto f = flush();
+			// Write remaining contents
+			auto a = new WriterThread::WriteBuffer( std::move(buffer) );
+			file_length += buffer_length;
+			buffer = Standalone<VectorRef<StringRef>>();
+			buffer_length = 0;
+			writer->post( a );
 
-			// If we are using a writer thread, try to wait for it to finish its work queue before killing it
-			// If it's encountering errors, we'll get past here without it actually finishing
-			if (writer) f.getBlocking();
+			auto c = new WriterThread::Close();
+			writer->post( c );
+
+			ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
+			barriers->push(f);
+			writer->post( new WriterThread::Barrier );
+
+			f.getBlocking();
 
 			opened = false;
 		}
@@ -494,7 +632,7 @@ struct TraceLog {
 
 	~TraceLog() {
 		close();
-		if (writer) writer->addref(); // FIXME: We are not shutting down the writer thread at all, because the ThreadPool shutdown mechanism is blocking (necessarily waits for current work items to finish) and we might not be able to finish everything.  Also we (already) weren't closing the file on shutdown anyway.
+		if (writer) writer->addref(); // FIXME: We are not shutting down the writer thread at all, because the ThreadPool shutdown mechanism is blocking (necessarily waits for current work items to finish) and we might not be able to finish everything.
 	}
 };
 
@@ -507,7 +645,7 @@ NetworkAddress getAddressIndex() {
 }
 
 // This does not check for simulation, and as such is not safe for external callers
-void clearPrefix_internal( std::map<std::string, std::string>& data, std::string prefix ) {
+void clearPrefix_internal( std::map<std::string, TraceEventFields>& data, std::string prefix ) {
 	auto first = data.lower_bound( prefix );
 	auto last = data.lower_bound( strinc( prefix ).toString() );
 	data.erase( first, last );
@@ -521,29 +659,29 @@ void LatestEventCache::clear() {
 	latest[getAddressIndex()].clear();
 }
 
-void LatestEventCache::set( std::string tag, std::string contents ) {
+void LatestEventCache::set( std::string tag, TraceEventFields contents ) {
 	latest[getAddressIndex()][tag] = contents;
 }
 
-std::string LatestEventCache::get( std::string tag ) {
+TraceEventFields LatestEventCache::get( std::string tag ) {
 	return latest[getAddressIndex()][tag];
 }
 
-std::vector<std::string> allEvents( std::map<std::string, std::string> const& data ) {
-	std::vector<std::string> all;
+std::vector<TraceEventFields> allEvents( std::map<std::string, TraceEventFields> const& data ) {
+	std::vector<TraceEventFields> all;
 	for(auto it = data.begin(); it != data.end(); it++) {
 		all.push_back( it->second );
 	}
 	return all;
 }
 
-std::vector<std::string> LatestEventCache::getAll() {
+std::vector<TraceEventFields> LatestEventCache::getAll() {
 	return allEvents( latest[getAddressIndex()] );
 }
 
 // if in simulation, all events from all machines will be returned
-std::vector<std::string> LatestEventCache::getAllUnsafe() {
-	std::vector<std::string> all;
+std::vector<TraceEventFields> LatestEventCache::getAllUnsafe() {
+	std::vector<TraceEventFields> all;
 	for(auto it = latest.begin(); it != latest.end(); ++it) {
 		auto m = allEvents( it->second );
 		all.insert( all.end(), m.begin(), m.end() );
@@ -551,13 +689,13 @@ std::vector<std::string> LatestEventCache::getAllUnsafe() {
 	return all;
 }
 
-void LatestEventCache::setLatestError( std::string contents ) {
+void LatestEventCache::setLatestError( TraceEventFields contents ) {
 	if(TraceEvent::isNetworkThread()) { // The latest event cache doesn't track errors that happen on other threads
 		latestErrors[getAddressIndex()] = contents;
 	}
 }
 
-std::string LatestEventCache::getLatestError() {
+TraceEventFields LatestEventCache::getLatestError() {
 	return latestErrors[getAddressIndex()];
 }
 
@@ -588,8 +726,7 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 		baseOfBase = "trace";
 
 	std::string baseName = format("%s.%03d.%03d.%03d.%03d.%d", baseOfBase.c_str(), (na.ip>>24)&0xff, (na.ip>>16)&0xff, (na.ip>>8)&0xff, na.ip&0xff, na.port);
-	g_traceLog.logGroup = logGroup;
-	g_traceLog.open( directory, baseName, format("%lld", time(NULL)), rollsize, maxLogsSize, na );
+	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
 	// FIXME
 	suppress.insert( LiteralStringRef( "TLogCommitDurable" ) );
@@ -684,25 +821,32 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 	this->type = type;
 	this->severity = severity;
 	tmpEventMetric = new DynamicEventMetric(MetricNameRef());
-	tmpEventMetric->setField("Severity", (int64_t)severity);
 
 	length = 0;
 	if (isEnabled(type, severity)) {
 		enabled = true;
-		buffer[sizeof(buffer)-1]=0;
-		NetworkAddress local = (g_network && g_network->isSimulated()) ? g_network->getLocalAddress() : g_traceLog.localAddress;
 
 		double time;
 		if(g_trace_clock == TRACE_CLOCK_NOW) {
-			time = g_network ? now() : 0;
+			if(!g_network) {
+				static double preNetworkTime = timer_monotonic();
+				time = preNetworkTime;
+			}
+			else {
+				time = now();
+			}
 		}
 		else {
 			time = timer();
 		}
 
-		writef( "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\"",
-			(int)severity, time, type,
-			(local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port );
+		detail("Severity", severity);
+		detailf("Time", "%.6f", time);
+		detail("Type", type);
+		if(g_network && g_network->isSimulated()) {
+			NetworkAddress local = g_network->getLocalAddress();
+			detailf("Machine", "%d.%d.%d.%d:%d", (local.ip>>24)&0xff, (local.ip>>16)&0xff, (local.ip>>8)&0xff, local.ip&0xff, local.port);
+		}
 	} else
 		enabled = false;
 
@@ -727,72 +871,67 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 	return *this;
 }
 
-TraceEvent& TraceEvent::detail( const char* key, const char* value ) {
+TraceEvent& TraceEvent::detail( std::string key, std::string value ) {
 	if (enabled) {
-		if( strlen( value ) > 495 ) {
-			char replacement[500];
-			strncpy( replacement, value, 495 );
-			strcpy( &replacement[495], "\\..." );
-			value = replacement;
+		if( value.size() > 495 ) {
+			value = value.substr(0, 495) + "...";
 		}
-		writef( " %s=\"", key );
-		writeEscaped( value );
-		writef( "\"" );
-		tmpEventMetric->setField(key, Standalone<StringRef>(StringRef((const uint8_t *)value, strlen(value))));
+
+		fields.addField(key, value);
+		length += key.size() + value.size();
+		// TODO: Overflow? buffer was first 300 bytes. TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", buffer);
+		tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
 	}
 	return *this;
 }
-TraceEvent& TraceEvent::detail( const char* key, const std::string& value ) {
-	return detail( key, value.c_str() );
-}
-TraceEvent& TraceEvent::detail( const char* key, double value ) {
+TraceEvent& TraceEvent::detail( std::string key, double value ) {
 	if(enabled)
-		tmpEventMetric->setField(key, value);
-	return _detailf( key, "%g", value );
+		tmpEventMetric->setField(key.c_str(), value);
+	return detailf_no_metric( key, "%g", value );
 }
-TraceEvent& TraceEvent::detail( const char* key, int value ) {
+TraceEvent& TraceEvent::detail( std::string key, int value ) {
 	if(enabled)
-		tmpEventMetric->setField(key, (int64_t)value);
-	return _detailf( key, "%d", value );
+		tmpEventMetric->setField(key.c_str(), (int64_t)value);
+	return detailf_no_metric( key, "%d", value );
 }
-TraceEvent& TraceEvent::detail( const char* key, unsigned value ) {
+TraceEvent& TraceEvent::detail( std::string key, unsigned value ) {
 	if(enabled)
-		tmpEventMetric->setField(key, (int64_t)value);
-	return _detailf( key, "%u", value );
+		tmpEventMetric->setField(key.c_str(), (int64_t)value);
+	return detailf_no_metric( key, "%u", value );
 }
-TraceEvent& TraceEvent::detail( const char* key, long int value ) {
+TraceEvent& TraceEvent::detail( std::string key, long int value ) {
 	if(enabled)
-		tmpEventMetric->setField(key, (int64_t)value);
-	return _detailf( key, "%ld", value );
+		tmpEventMetric->setField(key.c_str(), (int64_t)value);
+	return detailf_no_metric( key, "%ld", value );
 }
-TraceEvent& TraceEvent::detail( const char* key, long unsigned int value ) {
+TraceEvent& TraceEvent::detail( std::string key, long unsigned int value ) {
 	if(enabled)
-		tmpEventMetric->setField(key, (int64_t)value);
-	return _detailf( key, "%lu", value );
+		tmpEventMetric->setField(key.c_str(), (int64_t)value);
+	return detailf_no_metric( key, "%lu", value );
 }
-TraceEvent& TraceEvent::detail( const char* key, long long int value ) {
+TraceEvent& TraceEvent::detail( std::string key, long long int value ) {
 	if(enabled)
-		tmpEventMetric->setField(key, (int64_t)value);
-	return _detailf( key, "%lld", value );
+		tmpEventMetric->setField(key.c_str(), (int64_t)value);
+	return detailf_no_metric( key, "%lld", value );
 }
-TraceEvent& TraceEvent::detail( const char* key, long long unsigned int value ) {
+TraceEvent& TraceEvent::detail( std::string key, long long unsigned int value ) {
 	if(enabled)
-		tmpEventMetric->setField(key, (int64_t)value);
-	return _detailf( key, "%llu", value );
+		tmpEventMetric->setField(key.c_str(), (int64_t)value);
+	return detailf_no_metric( key, "%llu", value );
 }
-TraceEvent& TraceEvent::detail( const char* key, NetworkAddress const& value ) {
+TraceEvent& TraceEvent::detail( std::string key, NetworkAddress const& value ) {
 	return detail( key, value.toString() );
 }
-TraceEvent& TraceEvent::detail( const char* key, UID const& value ) {
+TraceEvent& TraceEvent::detail( std::string key, UID const& value ) {
 	return detailf( key, "%016llx", value.first() );  // SOMEDAY: Log entire value?  We also do this explicitly in some "lists" in various individual TraceEvent calls
 }
-TraceEvent& TraceEvent::detailext(const char* key, StringRef const& value) {
+TraceEvent& TraceEvent::detailext( std::string key, StringRef const& value ) {
 	return detail(key, value.printable());
 }
-TraceEvent& TraceEvent::detailext(const char* key, Optional<Standalone<StringRef>> const& value) {
+TraceEvent& TraceEvent::detailext( std::string key, Optional<Standalone<StringRef>> const& value ) {
 	return detail(key, (value.present()) ? value.get().printable() : "[not set]");
 }
-TraceEvent& TraceEvent::detailf( const char* key, const char* valueFormat, ... ) {
+TraceEvent& TraceEvent::detailf( std::string key, const char* valueFormat, ... ) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
@@ -801,31 +940,21 @@ TraceEvent& TraceEvent::detailf( const char* key, const char* valueFormat, ... )
 	}
 	return *this;
 }
-TraceEvent& TraceEvent::_detailf( const char* key, const char* valueFormat, ... ) {
+TraceEvent& TraceEvent::detailf_no_metric( std::string key, const char* valueFormat, ... ) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
-		detailfv( key, valueFormat, args, false); // Do NOT write this detail to the event metric, caller of _detailf should do that itself with the appropriate value type
+		detailfv( key, valueFormat, args, false); // Do NOT write this detail to the event metric, caller of detailf_no_metric should do that itself with the appropriate value type
 		va_end(args);
 	}
 	return *this;
 }
-TraceEvent& TraceEvent::detailfv( const char* key, const char* valueFormat, va_list args, bool writeEventMetricField ) {
+TraceEvent& TraceEvent::detailfv( std::string key, const char* valueFormat, va_list args, bool writeEventMetricField ) {
 	if (enabled) {
-		writef( " %s=\"", key );
-		va_list args2;
-		va_copy(args2, args);
-		writeEscapedfv( valueFormat, args );
-		writef( "\"" );
-		if(writeEventMetricField)
-		{
-			// TODO: It would be better to make use of the formatted string created in writeEscapedfv above
-			char temp[ 1024 ];
-			size_t n = vsnprintf(temp, sizeof(temp)-1, valueFormat, args2);
-			if(n > sizeof(temp) - 1)
-				n = sizeof(temp) - 1;
-			temp[n] = 0;
-			tmpEventMetric->setField(key, Standalone<StringRef>(StringRef((uint8_t *)temp, n)));
+		std::string value = formatv(valueFormat, args); // TODO: exceptions?
+		fields.addField(key, value);
+		if(writeEventMetricField) {
+			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
 		}
 	}
 	return *this;
@@ -895,7 +1024,7 @@ TraceEvent::~TraceEvent() {
 	try {
 		if (enabled) {
 			// TRACE_EVENT_THROTTLER
-			if (severity > SevDebug && isNetworkThread()) {
+			if (g_network && severity > SevDebug && isNetworkThread()) {
 				if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t *)type, strlen(type)))) {
 					TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
 					// Throttle Msg
@@ -907,28 +1036,14 @@ TraceEvent::~TraceEvent() {
 				}
 			} // End of Throttler
 
-			_detailf("logGroup", "%.*s", g_traceLog.logGroup.size(), g_traceLog.logGroup.data());
-			if (!trackingKey.empty()) {
-				if(!isNetworkThread()) {
-					TraceEvent(SevError, "TrackLatestFromNonNetworkThread");
-					detail("__InvalidTrackLatest__", ""); // Choosing a detail name that is unlikely to collide with other names
-				}
-				else {
-					latestEventCache.set( trackingKey, std::string(buffer, length) + " TrackLatestType=\"Rolled\"/>\r\n" );
-				}
-
-				detail("TrackLatestType", "Original");
-			}
-
 			if (this->severity == SevError) {
 				severity = SevInfo;
 				backtrace();
 				severity = SevError;
 			}
 
-			writef("/>\r\n");
 			TraceEvent::eventCounts[severity/10]++;
-			g_traceLog.write( buffer, length );
+			g_traceLog.writeEvent( fields, trackingKey, severity > SevWarnAlways );
 
 			if (g_traceLog.isOpen()) {
 				// Log Metrics
@@ -942,9 +1057,6 @@ TraceEvent::~TraceEvent() {
 					g_traceLog.log(severity, type, id, event_ts);
 				}
 			}
-			if (severity > SevWarnAlways) {
-				latestEventCache.setLatestError( std::string(buffer, length) + " latestError=\"1\"/>\r\n" );
-			}
 		}
 	} catch( Error &e ) {
 		TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
@@ -952,62 +1064,6 @@ TraceEvent::~TraceEvent() {
 		throw;
 	}
 	delete tmpEventMetric;
-}
-
-void TraceEvent::write( int length, const void* bytes ) {
-	if (!(this->length + length <= sizeof(buffer))) {
-		buffer[300] = 0;
-		TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", buffer);
-		enabled = false;
-	} else {
-		memcpy( buffer + this->length, bytes, length );
-		this->length += length;
-	}
-}
-
-void TraceEvent::writef( const char* format, ... ) {
-	va_list args;
-	va_start( args, format );
-	int size = sizeof(buffer)-1-length;
-	int i = size<0 ? -1 : vsnprintf( buffer + length, size, format, args );
-	if( i < 0 || i >= size ) {  // first block catches truncations on windows, second on linux
-		buffer[300] = 0;
-		TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", buffer);
-		enabled = false;
-	} else {
-		length += i;
-	}
-	va_end(args);
-}
-
-void TraceEvent::writeEscaped( const char* data ) {
-	while (*data) {
-		if (*data == '&') {
-			write( 5, "&amp;" );
-			data++;
-		} else if (*data == '"') {
-			write( 6, "&quot;" );
-			data++;
-		} else if (*data == '<') {
-			write( 4, "&lt;" );
-			data++;
-		} else if (*data == '>') {
-			write( 4, "&gt;" );
-			data++;
-		} else {
-			const char* e = data;
-			while (*e && *e != '"' && *e != '&' && *e != '<' && *e != '>') e++;
-			write( e-data, data );
-			data = e;
-		}
-	}
-}
-
-void TraceEvent::writeEscapedfv( const char* format, va_list args ) {
-	char temp[ 1024 ];
-	vsnprintf(temp, sizeof(temp)-1, format, args);
-	temp[sizeof(temp)-1] = 0;
-	writeEscaped( temp );
 }
 
 thread_local bool TraceEvent::networkThread = false;
@@ -1052,34 +1108,122 @@ void TraceBatch::addBuggify( int activated, int line, std::string file ) {
 void TraceBatch::dump() {
 	if (!g_traceLog.isOpen())
 		return;
-	NetworkAddress local = g_network->getLocalAddress();
+	std::string machine;
+	if(g_network->isSimulated()) {
+		NetworkAddress local = g_network->getLocalAddress();
+		machine = format("%d.%d.%d.%d:%d", (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port);
+	}
 
 	for(int i = 0; i < attachBatch.size(); i++) {
-		char buffer[256];
-		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" ID=\"%016" PRIx64 "\" To=\"%016" PRIx64 "\"/>\r\n",
-			(int)SevInfo, attachBatch[i].time, attachBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
-			attachBatch[i].id, attachBatch[i].to);
-		g_traceLog.write( buffer, length );
+		if(g_network->isSimulated()) {
+			attachBatch[i].fields.addField("Machine", machine);
+		}
+		g_traceLog.writeEvent(attachBatch[i].fields, "", false);
 	}
 
 	for(int i = 0; i < eventBatch.size(); i++) {
-		char buffer[256];
-		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" ID=\"%016" PRIx64 "\" Location=\"%s\"/>\r\n",
-			(int)SevInfo, eventBatch[i].time, eventBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
-			eventBatch[i].id, eventBatch[i].location );
-		g_traceLog.write( buffer, length );
+		if(g_network->isSimulated()) {
+			eventBatch[i].fields.addField("Machine", machine);
+		}
+		g_traceLog.writeEvent(eventBatch[i].fields, "", false);
 	}
 
 	for(int i = 0; i < buggifyBatch.size(); i++) {
-		char buffer[256];
-		int length = sprintf( buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"BuggifySection\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" Activated=\"%d\" File=\"%s\" Line=\"%d\"/>\r\n",
-			(int)SevInfo, buggifyBatch[i].time, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
-			buggifyBatch[i].activated, buggifyBatch[i].file.c_str(), buggifyBatch[i].line );
-		g_traceLog.write( buffer, length );
+		if(g_network->isSimulated()) {
+			buggifyBatch[i].fields.addField("Machine", machine);
+		}
+		g_traceLog.writeEvent(buggifyBatch[i].fields, "", false);
 	}
 
 	g_traceLog.flush();
 	eventBatch.clear();
 	attachBatch.clear();
 	buggifyBatch.clear();
+}
+
+TraceBatch::EventInfo::EventInfo(double time, const char *name, uint64_t id, const char *location) {
+	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Time", format("%.6f", time));
+	fields.addField("Type", name);
+	fields.addField("ID", format("%016" PRIx64, id));
+	fields.addField("Location", location);
+}
+
+TraceBatch::AttachInfo::AttachInfo(double time, const char *name, uint64_t id, uint64_t to) {
+	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Time", format("%.6f", time));
+	fields.addField("Type", name);
+	fields.addField("ID", format("%016" PRIx64, id));
+	fields.addField("To", format("%016" PRIx64, to));
+}
+
+TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::string file) {
+	fields.addField("Severity", format("%d", (int)SevInfo));
+	fields.addField("Time", format("%.6f", time));
+	fields.addField("Type", "BuggifySection");
+	fields.addField("Activated", format("%d", activated));
+	fields.addField("File", file);
+	fields.addField("Line", format("%d", line));
+}
+
+void TraceEventFields::addField(std::string key, std::string value) {
+	fields.push_back(std::make_pair(key, value));
+}
+
+size_t TraceEventFields::size() const {
+	return fields.size();
+}
+
+TraceEventFields::FieldIterator TraceEventFields::begin() const {
+	return fields.cbegin();
+}
+
+TraceEventFields::FieldIterator TraceEventFields::end() const {
+	return fields.cend();
+}
+
+const TraceEventFields::Field &TraceEventFields::operator[] (int index) const {
+	ASSERT(index >= 0 && index < size());
+	return fields.at(index);
+}
+
+void TraceEventFields::replaceValue(int index, std::string value) {
+	ASSERT(index >= 0 && index < size());
+	fields[index].second = value;
+}
+
+bool TraceEventFields::tryGetValue(std::string key, std::string &outValue) const {
+	for(auto itr = begin(); itr != end(); ++itr) {
+		if(itr->first == key) {
+			outValue = itr->second;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+std::string TraceEventFields::getValue(std::string key) const {
+	std::string value;
+	if(tryGetValue(key, value)) {
+		return value;
+	}
+	else {
+		throw attribute_not_found();
+	}
+}
+
+std::string TraceEventFields::toString() const {
+	std::string str;
+	bool first = true;
+	for(auto itr = begin(); itr != end(); ++itr) {
+		if(!first) {
+			str += ", ";
+		}
+		first = false;
+
+		str += format("\"%s\"=\"%s\"", itr->first.c_str(), itr->second.c_str());
+	}
+
+	return str;
 }

@@ -93,13 +93,14 @@ Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_un
 	return ret;
 }
 
-std::string format( const char* form, ... ) {
+// TODO: Is there a better way to implement format/formatv?
+std::string formatv( const char* form, va_list args) {
 	char buf[200];
-	va_list args;
 
-	va_start(args, form);
-	int size = vsnprintf(buf, sizeof(buf), form, args);
-	va_end(args);
+	va_list args2;
+	va_copy(args2, args);
+	int size = vsnprintf(buf, sizeof(buf), form, args2);
+	va_end(args2);
 
 	if(size >= 0 && size < sizeof(buf)) {
 		return std::string(buf, size);
@@ -107,9 +108,9 @@ std::string format( const char* form, ... ) {
 
 	#ifdef _WIN32
 	// Microsoft's non-standard vsnprintf doesn't return a correct size, but just an error, so determine the necessary size
-	va_start(args, form);
-	size = _vscprintf(form, args);
-	va_end(args);
+	va_copy(args2, args);
+	size = _vscprintf(form, args2);
+	va_end(args2);
 	#endif
 
 	if (size < 0) throw internal_error();
@@ -118,13 +119,29 @@ std::string format( const char* form, ... ) {
 
 	std::string s;
 	s.resize(size + 1);
-	va_start(args, form);
 	size = vsnprintf(&s[0], s.size(), form, args);
-	va_end(args);
 	if (size < 0 || size >= s.size()) throw internal_error();
 
 	s.resize(size);
 	return s;
+}
+
+std::string format( const char* form, ... ) {
+	va_list args;
+	va_start(args, form);
+
+	std::string result;
+	try {
+		result = formatv(form, args);
+	}
+	catch(Error &e) {
+		va_end(args);
+		throw;
+	}
+
+	va_end(args);
+
+	return result;
 }
 
 Standalone<StringRef> strinc(StringRef const& str) {

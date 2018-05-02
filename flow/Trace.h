@@ -52,6 +52,50 @@ enum Severity {
 	SevMax=1000000
 };
 
+class TraceEventFields {
+public:
+	typedef std::pair<std::string, std::string> Field;
+	typedef std::vector<Field> FieldContainer;
+	typedef FieldContainer::const_iterator FieldIterator;
+
+	size_t size() const;
+	FieldIterator begin() const;
+	FieldIterator end() const;
+
+	void addField(std::string key, std::string value);
+	void replaceValue(int index, std::string value);
+
+	const Field &operator[] (int index) const;
+	bool tryGetValue(std::string key, std::string &outValue) const;
+	std::string getValue(std::string key) const;
+
+	std::string toString() const;
+
+private:
+	FieldContainer fields;
+};
+
+template <class Archive>
+inline void load( Archive& ar, TraceEventFields& value ) {
+	uint32_t count;
+	ar >> count;
+
+	std::string k;
+	std::string v;
+	for(uint32_t i = 0; i < count; ++i) {
+		ar >> k >> v;
+		value.addField(k, v);
+	}
+}
+template <class Archive>
+inline void save( Archive& ar, const TraceEventFields& value ) {
+	ar << (uint32_t)value.size();
+
+	for(auto itr : value) {
+		ar << itr.first << itr.second;
+	}
+}
+
 class TraceBatch {
 public:
 	void addEvent( const char *name, uint64_t id, const char *location );
@@ -61,30 +105,18 @@ public:
 
 private:
 	struct EventInfo {
-		double time;
-		const char *name;
-		uint64_t id;
-		const char *location;
-
-		EventInfo(double time, const char *name, uint64_t id, const char *location) : time(time), name(name), id(id), location(location) {}
+		TraceEventFields fields;
+		EventInfo(double time, const char *name, uint64_t id, const char *location); 
 	};
 
 	struct AttachInfo {
-		double time;
-		const char *name;
-		uint64_t id;
-		uint64_t to;
-
-		AttachInfo(double time, const char *name, uint64_t id, uint64_t to) : time(time), name(name), id(id), to(to) {}
+		TraceEventFields fields;
+		AttachInfo(double time, const char *name, uint64_t id, uint64_t to);
 	};
 
 	struct BuggifyInfo {
-		double time;
-		int activated;
-		int line;
-		std::string file;
-
-		BuggifyInfo(double time, int activated, int line, std::string file) : time(time), activated(activated), line(line), file(file) {}
+		TraceEventFields fields;
+		BuggifyInfo(double time, int activated, int line, std::string file);
 	};
 
 	std::vector<EventInfo> eventBatch;
@@ -114,26 +146,25 @@ struct TraceEvent {
 
 	TraceEvent& error(class Error const& e, bool includeCancelled=false);
 
-	TraceEvent& detail( const char* key, const char* value );
-	TraceEvent& detail( const char* key, const std::string& value );
-	TraceEvent& detail( const char* key, double value );
-	TraceEvent& detail( const char* key, long int value );
-	TraceEvent& detail( const char* key, long unsigned int value );
-	TraceEvent& detail( const char* key, long long int value );
-	TraceEvent& detail( const char* key, long long unsigned int value );
-	TraceEvent& detail( const char* key, int value );
-	TraceEvent& detail( const char* key, unsigned value );
-	TraceEvent& detail( const char* key, struct NetworkAddress const& value );
-	TraceEvent& detailf( const char* key, const char* valueFormat, ... );
-	TraceEvent& detailext(const char* key, StringRef const& value);
-	TraceEvent& detailext(const char* key, Optional<Standalone<StringRef>> const& value);
+	TraceEvent& detail( std::string key, std::string value );
+	TraceEvent& detail( std::string key, double value );
+	TraceEvent& detail( std::string key, long int value );
+	TraceEvent& detail( std::string key, long unsigned int value );
+	TraceEvent& detail( std::string key, long long int value );
+	TraceEvent& detail( std::string key, long long unsigned int value );
+	TraceEvent& detail( std::string key, int value );
+	TraceEvent& detail( std::string key, unsigned value );
+	TraceEvent& detail( std::string key, struct NetworkAddress const& value );
+	TraceEvent& detailf( std::string key, const char* valueFormat, ... );
+	TraceEvent& detailext( std::string key, StringRef const& value );
+	TraceEvent& detailext( std::string key, Optional<Standalone<StringRef>> const& value );
 private:
-	// Private version of _detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
+	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
 	// which can write field metrics of a more appropriate type than string but use detailf() to add to the TraceEvent.
-	TraceEvent& _detailf( const char* key, const char* valueFormat, ... );
+	TraceEvent& detailf_no_metric( std::string key, const char* valueFormat, ... );
 public:
-	TraceEvent& detailfv( const char* key, const char* valueFormat, va_list args, bool writeEventMetricField);
-	TraceEvent& detail( const char* key, UID const& value );
+	TraceEvent& detailfv( std::string key, const char* valueFormat, va_list args, bool writeEventMetricField );
+	TraceEvent& detail( std::string key, UID const& value );
 	TraceEvent& backtrace(std::string prefix = "");
 	TraceEvent& trackLatest( const char* trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
@@ -151,7 +182,7 @@ public:
 private:
 	bool enabled;
 	std::string trackingKey;
-	char buffer[4000];
+	TraceEventFields fields;
 	int length;
 	Severity severity;
 	const char *type;
@@ -180,27 +211,33 @@ struct TraceEvent {
 
 	TraceEvent& error(class Error const& e, bool includeCancelled = false) { return *this; }
 
-	TraceEvent& detail(const char* key, const char* value) { return *this; }
-	TraceEvent& detail(const char* key, const std::string& value) { return *this; }
-	TraceEvent& detail(const char* key, double value) { return *this; }
-	TraceEvent& detail(const char* key, long int value) { return *this; }
-	TraceEvent& detail(const char* key, long unsigned int value) { return *this; }
-	TraceEvent& detail(const char* key, long long int value) { return *this; }
-	TraceEvent& detail(const char* key, long long unsigned int value) { return *this; }
-	TraceEvent& detail(const char* key, int value) { return *this; }
-	TraceEvent& detail(const char* key, unsigned value) { return *this; }
-	TraceEvent& detail(const char* key, struct NetworkAddress const& value) { return *this; }
-	TraceEvent& detailf(const char* key, const char* valueFormat, ...) { return *this; }
-	TraceEvent& detailfv(const char* key, const char* valueFormat, va_list args) { return *this; }
-	TraceEvent& detail(const char* key, UID const& value) { return *this; }
-	TraceEvent& detailext(const char* key, StringRef const& value) { return *this; }
-	TraceEvent& detailext(const char* key, Optional<Standalone<StringRef>> const& value); { return *this; }
+	TraceEvent& detail(std::string key, std::string value) { return *this; }
+	TraceEvent& detail(std::string key, double value) { return *this; }
+	TraceEvent& detail(std::string key, long int value) { return *this; }
+	TraceEvent& detail(std::string key, long unsigned int value) { return *this; }
+	TraceEvent& detail(std::string key, long long int value) { return *this; }
+	TraceEvent& detail(std::string key, long long unsigned int value) { return *this; }
+	TraceEvent& detail(std::string key, int value) { return *this; }
+	TraceEvent& detail(std::string key, unsigned value) { return *this; }
+	TraceEvent& detail(std::string key, struct NetworkAddress const& value) { return *this; }
+	TraceEvent& detailf(std::string key, const char* valueFormat, ...) { return *this; }
+	TraceEvent& detailfv(std::string key, const char* valueFormat, va_list args) { return *this; }
+	TraceEvent& detail(std::string key, UID const& value) { return *this; }
+	TraceEvent& detailext(std::string key, StringRef const& value) { return *this; }
+	TraceEvent& detailext(std::string key, Optional<Standalone<StringRef>> const& value); { return *this; }
 	TraceEvent& backtrace(std::string prefix = "") { return *this; }
 	TraceEvent& trackLatest(const char* trackingKey) { return *this; }
 
 	TraceEvent& GetLastError() { return *this; }
 };
 #endif
+
+struct TraceLogFormatter {
+	virtual const char* getExtension() = 0;
+	virtual const char* getHeader() = 0; // Called when starting a new file
+	virtual const char* getFooter() = 0; // Called when ending a file
+	virtual std::string formatEvent(TraceEventFields) = 0; // Called for each event
+};
 
 struct TraceInterval {
 	TraceInterval( const char* type ) : count(-1), type(type), severity(SevInfo) {}
@@ -216,20 +253,20 @@ struct TraceInterval {
 
 struct LatestEventCache {
 public:
-	void set( std::string tag, std::string contents );
-	std::string get( std::string tag );
-	std::vector<std::string> getAll();
-	std::vector<std::string> getAllUnsafe();
+	void set( std::string tag, TraceEventFields fields );
+	TraceEventFields get( std::string tag );
+	std::vector<TraceEventFields> getAll();
+	std::vector<TraceEventFields> getAllUnsafe();
 
 	void clear( std::string prefix );
 	void clear();
 
 	// Latest error tracking only tracks errors when called from the main thread. Other errors are silently ignored.
-	void setLatestError( std::string contents );
-	std::string getLatestError();
+	void setLatestError( TraceEventFields contents );
+	TraceEventFields getLatestError();
 private:
-	std::map<NetworkAddress, std::map<std::string, std::string>> latest;
-	std::map<NetworkAddress, std::string> latestErrors;
+	std::map<NetworkAddress, std::map<std::string, TraceEventFields>> latest;
+	std::map<NetworkAddress, TraceEventFields> latestErrors;
 };
 
 extern LatestEventCache latestEventCache;

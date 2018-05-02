@@ -68,6 +68,7 @@ bool validationIsEnabled();
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
 extern std::string format(const char* form, ...);
+extern std::string formatv(const char* form, va_list args);
 extern Standalone<StringRef> strinc(StringRef const& str);
 extern StringRef strinc(StringRef const& str, Arena& arena);
 

@@ -117,7 +117,7 @@ ERROR( read_version_already_set, 2010, "Transaction already has a read version s
 ERROR( version_invalid, 2011, "Version not valid" )
 ERROR( range_limits_invalid, 2012, "Range limits not valid" )
 ERROR( invalid_database_name, 2013, "Database name must be 'DB'" )
-ERROR( attribute_not_found, 2014, "Attribute not found in string" )
+ERROR( attribute_not_found, 2014, "Attribute not found" )
 ERROR( future_not_set, 2015, "Future not ready" )
 ERROR( future_not_error, 2016, "Future not an error" )
 ERROR( used_during_commit, 2017, "Operation issued while a commit was outstanding" )
