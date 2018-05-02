@@ -731,9 +731,9 @@ struct DDTeamCollection {
 				}
 
 				int bestSize = 0;
-				for( int i = 0; i < req.sources.size(); i++ ) {
-					if( self->server_info.count( req.sources[i] ) ) {
-						auto& teamList = self->server_info[ req.sources[i] ]->teams;
+				for( int i = 0; i < req.completeSources.size(); i++ ) {
+					if( self->server_info.count( req.completeSources[i] ) ) {
+						auto& teamList = self->server_info[ req.completeSources[i] ]->teams;
 						for( int j = 0; j < teamList.size(); j++ ) {
 							bool found = true;
 							for( int k = 0; k < teamList[j]->serverIDs.size(); k++ ) {
