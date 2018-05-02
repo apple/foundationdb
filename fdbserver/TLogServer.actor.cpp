@@ -1085,9 +1085,6 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 
 	ASSERT( ver > logData->queueCommittedVersion.get() );
 
-	logData->queueCommittedVersion.set(ver);
-	self->queueCommitEnd.set(commitNumber);
-
 	logData->durableKnownCommittedVersion = knownCommittedVersion;
 	if(logData->unpoppedRecoveredTags == 0 && knownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
 		TraceEvent("TLogRecoveryComplete", logData->logId).detail("tags", logData->unpoppedRecoveredTags).detail("durableKCVer", logData->durableKnownCommittedVersion).detail("recoveredAt", logData->recoveredAt);
@@ -1099,6 +1096,9 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 		logData->logRouterPoppedVersion = ver;
 		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
 	}
+
+	logData->queueCommittedVersion.set(ver);
+	self->queueCommitEnd.set(commitNumber);
 
 	return Void();
 }
