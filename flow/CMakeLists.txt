@@ -68,13 +68,11 @@ set(FLOW_SRCS
   stacktrace.amalgamation.cpp
   stacktrace.h)
 
-actor_set(FLOW_BUILD "${FLOW_SRCS};${FLOW_SRCS_ALLOW_ACTOR_WITHOUT_WAIT}")
+actor_set(FLOW_BUILD "${FLOW_SRCS}")
 add_library(flow STATIC ${FLOW_BUILD})
 actor_compile(flow "${FLOW_SRCS}")
-actor_compile(flow "${FLOW_SRCS_ALLOW_ACTOR_WITHOUT_WAIT}" DISABLE_ACTOR_WITHOUT_WAIT)
-#target_include_directories(flow PRIVATE libeio)
-target_include_directories(flow SYSTEM PUBLIC ${Boost_INCLUDE_DIRS} ${CMAKE_THREAD_LIBS_INIT})
-#set(FLOW_LIBS eio ${CMAKE_DL_LIBS})
+target_include_directories(flow SYSTEM PUBLIC ${CMAKE_THREAD_LIBS_INIT})
+target_include_directories(flow PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 if (NOT APPLE)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 endif()
