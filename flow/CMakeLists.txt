@@ -66,7 +66,10 @@ set(FLOW_SRCS
   network.h
   serialize.h
   stacktrace.amalgamation.cpp
-  stacktrace.h)
+  stacktrace.h
+  version.cpp)
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/hgVersion.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/hgVersion.h)
 
 actor_set(FLOW_BUILD "${FLOW_SRCS}")
 add_library(flow STATIC ${FLOW_BUILD})
@@ -77,4 +80,11 @@ if (NOT APPLE)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
-target_link_libraries(flow PUBLIC boost_system fmt)
+target_link_libraries(flow PUBLIC boost_system)
+
+if(APPLE)
+  find_library(IO_KIT IOKit)
+  find_library(CORE_FOUNDATION CoreFoundation)
+  target_link_libraries(flow PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
+endif()
+
