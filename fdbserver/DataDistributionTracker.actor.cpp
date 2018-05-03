@@ -26,6 +26,9 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/ActorCollection.h"
 
+#undef FLOW_ACOMPILER_STATE
+#define FLOW_ACOMPILER_STATE 1
+
 enum BandwidthStatus {
 	BandwidthStatusLow,
 	BandwidthStatusNormal,

@@ -26,6 +26,9 @@
 #include "workloads.h"
 #include "fdbclient/Atomic.h"
 
+#undef FLOW_ACOMPILER_STATE
+#define FLOW_ACOMPILER_STATE 1
+
 struct WriteDuringReadWorkload : TestWorkload {
 	double testDuration, slowModeStart;
 	int numOps;

@@ -57,6 +57,10 @@ set(FDBRPC_SRCS
   zlib/trees.c
   zlib/zutil.c)
 
+if(APPLE)
+  list(APPEND FDBRPC_SRCS libcoroutine/asm.S libcoroutine/context.c)
+endif()
+
 actor_set(FDBRPC_BUILD "${FDBRPC_SRCS}")
 add_library(fdbrpc STATIC ${FDBRPC_BUILD})
 actor_compile(fdbrpc "${FDBRPC_SRCS}")

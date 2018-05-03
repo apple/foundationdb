@@ -33,6 +33,9 @@
 #include "QuietDatabase.h"
 #include "RecoveryState.h"
 
+#undef FLOW_ACOMPILER_STATE
+#define FLOW_ACOMPILER_STATE 1
+
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
 	"configuration_missing", "configuration_never_created", "configuration_invalid",

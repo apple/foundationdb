@@ -156,6 +156,9 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
+#undef FLOW_ACOMPILER_STATE
+#define FLOW_ACOMPILER_STATE 1
+
 GlobalCounters g_counters;
 
 extern void dsltest();

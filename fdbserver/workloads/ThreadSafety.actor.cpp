@@ -28,6 +28,9 @@
 #include "fdbclient/MultiVersionTransaction.h"
 #include "workloads.h"
 
+#undef FLOW_ACOMPILER_STATE
+#define FLOW_ACOMPILER_STATE 1
+
 struct ThreadSafetyWorkload;
 
 // Parameters passed to each thread

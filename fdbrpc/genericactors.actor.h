@@ -22,12 +22,12 @@
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
 #if defined(NO_INTELLISENSE) && !defined(FDBRPC_GENERICACTORS_ACTOR_G_H)
 	#define FDBRPC_GENERICACTORS_ACTOR_G_H
-	#include "genericactors.actor.g.h"
+	#include "fdbrpc/genericactors.actor.g.h"
 #elif !defined(RPCGENERICACTORS_ACTOR_H)
 	#define RPCGENERICACTORS_ACTOR_H
 
 #include "flow/genericactors.actor.h"
-#include "fdbrpc.h"
+#include "fdbrpc/fdbrpc.h"
 
 ACTOR template <class Req>
 Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request ) {

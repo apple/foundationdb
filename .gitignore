@@ -79,3 +79,4 @@ ipch/
 .envrc
 .DS_Store
 temp/
+/compile_commands.json

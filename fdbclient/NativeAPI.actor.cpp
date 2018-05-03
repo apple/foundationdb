@@ -53,6 +53,9 @@
 #include "versions.h"
 #endif
 
+#undef FLOW_ACOMPILER_STATE
+#define FLOW_ACOMPILER_STATE 1
+
 extern IRandom* trace_random;
 extern const char* getHGVersion();
 

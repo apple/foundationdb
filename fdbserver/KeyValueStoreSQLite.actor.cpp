@@ -39,6 +39,9 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 	#define sqlite3_mutex_leave(x)
 #endif
 
+#undef FLOW_ACOMPILER_STATE
+#define FLOW_ACOMPILER_STATE 1
+
 void hexdump(FILE *fout, StringRef val);
 
 /*#undef state

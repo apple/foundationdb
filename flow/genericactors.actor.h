@@ -30,8 +30,8 @@
 
 #include <list>
 
-#include "actorcompiler.h"
-#include "Knobs.h"
+#include "flow/actorcompiler.h"
+#include "flow/Knobs.h"
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
 
 ACTOR template<class T, class X>

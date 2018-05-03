@@ -36,37 +36,6 @@ SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
 SET(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
 
 ################################################################################
-# GnuTLS Plugin
-################################################################################
-#set(WITH_GNUTLS ON CACHE BOOL "Install GnuTLS plugin")
-#if (WITH_GNUTLS)
-#  set(GnuTLS_PLUGIN "${CMAKE_CURRENT_SOURCE_DIR}/../gnutls-plugin/FDBGnuTLS.so")
-#  if (NOT EXISTS ${GnuTLS_PLUGIN})
-#	message(FATAL_ERROR "could not find the GnuTLS plugin - please build that one first")
-#  endif()
-#  install(FILES ${GnuTLS_PLUGIN} DESTINATION lib/foundationdb/plugins COMPONENT server)
-#endif()
-
-################################################################################
-# FDB-VERSION
-################################################################################
-
-set(FDB_RELEASE OFF CACHE BOOL "Whether the current build will be a delivered release")
-set(DEBUG_TASKS OFF CACHE BOOL "Debug task metrics")
-set(NDEBUG OFF CACHE BOOL "Not Debug mode (smaller code)")
-set(FDB_MAJOR 5)
-set(FDB_MINOR 1)
-set(FDB_REVISION 7)
-set(REL_SUFFIX "-PRERELEASE")
-
-if (FDB_RELEASE)
-  set(REL_SUFFIX "")
-endif()
-
-set(FDBVERSION "${FDB_MAJOR}.${FDB_MINOR}.${FDB_REVISION}${REL_SUFFIX}" CACHE STRING "FDB version string")
-set(FDBPACKAGE_NAME "${FDB_MAJOR}.${FDB_MINOR}" CACHE STRING "FDB version string")
-
-################################################################################
 # Packages used for bindings
 ################################################################################
 
@@ -92,6 +61,7 @@ set(USE_GOLD_LINKER OFF CACHE BOOL "Use gold linker")
 set(ALLOC_INSTRUMENTATION OFF CACHE BOOL "Instrument alloc")
 set(WITH_UNDODB OFF CACHE BOOL "Use rr or undodb")
 set(OPEN_FOR_IDE OFF CACHE BOOL "Open this in an IDE (won't compile/link)")
+set(FDB_RELEASE OFF CACHE BOOL "This is a building of a final release")
 
 if(USE_GOLD_LINKER)
   set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=gold -Wl,--disable-new-dtags")
@@ -167,6 +137,9 @@ if (CLANG)
     -Wno-comment
     -Wno-unknown-pragmas
     -Wno-delete-non-virtual-dtor
+    -Wno-undefined-var-template
+    -Wno-unused-value
+    -Wno-tautological-pointer-compare
     -Wno-format)
 endif()
 if (CMAKE_GENERATOR STREQUAL Xcode)
@@ -216,6 +189,27 @@ execute_process(
   OUTPUT_VARIABLE CURRENT_GIT_VERSION_WNL)
 string(STRIP "${CURRENT_GIT_VERSION_WNL}" CURRENT_GIT_VERSION)
 message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
+
+################################################################################
+# Version information
+################################################################################
+
+add_custom_target(version_file ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/versions.target)
+execute_process(
+  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/get_version.sh ${CMAKE_CURRENT_SOURCE_DIR}/versions.target
+  OUTPUT_VARIABLE FDB_VERSION_WNL)
+execute_process(
+  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/get_package_name.sh ${CMAKE_CURRENT_SOURCE_DIR}/versions.target
+  OUTPUT_VARIABLE FDB_PACKAGE_NAME_WNL)
+string(STRIP "${FDB_VERSION_WNL}" FDB_VERSION)
+string(STRIP "${FDB_PACKAGE_NAME_WNL}" FDB_PACKAGE_NAME)
+if(NOT FDB_RELEASE)
+  set(FDB_VERSION "${FDB_VERSION}-PRERELEASE")
+endif()
+message(STATUS "FDB version is ${FDB_VERSION}")
+message(STATUS "FDB package name is ${FDB_PACKAGE_NAME}")
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/versions.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdbclient/versions.h)
+
 
 ################################################################################
 # ACTOR COMPILER
@@ -270,8 +264,6 @@ set(VEXILLOGRAPHER_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/c.cs
   ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/cpp.cs
   ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/java.cs
-  ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/nodejs.cs
-  ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/php.cs
   ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/python.cs
   ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/ruby.cs
   ${CMAKE_CURRENT_SOURCE_DIR}/fdbclient/vexillographer/vexillographer.cs)
@@ -424,27 +416,26 @@ enable_testing()
 ################################################################################
 
 include(CompileBoost)
-include(CompileFMT)
 add_subdirectory(flow)
 add_subdirectory(fdbrpc)
-#add_subdirectory(fdbclient)
-#add_subdirectory(fdbserver)
+add_subdirectory(fdbclient)
+add_subdirectory(fdbserver)
 #add_subdirectory(fdbcli)
 #add_subdirectory(bindings)
 #add_subdirectory(fdbbackup)
 #add_subdirectory(fdbmonitor)
 
 ################################################################################
-# process compile commands for rtags
+# process compile commands for IDE
 ################################################################################
 
 if (CMAKE_EXPORT_COMPILE_COMMANDS)
   add_custom_command(
 	OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json
-	COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/gen_compile_db.py
+	COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py
 	ARGS -b ${CMAKE_CURRENT_BINARY_DIR} -s ${CMAKE_CURRENT_SOURCE_DIR} -o ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
-	COMMENT "Build compile commands for rtags"
+	DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/build/gen_compile_db.py ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json
+	COMMENT "Build compile commands for IDE"
 	)
   add_custom_target(procossed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 endif()
