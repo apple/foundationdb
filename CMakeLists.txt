@@ -420,10 +420,10 @@ add_subdirectory(flow)
 add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
-#add_subdirectory(fdbcli)
+add_subdirectory(fdbcli)
+add_subdirectory(fdbmonitor)
 #add_subdirectory(bindings)
-#add_subdirectory(fdbbackup)
-#add_subdirectory(fdbmonitor)
+add_subdirectory(fdbbackup)
 
 ################################################################################
 # process compile commands for IDE
