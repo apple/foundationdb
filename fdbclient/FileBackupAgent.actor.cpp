@@ -834,7 +834,8 @@ namespace fileBackup {
 		static StringRef name;
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state FileBackupAgent backupAgent;
-			state std::string tagName = task->params[BackupAgentBase::keyConfigBackupTag].toString();
+			state BackupConfig config(task);
+			state std::string tagName = wait(config.tag().getOrThrow(tr));
 
 			TEST(true);  // Canceling 5.1 backup task
 
