@@ -422,7 +422,7 @@ add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
 add_subdirectory(fdbcli)
 add_subdirectory(fdbmonitor)
-#add_subdirectory(bindings)
+add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
 
 ################################################################################
