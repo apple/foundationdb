@@ -149,8 +149,8 @@ FoundationDB includes a few modules that make it easy to model data using this a
 The :mod:`directory` module lets us open a :ref:`directory <developer-guide-directories>` in the database::
 
   schedulingDir, err := directory.CreateOrOpen(db, []string{"scheduling"}, nil)
-  if e != nil {
-    log.Fatal(e)
+  if err != nil {
+    log.Fatal(err)
   }
 
 The :func:`CreateOrOpen` function returns a :ref:`subspace <developer-guide-sub-keyspaces>` where we'll store our application data. Each subspace has a fixed prefix it uses when defining keys. The prefix corresponds to the first element of a tuple. We decided that we wanted ``"attends"`` and  ``"class"`` as our prefixes, so we'll create new subspaces for them within the ``scheduling`` subspace.::
