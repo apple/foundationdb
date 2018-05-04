@@ -354,8 +354,6 @@ public:
 	Promise<Void> coreStarted;
 	bool shuttingDown;
 
-	Smoother readReplyRate; //FIXME: very similar to counters.finishedQueries, new fast load balancing smoother
-
 	bool behind;
 
 	bool debug_inApplyUpdate;
@@ -420,8 +418,7 @@ public:
 			updateEagerReads(0),
 			shardChangeCounter(0),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
-			shuttingDown(false), readReplyRate(SERVER_KNOBS->STORAGE_LOGGING_DELAY / 2.0),
-			debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
+			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
 			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff"))
@@ -705,8 +702,6 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		m.iosPerKSecond = 1;
 		data->metrics.notify(req.key, m);
 		*/
-
-		data->readReplyRate.addDelta(1);
 
 		if (v.present()) {
 			++data->counters.rowsQueried;
@@ -1203,7 +1198,6 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 			none.penalty = data->getPenalty();
 
 			data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(req.begin.getKey(), req.end.getKey()), std::max<KeyRef>(req.begin.getKey(), req.end.getKey()) ) );
-			data->readReplyRate.addDelta(1);
 			req.reply.send( none );
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
@@ -1227,7 +1221,6 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 				m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
 				data->metrics.notify(r.data[i].key, m);
 			}*/
-			data->readReplyRate.addDelta(1);
 
 			r.penalty = data->getPenalty();
 			req.reply.send( r );
@@ -1265,7 +1258,6 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 		Key k = wait( findKey( data, req.sel, version, shard, &offset ) );
 
 		data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(req.sel.getKey(), k), std::max<KeyRef>(req.sel.getKey(), k) ) );
-		data->readReplyRate.addDelta(1);
 
 		KeySelector updated;
 		if (offset < 0)
@@ -1299,7 +1291,6 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	reply.instanceID = self->instanceID;
 	reply.bytesInput = self->counters.bytesInput.getValue();
 	reply.bytesDurable = self->counters.bytesDurable.getValue();
-	reply.readReplyRate = self->readReplyRate.smoothRate();
 
 	reply.storageBytes = self->storage.getStorageBytes();
 

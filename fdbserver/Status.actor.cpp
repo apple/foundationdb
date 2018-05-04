@@ -1328,9 +1328,13 @@ static std::set<StringRef> getTLogEligibleMachines(vector<std::pair<WorkerInterf
 	return tlogEligibleMachines;
 }
 
-ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, StatusObject *qos, StatusObject *data_overlay, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker, 
+	std::string dbName, StatusObject *qos, StatusObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, std::string>>>> storageServerFuture) 
+{
 	state StatusObject statusObj;
 	state StatusObject operationsObj;
+	state StatusObject bytesObj;
+	state StatusObject keysObj;
 
 	// Writes and conflicts
 	try {
@@ -1359,10 +1363,7 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 		}
 
 		operationsObj["writes"] = mutations;
-
-		StatusObject bytesObj;
 		bytesObj["written"] = mutationBytes;
-		statusObj["bytes"] = bytesObj;
 
 		StatusObject transactions;
 		transactions["conflicted"] = txnConflicts;
@@ -1377,12 +1378,11 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 		incomplete_reasons->insert("Unknown mutations, conflicts, and transactions state.");
 	}
 
-	// Transactions and reads
+	// Transactions
 	try {
 		Standalone<StringRef> md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(StringRef(dbName+"/RkUpdate") ) ), 1.0) );
 		double tpsLimit = parseDouble(extractAttribute(md, LiteralStringRef("TPSLimit")));
 		double transPerSec = parseDouble(extractAttribute(md, LiteralStringRef("ReleasedTPS")));
-		double readReplyRate = parseDouble(extractAttribute(md, LiteralStringRef("ReadReplyRate")));
 		int ssCount = parseInt(extractAttribute(md, LiteralStringRef("StorageServers")));
 		int tlogCount = parseInt(extractAttribute(md, LiteralStringRef("TLogs")));
 		int64_t worstFreeSpaceStorageServer = parseInt64(extractAttribute(md, LiteralStringRef("WorstFreeSpaceStorageServer")));
@@ -1393,11 +1393,6 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 		int64_t totalDiskUsageBytes = parseInt64(extractAttribute(md, LiteralStringRef("TotalDiskUsageBytes")));
 		int64_t worstVersionLag = parseInt64(extractAttribute(md, LiteralStringRef("WorstStorageServerVersionLag")));
 		int64_t limitingVersionLag = parseInt64(extractAttribute(md, LiteralStringRef("LimitingStorageServerVersionLag")));
-
-		StatusObject readsObj;
-		readsObj["hz"] = readReplyRate;
-		operationsObj["reads"] = readsObj;
-
 		(*data_overlay)["total_disk_used_bytes"] = totalDiskUsageBytes;
 
 		if(ssCount > 0) {
@@ -1438,9 +1433,41 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 	} catch (Error &e){
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		incomplete_reasons->insert("Unknown read and performance state.");
+		incomplete_reasons->insert("Unknown performance state.");
 	}
+
+	// Reads
+	try {
+		ErrorOr<vector<std::pair<StorageServerInterface, std::string>>> storageServers = wait(storageServerFuture);
+		if(!storageServers.present()) {
+			throw storageServers.getError();
+		}
+
+		StatusObject reads = makeCounter();
+		StatusObject readKeys = makeCounter();
+		StatusObject readBytes = makeCounter();
+
+		for(auto &ss : storageServers.get()) {
+			reads = addCounters(reads, parseCounter(extractAttribute(ss.second, LiteralStringRef("finishedQueries"))));
+			readKeys = addCounters(readKeys, parseCounter(extractAttribute(ss.second, LiteralStringRef("rowsQueried"))));
+			readBytes = addCounters(readBytes, parseCounter(extractAttribute(ss.second, LiteralStringRef("bytesQueried"))));
+		}
+
+		operationsObj["reads"] = reads;
+		keysObj["read"] = readKeys;
+		bytesObj["read"] = readBytes;
+
+	}
+	catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incomplete_reasons->insert("Unknown read state.");
+	}
+
+
 	statusObj["operations"] = operationsObj;
+	statusObj["keys"] = keysObj;
+	statusObj["bytes"] = bytesObj;
 
 	return statusObj;
 }
@@ -1791,13 +1818,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["latency_probe"] = latencyProbeResults;
 			}
 
-			state int minReplicasRemaining = -1;
-			std::vector<Future<StatusObject>> futures2;
-			futures2.push_back(dataStatusFetcher(mWorker, dbName, &minReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, dbName, &qos, &data_overlay, &status_incomplete_reasons));
-			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
-			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
-
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because having storage servers
 			// in status output is important to give context to error messages in status that reference a storage server role ID.
 			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
@@ -1805,6 +1825,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				address_workers[worker.first.address()] = worker.first;
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, std::string>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, std::string>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
+
+			state int minReplicasRemaining = -1;
+			std::vector<Future<StatusObject>> futures2;
+			futures2.push_back(dataStatusFetcher(mWorker, dbName, &minReplicasRemaining));
+			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, dbName, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
+			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 
 			state std::vector<StatusObject> workerStatuses = wait(getAll(futures2));
 
