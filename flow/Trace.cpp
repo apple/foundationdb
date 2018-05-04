@@ -871,7 +871,7 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 	return *this;
 }
 
-TraceEvent& TraceEvent::detail( std::string key, std::string value ) {
+TraceEvent& TraceEvent::detailImpl( std::string key, std::string value, bool writeEventMetricField) {
 	if (enabled) {
 		if( value.size() > 495 ) {
 			value = value.substr(0, 495) + "...";
@@ -880,82 +880,87 @@ TraceEvent& TraceEvent::detail( std::string key, std::string value ) {
 		fields.addField(key, value);
 		length += key.size() + value.size();
 		// TODO: Overflow? buffer was first 300 bytes. TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", buffer);
-		tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
+
+		if(writeEventMetricField) {
+			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
+		}
 	}
 	return *this;
+}
+
+TraceEvent& TraceEvent::detail( std::string key, std::string value ) {
+	return detailImpl(key, value);
 }
 TraceEvent& TraceEvent::detail( std::string key, double value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), value);
-	return detailf_no_metric( key, "%g", value );
+	return detailfNoMetric( key, "%g", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailf_no_metric( key, "%d", value );
+	return detailfNoMetric( key, "%d", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, unsigned value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailf_no_metric( key, "%u", value );
+	return detailfNoMetric( key, "%u", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailf_no_metric( key, "%ld", value );
+	return detailfNoMetric( key, "%ld", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long unsigned int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailf_no_metric( key, "%lu", value );
+	return detailfNoMetric( key, "%lu", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long long int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailf_no_metric( key, "%lld", value );
+	return detailfNoMetric( key, "%lld", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long long unsigned int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailf_no_metric( key, "%llu", value );
+	return detailfNoMetric( key, "%llu", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, NetworkAddress const& value ) {
-	return detail( key, value.toString() );
+	return detailImpl( key, value.toString() );
 }
 TraceEvent& TraceEvent::detail( std::string key, UID const& value ) {
 	return detailf( key, "%016llx", value.first() );  // SOMEDAY: Log entire value?  We also do this explicitly in some "lists" in various individual TraceEvent calls
 }
 TraceEvent& TraceEvent::detailext( std::string key, StringRef const& value ) {
-	return detail(key, value.printable());
+	return detailImpl(key, value.printable());
 }
 TraceEvent& TraceEvent::detailext( std::string key, Optional<Standalone<StringRef>> const& value ) {
-	return detail(key, (value.present()) ? value.get().printable() : "[not set]");
+	return detailImpl(key, (value.present()) ? value.get().printable() : "[not set]");
 }
 TraceEvent& TraceEvent::detailf( std::string key, const char* valueFormat, ... ) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
-		detailfv( key, valueFormat, args, true);  // Write this detail to eventMetric
+		std::string value;
+		int result = vsformat(value, valueFormat, args);
 		va_end(args);
+
+		ASSERT(result >= 0);
+		detailImpl(key, value);
 	}
 	return *this;
 }
-TraceEvent& TraceEvent::detailf_no_metric( std::string key, const char* valueFormat, ... ) {
+TraceEvent& TraceEvent::detailfNoMetric( std::string key, const char* valueFormat, ... ) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
-		detailfv( key, valueFormat, args, false); // Do NOT write this detail to the event metric, caller of detailf_no_metric should do that itself with the appropriate value type
+		std::string value;
+		int result = vsformat(value, valueFormat, args);
 		va_end(args);
-	}
-	return *this;
-}
-TraceEvent& TraceEvent::detailfv( std::string key, const char* valueFormat, va_list args, bool writeEventMetricField ) {
-	if (enabled) {
-		std::string value = formatv(valueFormat, args); // TODO: exceptions?
-		fields.addField(key, value);
-		if(writeEventMetricField) {
-			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
-		}
+
+		ASSERT(result >= 0);
+		detailImpl(key, value, false); // Do NOT write this detail to the event metric, caller of detailfNoMetric should do that itself with the appropriate value type
 	}
 	return *this;
 }

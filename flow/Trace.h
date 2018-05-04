@@ -129,7 +129,6 @@ class StringRef;
 template <class T> class Standalone;
 template <class T> class Optional;
 
-#if 1
 struct TraceEvent {
 	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
 	TraceEvent( Severity, const char* type, UID id = UID() );
@@ -161,9 +160,9 @@ struct TraceEvent {
 private:
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
 	// which can write field metrics of a more appropriate type than string but use detailf() to add to the TraceEvent.
-	TraceEvent& detailf_no_metric( std::string key, const char* valueFormat, ... );
+	TraceEvent& detailfNoMetric( std::string key, const char* valueFormat, ... );
+	TraceEvent& detailImpl( std::string key, std::string value, bool writeEventMetricField=true );
 public:
-	TraceEvent& detailfv( std::string key, const char* valueFormat, va_list args, bool writeEventMetricField );
 	TraceEvent& detail( std::string key, UID const& value );
 	TraceEvent& backtrace(std::string prefix = "");
 	TraceEvent& trackLatest( const char* trackingKey );
@@ -193,44 +192,7 @@ private:
 
 	bool init( Severity, const char* type );
 	bool init( Severity, struct TraceInterval& );
-
-	void write( int length, const void* data );
-	void writef( const char* format, ... );
-	void writeEscaped( const char* data );
-	void writeEscapedfv( const char* format, va_list args );
 };
-#else
-struct TraceEvent {
-	TraceEvent(const char* type, UID id = UID()) {}
-	TraceEvent(Severity, const char* type, UID id = UID()) {}
-	TraceEvent(struct TraceInterval&, UID id = UID()) {}
-	TraceEvent(const char* type, StringRef& const id); {}   // Assumes SevInfo severity
-	TraceEvent(Severity, const char* type, StringRef& const id); {}
-
-	static bool isEnabled(const char* type) { return false; }
-
-	TraceEvent& error(class Error const& e, bool includeCancelled = false) { return *this; }
-
-	TraceEvent& detail(std::string key, std::string value) { return *this; }
-	TraceEvent& detail(std::string key, double value) { return *this; }
-	TraceEvent& detail(std::string key, long int value) { return *this; }
-	TraceEvent& detail(std::string key, long unsigned int value) { return *this; }
-	TraceEvent& detail(std::string key, long long int value) { return *this; }
-	TraceEvent& detail(std::string key, long long unsigned int value) { return *this; }
-	TraceEvent& detail(std::string key, int value) { return *this; }
-	TraceEvent& detail(std::string key, unsigned value) { return *this; }
-	TraceEvent& detail(std::string key, struct NetworkAddress const& value) { return *this; }
-	TraceEvent& detailf(std::string key, const char* valueFormat, ...) { return *this; }
-	TraceEvent& detailfv(std::string key, const char* valueFormat, va_list args) { return *this; }
-	TraceEvent& detail(std::string key, UID const& value) { return *this; }
-	TraceEvent& detailext(std::string key, StringRef const& value) { return *this; }
-	TraceEvent& detailext(std::string key, Optional<Standalone<StringRef>> const& value); { return *this; }
-	TraceEvent& backtrace(std::string prefix = "") { return *this; }
-	TraceEvent& trackLatest(const char* trackingKey) { return *this; }
-
-	TraceEvent& GetLastError() { return *this; }
-};
-#endif
 
 struct TraceLogFormatter {
 	virtual const char* getExtension() = 0;
