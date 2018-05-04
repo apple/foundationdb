@@ -1706,7 +1706,7 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 
 	if (flags & IAsyncFile::OPEN_UNCACHED) {
 		auto& machineCache = g_simulator.getCurrentProcess()->machine->openFiles;
-		std::string actualFilename = filename;
+		std::string actualFilename = abspath(filename);
 		if ( machineCache.find(filename) == machineCache.end() ) {
 			if(flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) {
 				actualFilename = filename + ".part";
@@ -1734,7 +1734,7 @@ Future< Reference<class IAsyncFile> > Sim2FileSystem::open( std::string filename
 // Deletes the given file.  If mustBeDurable, returns only when the file is guaranteed to be deleted even after a power failure.
 Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDurable )
 {
-	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
+	return Sim2::deleteFileImpl(&g_sim2, abspath(filename), mustBeDurable);
 }
 
 void Sim2FileSystem::newFileSystem()
