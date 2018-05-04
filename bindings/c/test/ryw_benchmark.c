@@ -236,6 +236,7 @@ void runTests(struct ResultSet *rs) {
 	runTest(&clearRangeGetRange, tr, rs, "C: get range cached values with clear ranges throughput");
 	runTest(&interleavedSetsGets, tr, rs, "C: interleaved sets and gets on a single key throughput");
 
+	fdb_transaction_destroy(tr);
 	fdb_database_destroy(db);
 	fdb_stop_network();
 }
