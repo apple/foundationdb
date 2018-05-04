@@ -23,9 +23,7 @@
 #pragma once
 
 
-#ifndef DLLEXPORT
-#define DLLEXPORT
-#endif
+#include "fdb_c_export.h"
 
 #if !defined(FDB_API_VERSION)
 #error You must #define FDB_API_VERSION prior to including fdb_c.h (current version is 520)

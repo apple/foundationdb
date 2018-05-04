@@ -29,11 +29,17 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options
   COMMENT "Generate C options")
 add_custom_target(fdb_c_options DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h)
 
-add_library(fdb_c SHARED ${FDB_C_SRCS})
+include(GenerateExportHeader)
+
+add_library(fdb_c SHARED ${FDB_C_SRCS} ${CMAKE_CURRENT_BINARY_DIR}/fdb_c.g.S)
 add_dependencies(fdb_c fdb_c_generated fdb_c_options)
 target_link_libraries(fdb_c PUBLIC fdbclient)
-target_include_directories(fdb_c PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
-
+target_include_directories(fdb_c PUBLIC
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
+generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
+  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
 install(TARGETS fdb_c DESTINATION lib64 COMPONENT clients)
 install(FILES foundationdb/fdb_c.h ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
   DESTINATION include/foundationdb COMPONENT clients)
