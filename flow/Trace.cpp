@@ -879,9 +879,12 @@ TraceEvent& TraceEvent::detailImpl( std::string key, std::string value, bool wri
 
 		fields.addField(key, value);
 		length += key.size() + value.size();
-		// TODO: Overflow? buffer was first 300 bytes. TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", buffer);
 
-		if(writeEventMetricField) {
+		if(length > FLOW_KNOBS->TRACE_EVENT_MAX_SIZE) {
+			TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", fields.toString().substr(300));	
+			enabled = false;
+		}
+		else if(writeEventMetricField) {
 			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
 		}
 	}
