@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "FDBLibTLSSession.h"
+#include "fdblibtlssession.h"
 
 #include <openssl/bio.h>
 #include <openssl/pem.h>

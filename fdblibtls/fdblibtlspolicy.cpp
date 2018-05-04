@@ -1,5 +1,5 @@
 /*
- * FDBLibTLSPolicy.cpp
+ * fdblibtlspolicy.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "FDBLibTLSPolicy.h"
-#include "FDBLibTLSSession.h"
+#include "fdblibtlspolicy.h"
+#include "fdblibtlssession.h"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>

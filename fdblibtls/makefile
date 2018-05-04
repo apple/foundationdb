@@ -29,7 +29,7 @@ ifeq ($(PLATFORM),Cygwin)
 
 	LINK_LDFLAGS = -shared
 	LINK_LDFLAGS += -Wl,-soname,$(PLUGIN)
-	LINK_LDFLAGS += -Wl,--version-script=FDBLibTLS.map
+	LINK_LDFLAGS += -Wl,--version-script=fdblibtls.map
 	LINK_LDFLAGS += -Wl,-Bstatic $(LIBS) -Wl,-Bdynamic
 
 else ifeq ($(PLATFORM),Darwin)
@@ -45,7 +45,7 @@ else ifeq ($(PLATFORM),Darwin)
 	.LIBPATTERNS = lib%.a lib%.dylib lib%.so
 
 	LINK_LDFLAGS = -shared
-	LINK_LDFLAGS += -Wl,-exported_symbols_list,FDBLibTLS.symbols
+	LINK_LDFLAGS += -Wl,-exported_symbols_list,fdblibtls.symbols
 	LINK_LDFLAGS += -Wl,-dylib_install_name,$(PLUGIN)
 	LINK_LDFLAGS += $(LIBS)
 
@@ -61,15 +61,15 @@ else ifeq ($(PLATFORM),GNU/Linux)
 
 	LINK_LDFLAGS = -shared
 	LINK_LDFLAGS += -Wl,-soname,$(PLUGIN)
-	LINK_LDFLAGS += -Wl,--version-script=FDBLibTLS.map
+	LINK_LDFLAGS += -Wl,--version-script=fdblibtls.map
 	LINK_LDFLAGS += -Wl,-Bstatic $(LIBS) -Wl,-Bdynamic
 
 else
 $(error Unknown platform $(PLATFORM))
 endif
 
-PLUGIN := FDBLibTLS.$(DYEXT)
-OBJECTS := FDBLibTLSPlugin.o FDBLibTLSPolicy.o FDBLibTLSSession.o
+PLUGIN := fdblibtls.$(DYEXT)
+OBJECTS := fdblibtlsplugin.o fdblibtlspolicy.o fdblibtlssession.o
 LINKLINE := $(CXXFLAGS) $(CFLAGS) $(LDFLAGS) $(OBJECTS) $(LINK_LDFLAGS) -o $(PLUGIN)
 
 all: $(PLUGIN)

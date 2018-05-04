@@ -20,8 +20,8 @@
 
 #include "boost/config.hpp"
 
-#include "FDBLibTLSPlugin.h"
-#include "FDBLibTLSPolicy.h"
+#include "fdblibtlsplugin.h"
+#include "fdblibtlspolicy.h"
 
 #include <string.h>
 

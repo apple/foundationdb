@@ -11,12 +11,12 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="FDBLibTLSPlugin.h" />
-    <ClCompile Include="FDBLibTLSPlugin.cpp" />
-    <ClInclude Include="FDBLibTLSPolicy.h" />
-    <ClCompile Include="FDBLibTLSPolicy.cpp" />
-    <ClInclude Include="FDBLibTLSSession.h" />
-    <ClCompile Include="FDBLibTLSSession.cpp" />
+    <ClInclude Include="fdblibtlsplugin.h" />
+    <ClCompile Include="fdblibtlsplugin.cpp" />
+    <ClInclude Include="fdblibtlspolicy.h" />
+    <ClCompile Include="fdblibtlspolicy.cpp" />
+    <ClInclude Include="fdblibtlsession.h" />
+    <ClCompile Include="fdblibtlssession.cpp" />
   </ItemGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|X64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>

@@ -79,9 +79,9 @@ Plugin default location
 
 Similarly, if a value is not specified for the parameter ``tls_plugin``, the file will be specified by the environment variable ``FDB_TLS_PLUGIN`` or, if this variable is not set, the system-dependent location:
 
-  * Linux: ``/usr/lib/foundationdb/plugins/FDBLibTLS.so``
-  * macOS: ``/usr/local/foundationdb/plugins/FDBLibTLS.dylib``
-  * Windows: ``C:\Program Files\foundationdb\plugins\FDBLibTLS.dll``
+  * Linux: ``/usr/lib/foundationdb/plugins/fdblibtls.so``
+  * macOS: ``/usr/local/foundationdb/plugins/fdblibtls.dylib``
+  * Windows: ``C:\Program Files\foundationdb\plugins\fdblibtls.dll``
 
 On Windows, this location will be relative to the chosen installation location. The environment variable ``FOUNDATIONDB_INSTALL_PATH`` will be used in place of ``C:\Program Files\foundationdb\`` to determine this location.
 
@@ -183,11 +183,11 @@ If the default checking of the certificate chain is too stringent, the verificat
 =====================  =============================================================
 Setting                Result
 =====================  =============================================================
-``Check.Valid=0``      Sets the current process to disable all further verification 
+``Check.Valid=0``      Sets the current process to disable all further verification
                        of a peer certificate.
-``Check.Unexpired=0``  Disables date checking of peer certificates. If the clocks in 
-                       the cluster and between the clients and servers are not to be 
-                       trusted, setting this value to ``0`` can allow communications 
+``Check.Unexpired=0``  Disables date checking of peer certificates. If the clocks in
+                       the cluster and between the clients and servers are not to be
+                       trusted, setting this value to ``0`` can allow communications
                        to proceed.
 =====================  =============================================================
 
