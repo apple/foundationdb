@@ -52,7 +52,7 @@ case $1 in
 			    objcopy --add-gnu-debuglink=$3.debug $3
 			    ./build/link-validate.sh $3 $4
 			    ;;
-			freebsd)
+			FreeBSD)
 			    cp $3 $3.debug
 			    if [ -z "${NOSTRIP}" ]; then strip $3; fi
 			    ;;
