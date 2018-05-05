@@ -1,4 +1,4 @@
-#/bin/sh
+#!/usr/bin/env bash
 #
 # This script is used to validate the shared libraries
 

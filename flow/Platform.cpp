@@ -100,6 +100,29 @@
 #include <signal.h>
 #endif
 
+#ifdef __FreeBSD__
+/* Needed for memory allocation */
+#include <sys/mman.h>
+/* Needed for processor affinity */
+#include <sys/sched.h>
+/* Needed for getProcessorTime* and setpriority */
+#include <sys/syscall.h>
+/* Needed for setpriority */
+#include <sys/resource.h>
+/* Needed for crash handler */
+#include <sys/signal.h>
+/* Needed for socket definition */
+#include <netinet/in.h>
+/* Needed for proc info	*/
+#include <sys/user.h>
+/* Needed for vm info  */
+#include <stdio.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/vmmeter.h>
+#endif
+
 #ifdef __APPLE__
 #include <sys/uio.h>
 #include <sys/syslimits.h>
@@ -198,7 +221,7 @@ double getProcessorTimeThread() {
 		throw platform_error();
 	}
 	return FiletimeAsInt64(ftKernel) / double(1e7) + FiletimeAsInt64(ftUser) / double(1e7);
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	return getProcessorTimeGeneric(RUSAGE_THREAD);
 #elif defined(__APPLE__)
 	/* No RUSAGE_THREAD so we use the lower level interface */
@@ -251,6 +274,23 @@ uint64_t getResidentMemoryUsage() {
 	rssize *= sysconf(_SC_PAGESIZE);
 
 	return rssize;
+#elif defined(__FreeBSD__)
+	uint64_t rssize = 0;
+
+	std::ifstream stat_stream("/proc/self/statm", std::ifstream::in);
+	std::string ignore;
+
+	if(!stat_stream.good()) {
+		TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
+		throw platform_error();
+	}
+
+	stat_stream >> ignore;
+	stat_stream >> rssize;
+
+	rssize *= sysconf(_SC_PAGESIZE);
+
+	return rssize;
 #elif defined(_WIN32)
 	PROCESS_MEMORY_COUNTERS_EX pmc;
 	if(!GetProcessMemoryInfo(GetCurrentProcess(), (PPROCESS_MEMORY_COUNTERS)&pmc, sizeof(pmc))) {
@@ -274,6 +314,21 @@ uint64_t getResidentMemoryUsage() {
 
 uint64_t getMemoryUsage() {
 #if defined(__linux__)
+	uint64_t vmsize = 0;
+
+	std::ifstream stat_stream("/proc/self/statm", std::ifstream::in);
+
+	if(!stat_stream.good()) {
+		TraceEvent(SevError, "GetMemoryUsage").GetLastError();
+		throw platform_error();
+	}
+
+	stat_stream >> vmsize;
+
+	vmsize *= sysconf(_SC_PAGESIZE);
+
+	return vmsize;
+#elif defined(__FreeBSD__)
 	uint64_t vmsize = 0;
 
 	std::ifstream stat_stream("/proc/self/statm", std::ifstream::in);
@@ -397,6 +452,53 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	}
 
 	memInfo.committed = memInfo.total - memInfo.available;
+#elif defined(__FreeBSD__)
+	
+	int status;
+    
+    u_int page_size;
+    u_int free_count;
+    u_int active_count;
+    u_int inactive_count;
+    u_int wire_count;
+    
+    size_t uint_size;
+    
+    uint_size = sizeof(page_size);
+    
+    status = sysctlbyname("vm.stats.vm.v_page_size", &page_size, &uint_size, NULL, 0);
+    if (status < 0){
+        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+    }
+    
+    status = sysctlbyname("vm.stats.vm.v_free_count", &free_count, &uint_size, NULL, 0);
+    if (status < 0){
+        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+    }
+    
+    status = sysctlbyname("vm.stats.vm.v_active_count", &active_count, &uint_size, NULL, 0);
+    if (status < 0){
+        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+    }
+    
+    status = sysctlbyname("vm.stats.vm.v_inactive_count", &inactive_count, &uint_size, NULL, 0);
+    if (status < 0){
+        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+    }
+    
+    status = sysctlbyname("vm.stats.vm.v_wire_count", &wire_count, &uint_size, NULL, 0);
+    if (status < 0){
+        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+		throw platform_error();
+    }
+
+	memInfo.total = (int64_t)((free_count + active_count + inactive_count + wire_count) * (u_int64_t)page_size);
+	memInfo.available = (int64_t)(free_count * (u_int64_t)page_size);
+	memInfo.committed = memInfo.total - memInfo.available;
 #elif defined(_WIN32)
 	MEMORYSTATUSEX mem_status;
 	mem_status.dwLength = sizeof(mem_status);
@@ -436,6 +538,14 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	INJECT_FAULT( platform_error, "getDiskBytes" );
 #if defined(__unixish__)
 #ifdef __linux__
+	struct statvfs buf;
+	if (statvfs(directory.c_str(), &buf)) {
+		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError();
+		throw platform_error();
+	}
+
+	uint64_t blockSize = buf.f_frsize;
+#elif __FreeBSD__
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
 		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError();
@@ -517,6 +627,215 @@ const char* getInterfaceName(uint32_t _ip) {
 #endif
 
 #if defined(__linux__)
+void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
+					   uint64_t& outSegs, uint64_t& retransSegs) {
+	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
+	const char* ifa_name = nullptr;
+	try {
+		ifa_name = getInterfaceName(ip);
+	}
+	catch(Error &e) {
+		if(e.code() != error_code_platform_error) {
+			throw;
+		}
+	}
+
+	if (!ifa_name)
+		return;
+
+	std::ifstream dev_stream("/proc/net/dev", std::ifstream::in);
+	dev_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+	dev_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+	std::string iface;
+	std::string ignore;
+
+	uint64_t bytesSentSum = 0;
+	uint64_t bytesReceivedSum = 0;
+
+	while (dev_stream.good()) {
+		dev_stream >> iface;
+		if (dev_stream.eof()) break;
+		if (!strncmp(iface.c_str(), ifa_name, strlen(ifa_name))) {
+			uint64_t sent = 0, received = 0;
+
+			dev_stream >> received;
+			for (int i = 0; i < 7; i++) dev_stream >> ignore;
+			dev_stream >> sent;
+
+			bytesSentSum += sent;
+			bytesReceivedSum += received;
+
+			dev_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		}
+	}
+
+	if(bytesSentSum > 0) {
+		bytesSent = bytesSentSum;
+	}
+	if(bytesReceivedSum > 0) {
+		bytesReceived = bytesReceivedSum;
+	}
+
+	std::ifstream snmp_stream("/proc/net/snmp", std::ifstream::in);
+
+	std::string label;
+
+	while (snmp_stream.good()) {
+		snmp_stream >> label;
+		snmp_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		if (label == "Tcp:")
+			break;
+	}
+
+	/* Ignore the first 11 columns of the Tcp line */
+	for (int i = 0; i < 11; i++)
+		snmp_stream >> ignore;
+
+	snmp_stream >> outSegs;
+	snmp_stream >> retransSegs;
+}
+
+void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
+	INJECT_FAULT( platform_error, "getMachineLoad" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
+	std::ifstream stat_stream("/proc/stat", std::ifstream::in);
+
+	std::string ignore;
+	stat_stream >> ignore;
+
+	uint64_t t_user, t_nice, t_system, t_idle, t_iowait, t_irq, t_softirq, t_steal, t_guest;
+	stat_stream >> t_user >> t_nice >> t_system >> t_idle >> t_iowait >> t_irq >> t_softirq >> t_steal >> t_guest;
+
+	totalTime = t_user+t_nice+t_system+t_idle+t_iowait+t_irq+t_softirq+t_steal+t_guest;
+	idleTime = t_idle+t_iowait;
+
+	if( !DEBUG_DETERMINISM )
+		TraceEvent("MachineLoadDetail").detail("User", t_user).detail("Nice", t_nice).detail("System", t_system).detail("Idle", t_idle).detail("IOWait", t_iowait).detail("IRQ", t_irq).detail("SoftIRQ", t_softirq).detail("Steal", t_steal).detail("Guest", t_guest);
+}
+
+void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
+	INJECT_FAULT( platform_error, "getDiskStatistics" );
+	currentIOs = 0;
+
+	struct stat buf;
+	if (stat(directory.c_str(), &buf)) {
+		TraceEvent(SevError, "GetDiskStatisticsStatError").detail("Directory", directory).GetLastError();
+		throw platform_error();
+	}
+
+	std::ifstream proc_stream("/proc/diskstats", std::ifstream::in);
+	while (proc_stream.good()) {
+		std::string line;
+		getline(proc_stream, line);
+		std::istringstream disk_stream(line, std::istringstream::in);
+
+		unsigned int majorId;
+		unsigned int minorId;
+		disk_stream >> majorId;
+		disk_stream >> minorId;
+		if(majorId == (unsigned int) major(buf.st_dev) && minorId == (unsigned int) minor(buf.st_dev)) {
+			std::string ignore;
+			uint64_t rd_ios;	/* # of reads completed */
+			//	    This is the total number of reads completed successfully.
+
+			uint64_t rd_merges;	/* # of reads merged */
+			//	    Reads and writes which are adjacent to each other may be merged for
+			//	    efficiency.  Thus two 4K reads may become one 8K read before it is
+			//	    ultimately handed to the disk, and so it will be counted (and queued)
+			//	    as only one I/O.  This field lets you know how often this was done.
+
+			uint64_t rd_sectors; /*# of sectors read */
+			//	    This is the total number of sectors read successfully.
+
+			uint64_t rd_ticks;	/* # of milliseconds spent reading */
+			//	    This is the total number of milliseconds spent by all reads (as
+			//	    measured from __make_request() to end_that_request_last()).
+
+			uint64_t wr_ios;	/* # of writes completed */
+			//	    This is the total number of writes completed successfully.
+
+			uint64_t wr_merges;	/* # of writes merged */
+			//	    Reads and writes which are adjacent to each other may be merged for
+			//	    efficiency.  Thus two 4K reads may become one 8K read before it is
+			//	    ultimately handed to the disk, and so it will be counted (and queued)
+			//	    as only one I/O.  This field lets you know how often this was done.
+
+			uint64_t wr_sectors; /* # of sectors written */
+			//	    This is the total number of sectors written successfully.
+
+			uint64_t wr_ticks;	/* # of milliseconds spent writing */
+			//	    This is the total number of milliseconds spent by all writes (as
+			//	    measured from __make_request() to end_that_request_last()).
+
+			uint64_t cur_ios;	/* # of I/Os currently in progress */
+			//	    The only field that should go to zero. Incremented as requests are
+			//	    given to appropriate struct request_queue and decremented as they finish.
+
+			uint64_t ticks;	/* # of milliseconds spent doing I/Os */
+			//	    This field increases so long as field 9 is nonzero.
+
+			uint64_t aveq;	/* weighted # of milliseconds spent doing I/Os */
+			//	    This field is incremented at each I/O start, I/O completion, I/O
+			//	    merge, or read of these stats by the number of I/Os in progress
+			//	    (field 9) times the number of milliseconds spent doing I/O since the
+			//	    last update of this field.  This can provide an easy measure of both
+			//	    I/O completion time and the backlog that may be accumulating.
+
+			disk_stream >> ignore;
+			disk_stream >> rd_ios;
+			disk_stream >> rd_merges;
+			disk_stream >> rd_sectors;
+			disk_stream >> rd_ticks;
+			disk_stream >> wr_ios;
+			disk_stream >> wr_merges;
+			disk_stream >> wr_sectors;
+			disk_stream >> wr_ticks;
+			disk_stream >> cur_ios;
+			disk_stream >> ticks;
+			disk_stream >> aveq;
+
+			currentIOs = cur_ios;
+			busyTicks = ticks;
+			reads = rd_ios;
+			writes = wr_ios;
+			writeSectors = wr_sectors;
+			readSectors = rd_sectors;
+
+			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("ignore", ignore).detail("rd_ios", rd_ios)
+			//	.detail("rd_merges", rd_merges).detail("rd_sectors", rd_sectors).detail("rd_ticks", rd_ticks).detail("wr_ios", wr_ios).detail("wr_merges", wr_merges)
+			//	.detail("wr_sectors", wr_sectors).detail("wr_ticks", wr_ticks).detail("cur_ios", cur_ios).detail("ticks", ticks).detail("aveq", aveq)
+			//	.detail("currentIOs", currentIOs).detail("busyTicks", busyTicks).detail("reads", reads).detail("writes", writes).detail("writeSectors", writeSectors)
+			//  .detail("readSectors", readSectors);
+			return;
+		} else
+			disk_stream.ignore( std::numeric_limits<std::streamsize>::max(), '\n');
+	}
+
+	if(!g_network->isSimulated()) TraceEvent(SevWarn, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
+}
+
+dev_t getDeviceId(std::string path) {
+	struct stat statInfo;
+
+	while (true) {
+		int returnValue = stat(path.c_str(), &statInfo);
+		if (!returnValue) break;
+
+		if (errno == ENOENT) {
+			path = parentDirectory(path);
+		} else {
+			TraceEvent(SevError, "GetDeviceIdError").detail("Path", path).GetLastError();
+			throw platform_error();
+		}
+	}
+
+	return statInfo.st_dev;
+}
+
+#endif
+
+#if defined(__FreeBSD__)
+
 void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
 					   uint64_t& outSegs, uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
@@ -1247,7 +1566,7 @@ struct OffsetTimer {
 		return offset + count * secondsPerCount;
 	}
 };
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 #define DOUBLETIME(ts) (double(ts.tv_sec) + (ts.tv_nsec * 1e-9))
 #ifndef CLOCK_MONOTONIC_RAW
 #define CLOCK_MONOTONIC_RAW 4 // Confirmed safe to do with glibc >= 2.11 and kernel >= 2.6.28. No promises with older glibc. Older kernel definitely breaks it.
@@ -1312,7 +1631,7 @@ double timer() {
 	GetSystemTimeAsFileTime(&fileTime);
 	static_assert( sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong" );
 	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return double(ts.tv_sec) + (ts.tv_nsec * 1e-9);
@@ -1332,7 +1651,7 @@ uint64_t timer_int() {
 	GetSystemTimeAsFileTime(&fileTime);
 	static_assert( sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong" );
 	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH);
-#elif defined(__linux__)
+#elif defined(__linux__)  || defined(__FreeBSD__)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return uint64_t(ts.tv_sec) * 1e9 + ts.tv_nsec;
@@ -1378,7 +1697,7 @@ void setMemoryQuota( size_t limit ) {
 	}
 	if (!AssignProcessToJobObject( job, GetCurrentProcess() ))
 		TraceEvent(SevWarn, "FailedToSetMemoryLimit").GetLastError();
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	struct rlimit rlim;
 	if (getrlimit(RLIMIT_AS, &rlim)) {
 		TraceEvent(SevError, "GetMemoryLimit").GetLastError();
@@ -1481,7 +1800,7 @@ static void *allocateInternal(size_t length, bool largePages) {
 		flags |= MAP_HUGETLB;
 
 	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__FreeBSD__)
 	int flags = MAP_PRIVATE|MAP_ANON;
 
 	return mmap(NULL, length, PROT_READ|PROT_WRITE, flags, -1, 0);
@@ -1615,7 +1934,7 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 		//renamedFile();
 		return;
 	}
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	if (!rename( fromPath.c_str(), toPath.c_str() )) {
 		//FIXME: We cannot inject faults after renaming the file, because we could end up with two asyncFileNonDurable open for the same file
 		//renamedFile();
@@ -1733,7 +2052,7 @@ bool createDirectory( std::string const& directory ) {
 	}
 	TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
 	throw platform_error();
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	size_t sep = 0;
 	do {
 		sep = directory.find_first_of('/', sep + 1);
@@ -1774,7 +2093,7 @@ std::string abspath( std::string const& filename ) {
 		if (*x == '/')
 			*x = CANONICAL_PATH_SEPARATOR;
 	return nameBuffer;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	char result[PATH_MAX];
 	auto r = realpath( filename.c_str(), result );
 	if (!r) {
@@ -1839,7 +2158,7 @@ std::string getUserHomeDirectory() {
 
 #ifdef _WIN32
 #define FILE_ATTRIBUTE_DATA DWORD
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define FILE_ATTRIBUTE_DATA mode_t
 #else
 #error Port me!
@@ -1848,7 +2167,7 @@ std::string getUserHomeDirectory() {
 bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
 #ifdef _WIN32
 	return !(fileAttributes & FILE_ATTRIBUTE_DIRECTORY) && StringRef(name).endsWith(extension);
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	return S_ISREG(fileAttributes) && StringRef(name).endsWith(extension);
 #else
 	#error Port me!
@@ -1894,7 +2213,7 @@ std::vector<std::string> findFiles( std::string const& directory, std::string co
 		}
 		FindClose(h);
 	}
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	DIR *dip;
 
 	if ((dip = opendir(directory.c_str())) != NULL) {
@@ -1958,7 +2277,7 @@ void findFilesRecursively(std::string path, std::vector<std::string> &out) {
 void threadSleep( double seconds ) {
 #ifdef _WIN32
 	Sleep( (DWORD)(seconds * 1e3) );
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	struct timespec req, rem;
 
 	req.tv_sec = seconds;
@@ -1996,7 +2315,7 @@ void makeTemporary( const char* filename ) {
 THREAD_HANDLE startThread(void (*func) (void *), void *arg) {
 	return (void *)_beginthread(func, 0, arg);
 }
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
 	pthread_t t;
 	pthread_create(&t, NULL, func, arg);
@@ -2009,7 +2328,7 @@ THREAD_HANDLE startThread(void *(*func) (void *), void *arg) {
 void waitThread(THREAD_HANDLE thread) {
 #ifdef _WIN32
 	WaitForSingleObject(thread, INFINITE);
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	pthread_join(thread, NULL);
 #else
 	#error Port me!
@@ -2038,7 +2357,7 @@ int64_t fileSize(std::string const& filename) {
 		return 0;
 	else
 		return file_status.st_size;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	struct stat file_status;
 	if(stat(filename.c_str(), &file_status) != 0)
 		return 0;
@@ -2178,6 +2497,8 @@ std::string getDefaultPluginPath( const char* plugin_name ) {
 	}
 	return format( "%splugins\\%s.dll", installPath.c_str(), plugin_name );
 #elif defined(__linux__)
+	return format( "/usr/lib/foundationdb/plugins/%s.so", plugin_name );
+#elif defined(__FreeBSD__)
 	return format( "/usr/lib/foundationdb/plugins/%s.so", plugin_name );
 #elif defined(__APPLE__)
 	return format( "/usr/local/foundationdb/plugins/%s.dylib", plugin_name );
@@ -2430,7 +2751,7 @@ void* getImageOffset() { return NULL; }
 #endif
 
 bool isLibraryLoaded(const char* lib_path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
 #error Port me!
 #endif
 

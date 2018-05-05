@@ -6,6 +6,8 @@ TOPDIR := $(shell pwd)
 
 ifeq ($(ARCH),x86_64)
   ARCH := x64
+else ifeq ($(ARCH),amd64)
+  ARCH := x64
 else
   $(error Not prepared to compile on $(ARCH))
 endif
@@ -37,6 +39,19 @@ ifeq ($(PLATFORM),Linux)
   CXXFLAGS += -std=c++0x
 
   BOOSTDIR ?= /opt/boost_1_52_0
+  DLEXT := so
+  java_DLEXT := so
+  TARGET_LIBC_VERSION ?= 2.11
+else ifeq ($(PLATFORM),FreeBSD)
+  PLATFORM := FreeBSD
+
+  CC ?= clang
+  CXX ?= clang++
+
+  CFLAGS += -stdlib=libc++ -Wno-error=unused-command-line-argument
+  CXXFLAGS += -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option
+  LDFLAGS += -lutil
+  BOOSTDIR ?= $(HOME)/boost_1_52_0
   DLEXT := so
   java_DLEXT := so
   TARGET_LIBC_VERSION ?= 2.11
@@ -93,7 +108,7 @@ VPATH += $(addprefix :,$(filter-out lib,$(patsubst -L%,%,$(filter -L%,$(LDFLAGS)
 
 CS_PROJECTS := flow/actorcompiler flow/coveragetool fdbclient/vexillographer
 CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow FDBLibTLS
-OTHER_PROJECTS := bindings/python bindings/ruby bindings/go
+OTHER_PROJECTS := bindings/python
 
 CS_MK_GENERATED := $(CS_PROJECTS:=/generated.mk)
 CPP_MK_GENERATED := $(CPP_PROJECTS:=/generated.mk)

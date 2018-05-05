@@ -22,7 +22,7 @@
 #define FLOW_PLATFORM_H
 #pragma once
 
-#if (defined(__linux__) || defined(__APPLE__))
+#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 #define __unixish__ 1
 #endif
 
@@ -182,6 +182,8 @@ THREAD_HANDLE startThread(void *(func) (void *), void *arg);
 #if defined(_WIN32)
 #define DYNAMIC_LIB_EXT ".dll"
 #elif defined(__linux)
+#define DYNAMIC_LIB_EXT ".so"
+#elif defined(__FreeBSD__)
 #define DYNAMIC_LIB_EXT ".so"
 #elif defined(__APPLE__)
 #define DYNAMIC_LIB_EXT ".dylib"
@@ -386,6 +388,16 @@ inline static uint64_t __rdtsc() {
 #endif
 #endif
 
+#ifdef __FreeBSD__
+#if !(__has_builtin(__rdtsc))
+inline static uint64_t __rdtsc() {
+	uint64_t lo, hi;
+	asm( "rdtsc" : "=a" (lo), "=d" (hi) );
+	return( lo | (hi << 32) );
+}
+#endif
+#endif
+
 #ifdef _WIN32
 #include <intrin.h>
 inline static int32_t interlockedIncrement(volatile int32_t *a) { return _InterlockedIncrement((long*)a); }
@@ -489,6 +501,7 @@ inline static void aligned_free(void* ptr) { _aligned_free(ptr); }
 #elif defined(__linux__)
 #include <malloc.h>
 inline static void aligned_free(void* ptr) { free(ptr); }
+#elif defined(__FreeBSD__)
 #if (!defined(_ISOC11_SOURCE)) // old libc versions
 inline static void* aligned_alloc(size_t alignment, size_t size) { return memalign(alignment, size); }
 #endif

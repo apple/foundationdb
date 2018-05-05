@@ -25,7 +25,7 @@
 #include "Error.h"
 #include "Trace.h"
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <semaphore.h>
 #endif
 
@@ -115,7 +115,7 @@ public:
 private:
 #ifdef _WIN32
 	void* ev;
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__FreeBSD__)
 	sem_t sem;
 #elif defined(__APPLE__)
 	mach_port_t self;

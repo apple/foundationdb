@@ -22,7 +22,13 @@
 
 fdbcli_CFLAGS := $(fdbclient_CFLAGS)
 fdbcli_LDFLAGS := $(fdbrpc_LDFLAGS)
+
+ifeq ($(PLATFORM),FreeBSD)
+fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
+else
 fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a -ldl
+endif
+
 fdbcli_STATIC_LIBS :=
 
 fdbcli_GENERATED_SOURCES += versions.h
