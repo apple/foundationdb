@@ -6,7 +6,7 @@ add_executable(fdbbackup "${FDBBACKUP_BUILD}")
 actor_compile(fdbbackup "${FDBBACKUP_SRCS}")
 target_link_libraries(fdbbackup PRIVATE fdbclient)
 
-install(TARGETS fdbbackup DESTINATION ${FDB_BIN_DIR} COMPONENT server)
+install(TARGETS fdbbackup DESTINATION ${FDB_BIN_DIR} COMPONENT clients)
 install(PROGRAMS $<TARGET_FILE:fdbbackup>
   DESTINATION ${FDB_LIB_DIR}/foundationdb/backup_agent
   RENAME backup_agent
