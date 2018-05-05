@@ -2177,7 +2177,7 @@ bool acceptFile( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::stri
 bool acceptDirectory( FILE_ATTRIBUTE_DATA fileAttributes, std::string name, std::string extension ) {
 #ifdef _WIN32
 	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-#elif (defined(__linux__) || defined(__APPLE__))
+#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
 	return S_ISDIR(fileAttributes);
 #else
 	#error Port me!
