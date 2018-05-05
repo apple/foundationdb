@@ -72,6 +72,9 @@ case $1 in
 			linux)
 			    if [ -z "${NOSTRIP}" ]; then strip --strip-all $3; fi
 			    ;;
+			FreeBSD)
+			    if [ -z "${NOSTRIP}" ]; then strip --strip-all $3; fi
+			    ;;
 			osx)
 			    if [ -z "${NOSTRIP}" ]; then strip -S -x $3; fi
 			    ;;
