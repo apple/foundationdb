@@ -24,22 +24,13 @@ foreach(src ${SRCS})
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 	COMMENT "copy ${src}")
   set(out_files "${out_files};${PROJECT_BINARY_DIR}/bindings/python/${src}")
-  if(${extname} STREQUAL ".py")
-    add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/bindings/python/${src}c
-      COMMAND python -m py_compile ${PROJECT_BINARY_DIR}/bindings/python/${src}
-      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${src} ${CMAKE_CURRENT_BINARY_DIR}/${src}
-      WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/bindings/python/${dirname}
-      COMMENT "compile ${src}")
-    set(out_files "${out_files};${PROJECT_BINARY_DIR}/bindings/python/${src}c")
-  endif()
 endforeach()
 add_custom_target(python_binding ALL DEPENDS ${out_files})
 
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/bindings/python/fdb)
 set(options_file ${PROJECT_BINARY_DIR}/bindings/python/fdb/fdboptions.py)
-add_custom_command(OUTPUT ${options_file} ${options_file}c
+add_custom_command(OUTPUT ${options_file}
   COMMAND ${MONO_EXECUTABLE} ${VEXILLOGRAPHER_EXE} ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options python ${options_file}
-  COMMAND python -m py_compile ${options_file}
   DEPENDS ${PROJECT_SOURCE_DIR}/fdbclient/vexillographer/fdb.options vexillographer
   COMMENT "Generate Python options")
 add_custom_target(fdb_python_options DEPENDS
@@ -49,5 +40,5 @@ add_custom_target(fdb_python_options DEPENDS
 
 add_dependencies(python_binding fdb_python_options)
 
-set(out_files "${out_files};${options_file};${options_file}c")
-install(FILES ${out_files} DESTINATION lib64/python2.6/site-packages/fdb COMPONENT clients)
+set(out_files "${out_files};${options_file}")
+install(FILES ${out_files} DESTINATION ${FDB_PYTHON_INSTALL_DIR} COMPONENT clients)

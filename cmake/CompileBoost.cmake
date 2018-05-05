@@ -2,7 +2,7 @@ include(ExternalProject)
 ExternalProject_add(boostProject
   URL "https://dl.bintray.com/boostorg/release/1.67.0/source/boost_1_67_0.tar.bz2"
   URL_HASH SHA256=2684c972994ee57fc5632e03bf044746f6eb45d4920c343937a465fd67a5adba
-  CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} ./bootstrap.sh --with-libraries=system,python --with-python=${PYTHON_EXECUTABLE}
+  CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} ./bootstrap.sh --with-libraries=system
   BUILD_COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} ./b2 link=static --user-config=${CMAKE_BINARY_DIR}/user-config.jam
   BUILD_IN_SOURCE ON
   INSTALL_COMMAND ""
