@@ -88,14 +88,19 @@ else()
   set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/README.md)
 endif()
 
-# configuration for rpm
+################################################################################
+# Configuration for RPM
+################################################################################
+
 if(INSTALL_LAYOUT MATCHES "RPM")
   set(CPACK_RPM_server_USER_FILELIST
     "%config(noreplace) /etc/foundationdb/foundationdb.conf"
     "%attr(600, root, root) %config(noreplace) /etc/foundationdb/fdb.cluster")
   set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
     "/usr/sbin" "/usr/share/java" "/usr/lib64/python2.7"
-    "/usr/lib64/python2.7/site-packages")
+    "/usr/lib64/python2.7/site-packages"
+    "/lib/systemd"
+    "/etc/rc.d/init.d")
   set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
   set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX /usr/src)
   set(CPACK_RPM_COMPONENT_INSTALL ON)
@@ -106,9 +111,11 @@ if(INSTALL_LAYOUT MATCHES "RPM")
   set(CPACK_RPM_server_PRE_INSTALL_SCRIPT_FILE
     ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preserver.sh)
   set(CPACK_RPM_server_POST_INSTALL_SCRIPT_FILE
-    ${CMAKE_SOURCE_DIR}/packaging/rpm/postserver.sh)
+    ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/postserver.sh)
   set(CPACK_RPM_server_PRE_UNINSTALL_SCRIPT_FILE
-    ${CMAKE_SOURCE_DIR}/packaging/rpm/preunserver.sh)
+    ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preunserver.sh)
+  set(CPACK_RPM_server_PACKAGE_REQUIRES
+    "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
 elseif(INSTALL_LAYOUT MATCHES "OSX")
 endif()
 
@@ -128,6 +135,27 @@ install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
 install(FILES ${CMAKE_BINARY_DIR}/fdb.cluster
   DESTINATION ${FDB_CONFIG_DIR}
   COMPONENT server)
+if(INSTALL_LAYOUT MATCHES "RPM")
+  execute_process(
+    COMMAND pidof systemd
+    RESULT_VARIABLE IS_SYSTEMD
+    OUTPUT_QUIET
+    ERROR_QUIET)
+  if(IS_SYSTEMD EQUAL "0")
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
+      DESTINATION "lib/systemd/system"
+      RENAME "foundationdb.service"
+      COMPONENT server)
+  else()
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
+      DESTINATION "usr/lib/foundationdb"
+      COMPONENT server)
+    install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
+      DESTINATION "etc/rc.d/init.d"
+      RENAME "foundationdb"
+      COMPONENT server)
+  endif()
+endif()
 
 ################################################################################
 # Helper Macros
