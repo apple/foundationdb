@@ -931,7 +931,9 @@ TraceEvent::~TraceEvent() {
 	} catch( Error &e ) {
 		TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
 		delete tmpEventMetric;
-		throw;
+		// TODO: it is illegal in C++11 to throw an exception in a destructor
+		// so we need to figure out what to do here
+		//throw;
 	}
 	delete tmpEventMetric;
 }
