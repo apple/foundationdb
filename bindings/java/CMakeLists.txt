@@ -136,5 +136,5 @@ add_dependencies(fdb-java fdb_java_options fdb_java)
 add_jar(foundationdb-tests SOURCES ${JAVA_TESTS_SRCS} INCLUDE_JARS fdb-java)
 add_dependencies(foundationdb-tests fdb_java_options)
 
-install_jar(fdb-java DESTINATION share/java COMPONENT clients)
-install(TARGETS fdb_java DESTINATION lib64 COMPONENT clients)
+install_jar(fdb-java DESTINATION ${FDB_SHARE_DIR}/java COMPONENT clients)
+install(TARGETS fdb_java DESTINATION ${FDB_LIB_DIR} COMPONENT clients)

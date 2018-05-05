@@ -99,9 +99,9 @@ endif()
 # we always compile with debug symbols. CPack will strip them out
 # and create a debuginfo rpm
 add_compile_options(-ggdb)
+find_package(Threads REQUIRED)
 set(USE_ASAN OFF CACHE BOOL "Compile with address sanitizer")
 if(USE_ASAN)
-    find_package(Threads REQUIRED)
     add_compile_options(
         -fno-omit-frame-pointer -fsanitize=address
         -DUSE_ASAN)
@@ -203,6 +203,7 @@ execute_process(
   OUTPUT_VARIABLE FDB_PACKAGE_NAME_WNL)
 string(STRIP "${FDB_VERSION_WNL}" FDB_VERSION)
 string(STRIP "${FDB_PACKAGE_NAME_WNL}" FDB_PACKAGE_NAME)
+set(FDB_VERSION_PLAIN ${FDB_VERSION})
 if(NOT FDB_RELEASE)
   set(FDB_VERSION "${FDB_VERSION}-PRERELEASE")
 endif()
@@ -412,6 +413,12 @@ configure_file(fdb.cluster.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdb.cluster)
 enable_testing()
 
 ################################################################################
+# Directory structure
+################################################################################
+
+include(cmake/InstallLayout.cmake)
+
+################################################################################
 # components
 ################################################################################
 
@@ -424,6 +431,8 @@ add_subdirectory(fdbcli)
 add_subdirectory(fdbmonitor)
 add_subdirectory(bindings)
 add_subdirectory(fdbbackup)
+
+include(CPack)
 
 ################################################################################
 # process compile commands for IDE
@@ -439,46 +448,3 @@ if (CMAKE_EXPORT_COMPILE_COMMANDS)
 	)
   add_custom_target(procossed_compile_commands ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compile_commands.json ${CMAKE_CURRENT_BINARY_DIR}/compile_commands.json)
 endif()
-
-################################################################################
-# Install scripts
-################################################################################
-
-#install(FILES scripts/log_writer.py DESTINATION lib/foundationdb COMPONENT server)
-install(FILES packaging/rpm/init_script/foundationdb
-  DESTINATION /etc/rc.d/init.d
-  PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
-  COMPONENT server)
-
-install(FILES packaging/foundationdb.conf
-  DESTINATION /etc/foundationdb
-  COMPONENT server)
-
-
-################################################################################
-# Build RPM
-################################################################################
-
-#configure_file(${CMAKE_CURRENT_SOURCE_DIR}/DESCRIPTION ${CMAKE_CURRENT_BINARY_DIR}/DESCRIPTION)
-#
-#include (InstallRequiredSystemLibraries)
-#set(CPACK_GENERATOR RPM)
-#set(CPACK_RPM_server_USER_FILELIST "%config(noreplace) /etc/foundationdb/foundationdb.conf")
-#set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
-#set(CPACK_RPM_PACKAGE_RELOCATABLE NO)
-#set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX /usr/src)
-#set(CPACK_RPM_COMPONENT_INSTALL ON)
-#set(CPACK_PACKAGE_NAME "foundationdb")
-#set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "FoundationDB - A distributed key-value store with ACID transactions")
-#set(CPACK_PACKAGE_DESCRIPTION_FILE ${CMAKE_CURRENT_BINARY_DIR}/DESCRIPTION)
-#set(CPACK_RESOURCE_FILE_LICENSE
-#     "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-#set(CPACK_PACKAGE_VERSION_MAJOR "${FDB_MAJOR}")
-#set(CPACK_PACKAGE_VERSION_MINOR "${FDB_MINOR}")
-#set(CPACK_PACKAGE_VERSION_PATCH "${FDB_REVISION}")
-#set(CPACK_RPM_clients_PRE_INSTALL_SCRIPT_FILE ${CMAKE_SOURCE_DIR}/packaging/rpm/preinstall-client.sh)
-#set(CPACK_RPM_server_PRE_INSTALL_SCRIPT_FILE ${CMAKE_SOURCE_DIR}/packaging/rpm/preinstall-server.sh)
-#set(CPACK_RPM_server_POST_INSTALL_SCRIPT_FILE ${CMAKE_SOURCE_DIR}/packaging/rpm/postinstall-server.sh)
-#
-#set(CPACK_RPM_server_PRE_UNINSTALL_SCRIPT_FILE ${CMAKE_SOURCE_DIR}/packaging/rpm/preuninstall-server.sh)
-#include (CPack)

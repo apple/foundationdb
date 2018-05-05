@@ -41,6 +41,13 @@ target_include_directories(fdb_c PUBLIC
 # TODO: re-enable once the old vcxproj-based build system is removed.
 #generate_export_header(fdb_c EXPORT_MACRO_NAME "DLLEXPORT"
 #  EXPORT_FILE_NAME ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_export.h)
-install(TARGETS fdb_c DESTINATION lib64 COMPONENT clients)
-install(FILES foundationdb/fdb_c.h ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
-  DESTINATION include/foundationdb COMPONENT clients)
+install(TARGETS fdb_c
+  EXPORT fdbc
+  DESTINATION ${FDB_LIB_DIR}
+  COMPONENT clients)
+install(
+  FILES foundationdb/fdb_c.h
+        ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/fdb_c_options.g.h
+        ${CMAKE_SOURCE_DIR}/fdbclient/vexillographer/fdb.options
+  DESTINATION ${FDB_INCLUDE_INSTALL_DIR}/foundationdb COMPONENT clients)
+#install(EXPORT fdbc DESTINATION ${FDB_LIB_DIR}/foundationdb COMPONENT clients)
