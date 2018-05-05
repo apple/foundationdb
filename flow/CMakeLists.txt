@@ -80,7 +80,7 @@ if (NOT APPLE)
   set (FLOW_LIBS ${FLOW_LIBS} rt)
 endif()
 target_link_libraries(flow PRIVATE ${FLOW_LIBS})
-target_link_libraries(flow PUBLIC boost_system Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(flow PUBLIC boost_target Threads::Threads ${CMAKE_DL_LIBS})
 
 if(APPLE)
   find_library(IO_KIT IOKit)
