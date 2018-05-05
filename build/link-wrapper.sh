@@ -36,19 +36,6 @@ case $1 in
 		fi
 		;;
 	    *)
-		$CC $OPTIONS
-		;;
-	esac
-
-	case $PLATFORM in
-	    freebsd)
-		if echo $OPTIONS | grep -q -- -static-libgcc ; then
-		    $( $CC -### $OPTIONS 2>&1 | grep '^ ' | sed -e s,^\ ,, -e s,-lgcc[^\ ]*,,g -e s,\",,g -e s,\$,\ `$CC -print-file-name=libgcc_eh.a`, -e s,10.8.2,10.6, )
-		else
-		    $CC $OPTIONS
-		fi
-		;;
-	    *)
 		/usr/bin/clang++ -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option $OPTIONS -lpthread
 		;;
 	esac
