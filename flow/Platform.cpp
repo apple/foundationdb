@@ -2767,7 +2767,7 @@ bool isLibraryLoaded(const char* lib_path) {
 }
 
 void* loadLibrary(const char* lib_path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32)
+#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
 #error Port me!
 #endif
 
