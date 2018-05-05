@@ -1208,6 +1208,8 @@ if platform.system() == 'Windows':
     capi_name = 'fdb_c.dll'
 elif platform.system() == 'Linux':
     capi_name = 'libfdb_c.so'
+elif platform.system() == 'FreeBSD':
+    capi_name = 'libfdb_c.so'
 elif platform.system() == 'Darwin':
     capi_name = 'libfdb_c.dylib'
 elif sys.platform == 'win32':
