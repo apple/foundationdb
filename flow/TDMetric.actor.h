@@ -36,6 +36,7 @@
 #include "CompressedInt.h"
 #include <algorithm>
 #include <functional>
+#include <cmath>
 
 struct MetricNameRef {
 	MetricNameRef() {}
