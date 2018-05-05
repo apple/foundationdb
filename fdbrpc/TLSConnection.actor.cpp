@@ -250,6 +250,8 @@ void TLSOptions::set_verify_peers( std::string const& verify_peers ) {
 }
 
 void TLSOptions::register_network() {
+	// Simulation relies upon being able to call this multiple times, and have it override g_network
+	// each time it's called.
 	new TLSNetworkConnections( Reference<TLSOptions>::addRef( this ) );
 }
 
