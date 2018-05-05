@@ -643,7 +643,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 		unsigned int minorId;
 		disk_stream >> majorId;
 		disk_stream >> minorId;
-		if(majorId == (unsigned int) major(buf.st_dev) && minorId == (unsigned int) minor(buf.st_dev)) {
+		if(majorId == (unsigned int) gnu_dev_major(buf.st_dev) && minorId == (unsigned int) gnu_dev_minor(buf.st_dev)) {
 			std::string ignore;
 			uint64_t rd_ios;	/* # of reads completed */
 			//	    This is the total number of reads completed successfully.

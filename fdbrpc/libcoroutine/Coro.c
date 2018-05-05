@@ -66,6 +66,8 @@ VALGRIND_STACK_DEREGISTER((coro)->valgrindStackId)
 #define STACK_DEREGISTER(coro)
 #endif
 
+#pragma GCC diagnostic ignored "-Wreturn-local-addr"
+
 // Define outside
 extern intptr_t g_stackYieldLimit;
 
