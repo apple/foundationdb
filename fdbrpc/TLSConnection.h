@@ -40,7 +40,7 @@ struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 	virtual void addref() { ReferenceCounted<TLSConnection>::addref(); }
 	virtual void delref() { ReferenceCounted<TLSConnection>::delref(); }
 
-	TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client );
+	TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host );
 	~TLSConnection() {
 		// Here for ordering to make sure we delref the ITLSSession
 		// which has a pointer to this object
@@ -108,7 +108,7 @@ struct TLSNetworkConnections : INetworkConnections {
 
 	explicit TLSNetworkConnections( Reference<TLSOptions> options );
 
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr );
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 
 	virtual Reference<IListener> listen( NetworkAddress localAddr );

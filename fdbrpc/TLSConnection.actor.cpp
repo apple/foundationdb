@@ -83,7 +83,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 	return Void();
 }
 
-TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client ) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()) {
+TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host ) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()) {
 	session = Reference<ITLSSession>( policy->create_session(is_client, send_func, this, recv_func, this, (void*)&uid) );
 	if ( !session ) {
 		// If session is NULL, we're trusting policy->create_session
@@ -150,13 +150,13 @@ int TLSConnection::write( SendBuffer const* buffer, int limit ) {
 	return 0;
 }
 
-ACTOR Future<Reference<IConnection>> wrap( Reference<ITLSPolicy> policy, bool is_client, Future<Reference<IConnection>> c ) {
+ACTOR Future<Reference<IConnection>> wrap( Reference<ITLSPolicy> policy, bool is_client, Future<Reference<IConnection>> c , std::string host ) {
 	Reference<IConnection> conn = wait(c);
-	return Reference<IConnection>(new TLSConnection( conn, policy, is_client ));
+	return Reference<IConnection>(new TLSConnection( conn, policy, is_client, host ));
 }
 
 Future<Reference<IConnection>> TLSListener::accept() {
-	return wrap( policy, false, listener->accept() );
+	return wrap( policy, false, listener->accept(), "" );
 }
 
 TLSNetworkConnections::TLSNetworkConnections( Reference<TLSOptions> options ) : options(options) {
@@ -164,11 +164,11 @@ TLSNetworkConnections::TLSNetworkConnections( Reference<TLSOptions> options ) : 
 	g_network->setGlobal(INetwork::enumGlobal::enNetworkConnections, (flowGlobalType) this);
 }
 
-Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress toAddr ) {
+Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress toAddr, std::string host ) {
 	if ( toAddr.isTLS() ) {
 		NetworkAddress clearAddr( toAddr.ip, toAddr.port, toAddr.isPublic(), false );
 		TraceEvent("TLSConnectionConnecting").detail("ToAddr", toAddr);
-		return wrap( options->get_policy(), true, network->connect( clearAddr ) );
+		return wrap( options->get_policy(), true, network->connect( clearAddr ), host );
 	}
 	return network->connect( toAddr );
 }
