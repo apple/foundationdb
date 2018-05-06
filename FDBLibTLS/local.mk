@@ -1,6 +1,6 @@
 
 ifeq ($(PLATFORM),freebsd)
-FDBLibTLS_CFLAGS := -fPIC -I/usr/local/include -I$(BOOSTDIR)/include
+FDBLibTLS_CFLAGS := -fPIC -I/usr/local/include -I$(BOOSTDIR)
 FDBLibTLS_LIBS := -lssl -lcrypto
 FDBLibTLS_LDFLAGS := -lc++
 else
