@@ -38,6 +38,8 @@ ifeq ($(PLATFORM),linux)
   GOPLATFORM := linux_amd64
 else ifeq ($(PLATFORM),osx)
   GOPLATFORM := darwin_amd64
+else ifeq ($(PLATFORM),FreeBSD)
+  GOPLATFORM := freebsd_amd64
 else
   $(error Not prepared to compile on platform $(PLATFORM))
 endif

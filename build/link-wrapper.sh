@@ -35,8 +35,11 @@ case $1 in
 		    $CC $OPTIONS
 		fi
 		;;
+		FreeBSD)
+			clang++ -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option $OPTIONS -lm -lc++ -lpthread -lexecinfo
+		;;
 	    *)
-		/usr/bin/clang++ -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option $OPTIONS -lm -lc++ -lpthread -lexecinfo
+		$CC $OPTIONS
 		;;
 	esac
 

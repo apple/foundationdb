@@ -33,6 +33,8 @@ ifeq ($(PLATFORM),linux)
   GEM := gem
 else ifeq ($(PLATFORM),osx)
   GEM := gem
+else ifeq ($(PLATFORM),FreeBSD)
+  GEM := gem
 else
   $(error Not prepared to build a gem on platform $(PLATFORM))
 endif

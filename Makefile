@@ -17,9 +17,9 @@ ifeq ($(MONO),)
   MONO := /usr/bin/mono
 endif
 
-MCS := $(shell which mcs)
+MCS := $(shell which dmcs)
 ifeq ($(MCS),)
-  MCS := /usr/bin/mcs
+  MCS := /usr/bin/dmcs
 endif
 
 CFLAGS := -Werror -Wno-error=format -fPIC -DNO_INTELLISENSE -fvisibility=hidden -DNDEBUG=1 -Wreturn-type -fno-omit-frame-pointer
@@ -108,7 +108,7 @@ VPATH += $(addprefix :,$(filter-out lib,$(patsubst -L%,%,$(filter -L%,$(LDFLAGS)
 
 CS_PROJECTS := flow/actorcompiler flow/coveragetool fdbclient/vexillographer
 CPP_PROJECTS := flow fdbrpc fdbclient fdbbackup fdbserver fdbcli bindings/c bindings/java fdbmonitor bindings/flow/tester bindings/flow FDBLibTLS
-OTHER_PROJECTS := bindings/python
+OTHER_PROJECTS := bindings/python bindings/ruby bindings/go
 
 CS_MK_GENERATED := $(CS_PROJECTS:=/generated.mk)
 CPP_MK_GENERATED := $(CPP_PROJECTS:=/generated.mk)
