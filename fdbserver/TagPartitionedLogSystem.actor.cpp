@@ -405,7 +405,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return waitForAll(quorumResults);
 	}
 
-	Reference<IPeekCursor> peekAll( UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore ) {
+	Reference<IPeekCursor> peekAll( UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore, bool throwIfDead ) {
 		int bestSet = -1;
 		int nextBestSet = -1;
 		std::vector<Reference<LogSet>> localSets;
@@ -444,7 +444,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						break;
 					}
 					TraceEvent("TLogPeekAllDead", dbgid).detail("tag", tag.toString()).detail("begin", begin).detail("end", end).detail("lastBegin", lastBegin).detail("oldLogDataSize", oldLogData.size());
-					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+					if(throwIfDead) {
+						throw worker_removed();
+					} else {
+						return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), tag, begin, getPeekEnd(), false, false ) );
+					}
 				}
 
 				int bestOldSet = -1;
@@ -554,7 +558,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		if(tag.locality == tagLocalityRemoteLog) {
 			return peekRemote(dbgid, begin, tag, parallelGetMore);
 		} else {
-			return peekAll(dbgid, begin, getPeekEnd(), tag, parallelGetMore);
+			return peekAll(dbgid, begin, getPeekEnd(), tag, parallelGetMore, false);
 		}
 	}
 
@@ -624,7 +628,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 				if(foundSpecial) {
 					TraceEvent("TLogPeekLocalFoundSpecial", dbgid).detail("tag", tag.toString()).detail("begin", begin).detail("end", end);
-					cursors.push_back(peekAll(dbgid, begin, std::min(lastBegin, end), tag, false));
+					cursors.push_back(peekAll(dbgid, begin, std::min(lastBegin, end), tag, false, true));
 					epochEnds.push_back(LogMessageVersion(std::min(lastBegin, end)));
 					break;
 				}
