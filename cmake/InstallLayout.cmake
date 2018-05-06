@@ -72,7 +72,7 @@ list(GET FDB_VERSION_LIST 2 FDB_PATCH)
 
 include(InstallRequiredSystemLibraries)
 set(CPACK_PACKAGE_NAME "foundationdb")
-set(CPACK_PACKAGE_VENDOR "FoundationDB Community")
+set(CPACK_PACKAGE_VENDOR "FoundationDB <fdb-dist@apple.com>")
 set(CPACK_PACKAGE_VERSION_MAJOR ${FDB_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${FDB_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${FDB_PATCH})
@@ -80,6 +80,8 @@ set(CPACK_PACKAGE_DESCRIPTION_FILE ${CMAKE_SOURCE_DIR}/packaging/description)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
   "FoundationDB is a scalable, fault-tolerant, ordered key-value store with full ACID transactions.")
 set(CPACK_PACKAGE_ICON ${CMAKE_SOURCE_DIR}/packaging/foundationdb.ico)
+set(CPACK_PACKAGE_CONTACT "The FoundationDB Community")
+set(CPACK_COMPONENT_server_DEPENDS clients)
 if (INSTALL_LAYOUT MATCHES "OSX")
   set(CPACK_RESOURCE_FILE_README ${CMAKE_SOURCE_DIR}/packaging/osx/resources/conclusion.rtf)
   set(CPACK_PRODUCTBUILD_RESOURCES_DIR ${CMAKE_SOURCE_DIR}/packaging/osx/resources)
@@ -95,11 +97,19 @@ endif()
 if(INSTALL_LAYOUT MATCHES "RPM")
   set(CPACK_RPM_server_USER_FILELIST
     "%config(noreplace) /etc/foundationdb/foundationdb.conf"
-    "%attr(600, root, root) %config(noreplace) /etc/foundationdb/fdb.cluster")
+    "%attr(0700,foundationdb,foundationdb) /var/log/foundationdb"
+    "%attr(0700, foundationdb, foundationdb) /var/lib/foundationdb")
   set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION
-    "/usr/sbin" "/usr/share/java" "/usr/lib64/python2.7"
+    "/usr/sbin"
+    "/usr/share/java"
+    "/usr/lib64/python2.7"
     "/usr/lib64/python2.7/site-packages"
+    "/var"
+    "/var/log"
+    "/var/lib"
+    "/lib"
     "/lib/systemd"
+    "/lib/systemd/system"
     "/etc/rc.d/init.d")
   set(CPACK_RPM_DEBUGINFO_PACKAGE ON)
   set(CPACK_RPM_BUILD_SOURCE_DIRS_PREFIX /usr/src)
@@ -116,7 +126,19 @@ if(INSTALL_LAYOUT MATCHES "RPM")
     ${CMAKE_SOURCE_DIR}/packaging/rpm/scripts/preunserver.sh)
   set(CPACK_RPM_server_PACKAGE_REQUIRES
     "foundationdb-clients = ${FDB_MAJOR}.${FDB_MINOR}.${FDB_PATCH}")
-elseif(INSTALL_LAYOUT MATCHES "OSX")
+endif()
+
+################################################################################
+# Configuration for DEB
+################################################################################
+
+if(INSTALL_LAYOUT MATCHES "DEB")
+  set(CPACK_DEB_COMPONENT_INSTALL ON)
+  set(CPACK_DEBIAN_PACKAGE_SECTION "database")
+  set(CPACK_DEBIAN_ENABLE_COMPONENT_DEPENDS ON)
+
+  set(CPACK_DEBIAN_server_PACKAGE_DEPENDS "adduser, libc6 (>= 2.11), python (>= 2.6)")
+  set(CPACK_DEBIAN_clients_PACKAGE_DEPENDS "adduser, libc6 (>= 2.11)")
 endif()
 
 ################################################################################
@@ -128,23 +150,30 @@ string(RANDOM LENGTH 8 description2)
 set(CLUSTER_DESCRIPTION1 ${description1} CACHE STRING "Cluster description")
 set(CLUSTER_DESCRIPTION2 ${description2} CACHE STRING "Cluster description")
 
-configure_file(fdb.cluster.cmake ${CMAKE_CURRENT_BINARY_DIR}/fdb.cluster)
 install(FILES ${CMAKE_SOURCE_DIR}/packaging/foundationdb.conf
   DESTINATION ${FDB_CONFIG_DIR}
   COMPONENT server)
-install(FILES ${CMAKE_BINARY_DIR}/fdb.cluster
-  DESTINATION ${FDB_CONFIG_DIR}
-  COMPONENT server)
 if(INSTALL_LAYOUT MATCHES "RPM")
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/packaging/foundationdb
+    ${CMAKE_BINARY_DIR}/packaging/rpm)
+  install(
+    DIRECTORY ${CMAKE_BINARY_DIR}/packaging/foundationdb
+    DESTINATION "var/log"
+    COMPONENT server)
+  install(
+    DIRECTORY ${CMAKE_BINARY_DIR}/packaging/foundationdb
+    DESTINATION "var/lib"
+    COMPONENT server)
   execute_process(
     COMMAND pidof systemd
     RESULT_VARIABLE IS_SYSTEMD
     OUTPUT_QUIET
     ERROR_QUIET)
   if(IS_SYSTEMD EQUAL "0")
-    install(FILES ${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb-init
+    configure_file(${CMAKE_SOURCE_DIR}/packaging/rpm/foundationdb.service
+      ${CMAKE_BINARY_DIR}/packaging/rpm/foundationdb.service)
+    install(FILES ${CMAKE_BINARY_DIR}/packaging/rpm/foundationdb.service
       DESTINATION "lib/systemd/system"
-      RENAME "foundationdb.service"
       COMPONENT server)
   else()
     install(FILES ${CMAKE_SOURCE_DIR}/packaging/argparse.py
