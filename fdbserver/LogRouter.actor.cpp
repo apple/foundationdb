@@ -308,7 +308,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 	TLogPeekReply reply;
 	reply.maxKnownVersion = self->version.get();
 	reply.messages = messages.toStringRef();
-	reply.popped = self->minPopped.get();
+	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
 	reply.end = endVersion;
 
 	req.reply.send( reply );
