@@ -21,6 +21,7 @@
 # -*- mode: makefile; -*-
 
 fdbclient_CFLAGS := $(fdbrpc_CFLAGS)
+fdbclient_LIBS := -lm -lc++ -lpthread -lexecinfo -leio
 
 fdbclient_GENERATED_SOURCES += fdbclient/FDBOptions.g.h
 
