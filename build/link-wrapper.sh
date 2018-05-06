@@ -36,7 +36,7 @@ case $1 in
 		fi
 		;;
 	    *)
-		/usr/bin/clang++ -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option $OPTIONS -lpthread
+		/usr/bin/clang++ -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option $OPTIONS -lm -lc++ -lpthread -lexecinfo
 		;;
 	esac
 
