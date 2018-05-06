@@ -21,5 +21,6 @@ else()
   message(STATUS "Boost include dir ${BOOST_INCLUDE_DIR}")
 
   add_library(boost_target INTERFACE)
+  add_dependencies(boost_target boostProject)
   target_include_directories(boost_target INTERFACE ${BOOST_INCLUDE_DIR})
 endif()
