@@ -34,6 +34,8 @@ ifeq ($(PLATFORM),linux)
   # fdbserver_STATIC_LIBS += -ltcmalloc -lunwind -lprofiler
 else ifeq ($(PLATFORM),osx)
   fdbserver_LDFLAGS += -lc++
+else ifeq ($(PLATFORM),freebsd)
+  fdbserver_LDFLAGS += -lc++ -lm -lpthread -lexecinfo -leio
 endif
 
 ifeq ($(WORKLOADS),false)

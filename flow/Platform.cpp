@@ -118,9 +118,12 @@
 /* Needed for vm info  */
 #include <stdio.h>
 #include <errno.h>
+#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <sys/vmmeter.h>
+#include <sys/cpuset.h>
+#include <sys/resource.h>
 #endif
 
 #ifdef __APPLE__
@@ -1874,6 +1877,11 @@ void setAffinity(int proc) {
 	CPU_ZERO(&set);
 	CPU_SET(proc, &set);
 	sched_setaffinity(0, sizeof(cpu_set_t), &set);
+#elif defined(__FreeBSD__)
+	cpuset_t set;
+	CPU_ZERO(&set);
+	CPU_SET(proc, &set);
+	cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID, -1,sizeof(set), &set);
 #endif
 }
 
@@ -2499,7 +2507,7 @@ std::string getDefaultPluginPath( const char* plugin_name ) {
 #elif defined(__linux__)
 	return format( "/usr/lib/foundationdb/plugins/%s.so", plugin_name );
 #elif defined(__FreeBSD__)
-	return format( "/usr/lib/foundationdb/plugins/%s.so", plugin_name );
+	return format( "/usr/local/lib/foundationdb/plugins/%s.so", plugin_name );
 #elif defined(__APPLE__)
 	return format( "/usr/local/foundationdb/plugins/%s.dylib", plugin_name );
 #else

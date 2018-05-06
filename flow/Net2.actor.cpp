@@ -56,7 +56,7 @@ uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__FreeBSD__)
 #include <execinfo.h>
 
 volatile double net2liveness = 0;
