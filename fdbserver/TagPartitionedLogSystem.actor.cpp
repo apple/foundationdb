@@ -67,6 +67,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	int expectedLogSets;
 	int logRouterTags;
 	UID recruitmentID;
+	bool stopped;
 
 	// new members
 	Future<Void> rejoins;
@@ -86,7 +87,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::vector<OldLogData> oldLogData;
 	AsyncTrigger logSystemConfigChanged;
 
-	TagPartitionedLogSystem( UID dbgid, LocalityData locality ) : dbgid(dbgid), locality(locality), actors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(0), logRouterTags(0), expectedLogSets(0), hasRemoteServers(false) {}
+	TagPartitionedLogSystem( UID dbgid, LocalityData locality ) : dbgid(dbgid), locality(locality), actors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(0), logRouterTags(0), expectedLogSets(0), hasRemoteServers(false), stopped(false) {}
 
 	virtual void stopRejoins() {
 		rejoins = Future<Void>();
@@ -128,6 +129,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->expectedLogSets = lsConf.expectedLogSets;
 		logSystem->logRouterTags = lsConf.logRouterTags;
 		logSystem->recruitmentID = lsConf.recruitmentID;
+		logSystem->stopped = lsConf.stopped;
 		for( int i = 0; i < lsConf.tLogs.size(); i++ ) {
 			TLogSet const& tLogSet = lsConf.tLogs[i];
 			if(!excludeRemote || tLogSet.isLocal) {
@@ -241,6 +243,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 		logSystem->logSystemType = lsConf.logSystemType;
+		logSystem->stopped = true;
 
 		return logSystem;
 	}
@@ -692,10 +695,34 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			}
 		}
 		if( found ) {
-			for( auto& log : tLogs ) {
-				if( log->logServers.size() && log->isLocal && log->hasBestPolicy ) {
-					TraceEvent("TLogPeekLogRouterBestOnly", dbgid).detail("tag", tag.toString()).detail("begin", begin).detail("logId", log->logServers[log->bestLocationFor( tag )]->get().id());
-					return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( log->logServers[log->bestLocationFor( tag )], tag, begin, getPeekEnd(), false, false ) );
+			if(stopped) {
+				int bestSet = -1;
+				int nextBestSet = -1;
+				std::vector<Reference<LogSet>> localSets;
+				for(auto& log : tLogs) {
+					if(log->isLocal && log->logServers.size()) {
+						TraceEvent("TLogPeekLogRouterLocalSet", dbgid).detail("tag", tag.toString()).detail("begin", begin).detail("logServers", log->logServerString());
+						localSets.push_back(log);
+						if(log->hasBestPolicy && (log->locality == tag.locality || tag.locality == tagLocalitySpecial || log->locality == tagLocalitySpecial || log->locality == tagLocalityUpgraded)) {
+							bestSet = localSets.size()-1;
+							nextBestSet = bestSet;
+						}
+						if(log->hasBestPolicy && bestSet == -1) {
+							nextBestSet = localSets.size()-1;
+						}
+					}
+				}
+
+				TraceEvent("TLogPeekLogRouterSets", dbgid).detail("tag", tag.toString()).detail("begin", begin);
+				//FIXME: do this merge on one of the logs in the other data center to avoid sending multiple copies across the WAN
+				return Reference<ILogSystem::SetPeekCursor>( new ILogSystem::SetPeekCursor( localSets, bestSet == -1 ? nextBestSet : bestSet, 
+					bestSet >= 0 ? localSets[bestSet]->bestLocationFor( tag ) : -1, tag, begin, getPeekEnd(), false ) );
+			} else {
+				for( auto& log : tLogs ) {
+					if( log->logServers.size() && log->isLocal && log->hasBestPolicy ) {
+						TraceEvent("TLogPeekLogRouterBestOnly", dbgid).detail("tag", tag.toString()).detail("begin", begin).detail("logId", log->logServers[log->bestLocationFor( tag )]->get().id());
+						return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( log->logServers[log->bestLocationFor( tag )], tag, begin, getPeekEnd(), false, false ) );
+					}
 				}
 			}
 		}
@@ -900,6 +927,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystemConfig.expectedLogSets = expectedLogSets;
 		logSystemConfig.logRouterTags = logRouterTags;
 		logSystemConfig.recruitmentID = recruitmentID;
+		logSystemConfig.stopped = stopped;
 		for( int i = 0; i < tLogs.size(); i++ ) {
 			Reference<LogSet> logSet = tLogs[i];
 			if(logSet->isLocal || remoteLogsWrittenToCoreState) {
@@ -1139,6 +1167,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->logSystemType = prevState.logSystemType;
 			logSystem->epochEndVersion = 0;
 			logSystem->knownCommittedVersion = 0;
+			logSystem->stopped = true;
 			outLogSystem->set(logSystem);
 			Void _ = wait( Future<Void>(Never()) );
 			throw internal_error();
@@ -1278,6 +1307,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSystem->epochEndVersion = minEnd;
 				logSystem->knownCommittedVersion = knownCommittedVersion;
 				logSystem->remoteLogsWrittenToCoreState = true;
+				logSystem->stopped = true;
 
 				outLogSystem->set(logSystem);
 			}
