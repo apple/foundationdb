@@ -3239,7 +3239,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		return false;
 }
 
-ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag, ReplyPromise<StorageServerInterface> recruitReply,
+ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag, ReplyPromise<InitializeStorageReply> recruitReply,
 	Reference<AsyncVar<ServerDBInfo>> db, std::string folder )
 {
 	state StorageServer self(persistentData, db, ssi);
@@ -3260,7 +3260,10 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 		Void _ = wait( self.storage.commit() );
 
 		TraceEvent("StorageServerInit", ssi.id()).detail("Version", self.version.get()).detail("SeedTag", seedTag.toString());
-		recruitReply.send(ssi);
+		InitializeStorageReply rep;
+		rep.interf = ssi;
+		rep.addedVersion = self.version.get();
+		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
 		Void _ = wait( storageServerCore(&self, ssi) );
 

@@ -487,7 +487,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
 	state ActorCollection filesClosed(true);
 	state Promise<Void> stopping;
-	state WorkerCache<StorageServerInterface> storageCache;
+	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo(LiteralStringRef("DB"))) );
 	state Future<Void> metricsLogger;
 	state UID processIDUid;
@@ -761,7 +761,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					IKeyValueStore* data = openKVStore( req.storeType, filename, recruited.id(), memoryLimit );
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add( kvClosed );
-					ReplyPromise<StorageServerInterface> storageReady = req.reply;
+					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set( req.reqId, storageReady.getFuture() );
 					Future<Void> s = storageServer( data, recruited, req.seedTag, storageReady, dbInfo, folder );
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);

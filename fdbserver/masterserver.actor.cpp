@@ -338,7 +338,7 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfig
 		isr.reqId = g_random->randomUniqueID();
 		isr.interfaceId = g_random->randomUniqueID();
 
-		ErrorOr<StorageServerInterface> newServer = wait( recruits.storageServers[idx].storage.tryGetReply( isr ) );
+		ErrorOr<InitializeStorageReply> newServer = wait( recruits.storageServers[idx].storage.tryGetReply( isr ) );
 
 		if( newServer.isError() ) {
 			if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
@@ -357,7 +357,7 @@ ACTOR Future<Void> newSeedServers( Reference<MasterData> self, RecruitFromConfig
 			tag.id++;
 			idx++;
 
-			servers->push_back( newServer.get() );
+			servers->push_back( newServer.get().interf );
 		}
 	}
 

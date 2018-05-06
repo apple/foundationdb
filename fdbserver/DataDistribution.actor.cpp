@@ -268,14 +268,20 @@ struct ServerStatus {
 };
 typedef AsyncMap<UID, ServerStatus> ServerStatusMap;
 
-ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID ) {
+ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version addedVersion ) {
 	state Transaction tr(cx);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
-			if (canRemove)
-				return Void();
+			Version ver = wait( tr.getReadVersion() );
+
+			//we cannot remove a server immediately after adding it, because 
+			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
+				if (canRemove) {
+					return Void();
+				}
+			}
 
 			// Wait for any change to the serverKeys for this server
 			Void _ = wait( delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskDataDistribution) );
@@ -295,7 +301,8 @@ ACTOR Future<Void> storageServerFailureTracker(
 	ServerStatus *status,
 	PromiseStream<Void> serverFailures,
 	int64_t *unhealthyServers,
-	UID masterId )
+	UID masterId,
+	Version addedVersion )
 {
 	loop {
 		bool unhealthy = statusMap->count(server.id()) && statusMap->get(server.id()).isUnhealthy();
@@ -319,7 +326,7 @@ ACTOR Future<Void> storageServerFailureTracker(
 				TraceEvent("StatusMapChange", masterId).detail("ServerID", server.id()).detail("Status", status->toString()).
 					detail("Available", IFailureMonitor::failureMonitor().getState(server.waitFailure.getEndpoint()).isAvailable());
 			}
-			when ( Void _ = wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, server.id()) : Never() ) ) { break; }
+			when ( Void _ = wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, server.id(), addedVersion) : Never() ) ) { break; }
 		}
 	}
 
@@ -479,7 +486,8 @@ Future<Void> storageServerTracker(
 	std::map<UID, Reference<TCServerInfo>>* const& other_servers,
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& changes,
 	PromiseStream<Void> const& serverFailures,
-	Promise<Void> const& errorOut);
+	Promise<Void> const& errorOut,
+	Version const& addedVersion);
 
 Future<Void> teamTracker( struct DDTeamCollection* const& self, Reference<IDataDistributionTeam> const& team );
 
@@ -802,7 +810,7 @@ struct DDTeamCollection {
 		// we preferentially mark the least used server as undesirable?
 		for (auto i = initTeams.allServers.begin(); i != initTeams.allServers.end(); ++i) {
 			if (shouldHandleServer(i->first)) {
-				addServer(i->first, i->second, serverTrackerErrorOut);
+				addServer(i->first, i->second, serverTrackerErrorOut, 0);
 			}
 		}
 
@@ -1156,7 +1164,7 @@ struct DDTeamCollection {
 		return (includedDCs.empty() || std::find(includedDCs.begin(), includedDCs.end(), newServer.locality.dcId()) != includedDCs.end() || (otherTrackedDCs.present() && std::find(otherTrackedDCs.get().begin(), otherTrackedDCs.get().end(), newServer.locality.dcId()) == otherTrackedDCs.get().end()));
 	}
 
-	void addServer( StorageServerInterface newServer, ProcessClass processClass, Promise<Void> errorOut ) {
+	void addServer( StorageServerInterface newServer, ProcessClass processClass, Promise<Void> errorOut, Version addedVersion ) {
 		if (!shouldHandleServer(newServer)) {
 			return;
 		}
@@ -1164,7 +1172,7 @@ struct DDTeamCollection {
 
 		TraceEvent("AddedStorageServer", masterId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("address", newServer.waitFailure.getEndpoint().address);
 		auto &r = server_info[newServer.id()] = Reference<TCServerInfo>( new TCServerInfo( newServer, processClass ) );
-		r->tracker = storageServerTracker( this, cx, r.getPtr(), &server_status, lock, masterId, &server_info, serverChanges, serverFailures, errorOut );
+		r->tracker = storageServerTracker( this, cx, r.getPtr(), &server_status, lock, masterId, &server_info, serverChanges, serverFailures, errorOut, addedVersion );
 		restartTeamBuilder.trigger();
 	}
 
@@ -1515,7 +1523,7 @@ ACTOR Future<Void> waitServerListChange( DDTeamCollection *self, Database cx, Fu
 								currentInterfaceChanged.send( std::make_pair(ssi,processClass) );
 							}
 						} else if( !self->recruitingIds.count(ssi.id()) ) {
-							self->addServer( ssi, processClass, self->serverTrackerErrorOut );
+							self->addServer( ssi, processClass, self->serverTrackerErrorOut, tr.getReadVersion().get() );
 							self->doBuildTeams = true;
 						}
 					}
@@ -1567,7 +1575,8 @@ ACTOR Future<Void> storageServerTracker(
 	std::map<UID, Reference<TCServerInfo>>* other_servers,
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > changes,
 	PromiseStream<Void> serverFailures,
-	Promise<Void> errorOut)
+	Promise<Void> errorOut,
+	Version addedVersion)
 {
 	state Future<Void> failureTracker;
 	state ServerStatus status( false, false, server->lastKnownInterface.locality );
@@ -1651,7 +1660,7 @@ ACTOR Future<Void> storageServerTracker(
 			otherChanges.push_back( self->excludedServers.onChange( addr ) );
 			otherChanges.push_back( self->excludedServers.onChange( ipaddr ) );
 
-			failureTracker = storageServerFailureTracker( cx, server->lastKnownInterface, statusMap, &status, serverFailures, &self->unhealthyServers, masterId );
+			failureTracker = storageServerFailureTracker( cx, server->lastKnownInterface, statusMap, &status, serverFailures, &self->unhealthyServers, masterId, addedVersion );
 
 			//We need to recruit new storage servers if the key value store type has changed
 			if(hasWrongStoreTypeOrDC)
@@ -1766,7 +1775,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection *self, RecruitStorageRepl
 
 	self->recruitingIds.insert(interfaceId);
 	self->recruitingLocalities.insert(candidateWorker.worker.address());
-	ErrorOr<StorageServerInterface> newServer = wait( candidateWorker.worker.storage.tryGetReply( isr, TaskDataDistribution ) );
+	ErrorOr<InitializeStorageReply> newServer = wait( candidateWorker.worker.storage.tryGetReply( isr, TaskDataDistribution ) );
 	self->recruitingIds.erase(interfaceId);
 	self->recruitingLocalities.erase(candidateWorker.worker.address());
 
@@ -1782,8 +1791,8 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection *self, RecruitStorageRepl
 		Void _ = wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskDataDistribution) );
 	}
 	else if( newServer.present() ) {
-		if( !self->server_info.count( newServer.get().id() ) )
-			self->addServer( newServer.get(), candidateWorker.processClass, self->serverTrackerErrorOut );
+		if( !self->server_info.count( newServer.get().interf.id() ) )
+			self->addServer( newServer.get().interf, candidateWorker.processClass, self->serverTrackerErrorOut, newServer.get().addedVersion );
 		else
 			TraceEvent(SevWarn, "DDRecruitmentError").detail("Reason", "Server ID already recruited");
 

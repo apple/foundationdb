@@ -146,12 +146,22 @@ struct InitializeResolverRequest {
 	}
 };
 
+struct InitializeStorageReply {
+	StorageServerInterface interf;
+	Version addedVersion;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & interf & addedVersion;
+	}
+};
+
 struct InitializeStorageRequest {
 	Tag seedTag;									//< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
-	ReplyPromise< struct StorageServerInterface > reply;
+	ReplyPromise< InitializeStorageReply > reply;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -288,7 +298,7 @@ Future<Void> storageServer(
 				class IKeyValueStore* const& persistentData,
 				StorageServerInterface const& ssi,
 				Tag const& seedTag,
-				ReplyPromise<StorageServerInterface> const& recruitReply,
+				ReplyPromise<InitializeStorageReply> const& recruitReply,
 				Reference<AsyncVar<ServerDBInfo>> const& db,
 				std::string const& folder );
 Future<Void> storageServer(
