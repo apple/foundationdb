@@ -24,11 +24,11 @@
 
 #include <openssl/obj_mac.h>
 
-#include "ITLSPlugin.h"
-#include "ReferenceCounted.h"
+#include "itlsplugin.h"
+#include "referencecounted.h"
 
-#include "FDBLibTLSPlugin.h"
-#include "FDBLibTLSPolicy.h"
+#include "fdblibtlsplugin.h"
+#include "fdblibtlspolicy.h"
 
 struct FDBLibTLSVerifyTest {
 	FDBLibTLSVerifyTest(std::string input):

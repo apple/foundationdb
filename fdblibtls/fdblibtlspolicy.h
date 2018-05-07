@@ -24,8 +24,8 @@
 #pragma once
 
 #include "fdblibtlsplugin.h"
-#include "ITLSPlugin.h"
-#include "ReferenceCounted.h"
+#include "itlsplugin.h"
+#include "referencecounted.h"
 
 #include <map>
 #include <string>

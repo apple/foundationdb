@@ -30,8 +30,8 @@
 
 #include <boost/circular_buffer.hpp>
 
-#include "ITLSPlugin.h"
-#include "ReferenceCounted.h"
+#include "itlsplugin.h"
+#include "referencecounted.h"
 
 #include "fdblibtlsplugin.h"
 

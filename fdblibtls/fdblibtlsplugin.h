@@ -23,8 +23,8 @@
 
 #pragma once
 
-#include "ITLSPlugin.h"
-#include "ReferenceCounted.h"
+#include "itlsplugin.h"
+#include "referencecounted.h"
 
 #include <tls.h>
 

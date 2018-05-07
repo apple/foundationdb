@@ -1,5 +1,5 @@
 /*
- * ReferenceCounted.h
+ * referencecounted.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -100,7 +100,7 @@ private:
 	P *ptr;
 };
 
-template <class P> 
+template <class P>
 bool operator==( const Reference<P>& lhs, const Reference<P>& rhs ) {
 	return lhs.getPtr() == rhs.getPtr();
 }
