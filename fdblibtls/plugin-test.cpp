@@ -33,7 +33,7 @@
 #include "ITLSPlugin.h"
 #include "ReferenceCounted.h"
 
-#include "FDBLibTLSPlugin.h"
+#include "fdblibtlsplugin.h"
 
 #define TESTDATA "./testdata/"
 

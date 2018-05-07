@@ -1,5 +1,5 @@
 /*
- * FDBLibTLSSession.h
+ * fdblibtlssession.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -26,7 +26,7 @@
 #include "ITLSPlugin.h"
 #include "ReferenceCounted.h"
 
-#include "FDBLibTLSPolicy.h"
+#include "fdblibtlspolicy.h"
 
 #include <tls.h>
 
