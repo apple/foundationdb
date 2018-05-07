@@ -98,8 +98,12 @@ endif
 GITPRESENT := $(wildcard $(FDBDIR)/.git)
 HGPRESENT := $(wildcard $(FDBDIR)/.hg)
 
+# Do not override version IDs if already set
+ifneq ($(VERSION_ID),)
+# Noop
+
 # Use Git, if not missing
-ifneq ($(GITPRESENT),)
+else ifneq ($(GITPRESENT),)
 	SCVER := $(shell cd "$(FDBDIR)" && git --version 2>/dev/null)
 	ifneq ($(SCVER),)
 		VERSION_ID := $(shell cd "$(FDBDIR)" && git rev-parse --verify HEAD)
