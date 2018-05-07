@@ -1861,6 +1861,9 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			if(!it.second->isPrimary && it.second->logSystem->get()) {
 				it.second->removed = it.second->removed && it.second->logSystem->get()->endEpoch();
 			}
+			if(it.second->committingQueue.canBeSet()) {
+				it.second->committingQueue.sendError(worker_removed());
+			}
 		}
 		it.second->stopped = true;
 		if(!it.second->recoveryComplete.isSet()) {
