@@ -121,7 +121,7 @@ else
 $(error Missing hg executable on $(PLATFORM))
 		endif
 	else
-	FDBFILES := (shell ls -la $(FDBDIR))
+	FDBFILES := $(shell ls -la $(FDBDIR))
 $(error Missing source control information for source on $(PLATFORM) in directory: $(FDBDIR) with files: $(FDBFILES))
 	endif
 endif
