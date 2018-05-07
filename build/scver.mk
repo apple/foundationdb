@@ -108,22 +108,22 @@ ifneq ($(GITPRESENT),)
 	else
 $(error Missing git executable on $(PLATFORM) )
 	endif
+
 # Otherwise, use Mercurial
-else
-	# Otherwise, use Mercurial, if not missing
-	ifneq ($(HGPRESENT),)
-		SCVER := $(shell cd "$(FDBDIR)" && hg --version 2>/dev/null)
-		ifdef SCVER
-			VERSION_ID := $(shell cd "$(FDBDIR)" && hg id -n)
-			SOURCE_CONTROL := MERCURIAL
-			SCBRANCH := $(shell cd "$(FDBDIR)" && hg branch)
-		else
-$(error Missing hg executable on $(PLATFORM))
-		endif
+else ifneq ($(HGPRESENT),)
+	SCVER := $(shell cd "$(FDBDIR)" && hg --version 2>/dev/null)
+	ifdef SCVER
+		VERSION_ID := $(shell cd "$(FDBDIR)" && hg id -n)
+		SOURCE_CONTROL := MERCURIAL
+		SCBRANCH := $(shell cd "$(FDBDIR)" && hg branch)
 	else
+$(error Missing hg executable on $(PLATFORM))
+	endif
+
+# No version control system
+else
 	FDBFILES := $(shell ls -la $(FDBDIR))
 $(error Missing source control information for source on $(PLATFORM) in directory: $(FDBDIR) with files: $(FDBFILES))
-	endif
 endif
 
 # Set the RELEASE variable based on the KVRELEASE variable.
