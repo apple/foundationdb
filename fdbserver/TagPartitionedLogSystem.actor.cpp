@@ -1747,7 +1747,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			for( int i = 0; i < recr.satelliteTLogs.size(); i++ )
 				satelliteInitializationReplies.push_back( transformErrors( throwErrorOr( recr.satelliteTLogs[i].tLog.getReplyUnlessFailedFor( sreqs[i], SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 
-			Void _ = wait( waitForAll( satelliteInitializationReplies ) );
+			Void _ = wait( waitForAll( satelliteInitializationReplies ) || oldRouterRecruitment );
 
 			for( int i = 0; i < satelliteInitializationReplies.size(); i++ ) {
 				logSystem->tLogs[1]->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(satelliteInitializationReplies[i].get()) ) );

@@ -1835,7 +1835,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 		} else {
 			logData->logSystem->get()->pop(logData->logRouterPoppedVersion, logData->remoteTag, logData->durableKnownCommittedVersion, logData->locality);
 		}
-		TraceEvent("TLogUpdate", self->dbgid).detail("logId", logData->logId).detail("recoverFrom", recoverFrom.toString()).detail("dbInfo", self->dbInfo->get().logSystemConfig.toString()).detail("found", found).detail("logSystem", (bool) logSystem->get() ).detail("recoveryState", self->dbInfo->get().recoveryState);
+		TraceEvent("TLogUpdate", self->dbgid).detail("logId", logData->logId).detail("recruitmentID", logData->recruitmentID).detail("dbRecruitmentID", self->dbInfo->get().logSystemConfig.recruitmentID).detail("recoverFrom", recoverFrom.toString()).detail("dbInfo", self->dbInfo->get().logSystemConfig.toString()).detail("found", found).detail("logSystem", (bool) logSystem->get() ).detail("recoveryState", self->dbInfo->get().recoveryState);
 		for(auto it : self->dbInfo->get().logSystemConfig.oldTLogs) {
 			TraceEvent("TLogUpdateOld", self->dbgid).detail("logId", logData->logId).detail("dbInfo", it.toString());
 		}
