@@ -221,7 +221,7 @@ else
                 fi
             else
                 echo "Downloading foundation repository into ${destdir}:"
-                cmd=( 'git' '-C' "${destdir}" 'clone' '--branch' "release-${FDBVER}" "git@${REMOTE}:${FDBREPO}.git" )
+                cmd=( 'git' '-C' "${destdir}" 'clone' '--branch' "release-${FDBVER}" "https://${REMOTE}/${FDBREPO}.git" )
 
                 echo "${cmd[*]}"
                 if ! "${cmd[@]}" ; then
