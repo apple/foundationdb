@@ -5,7 +5,7 @@ FDBLibTLS_LDFLAGS += -Wl,-soname,FDBLibTLS.so -Wl,--version-script=FDBLibTLS/FDB
 
 # The plugin isn't a typical library, so it feels more sensible to have a copy
 # of it in bin/.
-bin/FDBLibTLS.$(DLEXT): lib/libFDBLibTLS.$(DLEXT)
+bin/fdb-libressl-plugin.$(DLEXT): lib/libFDBLibTLS.$(DLEXT)
 	@cp $< $@
 
-TARGETS += bin/FDBLibTLS.$(DLEXT)
+TARGETS += bin/fdb-libressl-plugin.$(DLEXT)
