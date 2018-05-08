@@ -82,7 +82,7 @@ struct PrefixTree {
 			SUFFIX_LEN_LARGE    = 1 << 7
 		};
 
-		/* Byte format, in order, based on flags
+		/* Byte format, in order, lengths are based on flags
 		 *   flags            1 byte
 		 *   prefix len       1 or 2 bytes
 		 *   split len        0, 1 or 2 bytes
@@ -127,10 +127,27 @@ struct PrefixTree {
 			return r;
 		}
 
+		// Helper function to make decoding the variable length structure a little cleaner
+		inline int readLen(const uint8_t *&ptr, bool present, bool large) const {
+			if(!present)
+				return 0;
+
+			int r;
+			if(large) {
+				r = *(uint16_t *)(ptr);
+				ptr += sizeof(uint16_t);
+			}
+			else {
+				r = *(uint8_t *)(ptr);
+				ptr += sizeof(uint8_t);
+			}
+
+			return r;
+		}
+
 	public:
 
 		// Structure for decoding a variable length Node to make the members more accessible
-		// TODO:  Something more efficient where things are decoded on-demand
 		struct Members {
 			StringRef prefix;
 			StringRef split;
@@ -139,8 +156,9 @@ struct PrefixTree {
 			const Node *rightChild;
 
 			// Copies all of the key bytes into a single contiguous buffer
-			// TODO:  Method to extract a prefix efficiently
 			StringRef key(Arena &arena) const {
+				ASSERT(prefix.size() == 0 || prefix.begin() != nullptr);
+
 				StringRef r = makeString(prefix.size() + split.size() + suffix.size(), arena);
 				uint8_t *wptr = mutateString(r);
 				if(prefix.size() > 0) {
@@ -198,6 +216,166 @@ struct PrefixTree {
 			out.rightChild = (flags & HAS_RIGHT_CHILD) ? (Node *)ptr : nullptr;
 		}
 
+		inline int getPrefixLen() const {
+			const uint8_t *ptr = data;
+			return readLen(ptr, true, flags & PREFIX_BORROW_LARGE);
+		}
+
+		inline StringRef getSplitString() const {
+			if(flags & HAS_SPLIT_STRING) {
+				// skip prefix len
+				const uint8_t *ptr = data + (flags & PREFIX_BORROW_LARGE ? 2 : 1);
+				// read split len
+				int splitLen = readLen(ptr, flags & HAS_SPLIT_STRING, flags & SPLIT_LEN_LARGE);
+
+				return StringRef(ptr, splitLen);
+			}
+			return StringRef();
+		}
+
+		inline const Node * getLeftChild() const {
+			if(flags & HAS_LEFT_CHILD) {
+				// skip prefix len
+				const uint8_t *ptr = data + (flags & PREFIX_BORROW_LARGE ? 2 : 1);
+				// read split len, skip over split string
+				ptr += readLen(ptr, flags & HAS_SPLIT_STRING, flags & SPLIT_LEN_LARGE);
+				// read and skip suffix len if present
+				readLen(ptr, flags & HAS_SUFFIX_STRING, flags & SUFFIX_LEN_LARGE);
+				// skip left child length
+				ptr += 2;
+
+				return (Node *)ptr;
+			}
+			return nullptr;
+		}
+
+		inline StringRef getSuffixString() const {
+			if(flags & HAS_SUFFIX_STRING) {
+				// skip prefix len
+				const uint8_t *ptr = data + (flags & PREFIX_BORROW_LARGE ? 2 : 1);
+				// read split len, skip over split string
+				ptr += readLen(ptr, flags & HAS_SPLIT_STRING, flags & SPLIT_LEN_LARGE);
+				// read suffix len
+				int suffixLen = readLen(ptr, flags & HAS_SUFFIX_STRING, flags & SUFFIX_LEN_LARGE);
+				// read left child len, skip over left child, if exists
+				ptr += readLen(ptr, flags & HAS_LEFT_CHILD, true);
+
+				return StringRef(ptr, suffixLen);
+			}
+			return StringRef();
+		}
+
+		inline const Node * getRightChild() const {
+			if(flags & HAS_RIGHT_CHILD) {
+				// skip prefix len
+				const uint8_t *ptr = data + (flags & PREFIX_BORROW_LARGE ? 2 : 1);
+				// read split len, skip over split string
+				ptr += readLen(ptr, flags & HAS_SPLIT_STRING, flags & SPLIT_LEN_LARGE);
+				// read suffix len
+				int suffixLen = readLen(ptr, flags & HAS_SUFFIX_STRING, flags & SUFFIX_LEN_LARGE);
+				// read left child len, skip over left child, if exists
+				ptr += readLen(ptr, flags & HAS_LEFT_CHILD, true);
+				// skip over suffix
+				ptr += suffixLen;
+
+				return (Node *)ptr;
+			}
+			return nullptr;
+		}
+
+		inline int getKeySize() const {
+			const uint8_t *ptr = data;
+			int s = readLen(ptr, true, flags & PREFIX_BORROW_LARGE);
+			int splitLen = readLen(ptr, flags & HAS_SPLIT_STRING, flags & SPLIT_LEN_LARGE);
+			s += splitLen;
+			ptr += splitLen;
+			s += readLen(ptr, flags & HAS_SUFFIX_STRING, flags & SUFFIX_LEN_LARGE);
+			return s;
+		}
+
+		struct NodeWithPrefix {
+			const Node *node;
+			StringRef prefix;
+
+			void init(Arena &arena, const Node *n, NodeWithPrefix *lastLeft, NodeWithPrefix *lastRight) {
+				node = n;
+				prefix = (node->flags & PREFIX_BORROW_LEFT ? lastLeft : lastRight)->key(arena, node->getPrefixLen());
+			}
+
+			void initConstant(StringRef s) {
+				node = nullptr;
+				prefix = s;
+			}
+
+			int compareToKey(StringRef s) const {
+				// If s is shorter than prefix, compare s to prefix for final result
+				if(s.size() < prefix.size())
+					return s.compare(prefix);
+
+				// Compare prefix len of s to prefix
+				int cmp = s.substr(0, prefix.size()).compare(prefix);
+
+				// If they are the same, move on to split string
+				if(cmp == 0) {
+					s = s.substr(prefix.size());
+					StringRef split = node->getSplitString();
+
+					// If s is shorter than split, compare s to split for final result
+					if(s.size() < split.size())
+						return s.compare(split);
+
+					// Compare split len of s to split
+					cmp = s.substr(0, split.size()).compare(split);
+
+					// If they are the same, move on to suffix string
+					if(cmp == 0) {
+						s = s.substr(split.size());
+						return s.compare(node->getSuffixString());
+					}
+				}
+				return cmp;
+			}
+
+			// Extract size bytes from the reconstituted key, allocating in arena if a new string if needed
+			StringRef key(Arena &arena, int size = -1) const {
+				if(size >= 0 && size <= prefix.size())
+					return prefix.substr(0, size);
+
+				if(size < 0)
+					size = node->getKeySize();
+
+				StringRef r = makeString(size, arena);
+				uint8_t *wptr = mutateString(r);
+
+				// The entire prefix is definitely needed
+				if(prefix.size() > 0) {
+					memcpy(wptr, prefix.begin(), prefix.size());
+					wptr += prefix.size();
+					size -= prefix.size();
+					if(size == 0)
+						return r;
+				}
+
+				StringRef split = node->getSplitString();
+				if(split.size() > 0) {
+					const int b = std::min(size, split.size());
+					memcpy(wptr, split.begin(), b);
+					wptr += b;
+					size -= b;
+					if(size == 0)
+						return r;
+				}
+
+				StringRef suffix = node->getSuffixString();
+				ASSERT(size <= suffix.size());
+				if(suffix.size() > 0) {
+					memcpy(wptr, suffix.begin(), size);
+				}
+
+				return r;
+			}
+		};
+
 		static std::string escapeForDOT(StringRef s) {
 			std::string r;
 			for(char c : s) {
@@ -235,53 +413,55 @@ struct PrefixTree {
 	uint16_t count;
 	Node root;
 
-	// TODO:  Completely rewrite this to be efficient
-	// Suggestion:  Allow comparison and borrowing bytes from non-coalesced keys
+	// This Cursor coalesces prefix bytes into a contiguous buffer for each node
 	struct Cursor {
-		Cursor(const Node *root, StringRef boundary) : root(root), boundary(boundary) {}
+		Cursor(const Node *root, StringRef _boundary) : root(root) {
+			boundary.initConstant(_boundary);
+		}
 
 		struct Context {
-			const Node *node;
-			StringRef key;
-			StringRef lastLeft;
-			StringRef lastRight;
+			Node::NodeWithPrefix node;
 			bool directionRight;
 		};
 
 		const Node *root;
 		std::vector<Context> path;
-		StringRef boundary;
+		Node::NodeWithPrefix boundary;
 		Arena arena;
 
 		bool valid() {
-			return !path.empty() && path.back().node != nullptr;
+			return !path.empty() && path.back().node.node != nullptr;
 		}
 
 		StringRef getKey() {
-			return path.back().key;
+			return path.back().node.key(arena);
 		}
 
 		bool seekLessThanOrEqual(StringRef s) {
 			path.clear();
+			// more levels than a PrefixTree would have, so that element addresses do not change
+			path.reserve(20);
 			arena = Arena();
 
 			const Node *node = root;
-			StringRef lastLeft;
-			StringRef lastRight = boundary;
+			Node::NodeWithPrefix *lastLeft = nullptr;
+			Node::NodeWithPrefix *lastRight = &boundary;
 
 			while(1) {
-				Node::Members m;
-				node->decode(m, lastLeft, lastRight);
-				StringRef key = m.key(arena);
-				path.push_back({node, key, lastLeft, lastRight});
+				path.resize(path.size() + 1);
+				Context &c = path.back();
+				c.node.init(arena, node, lastLeft, lastRight);
 
-				int cmp = s.compare(key);
+				// TODO: Track position of difference and use prefix reuse bytes and prefix sources
+				// to skip comparison of some prefix bytes when possible
+				int cmp = c.node.compareToKey(s);
 
 				if(cmp == 0)
 					return true;
 
 				if(cmp < 0) {
-					if(m.leftChild == nullptr) {
+					const Node *left = c.node.node->getLeftChild();
+					if(left == nullptr) {
 						path.pop_back();
 
 						// Find the last node from which we went right
@@ -293,22 +473,23 @@ struct PrefixTree {
 						}
 
 						// We never went right, apparently, so cursor is now to the left of the leftmost node
-						path.push_back({nullptr});
+						path.resize(path.size() + 1);
 						return false;
 					}
 
-					path.back().directionRight = false;
-					node = m.leftChild;
-					lastLeft = key;
+					c.directionRight = false;
+					node = left;
+					lastLeft = &(c.node);
 				}
 				else {
-					if(m.rightChild == nullptr) {
+					const Node *right = c.node.node->getRightChild();
+					if(right == nullptr) {
 						return true;
 					}
 
-					path.back().directionRight = true;
-					node = m.rightChild;
-					lastRight = key;
+					c.directionRight = true;
+					node = right;
+					lastRight = &(c.node);
 				}
 			}
 		}

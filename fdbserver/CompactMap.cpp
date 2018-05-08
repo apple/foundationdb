@@ -385,7 +385,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	for(auto &k : testData) {
 		testDataRef.push_back(k);
 	}
-	
+
 	t1 = timer_monotonic();
 	int prefixTreeBytes = pt->build(testDataRef, StringRef());
 	t2 = timer_monotonic();
@@ -436,7 +436,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	}
 
 	{
-		PrefixTree::Cursor cur = pt->getCursor(StringRef());
+		auto cur = pt->getCursor(StringRef());
 
 		for (int i = 0; i < testDataRef.size(); i++) {
 			StringRef s = testDataRef[i];
@@ -496,7 +496,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	t2 = timer_monotonic();
 	printf("compactmap, in cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
 
-	PrefixTree::Cursor cur = pt->getCursor(StringRef());
+	auto cur = pt->getCursor(StringRef());
 	t1 = timer_monotonic();
 	for (auto& q : sampleQueries)
 		cur.seekLessThanOrEqual(StringRef(q));
@@ -592,18 +592,141 @@ std::vector<std::string> sampleBPlusTreeSeparators( std::vector<std::string> raw
 	return testData;
 }
 
+struct Page {
+	Page() : tree(nullptr), size(0), sizeBuilt(0), unsortedKeys(0) {}
+
+	std::vector<StringRef> keys;
+	PrefixTree *tree;
+	std::string treeBuffer;
+	int size;
+	int sizeBuilt;
+	int unsortedKeys;
+
+	void add(StringRef k) {
+		keys.push_back(k);
+		size += k.size();
+		++unsortedKeys;
+	}
+
+	void sort() {
+		if(unsortedKeys > 0) {
+			// sort newest elements, then merge
+			std::sort(keys.end() - unsortedKeys, keys.end());
+			std::inplace_merge(keys.begin(), keys.end() - unsortedKeys, keys.end());
+			unsortedKeys = 0;
+		}
+	}
+
+	int build() {
+		if(sizeBuilt != size) {
+			sort();
+			treeBuffer.reserve(keys.size() * PrefixTree::Node::getMaxOverhead() + size);
+			tree = (PrefixTree *)treeBuffer.data();
+			int b = tree->build(keys, StringRef());
+			sizeBuilt = size;
+			return b;
+		}
+		return 0;
+	}
+};
+
 int main() {
 	printf("CompactMap test\n");
 
 #ifndef NDEBUG
 	printf("Compiler optimization is OFF\n");
 #endif
+
 	printf("Key prefix compression is %s\n", CompactPreOrderTree::Node::ENABLE_PREFIX ? "ON" : "OFF");
 	printf("Right subtree prefetch is %s\n", CompactPreOrderTree::ENABLE_PREFETCH_RIGHT ? "ON" : "OFF");
 	printf("Left pointer is %s\n", CompactPreOrderTree::Node::ENABLE_LEFT_PTR ? "ON" : "OFF");
 	printf("Fancy build is %s\n", CompactPreOrderTree::ENABLE_FANCY_BUILD ? "ON" : "OFF");
 
 	g_random = new DeterministicRandom(1);
+
+#if 0
+	std::vector<StringRef> keys_generated;
+	Arena arena;
+	std::set<StringRef> testmap;
+	for(int i = 0; i < 1000000; ++i) {
+		keys_generated.push_back(StringRef(arena, format("........%02X......%02X.....%02X........%02X", 
+			g_random->randomInt(0, 100),
+			g_random->randomInt(0, 100),
+			g_random->randomInt(0, 100),
+			g_random->randomInt(0, 100)
+		)));
+	}
+
+	double t1 = timer_monotonic();
+	for(const auto &k : keys_generated)
+		testmap.insert(k);
+	double t2 = timer_monotonic();
+	printf("Ingested %d elements into map, Speed %f M/s\n",
+		keys_generated.size(), keys_generated.size() / (t2 - t1) / 1e6);
+
+	// sort a group after k elements were added
+	for(int k = 5; k <= 20; k += 5) {
+		// g is average page delta size
+		for(int g = 10; g <= 150; g += 10) {
+			// rebuild page after r bytes added
+			for(int r = 500; r <= 4000; r += 500) {
+				double elapsed = timer_monotonic();
+				int builds = 0;
+				int buildbytes = 0;
+				int keybytes = 0;
+
+				std::vector<Page *> pages;
+				int pageCount = keys_generated.size() / g;
+				pages.resize(pageCount);
+
+				for(auto &key : keys_generated) {
+					int p = g_random->randomInt(0, pageCount);
+					Page *&pPage = pages[p];
+					if(pPage == nullptr)
+						pPage = new Page();
+					Page &page = *pPage;
+
+					page.add(key);
+					keybytes += key.size();
+
+					if(page.keys.size() % k == 0) {
+						page.sort();
+					}
+
+					// Rebuild page after r bytes added
+					if(page.size - page.sizeBuilt > r) {
+						int b = page.build();
+						if(b > 0) {
+							++builds;
+							buildbytes += b;
+						}
+					}
+				}
+
+				for(auto p : pages) {
+					if(p) {
+						int b = p->build();
+						if(b > 0) {
+							++builds;
+							buildbytes += b;
+						}
+					}
+				}
+
+				elapsed = timer_monotonic() - elapsed;
+				printf("%6d keys  %6d pages %3f builds/page %6d builds/s  %6d pages/s  %5d avg keys/page  sort every %d deltas  rebuild every %5d bytes  %7d keys/s %8d keybytes/s\n",
+					keys_generated.size(), pageCount, (double)builds / pageCount, int(builds / elapsed), int(pageCount/elapsed), g, k, r, int(keys_generated.size() / elapsed), int(keybytes / elapsed));
+
+				for(auto p : pages) {
+					delete p;
+				}
+			}
+		}
+	}
+
+	if(true)
+		return -1;
+#endif
 
 	/*for (int subtree_size = 1; subtree_size < 20; subtree_size++) {
 		printf("Subtree of size %d:\n", subtree_size);
