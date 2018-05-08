@@ -203,6 +203,8 @@ public:
 
 	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter);
+
 private:
 	const std::string fdbCPath;
 	const Reference<FdbCApi> api;

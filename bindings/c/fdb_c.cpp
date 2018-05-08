@@ -42,7 +42,8 @@ int g_api_version = 0;
 #define CLUSTER(c) ((ICluster*)c)
 #define TXN(t) ((ITransaction*)t)
 
-#define API (MultiVersionApi::api)
+#define API ((IClientApi*)MultiVersionApi::api)
+
 
 /* This must be true so that we can return the data pointer of a
    Standalone<RangeResultRef> as an array of FDBKeyValue. */

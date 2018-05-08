@@ -140,6 +140,8 @@ public:
 
 	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter);
+
 	static IClientApi* api;
 
 private:
@@ -148,6 +150,9 @@ private:
 	int apiVersion;
 	const std::string clientVersion;
 	uint64_t transportId;
+	
+	Mutex lock;
+	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 };
 
 #endif

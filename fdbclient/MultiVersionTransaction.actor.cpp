@@ -355,6 +355,11 @@ ThreadFuture<Reference<ICluster>> DLApi::createCluster(const char *clusterFilePa
 	});
 }
 
+void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
+	// All completion hooks are handled on the local client
+	throw unsupported_operation();
+}
+
 // MultiVersionTransaction
 MultiVersionTransaction::MultiVersionTransaction(Reference<MultiVersionDatabase> db) : db(db) {
 	updateTransaction();
@@ -1174,29 +1179,7 @@ void MultiVersionApi::runNetwork() {
 		});
 	}
 
-	Error *runErr = NULL;
-	try {
-		localClient->api->runNetwork();
-	}
-	catch(Error &e) {
-		runErr = &e;
-	}
-
-	for(auto &hook : localClient->threadCompletionHooks) {
-		try {
-			hook.first(hook.second);
-		}
-		catch(Error &e) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
-		}
-		catch(...) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
-		}
-	}
-
-	if(runErr != NULL) {
-		throw *runErr;
-	}
+	localClient->api->runNetwork();
 
 	for(auto h : handles) {
 		waitThread(h);
@@ -1228,11 +1211,12 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *
 	}
 	lock.leave();
 
-	auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
-	threadCompletionHooks.push_back(hookPair);
+	localClient->api->addNetworkThreadCompletionHook(hook, hook_parameter);
 
 	if(!bypassMultiClientApi) {
+		auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
 		for( auto it : externalClients ) {
+			MutexHolder holder(lock);
 			it.second->threadCompletionHooks.push_back(hookPair);
 		}
 	}

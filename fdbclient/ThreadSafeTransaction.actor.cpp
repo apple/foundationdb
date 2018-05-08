@@ -357,7 +357,30 @@ void ThreadSafeApi::setupNetwork() {
 }
 
 void ThreadSafeApi::runNetwork() {
-	::runNetwork();
+	Optional<Error> runErr;
+	try {
+		::runNetwork();
+	}
+	catch(Error &e) {
+		runErr = e;
+	}
+
+	for(auto &hook : threadCompletionHooks) {
+		try {
+			hook.first(hook.second);
+		}
+		catch(Error &e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+		}
+	}
+
+	if(runErr.present()) {
+		throw runErr.get();
+	}
+
 }
 
 void ThreadSafeApi::stopNetwork() {
@@ -367,5 +390,17 @@ void ThreadSafeApi::stopNetwork() {
 ThreadFuture<Reference<ICluster>> ThreadSafeApi::createCluster(const char *clusterFilePath) {
 	return ThreadSafeCluster::create(clusterFilePath, apiVersion);
 }
+
+void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
+	if (!g_network) {
+		throw network_not_setup();
+	}
+
+	auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
+
+	MutexHolder holder(lock); // We could use the network thread to protect this action, but then we can't guarantee upon return that the hook is set.
+	threadCompletionHooks.push_back(hookPair);
+}
+
 
 IClientApi* ThreadSafeApi::api = new ThreadSafeApi();
