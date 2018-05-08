@@ -358,8 +358,10 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	}*/
 
 	int totalKeyBytes = 0;
-	for (auto& s : testData) totalKeyBytes += s.size();
+	for (auto& s : testData)
+		totalKeyBytes += s.size();
 	printf("%d bytes in %lu keys\n", totalKeyBytes, testData.size());
+
 	for (int i = 0; i < 5; i++)
 		printf("  '%s'\n", printable(testData[i]).c_str());
 
@@ -395,7 +397,15 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 		fclose(fout);
 	}
 
+	// Calculate perfect prefix-compressed size
+	int perfectSize = testData.front().size();
+	for(int i = 1; i < testData.size(); ++i) {
+		int common = commonPrefixLength(StringRef(testData[i]), StringRef(testData[i - 1]));
+		perfectSize += (testData[i].size() - common);
+	}
+
 	printf("PrefixTree tree is %d bytes\n", prefixTreeBytes);
+	printf("Perfect compressed size with no overhead is %d, average PrefixTree overhead is %.2f per item\n", perfectSize, double(prefixTreeBytes - perfectSize) / testData.size());
 	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)*1e6, 1 / (t2 - t1) / 1e6);
 
 	t1 = timer_monotonic();
@@ -630,21 +640,7 @@ struct Page {
 	}
 };
 
-int main() {
-	printf("CompactMap test\n");
-
-#ifndef NDEBUG
-	printf("Compiler optimization is OFF\n");
-#endif
-
-	printf("Key prefix compression is %s\n", CompactPreOrderTree::Node::ENABLE_PREFIX ? "ON" : "OFF");
-	printf("Right subtree prefetch is %s\n", CompactPreOrderTree::ENABLE_PREFETCH_RIGHT ? "ON" : "OFF");
-	printf("Left pointer is %s\n", CompactPreOrderTree::Node::ENABLE_LEFT_PTR ? "ON" : "OFF");
-	printf("Fancy build is %s\n", CompactPreOrderTree::ENABLE_FANCY_BUILD ? "ON" : "OFF");
-
-	g_random = new DeterministicRandom(1);
-
-#if 0
+void ingestBenchmark() {
 	std::vector<StringRef> keys_generated;
 	Arena arena;
 	std::set<StringRef> testmap;
@@ -723,10 +719,23 @@ int main() {
 			}
 		}
 	}
+}
 
-	if(true)
-		return -1;
+int main() {
+	printf("CompactMap test\n");
+
+#ifndef NDEBUG
+	printf("Compiler optimization is OFF\n");
 #endif
+
+	printf("Key prefix compression is %s\n", CompactPreOrderTree::Node::ENABLE_PREFIX ? "ON" : "OFF");
+	printf("Right subtree prefetch is %s\n", CompactPreOrderTree::ENABLE_PREFETCH_RIGHT ? "ON" : "OFF");
+	printf("Left pointer is %s\n", CompactPreOrderTree::Node::ENABLE_LEFT_PTR ? "ON" : "OFF");
+	printf("Fancy build is %s\n", CompactPreOrderTree::ENABLE_FANCY_BUILD ? "ON" : "OFF");
+
+	g_random = new DeterministicRandom(1);
+
+	//ingestBenchmark();
 
 	/*for (int subtree_size = 1; subtree_size < 20; subtree_size++) {
 		printf("Subtree of size %d:\n", subtree_size);
