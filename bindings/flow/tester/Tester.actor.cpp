@@ -1618,11 +1618,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 			}
 
 			// Flow directory operations don't support snapshot reads
-			if (isDirectory && isSnapshot) {
-				Version readVersion = wait(instruction->tr->getReadVersion());
-				instruction->tr = Reference<Transaction>(new Transaction(data->db));
-				instruction->tr->setVersion(readVersion);
-			}
+			ASSERT(!isDirectory || !isSnapshot);
 
 			data->stack.index = idx;
 			Void _ = wait(InstructionFunc::call(op.toString(), data, instruction));
