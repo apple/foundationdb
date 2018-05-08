@@ -61,6 +61,16 @@ struct ITLSPolicy {
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
+	// set_ca_data should import the provided certificate list and
+	// associate it with this policy. cert_data will point to a PEM
+	// encoded certificate list of trust roots.
+	//
+	// set_ca_data should return true if the operation succeeded,
+	// and false otherwise. After the first call to create_session for
+	// a given policy, set_ca_data should immediately return false
+	// if called.
+	virtual bool set_ca_data(const uint8_t* ca_data, int ca_len) = 0;
+
 	// set_cert_data should import the provided certificate list and
 	// associate it with this policy. cert_data will point to a PEM
 	// encoded certificate list, ordered such that each certificate
@@ -77,7 +87,8 @@ struct ITLSPolicy {
 
 	// set_key_data should import the provided private key and
 	// associate it with this policy. key_data will point to a PEM
-	// encoded key.
+	// encoded key, which may be encrypted. If encrypted the password
+	// argument should be specified, otherwise it may be NULL.
 	//
 	// key_data may additionally contain certificate information,
 	// which must be ignored.
@@ -86,7 +97,7 @@ struct ITLSPolicy {
 	// false otherwise. After the first call to create_session for a
 	// given policy, set_key_data should immediately return false if
 	// called.
-	virtual bool set_key_data(const uint8_t* key_data, int key_len) = 0;
+	virtual bool set_key_data(const uint8_t* key_data, int key_len, const char* password) = 0;
 
 	// set_verify_peers should modify the validation rules for
 	// verifying a peer during connection handshake. The format of
@@ -96,7 +107,7 @@ struct ITLSPolicy {
 	// and false otherwise. After the first call to create_session for
 	// a given policy, set_verify_peers should immediately return
 	// false if called.
-	virtual bool set_verify_peers(const uint8_t* verify_peers, int verify_peers_len) = 0;
+	virtual bool set_verify_peers(int count, const uint8_t* verify_peers[], int verify_peers_len[]) = 0;
 
 	// create_session should return a new object that implements
 	// ITLSSession, associated with this policy. After the first call
@@ -109,7 +120,7 @@ struct ITLSPolicy {
 	//
 	// uid should only be provided when invoking an ITLSLogFunc, which
 	// will use it to identify this session.
-	virtual ITLSSession* create_session(bool is_client, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid ) = 0;
+	virtual ITLSSession* create_session(bool is_client, const char *servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) = 0;
 };
 
 // Logs a message/error to the appropriate trace log.
