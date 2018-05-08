@@ -301,9 +301,9 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( METRIC_UPDATE_RATE,                                     .1 ); if( slowRateKeeper ) METRIC_UPDATE_RATE = 0.5;
 
 	bool smallStorageTarget = randomize && BUGGIFY;
-	init( TARGET_BYTES_PER_STORAGE_SERVER,                    1000e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER = 1000e3;
-	init( SPRING_BYTES_STORAGE_SERVER,                         100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER = 100e3;
-	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 1500e3;
+	init( TARGET_BYTES_PER_STORAGE_SERVER,                    1000e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER = 3000e3;
+	init( SPRING_BYTES_STORAGE_SERVER,                         100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER = 300e3;
+	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
 
 	bool smallTlogTarget = randomize && BUGGIFY;
 	init( TARGET_BYTES_PER_TLOG,                              2000e6 ); if( smallTlogTarget ) TARGET_BYTES_PER_TLOG = 2000e3;
