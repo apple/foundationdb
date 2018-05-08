@@ -309,7 +309,7 @@ void TLSOptions::init_plugin( std::string const& plugin_path ) {
 	} else {
 		if ( !platform::getEnvironmentVar( "FDB_TLS_PLUGIN", path ) )
 			// FIXME: should there be other fallbacks?
-			path = platform::getDefaultPluginPath("FDBLibTLS");
+			path = platform::getDefaultPluginPath("fdb-libressl-plugin");
 	}
 
 	TraceEvent("TLSConnectionLoadingPlugin").detail("PluginPath", path);

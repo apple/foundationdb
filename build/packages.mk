@@ -121,7 +121,7 @@ ifeq ($(PLATFORM),linux)
 	@rm -f packages/foundationdb-server-*.rpm packages/foundationdb-clients-*.rpm
 	@packaging/rpm/buildrpms.sh $(VERSION) $(PKGRELEASE)
 
-  FDBTLS: bin/FDBLibTLS.$(DLEXT)
+  FDBTLS: bin/fdb-libressl-plugin.$(DLEXT)
 
   packages: DEB RPM JAVA_RELEASE FDBTESTS FDBHEADERS FDBTLS
 
