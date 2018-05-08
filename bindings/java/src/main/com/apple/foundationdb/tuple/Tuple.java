@@ -73,12 +73,12 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 	private List<Object> elements;
 
 	private Tuple(List<? extends Object> elements, Object newItem) {
-		this(new LinkedList<Object>(elements));
+		this(elements);
 		this.elements.add(newItem);
 	}
 
 	private Tuple(List<? extends Object> elements) {
-		this.elements = new ArrayList<Object>(elements);
+		this.elements = new ArrayList<>(elements);
 	}
 
 	/**

@@ -615,7 +615,7 @@ void print_usage(const char* name) {
 		"                 fdbmonitor. The default is `/var/run/fdbmonitor.pid'.\n"
 		"  --loggroup LOGGROUP\n"
 		"                 Sets the 'LogGroup' field with the specified value for all\n"
-		"                 entries in the log output. The default log group is 'default'."
+		"                 entries in the log output. The default log group is 'default'.\n"
 		"  --daemonize    Background the fdbmonitor process.\n"
 		"  -h, --help     Display this help and exit.\n", name);
 }
