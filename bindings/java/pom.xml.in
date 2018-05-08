@@ -10,7 +10,7 @@
   <packaging>jar</packaging>
 
   <name>foundationdb-java</name>
-  <description>Java bindings for the FoundationDB database. These bindings require the FoundationDB client, which is under a different license. The client can be obtained from https://www.foundationdb.org/downloads/fdb-c/.</description>
+  <description>Java bindings for the FoundationDB database. These bindings require the FoundationDB client, which is under a different license. The client can be obtained from https://www.foundationdb.org/download/.</description>
   <inceptionYear>2010</inceptionYear>
   <url>https://www.foundationdb.org</url>
 
