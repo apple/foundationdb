@@ -83,8 +83,9 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 	return Void();
 }
 
-TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client ) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()) {
-	session = Reference<ITLSSession>( policy->create_session(is_client, send_func, this, recv_func, this, (void*)&uid) );
+TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()) {
+	const char * serverName = host.empty() ? NULL : host.c_str();
+	session = Reference<ITLSSession>( policy->create_session(is_client, serverName, send_func, this, recv_func, this, (void*)&uid) );
 	if ( !session ) {
 		// If session is NULL, we're trusting policy->create_session
 		// to have used its provided logging function to have logged
@@ -150,13 +151,13 @@ int TLSConnection::write( SendBuffer const* buffer, int limit ) {
 	return 0;
 }
 
-ACTOR Future<Reference<IConnection>> wrap( Reference<ITLSPolicy> policy, bool is_client, Future<Reference<IConnection>> c ) {
+ACTOR Future<Reference<IConnection>> wrap( Reference<ITLSPolicy> policy, bool is_client, Future<Reference<IConnection>> c, std::string host) {
 	Reference<IConnection> conn = wait(c);
-	return Reference<IConnection>(new TLSConnection( conn, policy, is_client ));
+	return Reference<IConnection>(new TLSConnection( conn, policy, is_client, host ));
 }
 
 Future<Reference<IConnection>> TLSListener::accept() {
-	return wrap( policy, false, listener->accept() );
+	return wrap( policy, false, listener->accept(), "");
 }
 
 TLSNetworkConnections::TLSNetworkConnections( Reference<TLSOptions> options ) : options(options) {
@@ -164,11 +165,14 @@ TLSNetworkConnections::TLSNetworkConnections( Reference<TLSOptions> options ) : 
 	g_network->setGlobal(INetwork::enumGlobal::enNetworkConnections, (flowGlobalType) this);
 }
 
-Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress toAddr ) {
+Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress toAddr, std::string host) {
 	if ( toAddr.isTLS() ) {
 		NetworkAddress clearAddr( toAddr.ip, toAddr.port, toAddr.isPublic(), false );
 		TraceEvent("TLSConnectionConnecting").detail("ToAddr", toAddr);
-		return wrap( options->get_policy(), true, network->connect( clearAddr ) );
+		if (host.empty() || host == toIPString(toAddr.ip))
+			return wrap(options->get_policy(TLSOptions::POLICY_VERIFY_PEERS), true, network->connect(clearAddr), std::string(""));
+		else
+			return wrap( options->get_policy(TLSOptions::POLICY_NO_VERIFY_PEERS), true, network->connect( clearAddr ), host );
 	}
 	return network->connect( toAddr );
 }
@@ -181,7 +185,7 @@ Reference<IListener> TLSNetworkConnections::listen( NetworkAddress localAddr ) {
 	if ( localAddr.isTLS() ) {
 		NetworkAddress clearAddr( localAddr.ip, localAddr.port, localAddr.isPublic(), false );
 		TraceEvent("TLSConnectionListening").detail("OnAddr", localAddr);
-		return Reference<IListener>(new TLSListener( options->get_policy(), network->listen( clearAddr ) ));
+		return Reference<IListener>(new TLSListener( options->get_policy(TLSOptions::POLICY_VERIFY_PEERS), network->listen( clearAddr ) ));
 	}
 	return network->listen( localAddr );
 }
@@ -206,12 +210,38 @@ void TLSOptions::set_cert_file( std::string const& cert_file ) {
 	}
 }
 
+void TLSOptions::set_ca_file(std::string const& ca_file) {
+	try {
+		TraceEvent("TLSConnectionSettingCAFile").detail("CAPath", ca_file);
+		set_ca_data(readFileBytes(ca_file, CERT_FILE_MAX_SIZE));
+	}
+	catch (Error&) {
+		TraceEvent(SevError, "TLSOptionsSetCertAError").detail("Filename", ca_file);
+		throw;
+	}
+}
+
+void TLSOptions::set_ca_data(std::string const& ca_data) {
+	if (!policyVerifyPeersSet || !policyVerifyPeersNotSet)
+		init_plugin();
+
+	TraceEvent("TLSConnectionSettingCAData").detail("CADataSize", ca_data.size());
+	if (!policyVerifyPeersSet->set_ca_data((const uint8_t*)&ca_data[0], ca_data.size()))
+		throw tls_error();
+	if (!policyVerifyPeersNotSet->set_ca_data((const uint8_t*)&ca_data[0], ca_data.size()))
+		throw tls_error();
+
+	ca_set = true;
+}
+
 void TLSOptions::set_cert_data( std::string const& cert_data ) {
-	if ( !policy )
+	if (!policyVerifyPeersSet || !policyVerifyPeersNotSet)
 		init_plugin();
 
 	TraceEvent("TLSConnectionSettingCertData").detail("CertDataSize", cert_data.size());
-	if ( !policy->set_cert_data( (const uint8_t*)&cert_data[0], cert_data.size() ) )
+	if ( !policyVerifyPeersSet->set_cert_data( (const uint8_t*)&cert_data[0], cert_data.size() ) )
+		throw tls_error();
+	if (!policyVerifyPeersNotSet->set_cert_data((const uint8_t*)&cert_data[0], cert_data.size()))
 		throw tls_error();
 
 	certs_set = true;
@@ -228,22 +258,37 @@ void TLSOptions::set_key_file( std::string const& key_file ) {
 }
 
 void TLSOptions::set_key_data( std::string const& key_data ) {
-	if ( !policy )
+	if (!policyVerifyPeersSet || !policyVerifyPeersNotSet)
 		init_plugin();
 
 	TraceEvent("TLSConnectionSettingKeyData").detail("KeyDataSize", key_data.size());
-	if ( !policy->set_key_data( (const uint8_t*)&key_data[0], key_data.size() ) )
+	if ( !policyVerifyPeersSet->set_key_data( (const uint8_t*)&key_data[0], key_data.size(), NULL ) )
+		throw tls_error();
+	if (!policyVerifyPeersNotSet->set_key_data((const uint8_t*)&key_data[0], key_data.size(), NULL))
 		throw tls_error();
 
 	key_set = true;
 }
 
-void TLSOptions::set_verify_peers( std::string const& verify_peers ) {
-	if ( !policy )
+void TLSOptions::set_verify_peers( std::vector<std::string> const& verify_peers ) {
+	if (!policyVerifyPeersSet)
 		init_plugin();
+	{
+		TraceEvent e("TLSConnectionSettingVerifyPeers");
+		for (int i = 0; i < verify_peers.size(); i++)
+			e.detail(std::string("Value" + std::to_string(i)).c_str(), verify_peers[i].c_str());
+	}
+	const uint8_t **verify_peers_arr = (const uint8_t **) malloc(verify_peers.size() * sizeof(uint8_t *));
+	int *verify_peers_len = (int *)malloc(verify_peers.size() * sizeof(int));
+	for (int i = 0; i < verify_peers.size(); i++) {
+		verify_peers_arr[i] = (const uint8_t *)&verify_peers[i][0];
+		verify_peers_len[i] = verify_peers[i].size();
+	}
+	bool success = policyVerifyPeersSet->set_verify_peers(verify_peers.size(), verify_peers_arr, verify_peers_len);
+	free(verify_peers_len);
+	free(verify_peers_arr);
 
-	TraceEvent("TLSConnectionSettingVerifyPeers").detail("Value", verify_peers);
-	if ( !policy->set_verify_peers( (const uint8_t*)&verify_peers[0], verify_peers.size() ) )
+	if (!success)
 		throw tls_error();
 
 	verify_peers_set = true;
@@ -255,7 +300,7 @@ void TLSOptions::register_network() {
 
 const char *defaultCertFileName = "fdb.pem";
 
-Reference<ITLSPolicy> TLSOptions::get_policy() {
+Reference<ITLSPolicy> TLSOptions::get_policy(enum POLICY_TYPE type) {
 	if ( !certs_set ) {
 		std::string certFile;
 		if ( !platform::getEnvironmentVar( "FDB_TLS_CERTIFICATE_FILE", certFile ) )
@@ -271,13 +316,29 @@ Reference<ITLSPolicy> TLSOptions::get_policy() {
 	if( !verify_peers_set ) {
 		std::string verifyPeerString;
 		if ( platform::getEnvironmentVar( "FDB_TLS_VERIFY_PEERS", verifyPeerString ) )
-			set_verify_peers( verifyPeerString );
+			set_verify_peers({ verifyPeerString });
+	}
+	if (!ca_set) {
+		std::string caFile;
+		if (platform::getEnvironmentVar("FDB_TLS_CA_FILE", caFile))
+			set_ca_file(caFile);
 	}
 
+	Reference<ITLSPolicy> policy;
+	switch (type) {
+	case POLICY_VERIFY_PEERS:
+		policy = policyVerifyPeersSet;
+		break;
+	case POLICY_NO_VERIFY_PEERS:
+		policy = policyVerifyPeersNotSet;
+		break;
+	default:
+		ASSERT_ABORT(0);
+	}
 	return policy;
 }
 
-static void TLSConnectionLogFunc( const char* event, void* uid_ptr, int is_error, ... ) {
+static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_error, ... ) {
 	UID uid;
 
 	if ( uid_ptr )
@@ -318,10 +379,17 @@ void TLSOptions::init_plugin( std::string const& plugin_path ) {
 		throw tls_error();
 	}
 
-	policy = Reference<ITLSPolicy>( plugin->create_policy( TLSConnectionLogFunc ) );
-	if ( !policy ) {
+	policyVerifyPeersSet = Reference<ITLSPolicy>( plugin->create_policy( TLSConnectionLogFunc ) );
+	if ( !policyVerifyPeersSet) {
 		// Hopefully create_policy logged something with the log func
-		TraceEvent(SevError, "TLSConnectionCreatePolicyError");
+		TraceEvent(SevError, "TLSConnectionCreatePolicyVerifyPeersSetError");
+		throw tls_error();
+	}
+
+	policyVerifyPeersNotSet = Reference<ITLSPolicy>(plugin->create_policy(TLSConnectionLogFunc));
+	if (!policyVerifyPeersNotSet) {
+		// Hopefully create_policy logged something with the log func
+		TraceEvent(SevError, "TLSConnectionCreatePolicyVerifyPeersNotSetError");
 		throw tls_error();
 	}
 }

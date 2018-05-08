@@ -40,7 +40,7 @@ struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 	virtual void addref() { ReferenceCounted<TLSConnection>::addref(); }
 	virtual void delref() { ReferenceCounted<TLSConnection>::delref(); }
 
-	TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client );
+	TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client, std::string host);
 	~TLSConnection() {
 		// Here for ordering to make sure we delref the ITLSSession
 		// which has a pointer to this object
@@ -80,27 +80,30 @@ struct TLSListener : IListener, ReferenceCounted<TLSListener> {
 };
 
 struct TLSOptions : ReferenceCounted<TLSOptions> {
-	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS };
-
-	TLSOptions() : certs_set(false), key_set(false), verify_peers_set(false) {}
+	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE };
+	enum POLICY_TYPE { POLICY_VERIFY_PEERS = 1, POLICY_NO_VERIFY_PEERS };
+	TLSOptions() : certs_set(false), key_set(false), verify_peers_set(false), ca_set(false) {}
 
 	void set_plugin_name_or_path( std::string const& plugin_name_or_path );
 	void set_cert_file( std::string const& cert_file );
 	void set_cert_data( std::string const& cert_data );
+	void set_ca_file(std::string const& ca_file);
+	void set_ca_data(std::string const& ca_data);
 	void set_key_file( std::string const& key_file );
 	void set_key_data( std::string const& key_data );
-	void set_verify_peers( std::string const& verify_peers );
+	void set_verify_peers( std::vector<std::string> const& verify_peers );
 
 	void register_network();
 
-	Reference<ITLSPolicy> get_policy();
+	Reference<ITLSPolicy> get_policy(enum POLICY_TYPE type);
 
 private:
 	void init_plugin( std::string const& plugin_path = "" );
 
 	Reference<ITLSPlugin> plugin;
-	Reference<ITLSPolicy> policy;
-	bool certs_set, key_set, verify_peers_set;
+	Reference<ITLSPolicy> policyVerifyPeersSet;
+	Reference<ITLSPolicy> policyVerifyPeersNotSet;
+	bool certs_set, key_set, verify_peers_set, ca_set;
 };
 
 struct TLSNetworkConnections : INetworkConnections {
@@ -108,7 +111,7 @@ struct TLSNetworkConnections : INetworkConnections {
 
 	explicit TLSNetworkConnections( Reference<TLSOptions> options );
 
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr );
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
@@ -121,12 +124,14 @@ private:
 #define TLS_CERTIFICATE_FILE_FLAG "--tls_certificate_file"
 #define TLS_KEY_FILE_FLAG "--tls_key_file"
 #define TLS_VERIFY_PEERS_FLAG "--tls_verify_peers"
+#define TLS_CA_FILE_FLAG "--tls_ca_file"
 
 #define TLS_OPTION_FLAGS \
 	{ TLSOptions::OPT_TLS_PLUGIN,       TLS_PLUGIN_FLAG,           SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_KEY,          TLS_KEY_FILE_FLAG,         SO_REQ_SEP }, \
-	{ TLSOptions::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG,     SO_REQ_SEP },
+	{ TLSOptions::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG,     SO_REQ_SEP }, \
+    { TLSOptions::OPT_TLS_CA_FILE,      TLS_CA_FILE_FLAG,		   SO_REQ_SEP },
 
 #define TLS_HELP \
 	"  " TLS_PLUGIN_FLAG " PLUGIN\n" \
@@ -137,6 +142,8 @@ private:
 	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n" \
 	"                 The path of a file containing the TLS certificate and CA\n" \
 	"                 chain.\n"											\
+	"  " TLS_CA_FILE_FLAG " CERTAUTHFILE\n" \
+	"                 The path of a file containing the CA certificates chain.\n"	\
 	"  " TLS_KEY_FILE_FLAG " KEYFILE\n" \
 	"                 The path of a file containing the private key corresponding\n" \
 	"                 to the TLS certificate.\n"						\

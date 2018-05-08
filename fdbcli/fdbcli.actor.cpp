@@ -2078,6 +2078,7 @@ struct CLIOptions {
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
+	std::string tlsCAPath;
 
 	CLIOptions( int argc, char* argv[] )
 		: trace(false),
@@ -2150,6 +2151,9 @@ struct CLIOptions {
 				break;
 			case TLSOptions::OPT_TLS_CERTIFICATES:
 				tlsCertPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_CA_FILE:
+				tlsCAPath = args.OptionArg();
 				break;
 			case TLSOptions::OPT_TLS_KEY:
 				tlsKeyPath = args.OptionArg();
@@ -3174,6 +3178,15 @@ int main(int argc, char **argv) {
 			setNetworkOption(FDBNetworkOptions::TLS_CERT_PATH, opt.tlsCertPath);
 		} catch( Error& e ) {
 			fprintf(stderr, "ERROR: cannot set TLS certificate path to `%s' (%s)\n", opt.tlsCertPath.c_str(), e.what());
+			return 1;
+		}
+	}
+	if (opt.tlsCAPath.size()) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, opt.tlsCAPath);
+		}
+		catch (Error& e) {
+			fprintf(stderr, "ERROR: cannot set TLS CA path to `%s' (%s)\n", opt.tlsCAPath.c_str(), e.what());
 			return 1;
 		}
 	}
