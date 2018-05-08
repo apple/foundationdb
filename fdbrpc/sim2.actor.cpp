@@ -772,8 +772,8 @@ public:
 		currentTaskID = taskID;
 	}
 	// Sets the taskID/priority of the current task, without yielding
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr ) {
-		ASSERT( !toAddr.isTLS() );
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host ) {
+		ASSERT( !toAddr.isTLS() && host.empty() );
 		if (!addressMap.count( toAddr )) {
 			return waitForProcessAndConnect( toAddr, this );
 		}
