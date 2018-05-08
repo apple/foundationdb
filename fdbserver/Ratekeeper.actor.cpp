@@ -90,7 +90,7 @@ struct StorageQueueInfo {
 		smoothDurableVersion(1.), smoothLatestVersion(1.), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited)
 	{
-		// FIXME: this is a tacky workaround for a potential unitialized use in trackStorageServerQueueInfo
+		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
 };
@@ -106,7 +106,7 @@ struct TLogQueueInfo {
 	TLogQueueInfo(UID id) : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-		// FIXME: this is a tacky workaround for a potential unitialized use in trackTLogQueueInfo (copied from storageQueueInfO)
+		// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from storageQueueInfO)
 		lastReply.instanceID = -1;
 	}
 };

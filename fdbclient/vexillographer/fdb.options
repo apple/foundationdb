@@ -142,6 +142,8 @@ description is not currently required but encouraged.
             description="Deprecated" />
     <Option name="durability_datacenter" code="110" />
     <Option name="durability_risky" code="120" />
+    <Option name="durability_dev_null_is_web_scale" code="130"
+            description="Deprecated"/>
     <Option name="priority_system_immediate" code="200"
             description="Specifies that this transaction should be treated as highest priority and that lower priority transactions should block behind this one. Use is discouraged outside of low-level tools" />
     <Option name="priority_batch" code="201"
