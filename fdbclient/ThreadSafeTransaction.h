@@ -140,7 +140,7 @@ public:
 
 	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 
-	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter);
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
 	static IClientApi* api;
 

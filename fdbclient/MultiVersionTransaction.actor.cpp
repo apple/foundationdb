@@ -336,7 +336,21 @@ void DLApi::setupNetwork() {
 }
 
 void DLApi::runNetwork() {
-	throwIfError(api->runNetwork());
+	auto e = api->runNetwork();
+
+	for(auto &hook : threadCompletionHooks) {
+		try {
+			hook.first(hook.second);
+		}
+		catch(Error &e) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+		}
+		catch(...) {
+			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+		}
+	}
+
+	throwIfError(e);
 }
 
 void DLApi::stopNetwork() {
@@ -355,9 +369,9 @@ ThreadFuture<Reference<ICluster>> DLApi::createCluster(const char *clusterFilePa
 	});
 }
 
-void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
-	// All completion hooks are handled on the local client
-	throw unsupported_operation();
+void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {
+	MutexHolder holder(lock);
+	threadCompletionHooks.push_back(std::make_pair(hook, hookParameter));
 }
 
 // MultiVersionTransaction
@@ -1145,19 +1159,6 @@ THREAD_FUNC_RETURN runNetworkThread(void *param) {
 		TraceEvent(SevError, "RunNetworkError").error(e);
 	}
 
-	std::vector<std::pair<void (*)(void*), void*>> &hooks = ((ClientInfo*)param)->threadCompletionHooks;
-	for(auto &hook : hooks) {
-		try {
-			hook.first(hook.second);
-		}
-		catch(Error &e) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
-		}
-		catch(...) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
-		}
-	}
-
 	THREAD_RETURN;
 }
 
@@ -1203,7 +1204,7 @@ void MultiVersionApi::stopNetwork() {
 	}
 }
 
-void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
+void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {
 	lock.enter();
 	if(!networkSetup) {
 		lock.leave();
@@ -1211,14 +1212,12 @@ void MultiVersionApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *
 	}
 	lock.leave();
 
-	localClient->api->addNetworkThreadCompletionHook(hook, hook_parameter);
+	localClient->api->addNetworkThreadCompletionHook(hook, hookParameter);
 
 	if(!bypassMultiClientApi) {
-		auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
-		for( auto it : externalClients ) {
-			MutexHolder holder(lock);
-			it.second->threadCompletionHooks.push_back(hookPair);
-		}
+		runOnExternalClients([hook, hookParameter](Reference<ClientInfo> client) {
+			client->api->addNetworkThreadCompletionHook(hook, hookParameter);
+		});
 	}
 }
 

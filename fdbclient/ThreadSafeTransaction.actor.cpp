@@ -391,15 +391,13 @@ ThreadFuture<Reference<ICluster>> ThreadSafeApi::createCluster(const char *clust
 	return ThreadSafeCluster::create(clusterFilePath, apiVersion);
 }
 
-void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter) {
+void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) {
 	if (!g_network) {
 		throw network_not_setup();
 	}
 
-	auto hookPair = std::pair<void (*)(void*), void*>(hook, hook_parameter);
-
 	MutexHolder holder(lock); // We could use the network thread to protect this action, but then we can't guarantee upon return that the hook is set.
-	threadCompletionHooks.push_back(hookPair);
+	threadCompletionHooks.push_back(std::make_pair(hook, hookParameter));
 }
 
 
