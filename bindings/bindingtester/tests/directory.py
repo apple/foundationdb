@@ -92,7 +92,7 @@ class DirectoryTest(Test):
         directory += directory_db_reads
 
         if not args.no_directory_snapshot_ops:
-        directory += directory_snapshot_reads
+            directory += directory_snapshot_reads
 
         subspace = ['DIRECTORY_PACK_KEY', 'DIRECTORY_UNPACK_KEY', 'DIRECTORY_RANGE', 'DIRECTORY_CONTAINS', 'DIRECTORY_OPEN_SUBSPACE']
 
