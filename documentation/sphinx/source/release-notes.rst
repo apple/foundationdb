@@ -12,7 +12,7 @@ Features
 * Added a TLS plugin implementation. `(PR #343) <https://github.com/apple/foundationdb/pull/343>`_
 * Backup supports HTTPS for blobstore connections. `(PR #343) <https://github.com/apple/foundationdb/pull/343>`_
 * Added the APPEND_IF_FITS atomic operation. `(PR #22) <https://github.com/apple/foundationdb/pull/22>`_
-* Updated the SET_VERSION_STAMP_VALUE atomic operation to place the version stamp at a specified offset in a value. `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
+* Updated the SET_VERSIONSTAMPED_VALUE atomic operation to place the version stamp at a specified offset in a value. `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
 
 Performance
 -----------
@@ -22,7 +22,7 @@ Performance
 Status
 ------
 
-* Available space metrics take into account both memory and disk. `(PR #41) <https://github.com/apple/foundationdb/pull/41>`_
+* Available space metrics for the memory storage engine take into account both memory and disk. `(PR #41) <https://github.com/apple/foundationdb/pull/41>`_
 * Added metrics for read bytes per second and read keys per second. `(PR #303) <https://github.com/apple/foundationdb/pull/303>`_
 
 Bindings
