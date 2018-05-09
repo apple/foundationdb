@@ -1645,6 +1645,7 @@ public:
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					Optional<Value> drVersion = wait(tr->get(drVersionKey));
 
+					TraceEvent("DRU_versionCheck").detail("current", drVersion.present() ? BinaryReader::fromStringRef<int>(drVersion.get(), Unversioned()) : -1).detail("expected", DatabaseBackupAgent::LATEST_DR_VERSION).detail("logUid", BinaryWriter::toValue(logUid, Unversioned()).printable());
 					if (drVersion.present() && BinaryReader::fromStringRef<int>(drVersion.get(), Unversioned()) == DatabaseBackupAgent::LATEST_DR_VERSION) {
 						return Void();
 					}
