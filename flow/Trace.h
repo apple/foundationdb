@@ -199,6 +199,9 @@ struct TraceLogFormatter {
 	virtual const char* getHeader() = 0; // Called when starting a new file
 	virtual const char* getFooter() = 0; // Called when ending a file
 	virtual std::string formatEvent(TraceEventFields) = 0; // Called for each event
+
+	virtual void addref() = 0;
+	virtual void delref() = 0;
 };
 
 struct TraceInterval {

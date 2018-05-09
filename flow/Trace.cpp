@@ -137,7 +137,15 @@ SuppressionMap suppressedEvents;
 static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 
-struct XmlTraceLogFormatter : public TraceLogFormatter {
+struct XmlTraceLogFormatter : public TraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
+	void addref() {
+		ReferenceCounted<XmlTraceLogFormatter>::addref();
+	}
+
+	void delref() {
+		ReferenceCounted<XmlTraceLogFormatter>::delref();
+	}
+
 	const char* getExtension() {
 		return "xml";
 	}
@@ -210,7 +218,7 @@ struct XmlTraceLogFormatter : public TraceLogFormatter {
 struct TraceLog {
 
 private:
-	TraceLogFormatter *formatter = new XmlTraceLogFormatter(); // TODO: Memory handling
+	Reference<TraceLogFormatter> formatter;
 	Standalone< VectorRef<StringRef> > buffer;
 	int file_length;
 	int buffer_length;
@@ -278,12 +286,12 @@ public:
 	Reference<BarrierList> barriers;
 
 	struct WriterThread : IThreadPoolReceiver {
-		WriterThread( std::string directory, std::string processName, uint32_t maxLogsSize, std::string basename, std::string logGroup, Optional<NetworkAddress> localAddress, Reference<BarrierList> barriers, TraceLogFormatter *formatter ) 
+		WriterThread( std::string directory, std::string processName, uint32_t maxLogsSize, std::string basename, std::string logGroup, Optional<NetworkAddress> localAddress, Reference<BarrierList> barriers, Reference<TraceLogFormatter> formatter ) 
 			: directory(directory), processName(processName), maxLogsSize(maxLogsSize), basename(basename), logGroup(logGroup), localAddress(localAddress), traceFileFD(0), index(0), barriers(barriers), formatter(formatter) {}
 
 		virtual void init() {}
 
-		TraceLogFormatter *formatter;
+		Reference<TraceLogFormatter> formatter;
 		Reference<BarrierList> barriers;
 		int traceFileFD;
 		std::string directory;
@@ -430,7 +438,7 @@ public:
 		}
 	};
 
-	TraceLog() : buffer_length(0), file_length(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false) {}
+	TraceLog() : buffer_length(0), file_length(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
 
 	bool isOpen() const { return opened; }
 
