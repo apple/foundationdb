@@ -26,6 +26,7 @@
 #include "ITLSPlugin.h"
 #include "LoadPlugin.h"
 #include "Platform.h"
+#include <memory>
 
 // Must not throw an exception from this function!
 static int send_func(void* ctx, const uint8_t* buf, int len) {
@@ -283,17 +284,14 @@ void TLSOptions::set_verify_peers( std::vector<std::string> const& verify_peers 
 		for (int i = 0; i < verify_peers.size(); i++)
 			e.detail(std::string("Value" + std::to_string(i)).c_str(), verify_peers[i].c_str());
 	}
-	const uint8_t **verify_peers_arr = (const uint8_t **) malloc(verify_peers.size() * sizeof(uint8_t *));
-	int *verify_peers_len = (int *)malloc(verify_peers.size() * sizeof(int));
+	std::unique_ptr<const uint8_t *[]> verify_peers_arr(new const uint8_t*[verify_peers.size()]);
+	std::unique_ptr<int[]> verify_peers_len(new int[verify_peers.size()]);
 	for (int i = 0; i < verify_peers.size(); i++) {
 		verify_peers_arr[i] = (const uint8_t *)&verify_peers[i][0];
 		verify_peers_len[i] = verify_peers[i].size();
 	}
-	bool success = policyVerifyPeersSet->set_verify_peers(verify_peers.size(), verify_peers_arr, verify_peers_len);
-	free(verify_peers_len);
-	free(verify_peers_arr);
 
-	if (!success)
+	if (!policyVerifyPeersSet->set_verify_peers(verify_peers.size(), verify_peers_arr.get(), verify_peers_len.get()))
 		throw tls_error();
 
 	verify_peers_set = true;
