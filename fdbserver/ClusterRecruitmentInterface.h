@@ -27,6 +27,7 @@
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "MasterInterface.h"
+#include "RecoveryState.h"
 #include "TLogInterface.h"
 #include "WorkerInterface.h"
 #include "Knobs.h"
@@ -200,8 +201,8 @@ struct RegisterMasterRequest {
 	int64_t registrationCount;
 	Optional<DatabaseConfiguration> configuration;
 	vector<UID> priorCommittedLogServers;
-	int recoveryState;
-	
+	RecoveryState recoveryState;
+
 	ReplyPromise<Void> reply;
 
 	RegisterMasterRequest() {}
