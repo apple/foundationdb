@@ -303,7 +303,7 @@ void TLSOptions::register_network() {
 
 const char *defaultCertFileName = "fdb.pem";
 
-Reference<ITLSPolicy> TLSOptions::get_policy(enum POLICY_TYPE type) {
+Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 	if ( !certs_set ) {
 		std::string certFile;
 		if ( !platform::getEnvironmentVar( "FDB_TLS_CERTIFICATE_FILE", certFile ) )
