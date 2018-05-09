@@ -813,7 +813,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
 			try {
-				tlsOptions->set_verify_peers( value.get().toString() );
+				tlsOptions->set_verify_peers({ value.get().toString() });
 			} catch( Error& e ) {
 				TraceEvent(SevWarnAlways, "TLSValidationSetError")
 					.detail("Input", value.get().toString() )

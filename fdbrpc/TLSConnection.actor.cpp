@@ -26,8 +26,6 @@
 #include "ITLSPlugin.h"
 #include "LoadPlugin.h"
 #include "Platform.h"
-#include <boost/algorithm/string.hpp>
-#include <memory>
 
 // Must not throw an exception from this function!
 static int send_func(void* ctx, const uint8_t* buf, int len) {
@@ -277,20 +275,25 @@ void TLSOptions::set_key_data( std::string const& key_data ) {
 	key_set = true;
 }
 
-void TLSOptions::set_verify_peers(std::string const& verify_peers_in ) {
+void TLSOptions::set_verify_peers( std::vector<std::string> const& verify_peers ) {
 	if (!policyVerifyPeersSet)
 		init_plugin();
-	TraceEvent("TLSConnectionSettingVerifyPeers").detail("Value", verify_peers_in);
-	std::vector<std::string> verify_peers;
-	boost::split(verify_peers, verify_peers_in, [](char c) {return c == ','; });
-	std::unique_ptr<const uint8_t *[]> verify_peers_arr(new const uint8_t*[verify_peers.size()]);
-	std::unique_ptr<int[]> verify_peers_len(new int[verify_peers.size()]);
+	{
+		TraceEvent e("TLSConnectionSettingVerifyPeers");
+		for (int i = 0; i < verify_peers.size(); i++)
+			e.detail(std::string("Value" + std::to_string(i)).c_str(), verify_peers[i].c_str());
+	}
+	const uint8_t **verify_peers_arr = (const uint8_t **) malloc(verify_peers.size() * sizeof(uint8_t *));
+	int *verify_peers_len = (int *)malloc(verify_peers.size() * sizeof(int));
 	for (int i = 0; i < verify_peers.size(); i++) {
 		verify_peers_arr[i] = (const uint8_t *)&verify_peers[i][0];
 		verify_peers_len[i] = verify_peers[i].size();
 	}
+	bool success = policyVerifyPeersSet->set_verify_peers(verify_peers.size(), verify_peers_arr, verify_peers_len);
+	free(verify_peers_len);
+	free(verify_peers_arr);
 
-	if (!policyVerifyPeersSet->set_verify_peers(verify_peers.size(), verify_peers_arr.get(), verify_peers_len.get()))
+	if (!success)
 		throw tls_error();
 
 	verify_peers_set = true;
@@ -318,9 +321,9 @@ Reference<ITLSPolicy> TLSOptions::get_policy(enum POLICY_TYPE type) {
 	if( !verify_peers_set ) {
 		std::string verifyPeerString;
 		if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verifyPeerString))
-			set_verify_peers(verifyPeerString);
+			set_verify_peers({ verifyPeerString });
 		else
-			set_verify_peers(std::string("Check.Valid=0"));
+			set_verify_peers({ std::string("Check.Valid=0")});
 	}
 	if (!ca_set) {
 		std::string caFile;
