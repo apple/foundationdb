@@ -33,7 +33,6 @@
 // floats, doubles, booleans, UUIDs, tuples, and NULL values. In Go these are
 // represented as []byte (or fdb.KeyConvertible), string, int64 (or int),
 // float32, float64, bool, UUID, Tuple, and nil.
-
 package tuple
 
 import (
