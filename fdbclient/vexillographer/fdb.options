@@ -79,6 +79,15 @@ description is not currently required but encouraged.
     <Option name="Buggify_section_fired_probability" code="51"
             paramType="Int" paramDescription="probability expressed as a percentage between 0 and 100"
             description="Set the probability of an active BUGGIFY section being fired" />
+    <Option name="TLS_ca_bytes" code="52"
+            paramType="Bytes" paramDescription="ca bundle"
+            description="Set the ca bundle" />
+    <Option name="TLS_ca_path" code="53"
+            paramType="String" paramDescription="file path"
+            description="Set the file from which to load the certificate authority bundle" />
+    <Option name="TLS_password" code="54"
+            paramType="String" paramDescription="key passphrase"
+            description="Set the passphrase for encrypted private key. Password should be set before setting the key for the password to be used." />
     <Option name="disable_multi_version_client_api" code="60"
             description="Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network." />
     <Option name="callbacks_on_external_threads" code="61"

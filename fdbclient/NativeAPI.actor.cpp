@@ -790,6 +790,18 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::TLS_CERT_BYTES:
 			tlsOptions->set_cert_data( value.get().toString() );
 			break;
+		case FDBNetworkOptions::TLS_CA_PATH:
+			validateOptionValue(value, true);
+			tlsOptions->set_ca_file( value.get().toString() );
+			break;
+		case FDBNetworkOptions::TLS_CA_BYTES:
+			validateOptionValue(value, true);
+			tlsOptions->set_ca_data(value.get().toString());
+			break;
+		case FDBNetworkOptions::TLS_PASSWORD:
+			validateOptionValue(value, true);
+			tlsOptions->set_key_password(value.get().toString());
+			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);
 			tlsOptions->set_key_file( value.get().toString() );
@@ -801,7 +813,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
 			try {
-				tlsOptions->set_verify_peers( value.get().toString() );
+				tlsOptions->set_verify_peers({ value.get().toString() });
 			} catch( Error& e ) {
 				TraceEvent(SevWarnAlways, "TLSValidationSetError")
 					.detail("Input", value.get().toString() )
