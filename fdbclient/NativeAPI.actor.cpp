@@ -2063,8 +2063,8 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 
 	auto &req = tr;
 	auto &t = req.transaction;
-    auto r = singleKeyRange( key, req.arena );
-    auto v = ValueRef( req.arena, operand );
+	auto r = singleKeyRange( key, req.arena );
+	auto v = ValueRef( req.arena, operand );
 
 	t.mutations.push_back( req.arena, MutationRef( operationType, r.begin, v ) );
 

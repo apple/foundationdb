@@ -438,13 +438,13 @@ public:
 
 	Standalone<StringRef> withPrefix( const StringRef& prefix ) const {
 		Standalone<StringRef> r;
-		((StringRef &)r) = withPrefix(prefix, r.arena());
+		r.contents() = withPrefix(prefix, r.arena());
 		return r;
 	}
 
 	Standalone<StringRef> withSuffix( const StringRef& suffix ) const {
 		Standalone<StringRef> r;
-		((StringRef &)r) = withSuffix(suffix, r.arena());
+		r.contents() = withSuffix(suffix, r.arena());
 		return r;
 	}
 
