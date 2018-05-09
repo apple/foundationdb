@@ -23,6 +23,7 @@
 #include "fdbclient/BackupAgent.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
+#include "fdbclient/ManagementAPI.h"
 
 //A workload which test the correctness of upgrading DR from 5.1 to 5.2
 struct BackupToDBUpgradeWorkload : TestWorkload {
@@ -267,12 +268,87 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> diffRanges(Standalone<VectorRef<KeyRangeRef>> ranges, StringRef backupPrefix, Database src, Database dest) {
+		state int rangeIndex;
+		for (rangeIndex = 0; rangeIndex < ranges.size(); ++rangeIndex) {
+			state KeyRangeRef range = ranges[rangeIndex];
+			state Key begin = range.begin;
+			if(range.empty()) {
+				continue;
+			}
+			loop {
+				state Transaction tr(src);
+				state Transaction tr2(dest);
+				try {
+					loop {
+						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
+						state Future<Standalone<RangeResultRef>> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
+						state Future<Standalone<RangeResultRef>> bkpFuture = tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
+						Void _ = wait(success(srcFuture) && success(bkpFuture));
+
+						auto src = srcFuture.get().begin();
+						auto bkp = bkpFuture.get().begin();
+
+						while (src != srcFuture.get().end() && bkp != bkpFuture.get().end()) {
+							KeyRef bkpKey = bkp->key.substr(backupPrefix.size());
+							if (src->key != bkpKey && src->value != bkp->value) {
+								TraceEvent(SevError, "MismatchKeyAndValue").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+							}
+							else if (src->key != bkpKey) {
+								TraceEvent(SevError, "MismatchKey").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+							}
+							else if (src->value != bkp->value) {
+								TraceEvent(SevError, "MismatchValue").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value)).detail("bkpKey", printable(bkpKey)).detail("bkpVal", printable(bkp->value));
+							}
+							begin = std::min(src->key, bkpKey);
+							if (src->key == bkpKey) {
+								++src;
+								++bkp;
+							}
+							else if (src->key < bkpKey) {
+								++src;
+							}
+							else {
+								++bkp;
+							}
+						}
+						while (src != srcFuture.get().end() && !bkpFuture.get().more) {
+							TraceEvent(SevError, "MissingBkpKey").detail("srcKey", printable(src->key)).detail("srcVal", printable(src->value));
+							begin = src->key;
+							++src;
+						}
+						while (bkp != bkpFuture.get().end() && !srcFuture.get().more) {
+							TraceEvent(SevError, "MissingSrcKey").detail("bkpKey", printable(bkp->key.substr(backupPrefix.size()))).detail("bkpVal", printable(bkp->value));
+							begin = bkp->key;
+							++bkp;
+						}
+
+						if (!srcFuture.get().more && !bkpFuture.get().more) {
+							break;
+						}
+
+						begin = keyAfter(begin);
+					}
+
+					break;
+				}
+				catch (Error &e) {
+					Void _ = wait(tr.onError(e));
+				}
+			}
+		}
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> _start(Database cx, BackupToDBUpgradeWorkload* self) {
 		state DatabaseBackupAgent backupAgent(cx);
 		state DatabaseBackupAgent restoreAgent(self->extraDB);
 		state Future<Void> disabler = disableConnectionFailuresAfter(300, "BackupToDBUpgradeStart");
 		state Standalone<VectorRef<KeyRangeRef>> prevBackupRanges;
 		state UID logUid;
+		state Version commitVersion;
 
 		state Future<Void> stopDifferential = delay(self->stopDifferentialAfter);
 		state Future<Void> waitUpgrade = backupAgent.waitUpgradeToLatestDrVersion(self->extraDB, self->backupTag);
@@ -293,16 +369,47 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					ASSERT(backupKeysPacked.present());
 
 					BinaryReader br(backupKeysPacked.get(), IncludeVersion());
+					prevBackupRanges = Standalone<VectorRef<KeyRangeRef>>();
 					br >> prevBackupRanges;
+					Void _ = wait( lockDatabase(tr, logUid) );
+					tr->addWriteConflictRange(singleKeyRange(StringRef()));
+					Void _ = wait( tr->commit() );
+					commitVersion = tr->getCommittedVersion();
 					break;
 				} catch( Error &e ) {
 					Void _ = wait( tr->onError(e) );
 				}
 			}
 
+			TraceEvent("DRU_locked").detail("lockedVersion", commitVersion);
+
+			// Wait for the destination to apply mutations up to the lock commit before switching over.
+			state ReadYourWritesTransaction versionCheckTr(self->extraDB);
+			loop {
+				try {
+					versionCheckTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					versionCheckTr.setOption(FDBTransactionOptions::LOCK_AWARE);
+					Optional<Value> v = wait(versionCheckTr.get(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin)));
+					TraceEvent("DRU_applied").detail("appliedVersion", v.present() ? BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) : -1);
+					if( v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) >= commitVersion)
+						break;
+
+					state Future<Void> versionWatch = versionCheckTr.watch(BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
+					Void _ = wait(versionCheckTr.commit());
+					Void _ = wait(versionWatch);
+					versionCheckTr.reset();
+				} catch( Error &e ) {
+					Void _ = wait(versionCheckTr.onError(e));
+				}
+			}
+
+			TraceEvent("DRU_diffRanges");
+			Void _ = wait( diffRanges(prevBackupRanges, self->backupPrefix, cx, self->extraDB ) );
+
 			// abort backup
 			TraceEvent("DRU_abortBackup").detail("tag", printable(self->backupTag));
 			Void _ = wait(backupAgent.abortBackup(self->extraDB, self->backupTag));
+			Void _ = wait( unlockDatabase(self->extraDB, logUid) );
 
 			// restore database
 			TraceEvent("DRU_prepareRestore").detail("restoreTag", printable(self->restoreTag));
