@@ -315,8 +315,10 @@ Reference<ITLSPolicy> TLSOptions::get_policy(enum POLICY_TYPE type) {
 	}
 	if( !verify_peers_set ) {
 		std::string verifyPeerString;
-		if ( platform::getEnvironmentVar( "FDB_TLS_VERIFY_PEERS", verifyPeerString ) )
+		if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verifyPeerString))
 			set_verify_peers({ verifyPeerString });
+		else
+			set_verify_peers({ std::string("Check.Valid=0")});
 	}
 	if (!ca_set) {
 		std::string caFile;

@@ -120,7 +120,6 @@ static void simInitTLS() {
 	Reference<TLSOptions> options( new TLSOptions );
 	options->set_cert_data( certBytes );
 	options->set_key_data( certBytes );
-	options->set_verify_peers(std::vector<std::string>(1, "Check.Valid=0"));
 	options->register_network();
 }
 
