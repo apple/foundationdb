@@ -798,6 +798,10 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			validateOptionValue(value, true);
 			tlsOptions->set_ca_data(value.get().toString());
 			break;
+		case FDBNetworkOptions::TLS_PASSWORD:
+			validateOptionValue(value, true);
+			tlsOptions->set_key_password(value.get().toString());
+			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);
 			tlsOptions->set_key_file( value.get().toString() );

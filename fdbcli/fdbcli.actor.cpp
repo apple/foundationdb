@@ -2079,6 +2079,7 @@ struct CLIOptions {
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
 	std::string tlsCAPath;
+	std::string tlsPassword;
 
 	CLIOptions( int argc, char* argv[] )
 		: trace(false),
@@ -2157,6 +2158,9 @@ struct CLIOptions {
 				break;
 			case TLSOptions::OPT_TLS_KEY:
 				tlsKeyPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_PASSWORD:
+				tlsPassword = args.OptionArg();
 				break;
 			case TLSOptions::OPT_TLS_VERIFY_PEERS:
 				tlsVerifyPeers = args.OptionArg();
@@ -3192,6 +3196,9 @@ int main(int argc, char **argv) {
 	}
 	if ( opt.tlsKeyPath.size() ) {
 		try {
+			if (opt.tlsPassword.size())
+				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD);
+
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, opt.tlsKeyPath);
 		} catch( Error& e ) {
 			fprintf(stderr, "ERROR: cannot set TLS key path to `%s' (%s)\n", opt.tlsKeyPath.c_str(), e.what());

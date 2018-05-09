@@ -247,6 +247,11 @@ void TLSOptions::set_cert_data( std::string const& cert_data ) {
 	certs_set = true;
 }
 
+void TLSOptions::set_key_password(std::string const& password) {
+	TraceEvent("TLSConnectionSettingPassword");
+	keyPassword = password;
+}
+
 void TLSOptions::set_key_file( std::string const& key_file ) {
 	try {
 		TraceEvent("TLSConnectionSettingKeyFile").detail("KeyFilePath", key_file);
@@ -260,11 +265,11 @@ void TLSOptions::set_key_file( std::string const& key_file ) {
 void TLSOptions::set_key_data( std::string const& key_data ) {
 	if (!policyVerifyPeersSet || !policyVerifyPeersNotSet)
 		init_plugin();
-
+	const char *passphrase = keyPassword.empty() ? NULL : keyPassword.c_str();
 	TraceEvent("TLSConnectionSettingKeyData").detail("KeyDataSize", key_data.size());
-	if ( !policyVerifyPeersSet->set_key_data( (const uint8_t*)&key_data[0], key_data.size(), NULL ) )
+	if ( !policyVerifyPeersSet->set_key_data( (const uint8_t*)&key_data[0], key_data.size(), passphrase) )
 		throw tls_error();
-	if (!policyVerifyPeersNotSet->set_key_data((const uint8_t*)&key_data[0], key_data.size(), NULL))
+	if (!policyVerifyPeersNotSet->set_key_data((const uint8_t*)&key_data[0], key_data.size(), passphrase))
 		throw tls_error();
 
 	key_set = true;

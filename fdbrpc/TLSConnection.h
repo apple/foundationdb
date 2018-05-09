@@ -80,7 +80,7 @@ struct TLSListener : IListener, ReferenceCounted<TLSListener> {
 };
 
 struct TLSOptions : ReferenceCounted<TLSOptions> {
-	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE };
+	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE, OPT_TLS_PASSWORD };
 	enum POLICY_TYPE { POLICY_VERIFY_PEERS = 1, POLICY_NO_VERIFY_PEERS };
 	TLSOptions() : certs_set(false), key_set(false), verify_peers_set(false), ca_set(false) {}
 
@@ -89,6 +89,8 @@ struct TLSOptions : ReferenceCounted<TLSOptions> {
 	void set_cert_data( std::string const& cert_data );
 	void set_ca_file(std::string const& ca_file);
 	void set_ca_data(std::string const& ca_data);
+	// If there is a passphrase, this api should be called prior to setting key for the passphrase to be used
+	void set_key_password( std::string const& password );
 	void set_key_file( std::string const& key_file );
 	void set_key_data( std::string const& key_data );
 	void set_verify_peers( std::vector<std::string> const& verify_peers );
@@ -104,6 +106,7 @@ private:
 	Reference<ITLSPolicy> policyVerifyPeersSet;
 	Reference<ITLSPolicy> policyVerifyPeersNotSet;
 	bool certs_set, key_set, verify_peers_set, ca_set;
+	std::string keyPassword;
 };
 
 struct TLSNetworkConnections : INetworkConnections {
@@ -125,12 +128,14 @@ private:
 #define TLS_KEY_FILE_FLAG "--tls_key_file"
 #define TLS_VERIFY_PEERS_FLAG "--tls_verify_peers"
 #define TLS_CA_FILE_FLAG "--tls_ca_file"
+#define TLS_PASSWORD_FLAG "--tls_password"
 
 #define TLS_OPTION_FLAGS \
 	{ TLSOptions::OPT_TLS_PLUGIN,       TLS_PLUGIN_FLAG,           SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_KEY,          TLS_KEY_FILE_FLAG,         SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG,     SO_REQ_SEP }, \
+	{ TLSOptions::OPT_TLS_PASSWORD,		TLS_PASSWORD_FLAG,		   SO_REQ_SEP }, \
     { TLSOptions::OPT_TLS_CA_FILE,      TLS_CA_FILE_FLAG,		   SO_REQ_SEP },
 
 #define TLS_HELP \
@@ -147,6 +152,8 @@ private:
 	"  " TLS_KEY_FILE_FLAG " KEYFILE\n" \
 	"                 The path of a file containing the private key corresponding\n" \
 	"                 to the TLS certificate.\n"						\
+	"  " TLS_PASSWORD_FLAG " PASSCODE\n" \
+	"                 The passphrase of encrypted private key\n" \
 	"  " TLS_VERIFY_PEERS_FLAG " CONSTRAINTS\n" \
 	"                 The constraints by which to validate TLS peers. The contents\n" \
 	"                 and format of CONSTRAINTS are plugin-specific.\n"

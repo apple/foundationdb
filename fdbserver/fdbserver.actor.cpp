@@ -867,7 +867,7 @@ int main(int argc, char* argv[]) {
 		bool testOnServers = false;
 
 		Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
-		std::string tlsCertPath, tlsKeyPath, tlsCAPath;
+		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
 		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
@@ -1202,6 +1202,9 @@ int main(int argc, char* argv[]) {
 				case TLSOptions::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args.OptionArg();
 					break;
+				case TLSOptions::OPT_TLS_PASSWORD:
+					tlsPassword = args.OptionArg();
+					break;
 				case TLSOptions::OPT_TLS_CA_FILE:
 					tlsCAPath = args.OptionArg();
 					break;
@@ -1471,8 +1474,12 @@ int main(int argc, char* argv[]) {
 				tlsOptions->set_cert_file( tlsCertPath );
 			if (tlsCAPath.size())
 				tlsOptions->set_ca_file(tlsCAPath);
-			if ( tlsKeyPath.size() )
-				tlsOptions->set_key_file( tlsKeyPath );
+			if (tlsKeyPath.size()) {
+				if (tlsPassword.size())
+					tlsOptions->set_key_password(tlsPassword);
+
+				tlsOptions->set_key_file(tlsKeyPath);
+			}
 			if ( tlsVerifyPeers.size() )
 				tlsOptions->set_verify_peers( tlsVerifyPeers );
 
