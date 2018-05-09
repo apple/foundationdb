@@ -244,10 +244,10 @@ struct ResolutionRequestBuilder {
 		bool isTXNStateTransaction = false;
 		for (auto & m : trIn.mutations) {
 			if (m.type == MutationRef::SetVersionstampedKey) {
-				transformSetVersionstampedKey( m, requests[0].version, transactionNumberInBatch );
+				transformVersionstampMutation( m, &MutationRef::param1, requests[0].version, transactionNumberInBatch );
 				trIn.write_conflict_ranges.push_back( requests[0].arena, singleKeyRange( m.param1, requests[0].arena ) );
-			} else if (m.type == MutationRef::SetVersionstampedValue ) {
-				transformSetVersionstampedValue( m, requests[0].version, transactionNumberInBatch );
+			} else if (m.type == MutationRef::SetVersionstampedValue) {
+				transformVersionstampMutation( m, &MutationRef::param2, requests[0].version, transactionNumberInBatch );
 			}
 			if (isMetadataMutation(m)) {
 				isTXNStateTransaction = true;

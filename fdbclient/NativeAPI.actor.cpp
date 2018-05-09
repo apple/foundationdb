@@ -285,7 +285,7 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction *tr, std::vecto
 			int64_t numCommitBytes = 0;
 			for (auto &chunk : *chunks) {
 				tr->atomicOp(chunk.key, chunk.value, MutationRef::SetVersionstampedKey);
-				numCommitBytes += chunk.key.size() + chunk.value.size() - 2; // subtract last 2 bytes of key that denotes verstion stamp index 
+				numCommitBytes += chunk.key.size() + chunk.value.size() - 4; // subtract number of bytes of key that denotes verstion stamp index
 			}
 			tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&numCommitBytes, 8), MutationRef::AddValue);
 			Void _ = wait(tr->commit());
@@ -369,9 +369,9 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 					TrInfoChunk chunk;
 					BinaryWriter chunkBW(Unversioned());
 					chunkBW << bigEndian32(i+1) << bigEndian32(num_chunks);
-					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + std::string(2, '\x00'));
-					int16_t pos = littleEndian16(clientLatencyName.size());
-					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int16_t), &pos, sizeof(int16_t));
+					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + std::string(4, '\x00'));
+					int32_t pos = littleEndian32(clientLatencyName.size());
+					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int32_t), &pos, sizeof(int32_t));
 					if (i == num_chunks - 1) {
 						chunk.value = ValueRef(static_cast<uint8_t *>(bw.getData()) + (i * value_size_limit), bw.getLength() - (i * value_size_limit));
 					}
@@ -2060,10 +2060,12 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 		else if (operationType == MutationRef::And)
 			operationType = MutationRef::AndV2;
 	}
+
 	auto &req = tr;
 	auto &t = req.transaction;
 	auto r = singleKeyRange( key, req.arena );
 	auto v = ValueRef( req.arena, operand );
+
 	t.mutations.push_back( req.arena, MutationRef( operationType, r.begin, v ) );
 
 	if( addConflictRange )
