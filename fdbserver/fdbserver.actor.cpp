@@ -867,8 +867,7 @@ int main(int argc, char* argv[]) {
 		bool testOnServers = false;
 
 		Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
-		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
-		std::vector<std::string> tlsVerifyPeers;
+		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword, tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
 
@@ -1212,7 +1211,7 @@ int main(int argc, char* argv[]) {
 					tlsKeyPath = args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_VERIFY_PEERS:
-					tlsVerifyPeers.push_back(args.OptionArg());
+					tlsVerifyPeers = args.OptionArg();
 					break;
 			}
 		}

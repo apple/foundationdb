@@ -93,7 +93,7 @@ struct TLSOptions : ReferenceCounted<TLSOptions> {
 	void set_key_password( std::string const& password );
 	void set_key_file( std::string const& key_file );
 	void set_key_data( std::string const& key_data );
-	void set_verify_peers( std::vector<std::string> const& verify_peers );
+	void set_verify_peers( std::string const& verify_peers );
 
 	void register_network();
 
