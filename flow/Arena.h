@@ -421,6 +421,7 @@ public:
 	StringRef substr(int start, int size) const { return StringRef( data + start, size ); }
 	bool startsWith( const StringRef& s ) const { return size() >= s.size() && !memcmp(begin(), s.begin(), s.size()); }
 	bool endsWith( const StringRef& s ) const { return size() >= s.size() && !memcmp(end()-s.size(), s.begin(), s.size()); }
+	bool isZero() const { for ( size_t i = 0; i < length; i++) { if (data[i]) return false; } return true; }
 
 	StringRef withPrefix( const StringRef& prefix, Arena& arena ) const {
 		uint8_t* s = new (arena) uint8_t[ prefix.size() + size() ];

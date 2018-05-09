@@ -1427,6 +1427,7 @@ void ReadYourWritesTransaction::writeRangeToNativeTransaction( KeyRangeRef const
 					case MutationRef::ByteMax:
 					case MutationRef::MinV2:
 					case MutationRef::AndV2:
+					case MutationRef::AddWithClear:
 						tr.atomicOp( it.beginKey().assertRef(), op[i].value.get(), op[i].type, false );
 						break;
 					default:
