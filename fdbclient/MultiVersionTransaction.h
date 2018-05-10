@@ -203,11 +203,16 @@ public:
 
 	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
+
 private:
 	const std::string fdbCPath;
 	const Reference<FdbCApi> api;
 	int headerVersion;
 	bool networkSetup;
+
+	Mutex lock;
+	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 
 	void init();
 };
@@ -403,7 +408,7 @@ public:
 	void setupNetwork();
 	void runNetwork();
 	void stopNetwork();
-	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hook_parameter);
+	void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter);
 
 	ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath);
 	static MultiVersionApi* api;
@@ -443,7 +448,6 @@ private:
 	std::vector<std::pair<FDBNetworkOptions::Option, Optional<Standalone<StringRef>>>> options;
 	std::map<FDBNetworkOptions::Option, std::set<Standalone<StringRef>>> setEnvOptions;
 	volatile bool envOptionsLoaded;
-	std::vector<std::pair<void (*)(void*), void*>> threadCompletionHooks;
 };
 
 

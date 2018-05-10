@@ -20,6 +20,7 @@
 
 import math
 import re
+import struct
 
 import fdb
 
@@ -79,6 +80,20 @@ class Test(object):
     # Returns a list of error strings
     def validate(self, db, args):
         return []
+
+    def versionstamp_key(self, raw_bytes, version_pos):
+        if hasattr(self, 'api_version') and self.api_version < 520:
+            return raw_bytes + struct.pack('<H', version_pos)
+        else:
+            return raw_bytes + struct.pack('<L', version_pos)
+
+    def versionstamp_value(self, raw_bytes, version_pos=0):
+        if hasattr(self, 'api_version') and self.api_version < 520:
+            if version_pos != 0:
+                raise ValueError("unable to set non-zero version position before 520 in values")
+            return raw_bytes
+        else:
+            return raw_bytes + struct.pack('<L', version_pos)
 
     @classmethod
     def create_test(cls, name, subspace):
