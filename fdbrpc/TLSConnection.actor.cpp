@@ -402,5 +402,5 @@ void TLSOptions::init_plugin( std::string const& plugin_path ) {
 }
 
 bool TLSOptions::enabled() {
-	return !!policy;
+	return !!policyVerifyPeersSet && !!policyVerifyPeersNotSet;
 }

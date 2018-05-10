@@ -97,12 +97,8 @@ struct TLSOptions : ReferenceCounted<TLSOptions> {
 
 	void register_network();
 
-<<<<<<< HEAD
-	Reference<ITLSPolicy> get_policy();
-	bool enabled();
-=======
 	Reference<ITLSPolicy> get_policy(PolicyType type);
->>>>>>> release-5.2
+	bool enabled();
 
 private:
 	void init_plugin( std::string const& plugin_path = "" );
