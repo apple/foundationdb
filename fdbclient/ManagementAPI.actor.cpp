@@ -1254,7 +1254,7 @@ ACTOR Future<Void> lockDatabase( Transaction* tr, UID id ) {
 		}
 	}
 
-	tr->atomicOp(databaseLockedKey, BinaryWriter::toValue(id, Unversioned()).withPrefix(LiteralStringRef("0123456789")), MutationRef::SetVersionstampedValue);
+	tr->atomicOp(databaseLockedKey, BinaryWriter::toValue(id, Unversioned()).withPrefix(LiteralStringRef("0123456789")).withSuffix(LiteralStringRef("\x00\x00\x00\x00")), MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
 	return Void();
 }
@@ -1273,7 +1273,7 @@ ACTOR Future<Void> lockDatabase( Reference<ReadYourWritesTransaction> tr, UID id
 		}
 	}
 
-	tr->atomicOp(databaseLockedKey, BinaryWriter::toValue(id, Unversioned()).withPrefix(LiteralStringRef("0123456789")), MutationRef::SetVersionstampedValue);
+	tr->atomicOp(databaseLockedKey, BinaryWriter::toValue(id, Unversioned()).withPrefix(LiteralStringRef("0123456789")).withSuffix(LiteralStringRef("\x00\x00\x00\x00")), MutationRef::SetVersionstampedValue);
 	tr->addWriteConflictRange(normalKeys);
 	return Void();
 }
