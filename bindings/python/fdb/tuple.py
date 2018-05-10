@@ -363,7 +363,7 @@ def _encode(value, nested=False):
     elif isinstance(value, tuple) or isinstance(value, list):
         child_bytes, version_pos = _reduce_children(map(lambda x: _encode(x, True), value))
         new_version_pos = -1 if version_pos < 0 else version_pos + 1
-        return b''.join([six.int2byte(NESTED_CODE)] + child_bytes + [six.int2byte(0x00)]), version_pos
+        return b''.join([six.int2byte(NESTED_CODE)] + child_bytes + [six.int2byte(0x00)]), new_version_pos
     else:
         raise ValueError("Unsupported data type: " + str(type(value)))
 
