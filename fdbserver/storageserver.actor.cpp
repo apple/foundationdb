@@ -1539,6 +1539,19 @@ bool expandMutation( MutationRef& m, StorageServer::VersionedData const& data, U
 			case MutationRef::AndV2:
 				m.param2 = doAndV2(oldVal, m.param2, ar);
 				break;
+			case MutationRef::AddWithClear:
+				if(!oldVal.present() && m.param2.isZero())
+					return false;
+				m.param2 = doLittleEndianAdd(oldVal, m.param2, ar);
+				if (m.param2.isZero()) {
+					m.type = MutationRef::ClearRange;
+					KeyRange range = singleKeyRange(m.param1);
+					m.param1 = range.begin;
+					m.param2 = range.end;
+				} else {
+					m.type = MutationRef::SetValue;
+				}
+				return true;
 		}
 		m.type = MutationRef::SetValue;
 	}
