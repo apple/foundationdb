@@ -24,6 +24,7 @@
 
 #include "flow/Platform.h"
 #include "flow/IRandom.h"
+#include <cmath>
 #include <vector>
 #include <algorithm>
 

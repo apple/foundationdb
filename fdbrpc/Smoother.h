@@ -23,6 +23,7 @@
 #pragma once
 
 #include "flow/flow.h"
+#include <cmath>
 
 struct Smoother {
 	// Times (t) are expected to be nondecreasing
