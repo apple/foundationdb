@@ -82,6 +82,12 @@ public:
 	static ValueRef getRandomVersionstampValue(Arena& arena) {
 		int len = g_random->randomInt(10, 98);
 		std::string value = std::string(len, 'x');
+		int32_t pos = g_random->randomInt(0, len - 9);
+		if (g_random->random01() < 0.01) {
+			pos = value.size() - 10;
+		}
+		pos = littleEndian32(pos);
+		value += std::string((const char*)&pos, sizeof(int32_t));
 		return ValueRef(arena, value);
 	}
 
@@ -92,15 +98,15 @@ public:
 			key += '\x00';
 		if (idx % 3 >= 2)
 			key += '\x00';
-		int pos = key.size() - g_random->randomInt(0, 3);
+		int32_t pos = key.size() - g_random->randomInt(0, 3);
 		if (g_random->random01() < 0.01) {
 			pos = 0;
 		}
 		key = key.substr(0, pos);
 		key += "XXXXXXXXYY";
 		key += std::string(g_random->randomInt(0, 3), 'z');
-		key += (char)(pos & 0xFF);
-		key += (char)((pos >> 8) & 0xFF);
+		pos = littleEndian32(pos);
+		key += std::string((const char*)&pos, sizeof(int32_t));
 		return ValueRef(arena, key);
 	}
 

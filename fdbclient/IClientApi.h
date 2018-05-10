@@ -104,6 +104,8 @@ public:
 	virtual void stopNetwork() = 0;
 
 	virtual ThreadFuture<Reference<ICluster>> createCluster(const char *clusterFilePath) = 0;
+
+	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void *hookParameter) = 0;
 };
 
 #endif

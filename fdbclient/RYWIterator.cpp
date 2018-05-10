@@ -386,7 +386,7 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("stamp:XXXXXXXX\x06\x00"), MutationRef::SetVersionstampedKey, LiteralStringRef("1"), true);
+	writes.mutate(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00"), MutationRef::SetVersionstampedKey, LiteralStringRef("1"), true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
@@ -398,7 +398,7 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
 
 	ASSERT(it.beginKey() < allKeys.end);
 	ASSERT(it.beginKey().cmp(LiteralStringRef("")) == 0);
-	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -407,8 +407,8 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00")) == 0);
-	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00")) == 0);
+	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00\x00")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -418,7 +418,7 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00")) == 0);
+	ASSERT(it.beginKey().cmp(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00\x00")) == 0);
 	ASSERT(it.endKey().cmp(LiteralStringRef("stamp:ZZZZZZZZZZ")) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
@@ -459,7 +459,7 @@ TEST_CASE("fdbclient/WriteMap/setVersionstampedValue") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("stamp"), MutationRef::SetVersionstampedValue, LiteralStringRef("XXXXXXXX\x00\x00"), true);
+	writes.mutate(LiteralStringRef("stamp"), MutationRef::SetVersionstampedValue, LiteralStringRef("XXXXXXXX\x00\x00\x00\x00\x00\x00"), true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
