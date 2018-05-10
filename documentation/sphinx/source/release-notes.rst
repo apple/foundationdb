@@ -19,6 +19,11 @@ Performance
 
 * Improved backup task prioritization. `(PR #71) <https://github.com/apple/foundationdb/pull/71>`_
 
+Fixes
+-----
+
+* The client did not clear the storage server interface cache on endpoint failure for all request types. This causes up to one second of additional latency on the first get range request to a rebooted storage server. `(Issue #351) <https://github.com/apple/foundationdb/issues/351>`_
+
 Status
 ------
 
