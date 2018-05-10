@@ -64,9 +64,9 @@ static int perfectSubtreeSplitPoint(int subtree_size) {
 	return std::min(s * 2 + 1, subtree_size - s - 1);
 }
 
+#pragma pack(push, 1)
 struct PrefixTree {
 
-	#pragma pack(push,1)
 	struct Node {
 		uint8_t flags;
 		uint8_t data[0];
@@ -128,7 +128,7 @@ struct PrefixTree {
 		}
 
 		// Helper function to make decoding the variable length structure a little cleaner
-		inline int readLen(const uint8_t *&ptr, bool present, bool large) const {
+		static inline int readLen(const uint8_t *&ptr, bool present, bool large) {
 			if(!present)
 				return 0;
 
@@ -147,13 +147,38 @@ struct PrefixTree {
 
 	public:
 
-		// Structure for decoding a variable length Node to make the members more accessible
-		struct Members {
+		// Structure for decoding all of the Node members at once to a native structure
+		struct DecodedMembers {
 			StringRef prefix;
 			StringRef split;
 			StringRef suffix;
 			const Node *leftChild;
 			const Node *rightChild;
+
+			DecodedMembers(const Node *node, const StringRef &lastLeft, const StringRef &lastRight) {
+				const uint8_t *ptr = node->data;
+				uint8_t flags = node->flags;
+				prefix = (flags & PREFIX_BORROW_LEFT ? lastLeft : lastRight).substr(0, readLen(ptr, true, flags & PREFIX_BORROW_LARGE));
+
+				int splitLen = readLen(ptr, flags & HAS_SPLIT_STRING, flags & SPLIT_LEN_LARGE);
+				if(splitLen > 0) {
+					split = StringRef(ptr, splitLen);
+					ptr += splitLen;
+				}
+
+				int suffixLen = readLen(ptr, flags & HAS_SUFFIX_STRING, flags & SUFFIX_LEN_LARGE);
+
+				int leftLen = readLen(ptr, flags & HAS_LEFT_CHILD, true);
+				leftChild = leftLen ? (Node *)ptr : nullptr;
+				ptr += leftLen;
+
+				if(suffixLen > 0) {
+					suffix = StringRef(ptr, suffixLen);
+					ptr += suffixLen;
+				}
+
+				rightChild = (flags & HAS_RIGHT_CHILD) ? (Node *)ptr : nullptr;
+			}
 
 			// Copies all of the key bytes into a single contiguous buffer
 			StringRef key(Arena &arena) const {
@@ -183,39 +208,7 @@ struct PrefixTree {
 			}
 		};
 
-		void decode(Members &out, const StringRef &lastLeft, const StringRef &lastRight) const {
-			const uint8_t *ptr = data;
-			out.prefix = (flags & PREFIX_BORROW_LEFT ? lastLeft : lastRight).substr(0, getInt(ptr, PREFIX_BORROW_LARGE));
-
-			if(flags & HAS_SPLIT_STRING) {
-				int splitLen = getInt(ptr, SPLIT_LEN_LARGE);
-				out.split = StringRef(ptr, splitLen);
-				ptr += splitLen;
-			}
-
-			int suffixLen = 0;
-			if(flags & HAS_SUFFIX_STRING) {
-				suffixLen = getInt(ptr, SUFFIX_LEN_LARGE);
-			}
-
-			if(flags & HAS_LEFT_CHILD) {
-				int leftLen = *(uint16_t *)ptr;
-				ptr += sizeof(uint16_t);
-				out.leftChild = (Node *)ptr;
-				ptr += leftLen;
-			}
-			else {
-				out.leftChild = nullptr;
-			}
-
-			if(suffixLen > 0) {
-				out.suffix = StringRef(ptr, suffixLen);
-				ptr += suffixLen;
-			}
-
-			out.rightChild = (flags & HAS_RIGHT_CHILD) ? (Node *)ptr : nullptr;
-		}
-
+		// Methods for decoding specific Node members on-demand
 		inline int getPrefixLen() const {
 			const uint8_t *ptr = data;
 			return readLen(ptr, true, flags & PREFIX_BORROW_LARGE);
@@ -293,89 +286,6 @@ struct PrefixTree {
 			return s;
 		}
 
-		struct NodeWithPrefix {
-			const Node *node;
-			StringRef prefix;
-
-			void init(Arena &arena, const Node *n, NodeWithPrefix *lastLeft, NodeWithPrefix *lastRight) {
-				node = n;
-				prefix = (node->flags & PREFIX_BORROW_LEFT ? lastLeft : lastRight)->key(arena, node->getPrefixLen());
-			}
-
-			void initConstant(StringRef s) {
-				node = nullptr;
-				prefix = s;
-			}
-
-			int compareToKey(StringRef s) const {
-				// If s is shorter than prefix, compare s to prefix for final result
-				if(s.size() < prefix.size())
-					return s.compare(prefix);
-
-				// Compare prefix len of s to prefix
-				int cmp = s.substr(0, prefix.size()).compare(prefix);
-
-				// If they are the same, move on to split string
-				if(cmp == 0) {
-					s = s.substr(prefix.size());
-					StringRef split = node->getSplitString();
-
-					// If s is shorter than split, compare s to split for final result
-					if(s.size() < split.size())
-						return s.compare(split);
-
-					// Compare split len of s to split
-					cmp = s.substr(0, split.size()).compare(split);
-
-					// If they are the same, move on to suffix string
-					if(cmp == 0) {
-						s = s.substr(split.size());
-						return s.compare(node->getSuffixString());
-					}
-				}
-				return cmp;
-			}
-
-			// Extract size bytes from the reconstituted key, allocating in arena if a new string if needed
-			StringRef key(Arena &arena, int size = -1) const {
-				if(size >= 0 && size <= prefix.size())
-					return prefix.substr(0, size);
-
-				if(size < 0)
-					size = node->getKeySize();
-
-				StringRef r = makeString(size, arena);
-				uint8_t *wptr = mutateString(r);
-
-				// The entire prefix is definitely needed
-				if(prefix.size() > 0) {
-					memcpy(wptr, prefix.begin(), prefix.size());
-					wptr += prefix.size();
-					size -= prefix.size();
-					if(size == 0)
-						return r;
-				}
-
-				StringRef split = node->getSplitString();
-				if(split.size() > 0) {
-					const int b = std::min(size, split.size());
-					memcpy(wptr, split.begin(), b);
-					wptr += b;
-					size -= b;
-					if(size == 0)
-						return r;
-				}
-
-				StringRef suffix = node->getSuffixString();
-				ASSERT(size <= suffix.size());
-				if(suffix.size() > 0) {
-					memcpy(wptr, suffix.begin(), size);
-				}
-
-				return r;
-			}
-		};
-
 		static std::string escapeForDOT(StringRef s) {
 			std::string r;
 			for(char c : s) {
@@ -388,8 +298,7 @@ struct PrefixTree {
 		}
 
 		std::string toDOT(const StringRef &lastLeft, const StringRef &lastRight) const {
-			Members m;
-			decode(m, lastLeft, lastRight);
+			DecodedMembers m(this, lastLeft, lastRight);
 
 			std::string r = format("node%p [ label = \"%s\" ];\nnode%p -> { %s %s };\n",
 				this,
@@ -409,93 +318,302 @@ struct PrefixTree {
 		}
 	};
 
-	uint16_t size;
-	uint16_t count;
+	uint16_t size;   // size in bytes
 	Node root;
 
-	// This Cursor coalesces prefix bytes into a contiguous buffer for each node
-	struct Cursor {
-		Cursor(const Node *root, StringRef _boundary) : root(root) {
-			boundary.initConstant(_boundary);
+private:
+	struct PathEntry {
+		const Node *node;
+		StringRef prefix;
+		bool nodeTypeLeft;
+		int moves;  // number of consecutive moves in same direction
+
+		PathEntry(StringRef s = StringRef()) : node(nullptr), prefix(s) {
+		}
+		PathEntry(const Node *node, StringRef prefix, bool left, int moves) : node(node), prefix(prefix), nodeTypeLeft(left), moves(moves) {
 		}
 
-		struct Context {
-			Node::NodeWithPrefix node;
-			bool directionRight;
-		};
+		inline bool valid() const {
+			return node != nullptr;
+		}
 
-		const Node *root;
-		std::vector<Context> path;
-		Node::NodeWithPrefix boundary;
+		int compareToKey(StringRef s) const {
+			// If s is shorter than prefix, compare s to prefix for final result
+			if(s.size() < prefix.size())
+				return s.compare(prefix);
+
+			// Compare prefix len of s to prefix
+			int cmp = s.substr(0, prefix.size()).compare(prefix);
+
+			// If they are the same, move on to split string
+			if(cmp == 0) {
+				s = s.substr(prefix.size());
+				StringRef split = node->getSplitString();
+
+				// If s is shorter than split, compare s to split for final result
+				if(s.size() < split.size())
+					return s.compare(split);
+
+				// Compare split len of s to split
+				cmp = s.substr(0, split.size()).compare(split);
+
+				// If they are the same, move on to suffix string
+				if(cmp == 0) {
+					s = s.substr(split.size());
+					return s.compare(node->getSuffixString());
+				}
+			}
+			return cmp;
+		}
+
+		// Extract size bytes from the reconstituted key, allocating in arena if needed
+		StringRef key(Arena &arena, int size = -1) const {
+			if(size >= 0 && size <= prefix.size()) {
+				return prefix.substr(0, size);
+			}
+
+			ASSERT(node != nullptr);
+
+			if(size < 0) {
+				size = node->getKeySize();
+			}
+
+			StringRef r = makeString(size, arena);
+			uint8_t *wptr = mutateString(r);
+
+			// The entire prefix is definitely needed
+			if(prefix.size() > 0) {
+				memcpy(wptr, prefix.begin(), prefix.size());
+				wptr += prefix.size();
+				size -= prefix.size();
+				if(size == 0)
+					return r;
+			}
+
+			StringRef split = node->getSplitString();
+			if(split.size() > 0) {
+				const int b = std::min(size, split.size());
+				memcpy(wptr, split.begin(), b);
+				wptr += b;
+				size -= b;
+				if(size == 0)
+					return r;
+			}
+
+			StringRef suffix = node->getSuffixString();
+			ASSERT(size <= suffix.size());
+			if(suffix.size() > 0) {
+				memcpy(wptr, suffix.begin(), size);
+			}
+
+			return r;
+		}
+	};
+
+public:
+	// This Cursor coalesces prefix bytes into a contiguous buffer for each node
+	struct Cursor {
+		Cursor(const Node *root, StringRef parentBoundary) {
+			ASSERT(!(root->flags & Node::PREFIX_BORROW_LEFT));
+			path.reserve(20);
+			path.push_back(PathEntry(parentBoundary));
+			path.push_back(PathEntry(root, parentBoundary.substr(0, root->getPrefixLen()), false, 1));
+		}
+
+		bool operator == (const Cursor &rhs) const {
+			return path.back().node == rhs.path.back().node;
+		}
+
+		StringRef parentBoundary;
+		std::vector<PathEntry> path;
 		Arena arena;
 
 		bool valid() {
-			return !path.empty() && path.back().node.node != nullptr;
+			return path.back().valid();
 		}
 
-		StringRef getKey() {
-			return path.back().node.key(arena);
+		StringRef getKey(Arena &arena) {
+			return path.back().key(arena);
+		}
+
+		Standalone<StringRef> getKey() {
+			Standalone<StringRef> s;
+			(StringRef &)s = path.back().key(s.arena());
+			return s;
 		}
 
 		bool seekLessThanOrEqual(StringRef s) {
-			path.clear();
-			// more levels than a PrefixTree would have, so that element addresses do not change
-			path.reserve(20);
-			arena = Arena();
+			path.resize(2);
+			arena = Arena();   // free previously used bytes
 
-			const Node *node = root;
-			Node::NodeWithPrefix *lastLeft = nullptr;
-			Node::NodeWithPrefix *lastRight = &boundary;
-
+			// TODO: Track position of difference and use prefix reuse bytes and prefix sources
+			// to skip comparison of some prefix bytes when possible
 			while(1) {
-				path.resize(path.size() + 1);
-				Context &c = path.back();
-				c.node.init(arena, node, lastLeft, lastRight);
-
-				// TODO: Track position of difference and use prefix reuse bytes and prefix sources
-				// to skip comparison of some prefix bytes when possible
-				int cmp = c.node.compareToKey(s);
+				const PathEntry &p = path.back();
+				int cmp = p.compareToKey(s);
 
 				if(cmp == 0)
 					return true;
 
 				if(cmp < 0) {
-					const Node *left = c.node.node->getLeftChild();
+					const Node *left = p.node->getLeftChild();
 					if(left == nullptr) {
-						path.pop_back();
-
-						// Find the last node from which we went right
-						for(int i = path.size(); i > 0; --i) {
-							if(path[i - 1].directionRight) {
-								path.resize(i);
-								return true;
+						if(p.nodeTypeLeft) {
+							// If we only went left, cursor is now before the first element
+							if((p.moves + 2) == path.size()) {
+								path.push_back(PathEntry());
+								return false;
 							}
+
+							// Otherwise, go to the parent of the last right child traversed,
+							// which is the last node from which we went right
+							path.resize(path.size() - (p.moves + 1));
+							return true;
 						}
 
-						// We never went right, apparently, so cursor is now to the left of the leftmost node
-						path.resize(path.size() + 1);
-						return false;
+						// p.directionLeft is false, so p.node is a right child, so go to its parent.
+						path.pop_back();
+						return true;
 					}
 
-					c.directionRight = false;
-					node = left;
-					lastLeft = &(c.node);
+					int newMoves = p.nodeTypeLeft ? p.moves + 1 : 1;
+					const PathEntry *borrowSource = (left->flags & Node::PREFIX_BORROW_LEFT) ? &p : &p - newMoves;
+					path.push_back(PathEntry(left, borrowSource->key(arena, left->getPrefixLen()), true, newMoves));
 				}
 				else {
-					const Node *right = c.node.node->getRightChild();
+					const Node *right = p.node->getRightChild();
 					if(right == nullptr) {
 						return true;
 					}
 
-					c.directionRight = true;
-					node = right;
-					lastRight = &(c.node);
+					int newMoves = p.nodeTypeLeft ? 1 : p.moves + 1;
+					const PathEntry *borrowSource = (right->flags & Node::PREFIX_BORROW_LEFT) ? &p - newMoves : &p;
+					path.push_back(PathEntry(right, borrowSource->key(arena, right->getPrefixLen()), false, newMoves));
 				}
 			}
 		}
+
+		void printPath() {
+			for(int i = 0; i < path.size(); ++i) {
+				printf("path(%p_)[%d] = (%p) left %d moves %d\n", this, i, path[i].node, path[i].nodeTypeLeft, path[i].moves);
+			}
+		}
+
+		bool moveNext() {
+			const PathEntry &p = path.back();
+
+			// If p isn't valid
+			if(!p.valid()) {
+				// If its parent is not a left child, return false as cursor is past the end
+				if(!path[path.size() - 2].nodeTypeLeft) {
+					return false;
+				}
+				else {
+					// Cursor is before the first element so pop the last path entry and return true
+					path.pop_back();
+					return true;
+				}
+			}
+
+			const Node *right = p.node->getRightChild();
+
+			// If we can't go right, then go upward to the parent of the last left child
+			if(right == nullptr) {
+				// If current node was a left child then pop one node and we're done
+				if(p.nodeTypeLeft) {
+					path.pop_back();
+					return true;
+				}
+
+				// Current node is a right child
+				// If we are at the rightmost tree node, move cursor past the end
+				if(p.moves + 1 == path.size()) {
+					path.push_back(PathEntry());
+					return false;
+				}
+
+				// Truncate path to the parent of the last left child
+				path.resize(path.size() - (p.moves + 1));
+				return true;
+			}
+
+			// Go right
+			int newMoves = p.nodeTypeLeft ? 1 : p.moves + 1;
+			const PathEntry *borrowSource = (right->flags & Node::PREFIX_BORROW_LEFT) ? &p - newMoves : &p;
+			path.push_back(PathEntry(right, borrowSource->key(arena, right->getPrefixLen()), false, newMoves));
+
+			// Go left as far as possible
+			while(1) {
+				const PathEntry &p = path.back();
+				const Node *left = p.node->getLeftChild();
+				if(left == nullptr)
+					return true;
+
+				int newMoves = p.nodeTypeLeft ? p.moves + 1 : 1;
+				const PathEntry *borrowSource = (left->flags & Node::PREFIX_BORROW_LEFT) ? &p : &p - newMoves;
+				path.push_back(PathEntry(left, borrowSource->key(arena, left->getPrefixLen()), true, newMoves));
+			}
+		}
+
+		bool movePrev() {
+			const PathEntry &p = path.back();
+
+			// If p isn't valid
+			if(!p.valid()) {
+				// If its parent is a left child, return false as cursor is before the start
+				if(path[path.size() - 2].nodeTypeLeft) {
+					return false;
+				}
+				else {
+					// Cursor is before the first element so pop the last path entry and return true
+					path.pop_back();
+					return true;
+				}
+			}
+
+			const Node *left = p.node->getLeftChild();
+
+			// If we can't go left, then go upward to the parent of the last right child
+			if(left == nullptr) {
+				// If current node was a right child then pop one node and we're done
+				if(!p.nodeTypeLeft) {
+					path.pop_back();
+					return true;
+				}
+
+				// Current node is a left child
+				// If we are at the leftmost tree node, move cursor before the start
+				if(p.moves + 2 == path.size()) {
+					path.push_back(PathEntry());
+					return false;
+				}
+
+				// Truncate path to the parent of the last right child
+				path.resize(path.size() - (p.moves + 1));
+				return true;
+			}
+
+			// Go left
+			int newMoves = p.nodeTypeLeft ? p.moves + 1 : 1;
+			const PathEntry *borrowSource = (left->flags & Node::PREFIX_BORROW_LEFT) ? &p : &p - newMoves;
+			path.push_back(PathEntry(left, borrowSource->key(arena, left->getPrefixLen()), true, newMoves));
+
+			// Go right as far as possible
+			while(1) {
+				const PathEntry &p = path.back();
+				const Node *right = p.node->getRightChild();
+				if(right == nullptr)
+					return true;
+
+				int newMoves = p.nodeTypeLeft ? 1 : p.moves + 1;
+				const PathEntry *borrowSource = (right->flags & Node::PREFIX_BORROW_LEFT) ? &p - newMoves : &p;
+				path.push_back(PathEntry(right, borrowSource->key(arena, right->getPrefixLen()), false, newMoves));
+			}
+		}
+
 	};
 
-	Cursor getCursor(StringRef boundary) {
+	Cursor getCursor(StringRef boundary = StringRef()) {
 		return Cursor(&root, boundary);
 	}
 
@@ -509,9 +627,13 @@ struct PrefixTree {
 
 	// Returns number of bytes written
 	uint16_t build(const std::vector<StringRef> keys, const StringRef &boundary) {
-		size = keys.size();
 		// The boundary leading to the new page acts as the last time we branched right
-		int size = sizeof(size) + sizeof(count) + build(root, &*keys.begin(), &*keys.end(), StringRef(), boundary);
+		if(keys.empty()) {
+			size = 0;
+		}
+		else {
+			size = sizeof(size) + build(root, &*keys.begin(), &*keys.end(), StringRef(), boundary);
+		}
 		return size;
 	}
 

@@ -408,6 +408,40 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	printf("Perfect compressed size with no overhead is %d, average PrefixTree overhead is %.2f per item\n", perfectSize, double(prefixTreeBytes - perfectSize) / testData.size());
 	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)*1e6, 1 / (t2 - t1) / 1e6);
 
+	{
+		// Test cursor forward iteration
+		auto c = pt->getCursor();
+		c.seekLessThanOrEqual(StringRef());
+		ASSERT(!c.valid());
+		ASSERT(c.moveNext());
+		ASSERT(c.valid());
+
+		for(int i = 0; i < testDataRef.size(); ++i) {
+			ASSERT(c.valid());
+			ASSERT(c.getKey() == testDataRef[i]);
+			c.moveNext();
+		}
+		ASSERT(!c.valid());
+	}
+
+
+	{
+		// Test cursor backward iteration
+		auto c = pt->getCursor();
+		ASSERT(c.seekLessThanOrEqual(LiteralStringRef("\xff\xff\xff\xff")));
+		ASSERT(c.valid());
+		ASSERT(!c.moveNext());
+		ASSERT(!c.valid());
+		ASSERT(c.movePrev());
+
+		for(int i = testDataRef.size() - 1; i >= 0; --i) {
+			ASSERT(c.valid());
+			ASSERT(c.getKey() == testDataRef[i]);
+			c.movePrev();
+		}
+		ASSERT(!c.valid());
+	}
+
 	t1 = timer_monotonic();
 	for (int i = 0; i < nBuild; i++)
 		r += pt->build(testDataRef, StringRef());
@@ -446,7 +480,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	}
 
 	{
-		auto cur = pt->getCursor(StringRef());
+		auto cur = pt->getCursor();
 
 		for (int i = 0; i < testDataRef.size(); i++) {
 			StringRef s = testDataRef[i];
@@ -506,20 +540,22 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	t2 = timer_monotonic();
 	printf("compactmap, in cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
 
-	auto cur = pt->getCursor(StringRef());
+	auto cur = pt->getCursor();
+
 	t1 = timer_monotonic();
 	for (auto& q : sampleQueries)
 		cur.seekLessThanOrEqual(StringRef(q));
 	t2 = timer_monotonic();
 	printf("prefixtree, in cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
 
-	t1 = timer_monotonic();
+/*	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q += 2) {
 		auto x = CompactPreOrderTree::lastLessOrEqual2(t, t, sampleQueries[q], sampleQueries[q + 1]);
 		r += (intptr_t)x.first + (intptr_t)x.second;
 	}
 	t2 = timer_monotonic();
 	printf("in cache (2x interleaved): %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
+*/
 
 	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q++)
@@ -527,12 +563,17 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	t2 = timer_monotonic();
 	printf("compactmap, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
 
+	std::vector<PrefixTree::Cursor> cursors;
+	for (int q = 0; q < sampleQueries.size(); q++)
+		cursors.push_back(prefixTreeCopies[q]->getCursor());
+		
 	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q++)
-		prefixTreeCopies[q]->getCursor(StringRef()).seekLessThanOrEqual(sampleQueries[q]);
+		cursors[q].seekLessThanOrEqual(sampleQueries[q]);
 	t2 = timer_monotonic();
 	printf("prefixtree, out of cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
 
+/*
 	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q += 2) {
 		auto x = CompactPreOrderTree::lastLessOrEqual2(copies[q + sampleQueries.size()], copies[q + sampleQueries.size() + 1], sampleQueries[q], sampleQueries[q + 1]);
@@ -540,6 +581,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	}
 	t2 = timer_monotonic();
 	printf("out of cache (2x interleaved): %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
+*/
 
 	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q++)
@@ -658,7 +700,7 @@ void ingestBenchmark() {
 		testmap.insert(k);
 	double t2 = timer_monotonic();
 	printf("Ingested %d elements into map, Speed %f M/s\n",
-		keys_generated.size(), keys_generated.size() / (t2 - t1) / 1e6);
+		(int)keys_generated.size(), keys_generated.size() / (t2 - t1) / 1e6);
 
 	// sort a group after k elements were added
 	for(int k = 5; k <= 20; k += 5) {
@@ -711,7 +753,7 @@ void ingestBenchmark() {
 
 				elapsed = timer_monotonic() - elapsed;
 				printf("%6d keys  %6d pages %3f builds/page %6d builds/s  %6d pages/s  %5d avg keys/page  sort every %d deltas  rebuild every %5d bytes  %7d keys/s %8d keybytes/s\n",
-					keys_generated.size(), pageCount, (double)builds / pageCount, int(builds / elapsed), int(pageCount/elapsed), g, k, r, int(keys_generated.size() / elapsed), int(keybytes / elapsed));
+					(int)keys_generated.size(), pageCount, (double)builds / pageCount, int(builds / elapsed), int(pageCount/elapsed), g, k, r, int(keys_generated.size() / elapsed), int(keybytes / elapsed));
 
 				for(auto p : pages) {
 					delete p;
