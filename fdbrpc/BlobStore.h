@@ -71,7 +71,7 @@ public:
 		std::string getURLParameters() const;
 		static std::vector<std::string> getKnobDescriptions() {
 			return {
-				"secure_connection (or sc)			   Set 1 for secure connection and 0 for insecure connection.",
+				"secure_connection (or sc)             Set 1 for secure connection and 0 for insecure connection.",
 				"connect_tries (or ct)                 Number of times to try to connect for each request.",
 				"connect_timeout (or cto)              Number of seconds to wait for a connect request to succeed.",
 				"max_connection_life (or mcl)          Maximum number of seconds to use a single TCP connection.",
