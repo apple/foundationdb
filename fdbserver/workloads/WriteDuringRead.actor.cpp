@@ -512,11 +512,11 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 
 	Key versionStampKeyForIndex( int idx ) {
-		Key result = KeyRef( getKeyForIndex(idx).toString() + std::string(12,'\x00') );
-		int16_t pos = g_random->randomInt(0, result.size() - 11);
-		pos = littleEndian16(pos);
+		Key result = KeyRef( getKeyForIndex(idx).toString() + std::string(14,'\x00') );
+		int32_t pos = g_random->randomInt(0, result.size() - 13);
+		pos = littleEndian32(pos);
 		uint8_t* data = mutateString(result);
-		memcpy(data+result.size()-sizeof(int16_t), &pos, sizeof(int16_t));
+		memcpy(data+result.size()-sizeof(int32_t), &pos, sizeof(int32_t));
 		return result;
 	}
 

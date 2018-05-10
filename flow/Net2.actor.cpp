@@ -122,7 +122,7 @@ public:
 	void initMetrics();
 
 	// INetworkConnections interface
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr );
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
@@ -829,7 +829,7 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 }
 
 
-Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr ) {
+Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
