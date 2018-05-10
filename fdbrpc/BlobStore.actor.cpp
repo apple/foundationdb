@@ -49,6 +49,7 @@ BlobStoreEndpoint::Stats BlobStoreEndpoint::Stats::operator-(const Stats &rhs) {
 BlobStoreEndpoint::Stats BlobStoreEndpoint::s_stats;
 
 BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
+	secure_connection = 1;
 	connect_tries = CLIENT_KNOBS->BLOBSTORE_CONNECT_TRIES;
 	connect_timeout = CLIENT_KNOBS->BLOBSTORE_CONNECT_TIMEOUT;
 	max_connection_life = CLIENT_KNOBS->BLOBSTORE_MAX_CONNECTION_LIFE;
@@ -71,6 +72,7 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 
 bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	#define TRY_PARAM(n, sn) if(name == LiteralStringRef(#n) || name == LiteralStringRef(#sn)) { n = value; return true; }
+	TRY_PARAM(secure_connection, sc)
 	TRY_PARAM(connect_tries, ct);
 	TRY_PARAM(connect_timeout, cto);
 	TRY_PARAM(max_connection_life, mcl);
@@ -98,6 +100,7 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	static BlobKnobs defaults;
 	std::string r;
 	#define _CHECK_PARAM(n, sn) if(n != defaults. n) { r += format("%s%s=%d", r.empty() ? "" : "&", #sn, n); }
+	_CHECK_PARAM(secure_connection, sc);
 	_CHECK_PARAM(connect_tries, ct);
 	_CHECK_PARAM(connect_timeout, cto);
 	_CHECK_PARAM(max_connection_life, mcl);
@@ -149,7 +152,7 @@ Reference<BlobStoreEndpoint> BlobStoreEndpoint::fromString(std::string const &ur
 			StringRef value = t.eat("&");
 			char *valueEnd;
 			int ivalue = strtol(value.toString().c_str(), &valueEnd, 10);
-			if(*valueEnd || ivalue == 0)
+			if(*valueEnd || (ivalue == 0 && value.toString() != "0"))
 				throw format("%s is not a valid value for %s", value.toString().c_str(), name.toString().c_str());
 			if(!knobs.set(name, ivalue))
 				throw format("%s is not a valid parameter name", name.toString().c_str());
@@ -393,8 +396,10 @@ ACTOR Future<BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<BlobS
 			return rconn;
 		}
 	}
-
-	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, b->service.empty() ? "https" : b->service, true));
+	std::string service = b->service;
+	if (service.empty())
+		service = b->knobs.secure_connection ? "https" : "http";
+	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(b->host, service, b->knobs.secure_connection ? true : false));
 
 	TraceEvent("BlobStoreEndpointNewConnection")
 		.detail("RemoteEndpoint", conn->getPeerAddress())
