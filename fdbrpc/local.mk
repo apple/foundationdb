@@ -24,7 +24,9 @@ fdbrpc_BUILD_SOURCES += fdbrpc/libeio/eio.c
 
 fdbrpc_CFLAGS := -I$(BOOSTDIR) -I. -Ifdbrpc -Ifdbrpc/libeio -DUSE_UCONTEXT
 fdbrpc_LDFLAGS :=
+ifeq ($(PLATFORM),FreeBSD)
 fdbrpc_LIBS := -lm -lc++ -lpthread -leio
+endif
 
 ifeq ($(PLATFORM),osx)
   fdbrpc_CFLAGS += -fasynchronous-unwind-tables -fno-omit-frame-pointer

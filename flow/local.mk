@@ -22,7 +22,9 @@
 
 flow_CFLAGS := -I$(BOOSTDIR) -I. -Iflow -DUSE_UCONTEXT
 flow_LDFLAGS :=
+ifeq ($(PLATFORM),FreeBSD)
 flow_LIBS := -lm -lc++ -lpthread -leio -lexecinfo
+endif
 
 ifeq ($(PLATFORM),osx)
   flow_CFLAGS += -fasynchronous-unwind-tables -fno-omit-frame-pointer

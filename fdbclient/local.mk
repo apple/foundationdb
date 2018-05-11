@@ -21,7 +21,9 @@
 # -*- mode: makefile; -*-
 
 fdbclient_CFLAGS := $(fdbrpc_CFLAGS)
+ifeq ($(PLATFORM),FreeBSD)
 fdbclient_LIBS := -lm -lc++ -lpthread -lexecinfo -leio
+endif
 
 fdbclient_GENERATED_SOURCES += fdbclient/FDBOptions.g.h
 
