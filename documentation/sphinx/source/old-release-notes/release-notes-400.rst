@@ -21,8 +21,8 @@ Java
 Fdbcli
 ------
 
-* Added a "configure auto" command which will recommend a setting for proxies and logs (not resolvers) along with machine class changes.
-* Added a "setclass" command which can change a processes machine class from the cli.
+* Added a ``configure auto`` command which will recommend a setting for proxies and logs (not resolvers) along with machine class changes.
+* Added a ``setclass`` command which can change a process's machine class from ``fdbcli``.
 
 Performance
 -----------
