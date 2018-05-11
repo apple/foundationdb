@@ -285,7 +285,7 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction *tr, std::vecto
 			int64_t numCommitBytes = 0;
 			for (auto &chunk : *chunks) {
 				tr->atomicOp(chunk.key, chunk.value, MutationRef::SetVersionstampedKey);
-				numCommitBytes += chunk.key.size() + chunk.value.size() - 2; // subtract last 2 bytes of key that denotes verstion stamp index 
+				numCommitBytes += chunk.key.size() + chunk.value.size() - 4; // subtract number of bytes of key that denotes verstion stamp index
 			}
 			tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&numCommitBytes, 8), MutationRef::AddValue);
 			Void _ = wait(tr->commit());
@@ -369,9 +369,9 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 					TrInfoChunk chunk;
 					BinaryWriter chunkBW(Unversioned());
 					chunkBW << bigEndian32(i+1) << bigEndian32(num_chunks);
-					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + std::string(2, '\x00'));
-					int16_t pos = littleEndian16(clientLatencyName.size());
-					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int16_t), &pos, sizeof(int16_t));
+					chunk.key = KeyRef(clientLatencyName + std::string(10, '\x00') + "/" + random_id + "/" + chunkBW.toStringRef().toString() + "/" + std::string(4, '\x00'));
+					int32_t pos = littleEndian32(clientLatencyName.size());
+					memcpy(mutateString(chunk.key) + chunk.key.size() - sizeof(int32_t), &pos, sizeof(int32_t));
 					if (i == num_chunks - 1) {
 						chunk.value = ValueRef(static_cast<uint8_t *>(bw.getData()) + (i * value_size_limit), bw.getLength() - (i * value_size_limit));
 					}
@@ -790,6 +790,18 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::TLS_CERT_BYTES:
 			tlsOptions->set_cert_data( value.get().toString() );
 			break;
+		case FDBNetworkOptions::TLS_CA_PATH:
+			validateOptionValue(value, true);
+			tlsOptions->set_ca_file( value.get().toString() );
+			break;
+		case FDBNetworkOptions::TLS_CA_BYTES:
+			validateOptionValue(value, true);
+			tlsOptions->set_ca_data(value.get().toString());
+			break;
+		case FDBNetworkOptions::TLS_PASSWORD:
+			validateOptionValue(value, true);
+			tlsOptions->set_key_password(value.get().toString());
+			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);
 			tlsOptions->set_key_file( value.get().toString() );
@@ -801,7 +813,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
 			try {
-				tlsOptions->set_verify_peers( value.get().toString() );
+				tlsOptions->set_verify_peers({ value.get().toString() });
 			} catch( Error& e ) {
 				TraceEvent(SevWarnAlways, "TLSValidationSetError")
 					.detail("Input", value.get().toString() )
@@ -1011,16 +1023,12 @@ ACTOR Future<Optional<vector<StorageServerInterface>>> transactionalGetServerInt
 }
 
 //If isBackward == true, returns the shard containing the key before 'key' (an infinitely long, inexpressible key). Otherwise returns the shard containing key
-ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database cx, Key key, TransactionInfo info, bool isBackward = false ) {
+ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( Database cx, Key key, TransactionInfo info, bool isBackward = false ) {
 	if (isBackward) {
 		ASSERT( key != allKeys.begin && key <= allKeys.end );
 	} else {
 		ASSERT( key < allKeys.end );
 	}
-
-	auto loc = cx->getCachedLocation( key, isBackward );
-	if (loc.second)
-		return loc;
 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.Before");
@@ -1038,6 +1046,24 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation( Database 
 			}
 		}
 	}
+}
+
+template <class F>
+Future<pair<KeyRange, Reference<LocationInfo>>> getKeyLocation( Database const& cx, Key const& key, F StorageServerInterface::*member, TransactionInfo const& info, bool isBackward = false ) {
+	auto ssi = cx->getCachedLocation( key, isBackward );
+	if (!ssi.second) {
+		return getKeyLocation_internal( cx, key, info, isBackward );
+	}
+
+	for(int i = 0; i < ssi.second->size(); i++) {
+		if( IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, member).getEndpoint()) ) {
+			cx->invalidateCache( key );
+			ssi.second.clear();
+			return getKeyLocation_internal( cx, key, info, isBackward );
+		}
+	}
+
+	return ssi;
 }
 
 ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations_internal( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
@@ -1067,14 +1093,36 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 	}
 }
 
-Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database cx, KeyRange keys, int limit, bool reverse, TransactionInfo info ) {
+template <class F>
+Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLocations( Database const& cx, KeyRange const& keys, int limit, bool reverse, F StorageServerInterface::*member, TransactionInfo const& info ) {
 	ASSERT (!keys.empty());
 
-	vector< pair<KeyRange,Reference<LocationInfo>> > result;
-	if (cx->getCachedLocations(keys, result, limit, reverse))
-		return result;
+	vector< pair<KeyRange,Reference<LocationInfo>> > locations;
+	if (!cx->getCachedLocations(keys, locations, limit, reverse)) {
+		return getKeyRangeLocations_internal( cx, keys, limit, reverse, info );
+	}
 
-	return getKeyRangeLocations_internal( cx, keys, limit, reverse, info );
+	bool foundFailed = false;
+	for(auto& it : locations) {
+		bool onlyEndpointFailed = false;
+		for(int i = 0; i < it.second->size(); i++) {
+			if( IFailureMonitor::failureMonitor().onlyEndpointFailed(it.second->get(i, member).getEndpoint()) ) {
+				onlyEndpointFailed = true;
+				break;
+			}
+		}
+
+		if( onlyEndpointFailed ) {
+			cx->invalidateCache( it.first.begin );
+			foundFailed = true;
+		}
+	}
+
+	if(foundFailed) {
+		return getKeyRangeLocations_internal( cx, keys, limit, reverse, info );
+	}
+
+	return locations;
 }
 
 ACTOR Future<Void> warmRange_impl( Transaction *self, Database cx, KeyRange keys ) {
@@ -1117,28 +1165,8 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 	state Version ver = wait( version );
 	validateVersion(ver);
 
-	state pair<KeyRange, Reference<LocationInfo>> ssi;
 	loop {
-		ssi = cx->getCachedLocation( key );
-		if (!ssi.second) {
-			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
-			ssi = std::move(ssi2);
-		} else {
-			bool onlyEndpointFailed = false;
-			for(int i = 0; i < ssi.second->size(); i++) {
-				if( IFailureMonitor::failureMonitor().onlyEndpointFailed(ssi.second->get(i, &StorageServerInterface::getValue).getEndpoint()) ) {
-					onlyEndpointFailed = true;
-					break;
-				}
-			}
-
-			if( onlyEndpointFailed ) {
-				cx->invalidateCache( key );
-				pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
-				ssi = std::move(ssi2);
-			}
-		}
-		//Reference<LocationInfo> ssi = wait( getKeyLocation( cx, key ) );
+		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, key, &StorageServerInterface::getValue, info) );
 		state Optional<UID> getValueID = Optional<UID>();
 		state uint64_t startTime;
 		state double startTimeD;
@@ -1216,7 +1244,9 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			return Key();
 		}
 
-		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, Key(k.getKey(), k.arena()), info, k.isBackward()) );
+		Key locationKey(k.getKey(), k.arena());
+		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, locationKey, &StorageServerInterface::getKey, info, k.isBackward()) );
+		
 		try {
 			if( info.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.Before"); //.detail("StartKey", printable(k.getKey())).detail("offset",k.offset).detail("orEqual",k.orEqual);
@@ -1274,11 +1304,7 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 	ASSERT(ver != latestVersion);
 
 	loop {
-		state pair<KeyRange, Reference<LocationInfo>> ssi = cx->getCachedLocation( key );
-		if (!ssi.second) {
-			pair<KeyRange, Reference<LocationInfo>> ssi2 = wait( getKeyLocation( cx, key, info ) );
-			ssi = std::move(ssi2);
-		}
+		state pair<KeyRange, Reference<LocationInfo>> ssi = wait( getKeyLocation(cx, key, &StorageServerInterface::watchValue, info ) );
 
 		try {
 			state Optional<UID> watchValueID = Optional<UID>();
@@ -1349,8 +1375,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 
 	//printf("getExactRange( '%s', '%s' )\n", keys.begin.toString().c_str(), keys.end.toString().c_str());
 	loop {
-		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, info ) );
-
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->GET_RANGE_SHARD_LIMIT, reverse, &StorageServerInterface::getKeyValues, info ) );
 		ASSERT( locations.size() );
 		state int shard = 0;
 		loop {
@@ -1605,7 +1630,9 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 				return output;
 			}
 
-			state pair<KeyRange, Reference<LocationInfo>> beginServer = wait( getKeyLocation( cx, reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena()), info, reverse ? (end-1).isBackward() : begin.isBackward() ) );
+			Key locationKey = reverse ? Key(end.getKey(), end.arena()) : Key(begin.getKey(), begin.arena());
+			bool locationBackward = reverse ? (end-1).isBackward() : begin.isBackward();
+			state pair<KeyRange, Reference<LocationInfo>> beginServer = wait( getKeyLocation( cx, locationKey, &StorageServerInterface::getKeyValues, info, locationBackward ) );
 			state KeyRange shard = beginServer.first;
 			state bool modifiedSelectors = false;
 			state GetKeyValuesRequest req;
@@ -2060,10 +2087,12 @@ void Transaction::atomicOp(const KeyRef& key, const ValueRef& operand, MutationR
 		else if (operationType == MutationRef::And)
 			operationType = MutationRef::AndV2;
 	}
+
 	auto &req = tr;
 	auto &t = req.transaction;
 	auto r = singleKeyRange( key, req.arena );
 	auto v = ValueRef( req.arena, operand );
+
 	t.mutations.push_back( req.arena, MutationRef( operationType, r.begin, v ) );
 
 	if( addConflictRange )
@@ -2858,8 +2887,8 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 {
 	state int tooManyShardsCount = 0;
 	loop {
-		state vector< pair<KeyRange,Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, TransactionInfo(TaskDataDistribution) ) );
-
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, shardLimit, false, &StorageServerInterface::waitMetrics, TransactionInfo(TaskDataDistribution) ) );
+		
 		if( locations.size() == shardLimit ) {
 			TraceEvent(!g_network->isSimulated() && ++tooManyShardsCount >= 15 ? SevWarnAlways : SevWarn, "WaitStorageMetricsPenalty")
 				.detail("Keys", printable(keys))
@@ -2912,7 +2941,7 @@ Future< StorageMetrics > Transaction::getStorageMetrics( KeyRange const& keys, i
 ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, KeyRange keys, StorageMetrics limit, StorageMetrics estimated )
 {
 	loop {
-		state vector< pair<KeyRange,Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, false, TransactionInfo(TaskDataDistribution) ) );
+		state vector< pair<KeyRange, Reference<LocationInfo>> > locations = wait( getKeyRangeLocations( cx, keys, CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT, false, &StorageServerInterface::splitMetrics, TransactionInfo(TaskDataDistribution) ) );
 		state StorageMetrics used;
 		state Standalone<VectorRef<KeyRef>> results;
 

@@ -363,7 +363,7 @@ def _encode(value, nested=False):
     elif isinstance(value, tuple) or isinstance(value, list):
         child_bytes, version_pos = _reduce_children(map(lambda x: _encode(x, True), value))
         new_version_pos = -1 if version_pos < 0 else version_pos + 1
-        return b''.join([six.int2byte(NESTED_CODE)] + child_bytes + [six.int2byte(0x00)]), version_pos
+        return b''.join([six.int2byte(NESTED_CODE)] + child_bytes + [six.int2byte(0x00)]), new_version_pos
     else:
         raise ValueError("Unsupported data type: " + str(type(value)))
 
@@ -384,7 +384,10 @@ def _pack_maybe_with_versionstamp(t, prefix=None):
     if version_pos >= 0:
         version_pos += len(prefix) if prefix is not None else 0
         bytes_list.extend(child_bytes)
-        bytes_list.append(struct.pack('<H', version_pos))
+        if fdb.is_api_version_selected() and fdb.get_api_version() < 520:
+            bytes_list.append(struct.pack('<H', version_pos))
+        else:
+            bytes_list.append(struct.pack('<L', version_pos))
     else:
         bytes_list.extend(child_bytes)
 

@@ -51,7 +51,7 @@ using namespace boost::asio::ip;
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A551060001LL;
+uint64_t currentProtocolVersion        = 0x0FDB00A552000001LL;
 uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -122,7 +122,7 @@ public:
 	void initMetrics();
 
 	// INetworkConnections interface
-	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr );
+	virtual Future<Reference<IConnection>> connect( NetworkAddress toAddr, std::string host );
 	virtual Future<std::vector<NetworkAddress>> resolveTCPEndpoint( std::string host, std::string service);
 	virtual Reference<IListener> listen( NetworkAddress localAddr );
 
@@ -830,7 +830,7 @@ THREAD_HANDLE Net2::startThread( THREAD_FUNC_RETURN (*func) (void*), void *arg )
 }
 
 
-Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr ) {
+Future< Reference<IConnection> > Net2::connect( NetworkAddress toAddr, std::string host ) {
 	return Connection::connect(&this->reactor.ios, toAddr);
 }
 
@@ -844,7 +844,7 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl( Net2 *
 		}
 
 		std::vector<NetworkAddress> addrs;
-		
+
 		tcp::resolver::iterator end;
 		while(iter != end) {
 			// The easiest way to get an ip:port formatted endpoint with this interface is with a string stream because

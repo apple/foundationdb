@@ -227,14 +227,14 @@ static KeyRangeRef getVersionstampKeyRange(Arena& arena, const KeyRef &key, cons
 	KeyRef begin(arena, key);
 	KeyRef end(arena, key);
 
-	if (begin.size() < 2)
+	if (begin.size() < 4)
 		throw client_invalid_operation();
 
-	int16_t pos;
-	memcpy(&pos, begin.end() - sizeof(int16_t), sizeof(int16_t));
-	pos = littleEndian16(pos);
-	begin = begin.substr(0, begin.size() - 2);
-	end = end.substr(0, end.size() - 1);
+	int32_t pos;
+	memcpy(&pos, begin.end() - sizeof(int32_t), sizeof(int32_t));
+	pos = littleEndian32(pos);
+	begin = begin.substr(0, begin.size() - 4);
+	end = end.substr(0, end.size() - 3);
 	mutateString(end)[end.size()-1] = 0;
 
 	if (pos < 0 || pos + 10 > begin.size())
@@ -255,26 +255,17 @@ static void placeVersionstamp( uint8_t* destination, Version version, uint16_t t
 	memcpy( destination + sizeof(version), &transactionNumber, sizeof(transactionNumber) );
 }
 
-static void transformSetVersionstampedKey( MutationRef& mutation, Version version, uint16_t transactionNumber ) {
-	// This transforms a SetVersionstampedKey mutation into a SetValue mutation.  
-	// It is the responsibility of the caller to also add a write conflict range for the new mutation's key.
-	if (mutation.param1.size() >= 2) {
-		int16_t pos;
-		memcpy(&pos, mutation.param1.end() - sizeof(int16_t), sizeof(int16_t));
-		pos = littleEndian16(pos);
-		mutation.param1 = mutation.param1.substr(0, mutation.param1.size() - 2);
+static void transformVersionstampMutation( MutationRef& mutation, StringRef MutationRef::* param, Version version, uint16_t transactionNumber ) {
+	if ((mutation.*param).size() >= 4) {
+		int32_t pos;
+		memcpy(&pos, (mutation.*param).end() - sizeof(int32_t), sizeof(int32_t));
+		pos = littleEndian32(pos);
+		mutation.*param = (mutation.*param).substr(0, (mutation.*param).size() - 4);
 
-		if (pos >= 0 && pos + 10 <= mutation.param1.size()) {
-			placeVersionstamp( mutateString(mutation.param1) + pos, version, transactionNumber );
+		if (pos >= 0 && pos + 10 <= (mutation.*param).size()) {
+			placeVersionstamp( mutateString(mutation.*param) + pos, version, transactionNumber );
 		}
 	}
-
-	mutation.type = MutationRef::SetValue;
-}
-
-static void transformSetVersionstampedValue( MutationRef& mutation, Version version, uint16_t transactionNumber ) {
-	if (mutation.param2.size() >= 10)
-		placeVersionstamp( mutateString(mutation.param2), version, transactionNumber );
 
 	mutation.type = MutationRef::SetValue;
 }

@@ -821,7 +821,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		Key key;
 		Value value;
 		uint8_t op;
-		int16_t pos;
+		int32_t pos;
 
 		TestAtomicOp(unsigned int id, FuzzApiCorrectnessWorkload *workload) : BaseTestCallback(id, workload, "TestAtomicOp") {
 			key = makeKey();
@@ -854,8 +854,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 
 			pos = -1;
-			if(op == MutationRef::SetVersionstampedKey && key.size() >= 2) {
-				pos = littleEndian16(*(int16_t*)&key.end()[-2]);
+			if(op == MutationRef::SetVersionstampedKey && key.size() >= 4) {
+				pos = littleEndian32(*(int32_t*)&key.end()[-4]);
+			}
+			if(op == MutationRef::SetVersionstampedValue && value.size() >= 4) {
+				pos = littleEndian32(*(int32_t*)&value.end()[-4]);
 			}
 
 			contract = {
@@ -866,8 +869,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				std::make_pair( error_code_key_outside_legal_range, ExceptionContract::requiredIf(
 							(key >= (workload->useSystemKeys ? systemKeys.end : normalKeys.end))) ),
 				std::make_pair( error_code_client_invalid_operation, ExceptionContract::requiredIf(
-							(op == MutationRef::SetVersionstampedValue && value.size() < 10) ||
-							(op == MutationRef::SetVersionstampedKey && (pos < 0 || pos + 10 > key.size() - 2))) )
+							(op == MutationRef::SetVersionstampedKey && (pos < 0 || pos + 10 > key.size() - 4)) ||
+							(op == MutationRef::SetVersionstampedValue && (pos < 0 || pos + 10 > value.size() - 4))) )
 			};
 		}
 

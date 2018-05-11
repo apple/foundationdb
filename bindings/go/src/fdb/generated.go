@@ -159,6 +159,27 @@ func (o NetworkOptions) SetBuggifySectionFiredProbability(param int64) error {
 	return o.setOpt(51, b)
 }
 
+// Set the ca bundle
+//
+// Parameter: ca bundle
+func (o NetworkOptions) SetTLSCaBytes(param []byte) error {
+	return o.setOpt(52, param)
+}
+
+// Set the file from which to load the certificate authority bundle
+//
+// Parameter: file path
+func (o NetworkOptions) SetTLSCaPath(param string) error {
+	return o.setOpt(53, []byte(param))
+}
+
+// Set the passphrase for encrypted private key. Password should be set before setting the key for the password to be used.
+//
+// Parameter: key passphrase
+func (o NetworkOptions) SetTLSPassword(param string) error {
+	return o.setOpt(54, []byte(param))
+}
+
 // Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network.
 func (o NetworkOptions) SetDisableMultiVersionClientApi() error {
 	return o.setOpt(60, nil)
@@ -445,12 +466,12 @@ func (t Transaction) Min(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 13)
 }
 
-// SetVersionstampedKey transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.
+// SetVersionstampedKey transforms ``key`` using a versionstamp for the transaction. Sets the transformed key in the database to ``param``. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the key from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.
 func (t Transaction) SetVersionstampedKey(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 14)
 }
 
-// SetVersionstampedValue transforms ``param`` using a versionstamp for the transaction. Sets ``key`` in the database to the transformed parameter. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time versionstamped values are not compatible with the Tuple layer.
+// SetVersionstampedValue transforms ``param`` using a versionstamp for the transaction. Sets the ``key`` given to the transformed ``param``. The parameter is transformed by removing the final four bytes from ``param`` and reading those as a little-Endian 32-bit integer to get a position ``pos``. The 10 bytes of the parameter from ``pos`` to ``pos + 10`` are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.
 func (t Transaction) SetVersionstampedValue(key KeyConvertible, param []byte) {
 	t.atomicOp(key.FDBKey(), param, 15)
 }
