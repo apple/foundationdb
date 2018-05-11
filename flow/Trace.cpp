@@ -203,7 +203,7 @@ struct XmlTraceLogFormatter : public TraceLogFormatter, ReferenceCounted<XmlTrac
 		}
 	}
 
-	std::string formatEvent(TraceEventFields fields) {
+	std::string formatEvent(const TraceEventFields &fields) {
 		std::string event = "<Event ";
 
 		for(auto itr : fields) {
@@ -511,10 +511,11 @@ public:
 	}
 
 	void writeEvent( TraceEventFields fields, std::string trackLatestKey, bool trackError ) {
-		fields.addField("logGroup", logGroup);
 		if(localAddress.present()) {
 			fields.addField("Machine", format("%d.%d.%d.%d:%d", (localAddress.get().ip>>24)&0xff, (localAddress.get().ip>>16)&0xff, (localAddress.get().ip>>8)&0xff, localAddress.get().ip&0xff, localAddress.get().port));
 		}
+
+		fields.addField("logGroup", logGroup);
 
 		if(!trackLatestKey.empty()) {
 			fields.addField("TrackLatestType", "Original");
@@ -584,17 +585,17 @@ public:
 			std::vector<TraceEventFields> events = latestEventCache.getAllUnsafe();
 			for (int idx = 0; idx < events.size(); idx++) {
 				if(events[idx].size() > 0) {
-					TraceEventFields rolledFields = events[idx];
-
-					// TODO: do this better
-					std::string originalTime;
-					for(int i = 0; i < rolledFields.size(); ++i) {
-						if(rolledFields[i].first == "Time") {
-							rolledFields.addField("OriginalTime", rolledFields[i].second);
-							rolledFields.replaceValue(i, format("%.6f", (g_trace_clock == TRACE_CLOCK_NOW) ? now() : timer()));
+					TraceEventFields rolledFields;
+					for(auto itr = events[idx].begin(); itr != events[idx].end(); ++itr) {
+						if(itr->first == "Time") {
+							rolledFields.addField("Time", format("%.6f", (g_trace_clock == TRACE_CLOCK_NOW) ? now() : timer()));
+							rolledFields.addField("OriginalTime", itr->second);
 						}
-						else if(rolledFields[i].first == "TrackLatestType") {
-							rolledFields.replaceValue(i, "Rolled");
+						else if(itr->first == "TrackLatestType") {
+							rolledFields.addField("TrackLatestType", "Rolled");
+						}
+						else {
+							rolledFields.addField(itr->first, itr->second);
 						}
 					}
 
@@ -1201,11 +1202,6 @@ TraceEventFields::FieldIterator TraceEventFields::end() const {
 const TraceEventFields::Field &TraceEventFields::operator[] (int index) const {
 	ASSERT(index >= 0 && index < size());
 	return fields.at(index);
-}
-
-void TraceEventFields::replaceValue(int index, std::string value) {
-	ASSERT(index >= 0 && index < size());
-	fields[index].second = value;
 }
 
 bool TraceEventFields::tryGetValue(std::string key, std::string &outValue) const {

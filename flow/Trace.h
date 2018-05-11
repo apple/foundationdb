@@ -63,7 +63,6 @@ public:
 	FieldIterator end() const;
 
 	void addField(std::string key, std::string value);
-	void replaceValue(int index, std::string value);
 
 	const Field &operator[] (int index) const;
 	bool tryGetValue(std::string key, std::string &outValue) const;
@@ -198,7 +197,7 @@ struct TraceLogFormatter {
 	virtual const char* getExtension() = 0;
 	virtual const char* getHeader() = 0; // Called when starting a new file
 	virtual const char* getFooter() = 0; // Called when ending a file
-	virtual std::string formatEvent(TraceEventFields) = 0; // Called for each event
+	virtual std::string formatEvent(const TraceEventFields&) = 0; // Called for each event
 
 	virtual void addref() = 0;
 	virtual void delref() = 0;
