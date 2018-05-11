@@ -32,7 +32,6 @@ Other Changes
 
 Earlier release notes
 ---------------------
-* :doc:`5.2 (API Version 520) </old-release-notes/release-notes-520>`
 * :doc:`5.1 (API Version 510) </old-release-notes/release-notes-510>`
 * :doc:`5.0 (API Version 500) </old-release-notes/release-notes-500>`
 * :doc:`4.6 (API Version 460) </old-release-notes/release-notes-460>`
