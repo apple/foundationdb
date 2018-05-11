@@ -12,7 +12,8 @@ Features
 * Added a TLS plugin implementation. `(PR #343) <https://github.com/apple/foundationdb/pull/343>`_
 * Backup supports HTTPS for blobstore connections. `(PR #343) <https://github.com/apple/foundationdb/pull/343>`_
 * Added the APPEND_IF_FITS atomic operation. `(PR #22) <https://github.com/apple/foundationdb/pull/22>`_
-* Updated the SET_VERSIONSTAMPED_VALUE atomic operation to place the versionstamp at a specified offset in a value. `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
+* Updated the SET_VERSIONSTAMPED_KEY atomic operation to take four bytes to specify the offset instead of two (if the API version is set to 520 or higher). `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
+* Updated the SET_VERSIONSTAMPED_VALUE atomic operation to place the versionstamp at a specified offset in a value (if the API version is set to 520 or higher). `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
 
 Performance
 -----------
@@ -34,8 +35,11 @@ Bindings
 --------
 
 * API version updated to 520.
+* Java and Python: Versionstamp packing methods within tuple class now add four bytes for the offset instead of two if the API version is set to 520 or higher. `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
 * Added convenience methods to determine if an API version has been set. `(PR #72) <https://github.com/apple/foundationdb/pull/72>`_
 * Go: Reduce memory allocations when packing tuples. `(PR #278) <https://github.com/apple/foundationdb/pull/278>`_
+* Python: Correctly thread the versionstamp offset when there are incomplete versionstamps within nested tuples. `(Issue #356) <https://github.com/apple/foundationdb/issues/356>`_
+* Java: Length in ``Tuple.fromBytes`` is now honored if specified. `(Issue #362) <https://github.com/apple/foundationdb/issues/362>`_
 
 Other Changes
 -------------
