@@ -2,48 +2,37 @@
 Release Notes
 #############
 
-5.2.0
+6.0.0
 =====
 
 Features
 --------
 
-* Backup and DR share a single mutation log when both are being used on the same cluster. Ongoing backups will be aborted when upgrading to 5.2. `(PR #3) <https://github.com/apple/foundationdb/pull/3>`_
-* Added a TLS plugin implementation. `(PR #343) <https://github.com/apple/foundationdb/pull/343>`_
-* Backup supports HTTPS for blobstore connections. `(PR #343) <https://github.com/apple/foundationdb/pull/343>`_
-* Added the APPEND_IF_FITS atomic operation. `(PR #22) <https://github.com/apple/foundationdb/pull/22>`_
-* Updated the SET_VERSIONSTAMPED_VALUE atomic operation to place the versionstamp at a specified offset in a value. `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
+* Added support for asynchronous replication to a remote DC with processes in a single cluster. This improves on the asynchronous replication offered by fdbdr because servers can fetch data from the remote DC if all replicas have been lost in one DC.
+* Added support for synchronous replication of the transaction log to a remote DC. This remote DC does not need to contain any storage servers, meaning you need much fewer servers in this remote DC.
 
 Performance
 -----------
 
-* Improved backup task prioritization. `(PR #71) <https://github.com/apple/foundationdb/pull/71>`_
+* Transaction logs do not copy mutations from previous generations of transaction logs. `(PR #339) <https://github.com/apple/foundationdb/pull/339>`_
+* Load balancing temporarily avoids communicating with storage servers that have fallen behind.
+* Avoid assigning storage servers responsiblity for keys they do not have.
 
 Fixes
 -----
 
-* The client did not clear the storage server interface cache on endpoint failure for all request types. This causes up to one second of additional latency on the first get range request to a rebooted storage server. `(Issue #351) <https://github.com/apple/foundationdb/issues/351>`_
-
-Status
-------
-
-* Available space metrics for the memory storage engine take into account both memory and disk. `(PR #41) <https://github.com/apple/foundationdb/pull/41>`_
-* Added metrics for read bytes per second and read keys per second. `(PR #303) <https://github.com/apple/foundationdb/pull/303>`_
-
-Bindings
---------
-
-* API version updated to 520.
-* Added convenience methods to determine if an API version has been set. `(PR #72) <https://github.com/apple/foundationdb/pull/72>`_
-* Go: Reduce memory allocations when packing tuples. `(PR #278) <https://github.com/apple/foundationdb/pull/278>`_
+* Not all endpoint failures were reported to the failure monitor.
+* Watches registered on a lagging storage server would take a long time to trigger.
+* The cluster controller would not start a new generation until it recovered its files from disk.
 
 Other Changes
 -------------
 
-* Deprecated the read_ahead_disable option. The commit_on_first_proxy, debug_dump, and check_writes_enable options are no longer exposed through the bindings. `(PR #134) <https://github.com/apple/foundationdb/pull/134>`_
+* Does not support upgrades from any version older than 5.0.
 
 Earlier release notes
 ---------------------
+* :doc:`5.2 (API Version 520) </old-release-notes/release-notes-520>`
 * :doc:`5.1 (API Version 510) </old-release-notes/release-notes-510>`
 * :doc:`5.0 (API Version 500) </old-release-notes/release-notes-500>`
 * :doc:`4.6 (API Version 460) </old-release-notes/release-notes-460>`
