@@ -24,7 +24,7 @@
 
 #include "TLogInterface.h"
 #include "fdbrpc/ReplicationPolicy.h"
-#include "DatabaseConfiguration.h"
+#include "fdbclient/DatabaseConfiguration.h"
 
 template <class Interface>
 struct OptionalInterface {
@@ -63,18 +63,20 @@ struct TLogSet {
 	int32_t tLogWriteAntiQuorum, tLogReplicationFactor;
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	IRepPolicyRef tLogPolicy;
-	int8_t locality;
 	bool isLocal;
 	int32_t hasBestPolicy;
+	int8_t locality;
+	Version startVersion;
 
-	TLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(-99) {}
+	TLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 
 	std::string toString() const {
 		return format("anti: %d replication: %d local: %d best: %d routers: %d tLogs: %s locality: %d", tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, hasBestPolicy, logRouters.size(), describe(tLogs).c_str(), locality);
 	}
 
 	bool operator == ( const TLogSet& rhs ) const {
-		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || hasBestPolicy != rhs.hasBestPolicy || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality) {
+		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || hasBestPolicy != rhs.hasBestPolicy ||
+			startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality || logRouters.size() != rhs.logRouters.size()) {
 			return false;
 		}
 		if ((tLogPolicy && !rhs.tLogPolicy) || (!tLogPolicy && rhs.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != rhs.tLogPolicy->info()))) {
@@ -85,11 +87,16 @@ struct TLogSet {
 				return false;
 			}
 		}
+		for(int j = 0; j < logRouters.size(); j++ ) {
+			if (logRouters[j].id() != rhs.logRouters[j].id() || logRouters[j].present() != rhs.logRouters[j].present() || ( logRouters[j].present() && logRouters[j].interf().commit.getEndpoint().token != rhs.logRouters[j].interf().commit.getEndpoint().token ) ) {
+				return false;
+			}
+		}
 		return true;
 	}
 
 	bool isEqualIds(TLogSet const& r) const {
-		if (tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor || isLocal != r.isLocal || hasBestPolicy != r.hasBestPolicy || tLogs.size() != r.tLogs.size() || locality != r.locality) {
+		if (tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor || isLocal != r.isLocal || hasBestPolicy != r.hasBestPolicy || startVersion != r.startVersion || tLogs.size() != r.tLogs.size() || locality != r.locality) {
 			return false;
 		}
 		if ((tLogPolicy && !r.tLogPolicy) || (!tLogPolicy && r.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != r.tLogPolicy->info()))) {
@@ -105,22 +112,23 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & logRouters & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & hasBestPolicy & locality;
+		ar & tLogs & logRouters & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & hasBestPolicy & locality & startVersion;
 	}
 };
 
 struct OldTLogConf {
 	std::vector<TLogSet> tLogs;
 	Version epochEnd;
+	int32_t logRouterTags;
 
-	OldTLogConf() : epochEnd(0) {}
+	OldTLogConf() : epochEnd(0), logRouterTags(0) {}
 
 	std::string toString() const {
-		return format("end: %d %s", epochEnd, describe(tLogs).c_str()); 
+		return format("end: %d tags: %d %s", epochEnd, logRouterTags, describe(tLogs).c_str()); 
 	}
 
 	bool operator == ( const OldTLogConf& rhs ) const {
-		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd;
+		return tLogs == rhs.tLogs && epochEnd == rhs.epochEnd && logRouterTags == rhs.logRouterTags;
 	}
 
 	bool isEqualIds(OldTLogConf const& r) const {
@@ -137,21 +145,23 @@ struct OldTLogConf {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & epochEnd;
+		ar & tLogs & epochEnd & logRouterTags;
 	}
 };
 
 struct LogSystemConfig {
-	int logSystemType;
+	int32_t logSystemType;
 	std::vector<TLogSet> tLogs;
+	int32_t logRouterTags;
 	std::vector<OldTLogConf> oldTLogs;
-	int expectedLogSets;
-	int minRouters;
+	int32_t expectedLogSets;
+	UID recruitmentID;
+	bool stopped;
 
-	LogSystemConfig() : logSystemType(0), minRouters(0), expectedLogSets(0) {}
+	LogSystemConfig() : logSystemType(0), logRouterTags(0), expectedLogSets(0), stopped(false) {}
 
 	std::string toString() const { 
-		return format("type: %d oldGenerations: %d %s", logSystemType, oldTLogs.size(), describe(tLogs).c_str());
+		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
 	}
 
 	std::vector<TLogInterface> allPresentLogs() const {
@@ -193,7 +203,7 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && minRouters == r.minRouters && expectedLogSets == r.expectedLogSets;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID && stopped == r.stopped;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -224,7 +234,7 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & logSystemType & tLogs & oldTLogs & minRouters & expectedLogSets;
+		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped;
 	}
 };
 

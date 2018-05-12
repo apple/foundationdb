@@ -188,7 +188,8 @@ description is not currently required but encouraged.
     <Option name="read_lock_aware" code="702"
             description="The transaction can read from locked databases."/>
     <Option name="first_in_batch" code="710"
-            description="No other transactions will be applied before this transaction within the same commit version."/>
+            description="No other transactions will be applied before this transaction within the same commit version."
+            hidden="true" />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

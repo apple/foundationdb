@@ -24,7 +24,7 @@
 
 #include "MasterInterface.h"
 #include "TLogInterface.h"
-#include "DatabaseConfiguration.h"
+#include "fdbclient/DatabaseConfiguration.h"
 
 Future<Void> rateKeeper(
 	Reference<AsyncVar<struct ServerDBInfo>> const& dbInfo,

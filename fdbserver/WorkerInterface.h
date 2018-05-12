@@ -74,27 +74,37 @@ struct InitializeTLogRequest {
 	Version knownCommittedVersion;
 	LogEpoch epoch;
 	std::vector<Tag> recoverTags;
+	std::vector<Tag> allTags;
 	KeyValueStoreType storeType;
-	Optional<Tag> remoteTag;
+	Tag remoteTag;
+	int8_t locality;
+	bool isPrimary;
+	Version startVersion;
+	int logRouterTags;
+
 	ReplyPromise< struct TLogInterface > reply;
 
 	InitializeTLogRequest() {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & storeType & remoteTag & reply;
+		ar & recruitmentID & recoverFrom & recoverAt & knownCommittedVersion & epoch & recoverTags & allTags & storeType & remoteTag & locality & isPrimary & startVersion & logRouterTags & reply;
 	}
 };
 
 struct InitializeLogRouterRequest {
 	uint64_t recoveryCount;
-	int logSet;
 	Tag routerTag;
+	Version startVersion;
+	std::vector<LocalityData> tLogLocalities;
+	IRepPolicyRef tLogPolicy;
+	int32_t hasBestPolicy;
+	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & routerTag & logSet & reply;
+		ar & recoveryCount & routerTag & startVersion & tLogLocalities & tLogPolicy & hasBestPolicy & locality & reply;
 	}
 };
 
@@ -136,12 +146,22 @@ struct InitializeResolverRequest {
 	}
 };
 
+struct InitializeStorageReply {
+	StorageServerInterface interf;
+	Version addedVersion;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		ar & interf & addedVersion;
+	}
+};
+
 struct InitializeStorageRequest {
 	Tag seedTag;									//< If this server will be passed to seedShardServers, this will be a tag, otherwise it is invalidTag
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
-	ReplyPromise< struct StorageServerInterface > reply;
+	ReplyPromise< InitializeStorageReply > reply;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
@@ -270,15 +290,15 @@ class Database openDBOnServer( Reference<AsyncVar<ServerDBInfo>> const& db, int 
 Future<Void> extractClusterInterface( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& a, Reference<AsyncVar<Optional<struct ClusterInterface>>> const& b );
 
 Future<Void> fdbd( Reference<ClusterConnectionFile> const&, LocalityData const& localities, ProcessClass const& processClass, std::string const& dataFolder, std::string const& coordFolder, int64_t const& memoryLimit, std::string const& metricsConnFile, std::string const& metricsPrefix );
-Future<Void> workerServer( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& ccInterface, LocalityData const& localities, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, ProcessClass const& initialClass, std::string const& filename, int64_t const& memoryLimit, Future<Void> const& forceFailure, std::string const& metricsConnFile, std::string const& metricsPrefix );
-Future<Void> clusterController( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo );
+Future<Void> workerServer( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> const& ccInterface, LocalityData const& localities, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, ProcessClass const& initialClass, std::string const& filename, int64_t const& memoryLimit, Future<Void> const& forceFailure, std::string const& metricsConnFile, std::string const& metricsPrefix, Promise<Void> const& recoveredDiskFiles );
+Future<Void> clusterController( Reference<ClusterConnectionFile> const&, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> const& currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> const& asyncPriorityInfo, Future<Void> const& recoveredDiskFiles );
 
 // These servers are started by workerServer
 Future<Void> storageServer(
 				class IKeyValueStore* const& persistentData,
 				StorageServerInterface const& ssi,
 				Tag const& seedTag,
-				ReplyPromise<StorageServerInterface> const& recruitReply,
+				ReplyPromise<InitializeStorageReply> const& recruitReply,
 				Reference<AsyncVar<ServerDBInfo>> const& db,
 				std::string const& folder );
 Future<Void> storageServer(

@@ -314,7 +314,6 @@
     <ClInclude Include="ClusterRecruitmentInterface.h" />
     <ClInclude Include="MasterInterface.h" />
     <ClInclude Include="TLogInterface.h" />
-    <ClInclude Include="DatabaseConfiguration.h" />
     <ClInclude Include="sqlite\sqlite3.h">
       <Filter>sqlite</Filter>
     </ClInclude>

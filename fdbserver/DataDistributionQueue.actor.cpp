@@ -343,7 +343,6 @@ struct DDQueueData {
 	int activeRelocations;
 	int queuedRelocations;
 	int bytesWritten;
-	std::map<int, int> priority_relocations;
 	int teamSize;
 	int durableStorageQuorumPerTeam;
 
@@ -370,6 +369,28 @@ struct DDQueueData {
 	double lastInterval;
 	int suppressIntervals;
 
+	Reference<AsyncVar<bool>> rawProcessingUnhealthy; //many operations will remove relocations before adding a new one, so delay a small time before settling on a new number.
+
+	std::map<int, int> priority_relocations;
+	int unhealthyRelocations;
+	void startRelocation(int priority) {
+		if(priority >= PRIORITY_TEAM_UNHEALTHY) {
+			unhealthyRelocations++;
+			rawProcessingUnhealthy->set(true);
+		}
+		priority_relocations[priority]++;
+	}
+	void finishRelocation(int priority) {
+		if(priority >= PRIORITY_TEAM_UNHEALTHY) {
+			unhealthyRelocations--;
+			ASSERT(unhealthyRelocations >= 0);
+			if(unhealthyRelocations == 0) {
+				rawProcessingUnhealthy->set(false);
+			}
+		}
+		priority_relocations[priority]--;
+	}
+
 	DDQueueData( MasterInterface mi, MoveKeysLock lock, Database cx, std::vector<TeamCollectionInterface> teamCollections,
 		Reference<ShardsAffectedByTeamFailure> sABTF, PromiseStream<Promise<int64_t>> getAverageShardBytes,
 		int teamSize, int durableStorageQuorumPerTeam, PromiseStream<RelocateShard> input,
@@ -378,7 +399,8 @@ struct DDQueueData {
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), mi( mi ), lock( lock ),
 			cx( cx ), teamSize( teamSize ), durableStorageQuorumPerTeam( durableStorageQuorumPerTeam ), input( input ),
 			getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
-			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited), suppressIntervals(0), lastInterval(0) {}
+			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited),
+			suppressIntervals(0), lastInterval(0), unhealthyRelocations(0), rawProcessingUnhealthy( new AsyncVar<bool>(false) ) {}
 
 	void validate() {
 		if( EXPENSIVE_VALIDATION ) {
@@ -596,7 +618,7 @@ struct DDQueueData {
 				/*TraceEvent(rrs.interval.end(), mi.id()).detail("Result","Cancelled")
 					.detail("WasFetching", foundActiveFetching).detail("Contained", rd.keys.contains( rrs.keys ));*/
 				queuedRelocations--;
-				priority_relocations[ rrs.priority ]--;
+				finishRelocation(rrs.priority);
 			}
 		}
 
@@ -623,7 +645,7 @@ struct DDQueueData {
 					.detail("KeyBegin", printable(rrs.keys.begin)).detail("KeyEnd", printable(rrs.keys.end))
 					.detail("Priority", rrs.priority).detail("WantsNewServers", rrs.wantsNewServers);*/
 				queuedRelocations++;
-				priority_relocations[rrs.priority]++;
+				startRelocation(rrs.priority);
 
 				fetchingSourcesQueue.insert( rrs );
 				getSourceActors.insert( rrs.keys, getSourceServersForRange( cx, mi, rrs, fetchSourceServersComplete ) );
@@ -643,7 +665,7 @@ struct DDQueueData {
 								.detail("KeyBegin", printable(newData.keys.begin)).detail("KeyEnd", printable(newData.keys.end))
 								.detail("Priority", newData.priority).detail("WantsNewServers", newData.wantsNewServers);*/
 							queuedRelocations++;
-							priority_relocations[newData.priority]++;
+							startRelocation(newData.priority);
 							foundActiveRelocation = true;
 						}
 
@@ -776,7 +798,7 @@ struct DDQueueData {
 
 			//TraceEvent(rd.interval.end(), mi.id()).detail("Result","Success");
 			queuedRelocations--;
-			priority_relocations[rd.priority]--;
+			finishRelocation(rd.priority);
 
 			// now we are launching: remove this entry from the queue of all the src servers
 			for( int i = 0; i < rd.src.size(); i++ ) {
@@ -804,7 +826,7 @@ struct DDQueueData {
 
 				launch( rrs, busymap );
 				activeRelocations++;
-				priority_relocations[ rrs.priority ]++;
+				startRelocation(rrs.priority);
 				inFlightActors.insert( rrs.keys, dataDistributionRelocator( this, rrs ) );
 			}
 
@@ -1123,6 +1145,7 @@ ACTOR Future<Void> dataDistributionQueue(
 	Database cx,
 	PromiseStream<RelocateShard> input,
 	PromiseStream<GetMetricsRequest> getShardMetrics,
+	Reference<AsyncVar<bool>> processingUnhealthy,
 	std::vector<TeamCollectionInterface> teamCollections,
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	MoveKeysLock lock,
@@ -1148,6 +1171,7 @@ ACTOR Future<Void> dataDistributionQueue(
 		balancingFutures.push_back(BgDDMountainChopper(&self, i));
 		balancingFutures.push_back(BgDDValleyFiller(&self, i));
 	}
+	balancingFutures.push_back(delayedAsyncVar(self.rawProcessingUnhealthy, processingUnhealthy, 0));
 
 	try {
 		loop {
@@ -1189,7 +1213,7 @@ ACTOR Future<Void> dataDistributionQueue(
 				}
 				when ( RelocateData done = waitNext( self.relocationComplete.getFuture() ) ) {
 					self.activeRelocations--;
-					self.priority_relocations[ done.priority ]--;
+					self.finishRelocation(done.priority);
 					self.fetchKeysComplete.erase( done );
 					//self.logRelocation( done, "ShardRelocatorDone" );
 					actors.add( tag( delay(0, TaskDataDistributionLaunch), done.keys, rangesComplete ) );

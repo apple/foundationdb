@@ -149,6 +149,9 @@ public:
 	int SPRING_CLEANING_MIN_VACUUM_PAGES;
 	int SPRING_CLEANING_MAX_VACUUM_PAGES;
 
+	// KeyValueStoreMemory
+	int64_t REPLACE_CONTENTS_BYTES;
+
 	// Leader election
 	double CANDIDATE_MIN_DELAY;
 	double CANDIDATE_MAX_DELAY;

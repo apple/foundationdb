@@ -122,7 +122,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BACKUP_LOGFILE_BLOCK_SIZE,        1024 * 1024);
 	init( BACKUP_DISPATCH_ADDTASK_SIZE,             50 );
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
-	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 1;
+	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 20;
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
 	init( APPLY_MIN_LOCK_BYTES,                   11e6 ); //Must be bigger than TRANSACTION_SIZE_LIMIT

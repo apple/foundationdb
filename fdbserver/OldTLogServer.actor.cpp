@@ -475,10 +475,8 @@ namespace oldTLog {
 		TLogLockResult result;
 		result.end = stopVersion;
 		result.knownCommittedVersion = logData->knownCommittedVersion;
-		for( auto & tag : logData->tag_data )
-			result.tags.push_back( convertOldTag(tag.key) );
 
-		TraceEvent("TLogStop2", self->dbgid).detail("logId", logData->logId).detail("Ver", stopVersion).detail("isStopped", logData->stopped).detail("queueCommitted", logData->queueCommittedVersion.get()).detail("tags", describe(result.tags));
+		TraceEvent("TLogStop2", self->dbgid).detail("logId", logData->logId).detail("Ver", stopVersion).detail("isStopped", logData->stopped).detail("queueCommitted", logData->queueCommittedVersion.get());
 
 
 		reply.send( result );
@@ -858,9 +856,9 @@ namespace oldTLog {
 				int32_t messageLength;
 				uint32_t subVersion;
 				rd >> messageLength >> subVersion;
-				messageLength += sizeof(uint16_t);
-				messages << messageLength << subVersion << uint16_t(0);
-				messageLength -= (sizeof(subVersion) + sizeof(uint16_t));
+				messageLength += sizeof(uint16_t) + sizeof(Tag);
+				messages << messageLength << subVersion << uint16_t(1) << req.tag;
+				messageLength -= (sizeof(subVersion) + sizeof(uint16_t) + sizeof(Tag));
 				messages.serializeBytes(rd.readBytes(messageLength), messageLength);
 			}
 		}
@@ -934,9 +932,9 @@ namespace oldTLog {
 					int32_t messageLength;
 					uint32_t subVersion;
 					rd >> messageLength >> subVersion;
-					messageLength += sizeof(uint16_t);
-					messages << messageLength << subVersion << uint16_t(0);
-					messageLength -= (sizeof(subVersion) + sizeof(uint16_t));
+					messageLength += sizeof(uint16_t) + sizeof(Tag);
+					messages << messageLength << subVersion << uint16_t(1) << req.tag;
+					messageLength -= (sizeof(subVersion) + sizeof(uint16_t) + sizeof(Tag));
 					messages.serializeBytes(rd.readBytes(messageLength), messageLength);
 				}
 			}

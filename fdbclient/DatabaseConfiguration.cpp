@@ -37,7 +37,7 @@ void DatabaseConfiguration::resetInternal() {
 	regions.clear();
 	tLogPolicy = storagePolicy = remoteTLogPolicy = IRepPolicyRef();
 
-	remoteDesiredTLogCount = desiredLogRouterCount = -1;
+	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = 0;
 }
 
@@ -153,7 +153,6 @@ bool DatabaseConfiguration::isValid() const {
 		storagePolicy &&
 		tLogPolicy &&
 		getDesiredRemoteLogs() >= 1 &&
-		getDesiredLogRouters() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
 		regions.size() <= 2 &&
 		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && regions.size() == 2 && durableStorageQuorum == storageTeamSize ) ) ) ) {
@@ -297,9 +296,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if( remoteDesiredTLogCount != -1 ) {
 			result["remote_logs"] = remoteDesiredTLogCount;
 		}
-		if( desiredLogRouterCount != -1 ) {
-			result["log_routers"] = desiredLogRouterCount;
-		}
 		if( autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
 			result["auto_proxies"] = autoMasterProxyCount;
 		}
@@ -340,7 +336,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
-	else if (ck == LiteralStringRef("log_routers")) parse(&desiredLogRouterCount, value);
 	else if (ck == LiteralStringRef("regions")) parse(&regions, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect
