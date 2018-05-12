@@ -9,6 +9,8 @@ RUN dpkg -i /tmp/foundationdb-clients_*_amd64.deb &&\
     dpkg -i /tmp/foundationdb-server_*_amd64.deb &&\
     rm -f /tmp/foundationdb-*_amd64.deb
 
+RUN sed -i '25s/.*/listen_address = 0.0.0.0:4500/' /etc/foundationdb/foundationdb.conf
+
 CMD /usr/lib/foundationdb/fdbmonitor
 
 EXPOSE 4500
