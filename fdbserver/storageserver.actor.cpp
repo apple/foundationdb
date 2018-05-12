@@ -2260,13 +2260,14 @@ private:
 					.detail("FromVersion", fromVersion)
 					.detail("ToVersion", rollbackVersion)
 					.detail("AtVersion", currentVersion)
+					.detail("RestoredVersion", restoredVersion)
 					.detail("storageVersion", data->storageVersion());
 				ASSERT( rollbackVersion >= data->storageVersion() );
 			}
 			// Don't let oldestVersion (and thus storageVersion) go into the rolled back range of versions
 			// Since we currently don't read from uncommitted log systems, seeing the lastEpochEnd implies that currentVersion is fully committed, so we can safely make it durable
 			newOldestVersion = currentVersion;
-			if ( rollbackVersion < fromVersion )
+			if ( rollbackVersion < fromVersion && rollbackVersion > restoredVersion )
 				rollback( data, rollbackVersion, currentVersion );
 		} else if ((m.type == MutationRef::SetValue || m.type == MutationRef::ClearRange) && m.param1.substr(1).startsWith(serverTagPrefix)) {
 			bool matchesThisServer = decodeServerTagKey(m.param1.substr(1)) == data->thisServerID;
