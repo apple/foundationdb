@@ -12,5 +12,5 @@ docker build -t foundationdb:latest foundationdb/docker
 ## Usage
 
 ```bash
-docker run -d -v data:/data -p 4500:4500 foundationdb:latest
+docker run -d -v $(pwd)/data:/var/lib/foundationdb/data -p 4500:4500 foundationdb:latest
 ```

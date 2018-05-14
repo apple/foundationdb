@@ -1,0 +1,10 @@
+version: '3'
+
+services:
+
+  db:
+    image: foundationdb:latest  # Replace with specific version number if desired
+    volumes:
+      - ./data:/var/lib/foundationdb/data
+    ports:
+      - 4500:4500
