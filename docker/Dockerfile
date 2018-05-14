@@ -13,9 +13,11 @@ RUN dpkg -i /tmp/foundationdb-clients_*_amd64.deb &&\
     dpkg -i /tmp/foundationdb-server_*_amd64.deb &&\
     service foundationdb stop &&\
     rm -rf /tmp/foundationdb-*_"$FDB_VERSION"-"$FDB_REVISION"_amd64.deb /var/lib/foundationdb/data/*
-RUN sed -i "s/^listen_address.*/listen_address = $LISTEN_ADDR:4500/" /etc/foundationdb/foundationdb.conf
+RUN sed -i "s/^listen_address.*/listen_address = $LISTEN_ADDR:4500/" /etc/foundationdb/foundationdb.conf &&\
+    cp -r /etc/foundationdb /etc/foundationdb.default
 
-CMD chown foundationdb:foundationdb /etc/foundationdb/* &&\
+CMD cp --no-clobber /etc/foundationdb.default/* /etc/foundationdb &&\
+    chown -R foundationdb:foundationdb /etc/foundationdb &&\
     /usr/lib/foundationdb/fdbmonitor
 
 EXPOSE 4500
