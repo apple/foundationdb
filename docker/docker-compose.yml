@@ -5,6 +5,8 @@ services:
   db:
     image: foundationdb:latest  # Replace with specific version number if desired
     volumes:
+      - ./etc:/etc/foundationdb
+      - ./log:/var/log/foundationdb
       - ./data:/var/lib/foundationdb/data
     ports:
       - 4500:4500
