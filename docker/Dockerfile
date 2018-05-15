@@ -19,7 +19,7 @@ RUN dpkg -i /tmp/${FDB_CLIENTS_PKG} /tmp/${FDB_SERVER_PKG} && \
     rm /tmp/${FDB_CLIENTS_PKG} /tmp/${FDB_SERVER_PKG}
 
 # Note: Remove this instruction if deb postinst is changed to not auto-start foundationdb.
-RUN systemctl stop foundationdb.service && \
+RUN service foundationdb stop && \
     rm -rf /var/lib/foundationdb/data/*
 
 # Keeps default configuration from being overlaid by bind mounts.
