@@ -460,7 +460,7 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 			//resulting in a locking error
 			auto itr = SharedMemoryInfo::table.find(filename);
 			if(itr != SharedMemoryInfo::table.end()) {
-				ASSERT(itr->second.refcount == 0);
+				ASSERT_ABORT(itr->second.refcount == 0);
 				itr->second.cleanup();
 			}
 		}
