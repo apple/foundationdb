@@ -12,5 +12,13 @@ docker build -t foundationdb:latest foundationdb/docker
 ## Usage
 
 ```bash
-docker run -d -v $(pwd)/data:/var/lib/foundationdb/data -p 4500:4500 foundationdb:latest
+docker run -d \
+  -e FDB_UID=$(id -u) \
+  -e FDB_GID=$(id -g) \
+  -v $(pwd)/etc:/etc/foundationdb \
+  -v $(pwd)/log:/var/log/foundationdb \
+  -v $(pwd)/data:/var/lib/foundationdb/data \
+  -p 127.0.0.1:4500:4500 \
+  --init \
+  foundationdb:latest
 ```
