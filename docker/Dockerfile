@@ -25,14 +25,11 @@ RUN dpkg -i /tmp/${FDB_CLIENTS_PKG} /tmp/${FDB_SERVER_PKG} && \
 RUN service foundationdb stop && \
     rm -rf /var/lib/foundationdb/data/*
 
+# Replace the default listen_address with 0.0.0.0 or an argument specified at build time.
+RUN sed -i "s/^listen_address.*/listen_address = ${FDB_LISTEN_ADDR}:4500/" /etc/foundationdb/foundationdb.conf
+
 # Keeps the default configuration from being overlaid by bind mounts.
-RUN mkdir /etc/foundationdb.default && \
-    mv /etc/foundationdb/* /etc/foundationdb.default
-
-# Replace default listen_address with 0.0.0.0 or an argument specified at build time.
-RUN sed -i "s/^listen_address.*/listen_address = ${FDB_LISTEN_ADDR}:4500/" /etc/foundationdb.default/foundationdb.conf
-
-EXPOSE 4500
+RUN cp -r /etc/foundationdb /etc/foundationdb.default
 
 # Writes the default configuration to bind mounts if not present.
 CMD cp -r --no-clobber /etc/foundationdb.default/* /etc/foundationdb && \

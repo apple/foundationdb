@@ -18,7 +18,7 @@ docker run -d \
   -v $(pwd)/etc:/etc/foundationdb \
   -v $(pwd)/log:/var/log/foundationdb \
   -v $(pwd)/data:/var/lib/foundationdb/data \
-  -P \
+  -p 127.0.0.1:4500:4500 \
   --init \
   foundationdb:latest
 ```
