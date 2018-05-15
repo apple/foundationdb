@@ -1,6 +1,9 @@
 FROM ubuntu:18.04
 
-ARG LISTEN_ADDR="0.0.0.0"
+ENV FDB_UID=1000
+ENV FDB_GID=1000
+
+ARG FDB_LISTEN_ADDR="0.0.0.0"
 
 ARG FDB_VERSION="5.1.7"
 ARG FDB_DEB_REVISION="1"
@@ -22,17 +25,23 @@ RUN dpkg -i /tmp/${FDB_CLIENTS_PKG} /tmp/${FDB_SERVER_PKG} && \
 RUN service foundationdb stop && \
     rm -rf /var/lib/foundationdb/data/*
 
-# Keeps default configuration from being overlaid by bind mounts.
+# Keeps the default configuration from being overlaid by bind mounts.
 RUN mkdir /etc/foundationdb.default && \
-    mv /etc/foundationdb/* /etc/foundationdb.default && \
-    chown -R foundationdb:foundationdb /etc/foundationdb.default
+    mv /etc/foundationdb/* /etc/foundationdb.default
 
-USER foundationdb:foundationdb
-
-RUN sed -i "s/^listen_address.*/listen_address = ${LISTEN_ADDR}:4500/" /etc/foundationdb.default/foundationdb.conf
+# Replace default listen_address with 0.0.0.0 or an argument specified at build time.
+RUN sed -i "s/^listen_address.*/listen_address = ${FDB_LISTEN_ADDR}:4500/" /etc/foundationdb.default/foundationdb.conf
 
 EXPOSE 4500
 
-# Writes default configuration if not present and starts fdbmonitor.
+# Writes the default configuration to bind mounts if not present.
 CMD cp -r --no-clobber /etc/foundationdb.default/* /etc/foundationdb && \
+    # Syncs host and container file ownership for privilege separation.
+    groupmod -g ${FDB_GID} foundationdb && \
+    usermod -g ${FDB_GID} -u ${FDB_UID} --non-unique foundationdb && \
+    chown -R foundationdb:foundationdb \
+      /etc/foundationdb \
+      /var/log/foundationdb \
+      /var/lib/foundationdb && \
+    # Starts foundationdb
     /usr/lib/foundationdb/fdbmonitor

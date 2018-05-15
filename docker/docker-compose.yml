@@ -10,3 +10,6 @@ services:
       - ./data:/var/lib/foundationdb/data
     ports:
       - 4500:4500
+    environment:
+      - FDB_UID=1000  # Replace with the user/group IDs used for volume access in your setup.
+      - FDB_GID=1000

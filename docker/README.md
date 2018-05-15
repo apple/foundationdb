@@ -13,10 +13,12 @@ docker build -t foundationdb:latest foundationdb/docker
 
 ```bash
 docker run -d \
-  --init \
-  -p 4500:4500 \
+  -e FDB_UID=$(id -u) \
+  -e FDB_GID=$(id -g) \
   -v $(pwd)/etc:/etc/foundationdb \
   -v $(pwd)/log:/var/log/foundationdb \
   -v $(pwd)/data:/var/lib/foundationdb/data \
+  -P \
+  --init \
   foundationdb:latest
 ```
