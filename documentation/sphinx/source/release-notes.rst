@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+5.2.1
+=====
+
+Fixes
+-----
+
+* Client input validation would handle inputs to versionstamp mutations incorrectly if the API version was less than 520. `(Issue #387) <https://github.com/apple/foundationdb/issues/387>`_
+
 5.2.0
 =====
 
