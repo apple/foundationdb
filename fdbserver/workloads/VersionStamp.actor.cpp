@@ -59,6 +59,23 @@ struct VersionStampWorkload : TestWorkload {
 	virtual Future<Void> setup(Database const& cx) { return Void(); }
 
 	virtual Future<Void> start(Database const& cx) {
+		// Versionstamp behavior changed starting with API version 520, so
+		// choose a version to check compatibility.
+		double choice = g_random->random01();
+		int apiVersion;
+		if (choice < 0.1) {
+			apiVersion = 500;
+		}
+		else if (choice < 0.2) {
+			apiVersion = 510;
+		}
+		else if (choice < 0.3) {
+			apiVersion = 520;
+		} else {
+			apiVersion = Cluster::API_VERSION_LATEST;
+		}
+		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
+		cx->cluster->apiVersion = apiVersion;
 		if (clientId == 0)
 			return _start(cx, this, 1 / transactionsPerSecond);
 		return Void();
@@ -75,18 +92,24 @@ struct VersionStampWorkload : TestWorkload {
 		return result.withPrefix(vsValuePrefix);
 	}
 
-	Key versionStampKeyForIndex(uint64_t index) {
-		Key result = makeString(40);
+	Key versionStampKeyForIndex(uint64_t index, bool oldVSFormat) {
+		const size_t keySize = 38 + (oldVSFormat ? 0 : 2);
+		Key result = makeString(keySize);
 		uint8_t* data = mutateString(result);
-		memset(&data[0], 'V', 40);
+		memset(&data[0], 'V', keySize);
 
 		double d = double(index) / nodeCount;
 		emplaceIndex(data, 4, *(int64_t*)&d);
 
-		data[40 - 4] = 24 + vsKeyPrefix.size();
-		data[40 - 3] = 0;
-		data[40 - 2] = 0;
-		data[40 - 1] = 0;
+		if (oldVSFormat) {
+			data[keySize - 2] = 24 + vsKeyPrefix.size();
+			data[keySize - 1] = 0;
+		} else {
+			data[keySize - 4] = 24 + vsKeyPrefix.size();
+			data[keySize - 3] = 0;
+			data[keySize - 2] = 0;
+			data[keySize - 1] = 0;
+		}
 		return result.withPrefix(vsKeyPrefix);
 	}
 
@@ -153,7 +176,7 @@ struct VersionStampWorkload : TestWorkload {
 					const auto& all_values = all_values_iter->second;
 
 					const auto& value_pair_iter = std::find_if(all_values.cbegin(), all_values.cend(),
-					    [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) { return pair.first == parsedVersion; });
+						[parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) { return pair.first == parsedVersion; });
 					ASSERT(value_pair_iter != all_values.cend());  // The key exists, but we never wrote the timestamp.
 					if (self->failIfDataLost) {
 						auto last_element_iter = all_values.cend();  last_element_iter--;
@@ -186,7 +209,7 @@ struct VersionStampWorkload : TestWorkload {
 					const auto& all_values = all_values_iter->second;
 
 					const auto& value_pair_iter = std::find_if(all_values.cbegin(), all_values.cend(),
-					    [parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) { return pair.first == parsedVersion; });
+						[parsedVersion](const std::pair<Version, Standalone<StringRef>>& pair) { return pair.first == parsedVersion; });
 					ASSERT(value_pair_iter != all_values.cend());  // The key exists, but we never wrote the timestamp.
 					if (self->failIfDataLost) {
 						auto last_element_iter = all_values.cend();  last_element_iter--;
@@ -223,20 +246,26 @@ struct VersionStampWorkload : TestWorkload {
 
 		loop{
 			Void _ = wait(poisson(&lastTime, delay));
+			bool oldVSFormat = !cx->cluster->apiVersionAtLeast(520);
 
 			state bool cx_is_primary = true;
 			state ReadYourWritesTransaction tr(cx);
 			state Key key = self->keyForIndex(g_random->randomInt(0, self->nodeCount));
 			state Value value = std::string(g_random->randomInt(10, 100), 'x');
-			state Key versionStampKey = self->versionStampKeyForIndex(g_random->randomInt(0, self->nodeCount));
+			state Key versionStampKey = self->versionStampKeyForIndex(g_random->randomInt(0, self->nodeCount), oldVSFormat);
 			state StringRef prefix = versionStampKey.substr(0, 20+self->vsKeyPrefix.size());
 			state Key endOfRange = self->endOfRange(prefix);
 			state KeyRangeRef range(prefix, endOfRange);
 			state Standalone<StringRef> committedVersionStamp;
 			state Version committedVersion;
 
-			bool useVersionstampPos = (g_random->random01() < 0.5);
-			state Value versionStampValue = value.withSuffix(LiteralStringRef("\x00\x00\x00\x00"));
+			bool useVersionstampPos = (g_random->random01() < 0.5); // TODO: remove after tests pass
+			state Value versionStampValue;
+			if (oldVSFormat) {
+				versionStampValue = value;
+			} else {
+				versionStampValue = value.withSuffix(LiteralStringRef("\x00\x00\x00\x00"));
+			}
 
 			loop{
 				state bool error = false;
@@ -274,9 +303,9 @@ struct VersionStampWorkload : TestWorkload {
 								//TraceEvent("VST_commit_unknown_read").detail("vs_value", vs_value.present() ? printable(vs_value.get()) : "did not exist");
 								const auto& value_ts = self->key_commit[key.removePrefix(self->vsValuePrefix)];
 								const auto& iter = std::find_if(value_ts.cbegin(), value_ts.cend(),
-								    [value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
-								      return value_version == pair.first;
-								    });
+									[value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
+									  return value_version == pair.first;
+									});
 								if (iter == value_ts.cend()) {
 									// The commit was successful, and thus we need to record the new data.
 									committedVersion = value_version;
@@ -296,7 +325,7 @@ struct VersionStampWorkload : TestWorkload {
 				}
 
 				if (error) {
-					//TraceEvent("VST_commit_failed").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).error(e);
+					TraceEvent("VST_commit_failed").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).error(err);
 					Void _ = wait(tr.onError(err));
 					continue;
 				}
