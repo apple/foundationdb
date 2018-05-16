@@ -71,7 +71,8 @@ struct VersionStampWorkload : TestWorkload {
 		}
 		else if (choice < 0.3) {
 			apiVersion = 520;
-		} else {
+		}
+		else {
 			apiVersion = Cluster::API_VERSION_LATEST;
 		}
 		TraceEvent("VersionStampApiVersion").detail("ApiVersion", apiVersion);
@@ -104,7 +105,8 @@ struct VersionStampWorkload : TestWorkload {
 		if (oldVSFormat) {
 			data[keySize - 2] = 24 + vsKeyPrefix.size();
 			data[keySize - 1] = 0;
-		} else {
+		}
+		else {
 			data[keySize - 4] = 24 + vsKeyPrefix.size();
 			data[keySize - 3] = 0;
 			data[keySize - 2] = 0;
@@ -259,7 +261,6 @@ struct VersionStampWorkload : TestWorkload {
 			state Standalone<StringRef> committedVersionStamp;
 			state Version committedVersion;
 
-			bool useVersionstampPos = (g_random->random01() < 0.5); // TODO: remove after tests pass
 			state Value versionStampValue;
 			if (oldVSFormat) {
 				versionStampValue = value;
