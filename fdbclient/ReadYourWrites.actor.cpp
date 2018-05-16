@@ -1508,7 +1508,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if(operationType == MutationRef::SetVersionstampedKey) {
-		KeyRangeRef range = getVersionstampKeyRange(arena, key, getMaxReadKey()); // this does validation of the key and needs to be performed before the readYourWritesDisabled path
+		KeyRangeRef range = getVersionstampKeyRange(arena, k, getMaxReadKey()); // this does validation of the key and needs to be performed before the readYourWritesDisabled path
 		if(!options.readYourWritesDisabled) {
 			writeRangeToNativeTransaction(range);
 			writes.addUnmodifiedAndUnreadableRange(range);
@@ -1516,12 +1516,12 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	if(operationType == MutationRef::SetVersionstampedValue) {
-		if(operand.size() < 4)
+		if(v.size() < 4)
 			throw client_invalid_operation();
 		int32_t pos;
-		memcpy(&pos, operand.end() - sizeof(int32_t), sizeof(int32_t));
+		memcpy(&pos, v.end() - sizeof(int32_t), sizeof(int32_t));
 		pos = littleEndian32(pos);
-		if (pos < 0 || pos + 10 > operand.size() - 4)
+		if (pos < 0 || pos + 10 > v.size() - 4)
 			throw client_invalid_operation();
 	}
 
@@ -1530,7 +1530,7 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	}
 
 	writes.mutate(k, (MutationRef::Type) operationType, v, addWriteConflict);
-	RYWImpl::triggerWatches(this, key, Optional<ValueRef>(), false);
+	RYWImpl::triggerWatches(this, k, Optional<ValueRef>(), false);
 }
 
 void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) {
