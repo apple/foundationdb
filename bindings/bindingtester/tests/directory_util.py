@@ -50,38 +50,38 @@ class DirListEntry:
         DirListEntry.dir_id += 1
 
     def __repr__(self):
-        return 'DirEntry %d %r: %d' % (self.dir_id, self.path, self.has_known_prefix)
+        return '{DirEntry %d %r: %d}' % (self.dir_id, self.path, self.has_known_prefix)
 
     def add_child(self, subpath, default_path, root, child):
         if default_path in root.children:
-            # print 'Adding child %r to default directory %r at %r' % (child, root.children[DirectoryTest.DEFAULT_DIRECTORY_PATH].path, subpath)
+            # print('Adding child %r to default directory %r at %r' % (child, root.children[default_path].path, subpath))
             c = root.children[default_path]._add_child_impl(subpath, child)
             child.has_known_prefix = c.has_known_prefix and child.has_known_prefix
-            # print 'Added %r' % c
+            # print('Added %r' % c)
 
-        # print 'Adding child %r to directory %r at %r' % (child, self.path, subpath)
+        # print('Adding child %r to directory %r at %r (%r)' % (child, self.path, subpath, self.path + subpath))
         c = self._add_child_impl(subpath, child)
-        # print 'Added %r' % c
+        # print('Added %r' % c)
         return c
 
     def _add_child_impl(self, subpath, child):
-        # print '%d, %d. Adding child (recursive): %s %s' % (self.dir_id, child.dir_id, repr(self.path), repr(subpath))
+        # print('%d, %d. Adding child (recursive): %s %s' % (self.dir_id, child.dir_id, repr(self.path), repr(subpath)))
         if len(subpath) == 0:
             self.has_known_prefix = self.has_known_prefix and child.has_known_prefix
-            # print '%d, %d. Setting child: %d' % (self.dir_id, child.dir_id, self.has_known_prefix)
+            # print('%d, %d. Setting child: %d' % (self.dir_id, child.dir_id, self.has_known_prefix))
             self._merge_children(child)
 
             return self
         else:
             if not subpath[0] in self.children:
-                # print '%d, %d. Path %s was absent (%s)' % (self.dir_id, child.dir_id, repr(self.path + subpath[0:1]), repr(self.children))
+                # print('%d, %d. Path %s was absent from %r (%s)' % (self.dir_id, child.dir_id, repr(self.path + subpath[0:1]), repr(self), repr(self.children)))
                 subdir = DirListEntry(True, True, path=self.path + subpath[0:1], root=self.root)
                 subdir.has_known_prefix = len(subpath) == 1
                 self.children[subpath[0]] = subdir
             else:
                 subdir = self.children[subpath[0]]
                 subdir.has_known_prefix = False
-                # print '%d, %d. Path was present' % (self.dir_id, child.dir_id)
+                # print('%d, %d. Path was present' % (self.dir_id, child.dir_id))
 
             return subdir._add_child_impl(subpath[1:], child)
 

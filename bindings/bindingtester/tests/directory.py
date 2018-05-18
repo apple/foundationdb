@@ -114,9 +114,9 @@ class DirectoryTest(Test):
             instructions.push_args(layer)
             instructions.push_args(*test_util.with_length(path))
             instructions.append('DIRECTORY_OPEN')
-            # print '%d. Selected %s, dir=%s, has_known_prefix=%s, dir_list_len=%d' \
-            #        % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), False, len(self.dir_list))
             self.dir_list.append(self.dir_list[0].add_child(path, default_path, self.root, DirListEntry(True, True, has_known_prefix=False)))
+            # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
+            #       % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), self.dir_list[-1].dir_id, False, len(self.dir_list)-1))
 
         instructions.setup_complete()
 
@@ -135,8 +135,8 @@ class DirectoryTest(Test):
             op = random.choice(choices)
             dir_entry = self.dir_list[self.dir_index]
 
-            # print '%d. Selected %s, dir=%s, has_known_prefix=%s, dir_list_len=%d' \
-            #        % (len(instructions), op, repr(self.dir_index), repr(dir_entry.has_known_prefix), len(self.dir_list))
+            # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
+            #        % (len(instructions), op, repr(self.dir_index), dir_entry.dir_id, repr(dir_entry.has_known_prefix), len(self.dir_list)))
 
             if op.endswith('_DATABASE') or op.endswith('_SNAPSHOT'):
                 root_op = op[0:-9]
@@ -312,7 +312,7 @@ class DirectoryTest(Test):
                 instructions.push_args(self.directory_log.key())
                 instructions.append('DIRECTORY_LOG_DIRECTORY')
             if dir_entry.has_known_prefix and dir_entry.is_subspace:
-                # print '%d. Logging subspace: %d' % (i, dir_entry.dir_id)
+                # print('%d. Logging subspace: %d' % (i, dir_entry.dir_id))
                 instructions.push_args(self.subspace_log.key())
                 instructions.append('DIRECTORY_LOG_SUBSPACE')
             if (i + 1) % 100 == 0:
