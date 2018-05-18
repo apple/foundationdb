@@ -94,13 +94,19 @@ class DirListEntry:
             return subdir._add_child_impl(subpath[1:], child)
 
     def _merge_children(self, other):
-        for c in other.children:
+        if self == other:
+            return
+        other_children = other.children.copy()
+        for c in other_children:
             if c not in self.children:
-                self.children[c] = other.children[c]
+                self.children[c] = other_children[c]
             else:
-                self.children[c].has_known_prefix = self.children[c].has_known_prefix and other.children[c].has_known_prefix
-                self.children[c]._merge_children(other.children[c])
+                # print('%d, %d. Merging child %r and %r' % (self.dir_id, other.dir_id, self.children[c].path, other_children[c].path))
+                other_children[c].has_known_prefix = other_children[c].has_known_prefix and self.children[c].has_known_prefix
 
+                old_child = self.children[c]
+                self.children[c] = other_children[c]
+                old_child._merge_children(other_children[c])
 
 def setup_directories(instructions, default_path, random):
     dir_list = [DirListEntry(True, False, True)]
