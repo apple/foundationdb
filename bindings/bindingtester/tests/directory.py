@@ -48,7 +48,7 @@ class DirectoryTest(Test):
     def ensure_default_directory_subspace(self, instructions, path):
         directory_util.create_default_directory_subspace(instructions, path, self.random)
 
-        child = self.root.add_child((path,), path, self.root, DirListEntry(True, True))
+        child = self.root.add_child(path, DirListEntry(True, True, has_known_prefix=True))
         self.dir_list.append(child)
         self.dir_index = directory_util.DEFAULT_DIRECTORY_INDEX
 
@@ -114,7 +114,7 @@ class DirectoryTest(Test):
             instructions.push_args(layer)
             instructions.push_args(*test_util.with_length(path))
             instructions.append('DIRECTORY_OPEN')
-            self.dir_list.append(self.dir_list[0].add_child(path, default_path, self.root, DirListEntry(True, True, has_known_prefix=False)))
+            self.dir_list.append(self.root.add_child(path, DirListEntry(True, True, has_known_prefix=False)))
             # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
             #       % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), self.dir_list[-1].dir_id, False, len(self.dir_list)-1))
 
@@ -122,21 +122,26 @@ class DirectoryTest(Test):
 
         for i in range(args.num_ops):
             if random.random() < 0.5:
-                self.dir_index = random.randrange(0, len(self.dir_list))
+                while True:
+                    self.dir_index = random.randrange(0, len(self.dir_list))
+                    if not self.dir_list[self.dir_index].is_partition or not self.dir_list[self.dir_index].deleted:
+                        break
+
                 instructions.push_args(self.dir_index)
                 instructions.append('DIRECTORY_CHANGE')
 
+            dir_entry = self.dir_list[self.dir_index]
+
             choices = op_choices[:]
-            if self.dir_list[self.dir_index].is_directory:
+            if dir_entry.is_directory:
                 choices += directory
-            if self.dir_list[self.dir_index].is_subspace:
+            if dir_entry.is_subspace:
                 choices += subspace
 
             op = random.choice(choices)
-            dir_entry = self.dir_list[self.dir_index]
 
-            # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
-            #        % (len(instructions), op, repr(self.dir_index), dir_entry.dir_id, repr(dir_entry.has_known_prefix), len(self.dir_list)))
+            # print('%d. Selected %s, dir=%d, dir_id=%d, has_known_prefix=%d, dir_list_len=%d' \
+            #       % (len(instructions), op, self.dir_index, dir_entry.dir_id, dir_entry.has_known_prefix, len(self.dir_list)))
 
             if op.endswith('_DATABASE') or op.endswith('_SNAPSHOT'):
                 root_op = op[0:-9]
@@ -154,21 +159,23 @@ class DirectoryTest(Test):
                 instructions.push_args(generate_prefix(allow_empty=False, is_partition=True))
                 instructions.push_args(*test_util.with_length(path))
                 instructions.append(op)
-                self.dir_list.append(DirListEntry(False, True))
+                self.dir_list.append(DirListEntry(False, True, has_known_prefix=True))
 
             elif root_op == 'DIRECTORY_CREATE_LAYER':
                 indices = []
+                
+                prefixes = [generate_prefix(allow_empty=False, is_partition=True) for i in range(2)]
                 for i in range(2):
-                    instructions.push_args(generate_prefix(allow_empty=False, is_partition=True))
+                    instructions.push_args(prefixes[i])
                     instructions.push_args(*test_util.with_length(generate_path()))
                     instructions.append('DIRECTORY_CREATE_SUBSPACE')
                     indices.append(len(self.dir_list))
-                    self.dir_list.append(DirListEntry(False, True))
+                    self.dir_list.append(DirListEntry(False, True, has_known_prefix=True))
 
                 instructions.push_args(random.choice([0, 1]))
                 instructions.push_args(*indices)
                 instructions.append(op)
-                self.dir_list.append(DirListEntry(True, False, False))
+                self.dir_list.append(DirListEntry.get_layer(prefixes[0]))
 
             elif root_op == 'DIRECTORY_CREATE_OR_OPEN':
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
@@ -183,7 +190,12 @@ class DirectoryTest(Test):
                 if not op.endswith('_DATABASE') and args.concurrency == 1:
                     test_util.blocking_commit(instructions)
 
-                self.dir_list.append(dir_entry.add_child(path, default_path, self.root, DirListEntry(True, True, False)))
+                child_entry = dir_entry.get_descendent(path)
+                if child_entry is None:
+                    child_entry = DirListEntry(True, True)
+
+                child_entry.has_known_prefix = False  
+                self.dir_list.append(dir_entry.add_child(path, child_entry))
 
             elif root_op == 'DIRECTORY_CREATE':
                 layer = self.generate_layer()
@@ -209,14 +221,28 @@ class DirectoryTest(Test):
                 if not op.endswith('_DATABASE') and args.concurrency == 1:  # and allow_empty_prefix:
                     test_util.blocking_commit(instructions)
 
-                self.dir_list.append(dir_entry.add_child(path, default_path, self.root, DirListEntry(True, True, bool(prefix))))
+                child_entry = dir_entry.get_descendent(path)
+                if child_entry is None:
+                    child_entry = DirListEntry(True, True, has_known_prefix=bool(prefix))
+                elif not bool(prefix):
+                    child_entry.has_known_prefix = False
+
+                if is_partition:
+                    child_entry.is_partition = True
+
+                self.dir_list.append(dir_entry.add_child(path, child_entry))
 
             elif root_op == 'DIRECTORY_OPEN':
                 path = generate_path()
                 instructions.push_args(self.generate_layer())
                 instructions.push_args(*test_util.with_length(path))
                 instructions.append(op)
-                self.dir_list.append(dir_entry.add_child(path, default_path, self.root, dir_entry.get_descendant(path)))
+
+                child_entry = dir_entry.get_descendent(path)
+                if child_entry is None:
+                    self.dir_list.append(DirListEntry(False, False, has_known_prefix=False))
+                else:
+                    self.dir_list.append(dir_entry.add_child(path, child_entry))
 
             elif root_op == 'DIRECTORY_MOVE':
                 old_path = generate_path()
@@ -224,7 +250,11 @@ class DirectoryTest(Test):
                 instructions.push_args(*(test_util.with_length(old_path) + test_util.with_length(new_path)))
                 instructions.append(op)
 
-                self.dir_list.append(dir_entry.add_child(new_path, default_path, self.root, dir_entry.get_descendant(old_path)))
+                child_entry = dir_entry.get_descendent(old_path)
+                if child_entry is None:
+                    self.dir_list.append(DirListEntry(False, False, has_known_prefix=False))
+                else:
+                    self.dir_list.append(dir_entry.add_child(new_path, child_entry))
 
                 # Make sure that the default directory subspace still exists after moving the specified directory
                 if dir_entry.is_directory and not dir_entry.is_subspace and old_path == (u'',):
@@ -234,14 +264,16 @@ class DirectoryTest(Test):
                 new_path = generate_path()
                 instructions.push_args(*test_util.with_length(new_path))
                 instructions.append(op)
-                self.dir_list.append(dir_entry.root.add_child(new_path, default_path, self.root, dir_entry))
+
+                child_entry = dir_entry.get_descendent(())
+                if child_entry is None:
+                    self.dir_list.append(DirListEntry(False, False, has_known_prefix=False))
+                else:
+                    self.dir_list.append(dir_entry.add_child(new_path, child_entry))
 
                 # Make sure that the default directory subspace still exists after moving the current directory
                 self.ensure_default_directory_subspace(instructions, default_path)
 
-            # FIXME: There is currently a problem with removing partitions. In these generated tests, it's possible
-            # for a removed partition to resurrect itself and insert keys into the database using its allocated
-            # prefix. The result is non-deterministic HCA errors.
             elif root_op == 'DIRECTORY_REMOVE' or root_op == 'DIRECTORY_REMOVE_IF_EXISTS':
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
                 # transactions that allocate/remove these prefixes in a comparison test
@@ -253,9 +285,11 @@ class DirectoryTest(Test):
                 if count == 1:
                     path = generate_path()
                     instructions.push_args(*test_util.with_length(path))
-                instructions.push_args(count)
 
+                instructions.push_args(count)
                 instructions.append(op)
+
+                dir_entry.delete(path)
 
                 # Make sure that the default directory subspace still exists after removing the specified directory
                 if path == () or (dir_entry.is_directory and not dir_entry.is_subspace and path == (u'',)):

@@ -34,82 +34,142 @@ DEFAULT_DIRECTORY_INDEX = 4
 DEFAULT_DIRECTORY_PREFIX = 'default'
 DIRECTORY_ERROR_STRING = 'DIRECTORY_ERROR'
 
-
+# Represents an element of the directory hierarchy, which could have multiple states 
 class DirListEntry:
-    dir_id = 0  # Used for debugging
+    # A cache of directory layers. We mustn't have multiple entries for the same layer
+    layers = {}
 
-    def __init__(self, is_directory, is_subspace, has_known_prefix=True, path=(), root=None):
+    # This is the path of the directory that gets used if the chosen directory is invalid
+    # We must assume any operation could also have been applied to it
+    default_path = None
+
+    # Used for debugging
+    dir_id = 0  
+
+    @classmethod
+    def set_default_path(cls, default_path):
+        cls.default_path = default_path
+
+    @classmethod
+    def get_layer(cls, node_subspace_prefix):
+        if node_subspace_prefix not in DirListEntry.layers:
+            DirListEntry.layers[node_subspace_prefix] = DirListEntry(True, False, has_known_prefix=False)
+
+        return DirListEntry.layers[node_subspace_prefix]
+
+    def __init__(self, is_directory, is_subspace, has_known_prefix=True, root=None, is_partition=False):
         self.root = root or self
-        self.path = path
         self.is_directory = is_directory
         self.is_subspace = is_subspace
         self.has_known_prefix = has_known_prefix
         self.children = {}
+        self.deleted = False
+        self.is_partition = is_partition
 
         self.dir_id = DirListEntry.dir_id + 1
         DirListEntry.dir_id += 1
 
     def __repr__(self):
-        return '{DirEntry %d %r: %d}' % (self.dir_id, self.path, self.has_known_prefix)
+        return '{DirEntry %d: %d}' % (self.dir_id, self.has_known_prefix)
 
-    def get_descendant(self, subpath):
+    def _get_descendent(self, subpath, default):
         if not subpath:
+            if default is not None:
+                self._merge(default)
             return self
-        if subpath[0] in self.children:
-            return self.children[subpath[0]].get_descendant(subpath[1:])
 
-        return DirListEntry(False, False, False) # no such descendant
+        default_child = None
+        if default is not None:
+            default_child = default.children.get(subpath[0])
 
-    def add_child(self, subpath, default_path, root, child):
-        if default_path in root.children:
-            # print('Adding child %r to default directory %r at %r' % (child, root.children[default_path].path, subpath))
-            c = root.children[default_path]._add_child_impl(subpath, child)
-            child.has_known_prefix = c.has_known_prefix and child.has_known_prefix
-            # print('Added %r' % c)
+        self_child = self.children.get(subpath[0]) 
 
-        # print('Adding child %r to directory %r at %r (%r)' % (child, self.path, subpath, self.path + subpath))
+        if self_child is None:
+            if default_child is None:
+                return None
+            else:
+                return default_child._get_descendent(subpath[1:], None)
+
+        return self_child._get_descendent(subpath[1:], default_child)
+
+    def get_descendent(self, subpath):
+        return self._get_descendent(subpath, self.root.children.get(DirListEntry.default_path))
+
+    def add_child(self, subpath, child):
+        child.root = self.root
+        if DirListEntry.default_path and DirListEntry.default_path in self.root.children:
+            # print('Adding child %r to default directory at %r' % (child, subpath))
+            child = self.root.children[DirListEntry.default_path]._add_child_impl(subpath, child)
+            # print('Added %r' % child)
+
+        # print('Adding child %r to directory at %r' % (child, subpath))
         c = self._add_child_impl(subpath, child)
         # print('Added %r' % c)
         return c
 
     def _add_child_impl(self, subpath, child):
-        # print('%d, %d. Adding child (recursive): %s %s' % (self.dir_id, child.dir_id, repr(self.path), repr(subpath)))
+        # print('%d, %d. Adding child (recursive): %r' % (self.dir_id, child.dir_id, subpath))
         if len(subpath) == 0:
-            self.has_known_prefix = self.has_known_prefix and child.has_known_prefix
-            # print('%d, %d. Setting child: %d' % (self.dir_id, child.dir_id, self.has_known_prefix))
-            self._merge_children(child)
-
+            # print('%d, %d. Setting child: %d, %d' % (self.dir_id, child.dir_id, self.has_known_prefix, child.has_known_prefix))
+            self._merge(child)
             return self
         else:
             if not subpath[0] in self.children:
-                # print('%d, %d. Path %s was absent from %r (%s)' % (self.dir_id, child.dir_id, repr(self.path + subpath[0:1]), repr(self), repr(self.children)))
-                subdir = DirListEntry(True, True, path=self.path + subpath[0:1], root=self.root)
-                subdir.has_known_prefix = len(subpath) == 1
+                # print('%d, %d. Path %r was absent from %r (%r)' % (self.dir_id, child.dir_id, subpath[0:1], self, self.children))
+                subdir = DirListEntry(True, True, root=self.root)
+                subdir.has_known_prefix = len(subpath) == 1 # For the last element in the path, the merge will take care of has_known_prefix
                 self.children[subpath[0]] = subdir
             else:
                 subdir = self.children[subpath[0]]
-                subdir.has_known_prefix = False
+                subdir.has_known_prefix = False # The directory may have had to be recreated with an unknown prefix
                 # print('%d, %d. Path was present' % (self.dir_id, child.dir_id))
 
             return subdir._add_child_impl(subpath[1:], child)
 
-    def _merge_children(self, other):
+    def _merge(self, other):
         if self == other:
             return
+
+        self.is_directory = self.is_directory and other.is_directory
+        self.is_subspace = self.is_subspace and other.is_subspace
+        self.has_known_prefix = self.has_known_prefix and other.has_known_prefix
+        self.deleted = self.deleted or other.deleted
+        self.is_partition = self.is_partition or other.is_partition
+
+        other.root = self.root
+        other.is_directory = self.is_directory
+        other.is_subspace = self.is_subspace
+        other.has_known_prefix = self.has_known_prefix
+        other.children = self.children 
+        other.deleted = self.deleted
+        other.is_partition = self.is_partition
+        other.dir_id = self.dir_id
+
         other_children = other.children.copy()
         for c in other_children:
             if c not in self.children:
                 self.children[c] = other_children[c]
-            else:
-                # print('%d, %d. Merging child %r and %r' % (self.dir_id, other.dir_id, self.children[c].path, other_children[c].path))
-                other_children[c].has_known_prefix = other_children[c].has_known_prefix and self.children[c].has_known_prefix
 
-                old_child = self.children[c]
-                self.children[c] = other_children[c]
-                old_child._merge_children(other_children[c])
+        other.children = self.children
 
+        for c in other_children:
+            self.children[c]._merge(other_children[c])
+
+    def _delete_impl(self):
+        if not self.deleted:
+            self.deleted = True
+            for c in self.children.values():
+                c._delete_impl()
+
+    def delete(self, path):
+        child = self.get_descendent(path)
+        if child:
+            child._delete_impl()
+    
 def setup_directories(instructions, default_path, random):
-    dir_list = [DirListEntry(True, False, True)]
+    # Clients start with the default directory layer in the directory list
+    dir_list = [DirListEntry.get_layer('\xfe')]
+
     instructions.push_args(0, '\xfe')
     instructions.append('DIRECTORY_CREATE_SUBSPACE')
     dir_list.append(DirListEntry(False, True))
@@ -120,10 +180,11 @@ def setup_directories(instructions, default_path, random):
 
     instructions.push_args(1, 2, 1)
     instructions.append('DIRECTORY_CREATE_LAYER')
-    dir_list.append(dir_list[0])
+    dir_list.append(DirListEntry.get_layer('\xfe'))
 
+    DirListEntry.set_default_path(default_path)
     create_default_directory_subspace(instructions, default_path, random)
-    dir_list.append(DirListEntry(True, True, True))
+    dir_list.append(dir_list[0].add_child((default_path,), DirListEntry(True, True, has_known_prefix=True)))
 
     instructions.push_args(DEFAULT_DIRECTORY_INDEX)
     instructions.append('DIRECTORY_SET_ERROR_INDEX')
