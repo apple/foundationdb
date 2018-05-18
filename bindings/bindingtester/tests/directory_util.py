@@ -52,6 +52,14 @@ class DirListEntry:
     def __repr__(self):
         return '{DirEntry %d %r: %d}' % (self.dir_id, self.path, self.has_known_prefix)
 
+    def get_descendant(self, subpath):
+        if not subpath:
+            return self
+        if subpath[0] in self.children:
+            return self.children[subpath[0]].get_descendant(subpath[1:])
+
+        return DirListEntry(False, False, False) # no such descendant
+
     def add_child(self, subpath, default_path, root, child):
         if default_path in root.children:
             # print('Adding child %r to default directory %r at %r' % (child, root.children[default_path].path, subpath))

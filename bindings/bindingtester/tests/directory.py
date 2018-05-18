@@ -216,15 +216,15 @@ class DirectoryTest(Test):
                 instructions.push_args(self.generate_layer())
                 instructions.push_args(*test_util.with_length(path))
                 instructions.append(op)
-                self.dir_list.append(dir_entry.add_child(path, default_path, self.root, DirListEntry(True, True)))
+                self.dir_list.append(dir_entry.add_child(path, default_path, self.root, dir_entry.get_descendant(path)))
 
             elif root_op == 'DIRECTORY_MOVE':
                 old_path = generate_path()
                 new_path = generate_path()
                 instructions.push_args(*(test_util.with_length(old_path) + test_util.with_length(new_path)))
                 instructions.append(op)
-                # This could probably be made to sometimes set has_known_prefix to true
-                self.dir_list.append(dir_entry.add_child(new_path, default_path, self.root, DirListEntry(True, True, False)))
+
+                self.dir_list.append(dir_entry.add_child(new_path, default_path, self.root, dir_entry.get_descendant(old_path)))
 
                 # Make sure that the default directory subspace still exists after moving the specified directory
                 if dir_entry.is_directory and not dir_entry.is_subspace and old_path == (u'',):
