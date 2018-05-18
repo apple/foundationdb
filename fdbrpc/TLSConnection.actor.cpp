@@ -26,6 +26,7 @@
 #include "ITLSPlugin.h"
 #include "LoadPlugin.h"
 #include "Platform.h"
+#include <memory>
 
 // Must not throw an exception from this function!
 static int send_func(void* ctx, const uint8_t* buf, int len) {
@@ -84,7 +85,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 }
 
 TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLSPolicy> const& policy, bool is_client ) : conn(conn), write_wants(0), read_wants(0), uid(conn->getDebugID()) {
-	session = Reference<ITLSSession>( policy->create_session(is_client, send_func, this, recv_func, this, (void*)&uid) );
+	session = Reference<ITLSSession>( policy->create_session(is_client, NULL, send_func, this, recv_func, this, (void*)&uid) );
 	if ( !session ) {
 		// If session is NULL, we're trusting policy->create_session
 		// to have used its provided logging function to have logged
@@ -232,7 +233,7 @@ void TLSOptions::set_key_data( std::string const& key_data ) {
 		init_plugin();
 
 	TraceEvent("TLSConnectionSettingKeyData").detail("KeyDataSize", key_data.size());
-	if ( !policy->set_key_data( (const uint8_t*)&key_data[0], key_data.size() ) )
+	if ( !policy->set_key_data( (const uint8_t*)&key_data[0], key_data.size(), NULL ) )
 		throw tls_error();
 
 	key_set = true;
@@ -243,7 +244,12 @@ void TLSOptions::set_verify_peers( std::string const& verify_peers ) {
 		init_plugin();
 
 	TraceEvent("TLSConnectionSettingVerifyPeers").detail("Value", verify_peers);
-	if ( !policy->set_verify_peers( (const uint8_t*)&verify_peers[0], verify_peers.size() ) )
+	std::unique_ptr<const uint8_t *[]> verify_peers_arr(new const uint8_t*[1]);
+	std::unique_ptr<int[]> verify_peers_len(new int[1]);
+	verify_peers_arr[0] = (const uint8_t *)&verify_peers[0];
+	verify_peers_len[0] = verify_peers.size();
+
+	if ( !policy->set_verify_peers( 1, verify_peers_arr.get(), verify_peers_len.get() ) )
 		throw tls_error();
 
 	verify_peers_set = true;
@@ -272,12 +278,14 @@ Reference<ITLSPolicy> TLSOptions::get_policy() {
 		std::string verifyPeerString;
 		if ( platform::getEnvironmentVar( "FDB_TLS_VERIFY_PEERS", verifyPeerString ) )
 			set_verify_peers( verifyPeerString );
+		else
+			set_verify_peers({ std::string("Check.Valid=0") });
 	}
 
 	return policy;
 }
 
-static void TLSConnectionLogFunc( const char* event, void* uid_ptr, int is_error, ... ) {
+static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_error, ... ) {
 	UID uid;
 
 	if ( uid_ptr )
