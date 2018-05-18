@@ -106,7 +106,7 @@ def setup_directories(instructions, default_path, random):
 
     instructions.push_args(1, 2, 1)
     instructions.append('DIRECTORY_CREATE_LAYER')
-    dir_list.append(DirListEntry(True, False, True))
+    dir_list.append(dir_list[0])
 
     create_default_directory_subspace(instructions, default_path, random)
     dir_list.append(DirListEntry(True, True, True))
