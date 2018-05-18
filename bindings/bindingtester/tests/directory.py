@@ -318,6 +318,8 @@ class DirectoryTest(Test):
             if (i + 1) % 100 == 0:
                 test_util.blocking_commit(instructions)
 
+        test_util.blocking_commit(instructions)
+
         instructions.push_args(self.stack_subspace.key())
         instructions.append('LOG_STACK')
 
