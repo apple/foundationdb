@@ -234,8 +234,7 @@ class DirectoryTest(Test):
                 new_path = generate_path()
                 instructions.push_args(*test_util.with_length(new_path))
                 instructions.append(op)
-                self.dir_list.append(dir_entry.root.add_child(new_path, default_path, self.root,
-                                                              DirListEntry(True, True, dir_entry.has_known_prefix)))
+                self.dir_list.append(dir_entry.root.add_child(new_path, default_path, self.root, dir_entry))
 
                 # Make sure that the default directory subspace still exists after moving the current directory
                 self.ensure_default_directory_subspace(instructions, default_path)
