@@ -854,7 +854,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += "\n  Redundancy mode        - ";
 				std::string strVal;
 
-				if (statusObjConfig.get("redundancy.factor", strVal)){
+				if (statusObjConfig.get("redundancy_mode", strVal)){
 					outputString += strVal;
 				} else
 					outputString += "unknown";
@@ -2078,6 +2078,8 @@ struct CLIOptions {
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
+	std::string tlsCAPath;
+	std::string tlsPassword;
 
 	CLIOptions( int argc, char* argv[] )
 		: trace(false),
@@ -2151,8 +2153,14 @@ struct CLIOptions {
 			case TLSOptions::OPT_TLS_CERTIFICATES:
 				tlsCertPath = args.OptionArg();
 				break;
+			case TLSOptions::OPT_TLS_CA_FILE:
+				tlsCAPath = args.OptionArg();
+				break;
 			case TLSOptions::OPT_TLS_KEY:
 				tlsKeyPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_PASSWORD:
+				tlsPassword = args.OptionArg();
 				break;
 			case TLSOptions::OPT_TLS_VERIFY_PEERS:
 				tlsVerifyPeers = args.OptionArg();
@@ -3177,8 +3185,20 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	}
+	if (opt.tlsCAPath.size()) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, opt.tlsCAPath);
+		}
+		catch (Error& e) {
+			fprintf(stderr, "ERROR: cannot set TLS CA path to `%s' (%s)\n", opt.tlsCAPath.c_str(), e.what());
+			return 1;
+		}
+	}
 	if ( opt.tlsKeyPath.size() ) {
 		try {
+			if (opt.tlsPassword.size())
+				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD);
+
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, opt.tlsKeyPath);
 		} catch( Error& e ) {
 			fprintf(stderr, "ERROR: cannot set TLS key path to `%s' (%s)\n", opt.tlsKeyPath.c_str(), e.what());

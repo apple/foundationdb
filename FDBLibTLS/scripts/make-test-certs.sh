@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# make-tests-certs.sh
+# make-test-certs.sh
 #
 # This source file is part of the FoundationDB open source project
 #
@@ -32,6 +32,17 @@ cleanup() {
 }
 
 trap cleanup EXIT INT
+
+make_ca_bundle() {
+  local bundle_file=$1;
+  shift 1;
+
+  printf '' > "${bundle_file}"
+  for f in $@; do
+    openssl x509 -nameopt oneline -subject -issuer -noout -in "${TMPDIR}/${f}" >> "${bundle_file}"
+    cat "${TMPDIR}/${f}" >> "${bundle_file}"
+  done
+}
 
 make_bundle() {
   local bundle_file=$1;
@@ -80,36 +91,60 @@ subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid:always,issuer
 basicConstraints = critical, CA:false
 keyUsage = critical, digitalSignature
+
+[fdb_v3_server_san]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical, CA:false
+keyUsage = critical, digitalSignature
+subjectAltName = @fdb_v3_server_alt_names
+
+[fdb_v3_server_alt_names]
+DNS.1 = test.foundationdb.org
 EOF
 
-# Root CA.
+# Root CA 1.
 openssl req -new -days 3650 -nodes -newkey rsa:2048 -sha256 -x509 \
-  -subj "${SUBJECT} Root CA" -keyout "${TMPDIR}/ca-root.key" \
+  -subj "${SUBJECT} Root CA 1" -keyout "${TMPDIR}/ca-root-1.key" \
   -config "${TMPDIR}/openssl.cnf" -extensions fdb_v3_ca \
-  -out "${TMPDIR}/ca-root.crt"
+  -out "${TMPDIR}/ca-root-1.crt"
 
-# Intermediate CA 1.
+# Root CA 2.
+openssl req -new -days 3650 -nodes -newkey rsa:2048 -sha256 -x509 \
+  -subj "${SUBJECT_ALT} Root CA 2" -keyout "${TMPDIR}/ca-root-2.key" \
+  -config "${TMPDIR}/openssl.cnf" -extensions fdb_v3_ca \
+  -out "${TMPDIR}/ca-root-2.crt"
+
+# Intermediate CA 1 (from CA 1).
 openssl req -new -days 3650 -nodes -newkey rsa:2048 -sha256 \
   -subj "${SUBJECT} Intermediate CA 1" -keyout "${TMPDIR}/ca-int-1.key" \
   -out "${TMPDIR}/ca-int-1.csr"
-openssl x509 -req -days 3650 -CA "${TMPDIR}/ca-root.crt" -CAkey "${TMPDIR}/ca-root.key" \
+openssl x509 -req -days 3650 -CA "${TMPDIR}/ca-root-1.crt" -CAkey "${TMPDIR}/ca-root-1.key" \
   -extfile "${TMPDIR}/openssl.cnf" -extensions fdb_v3_ca -days 3650 \
   -CAcreateserial -in "${TMPDIR}/ca-int-1.csr" -out "${TMPDIR}/ca-int-1.crt"
 
-# Intermediate CA 2.
+# Intermediate CA 2 (from CA 1).
 openssl req -new -days 3650 -nodes -newkey rsa:2048 -sha256 \
   -subj "${SUBJECT} Intermediate CA 2" -keyout "${TMPDIR}/ca-int-2.key" \
   -out "${TMPDIR}/ca-int-2.csr"
-openssl x509 -req -days 3650 -CA "${TMPDIR}/ca-root.crt" -CAkey "${TMPDIR}/ca-root.key" \
+openssl x509 -req -days 3650 -CA "${TMPDIR}/ca-root-1.crt" -CAkey "${TMPDIR}/ca-root-1.key" \
   -extfile "${TMPDIR}/openssl.cnf" -extensions fdb_v3_ca -days 3650 \
   -CAcreateserial -in "${TMPDIR}/ca-int-2.csr" -out "${TMPDIR}/ca-int-2.crt"
+
+# Intermediate CA 3 (from CA 2).
+openssl req -new -days 3650 -nodes -newkey rsa:2048 -sha256 \
+  -subj "${SUBJECT} Intermediate CA 3" -keyout "${TMPDIR}/ca-int-3.key" \
+  -out "${TMPDIR}/ca-int-3.csr"
+openssl x509 -req -days 3650 -CA "${TMPDIR}/ca-root-2.crt" -CAkey "${TMPDIR}/ca-root-2.key" \
+  -extfile "${TMPDIR}/openssl.cnf" -extensions fdb_v3_ca -days 3650 \
+  -CAcreateserial -in "${TMPDIR}/ca-int-3.csr" -out "${TMPDIR}/ca-int-3.crt"
 
 # Server 1.
 openssl req -new -days 3650 -nodes -newkey rsa:2048 -sha256 \
   -subj "${SUBJECT} Server 1" -keyout "${TMPDIR}/server-1.key" \
   -out "${TMPDIR}/server-1.csr"
 openssl x509 -req -days 3650 -CA "${TMPDIR}/ca-int-1.crt" -CAkey "${TMPDIR}/ca-int-1.key" \
-  -extfile "${TMPDIR}/openssl.cnf" -extensions fdb_v3_other -days 3650 \
+  -extfile "${TMPDIR}/openssl.cnf" -extensions fdb_v3_server_san -days 3650 \
   -CAcreateserial -in "${TMPDIR}/server-1.csr" -out "${TMPDIR}/server-1.crt"
 
 # Server 2.
@@ -129,6 +164,15 @@ printf "y\ny\n" | openssl ca -cert "${TMPDIR}/ca-int-1.crt" -keyfile "${TMPDIR}/
   -startdate 20170101000000Z -enddate 20171231000000Z \
   -config "${TMPDIR}/openssl.cnf" -notext \
   -in "${TMPDIR}/server-3.csr" -out "${TMPDIR}/server-3.crt"
+
+# Server 4.
+openssl genpkey -algorithm rsa -pkeyopt rsa_keygen_bits:2048 -aes128 -pass pass:fdb123 \
+  -out "${TMPDIR}/server-4.key"
+openssl req -new -days 3650 -sha256 -key "${TMPDIR}/server-4.key" -passin pass:fdb123 \
+  -subj "${SUBJECT} Server 4" -out "${TMPDIR}/server-4.csr"
+openssl x509 -req -days 3650 -CA "${TMPDIR}/ca-int-3.crt" -CAkey "${TMPDIR}/ca-int-3.key" \
+  -extfile "${TMPDIR}/openssl.cnf" -extensions fdb_v3_other -days 3650 \
+  -CAcreateserial -in "${TMPDIR}/server-4.csr" -out "${TMPDIR}/server-4.crt"
 
 # Client 1.
 openssl req -new -days 3650 -nodes -newkey rsa:2048 -sha256 \
@@ -156,23 +200,35 @@ printf "y\ny\n" | openssl ca -cert "${TMPDIR}/ca-int-1.crt" -keyfile "${TMPDIR}/
   -config "${TMPDIR}/openssl.cnf" \
   -in "${TMPDIR}/client-3.csr" -out "${TMPDIR}/client-3.crt"
 
+# Client 4.
+openssl genpkey -algorithm rsa -pkeyopt rsa_keygen_bits:2048 -aes128 -pass pass:fdb321 \
+  -out "${TMPDIR}/client-4.key"
+openssl req -new -days 3650 -sha256 -key "${TMPDIR}/client-4.key" -passin pass:fdb321 \
+  -subj "${SUBJECT} Client 4" -out "${TMPDIR}/client-4.csr"
+openssl x509 -req -days 3650 -CA "${TMPDIR}/ca-int-3.crt" -CAkey "${TMPDIR}/ca-int-3.key" \
+  -extfile "${TMPDIR}/openssl.cnf" -extensions fdb_v3_other \
+  -CAcreateserial -in "${TMPDIR}/client-4.csr" -out "${TMPDIR}/client-4.crt"
+
 #
 # Test Bundles
 #
 
-make_bundle 'test-1-server.pem' 'server-1.key' 'server-1.crt' 'ca-int-1.crt' 'ca-root.crt'
-make_bundle 'test-1-client.pem' 'client-1.key' 'client-1.crt' 'ca-int-1.crt' 'ca-root.crt'
-make_bundle 'test-2-server.pem' 'server-2.key' 'server-2.crt' 'ca-int-2.crt' 'ca-root.crt'
-make_bundle 'test-2-client.pem' 'client-2.key' 'client-2.crt' 'ca-int-2.crt' 'ca-root.crt'
+make_ca_bundle 'test-ca-1.pem' 'ca-root-1.crt'
+make_ca_bundle 'test-ca-2.pem' 'ca-root-2.crt'
+make_ca_bundle 'test-ca-all.pem' 'ca-root-1.crt' 'ca-root-2.crt'
 
-# Expired client/server.
-make_bundle 'test-3-client.pem' 'client-3.key' 'client-3.crt' 'ca-int-1.crt' 'ca-root.crt'
-make_bundle 'test-3-server.pem' 'server-3.key' 'server-3.crt' 'ca-int-1.crt' 'ca-root.crt'
+# Valid client/server from intermediate CA 1.
+make_bundle 'test-client-1.pem' 'client-1.key' 'client-1.crt' 'ca-int-1.crt'
+make_bundle 'test-server-1.pem' 'server-1.key' 'server-1.crt' 'ca-int-1.crt'
 
-# Bundles that terminate at intermediate 1.
-make_bundle 'test-4-server.pem' 'server-1.key' 'server-1.crt' 'ca-int-1.crt'
-make_bundle 'test-4-client.pem' 'client-1.key' 'client-1.crt' 'ca-int-1.crt'
+# Valid client/server from intermediate CA 2.
+make_bundle 'test-client-2.pem' 'client-2.key' 'client-2.crt' 'ca-int-2.crt'
+make_bundle 'test-server-2.pem' 'server-2.key' 'server-2.crt' 'ca-int-2.crt'
 
-# Bundles that terminate at intermediate 2.
-make_bundle 'test-5-server.pem' 'server-2.key' 'server-2.crt' 'ca-int-2.crt'
-make_bundle 'test-5-client.pem' 'client-2.key' 'client-2.crt' 'ca-int-2.crt'
+# Expired client/server from intermediate CA 1.
+make_bundle 'test-client-3.pem' 'client-3.key' 'client-3.crt' 'ca-int-1.crt'
+make_bundle 'test-server-3.pem' 'server-3.key' 'server-3.crt' 'ca-int-1.crt'
+
+# Valid client/server from intermediate CA 3.
+make_bundle 'test-client-4.pem' 'client-4.key' 'client-4.crt' 'ca-int-3.crt'
+make_bundle 'test-server-4.pem' 'server-4.key' 'server-4.crt' 'ca-int-3.crt'

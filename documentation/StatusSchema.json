@@ -37,16 +37,20 @@
                      "counter":0,
                      "roughness":0.0
                   },
-                  "kvstore_used_bytes":12341234,
                   "stored_bytes":12341234,
+                  "kvstore_used_bytes":12341234,
+                  "kvstore_available_bytes":12341234,
                   "kvstore_free_bytes":12341234,
+                  "kvstore_total_bytes":12341234,
                   "durable_bytes":{  
                      "hz":0.0,
                      "counter":0,
                      "roughness":0.0
                   },
+                  "queue_disk_used_bytes":12341234,
+                  "queue_disk_available_bytes":12341234,
                   "queue_disk_free_bytes":12341234,
-                  "persistent_disk_used_bytes":12341234,
+                  "queue_disk_total_bytes":12341234,
                   "role":{  
                      "$enum":[  
                         "master",
@@ -59,12 +63,7 @@
                   },
                   "data_version":12341234,
                   "data_version_lag":12341234,
-                  "persistent_disk_total_bytes":12341234,
-                  "queue_disk_total_bytes":12341234,
-                  "persistent_disk_free_bytes":12341234,
-                  "queue_disk_used_bytes":12341234,
                   "id":"eb84471d68c12d1d26f692a50000003f",
-                  "kvstore_total_bytes":12341234,
                   "finished_queries":{  
                      "hz":0.0,
                      "counter":0,
@@ -289,11 +288,25 @@
                "roughness":0.0
             },
             "reads":{  
-               "hz":0.0
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
             }
          },
          "bytes":{  
             "written":{  
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            },
+            "read":{
+               "hz":0.0,
+               "counter":0,
+               "roughness":0.0
+            }
+         },
+         "keys":{
+            "read":{
                "hz":0.0,
                "counter":0,
                "roughness":0.0

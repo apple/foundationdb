@@ -29,15 +29,17 @@
 // For general guidance on tuple usage, see the Tuple section of Data Modeling
 // (https://apple.github.io/foundationdb/data-modeling.html#tuples).
 //
-// FoundationDB tuples can currently encode byte and unicode strings, integers
-// and NULL values. In Go these are represented as []byte, string, int64 and
-// nil.
+// FoundationDB tuples can currently encode byte and unicode strings, integers,
+// floats, doubles, booleans, UUIDs, tuples, and NULL values. In Go these are
+// represented as []byte (or fdb.KeyConvertible), string, int64 (or int),
+// float32, float64, bool, UUID, Tuple, and nil.
 package tuple
 
 import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	"github.com/apple/foundationdb/bindings/go/src/fdb"
 )
@@ -94,6 +96,14 @@ var sizeLimits = []uint64{
 	1<<(8*8) - 1,
 }
 
+func bisectLeft(u uint64) int {
+	var n int
+	for sizeLimits[n] < u {
+		n++
+	}
+	return n
+}
+
 func adjustFloatBytes(b []byte, encode bool) {
 	if (encode && b[0]&0x80 != 0x00) || (!encode && b[0]&0x80 == 0x00) {
 		// Negative numbers: flip all of the bytes.
@@ -106,109 +116,128 @@ func adjustFloatBytes(b []byte, encode bool) {
 	}
 }
 
-func encodeBytes(buf *bytes.Buffer, code byte, b []byte) {
-	buf.WriteByte(code)
-	buf.Write(bytes.Replace(b, []byte{0x00}, []byte{0x00, 0xFF}, -1))
-	buf.WriteByte(0x00)
+type packer struct {
+	buf []byte
 }
 
-func bisectLeft(u uint64) int {
-	var n int
-	for sizeLimits[n] < u {
-		n++
+func (p *packer) putByte(b byte) {
+	p.buf = append(p.buf, b)
+}
+
+func (p *packer) putBytes(b []byte) {
+	p.buf = append(p.buf, b...)
+}
+
+func (p *packer) putBytesNil(b []byte, i int) {
+	for i >= 0 {
+		p.putBytes(b[:i+1])
+		p.putByte(0xFF)
+		b = b[i+1:]
+		i = bytes.IndexByte(b, 0x00)
 	}
-	return n
+	p.putBytes(b)
 }
 
-func encodeInt(buf *bytes.Buffer, i int64) {
+func (p *packer) encodeBytes(code byte, b []byte) {
+	p.putByte(code)
+	if i := bytes.IndexByte(b, 0x00); i >= 0 {
+		p.putBytesNil(b, i)
+	} else {
+		p.putBytes(b)
+	}
+	p.putByte(0x00)
+}
+
+func (p *packer) encodeInt(i int64) {
 	if i == 0 {
-		buf.WriteByte(0x14)
+		p.putByte(0x14)
 		return
 	}
 
 	var n int
-	var ibuf bytes.Buffer
+	var scratch [8]byte
 
 	switch {
 	case i > 0:
 		n = bisectLeft(uint64(i))
-		buf.WriteByte(byte(intZeroCode + n))
-		binary.Write(&ibuf, binary.BigEndian, i)
+		p.putByte(byte(intZeroCode + n))
+		binary.BigEndian.PutUint64(scratch[:], uint64(i))
 	case i < 0:
 		n = bisectLeft(uint64(-i))
-		buf.WriteByte(byte(0x14 - n))
-		binary.Write(&ibuf, binary.BigEndian, int64(sizeLimits[n])+i)
+		p.putByte(byte(0x14 - n))
+		offsetEncoded := int64(sizeLimits[n]) + i
+		binary.BigEndian.PutUint64(scratch[:], uint64(offsetEncoded))
 	}
 
-	buf.Write(ibuf.Bytes()[8-n:])
+	p.putBytes(scratch[8-n:])
 }
 
-func encodeFloat(buf *bytes.Buffer, f float32) {
-	var ibuf bytes.Buffer
-	binary.Write(&ibuf, binary.BigEndian, f)
-	buf.WriteByte(floatCode)
-	out := ibuf.Bytes()
-	adjustFloatBytes(out, true)
-	buf.Write(out)
+func (p *packer) encodeFloat(f float32) {
+	var scratch [4]byte
+	binary.BigEndian.PutUint32(scratch[:], math.Float32bits(f))
+	adjustFloatBytes(scratch[:], true)
+
+	p.putByte(floatCode)
+	p.putBytes(scratch[:])
 }
 
-func encodeDouble(buf *bytes.Buffer, d float64) {
-	var ibuf bytes.Buffer
-	binary.Write(&ibuf, binary.BigEndian, d)
-	buf.WriteByte(doubleCode)
-	out := ibuf.Bytes()
-	adjustFloatBytes(out, true)
-	buf.Write(out)
+func (p *packer) encodeDouble(d float64) {
+	var scratch [8]byte
+	binary.BigEndian.PutUint64(scratch[:], math.Float64bits(d))
+	adjustFloatBytes(scratch[:], true)
+
+	p.putByte(doubleCode)
+	p.putBytes(scratch[:])
 }
 
-func encodeUUID(buf *bytes.Buffer, u UUID) {
-	buf.WriteByte(uuidCode)
-	buf.Write(u[:])
+func (p *packer) encodeUUID(u UUID) {
+	p.putByte(uuidCode)
+	p.putBytes(u[:])
 }
 
-func encodeTuple(buf *bytes.Buffer, t Tuple, nested bool) {
+func (p *packer) encodeTuple(t Tuple, nested bool) {
 	if nested {
-		buf.WriteByte(nestedCode)
+		p.putByte(nestedCode)
 	}
 
 	for i, e := range t {
 		switch e := e.(type) {
 		case Tuple:
-			encodeTuple(buf, e, true)
+			p.encodeTuple(e, true)
 		case nil:
-			buf.WriteByte(nilCode)
+			p.putByte(nilCode)
 			if nested {
-				buf.WriteByte(0xff)
+				p.putByte(0xff)
 			}
 		case int64:
-			encodeInt(buf, e)
+			p.encodeInt(e)
 		case int:
-			encodeInt(buf, int64(e))
+			p.encodeInt(int64(e))
 		case []byte:
-			encodeBytes(buf, bytesCode, e)
+			p.encodeBytes(bytesCode, e)
 		case fdb.KeyConvertible:
-			encodeBytes(buf, bytesCode, []byte(e.FDBKey()))
+			p.encodeBytes(bytesCode, []byte(e.FDBKey()))
 		case string:
-			encodeBytes(buf, stringCode, []byte(e))
+			p.encodeBytes(stringCode, []byte(e))
 		case float32:
-			encodeFloat(buf, e)
+			p.encodeFloat(e)
 		case float64:
-			encodeDouble(buf, e)
+			p.encodeDouble(e)
 		case bool:
 			if e {
-				buf.WriteByte(trueCode)
+				p.putByte(trueCode)
 			} else {
-				buf.WriteByte(falseCode)
+				p.putByte(falseCode)
 			}
 		case UUID:
-			encodeUUID(buf, e)
+			p.encodeUUID(e)
 		default:
 			panic(fmt.Sprintf("unencodable element at index %d (%v, type %T)", i, t[i], t[i]))
 		}
 	}
 
 	if nested {
-		buf.WriteByte(0x00)
+		p.putByte(0x00)
 	}
 }
 
@@ -221,9 +250,9 @@ func encodeTuple(buf *bytes.Buffer, t Tuple, nested bool) {
 // call Pack when using a Tuple with a FoundationDB API function that requires a
 // key.
 func (t Tuple) Pack() []byte {
-	buf := new(bytes.Buffer)
-	encodeTuple(buf, t, false)
-	return buf.Bytes()
+	p := packer{buf: make([]byte, 0, 64)}
+	p.encodeTuple(t, false)
+	return p.buf
 }
 
 func findTerminator(b []byte) int {

@@ -242,7 +242,7 @@ public:
 		return results;
 	}
 
-	std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogs( DatabaseConfiguration const& conf, int32_t tLogReplicationFactor, int32_t desired, IRepPolicyRef const& policy, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false, std::set<Optional<Key>> dcIds = std::set<Optional<Key>>() ) {
+	std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForTlogs( DatabaseConfiguration const& conf, int32_t required, int32_t desired, IRepPolicyRef const& policy, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false, std::set<Optional<Key>> dcIds = std::set<Optional<Key>>() ) {
 		std::map<ProcessClass::Fitness, vector<std::pair<WorkerInterface, ProcessClass>>> fitness_workers;
 		std::vector<std::pair<WorkerInterface, ProcessClass>> results;
 		std::vector<LocalityData> unavailableLocals;
@@ -272,13 +272,8 @@ public:
 			for (auto& worker : fitness_workers[(ProcessClass::Fitness) fitness] ) {
 				logServerMap->add(worker.first.locality, &worker);
 			}
-			if (logServerSet->size() < tLogReplicationFactor) {
-				TraceEvent(SevWarn,"GWFTADTooFew", id)
-					.detail("Fitness", fitness)
-					.detail("Processes", logServerSet->size())
-					.detail("tLogReplicationFactor", tLogReplicationFactor)
-					.detail("tLogPolicy", policy->info())
-					.detail("DesiredLogs", desired);
+			if (logServerSet->size() < required) {
+				TraceEvent(SevWarn,"GWFTADTooFew", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("tLogPolicy", policy->info()).detail("DesiredLogs", desired);
 			}
 			else if (logServerSet->size() <= desired) {
 				if (logServerSet->validate(policy)) {
@@ -288,14 +283,7 @@ public:
 					bCompleted = true;
 					break;
 				}
-				else {
-					TraceEvent(SevWarn,"GWFTADNotAcceptable", id)
-						.detail("Fitness", fitness)
-						.detail("Processes", logServerSet->size())
-						.detail("tLogReplicationFactor", tLogReplicationFactor)
-						.detail("tLogPolicy",policy->info())
-						.detail("DesiredLogs", desired);
-				}
+				TraceEvent(SevWarn,"GWFTADNotAcceptable", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("tLogPolicy",policy->info()).detail("DesiredLogs", desired);
 			}
 			// Try to select the desired size, if larger
 			else {
@@ -303,9 +291,7 @@ public:
 				std::vector<LocalityData> tLocalities;
 				
 				// Try to find the best team of servers to fulfill the policy
-				if (findBestPolicySet(bestSet, logServerSet, policy, desired,
-						SERVER_KNOBS->POLICY_RATING_TESTS, SERVER_KNOBS->POLICY_GENERATIONS))
-				{
+				if (findBestPolicySet(bestSet, logServerSet, policy, desired, SERVER_KNOBS->POLICY_RATING_TESTS, SERVER_KNOBS->POLICY_GENERATIONS)) {
 					results.reserve(results.size() + bestSet.size());
 					for (auto& entry : bestSet) {
 						auto object = logServerMap->getObject(entry);
@@ -313,53 +299,27 @@ public:
 						results.push_back(*object);
 						tLocalities.push_back(object->first.locality);
 					}
-					TraceEvent("GWFTADBestResults", id)
-						.detail("Fitness", fitness)
-						.detail("Processes", logServerSet->size())
-						.detail("BestCount", bestSet.size())
-						.detail("BestZones", ::describeZones(tLocalities))
-						.detail("BestDataHalls", ::describeDataHalls(tLocalities))
-						.detail("tLogPolicy", policy->info())
-						.detail("TotalResults", results.size())
-						.detail("DesiredLogs", desired);
+					TraceEvent("GWFTADBestResults", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("BestCount", bestSet.size()).detail("BestZones", ::describeZones(tLocalities))
+						.detail("BestDataHalls", ::describeDataHalls(tLocalities)).detail("tLogPolicy", policy->info()).detail("TotalResults", results.size()).detail("DesiredLogs", desired);
 					bCompleted = true;
 					break;
 				}
-				else {
-					TraceEvent(SevWarn,"GWFTADNoBest", id)
-						.detail("Fitness", fitness)
-						.detail("Processes", logServerSet->size())
-						.detail("tLogReplicationFactor", tLogReplicationFactor)
-						.detail("tLogPolicy", policy->info())
-						.detail("DesiredLogs", desired);
-				}
+				TraceEvent(SevWarn,"GWFTADNoBest", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("tLogPolicy", policy->info()).detail("DesiredLogs", desired);
 			}
 		}
 
 		// If policy cannot be satisfied
-		if (!bCompleted)
-		{
-				std::vector<LocalityData>	tLocalities;
-				for (auto& object : logServerMap->getObjects()) {
-					tLocalities.push_back(object->first.locality);
-				}
+		if (!bCompleted) {
+			std::vector<LocalityData> tLocalities;
+			for (auto& object : logServerMap->getObjects()) {
+				tLocalities.push_back(object->first.locality);
+			}
 
-				TraceEvent(SevWarn, "GetTLogTeamFailed")
-					.detail("Policy", policy->info())
-					.detail("Processes", logServerSet->size())
-					.detail("Workers", id_worker.size())
-					.detail("FitnessGroups", fitness_workers.size())
-					.detail("TLogZones", ::describeZones(tLocalities))
-					.detail("TLogDataHalls", ::describeDataHalls(tLocalities))
-					.detail("MissingZones", ::describeZones(unavailableLocals))
-					.detail("MissingDataHalls", ::describeDataHalls(unavailableLocals))
-					.detail("Replication", tLogReplicationFactor)
-					.detail("DesiredLogs", desired)
-					.detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
-					.detail("checkStable", checkStable)
-					.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
+			TraceEvent(SevWarn, "GetTLogTeamFailed").detail("Policy", policy->info()).detail("Processes", logServerSet->size()).detail("Workers", id_worker.size()).detail("FitnessGroups", fitness_workers.size())
+				.detail("TLogZones", ::describeZones(tLocalities)).detail("TLogDataHalls", ::describeDataHalls(tLocalities)).detail("MissingZones", ::describeZones(unavailableLocals))
+				.detail("MissingDataHalls", ::describeDataHalls(unavailableLocals)).detail("Required", required).detail("DesiredLogs", desired).detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
+				.detail("checkStable", checkStable).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
 
-			// Free the set
 			logServerSet->clear();
 			logServerSet.clear();
 			throw no_more_servers();
@@ -369,16 +329,9 @@ public:
 			id_used[result.first.locality.processId()]++;
 		}
 
-		TraceEvent("GetTLogTeamDone")
-			.detail("Completed", bCompleted).detail("Policy", policy->info())
-			.detail("Results", results.size()).detail("Processes", logServerSet->size())
-			.detail("Workers", id_worker.size())
-			.detail("Replication", tLogReplicationFactor)
-			.detail("Desired", desired)
-			.detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
-			.detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS);
+		TraceEvent("GetTLogTeamDone").detail("Completed", bCompleted).detail("Policy", policy->info()).detail("Results", results.size()).detail("Processes", logServerSet->size()).detail("Workers", id_worker.size())
+			.detail("Required", required).detail("Desired", desired).detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS);
 
-		// Free the set
 		logServerSet->clear();
 		logServerSet.clear();
 
@@ -518,7 +471,7 @@ public:
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 			( ( RoleFitness(remoteLogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ) ||
-			  ( RoleFitness(logRouters, ProcessClass::LogRouter) > RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.configuration.getDesiredLogRouters()) ) ) ) {
+			  ( RoleFitness(logRouters, ProcessClass::LogRouter) > RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.logRouterCount) ) ) ) {
 			throw operation_failed();
 		}
 
@@ -537,27 +490,18 @@ public:
 		primaryDC.insert(dcId);
 		result.dcId = dcId;
 		
-		Optional<Key> remoteDcId;
 		RegionInfo region;
 		for(auto& r : req.configuration.regions) {
-			if(r.dcId != dcId.get()) {
-				ASSERT(!remoteDcId.present());
-				remoteDcId = r.dcId;
-			} else {
-				ASSERT(region.dcId == StringRef());
+			if(r.dcId == dcId.get()) {
 				region = r;
+				break;
 			}
 		}
 		
 		if(req.recruitSeedServers) {
 			auto primaryStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, dcId );
-			for(int i = 0; i < primaryStorageServers.size(); i++)
+			for(int i = 0; i < primaryStorageServers.size(); i++) {
 				result.storageServers.push_back(primaryStorageServers[i].first);
-
-			if(req.configuration.remoteTLogReplicationFactor > 0) {
-				auto remoteStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, remoteDcId );
-				for(int i = 0; i < remoteStorageServers.size(); i++)
-					result.storageServers.push_back(remoteStorageServers[i].first);
 			}
 		}
 			
@@ -594,8 +538,10 @@ public:
 		for(int i = 0; i < proxies.size(); i++)
 			result.proxies.push_back(proxies[i].first);
 
-		auto logRouters = getWorkersForRoleInDatacenter( remoteDcId, ProcessClass::LogRouter, req.configuration.getDesiredLogRouters(), req.configuration, id_used );
-		result.logRouterCount = logRouters.size() ? logRouters.size() : 1;
+		auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, id_used );
+		for(int i = 0; i < oldLogRouters.size(); i++) {
+			result.oldLogRouters.push_back(oldLogRouters[i].first);
+		}
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 			( RoleFitness(tlogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
@@ -656,7 +602,6 @@ public:
 			throw no_more_servers();
 		} else {
 			RecruitFromConfigurationReply result;
-			result.logRouterCount = 0;
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			id_used[masterProcessId]++;
 			id_used[clusterControllerProcessId]++;
@@ -700,6 +645,11 @@ public:
 							result.resolvers.push_back(resolvers[i].first);
 						for(int i = 0; i < proxies.size(); i++)
 							result.proxies.push_back(proxies[i].first);
+
+						auto oldLogRouters = getWorkersForRoleInDatacenter( dcId, ProcessClass::LogRouter, req.maxOldLogRouters, req.configuration, used );
+						for(int i = 0; i < oldLogRouters.size(); i++) {
+							result.oldLogRouters.push_back(oldLogRouters[i].first);
+						}
 						break;
 					} else {
 						if(fitness < bestFitness) {
@@ -795,6 +745,7 @@ public:
 		std::vector<std::pair<WorkerInterface, ProcessClass>> remote_tlogs;
 		std::vector<std::pair<WorkerInterface, ProcessClass>> satellite_tlogs;
 		std::vector<std::pair<WorkerInterface, ProcessClass>> log_routers;
+		std::set<NetworkAddress> logRouterAddresses;
 
 		for( auto& logSet : dbi.logSystemConfig.tLogs ) {
 			for( auto& it : logSet.tLogs ) {
@@ -819,7 +770,10 @@ public:
 					return false;
 				if ( tlogWorker->second.priorityInfo.isExcluded )
 					return true;
-				log_routers.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
+				if( !logRouterAddresses.count( tlogWorker->second.interf.address() ) ) {
+					logRouterAddresses.insert( tlogWorker->second.interf.address() );
+					log_routers.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
+				}
 			}
 		}
 
@@ -901,7 +855,14 @@ public:
 		if(oldRemoteTLogFit < newRemoteTLogFit) return false;
 
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter);
-		RoleFitness newLogRoutersFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, db.config.getDesiredLogRouters(), db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
+		RoleFitness newLogRoutersFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newTLogFit.count, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
+
+		if(oldLogRoutersFit.count < oldTLogFit.count) {
+			oldLogRoutersFit.worstFit = ProcessClass::NeverAssign;
+		}
+		if(newLogRoutersFit.count < newTLogFit.count) {
+			newLogRoutersFit.worstFit = ProcessClass::NeverAssign;
+		}
 
 		if(oldLogRoutersFit < newLogRoutersFit) return false;
 
@@ -2061,7 +2022,8 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 	}
 }
 
-ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo ) {
+ACTOR Future<Void> clusterController( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> currentCC, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, Future<Void> recoveredDiskFiles ) {
+	Void _ = wait(recoveredDiskFiles);
 	state bool hasConnected = false;
 	loop {
 		try {

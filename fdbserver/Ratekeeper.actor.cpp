@@ -84,14 +84,13 @@ struct StorageQueueInfo {
 	Smoother smoothDurableVersion, smoothLatestVersion;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
-	double readReplyRate;
 	limitReason_t limitReason;
 	StorageQueueInfo(UID id, LocalityData locality) : valid(false), id(id), locality(locality), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
 		smoothDurableVersion(1.), smoothLatestVersion(1.), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
-		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), readReplyRate(0.0), limitReason(limitReason_t::unlimited)
+		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), limitReason(limitReason_t::unlimited)
 	{
-		// FIXME: this is a tacky workaround for a potential unitialized use in trackStorageServerQueueInfo
+		// FIXME: this is a tacky workaround for a potential uninitialized use in trackStorageServerQueueInfo
 		lastReply.instanceID = -1;
 	}
 };
@@ -107,7 +106,7 @@ struct TLogQueueInfo {
 	TLogQueueInfo(UID id) : valid(false), id(id), smoothDurableBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT), smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT),
 		smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
-		// FIXME: this is a tacky workaround for a potential unitialized use in trackTLogQueueInfo (copied from storageQueueInfO)
+		// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied from storageQueueInfO)
 		lastReply.instanceID = -1;
 	}
 };
@@ -147,7 +146,6 @@ ACTOR Future<Void> trackStorageServerQueueInfo( Ratekeeper* self, StorageServerI
 				myQueueInfo->value.valid = true;
 				myQueueInfo->value.prevReply = myQueueInfo->value.lastReply;
 				myQueueInfo->value.lastReply = reply.get();
-				myQueueInfo->value.readReplyRate = reply.get().readReplyRate;
 				if (myQueueInfo->value.prevReply.instanceID != reply.get().instanceID) {
 					myQueueInfo->value.smoothDurableBytes.reset(reply.get().bytesDurable);
 					myQueueInfo->value.verySmoothDurableBytes.reset(reply.get().bytesDurable);
@@ -263,7 +261,6 @@ void updateRate( Ratekeeper* self ) {
 	limitReason_t limitReason = limitReason_t::unlimited;
 
 	int sscount = 0;
-	double readReplyRateSum=0.0;
 
 	int64_t worstFreeSpaceStorageServer = std::numeric_limits<int64_t>::max();
 	int64_t worstStorageQueueStorageServer = 0;
@@ -278,8 +275,6 @@ void updateRate( Ratekeeper* self ) {
 		++sscount;
 
 		ss.limitReason = limitReason_t::unlimited;
-
-		readReplyRateSum += ss.readReplyRate;
 
 		int64_t minFreeSpace = std::max(SERVER_KNOBS->MIN_FREE_SPACE, (int64_t)(SERVER_KNOBS->MIN_FREE_SPACE_RATIO * ss.smoothTotalSpace.smoothTotal()));
 
@@ -499,7 +494,6 @@ void updateRate( Ratekeeper* self ) {
 			.detail("StorageServers", sscount)
 			.detail("Proxies", self->proxy_transactionCountAndTime.size())
 			.detail("TLogs", tlcount)
-			.detail("ReadReplyRate", readReplyRateSum)
 			.detail("WorstFreeSpaceStorageServer", worstFreeSpaceStorageServer)
 			.detail("WorstFreeSpaceTLog", worstFreeSpaceTLog)
 			.detail("WorstStorageServerQueue", worstStorageQueueStorageServer)

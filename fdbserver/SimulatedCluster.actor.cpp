@@ -704,7 +704,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	bool generateFearless = false; //FIXME g_random->random01() < 0.5;
+	bool generateFearless = g_random->random01() < 0.5;
 	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
@@ -761,11 +761,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		StatusObject primaryObj;
 		primaryObj["id"] = "0";
-		primaryObj["priority"] = 1;
+		primaryObj["priority"] = 0;
 
 		StatusObject remoteObj;
 		remoteObj["id"] = "1";
-		remoteObj["priority"] = 0;
+		remoteObj["priority"] = 1;
 
 		bool needsRemote = generateFearless;
 		if(generateFearless) {
@@ -854,7 +854,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			}
 
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
-			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 		}
 
 		StatusArray regionArr;
@@ -866,7 +865,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 	}
 	
-	if(generateFearless) {
+	if(generateFearless && minimumReplication > 1) { 
+		//low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that is down during failures).
+		machine_count = 16;
+	} else if(generateFearless) {
 		machine_count = 12;
 	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
 		machine_count = 9;
@@ -1020,7 +1022,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			if(assignClasses) {
 				if(assignedMachines < 4)
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 2), ProcessClass::CommandLineSource); //Unset or Storage
-				else if(assignedMachines == 4 && !g_simulator.hasRemoteReplication && !g_simulator.hasSatelliteReplication)
+				else if(assignedMachines == 4 && !simconfig.db.regions.size())
 					processClass = ProcessClass((ProcessClass::ClassType) (g_random->randomInt(0, 2) * ProcessClass::ResolutionClass), ProcessClass::CommandLineSource); //Unset or Resolution
 				else
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 3), ProcessClass::CommandLineSource); //Unset, Storage, or Transaction

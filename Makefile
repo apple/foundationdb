@@ -17,7 +17,11 @@ ifeq ($(MONO),)
   MONO := /usr/bin/mono
 endif
 
-MCS := $(shell which dmcs)
+DMCS := $(shell which dmcs)
+MCS := $(shell which mcs)
+ifneq ($(DMCS),)
+  MCS := $(DMCS)
+endif
 ifeq ($(MCS),)
   MCS := /usr/bin/dmcs
 endif

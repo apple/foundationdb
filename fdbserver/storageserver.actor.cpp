@@ -264,6 +264,7 @@ public:
 	Tag tag;
 	vector<pair<Version,Tag>> history;
 	vector<pair<Version,Tag>> allHistory;
+	Version poppedAllAfter;
 	std::map<Version, Arena> freeable;  // for each version, an Arena that must be held until that version is < oldestVersion
 	Arena lastArena;
 
@@ -281,6 +282,11 @@ public:
 
 	void popVersion(Version v, bool popAllTags = false) {
 		if(logSystem) {
+			if(v > poppedAllAfter) {
+				popAllTags = true;
+				poppedAllAfter = std::numeric_limits<Version>::max();
+			}
+
 			vector<pair<Version,Tag>>* hist = &history;
 			vector<pair<Version,Tag>> allHistoryCopy;
 			if(popAllTags) {
@@ -379,8 +385,6 @@ public:
 	Promise<Void> coreStarted;
 	bool shuttingDown;
 
-	Smoother readReplyRate; //FIXME: very similar to counters.finishedQueries, new fast load balancing smoother
-
 	bool behind;
 
 	bool debug_inApplyUpdate;
@@ -445,11 +449,11 @@ public:
 			updateEagerReads(0),
 			shardChangeCounter(0),
 			fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_BYTES),
-			shuttingDown(false), readReplyRate(SERVER_KNOBS->STORAGE_LOGGING_DELAY / 2.0),
-			debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
+			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), lastUpdate(now())
+			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), 
+			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max())
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
@@ -460,7 +464,7 @@ public:
 		newestDirtyVersion.insert(allKeys, invalidVersion);
 		addShard( ShardInfo::newNotAssigned( allKeys ) );
 
-		cx = openDBOnServer(db, TaskDefaultEndpoint, false, true);
+		cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
 	}
 	//~StorageServer() { fclose(log); }
 
@@ -730,8 +734,6 @@ ACTOR Future<Void> getValueQ( StorageServer* data, GetValueRequest req ) {
 		m.iosPerKSecond = 1;
 		data->metrics.notify(req.key, m);
 		*/
-
-		data->readReplyRate.addDelta(1);
 
 		if (v.present()) {
 			++data->counters.rowsQueried;
@@ -1242,7 +1244,6 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 			none.penalty = data->getPenalty();
 
 			data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(req.begin.getKey(), req.end.getKey()), std::max<KeyRef>(req.begin.getKey(), req.end.getKey()) ) );
-			data->readReplyRate.addDelta(1);
 			req.reply.send( none );
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
@@ -1266,7 +1267,6 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 				m.iosPerKSecond = 1; //FIXME: this should be 1/r.data.size(), but we cannot do that because it is an int
 				data->metrics.notify(r.data[i].key, m);
 			}*/
-			data->readReplyRate.addDelta(1);
 
 			r.penalty = data->getPenalty();
 			req.reply.send( r );
@@ -1304,7 +1304,6 @@ ACTOR Future<Void> getKey( StorageServer* data, GetKeyRequest req ) {
 		Key k = wait( findKey( data, req.sel, version, shard, &offset ) );
 
 		data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(req.sel.getKey(), k), std::max<KeyRef>(req.sel.getKey(), k) ) );
-		data->readReplyRate.addDelta(1);
 
 		KeySelector updated;
 		if (offset < 0)
@@ -1338,7 +1337,6 @@ void getQueuingMetrics( StorageServer* self, StorageQueuingMetricsRequest const&
 	reply.instanceID = self->instanceID;
 	reply.bytesInput = self->counters.bytesInput.getValue();
 	reply.bytesDurable = self->counters.bytesDurable.getValue();
-	reply.readReplyRate = self->readReplyRate.smoothRate();
 
 	reply.storageBytes = self->storage.getStorageBytes();
 
@@ -2344,7 +2342,13 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
 		//TraceEvent("SSUpdatePeeking", data->thisServerID).detail("MyVer", data->version.get()).detail("Epoch", data->updateEpoch).detail("Seq", data->updateSequence);
-		Void _ = wait( cursor->getMore() );
+		
+		loop {
+			Void _ = wait( cursor->getMore() );
+			if(!cursor->isExhausted()) {
+				break;
+			}
+		}
 		if(cursor->popped() > 0)
 			throw worker_removed();
 
@@ -2363,7 +2367,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		start = now();
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
-		state Version minNewOldestVersion = 0;
 		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
 
 		loop{
@@ -2429,7 +2432,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		data->updateEagerReads = &eager;
 		data->debug_inApplyUpdate = true;
 
-		StorageUpdater updater(data->lastVersionWithData, std::max( std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), minNewOldestVersion ), data->restoredVersion);
+		StorageUpdater updater(data->lastVersionWithData, std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), data->restoredVersion);
 
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);
@@ -2480,8 +2483,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			}
 		}
 
-		if(ver != invalidVersion) data->lastVersionWithData = ver;
-		ver = cloneCursor2->version().version - 1;
+		if(ver != invalidVersion) {
+			data->lastVersionWithData = ver;
+		} else {
+			ver = cloneCursor2->version().version - 1;
+		}
 		if(injectedChanges) data->lastVersionWithData = ver;
 
 		data->updateEagerReads = NULL;
@@ -3134,7 +3140,10 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 				if( self->db->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
 					self->logSystem = ILogSystem::fromServerDBInfo( self->thisServerID, self->db->get() );
 					if (self->logSystem) {
-						self->logCursor = self->logSystem->peekSingle( self->version.get() + 1, self->tag, self->history );
+						if(self->logSystem->getLogSystemConfig().oldTLogs.size()) {
+							self->poppedAllAfter = self->logSystem->getLogSystemConfig().oldTLogs[0].epochEnd;
+						}
+						self->logCursor = self->logSystem->peekSingle( self->thisServerID, self->version.get() + 1, self->tag, self->history );
 						self->popVersion( self->durableVersion.get() + 1, true );
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be cancelled.  But if it is waiting later,
@@ -3221,7 +3230,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		return false;
 }
 
-ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag, ReplyPromise<StorageServerInterface> recruitReply,
+ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag, ReplyPromise<InitializeStorageReply> recruitReply,
 	Reference<AsyncVar<ServerDBInfo>> db, std::string folder )
 {
 	state StorageServer self(persistentData, db, ssi);
@@ -3230,19 +3239,22 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	self.folder = folder;
 
 	try {
-		self.storage.makeNewStorageServerDurable();
-		Void _ = wait( self.storage.commit() );
-
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait( addStorageServer(self.cx, ssi) ); // Might throw recruitment_failed in case of simultaneous master failure
 			self.tag = verAndTag.second;
-			self.setInitialVersion( verAndTag.first-1 ); // FIXME: Can this be 0 now?  Should we get a corresponding updatePos?
+			self.setInitialVersion( verAndTag.first-1 );
 		} else {
 			self.tag = seedTag;
 		}
 
+		self.storage.makeNewStorageServerDurable();
+		Void _ = wait( self.storage.commit() );
+
 		TraceEvent("StorageServerInit", ssi.id()).detail("Version", self.version.get()).detail("SeedTag", seedTag.toString());
-		recruitReply.send(ssi);
+		InitializeStorageReply rep;
+		rep.interf = ssi;
+		rep.addedVersion = self.version.get();
+		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
 		Void _ = wait( storageServerCore(&self, ssi) );
 
@@ -3291,26 +3303,30 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 						tr.setOption(FDBTransactionOptions::FIRST_IN_BATCH);
 						tr.set( serverTagKeyFor(ssi.id()), serverTagValue(rep.newTag.get()) );
 						tr.atomicOp( serverTagHistoryKeyFor(ssi.id()), serverTagValue(rep.tag), MutationRef::SetVersionstampedKey );
-						tr.atomicOp( serverMaxTagKeyFor(rep.newTag.get().locality), serverTagMaxValue(rep.newTag.get()), MutationRef::Max );
 					}
 
-					if(rep.history.size() && rep.history.back().first <= self->version.get()) {
+					if(rep.history.size() && rep.history.back().first < self->version.get()) {
 						tr.clear(serverTagHistoryRangeBefore(ssi.id(), self->version.get()));
 					}
 
 					choose {
 						when ( Void _ = wait( tr.commit() ) ) {
 							self->history = rep.history;
+							while(self->history.size() && self->history.back().first < self->version.get() ) {
+								self->history.pop_back();
+							}
+
 							if(rep.newTag.present()) {
 								self->tag = rep.newTag.get();
-								self->history.push_back(std::make_pair(tr.getCommittedVersion(), rep.tag));
+								self->history.insert(self->history.begin(), std::make_pair(tr.getCommittedVersion(), rep.tag));
 							} else {
 								self->tag = rep.tag;
 							}
 							self->allHistory = self->history;
 
+							TraceEvent("SSTag", self->thisServerID).detail("myTag", self->tag.toString());
 							for(auto it : self->history) {
-								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString()).detail("myTag", self->tag.toString());
+								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString());
 							}
 
 							if(self->history.size() && BUGGIFY) {

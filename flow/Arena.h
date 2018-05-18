@@ -429,9 +429,22 @@ public:
 		return StringRef(s,prefix.size() + size());
 	}
 
+	StringRef withSuffix( const StringRef& suffix, Arena& arena ) const {
+		uint8_t* s = new (arena) uint8_t[ suffix.size() + size() ];
+		memcpy(s, begin(), size());
+		memcpy(s+size(), suffix.begin(), suffix.size());
+		return StringRef(s,suffix.size() + size());
+	}
+
 	Standalone<StringRef> withPrefix( const StringRef& prefix ) const {
 		Standalone<StringRef> r;
-		((StringRef &)r) = withPrefix(prefix, r.arena());
+		r.contents() = withPrefix(prefix, r.arena());
+		return r;
+	}
+
+	Standalone<StringRef> withSuffix( const StringRef& suffix ) const {
+		Standalone<StringRef> r;
+		r.contents() = withSuffix(suffix, r.arena());
 		return r;
 	}
 
@@ -439,6 +452,12 @@ public:
 		// pre: startsWith(s)
 		UNSTOPPABLE_ASSERT( s.size() <= size() );  //< In debug mode, we could check startsWith()
 		return substr( s.size() );
+	}
+
+	StringRef removeSuffix( const StringRef& s ) const {
+		// pre: endsWith(s)
+		UNSTOPPABLE_ASSERT( s.size() <= size() );  //< In debug mode, we could check endsWith()
+		return substr( 0, size() - s.size() );
 	}
 
 	std::string toString() const { return std::string( (const char*)data, length ); }

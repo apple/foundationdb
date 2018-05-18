@@ -46,8 +46,8 @@ struct applyMutationsData {
 // the same operations will be done on all proxies at the same time. Otherwise, the data stored in
 // txnStateStore will become corrupted.
 static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<MutationRef> const& mutations, IKeyValueStore* txnStateStore, LogPushData* toCommit, bool *confChange, Reference<ILogSystem> logSystem = Reference<ILogSystem>(), Version popVersion = 0,
-	KeyRangeMap<std::set<Key> >* vecBackupKeys = NULL, KeyRangeMap<ServerCacheInfo>* keyInfo = NULL, std::map<Key, applyMutationsData>* uid_applyMutationsData = NULL,
-	RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(), Database cx = Database(), NotifiedVersion* commitVersion = NULL, std::map<UID, Reference<StorageInfo>>* storageCache = NULL, bool initialCommit = false ) {
+	KeyRangeMap<std::set<Key> >* vecBackupKeys = NULL, KeyRangeMap<ServerCacheInfo>* keyInfo = NULL, std::map<Key, applyMutationsData>* uid_applyMutationsData = NULL, RequestStream<CommitTransactionRequest> commit = RequestStream<CommitTransactionRequest>(),
+	Database cx = Database(), NotifiedVersion* commitVersion = NULL, std::map<UID, Reference<StorageInfo>>* storageCache = NULL, std::map<Tag, Version>* tag_popped = NULL, bool initialCommit = false ) {
 	for (auto const& m : mutations) {
 		//TraceEvent("MetadataMutation", dbgid).detail("M", m.toString());
 
@@ -291,8 +291,10 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if (logSystem && popVersion) {
 					auto serverKeysCleared = txnStateStore->readRange( range & serverTagKeys ).get();	// read is expected to be immediately available
 					for(auto &kv : serverKeysCleared) {
-						TraceEvent("ServerTagRemove").detail("popVersion", popVersion).detail("tag", decodeServerTagValue(kv.value).toString()).detail("server", decodeServerTagKey(kv.key));
+						Tag tag = decodeServerTagValue(kv.value);
+						TraceEvent("ServerTagRemove").detail("popVersion", popVersion).detail("tag", tag.toString()).detail("server", decodeServerTagKey(kv.key));
 						logSystem->pop( popVersion, decodeServerTagValue(kv.value) );
+						(*tag_popped)[tag] = popVersion;
 
 						if(toCommit) {
 							MutationRef privatized = m;
@@ -317,8 +319,10 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if (logSystem && popVersion) {
 					auto serverKeysCleared = txnStateStore->readRange( range & serverTagHistoryKeys ).get();	// read is expected to be immediately available
 					for(auto &kv : serverKeysCleared) {
-						TraceEvent("ServerTagHistoryRemove").detail("popVersion", popVersion).detail("tag", decodeServerTagValue(kv.value).toString()).detail("version", decodeServerTagHistoryKey(kv.key));
-						logSystem->pop( popVersion, decodeServerTagValue(kv.value) );
+						Tag tag = decodeServerTagValue(kv.value);
+						TraceEvent("ServerTagHistoryRemove").detail("popVersion", popVersion).detail("tag", tag.toString()).detail("version", decodeServerTagHistoryKey(kv.key));
+						logSystem->pop( popVersion, tag );
+						(*tag_popped)[tag] = popVersion;
 					}
 				}
 				if(!initialCommit) txnStateStore->clear( range & serverTagHistoryKeys );
