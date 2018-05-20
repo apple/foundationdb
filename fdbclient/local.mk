@@ -21,7 +21,7 @@
 # -*- mode: makefile; -*-
 
 fdbclient_CFLAGS := $(fdbrpc_CFLAGS)
-ifeq ($(PLATFORM),FreeBSD)
+ifeq ($(PLATFORM),freebsd)
 fdbclient_LIBS := -lm -lc++ -lpthread -lexecinfo -leio
 endif
 

@@ -842,11 +842,20 @@ void watch_conf_dir( int kq, int* confd_fd, std::string confdir ) {
 		confdir = original;
 		std::string child = confdir;
 
+		#if defined(__FreeBSD__)
 		/* Find the nearest existing ancestor */
 		while( (*confd_fd = open( confdir.c_str(), O_RDONLY )) < 0 && errno == ENOENT ) {
 			child = confdir;
 			confdir = parentDirectory(confdir);
 		}
+		#else
+		/* Find the nearest existing ancestor */
+		while( (*confd_fd = open( confdir.c_str(), O_EVTONLY )) < 0 && errno == ENOENT ) {
+			child = confdir;
+			confdir = parentDirectory(confdir);
+		}
+		#endif
+		
 
 		if ( *confd_fd >= 0 ) {
 			EV_SET( &ev, *confd_fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_WRITE, 0, NULL );

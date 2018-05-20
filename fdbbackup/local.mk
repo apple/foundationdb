@@ -33,7 +33,7 @@ ifeq ($(PLATFORM),linux)
   # fdbbackup_LDFLAGS += -L/opt/gperftools/lib
   # fdbbackup_STATIC_LIBS += -ltcmalloc -lunwind -lprofiler
 else ifeq ($(PLATFORM),freebsd)
-  fdbbackup_LDFLAGS += -lc++ -lm -lexecinfo -lpthread -leio
+  fdbbackup_LDFLAGS += -lc++ -lm -lexecinfo -lpthread
 else ifeq ($(PLATFORM),osx)
   fdbbackup_LDFLAGS += -lc++
 endif

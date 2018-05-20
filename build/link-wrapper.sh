@@ -11,9 +11,9 @@ case $1 in
 	    if [ "$PLATFORM" = "linux" ]; then
 		OPTIONS="$OPTIONS -Wl,-z,noexecstack -Wl,-soname,$( basename $3 )"
 	    fi
-		if [ "$PLATFORM" = "FreeBSD" ]; then
+	    if [ "$PLATFORM" = "freebsd" ]; then
 		OPTIONS="$OPTIONS -Wl,-z,noexecstack -Wl,-soname,$( basename $3 )"
-		fi
+	    fi
 	    if [ "$PLATFORM" = "osx" ]; then
 		OPTIONS="$OPTIONS -Wl,-dylib_install_name -Wl,$( basename $3 )"
 	    fi
@@ -35,8 +35,12 @@ case $1 in
 		    $CC $OPTIONS
 		fi
 		;;
-		FreeBSD)
-			clang++ -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option $OPTIONS -lm -lc++ -lpthread -lexecinfo
+		freebsd)
+			CC=clang++
+			CFLAGS="-std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option -Wno-varargs"
+			_LIBS="-lm -lc++ -lpthread -lexecinfo -ldevstat -lkvm"
+			OPTIONS="$CFLAGS $OPTIONS $_LIBS"
+			$CC $OPTIONS
 		;;
 	    *)
 		$CC $OPTIONS
@@ -55,7 +59,7 @@ case $1 in
 			    objcopy --add-gnu-debuglink=$3.debug $3
 			    ./build/link-validate.sh $3 $4
 			    ;;
-			FreeBSD)
+			freebsd)
 			    cp $3 $3.debug
 			    if [ -z "${NOSTRIP}" ]; then strip $3; fi
 			    ;;
@@ -75,7 +79,7 @@ case $1 in
 			linux)
 			    if [ -z "${NOSTRIP}" ]; then strip --strip-all $3; fi
 			    ;;
-			FreeBSD)
+			freebsd)
 			    if [ -z "${NOSTRIP}" ]; then strip --strip-all $3; fi
 			    ;;
 			osx)

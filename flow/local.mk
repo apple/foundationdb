@@ -22,8 +22,8 @@
 
 flow_CFLAGS := -I$(BOOSTDIR) -I. -Iflow -DUSE_UCONTEXT
 flow_LDFLAGS :=
-ifeq ($(PLATFORM),FreeBSD)
-flow_LIBS := -lm -lc++ -lpthread -leio -lexecinfo
+ifeq ($(PLATFORM),freebsd)
+flow_LIBS := -lm -lc++ -lpthread -lexecinfo -leio
 endif
 
 ifeq ($(PLATFORM),osx)

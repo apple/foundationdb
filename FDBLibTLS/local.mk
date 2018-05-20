@@ -2,7 +2,7 @@
 FDBLibTLS_CFLAGS := -fPIC -I/usr/local/include -I$(BOOSTDIR) -Ifdbrpc
 FDBLibTLS_STATIC_LIBS := -ltls -lssl -lcrypto
 FDBLibTLS_LDFLAGS := -L/usr/local/lib -static-libstdc++ -static-libgcc -lrt
-endif
+
 
 FDBLibTLS_LDFLAGS += -Wl,-soname,FDBLibTLS.so -Wl,--version-script=FDBLibTLS/FDBLibTLS.map
 

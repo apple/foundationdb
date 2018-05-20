@@ -64,6 +64,20 @@ else ifeq ($(PLATFORM),GNU/Linux)
 	LINK_LDFLAGS += -Wl,--version-script=FDBLibTLS.map
 	LINK_LDFLAGS += -Wl,-Bstatic $(LIBS) -Wl,-Bdynamic
 
+else ifeq ($(PLATFORM),FreeBSD)
+        CC := clang
+        CXX := clang++
+        STRIP := strip --strip-all
+
+        CFLAGS += -fPIC       
+        DYEXT = so
+        
+        LIBS += -lrt
+
+        LINK_LDFLAGS = -shared   
+        LINK_LDFLAGS += -Wl,-soname,$(PLUGIN)
+        LINK_LDFLAGS += -Wl,--version-script=FDBLibTLS.map
+        LINK_LDFLAGS += -Wl,-Bstatic $(LIBS) -Wl,-Bdynamic
 else
 $(error Unknown platform $(PLATFORM))
 endif

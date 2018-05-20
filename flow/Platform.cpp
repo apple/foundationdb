@@ -101,29 +101,36 @@
 #endif
 
 #ifdef __FreeBSD__
-/* Needed for memory allocation */
-#include <sys/mman.h>
 /* Needed for processor affinity */
 #include <sys/sched.h>
-/* Needed for getProcessorTime* and setpriority */
+/* Needed for getProcessorTime and setpriority */
 #include <sys/syscall.h>
 /* Needed for setpriority */
 #include <sys/resource.h>
 /* Needed for crash handler */
 #include <sys/signal.h>
-/* Needed for socket definition */
-#include <netinet/in.h>
 /* Needed for proc info	*/
 #include <sys/user.h>
 /* Needed for vm info  */
-#include <stdio.h>
-#include <errno.h>
 #include <sys/param.h>
-#include <sys/types.h>
 #include <sys/sysctl.h>
 #include <sys/vmmeter.h>
 #include <sys/cpuset.h>
 #include <sys/resource.h>
+/* Needed for sysctl info */
+#include <sys/sysctl.h>
+#include <sys/fcntl.h>
+/* Needed for network info */
+#include <net/if.h>
+#include <net/if_mib.h>
+#include <net/if_var.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <netinet/tcp_var.h>
+/* Needed for device info */
+#include <devstat.h>
+#include <kvm.h>
+#include <libutil.h>
 #endif
 
 #ifdef __APPLE__
@@ -280,19 +287,25 @@ uint64_t getResidentMemoryUsage() {
 #elif defined(__FreeBSD__)
 	uint64_t rssize = 0;
 
-	std::ifstream stat_stream("/proc/self/statm", std::ifstream::in);
-	std::string ignore;
+    int status;
+    pid_t ppid = getpid();
+    int pidinfo[4];
+    pidinfo[0] = CTL_KERN;
+    pidinfo[1] = KERN_PROC;
+    pidinfo[2] = KERN_PROC_PID;
+    pidinfo[3] = (int)ppid;
+    
+    struct kinfo_proc procstk;
+    size_t len = sizeof(procstk);
+    
+    status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
+    if (status < 0){
+        TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
+        throw platform_error();
+    }
 
-	if(!stat_stream.good()) {
-		TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
-		throw platform_error();
-	}
-
-	stat_stream >> ignore;
-	stat_stream >> rssize;
-
-	rssize *= sysconf(_SC_PAGESIZE);
-
+    rssize = (uint64_t)procstk.ki_rssize;
+    
 	return rssize;
 #elif defined(_WIN32)
 	PROCESS_MEMORY_COUNTERS_EX pmc;
@@ -334,16 +347,24 @@ uint64_t getMemoryUsage() {
 #elif defined(__FreeBSD__)
 	uint64_t vmsize = 0;
 
-	std::ifstream stat_stream("/proc/self/statm", std::ifstream::in);
-
-	if(!stat_stream.good()) {
-		TraceEvent(SevError, "GetMemoryUsage").GetLastError();
-		throw platform_error();
-	}
-
-	stat_stream >> vmsize;
-
-	vmsize *= sysconf(_SC_PAGESIZE);
+    int status;
+    pid_t ppid = getpid();
+    int pidinfo[4];
+    pidinfo[0] = CTL_KERN;
+    pidinfo[1] = KERN_PROC;
+    pidinfo[2] = KERN_PROC_PID;
+    pidinfo[3] = (int)ppid;
+    
+    struct kinfo_proc procstk;
+    size_t len = sizeof(procstk);
+    
+    status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
+    if (status < 0){
+        TraceEvent(SevError, "GetMemoryUsage").GetLastError();
+        throw platform_error();
+    }
+    
+    vmsize = (uint64_t)procstk.ki_size >> PAGE_SHIFT;
 
 	return vmsize;
 #elif defined(_WIN32)
@@ -456,7 +477,6 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 
 	memInfo.committed = memInfo.total - memInfo.available;
 #elif defined(__FreeBSD__)
-	
 	int status;
     
     u_int page_size;
@@ -540,15 +560,7 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	INJECT_FAULT( platform_error, "getDiskBytes" );
 #if defined(__unixish__)
-#ifdef __linux__
-	struct statvfs buf;
-	if (statvfs(directory.c_str(), &buf)) {
-		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError();
-		throw platform_error();
-	}
-
-	uint64_t blockSize = buf.f_frsize;
-#elif __FreeBSD__
+#if defined (__linux__) || defined (__FreeBSD__)
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
 		TraceEvent(SevError, "GetDiskBytesStatvfsError").detail("Directory", directory).GetLastError();
@@ -841,7 +853,8 @@ dev_t getDeviceId(std::string path) {
 
 void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
 					   uint64_t& outSegs, uint64_t& retransSegs) {
-	INJECT_FAULT( platform_error, "getNetworkTraffic" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
+	INJECT_FAULT( platform_error, "getNetworkTraffic" );
+    
 	const char* ifa_name = nullptr;
 	try {
 		ifa_name = getInterfaceName(ip);
@@ -855,175 +868,156 @@ void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived
 	if (!ifa_name)
 		return;
 
-	std::ifstream dev_stream("/proc/net/dev", std::ifstream::in);
-	dev_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-	dev_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-
-	std::string iface;
-	std::string ignore;
-
-	uint64_t bytesSentSum = 0;
-	uint64_t bytesReceivedSum = 0;
-
-	while (dev_stream.good()) {
-		dev_stream >> iface;
-		if (dev_stream.eof()) break;
-		if (!strncmp(iface.c_str(), ifa_name, strlen(ifa_name))) {
-			uint64_t sent = 0, received = 0;
-
-			dev_stream >> received;
-			for (int i = 0; i < 7; i++) dev_stream >> ignore;
-			dev_stream >> sent;
-
-			bytesSentSum += sent;
-			bytesReceivedSum += received;
-
-			dev_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-		}
-	}
-
-	if(bytesSentSum > 0) {
-		bytesSent = bytesSentSum;
-	}
-	if(bytesReceivedSum > 0) {
-		bytesReceived = bytesReceivedSum;
-	}
-
-	std::ifstream snmp_stream("/proc/net/snmp", std::ifstream::in);
-
-	std::string label;
-
-	while (snmp_stream.good()) {
-		snmp_stream >> label;
-		snmp_stream.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-		if (label == "Tcp:")
+    struct ifaddrs *interfaces = NULL;
+    
+    if (getifaddrs(&interfaces))
+    {
+        TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
+        throw platform_error();
+    }
+    
+    int if_count, i;
+    int mib[6];
+    size_t ifmiblen;
+    struct ifmibdata ifmd;
+    
+    mib[0] = CTL_NET;
+    mib[1] = PF_LINK;
+    mib[2] = NETLINK_GENERIC;
+    mib[3] = IFMIB_IFDATA;
+    mib[4] = IFMIB_IFCOUNT;
+    mib[5] = IFDATA_GENERAL;
+    
+    ifmiblen = sizeof(ifmd);
+    
+    for (i = 1; i <= if_count; i++)
+    {
+        mib[4] = i;
+        
+        sysctl(mib, 6, &ifmd, &ifmiblen, (void *)0, 0);
+        
+        if (!strcmp(ifmd.ifmd_name, ifa_name))
+        {
+			bytesSent = ifmd.ifmd_data.ifi_obytes;
+            bytesReceived = ifmd.ifmd_data.ifi_ibytes;
 			break;
-	}
+        }
+    }
+    
+    freeifaddrs(interfaces);
+    
+    struct tcpstat tcpstat;
+    size_t stat_len;
+    stat_len = sizeof(tcpstat);
+    int tcpstatus = sysctlbyname("net.inet.tcp.stats", &tcpstat, &stat_len, NULL, 0);
+    if (tcpstatus < 0) {
+        TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
+        throw platform_error();
+    }
 
-	/* Ignore the first 11 columns of the Tcp line */
-	for (int i = 0; i < 11; i++)
-		snmp_stream >> ignore;
-
-	snmp_stream >> outSegs;
-	snmp_stream >> retransSegs;
+    outSegs = tcpstat.tcps_sndtotal;
+    retransSegs = tcpstat.tcps_sndrexmitpack;
 }
 
 void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
-	INJECT_FAULT( platform_error, "getMachineLoad" ); // Even though this function doesn't throw errors, the equivalents for other platforms do, and since all of our simulation testing is on Linux...
-	std::ifstream stat_stream("/proc/stat", std::ifstream::in);
-
-	std::string ignore;
-	stat_stream >> ignore;
-
-	uint64_t t_user, t_nice, t_system, t_idle, t_iowait, t_irq, t_softirq, t_steal, t_guest;
-	stat_stream >> t_user >> t_nice >> t_system >> t_idle >> t_iowait >> t_irq >> t_softirq >> t_steal >> t_guest;
-
-	totalTime = t_user+t_nice+t_system+t_idle+t_iowait+t_irq+t_softirq+t_steal+t_guest;
-	idleTime = t_idle+t_iowait;
-
-	if( !DEBUG_DETERMINISM )
-		TraceEvent("MachineLoadDetail").detail("User", t_user).detail("Nice", t_nice).detail("System", t_system).detail("Idle", t_idle).detail("IOWait", t_iowait).detail("IRQ", t_irq).detail("SoftIRQ", t_softirq).detail("Steal", t_steal).detail("Guest", t_guest);
+	INJECT_FAULT( platform_error, "getMachineLoad" );
+    
+    long cur[CPUSTATES], last[CPUSTATES];
+    size_t cur_sz = sizeof cur;
+    int state, j;
+    long sum;
+    double util;
+    
+    memset(last, 0, sizeof last);
+    
+    if (sysctlbyname("kern.cp_time", &cur, &cur_sz, NULL, 0) < 0)
+    {
+        TraceEvent(SevError, "GetMachineLoad").GetLastError();
+        throw platform_error();
+    }
+    
+    sum = 0;
+    for (state = 0; state < CPUSTATES; state++)
+    {
+        long tmp = cur[state];
+        cur[state] -= last[state];
+        last[state] = tmp;
+        sum += cur[state];
+    }
+    
+    totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS]);
+    
+    idleTime = (uint64_t)cur[CP_IDLE];
+    
 }
 
 void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
 	INJECT_FAULT( platform_error, "getDiskStatistics" );
-	currentIOs = 0;
+    currentIOs = 0;
+    busyTicks = 0;
+    reads = 0;
+    writes = 0;
+    writeSectors = 0;
+    readSectors = 0;
 
 	struct stat buf;
 	if (stat(directory.c_str(), &buf)) {
 		TraceEvent(SevError, "GetDiskStatisticsStatError").detail("Directory", directory).GetLastError();
 		throw platform_error();
 	}
+    
+    static struct statinfo dscur;
+    double etime;
+    struct timespec ts;
+    static int num_devices;
+    
+    kvm_t *kd = NULL;
+    
+    etime = ts.tv_nsec * 1e-6;
+    
+    int dn;
+    u_int64_t total_transfers_read, total_transfers_write;
+    u_int64_t total_blocks_read, total_blocks_write;
+    u_int64_t queue_len;
+    long double ms_per_transaction;
+    
+    dscur.dinfo = (struct devinfo *)calloc(1, sizeof(struct devinfo));
+    if (dscur.dinfo == NULL) {
+        TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+        throw platform_error();
+    }
+    
+    if (devstat_getdevs(kd, &dscur) == -1) {
+        TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+        throw platform_error();
+    }
+    
+    num_devices = dscur.dinfo->numdevs;
+    
+    for (dn = 0; dn < num_devices; dn++)
+    {
+        int di;
+        
+        if (devstat_compute_statistics(&dscur.dinfo->devices[dn], NULL, etime,
+                                       DSM_MS_PER_TRANSACTION, &ms_per_transaction,
+                                       DSM_TOTAL_TRANSFERS_READ, &total_transfers_read,
+                                       DSM_TOTAL_TRANSFERS_WRITE, &total_transfers_write,
+                                       DSM_TOTAL_BLOCKS_READ, &total_blocks_read,
+                                       DSM_TOTAL_BLOCKS_WRITE, &total_blocks_write,
+                                       DSM_QUEUE_LENGTH, &queue_len,
+                                       DSM_NONE) != 0) {
+            TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+            throw platform_error();
+        }
 
-	std::ifstream proc_stream("/proc/diskstats", std::ifstream::in);
-	while (proc_stream.good()) {
-		std::string line;
-		getline(proc_stream, line);
-		std::istringstream disk_stream(line, std::istringstream::in);
-
-		unsigned int majorId;
-		unsigned int minorId;
-		disk_stream >> majorId;
-		disk_stream >> minorId;
-		if(majorId == (unsigned int) major(buf.st_dev) && minorId == (unsigned int) minor(buf.st_dev)) {
-			std::string ignore;
-			uint64_t rd_ios;	/* # of reads completed */
-			//	    This is the total number of reads completed successfully.
-
-			uint64_t rd_merges;	/* # of reads merged */
-			//	    Reads and writes which are adjacent to each other may be merged for
-			//	    efficiency.  Thus two 4K reads may become one 8K read before it is
-			//	    ultimately handed to the disk, and so it will be counted (and queued)
-			//	    as only one I/O.  This field lets you know how often this was done.
-
-			uint64_t rd_sectors; /*# of sectors read */
-			//	    This is the total number of sectors read successfully.
-
-			uint64_t rd_ticks;	/* # of milliseconds spent reading */
-			//	    This is the total number of milliseconds spent by all reads (as
-			//	    measured from __make_request() to end_that_request_last()).
-
-			uint64_t wr_ios;	/* # of writes completed */
-			//	    This is the total number of writes completed successfully.
-
-			uint64_t wr_merges;	/* # of writes merged */
-			//	    Reads and writes which are adjacent to each other may be merged for
-			//	    efficiency.  Thus two 4K reads may become one 8K read before it is
-			//	    ultimately handed to the disk, and so it will be counted (and queued)
-			//	    as only one I/O.  This field lets you know how often this was done.
-
-			uint64_t wr_sectors; /* # of sectors written */
-			//	    This is the total number of sectors written successfully.
-
-			uint64_t wr_ticks;	/* # of milliseconds spent writing */
-			//	    This is the total number of milliseconds spent by all writes (as
-			//	    measured from __make_request() to end_that_request_last()).
-
-			uint64_t cur_ios;	/* # of I/Os currently in progress */
-			//	    The only field that should go to zero. Incremented as requests are
-			//	    given to appropriate struct request_queue and decremented as they finish.
-
-			uint64_t ticks;	/* # of milliseconds spent doing I/Os */
-			//	    This field increases so long as field 9 is nonzero.
-
-			uint64_t aveq;	/* weighted # of milliseconds spent doing I/Os */
-			//	    This field is incremented at each I/O start, I/O completion, I/O
-			//	    merge, or read of these stats by the number of I/Os in progress
-			//	    (field 9) times the number of milliseconds spent doing I/O since the
-			//	    last update of this field.  This can provide an easy measure of both
-			//	    I/O completion time and the backlog that may be accumulating.
-
-			disk_stream >> ignore;
-			disk_stream >> rd_ios;
-			disk_stream >> rd_merges;
-			disk_stream >> rd_sectors;
-			disk_stream >> rd_ticks;
-			disk_stream >> wr_ios;
-			disk_stream >> wr_merges;
-			disk_stream >> wr_sectors;
-			disk_stream >> wr_ticks;
-			disk_stream >> cur_ios;
-			disk_stream >> ticks;
-			disk_stream >> aveq;
-
-			currentIOs = cur_ios;
-			busyTicks = ticks;
-			reads = rd_ios;
-			writes = wr_ios;
-			writeSectors = wr_sectors;
-			readSectors = rd_sectors;
-
-			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("ignore", ignore).detail("rd_ios", rd_ios)
-			//	.detail("rd_merges", rd_merges).detail("rd_sectors", rd_sectors).detail("rd_ticks", rd_ticks).detail("wr_ios", wr_ios).detail("wr_merges", wr_merges)
-			//	.detail("wr_sectors", wr_sectors).detail("wr_ticks", wr_ticks).detail("cur_ios", cur_ios).detail("ticks", ticks).detail("aveq", aveq)
-			//	.detail("currentIOs", currentIOs).detail("busyTicks", busyTicks).detail("reads", reads).detail("writes", writes).detail("writeSectors", writeSectors)
-			//  .detail("readSectors", readSectors);
-			return;
-		} else
-			disk_stream.ignore( std::numeric_limits<std::streamsize>::max(), '\n');
-	}
-
-	if(!g_network->isSimulated()) TraceEvent(SevWarn, "GetDiskStatisticsDeviceNotFound").detail("Directory", directory);
+        currentIOs = queue_len;
+        busyTicks = (u_int64_t)ms_per_transaction;
+        reads = total_transfers_read;
+        writes = total_transfers_write;
+        writeSectors = total_blocks_read;
+        readSectors = total_blocks_write;        
+    }
+	
 }
 
 dev_t getDeviceId(std::string path) {
