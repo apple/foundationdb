@@ -39,7 +39,7 @@ struct FDBLibTLSSession : ITLSSession, ReferenceCounted<FDBLibTLSSession> {
 	virtual void delref() { ReferenceCounted<FDBLibTLSSession>::delref(); }
 
 	bool verify_peer();
-	bool check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs);
+	std::tuple<bool,std::string> check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs);
 
 	virtual int handshake();
 	virtual int read(uint8_t* data, int length);
