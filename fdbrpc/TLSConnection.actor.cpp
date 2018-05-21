@@ -357,6 +357,11 @@ static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_erro
 
 	auto t = TraceEvent( s, event, uid );
 
+	if ( !is_error ) {
+		// don't spam with too many reasons why client connections were rejected
+		t = t.suppressFor(1.0, true);
+	}
+
 	va_list ap;
 	char* field;
 
