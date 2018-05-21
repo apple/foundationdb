@@ -158,7 +158,7 @@ bool FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct st
 		goto err;
 	}
 	X509_STORE_CTX_trusted_stack(store_ctx, policy->roots);
-	X509_STORE_CTX_set_default(store_ctx, is_client ? "ssl_client" : "ssl_server");
+	X509_STORE_CTX_set_default(store_ctx, is_client ? "ssl_server" : "ssl_client");
 	if (!verify->verify_time)
 		X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(store_ctx), X509_V_FLAG_NO_CHECK_TIME);
 	if (X509_verify_cert(store_ctx) <= 0) {
