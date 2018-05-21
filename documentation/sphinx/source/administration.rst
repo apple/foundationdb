@@ -498,6 +498,14 @@ Trace files are rolled every 10MB. These files are valuable to the FoundationDB 
 
 .. _administration-disaster-recovery:
 
+Recreating the database
+=======================
+
+If there's no existing database or you deleted it, you need to (re)create it using a ``fdbcli`` command, specifying redundancy mode and storage engine::
+
+    configure new single memory
+
+
 Disaster Recovery
 =================
 
