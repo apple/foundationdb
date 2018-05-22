@@ -156,7 +156,7 @@ class DirectoryTest(Test):
 
             elif root_op == 'DIRECTORY_CREATE_SUBSPACE':
                 path = generate_path()
-                instructions.push_args(generate_prefix(allow_empty=False, is_partition=True))
+                instructions.push_args(generate_prefix(require_unique=False, is_partition=True))
                 instructions.push_args(*test_util.with_length(path))
                 instructions.append(op)
                 self.dir_list.append(DirListEntry(False, True, has_known_prefix=True))
@@ -164,7 +164,7 @@ class DirectoryTest(Test):
             elif root_op == 'DIRECTORY_CREATE_LAYER':
                 indices = []
                 
-                prefixes = [generate_prefix(allow_empty=False, is_partition=True) for i in range(2)]
+                prefixes = [generate_prefix(require_unique=args.concurrency==1, is_partition=True) for i in range(2)]
                 for i in range(2):
                     instructions.push_args(prefixes[i])
                     instructions.push_args(*test_util.with_length(generate_path()))
@@ -201,8 +201,7 @@ class DirectoryTest(Test):
                 layer = self.generate_layer()
                 is_partition = layer == 'partition'
 
-                allow_empty_prefix = random.random() < 0.8
-                prefix = generate_prefix(allow_empty=allow_empty_prefix, is_partition=is_partition)
+                prefix = generate_prefix(require_unique=is_partition and args.concurrency==1, is_partition=is_partition, min_length=0)
 
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
                 # transactions that allocate/remove these prefixes in a comparison test
@@ -400,11 +399,14 @@ def generate_path(min_length=0):
     return path
 
 
-def generate_prefix(allow_empty=True, is_partition=False):
-    if allow_empty and random.random() < 0.8:
+def generate_prefix(require_unique=False, is_partition=False, min_length=1):
+    if not require_unique and min_length == 0 and random.random() < 0.8:
         return None
-    elif is_partition or random.random() < 0.5:
-        length = random.randint(0 if allow_empty else 1, 5)
+    elif require_unique or is_partition or min_length > len('abcdefg') or random.random() < 0.5:
+        if require_unique:
+            min_length = max(min_length, 16)
+
+        length = random.randint(min_length, min_length+5)
         if length == 0:
             return ''
 
@@ -415,5 +417,5 @@ def generate_prefix(allow_empty=True, is_partition=False):
             return ''.join(chr(random.randrange(ord('\x02'), ord('\x14'))) for i in range(0, length))
     else:
         prefix = 'abcdefg'
-        generated = prefix[0:random.randrange(0 if allow_empty else 1, len(prefix))]
+        generated = prefix[0:random.randrange(min_length, len(prefix))]
         return generated
