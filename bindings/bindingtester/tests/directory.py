@@ -28,7 +28,7 @@ from bindingtester import util
 from bindingtester.tests import Test, Instruction, InstructionSet, ResultSpecification
 from bindingtester.tests import test_util, directory_util
 
-from bindingtester.tests.directory_util import DirListEntry
+from bindingtester.tests.directory_state_tree import DirectoryStateTreeNode
 
 fdb.api_version(FDB_API_VERSION)
 
@@ -48,7 +48,7 @@ class DirectoryTest(Test):
     def ensure_default_directory_subspace(self, instructions, path):
         directory_util.create_default_directory_subspace(instructions, path, self.random)
 
-        child = self.root.add_child(path, DirListEntry(True, True, has_known_prefix=True))
+        child = self.root.add_child(path, DirectoryStateTreeNode(True, True, has_known_prefix=True))
         self.dir_list.append(child)
         self.dir_index = directory_util.DEFAULT_DIRECTORY_INDEX
 
@@ -114,7 +114,7 @@ class DirectoryTest(Test):
             instructions.push_args(layer)
             instructions.push_args(*test_util.with_length(path))
             instructions.append('DIRECTORY_OPEN')
-            self.dir_list.append(self.root.add_child(path, DirListEntry(True, True, has_known_prefix=False)))
+            self.dir_list.append(self.root.add_child(path, DirectoryStateTreeNode(True, True, has_known_prefix=False)))
             # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
             #       % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), self.dir_list[-1].dir_id, False, len(self.dir_list)-1))
 
@@ -159,7 +159,7 @@ class DirectoryTest(Test):
                 instructions.push_args(generate_prefix(require_unique=False, is_partition=True))
                 instructions.push_args(*test_util.with_length(path))
                 instructions.append(op)
-                self.dir_list.append(DirListEntry(False, True, has_known_prefix=True))
+                self.dir_list.append(DirectoryStateTreeNode(False, True, has_known_prefix=True))
 
             elif root_op == 'DIRECTORY_CREATE_LAYER':
                 indices = []
@@ -170,12 +170,12 @@ class DirectoryTest(Test):
                     instructions.push_args(*test_util.with_length(generate_path()))
                     instructions.append('DIRECTORY_CREATE_SUBSPACE')
                     indices.append(len(self.dir_list))
-                    self.dir_list.append(DirListEntry(False, True, has_known_prefix=True))
+                    self.dir_list.append(DirectoryStateTreeNode(False, True, has_known_prefix=True))
 
                 instructions.push_args(random.choice([0, 1]))
                 instructions.push_args(*indices)
                 instructions.append(op)
-                self.dir_list.append(DirListEntry.get_layer(prefixes[0]))
+                self.dir_list.append(DirectoryStateTreeNode.get_layer(prefixes[0]))
 
             elif root_op == 'DIRECTORY_CREATE_OR_OPEN':
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
@@ -192,7 +192,7 @@ class DirectoryTest(Test):
 
                 child_entry = dir_entry.get_descendent(path)
                 if child_entry is None:
-                    child_entry = DirListEntry(True, True)
+                    child_entry = DirectoryStateTreeNode(True, True)
 
                 child_entry.has_known_prefix = False  
                 self.dir_list.append(dir_entry.add_child(path, child_entry))
@@ -222,7 +222,7 @@ class DirectoryTest(Test):
 
                 child_entry = dir_entry.get_descendent(path)
                 if child_entry is None:
-                    child_entry = DirListEntry(True, True, has_known_prefix=bool(prefix))
+                    child_entry = DirectoryStateTreeNode(True, True, has_known_prefix=bool(prefix))
                 elif not bool(prefix):
                     child_entry.has_known_prefix = False
 
@@ -239,7 +239,7 @@ class DirectoryTest(Test):
 
                 child_entry = dir_entry.get_descendent(path)
                 if child_entry is None:
-                    self.dir_list.append(DirListEntry(False, False, has_known_prefix=False))
+                    self.dir_list.append(DirectoryStateTreeNode(False, False, has_known_prefix=False))
                 else:
                     self.dir_list.append(dir_entry.add_child(path, child_entry))
 
@@ -251,7 +251,7 @@ class DirectoryTest(Test):
 
                 child_entry = dir_entry.get_descendent(old_path)
                 if child_entry is None:
-                    self.dir_list.append(DirListEntry(False, False, has_known_prefix=False))
+                    self.dir_list.append(DirectoryStateTreeNode(False, False, has_known_prefix=False))
                 else:
                     self.dir_list.append(dir_entry.add_child(new_path, child_entry))
 
@@ -266,7 +266,7 @@ class DirectoryTest(Test):
 
                 child_entry = dir_entry.get_descendent(())
                 if child_entry is None:
-                    self.dir_list.append(DirListEntry(False, False, has_known_prefix=False))
+                    self.dir_list.append(DirectoryStateTreeNode(False, False, has_known_prefix=False))
                 else:
                     self.dir_list.append(dir_entry.add_child(new_path, child_entry))
 
@@ -324,7 +324,7 @@ class DirectoryTest(Test):
                 instructions.push_args(*test_util.with_length(t))
                 instructions.append(op)
                 if root_op == 'DIRECTORY_OPEN_SUBSPACE':
-                    self.dir_list.append(DirListEntry(False, True, dir_entry.has_known_prefix))
+                    self.dir_list.append(DirectoryStateTreeNode(False, True, dir_entry.has_known_prefix))
                 else:
                     test_util.to_front(instructions, 1)
                     instructions.append('DIRECTORY_STRIP_PREFIX')
