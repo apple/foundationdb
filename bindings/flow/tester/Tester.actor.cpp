@@ -1739,7 +1739,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(510);
+		API *fdb = FDB::API::selectAPIVersion(520);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
@@ -1750,7 +1750,7 @@ ACTOR void _test_versionstamp() {
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();
 
-		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl"), FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
+		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl\x00\x00\x00\x00"), FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
 
 		Void _ = wait(tr->commit()); // should use retry loop
 

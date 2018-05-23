@@ -962,6 +962,14 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		System.out.println("t2.getNestedTuple(17): " + t2.getNestedTuple(17));
 		System.out.println("t2.getVersionstamp(20): " + t2.getVersionstamp(20));
 
+		int currOffset = 0;
+		for (Object item : t) {
+			int length = Tuple.from(item).pack().length;
+			Tuple t3 = Tuple.fromBytes(bytes, currOffset, length);
+			System.out.println("item = " + t3);
+			currOffset += length;
+		}
+
 		System.out.println("(2*(Long.MAX_VALUE+1),) = " + ByteArrayUtil.printable(Tuple.from(
 				BigInteger.valueOf(Long.MAX_VALUE).add(BigInteger.ONE).shiftLeft(1)
 		).pack()));
