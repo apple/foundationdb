@@ -140,7 +140,7 @@ ifeq ($(PLATFORM),linux)
 	sed -e 's/-PRERELEASE/-SNAPSHOT/g' bindings/java/pom.xml > "$@"
 
   packages/fdb-java-$(JARVER).jar: fdb_java versions.target
-	@echo "Building      $@"
+	@echo "Building       $@"
 	@rm -f $@
 	@rm -rf packages/jar_regular
 	@mkdir -p packages/jar_regular
