@@ -124,7 +124,7 @@ class DirectoryTest(Test):
             if random.random() < 0.5:
                 while True:
                     self.dir_index = random.randrange(0, len(self.dir_list))
-                    if not self.dir_list[self.dir_index].is_partition or not self.dir_list[self.dir_index].deleted:
+                    if not self.dir_list[self.dir_index].state().is_partition or not self.dir_list[self.dir_index].state().deleted:
                         break
 
                 instructions.push_args(self.dir_index)
@@ -133,15 +133,15 @@ class DirectoryTest(Test):
             dir_entry = self.dir_list[self.dir_index]
 
             choices = op_choices[:]
-            if dir_entry.is_directory:
+            if dir_entry.state().is_directory:
                 choices += directory
-            if dir_entry.is_subspace:
+            if dir_entry.state().is_subspace:
                 choices += subspace
 
             op = random.choice(choices)
 
             # print('%d. Selected %s, dir=%d, dir_id=%d, has_known_prefix=%d, dir_list_len=%d' \
-            #       % (len(instructions), op, self.dir_index, dir_entry.dir_id, dir_entry.has_known_prefix, len(self.dir_list)))
+            #       % (len(instructions), op, self.dir_index, dir_entry.dir_id, dir_entry.state().has_known_prefix, len(self.dir_list)))
 
             if op.endswith('_DATABASE') or op.endswith('_SNAPSHOT'):
                 root_op = op[0:-9]
@@ -194,7 +194,7 @@ class DirectoryTest(Test):
                 if child_entry is None:
                     child_entry = DirectoryStateTreeNode(True, True)
 
-                child_entry.has_known_prefix = False  
+                child_entry.state().has_known_prefix = False  
                 self.dir_list.append(dir_entry.add_child(path, child_entry))
 
             elif root_op == 'DIRECTORY_CREATE':
@@ -224,10 +224,10 @@ class DirectoryTest(Test):
                 if child_entry is None:
                     child_entry = DirectoryStateTreeNode(True, True, has_known_prefix=bool(prefix))
                 elif not bool(prefix):
-                    child_entry.has_known_prefix = False
+                    child_entry.state().has_known_prefix = False
 
                 if is_partition:
-                    child_entry.is_partition = True
+                    child_entry.state().is_partition = True
 
                 self.dir_list.append(dir_entry.add_child(path, child_entry))
 
@@ -256,7 +256,7 @@ class DirectoryTest(Test):
                     self.dir_list.append(dir_entry.add_child(new_path, child_entry))
 
                 # Make sure that the default directory subspace still exists after moving the specified directory
-                if dir_entry.is_directory and not dir_entry.is_subspace and old_path == (u'',):
+                if dir_entry.state().is_directory and not dir_entry.state().is_subspace and old_path == (u'',):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
             elif root_op == 'DIRECTORY_MOVE_TO':
@@ -291,7 +291,7 @@ class DirectoryTest(Test):
                 dir_entry.delete(path)
 
                 # Make sure that the default directory subspace still exists after removing the specified directory
-                if path == () or (dir_entry.is_directory and not dir_entry.is_subspace and path == (u'',)):
+                if path == () or (dir_entry.state().is_directory and not dir_entry.state().is_subspace and path == (u'',)):
                     self.ensure_default_directory_subspace(instructions, default_path)
 
             elif root_op == 'DIRECTORY_LIST' or root_op == 'DIRECTORY_EXISTS':
@@ -310,7 +310,7 @@ class DirectoryTest(Test):
                 instructions.append('DIRECTORY_STRIP_PREFIX')
 
             elif root_op == 'DIRECTORY_UNPACK_KEY' or root_op == 'DIRECTORY_CONTAINS':
-                if not dir_entry.has_known_prefix or random.random() < 0.2 or root_op == 'DIRECTORY_UNPACK_KEY':
+                if not dir_entry.state().has_known_prefix or random.random() < 0.2 or root_op == 'DIRECTORY_UNPACK_KEY':
                     t = self.random.random_tuple(5)
                     instructions.push_args(*test_util.with_length(t))
                     instructions.append('DIRECTORY_PACK_KEY')
@@ -324,7 +324,7 @@ class DirectoryTest(Test):
                 instructions.push_args(*test_util.with_length(t))
                 instructions.append(op)
                 if root_op == 'DIRECTORY_OPEN_SUBSPACE':
-                    self.dir_list.append(DirectoryStateTreeNode(False, True, dir_entry.has_known_prefix))
+                    self.dir_list.append(DirectoryStateTreeNode(False, True, dir_entry.state().has_known_prefix))
                 else:
                     test_util.to_front(instructions, 1)
                     instructions.append('DIRECTORY_STRIP_PREFIX')
@@ -340,10 +340,10 @@ class DirectoryTest(Test):
         for i, dir_entry in enumerate(self.dir_list):
             instructions.push_args(i)
             instructions.append('DIRECTORY_CHANGE')
-            if dir_entry.is_directory:
+            if dir_entry.state().is_directory:
                 instructions.push_args(self.directory_log.key())
                 instructions.append('DIRECTORY_LOG_DIRECTORY')
-            if dir_entry.has_known_prefix and dir_entry.is_subspace:
+            if dir_entry.state().has_known_prefix and dir_entry.state().is_subspace:
                 # print('%d. Logging subspace: %d' % (i, dir_entry.dir_id))
                 instructions.push_args(self.subspace_log.key())
                 instructions.append('DIRECTORY_LOG_SUBSPACE')
