@@ -101,6 +101,8 @@ Blob store Backup URLs can have optional parameters at the end which set various
 
 Here is a complete list of valid parameters:
 
+ *secure_connection* (or *sc*) - Set 1 for secure connection and 0 for unsecure connection. Defaults to secure connection.
+
  *connect_tries* (or *ct*) - Number of times to try to connect for each request.
 
  *request_tries* (or *rt*) - Number of times to try each request until a parseable HTTP response other than 429 is received.
@@ -149,6 +151,26 @@ The Blob Credential File format is JSON with the following schema:
       "user2@host2" : { "secret" : "SECRETKEY2" }
     }
   }
+
+SSL Support
+===========
+
+By default, backup will communicate over https. To configure https, the following environment variables are used:
+
+============================ ====================================================
+Environment Variable         Purpose
+============================ ====================================================
+``FDB_TLS_PLUGIN``           Path to the file to be loaded as the TLS plugin
+``FDB_TLS_CERTIFICATE_FILE`` Path to the file from which the local certificates
+                             can be loaded, used by the plugin
+``FDB_TLS_KEY_FILE``         Path to the file from which to load the private
+                             key, used by the plugin
+``FDB_TLS_PASSWORD``         The byte-string representing the passcode for
+                             unencrypting the private key
+``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
+                             to trust. Specify to override the default openssl
+                             location.
+============================ ====================================================
 
 
 ``fdbbackup`` command line tool
