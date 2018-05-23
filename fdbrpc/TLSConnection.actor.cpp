@@ -312,6 +312,8 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 	}
 	if ( !key_set ) {
 		std::string keyFile;
+		if ( keyPassword.empty() )
+			platform::getEnvironmentVar( "FDB_TLS_PASSWORD", keyPassword );
 		if ( !platform::getEnvironmentVar( "FDB_TLS_KEY_FILE", keyFile ) )
 			keyFile = fileExists(defaultCertFileName) ? defaultCertFileName : joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
 		set_key_file( keyFile );
@@ -354,6 +356,11 @@ static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_erro
 		s = SevError;
 
 	auto t = TraceEvent( s, event, uid );
+
+	if ( !is_error ) {
+		// don't spam with too many reasons why client connections were rejected
+		t = t.suppressFor(1.0, true);
+	}
 
 	va_list ap;
 	char* field;
