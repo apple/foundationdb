@@ -13,6 +13,12 @@ class DirectoryStateTreeNode:
     dir_id = 0  
 
     @classmethod
+    def reset(cls):
+        cls.dir_id = 0
+        cls.layers = {}
+        cls.default_directory = None
+
+    @classmethod
     def set_default_directory(cls, default_directory):
         cls.default_directory = default_directory
 

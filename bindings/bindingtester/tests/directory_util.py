@@ -37,6 +37,7 @@ DIRECTORY_ERROR_STRING = 'DIRECTORY_ERROR'
 
 def setup_directories(instructions, default_path, random):
     # Clients start with the default directory layer in the directory list
+    DirectoryStateTreeNode.reset()
     dir_list = [DirectoryStateTreeNode.get_layer('\xfe')]
 
     instructions.push_args(0, '\xfe')
