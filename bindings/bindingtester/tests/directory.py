@@ -53,7 +53,7 @@ class DirectoryTest(Test):
         self.dir_index = directory_util.DEFAULT_DIRECTORY_INDEX
 
     def generate_layer(self):
-        if random.random < 0.7:
+        if random.random() < 0.7:
             return ''
         else:
             choice = random.randint(0, 3)
