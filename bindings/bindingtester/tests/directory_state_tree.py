@@ -99,7 +99,7 @@ class DirectoryStateTreeNode:
             return subdir._add_child_impl(subpath[1:], child)
 
     def _merge(self, other):
-        if self == other:
+        if self.dir_id == other.dir_id:
             return
 
         self.is_directory = self.is_directory and other.is_directory
@@ -114,7 +114,8 @@ class DirectoryStateTreeNode:
         other.has_known_prefix = self.has_known_prefix
         other.deleted = self.deleted
         other.is_partition = self.is_partition
-        other.dir_id = self.dir_id
+        other.dir_id = min(other.dir_id, self.dir_id)
+        self.dir_id = other.dir_id
 
         other_children = other.children.copy()
         for c in other_children:
