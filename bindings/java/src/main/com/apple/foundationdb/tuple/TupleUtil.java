@@ -539,10 +539,10 @@ class TupleUtil {
 	}
 
 	static List<Object> unpack(byte[] bytes, int start, int length) {
-		List<Object> items = new LinkedList<Object>();
+		List<Object> items = new LinkedList<>();
 		int pos = start;
 		int end = start + length;
-		while(pos < bytes.length) {
+		while(pos < end) {
 			DecodeResult decoded = decode(bytes, pos, end);
 			items.add(decoded.o);
 			pos = decoded.end;

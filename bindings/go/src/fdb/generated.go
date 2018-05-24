@@ -159,6 +159,27 @@ func (o NetworkOptions) SetBuggifySectionFiredProbability(param int64) error {
 	return o.setOpt(51, b)
 }
 
+// Set the ca bundle
+//
+// Parameter: ca bundle
+func (o NetworkOptions) SetTLSCaBytes(param []byte) error {
+	return o.setOpt(52, param)
+}
+
+// Set the file from which to load the certificate authority bundle
+//
+// Parameter: file path
+func (o NetworkOptions) SetTLSCaPath(param string) error {
+	return o.setOpt(53, []byte(param))
+}
+
+// Set the passphrase for encrypted private key. Password should be set before setting the key for the password to be used.
+//
+// Parameter: key passphrase
+func (o NetworkOptions) SetTLSPassword(param string) error {
+	return o.setOpt(54, []byte(param))
+}
+
 // Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network.
 func (o NetworkOptions) SetDisableMultiVersionClientApi() error {
 	return o.setOpt(60, nil)
