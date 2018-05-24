@@ -31,8 +31,8 @@
 //
 // FoundationDB tuples can currently encode byte and unicode strings, integers,
 // floats, doubles, booleans, UUIDs, tuples, and NULL values. In Go these are
-// represented as []byte (or fdb.KeyConvertible), string, int64 (or int),
-// float32, float64, bool, UUID, Tuple, and nil.
+// represented as []byte (or fdb.KeyConvertible), string, uint64 (or uint),
+// int64 (or int), float32, float64, bool, UUID, Tuple, and nil.
 package tuple
 
 import (
@@ -50,7 +50,7 @@ import (
 // result in a runtime panic).
 //
 // The valid types for TupleElement are []byte (or fdb.KeyConvertible), string,
-// int64 (or int), float, double, bool, UUID, Tuple, and nil.
+// uint64 (or uint), int64 (or int), float, double, bool, UUID, Tuple, and nil.
 type TupleElement interface{}
 
 // Tuple is a slice of objects that can be encoded as FoundationDB tuples. If
@@ -59,7 +59,7 @@ type TupleElement interface{}
 //
 // Given a Tuple T containing objects only of these types, then T will be
 // identical to the Tuple returned by unpacking the byte slice obtained by
-// packing T (modulo type normalization to []byte and int64).
+// packing T (modulo type normalization to []byte, uint64, and int64).
 type Tuple []TupleElement
 
 // UUID wraps a basic byte array as a UUID. We do not provide any special
@@ -262,8 +262,8 @@ func (p *packer) encodeTuple(t Tuple, nested bool) {
 
 // Pack returns a new byte slice encoding the provided tuple. Pack will panic if
 // the tuple contains an element of any type other than []byte,
-// fdb.KeyConvertible, string, int64, int, float32, float64, bool, tuple.UUID,
-// nil, or a Tuple with elements of valid types.
+// fdb.KeyConvertible, string, uint64, uint, int64, int, float32, float64, bool,
+// tuple.UUID, nil, or a Tuple with elements of valid types.
 //
 // Tuple satisfies the fdb.KeyConvertible interface, so it is not necessary to
 // call Pack when using a Tuple with a FoundationDB API function that requires a
