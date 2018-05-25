@@ -303,7 +303,7 @@ func decodeString(b []byte) (string, int) {
 
 func decodeInt(b []byte) (interface{}, int) {
 	if b[0] == intZeroCode {
-		return uint64(0), 1
+		return int64(0), 1
 	}
 
 	var neg bool
@@ -318,14 +318,20 @@ func decodeInt(b []byte) (interface{}, int) {
 	copy(bp[8-n:], b[1:n+1])
 
 	if neg {
-		var ret int64
-		binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &ret)
-		return ret - int64(sizeLimits[n]), n + 1
+		var retInt int64
+		binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &retInt)
+		return retInt - int64(sizeLimits[n]), n + 1
 	}
 
-	var ret uint64
-	binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &ret)
-	return ret, n + 1
+	var retInt int64
+	binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &retInt)
+	if retInt > 0 {
+		return retInt, n + 1
+	}
+
+	var retUint uint64
+	binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &retUint)
+	return retUint, n + 1
 }
 
 func decodeFloat(b []byte) (float32, int) {
