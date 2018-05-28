@@ -316,21 +316,20 @@ func decodeInt(b []byte) (interface{}, int) {
 
 	bp := make([]byte, 8)
 	copy(bp[8-n:], b[1:n+1])
-	buf := bytes.NewBuffer(bp)
 
 	var retInt int64
 	if neg {
-		binary.Read(buf, binary.BigEndian, &retInt)
+		binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &retInt)
 		return retInt - int64(sizeLimits[n]), n + 1
 	}
 
-	binary.Read(buf, binary.BigEndian, &retInt)
+	binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &retInt)
 	if retInt > 0 {
 		return retInt, n + 1
 	}
 
 	var retUint uint64
-	binary.Read(buf, binary.BigEndian, &retUint)
+	binary.Read(bytes.NewBuffer(bp), binary.BigEndian, &retUint)
 	return retUint, n + 1
 }
 
