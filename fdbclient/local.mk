@@ -22,7 +22,7 @@
 
 fdbclient_CFLAGS := $(fdbrpc_CFLAGS)
 ifeq ($(PLATFORM),freebsd)
-fdbclient_LIBS := -lm -lc++ -lpthread -lexecinfo -leio
+fdbclient_LIBS := -lm -lc++ -lpthread -lexecinfo
 endif
 
 fdbclient_GENERATED_SOURCES += fdbclient/FDBOptions.g.h

@@ -25,7 +25,7 @@ fdbrpc_BUILD_SOURCES += fdbrpc/libeio/eio.c
 fdbrpc_CFLAGS := -I$(BOOSTDIR) -I. -Ifdbrpc -Ifdbrpc/libeio -DUSE_UCONTEXT
 fdbrpc_LDFLAGS :=
 ifeq ($(PLATFORM),freebsd)
-fdbrpc_LIBS := -lm -lc++ -lpthread -leio
+fdbrpc_LIBS := -lm -lc++ -lpthread
 endif
 
 ifeq ($(PLATFORM),osx)
