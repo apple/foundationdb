@@ -531,7 +531,7 @@ ACTOR Future<Void> rateKeeper(
 	TraceEvent("RkStorageServerQueueSizeParameters").detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER).detail("Spring", SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER).detail("EBrake", SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES)
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
 
-	tlogInterfs = dbInfo->get().logSystemConfig.allPresentLogs();
+	tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 	for( int i = 0; i < tlogInterfs.size(); i++ )
 		tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 
@@ -566,8 +566,8 @@ ACTOR Future<Void> rateKeeper(
 			}
 			when (Void _ = wait(err.getFuture())) {}
 			when (Void _ = wait(dbInfo->onChange())) {
-				if( tlogInterfs != dbInfo->get().logSystemConfig.allPresentLogs() ) {
-					tlogInterfs = dbInfo->get().logSystemConfig.allPresentLogs();
+				if( tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs() ) {
+					tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 					tlogTrackers = std::vector<Future<Void>>();
 					for( int i = 0; i < tlogInterfs.size(); i++ )
 						tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );

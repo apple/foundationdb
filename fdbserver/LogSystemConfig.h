@@ -164,6 +164,20 @@ struct LogSystemConfig {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
 	}
 
+	std::vector<TLogInterface> allLocalLogs() const {
+		std::vector<TLogInterface> results;
+		for( int i = 0; i < tLogs.size(); i++ ) {
+			if(tLogs[i].isLocal) {
+				for( int j = 0; j < tLogs[i].tLogs.size(); j++ ) {
+					if( tLogs[i].tLogs[j].present() ) {
+						results.push_back(tLogs[i].tLogs[j].interf());
+					}
+				}
+			}
+		}
+		return results;
+	}
+
 	std::vector<TLogInterface> allPresentLogs() const {
 		std::vector<TLogInterface> results;
 		for( int i = 0; i < tLogs.size(); i++ ) {
