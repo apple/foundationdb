@@ -64,7 +64,7 @@ struct ITLSPolicy {
 	// set_cert_data should import the provided certificate list and
 	// associate it with this policy. cert_data will point to a PEM
 	// encoded certificate list, ordered such that each certificate
-	// certifies the one befor it.
+	// certifies the one before it.
 	//
 	// cert_data may additionally contain key information, which must
 	// be ignored.
@@ -120,7 +120,7 @@ struct ITLSPolicy {
 // remaining arguments must be pairs of (const char*); the first of
 // each pair must be a valid XML attribute name, and the second a
 // valid XML attribute value. The final parameter must be NULL.
-typedef void (*ITLSLogFunc)(const char* event, void* uid, int is_error, ...);
+typedef void (*ITLSLogFunc)(const char* event, void* uid, bool is_error, ...);
 
 struct ITLSPlugin {
 	virtual void addref() = 0;

@@ -27,27 +27,23 @@
 #include "ReferenceCounted.h"
 
 #include "FDBLibTLSPolicy.h"
-#include "FDBLibTLSVerify.h"
 
 #include <tls.h>
 
 struct FDBLibTLSSession : ITLSSession, ReferenceCounted<FDBLibTLSSession> {
-	FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid);
+	FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid);
 	virtual ~FDBLibTLSSession();
 
 	virtual void addref() { ReferenceCounted<FDBLibTLSSession>::addref(); }
 	virtual void delref() { ReferenceCounted<FDBLibTLSSession>::delref(); }
 
-	bool verify_peer();
-	bool check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs);
+	bool check_criteria();
 
 	virtual int handshake();
 	virtual int read(uint8_t* data, int length);
 	virtual int write(const uint8_t* data, int length);
 
 	Reference<FDBLibTLSPolicy> policy;
-
-	bool is_client;
 
 	struct tls *tls_ctx;
 	struct tls *tls_sctx;
