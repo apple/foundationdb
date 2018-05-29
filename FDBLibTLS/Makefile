@@ -69,7 +69,7 @@ $(error Unknown platform $(PLATFORM))
 endif
 
 PLUGIN := FDBLibTLS.$(DYEXT)
-OBJECTS := FDBLibTLSPlugin.o FDBLibTLSPolicy.o FDBLibTLSSession.o FDBLibTLSVerify.o
+OBJECTS := FDBLibTLSPlugin.o FDBLibTLSPolicy.o FDBLibTLSSession.o
 LINKLINE := $(CXXFLAGS) $(CFLAGS) $(LDFLAGS) $(OBJECTS) $(LINK_LDFLAGS) -o $(PLUGIN)
 
 all: $(PLUGIN)

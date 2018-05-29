@@ -23,14 +23,12 @@
 
 #pragma once
 
+#include "FDBLibTLSPlugin.h"
 #include "ITLSPlugin.h"
 #include "ReferenceCounted.h"
 
-#include "FDBLibTLSPlugin.h"
-#include "FDBLibTLSVerify.h"
-
+#include <map>
 #include <string>
-#include <vector>
 
 struct FDBLibTLSPolicy: ITLSPolicy, ReferenceCounted<FDBLibTLSPolicy> {
 	FDBLibTLSPolicy(Reference<FDBLibTLSPlugin> plugin, ITLSLogFunc logf);
@@ -42,29 +40,28 @@ struct FDBLibTLSPolicy: ITLSPolicy, ReferenceCounted<FDBLibTLSPolicy> {
 	Reference<FDBLibTLSPlugin> plugin;
 	ITLSLogFunc logf;
 
-	virtual ITLSSession* create_session(bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid);
+	virtual ITLSSession* create_session(bool is_client, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid);
 
-	struct stack_st_X509* parse_cert_pem(const uint8_t* cert_pem, size_t cert_pem_len);
 	void parse_verify(std::string input);
 	void reset_verify(void);
 
-	virtual bool set_ca_data(const uint8_t* ca_data, int ca_len);
 	virtual bool set_cert_data(const uint8_t* cert_data, int cert_len);
-	virtual bool set_key_data(const uint8_t* key_data, int key_len, const char* password);
-	virtual bool set_verify_peers(int count, const uint8_t* verify_peers[], int verify_peers_len[]);
+	virtual bool set_key_data(const uint8_t* key_data, int key_len);
+	virtual bool set_verify_peers(const uint8_t* verify_peers, int verify_peers_len);
 
-	struct tls_config* tls_cfg;
+	struct tls_config *tls_cfg;
 
 	bool session_created;
 
-	bool ca_data_set;
 	bool cert_data_set;
 	bool key_data_set;
 	bool verify_peers_set;
 
-	struct stack_st_X509* roots;
+        bool verify_cert;
+        bool verify_time;
 
-	std::vector<Reference<FDBLibTLSVerify>> verify_rules;
+	std::map<int, std::string> subject_criteria;
+	std::map<int, std::string> issuer_criteria;
 };
 
 #endif /* FDB_LIBTLS_POLICY_H */
