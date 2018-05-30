@@ -160,6 +160,11 @@ class DirectoryExtension {
 				int count = StackUtils.getInt(inst.popParam().get());
 				List<List<String>> path = DirectoryUtil.popPaths(inst, count).get();
 				boolean exists;
+
+				// In Java, DirectoryLayer.exists can return true without doing any reads.
+				// Other bindings will always do a read, so we get a read version now to be compatible with that behavior.
+				inst.readTcx.read(tr -> tr.getReadVersion().join());
+
 				if(path.size() == 0)
 					exists = directory().exists(inst.readTcx).get();
 				else
