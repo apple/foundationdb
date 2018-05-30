@@ -2,6 +2,15 @@
 Release Notes
 #############
 
+5.2.2
+=====
+
+Fixes
+-----
+
+* Build would fail on recent versions of Clang
+* Clusters running with TLS plugin would fail to start when client and server certificates used different validation rules
+
 5.2.1
 =====
 
