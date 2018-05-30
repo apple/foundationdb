@@ -59,6 +59,10 @@ Command-line Option      Client Option        Environment Variable         Purpo
                                                                            key, used by the plugin
 ``tls_verify_peers``     ``TLS_verify_peers`` ``FDB_TLS_VERIFY_PEERS``     The byte-string for the verification of peer
                                                                            certificates and sessions, used by the plugin
+``tls_password``         ``TLS_password``     ``FDB_TLS_PASSWORD``         The byte-string representing the passcode for
+                                                                           unencrypting the private key
+``tls_ca_file``          ``TLS_ca_path``      ``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
+                                                                           to trust
 ======================== ==================== ============================ ==================================================
 
 The value for each setting can be specified in more than one way.  The actual valued used is determined in the following order:
@@ -69,7 +73,7 @@ The value for each setting can be specified in more than one way.  The actual va
 
 As with all other command-line options to ``fdbserver``, the TLS settings can be specified in the :ref:`[fdbserver] section of the configuration file <foundationdb-conf-fdbserver>`.
 
-The settings for certificate file, key file, and peer verification are interpreted by the loaded plugin.
+The settings for certificate file, key file, peer verification, password and CA file are interpreted by the loaded plugin.
 
 Default Values
 --------------
@@ -97,7 +101,17 @@ The default behavior when the certificate or key file is not specified is to loo
 Default Peer Verification
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default peer verification is the empty string.
+The default peer verification is ``Check.Valid=0``.
+
+Default Password
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+There is no default password. If no password is specified, the plugin assumes that private key is unencrypted.
+
+CA file default location
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If a value is not specified, the plugin searches for certs in the default openssl certs location.
 
 Parameters and client bindings
 ------------------------------
@@ -132,7 +146,7 @@ A file must be supplied that contains an ordered list of certificates. The first
 
 All but the last certificate are provided to peers during TLS handshake as the certificate chain.
 
-The last certificate in the list is the trusted certificate. All processes that want to communicate must have the same trusted certificate.
+The last certificate in the list is the trusted certificate.
 
 .. note:: If the certificate list contains only one certificate, that certificate *must* be self-signed and will be used as both the certificate chain and the trusted certificate.
 
@@ -152,6 +166,8 @@ The key file must contain the private key corresponding to the process' own cert
   -----BEGIN PRIVATE KEY-----
   xxxxxxxxxxxxxxx
   -----END PRIVATE KEY-----
+
+It can optionally be encrypted by the password provided to tls_password.
 
 Certificate creation
 --------------------
@@ -173,7 +189,7 @@ A FoundationDB server or client will only communicate with peers that present a 
 Certificate field verification
 ------------------------------
 
-With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient.
+With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient. You can specify multiple verification strings by providing additional tls_verify_peers command line arguments.
 
 Turning down the validation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -215,6 +231,8 @@ Prefix                        DN
 ``S.``, ``Subject.``, or none Subject
 ``I.``, or ``Issuer.``        Issuer
 ============================= ========
+
+Additionally, the verification can be restricted to certificates signed by a given root CA with the field ``Root.CN``. This allows you to have different requirements for different root chains.
 
 The value of a condition must be specified in a form derived from a subset of `RFC 4514 <http://www.ietf.org/rfc/rfc4514.txt>`_. Specifically, the "raw" notation (a value starting with the ``#`` character) is not accepted. Other escaping mechanisms, including specifying characters by hex notation, are allowed. The specified field's value must exactly match the value in the peer's certificate.
 
