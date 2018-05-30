@@ -233,7 +233,7 @@ Future<Void> AsyncFileCached::quiesce() {
 AsyncFileCached::~AsyncFileCached() {
 	while ( !pages.empty() ) {
 		auto ok = pages.begin()->second->evict();
-		ASSERT( ok );
+		ASSERT_ABORT( ok );
 	}
 	openFiles.erase( filename );
 }
