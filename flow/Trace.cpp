@@ -890,7 +890,7 @@ TraceEvent::~TraceEvent() {
 				}
 			} // End of Throttler
 
-			_detailf("logGroup", "%.*s", g_traceLog.logGroup.size(), g_traceLog.logGroup.data());
+			_detailf("LogGroup", "%.*s", g_traceLog.logGroup.size(), g_traceLog.logGroup.data());
 			if (!trackingKey.empty()) {
 				if(!isNetworkThread()) {
 					TraceEvent(SevError, "TrackLatestFromNonNetworkThread");
@@ -1038,7 +1038,7 @@ void TraceBatch::dump() {
 
 	for(int i = 0; i < attachBatch.size(); i++) {
 		char buffer[256];
-		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" ID=\"%016" PRIx64 "\" To=\"%016" PRIx64 "\"/>\r\n",
+		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" LogGroup=\"%.*s\" ID=\"%016" PRIx64 "\" To=\"%016" PRIx64 "\"/>\r\n",
 			(int)SevInfo, attachBatch[i].time, attachBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			attachBatch[i].id, attachBatch[i].to);
 		g_traceLog.write( buffer, length );
@@ -1046,7 +1046,7 @@ void TraceBatch::dump() {
 
 	for(int i = 0; i < eventBatch.size(); i++) {
 		char buffer[256];
-		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" ID=\"%016" PRIx64 "\" Location=\"%s\"/>\r\n",
+		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" LogGroup=\"%.*s\" ID=\"%016" PRIx64 "\" Location=\"%s\"/>\r\n",
 			(int)SevInfo, eventBatch[i].time, eventBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			eventBatch[i].id, eventBatch[i].location );
 		g_traceLog.write( buffer, length );
@@ -1054,7 +1054,7 @@ void TraceBatch::dump() {
 
 	for(int i = 0; i < buggifyBatch.size(); i++) {
 		char buffer[256];
-		int length = sprintf( buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"BuggifySection\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" Activated=\"%d\" File=\"%s\" Line=\"%d\"/>\r\n",
+		int length = sprintf( buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"BuggifySection\" Machine=\"%d.%d.%d.%d:%d\" LogGroup=\"%.*s\" Activated=\"%d\" File=\"%s\" Line=\"%d\"/>\r\n",
 			(int)SevInfo, buggifyBatch[i].time, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			buggifyBatch[i].activated, buggifyBatch[i].file.c_str(), buggifyBatch[i].line );
 		g_traceLog.write( buffer, length );

@@ -29,6 +29,7 @@ Other Changes
 -------------
 
 * Does not support upgrades from any version older than 5.0.
+* Renamed the trace log attribute ``logGroup`` to ``LogGroup``.
 
 Earlier release notes
 ---------------------
