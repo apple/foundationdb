@@ -74,6 +74,8 @@ extern int vsformat(std::string &outputString, const char* form, va_list args);
 
 extern Standalone<StringRef> strinc(StringRef const& str);
 extern StringRef strinc(StringRef const& str, Arena& arena);
+extern Standalone<StringRef> addVersionStampAtEnd(StringRef const& str);
+extern StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena);
 
 template <typename Iter>
 StringRef concatenate( Iter b, Iter const& e, Arena& arena ) {

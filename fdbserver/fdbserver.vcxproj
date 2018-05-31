@@ -36,7 +36,6 @@
     <ActorCompiler Include="Coordination.actor.cpp" />
     <ActorCompiler Include="CoordinatedState.actor.cpp" />
     <ActorCompiler Include="CoroFlow.actor.cpp" />
-    <ClCompile Include="DatabaseConfiguration.cpp" />
     <ActorCompiler Include="MasterProxyServer.actor.cpp" />
     <ActorCompiler Include="KeyValueStoreSQLite.actor.cpp" />
     <ActorCompiler Include="LeaderElection.actor.cpp" />
@@ -52,6 +51,7 @@
     <ActorCompiler Include="Resolver.actor.cpp" />
     <ActorCompiler Include="LogSystemDiskQueueAdapter.actor.cpp" />
     <ActorCompiler Include="LogSystemPeekCursor.actor.cpp" />
+    <ActorCompiler Include="LogRouter.actor.cpp" />
     <ActorCompiler Include="OldTLogServer.actor.cpp" />
     <ClCompile Include="SkipList.cpp" />
     <ActorCompiler Include="WaitFailure.actor.cpp" />
@@ -132,7 +132,6 @@
     <ActorCompiler Include="workloads\MetricLogging.actor.cpp" />
     <ActorCompiler Include="workloads\RYWPerformance.actor.cpp" />
     <ActorCompiler Include="workloads\RYWDisable.actor.cpp" />
-    <ActorCompiler Include="workloads\RestartRecovery.actor.cpp" />
     <ActorCompiler Include="workloads\UnitTests.actor.cpp" />
     <ActorCompiler Include="workloads\WorkerErrors.actor.cpp" />
     <ActorCompiler Include="workloads\MemoryLifetime.actor.cpp" />
@@ -150,7 +149,6 @@
     <ClInclude Include="CoordinatedState.h" />
     <ClInclude Include="CoordinationInterface.h" />
     <ClInclude Include="CoroFlow.h" />
-    <ClInclude Include="DatabaseConfiguration.h" />
     <ClInclude Include="DataDistribution.h" />
     <ClInclude Include="DBCoreState.h" />
     <ClInclude Include="IDiskQueue.h" />

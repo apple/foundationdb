@@ -122,9 +122,6 @@ struct MachineAttritionWorkload : TestWorkload {
 
 		ASSERT( g_network->isSimulated() );
 
-		TEST(g_simulator.killableMachines > 0);    // Some machines can be killed
-		TEST(g_simulator.killableDatacenters > 0); // Some processes can be killed
-
 		if( self->killDc ) {
 			Void _ = wait( delay( delayBeforeKill ) );
 

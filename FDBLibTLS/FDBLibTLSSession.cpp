@@ -28,6 +28,7 @@
 
 #include <exception>
 
+#include <set>
 #include <string.h>
 #include <limits.h>
 
@@ -138,67 +139,70 @@ bool match_criteria(X509_NAME *name, int nid, const char *value, size_t len) {
 	return rc;
 }
 
-bool FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
+std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
 	X509_STORE_CTX *store_ctx = NULL;
 	X509_NAME *subject, *issuer;
 	BIO *bio = NULL;
 	bool rc = false;
+	// if returning false, give a reason string
+	std::string reason = "";
 
 	// If certificate verification is disabled, there's nothing more to do.
 	if (!verify->verify_cert)
-		return true;
+		return std::make_tuple(true, reason);
 
 	// Verify the certificate.
 	if ((store_ctx = X509_STORE_CTX_new()) == NULL) {
 		policy->logf("FDBLibTLSOutOfMemory", uid, true, NULL);
+		reason = "FDBLibTLSOutOfMemory";
 		goto err;
 	}
 	if (!X509_STORE_CTX_init(store_ctx, NULL, sk_X509_value(certs, 0), certs)) {
-		policy->logf("FDBLibTLSStoreCtxInit", uid, true, NULL);
+		reason = "FDBLibTLSStoreCtxInit";
 		goto err;
 	}
 	X509_STORE_CTX_trusted_stack(store_ctx, policy->roots);
-	X509_STORE_CTX_set_default(store_ctx, is_client ? "ssl_client" : "ssl_server");
+	X509_STORE_CTX_set_default(store_ctx, is_client ? "ssl_server" : "ssl_client");
 	if (!verify->verify_time)
 		X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(store_ctx), X509_V_FLAG_NO_CHECK_TIME);
 	if (X509_verify_cert(store_ctx) <= 0) {
 		const char *errstr = X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx));
-		policy->logf("FDBLibTLSVerifyCert", uid, true, "VerifyError", errstr, NULL);
+		reason = "FDBLibTLSVerifyCert VerifyError " + std::string(errstr);
 		goto err;
 	}
 
 	// Check subject criteria.
 	if ((subject = X509_get_subject_name(sk_X509_value(store_ctx->chain, 0))) == NULL) {
-		policy->logf("FDBLibTLSCertSubjectError", uid, true, NULL);
+		reason = "FDBLibTLSCertSubjectError";
 		goto err;
 	}
 	for (auto &pair: verify->subject_criteria) {
 		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
-			policy->logf("FDBLibTLSCertSubjectMatchFailure", uid, true, NULL);
+			reason = "FDBLibTLSCertSubjectMatchFailure";
 			goto err;
 		}
 	}
 
 	// Check issuer criteria.
 	if ((issuer = X509_get_issuer_name(sk_X509_value(store_ctx->chain, 0))) == NULL) {
-		policy->logf("FDBLibTLSCertIssuerError", uid, true, NULL);
+		reason = "FDBLibTLSCertIssuerError";
 		goto err;
 	}
 	for (auto &pair: verify->issuer_criteria) {
 		if (!match_criteria(issuer, pair.first, pair.second.c_str(), pair.second.size())) {
-			policy->logf("FDBLibTLSCertIssuerMatchFailure", uid, true, NULL);
+			reason = "FDBLibTLSCertIssuerMatchFailure";
 			goto err;
 		}
 	}
 
 	// Check root criteria - this is the subject of the final certificate in the stack.
 	if ((subject = X509_get_subject_name(sk_X509_value(store_ctx->chain, sk_X509_num(store_ctx->chain) - 1))) == NULL) {
-		policy->logf("FDBLibTLSRootSubjectError", uid, true, NULL);
+		reason = "FDBLibTLSRootSubjectError";
 		goto err;
 	}
 	for (auto &pair: verify->root_criteria) {
 		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
-			policy->logf("FDBLibTLSRootSubjectMatchFailure", uid, true, NULL);
+			reason = "FDBLibTLSRootSubjectMatchFailure";
 			goto err;
 		}
 	}
@@ -209,7 +213,7 @@ bool FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct st
  err:
 	X509_STORE_CTX_free(store_ctx);
 
-	return rc;
+	return std::make_tuple(rc, reason);
 }
 
 bool FDBLibTLSSession::verify_peer() {
@@ -217,6 +221,9 @@ bool FDBLibTLSSession::verify_peer() {
 	const uint8_t *cert_pem;
 	size_t cert_pem_len;
 	bool rc = false;
+	std::set<std::string> verify_failure_reasons;
+	bool verify_success;
+	std::string verify_failure_reason;
 
 	// If no verify peer rules have been set, we are relying on standard
 	// libtls verification.
@@ -232,9 +239,20 @@ bool FDBLibTLSSession::verify_peer() {
 
 	// Any matching rule is sufficient.
 	for (auto &verify_rule: policy->verify_rules) {
-		if (check_verify(verify_rule, certs)) {
+		std::tie(verify_success, verify_failure_reason) = check_verify(verify_rule, certs);
+		if (verify_success) {
 			rc = true;
 			break;
+		} else {
+			if (verify_failure_reason.length() > 0)
+				verify_failure_reasons.insert(verify_failure_reason);
+		}
+	}
+
+	if (!rc) {
+		// log the various failure reasons
+		for (std::string reason : verify_failure_reasons) {
+			policy->logf(reason.c_str(), uid, false, NULL);
 		}
 	}
 

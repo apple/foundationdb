@@ -624,8 +624,9 @@ static void printUsage( const char *name, bool devhelp ) {
 	printf("  -a ID, --datacenter_id ID\n"
 		   "                 Data center identifier key (up to 16 hex characters).\n");
 	printf("  -c CLASS, --class CLASS\n"
-		   "                 Machine class (valid options are storage, transaction,\n");
-	printf("                 resolution, proxy, master, test, unset, stateless, log, cluster_controller).\n");
+		   "                 Machine class (valid options are storage, transaction,\n"
+		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
+		   "                 and cluster_controller).\n");
 	printf(TLS_HELP);
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, -?, --help Display this help and exit.\n");
@@ -1192,7 +1193,8 @@ int main(int argc, char* argv[]) {
 					break;
 				case TLSOptions::OPT_TLS_PLUGIN:
 					try {
-						tlsOptions->set_plugin_name_or_path( args.OptionArg() );
+						const char* plugin_path = args.OptionArg();
+						tlsOptions->set_plugin_name_or_path( plugin_path ? plugin_path : "" );
 					} catch (Error& e) {
 						fprintf(stderr, "ERROR: cannot load TLS plugin `%s' (%s)\n", args.OptionArg(), e.what());
 						printHelpTeaser(argv[0]);
@@ -1491,7 +1493,7 @@ int main(int argc, char* argv[]) {
 					if (listenError.isReady()) listenError.get();
 				} catch (Error& e) {
 					TraceEvent("BindError").error(e);
-					fprintf(stderr, "Error initializing networking with public address %s and listen address %s\n", publicAddress.toString().c_str(), listenAddress.toString().c_str());
+					fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n", publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1597,7 +1599,7 @@ int main(int argc, char* argv[]) {
 				platform::createDirectory( dataFolder );
 			}
 
-			setupAndRun( dataFolder, testFile, restarting );
+			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );

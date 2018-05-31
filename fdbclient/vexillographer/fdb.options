@@ -187,6 +187,9 @@ description is not currently required but encouraged.
             description="By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well. This behavior is intended to help developers discover situations where operations could be unintentionally executed after the transaction has been reset. Setting this option removes that protection, causing only the offending operation to fail."/>
     <Option name="read_lock_aware" code="702"
             description="The transaction can read from locked databases."/>
+    <Option name="first_in_batch" code="710"
+            description="No other transactions will be applied before this transaction within the same commit version."
+            hidden="true" />
   </Scope>
 
   <!-- The enumeration values matter - do not change them without

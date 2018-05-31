@@ -283,8 +283,27 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 	}
 }
 
+ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
+	Void _ = wait( delay(time) );
+
+	if(g_network->isSimulated()) {
+		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
+		g_simulator.hasRemoteReplication = false;
+		ConfigurationResult::Type _ = wait( changeConfig( cx, "remote_none" ) );
+		if (g_network->isSimulated() && g_simulator.extraDB) {
+			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
+			Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
+			ConfigurationResult::Type _ = wait(changeConfig(extraDB, "remote_none"));
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0 ) {
+	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100));
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 
@@ -346,32 +365,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 	return Void();
 }
 
-//Waits for f to complete. If simulated, disables connection failures after waiting a specified amount of time
-ACTOR Future<Void> disableConnectionFailuresAfter( Future<Void> f, double disableTime, std::string context ) {
-	if(!g_network->isSimulated()) {
-		Void _ = wait(f);
-		return Void();
-	}
-
-	choose {
-		when(Void _ = wait(f)) {
-			return Void();
-		}
-		when(Void _ = wait(delay(disableTime))) {
-			g_simulator.speedUpSimulation = true;
-			g_simulator.connectionFailuresDisableDuration = 1e6;
-			TraceEvent(SevWarnAlways, ("DisableConnectionFailures_" + context).c_str());
-		}
-	}
-
-	Void _ = wait(f);
-	return Void();
-}
-
-
 Future<Void> quietDatabase( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, std::string phase, int64_t dataInFlightGate,
 	int64_t maxTLogQueueGate, int64_t maxStorageServerQueueGate, int64_t maxDataDistributionQueueSize ) {
-
-	Future<Void> quiet = waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate, maxDataDistributionQueueSize);
-	return disableConnectionFailuresAfter(quiet, 300.0, "QuietDatabase" + phase);
+	return waitForQuietDatabase(cx, dbInfo, phase, dataInFlightGate, maxTLogQueueGate, maxStorageServerQueueGate, maxDataDistributionQueueSize);
 }

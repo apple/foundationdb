@@ -6,6 +6,7 @@ fdb-go
 This package requires:
 
 - Go 1.1+ with CGO enabled
+- [Mono](http://www.mono-project.com/) (macOS or Windows) or [Visual Studio](https://www.visualstudio.com/) (Windows)  (build-time only)
 - FoundationDB C API 2.0.x, 3.0.x, or 4.x.y (part of the [FoundationDB clients package](https://apple.github.io/foundationdb/downloads.html#c))
 
 Use of this package requires the selection of a FoundationDB API version at runtime. This package currently supports FoundationDB API versions 200-520.

@@ -450,7 +450,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 	virtual ~AFCPage() {
 		clearDirty();
-		ASSERT( flushableIndex == -1 );
+		ASSERT_ABORT( flushableIndex == -1 );
 	}
 
 	void setDirty() {

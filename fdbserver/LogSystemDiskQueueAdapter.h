@@ -42,7 +42,7 @@ public:
 
 	LogSystemDiskQueueAdapter( Reference<ILogSystem> logSystem, Tag tag, bool recover=true ) : logSystem(logSystem), tag(tag), enableRecovery(recover), recoveryLoc(1), recoveryQueueLoc(1), poppedUpTo(0), nextCommit(1), recoveryQueueDataSize(0) {
 		if (enableRecovery)
-			cursor = logSystem->peek( 0, tag, true );
+			cursor = logSystem->peek( UID(), 0, tag, true );
 	}
 
 	struct CommitMessage {

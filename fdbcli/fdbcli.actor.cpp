@@ -730,7 +730,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						std::string description;
 						if (recoveryState.get("name", name) &&
 							recoveryState.get("description", description) &&
-							name != "fully_recovered")
+							name != "fully_recovered" && name != "remote_recovered")
 						{
 							fatalRecoveryState = true;
 
@@ -854,7 +854,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += "\n  Redundancy mode        - ";
 				std::string strVal;
 
-				if (statusObjConfig.get("redundancy.factor", strVal)){
+				if (statusObjConfig.get("redundancy_mode", strVal)){
 					outputString += strVal;
 				} else
 					outputString += "unknown";
@@ -3197,7 +3197,7 @@ int main(int argc, char **argv) {
 	if ( opt.tlsKeyPath.size() ) {
 		try {
 			if (opt.tlsPassword.size())
-				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD);
+				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, opt.tlsPassword);
 
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, opt.tlsKeyPath);
 		} catch( Error& e ) {

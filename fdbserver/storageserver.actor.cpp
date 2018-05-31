@@ -262,6 +262,9 @@ private:
 
 public:
 	Tag tag;
+	vector<pair<Version,Tag>> history;
+	vector<pair<Version,Tag>> allHistory;
+	Version poppedAllAfter;
 	std::map<Version, Arena> freeable;  // for each version, an Arena that must be held until that version is < oldestVersion
 	Arena lastArena;
 
@@ -276,6 +279,32 @@ public:
 	void byteSampleApplyMutation( MutationRef const& m, Version ver );
 	void byteSampleApplySet( KeyValueRef kv, Version ver );
 	void byteSampleApplyClear( KeyRangeRef range, Version ver );
+
+	void popVersion(Version v, bool popAllTags = false) {
+		if(logSystem) {
+			if(v > poppedAllAfter) {
+				popAllTags = true;
+				poppedAllAfter = std::numeric_limits<Version>::max();
+			}
+
+			vector<pair<Version,Tag>>* hist = &history;
+			vector<pair<Version,Tag>> allHistoryCopy;
+			if(popAllTags) {
+				allHistoryCopy = allHistory;
+				hist = &allHistoryCopy;
+			}
+			
+			while(hist->size() && v > hist->back().first ) {
+				logSystem->pop( v, hist->back().second );
+				hist->pop_back();
+			}
+			if(hist->size()) {
+				logSystem->pop( v, hist->back().second );
+			} else {
+				logSystem->pop( v, tag );
+			}
+		}
+	}
 
 	Standalone<VersionUpdateRef>& addVersionToMutationLog(Version v) {
 		// return existing version...
@@ -336,6 +365,8 @@ public:
 
 	AsyncMap<Key,bool> watches;
 	int64_t watchBytes;
+	AsyncVar<bool> noRecentUpdates;
+	double lastUpdate;
 
 	Int64MetricHandle readQueueSizeMetric;
 
@@ -421,7 +452,8 @@ public:
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff"))
+			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), 
+			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max())
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
 		oldestVersion.initMetric(LiteralStringRef("StorageServer.OldestVersion"), counters.cc.id);
@@ -432,7 +464,7 @@ public:
 		newestDirtyVersion.insert(allKeys, invalidVersion);
 		addShard( ShardInfo::newNotAssigned( allKeys ) );
 
-		cx = openDBOnServer(db, TaskDefaultEndpoint, false, true);
+		cx = openDBOnServer(db, TaskDefaultEndpoint, true, true);
 	}
 	//~StorageServer() { fclose(log); }
 
@@ -780,13 +812,27 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 }
 
 ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req ) {
-	choose {
-		when( Void _ = wait( watchValue_impl( data, req ) ) ) {}
-		when( Void _ = wait( BUGGIFY ? Never() : delay( g_network->isSimulated() ? 20 : 900 ) ) ) {
-			req.reply.sendError( timed_out() );
+	state Future<Void> watch = watchValue_impl( data, req );
+	state double startTime = now();
+	
+	loop {
+		double timeoutDelay = -1;
+		if(data->noRecentUpdates.get()) {
+			timeoutDelay = std::max(CLIENT_KNOBS->FAST_WATCH_TIMEOUT - (now() - startTime), 0.0);
+		} else if(!BUGGIFY) {
+			timeoutDelay = std::max(CLIENT_KNOBS->WATCH_TIMEOUT - (now() - startTime), 0.0);
+		}
+		choose {
+			when( Void _ = wait( watch ) ) {
+				return Void();
+			}
+			when( Void _ = wait( timeoutDelay < 0 ? Never() : delay(timeoutDelay) ) ) {
+				req.reply.sendError( timed_out() );
+				return Void();
+			}
+			when( Void _ = wait( data->noRecentUpdates.onChange()) ) {}
 		}
 	}
-	return Void();
 }
 
 ACTOR Future<Void> getShardState_impl( StorageServer* data, GetShardStateRequest req ) {
@@ -1834,7 +1880,6 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true).suppressFor(1.0);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
-					Void _ = wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
 					Version lastFV = fetchVersion;
 					fetchVersion = data->version.get();
 					isTooOld = false;
@@ -1849,8 +1894,10 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					}
 				} else if (e.code() == error_code_future_version) {
 					TEST(true); // fetchKeys got future_version, so there must be a huge storage lag somewhere.  Keep trying.
-				} else
+				} else {
 					throw;
+				}
+				Void _ = wait( delayJittered( FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY ) );
 			}
 		}
 
@@ -2295,7 +2342,13 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
 		//TraceEvent("SSUpdatePeeking", data->thisServerID).detail("MyVer", data->version.get()).detail("Epoch", data->updateEpoch).detail("Seq", data->updateSequence);
-		Void _ = wait( cursor->getMore() );
+		
+		loop {
+			Void _ = wait( cursor->getMore() );
+			if(!cursor->isExhausted()) {
+				break;
+			}
+		}
 		if(cursor->popped() > 0)
 			throw worker_removed();
 
@@ -2314,7 +2367,6 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		start = now();
 		state UpdateEagerReadInfo eager;
 		state FetchInjectionInfo fii;
-		state Version minNewOldestVersion = 0;
 		state Reference<ILogSystem::IPeekCursor> cloneCursor2;
 
 		loop{
@@ -2380,7 +2432,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		data->updateEagerReads = &eager;
 		data->debug_inApplyUpdate = true;
 
-		StorageUpdater updater(data->lastVersionWithData, std::max( std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), minNewOldestVersion ), data->restoredVersion);
+		StorageUpdater updater(data->lastVersionWithData, std::max(data->desiredOldestVersion.get(), data->oldestVersion.get()), data->restoredVersion);
 
 		if (EXPENSIVE_VALIDATION) data->data().atLatest().validate();
 		validate(data);
@@ -2431,8 +2483,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			}
 		}
 
-		if(ver != invalidVersion) data->lastVersionWithData = ver;
-		ver = cloneCursor2->version().version - 1;
+		if(ver != invalidVersion) {
+			data->lastVersionWithData = ver;
+		} else {
+			ver = cloneCursor2->version().version - 1;
+		}
 		if(injectedChanges) data->lastVersionWithData = ver;
 
 		data->updateEagerReads = NULL;
@@ -2448,6 +2503,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			data->mutableData().createNewVersion(ver);
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
+			data->noRecentUpdates.set(false);
+			data->lastUpdate = now();
 			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
@@ -2524,8 +2581,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 
 		Void _ = wait( delay(0, TaskUpdateStorage) );
 
-		if (data->logSystem)
-			data->logSystem->pop( data->durableVersion.get() + 1, data->tag );
+		data->popVersion( data->durableVersion.get() + 1 );
 
 		while (!changeDurableVersion( data, newOldestVersion )) {
 			Void _ = wait( yield(TaskUpdateStorage) );
@@ -3048,6 +3104,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 	state ActorCollection actors(false);
 	state double lastLoopTopTime = now();
 	state Future<Void> dbInfoChange = Void();
+	state Future<Void> checkLastUpdate = Void();
 
 	actors.add(updateStorage(self));
 	actors.add(waitFailureServer(ssi.waitFailure.getFuture()));
@@ -3069,14 +3126,25 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 		lastLoopTopTime = loopTopTime;
 
 		choose {
+			when( Void _ = wait( checkLastUpdate ) ) {
+				if(now() - self->lastUpdate >= CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION) {
+					self->noRecentUpdates.set(true);
+					checkLastUpdate = delay(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION);
+				} else {
+					checkLastUpdate = delay( std::max(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION-(now()-self->lastUpdate), 0.1) );
+				}
+			}
 			when( Void _ = wait( dbInfoChange ) ) {
 				TEST( self->logSystem );  // shardServer dbInfo changed
 				dbInfoChange = self->db->onChange();
 				if( self->db->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
 					self->logSystem = ILogSystem::fromServerDBInfo( self->thisServerID, self->db->get() );
 					if (self->logSystem) {
-						self->logCursor = self->logSystem->peekSingle( self->version.get() + 1, self->tag );
-						self->logSystem->pop( self->durableVersion.get() + 1, self->tag );
+						if(self->logSystem->getLogSystemConfig().oldTLogs.size()) {
+							self->poppedAllAfter = self->logSystem->getLogSystemConfig().oldTLogs[0].epochEnd;
+						}
+						self->logCursor = self->logSystem->peekSingle( self->thisServerID, self->version.get() + 1, self->tag, self->history );
+						self->popVersion( self->durableVersion.get() + 1, true );
 					}
 					// If update() is waiting for results from the tlog, it might never get them, so needs to be cancelled.  But if it is waiting later,
 					// cancelling it could cause problems (e.g. fetchKeys that already committed to transitioning to waiting state)
@@ -3162,7 +3230,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		return false;
 }
 
-ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag, ReplyPromise<StorageServerInterface> recruitReply,
+ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerInterface ssi, Tag seedTag, ReplyPromise<InitializeStorageReply> recruitReply,
 	Reference<AsyncVar<ServerDBInfo>> db, std::string folder )
 {
 	state StorageServer self(persistentData, db, ssi);
@@ -3171,19 +3239,22 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	self.folder = folder;
 
 	try {
-		self.storage.makeNewStorageServerDurable();
-		Void _ = wait( self.storage.commit() );
-
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait( addStorageServer(self.cx, ssi) ); // Might throw recruitment_failed in case of simultaneous master failure
 			self.tag = verAndTag.second;
-			self.setInitialVersion( verAndTag.first-1 ); // FIXME: Can this be 0 now?  Should we get a corresponding updatePos?
+			self.setInitialVersion( verAndTag.first-1 );
 		} else {
 			self.tag = seedTag;
 		}
 
-		TraceEvent("StorageServerInit", ssi.id()).detail("Version", self.version.get()).detail("SeedTag", seedTag);
-		recruitReply.send(ssi);
+		self.storage.makeNewStorageServerDurable();
+		Void _ = wait( self.storage.commit() );
+
+		TraceEvent("StorageServerInit", ssi.id()).detail("Version", self.version.get()).detail("SeedTag", seedTag.toString());
+		InitializeStorageReply rep;
+		rep.interf = ssi;
+		rep.addedVersion = self.version.get();
+		recruitReply.send(rep);
 		self.byteSampleRecovery = Void();
 		Void _ = wait( storageServerCore(&self, ssi) );
 
@@ -3206,16 +3277,63 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 		state Future<Void> infoChanged = self->db->onChange();
 		state Reference<MultiInterface<MasterProxyInterface>> proxies( new MultiInterface<MasterProxyInterface>(self->db->get().client.proxies, self->db->get().myLocality, ALWAYS_FRESH) );
 		choose {
-			when( GetStorageServerRejoinInfoReply rep = wait( proxies->size() ? loadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id()) ) : Never() ) ) {
-				self->tag = rep.tag;
+			when( GetStorageServerRejoinInfoReply _rep = wait( proxies->size() ? loadBalance( proxies, &MasterProxyInterface::getStorageServerRejoinInfo, GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()) ) : Never() ) ) {
+				state GetStorageServerRejoinInfoReply rep = _rep;
 				try {
 					tr.reset();
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					tr.setVersion( rep.version );
+
 					tr.addReadConflictRange(singleKeyRange(serverListKeyFor(ssi.id())));
+					tr.addReadConflictRange(singleKeyRange(serverTagKeyFor(ssi.id())));
+					tr.addReadConflictRange(serverTagHistoryRangeFor(ssi.id()));
+					tr.addReadConflictRange(singleKeyRange(tagLocalityListKeyFor(ssi.locality.dcId())));
+
 					tr.set(serverListKeyFor(ssi.id()), serverListValue(ssi));
+					
+					if(rep.newLocality) {
+						tr.addReadConflictRange(tagLocalityListKeys);
+						tr.set( tagLocalityListKeyFor(ssi.locality.dcId()), tagLocalityListValue(rep.newTag.get().locality) );
+					}
+
+					if(rep.newTag.present()) {
+						KeyRange conflictRange = singleKeyRange(serverTagConflictKeyFor(rep.newTag.get()));
+						tr.addReadConflictRange( conflictRange );
+						tr.addWriteConflictRange( conflictRange );
+						tr.setOption(FDBTransactionOptions::FIRST_IN_BATCH);
+						tr.set( serverTagKeyFor(ssi.id()), serverTagValue(rep.newTag.get()) );
+						tr.atomicOp( serverTagHistoryKeyFor(ssi.id()), serverTagValue(rep.tag), MutationRef::SetVersionstampedKey );
+					}
+
+					if(rep.history.size() && rep.history.back().first < self->version.get()) {
+						tr.clear(serverTagHistoryRangeBefore(ssi.id(), self->version.get()));
+					}
+
 					choose {
 						when ( Void _ = wait( tr.commit() ) ) {
+							self->history = rep.history;
+							while(self->history.size() && self->history.back().first < self->version.get() ) {
+								self->history.pop_back();
+							}
+
+							if(rep.newTag.present()) {
+								self->tag = rep.newTag.get();
+								self->history.insert(self->history.begin(), std::make_pair(tr.getCommittedVersion(), rep.tag));
+							} else {
+								self->tag = rep.tag;
+							}
+							self->allHistory = self->history;
+
+							TraceEvent("SSTag", self->thisServerID).detail("myTag", self->tag.toString());
+							for(auto it : self->history) {
+								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString());
+							}
+
+							if(self->history.size() && BUGGIFY) {
+								TraceEvent("SSHistoryReboot", self->thisServerID);
+								throw please_reboot();
+							}
+
 							break;
 						}
 						when ( Void _ = wait(infoChanged) ) {}

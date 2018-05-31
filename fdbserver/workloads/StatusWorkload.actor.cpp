@@ -57,7 +57,7 @@ struct StatusWorkload : TestWorkload {
 		return Void();
 	}
 	virtual Future<Void> start(Database const& cx) {
-		if (clientId != 0)
+		//if (clientId != 0)
 			return Void();
 		Reference<Cluster> cluster = cx->cluster;
 		if (!cluster) {

@@ -298,6 +298,8 @@ void TLSOptions::set_verify_peers( std::vector<std::string> const& verify_peers 
 }
 
 void TLSOptions::register_network() {
+	// Simulation relies upon being able to call this multiple times, and have it override g_network
+	// each time it's called.
 	new TLSNetworkConnections( Reference<TLSOptions>::addRef( this ) );
 }
 
@@ -312,6 +314,8 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 	}
 	if ( !key_set ) {
 		std::string keyFile;
+		if ( keyPassword.empty() )
+			platform::getEnvironmentVar( "FDB_TLS_PASSWORD", keyPassword );
 		if ( !platform::getEnvironmentVar( "FDB_TLS_KEY_FILE", keyFile ) )
 			keyFile = fileExists(defaultCertFileName) ? defaultCertFileName : joinPath(platform::getDefaultConfigPath(), defaultCertFileName);
 		set_key_file( keyFile );
@@ -355,6 +359,11 @@ static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_erro
 
 	auto t = TraceEvent( s, event, uid );
 
+	if ( !is_error ) {
+		// don't spam with too many reasons why client connections were rejected
+		t = t.suppressFor(1.0, true);
+	}
+
 	va_list ap;
 	char* field;
 
@@ -397,4 +406,8 @@ void TLSOptions::init_plugin( std::string const& plugin_path ) {
 		TraceEvent(SevError, "TLSConnectionCreatePolicyVerifyPeersNotSetError");
 		throw tls_error();
 	}
+}
+
+bool TLSOptions::enabled() {
+	return !!policyVerifyPeersSet && !!policyVerifyPeersNotSet;
 }

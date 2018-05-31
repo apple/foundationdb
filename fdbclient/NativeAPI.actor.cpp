@@ -93,7 +93,7 @@ LocationInfo::~LocationInfo() {
 		for( auto const& alternative : getAlternatives() )
 			handles.push_back( alternative.v.getVersion.getEndpoint().token ); // must match above choice of UID
 		std::sort( handles.begin(), handles.end() );
-		ASSERT( handles.size() );
+		ASSERT_ABORT( handles.size() );
 
 		auto it = cx->ssid_locationInfo.find( handles );
 		if( it != cx->ssid_locationInfo.end() )
@@ -549,7 +549,7 @@ DatabaseContext::~DatabaseContext() {
 	monitorMasterProxiesInfoChange.cancel();
 	for(auto it = ssid_locationInfo.begin(); it != ssid_locationInfo.end(); it = ssid_locationInfo.erase(it))
 		it->second->notifyContextDestroyed();
-	ASSERT( ssid_locationInfo.empty() );
+	ASSERT_ABORT( ssid_locationInfo.empty() );
 	locationCache.insert( allKeys, Reference<LocationInfo>() );
 }
 
@@ -1230,7 +1230,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 }
 
 ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, TransactionInfo info ) {
-	Version _ = wait(version);
+	Version ver = wait(version);
 
 	if( info.debugID.present() )
 		g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKey.AfterVersion");
@@ -2514,7 +2514,12 @@ Future<Void> Transaction::commitMutations() {
 				TraceEvent("TransactionMutation", u).detail("T", i->type).detail("P1", printable(i->param1)).detail("P2", printable(i->param2));
 		}
 
-		tr.isLockAware = options.lockAware;
+		if(options.lockAware) {
+			tr.flags = tr.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+		}
+		if(options.firstInBatch) {
+			tr.flags = tr.flags | CommitTransactionRequest::FLAG_FIRST_IN_BATCH;
+		}
 
 		Future<Void> commitResult = tryCommit( cx, trLogInfo, tr, readVersion, info, &this->committedVersion, this, options );
 
@@ -2653,6 +2658,11 @@ void Transaction::setOption( FDBTransactionOptions::Option option, Optional<Stri
 				options.lockAware = true;
 				options.readOnly = true;
 			}
+			break;
+
+		case FDBTransactionOptions::FIRST_IN_BATCH:
+			validateOptionValue(value, false);
+			options.firstInBatch = true;
 			break;
 
 		default:

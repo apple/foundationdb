@@ -43,7 +43,8 @@ struct TLogInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure;
 	RequestStream< struct TLogRecoveryFinishedRequest > recoveryFinished;
 	
-	TLogInterface() { }
+	TLogInterface() {}
+	explicit TLogInterface(LocalityData locality) : uniqueID( g_random->randomUniqueID() ), locality(locality) { sharedTLogID = uniqueID; }
 	TLogInterface(UID sharedTLogID, LocalityData locality) : uniqueID( g_random->randomUniqueID() ), sharedTLogID(sharedTLogID), locality(locality) {}
 	TLogInterface(UID uniqueID, UID sharedTLogID, LocalityData locality) : uniqueID(uniqueID), sharedTLogID(sharedTLogID), locality(locality) {}
 	UID id() const { return uniqueID; }
@@ -61,6 +62,7 @@ struct TLogInterface {
 
 	template <class Ar> 
 	void serialize( Ar& ar ) {
+		ASSERT(ar.isDeserializing || uniqueID != UID());
 		ar & uniqueID & sharedTLogID & locality & peekMessages & popMessages
 		   & commit & lock & getQueuingMetrics & confirmRunning & waitFailure & recoveryFinished;
 	}
@@ -80,11 +82,10 @@ struct TLogRecoveryFinishedRequest {
 struct TLogLockResult {
 	Version end;
 	Version knownCommittedVersion;
-	std::vector<Tag> tags;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & end & knownCommittedVersion & tags;
+		ar & end & knownCommittedVersion;
 	}
 };
 
@@ -165,15 +166,16 @@ struct TLogPeekRequest {
 struct TLogPopRequest {
 	Arena arena;
 	Version to;
+	Version knownCommittedVersion;
 	Tag tag;
 	ReplyPromise<Void> reply;
 
-	TLogPopRequest( Version to, Tag tag ) : to(to), tag(tag) {}
+	TLogPopRequest( Version to, Version knownCommittedVersion, Tag tag ) : to(to), knownCommittedVersion(knownCommittedVersion), tag(tag) {}
 	TLogPopRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & to & tag & reply;
+		ar & arena & to & knownCommittedVersion & tag & reply;
 	}
 };
 
@@ -198,18 +200,17 @@ struct TLogCommitRequest {
 	Arena arena;
 	Version prevVersion, version, knownCommittedVersion;
 
-	StringRef messages;  // Each message prefixed by a 4-byte length
-	VectorRef< TagMessagesRef > tags;
+	StringRef messages;// Each message prefixed by a 4-byte length
 
 	ReplyPromise<Void> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, StringRef messages, VectorRef< TagMessagesRef > tags, Optional<UID> debugID ) 
-		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), messages(messages), tags(tags), debugID(debugID) {}
+	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, StringRef messages, Optional<UID> debugID ) 
+		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), messages(messages), debugID(debugID) {}
 	template <class Ar> 
 	void serialize( Ar& ar ) {
-		ar & prevVersion & version & knownCommittedVersion & messages & tags & reply & arena & debugID;
+		ar & prevVersion & version & knownCommittedVersion & messages & reply & arena & debugID;
 	}
 };
 

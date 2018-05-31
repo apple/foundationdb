@@ -144,7 +144,10 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( ALTERNATIVES_FAILURE_RESET_TIME,                     5.0 );
 	init( ALTERNATIVES_FAILURE_MAX_DELAY,                      1.0 );
 	init( ALTERNATIVES_FAILURE_MIN_DELAY,                     0.05 );
-	init( ALTERNATIVES_FAILURE_DELAY_RATIO,                    0.2 ); 
+	init( ALTERNATIVES_FAILURE_DELAY_RATIO,                    0.2 );
+	init( FUTURE_VERSION_INITIAL_BACKOFF,                      1.0 );
+	init( FUTURE_VERSION_MAX_BACKOFF,                          8.0 );
+	init( FUTURE_VERSION_BACKOFF_GROWTH,                       2.0 );
 }
 
 bool Knobs::setKnob( std::string const& knob, std::string const& value ) {

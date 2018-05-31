@@ -89,7 +89,6 @@ struct WatchesWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _setup( Database cx, WatchesWorkload* self) {
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "Watches");
 		vector<Future<Void>> setupActors;
 		for(int i=0; i<self->nodes; i++)
 			if( i % self->clientCount == self->clientId )
@@ -174,7 +173,6 @@ struct WatchesWorkload : TestWorkload {
 		state Optional<Value> startValue;
 		state double startTime = now();
 		state double chainStartTime;
-		state Future<Void> disabler = disableConnectionFailuresAfter(300, "Watches");
 		loop {
 			state Transaction tr( cx );
 			state bool isValue = g_random->random01() > 0.5;

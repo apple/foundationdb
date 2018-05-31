@@ -50,6 +50,7 @@ public:
 	double TLOG_PEEK_DELAY;
 	int LEGACY_TLOG_UPGRADE_ENTRIES_PER_VERSION;
 	int VERSION_MESSAGES_OVERHEAD_FACTOR_1024THS; // Multiplicative factor to bound total space used to store a version message (measured in 1/1024ths, e.g. a value of 2048 yields a factor of 2).
+	int64_t VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
 	double TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 	int64_t TLOG_MESSAGE_BLOCK_BYTES;
 	int64_t MAX_MESSAGE_SIZE;
@@ -148,6 +149,9 @@ public:
 	int SPRING_CLEANING_MIN_VACUUM_PAGES;
 	int SPRING_CLEANING_MAX_VACUUM_PAGES;
 
+	// KeyValueStoreMemory
+	int64_t REPLACE_CONTENTS_BYTES;
+
 	// Leader election
 	double CANDIDATE_MIN_DELAY;
 	double CANDIDATE_MAX_DELAY;
@@ -201,6 +205,7 @@ public:
 	double SIM_SHUTDOWN_TIMEOUT;
 	double SHUTDOWN_TIMEOUT;
 	double MASTER_SPIN_DELAY;
+	double CC_CHANGE_DELAY;
 	double WAIT_FOR_GOOD_RECRUITMENT_DELAY;
 	double ATTEMPT_RECRUITMENT_DELAY;
 	double WORKER_FAILURE_TIME;
@@ -213,6 +218,7 @@ public:
 
 	int EXPECTED_MASTER_FITNESS;
 	int EXPECTED_TLOG_FITNESS;
+	int EXPECTED_LOG_ROUTER_FITNESS;
 	int EXPECTED_PROXY_FITNESS;
 	int EXPECTED_RESOLVER_FITNESS;
 	double RECRUITMENT_TIMEOUT;
@@ -224,7 +230,6 @@ public:
 	double REMOVE_RETRY_DELAY;
 	int MOVE_KEYS_KRM_LIMIT;
 	int MOVE_KEYS_KRM_LIMIT_BYTES; //This must be sufficiently larger than CLIENT_KNOBS->KEY_SIZE_LIMIT (fdbclient/Knobs.h) to ensure that at least two entries will be returned from an attempt to read a key range map
-	double SKIP_TAGS_GROWTH_RATE;
 	int MAX_SKIP_TAGS;
 
 	//FdbServer

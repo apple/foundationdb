@@ -165,9 +165,8 @@ func IsAPIVersionSelected() bool {
 func GetAPIVersion() (int, error) {
 	if IsAPIVersionSelected() {
 		return apiVersion, nil
-	} else {
-		return 0, errAPIVersionUnset
 	}
+	return 0, errAPIVersionUnset
 }
 
 // MustAPIVersion is like APIVersion but panics if the API version is not

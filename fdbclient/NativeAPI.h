@@ -129,6 +129,7 @@ public:
 private: friend class ThreadSafeCluster;
 		 friend class AtomicOpsApiCorrectnessWorkload; // This is just for testing purposes. It needs to change apiVersion
 		 friend class AtomicOpsWorkload; // This is just for testing purposes. It needs to change apiVersion
+		 friend class VersionStampWorkload; // This is just for testing purposes. It needs to change apiVersion
 
 	Cluster( Reference<ClusterConnectionFile> connFile, int apiVersion = API_VERSION_LATEST );
 
@@ -150,6 +151,7 @@ struct TransactionOptions {
 	bool debugDump : 1;
 	bool lockAware : 1;
 	bool readOnly : 1;
+	bool firstInBatch : 1;
 
 	TransactionOptions() {
 		reset();

@@ -65,8 +65,17 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs") && isInteger(value) ) {
 			out[p+key] = value;
+		}
+
+		if( key == "regions" ) {
+			json_spirit::mValue mv;
+			json_spirit::read_string( value, mv );
+			
+			StatusObject regionObj;
+			regionObj["regions"] = mv;
+			out[p+key] = BinaryWriter::toValue(regionObj, IncludeVersion()).toString();
 		}
 
 		return out;
@@ -90,7 +99,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	std::string redundancy, log_replicas;
 	IRepPolicyRef storagePolicy;
 	IRepPolicyRef tLogPolicy;
-
+	
 	bool redundancySpecified = true;
 	if (mode == "single") {
 		redundancy="1";
@@ -136,7 +145,42 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		policyWriter = BinaryWriter(IncludeVersion());
 		serializeReplicationPolicy(policyWriter, tLogPolicy);
 		out[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
+		return out;
+	}
 
+	std::string remote_redundancy, remote_log_replicas;
+	IRepPolicyRef remoteTLogPolicy;
+	bool remoteRedundancySpecified = true;
+	if (mode == "remote_none") {
+		remote_redundancy="0";
+		remote_log_replicas="0";
+		remoteTLogPolicy = IRepPolicyRef();
+	} else if (mode == "remote_single") {
+		remote_redundancy="1";
+		remote_log_replicas="1";
+		remoteTLogPolicy = IRepPolicyRef(new PolicyOne());
+	} else if(mode == "remote_double") {
+		remote_redundancy="2";
+		remote_log_replicas="2";
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
+	} else if(mode == "remote_triple") {
+		remote_redundancy="3";
+		remote_log_replicas="3";
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(3, "zoneid", IRepPolicyRef(new PolicyOne())));
+	} else if(mode == "remote_three_data_hall") { //FIXME: not tested in simulation
+		remote_redundancy="3";
+		remote_log_replicas="4";
+		remoteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "data_hall",
+			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
+		));
+	} else
+		remoteRedundancySpecified = false;
+	if (remoteRedundancySpecified) {
+		out[p+"remote_log_replicas"] = remote_log_replicas;
+
+		BinaryWriter policyWriter(IncludeVersion());
+		serializeReplicationPolicy(policyWriter, remoteTLogPolicy);
+		out[p+"remote_log_policy"] = policyWriter.toStringRef().toString();
 		return out;
 	}
 
@@ -146,13 +190,15 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& modeTokens, std::map<std::string, std::string>& outConf ) {
 	for(auto it : modeTokens) {
 		std::string mode = it.toString();
-
 		auto m = configForToken( mode );
-		if( !m.size() )
+		if( !m.size() ) {
+			TraceEvent(SevWarnAlways, "UnknownOption").detail("option", mode);
 			return ConfigurationResult::UNKNOWN_OPTION;
+		}
 
 		for( auto t = m.begin(); t != m.end(); ++t ) {
 			if( outConf.count( t->first ) ) {
+				TraceEvent(SevWarnAlways, "ConflictingOption").detail("option", printable(StringRef(t->first)));
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
@@ -174,7 +220,6 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 		serializeReplicationPolicy(policyWriter, logPolicy);
 		outConf[p+"log_replication_policy"] = policyWriter.toStringRef().toString();
 	}
-
 	return ConfigurationResult::SUCCESS;
 }
 
@@ -639,10 +684,6 @@ ACTOR Future<std::vector<NetworkAddress>> getCoordinators( Database cx ) {
 ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuorumChange> change ) {
 	state Transaction tr(cx);
 	state int retries = 0;
-
-	//quorum changes do not balance coordinators evenly across datacenters
-	if(g_network->isSimulated())
-		g_simulator.maxCoordinatorsInDatacenter = g_simulator.killableMachines + 1;
 
 	loop {
 		try {
@@ -1122,6 +1163,64 @@ ACTOR Future<Void> waitForExcludedServers( Database cx, vector<AddressExclusion>
 			Void _ = wait( delayJittered( 1.0 ) );  // SOMEDAY: watches!
 		} catch (Error& e) {
 			Void _ = wait( tr.onError(e) );
+		}
+	}
+}
+
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
+	state Transaction tr(cx);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			Standalone<RangeResultRef> res = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
+			ASSERT( res.size() < CLIENT_KNOBS->TOO_MANY );
+			DatabaseConfiguration config;
+			config.fromKeyValues((VectorRef<KeyValueRef>) res);
+			return config;
+		} catch( Error &e ) {
+			Void _ = wait( tr.onError(e) );
+		}
+	}
+
+}
+
+ACTOR Future<Void> waitForFullReplication( Database cx ) {
+	loop {
+		state ReadYourWritesTransaction tr(cx);
+		loop {
+			try {
+				tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
+				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+				tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+
+				Standalone<RangeResultRef> confResults = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
+				ASSERT( !confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY );
+				state DatabaseConfiguration config;
+				config.fromKeyValues((VectorRef<KeyValueRef>) confResults);
+			
+				state std::vector<Future<Optional<Value>>> replicasFutures;
+				for(auto& region : config.regions) {
+					replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
+				}
+				Void _ = wait( waitForAll(replicasFutures) );
+
+				state std::vector<Future<Void>> watchFutures;
+				for(int i = 0; i < config.regions.size(); i++) {
+					if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize ) {
+						watchFutures.push_back(tr.watch(datacenterReplicasKeyFor(config.regions[i].dcId)));
+					}
+				}
+
+				if( !watchFutures.size() || (config.remoteTLogReplicationFactor == 0 && watchFutures.size() < config.regions.size())) {
+					return Void();
+				}
+
+				Void _ = wait( tr.commit() );
+				Void _ = wait( waitForAny(watchFutures) );
+				break;
+			} catch (Error& e) {
+				Void _ = wait( tr.onError(e) );
+			}
 		}
 	}
 }

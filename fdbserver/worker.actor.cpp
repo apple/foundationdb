@@ -250,17 +250,17 @@ std::vector< DiskStore > getDiskStores( std::string folder ) {
 	return result;
 }
 
-ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, WorkerInterface interf, Reference<AsyncVar<ProcessClass>> asyncProcessClass, ProcessClass initialClass, Reference<AsyncVar<bool>> asyncIsExcluded) {
+ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, WorkerInterface interf, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass) {
 	// Keeps the cluster controller (as it may be re-elected) informed that this worker exists
 	// The cluster controller uses waitFailureClient to find out if we die, and returns from registrationReply (requiring us to re-register)
 	state Generation requestGeneration = 0;
-
+	state ProcessClass processClass = initialClass;
 	loop {
-		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, initialClass, asyncProcessClass->get(), asyncIsExcluded->get(), requestGeneration++) ) ) : Never();
+		Future<RegisterWorkerReply> registrationReply = ccInterface->get().present() ? brokenPromiseToNever( ccInterface->get().get().registerWorker.getReply( RegisterWorkerRequest(interf, initialClass, processClass, asyncPriorityInfo->get(), requestGeneration++) ) ) : Never();
 		choose {
 			when ( RegisterWorkerReply reply = wait( registrationReply )) {
-				asyncProcessClass->set( reply.processClass );
-				asyncIsExcluded->set( reply.isExcluded );
+				processClass = reply.processClass;	
+				asyncPriorityInfo->set( reply.priorityInfo );
 			}
 			when ( Void _ = wait( ccInterface->onChange() )) { }
 		}
@@ -479,7 +479,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 }
 
 ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData localities,
-	Reference<AsyncVar<ProcessClass>> asyncProcessClass, ProcessClass initialClass, Reference<AsyncVar<bool>> asyncIsExcluded, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix ) {
+	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles ) {
 	state PromiseStream< ErrorInfo > errors;
 	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
@@ -487,7 +487,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
 	state ActorCollection filesClosed(true);
 	state Promise<Void> stopping;
-	state WorkerCache<StorageServerInterface> storageCache;
+	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo(LiteralStringRef("DB"))) );
 	state Future<Void> metricsLogger;
 	state UID processIDUid;
@@ -626,6 +626,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				Promise<Void> recovery;
 				Future<Void> tl = tLog( kv, queue, dbInfo, locality, tlog.isReady() ? tlogRequests : PromiseStream<InitializeTLogRequest>(), s.storeID, true, oldLog, recovery );
 				recoveries.push_back(recovery.getFuture());
+
 				tl = handleIOErrors( tl, kv, s.storeID );
 				tl = handleIOErrors( tl, queue, s.storeID );
 				if(tlog.isReady()) {
@@ -642,7 +643,9 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		startRole( interf.id(), interf.id(), "Worker", details );
 
 		Void _ = wait(waitForAll(recoveries));
-		errorForwarders.add( registrationClient( ccInterface, interf, asyncProcessClass, initialClass, asyncIsExcluded ) );
+		recoveredDiskFiles.send(Void());
+
+		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass ) );
 
 		TraceEvent("RecoveriesComplete", interf.id());
 
@@ -723,6 +726,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					IDiskQueue* queue = openDiskQueue( joinPath( folder, fileLogQueuePrefix.toString() + logId.toString() + "-" ), logId );
 					filesClosed.add( data->onClosed() );
 					filesClosed.add( queue->onClosed() );
+
 					tlog = tLog( data, queue, dbInfo, locality, tlogRequests, logId, false, Promise<Void>(), Promise<Void>() );
 					tlog = handleIOErrors( tlog, data, logId );
 					tlog = handleIOErrors( tlog, queue, logId );
@@ -757,7 +761,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 					IKeyValueStore* data = openKVStore( req.storeType, filename, recruited.id(), memoryLimit );
 					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add( kvClosed );
-					ReplyPromise<StorageServerInterface> storageReady = req.reply;
+					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set( req.reqId, storageReady.getFuture() );
 					Future<Void> s = storageServer( data, recruited, req.seedTag, storageReady, dbInfo, folder );
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
@@ -804,6 +808,24 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 				errorForwarders.add( zombie(recruited, forwardError( errors, "Resolver", recruited.id(),
 						resolver( recruited, req, dbInfo ) ) ) );
+				req.reply.send(recruited);
+			}
+			when( InitializeLogRouterRequest req = waitNext(interf.logRouter.getFuture()) ) {
+				TLogInterface recruited(locality);
+				recruited.initEndpoints();
+
+				std::map<std::string, std::string> details;
+				startRole( recruited.id(), interf.id(), "logRouter", details );
+
+				DUMPTOKEN( recruited.peekMessages );
+				DUMPTOKEN( recruited.popMessages );
+				DUMPTOKEN( recruited.commit );
+				DUMPTOKEN( recruited.lock );
+				DUMPTOKEN( recruited.getQueuingMetrics );
+				DUMPTOKEN( recruited.confirmRunning );
+
+				errorForwarders.add( zombie(recruited, forwardError( errors, "logRouter", recruited.id(), 
+						logRouter( recruited, req, dbInfo ) ) ) );
 				req.reply.send(recruited);
 			}
 			when( DebugQueryRequest req = waitNext(interf.debugQuery.getFuture()) ) {
@@ -956,15 +978,16 @@ ACTOR Future<Void> fdbd(
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
 		Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
-		Reference<AsyncVar<ProcessClass>> asyncProcessClass(new AsyncVar<ProcessClass>(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource)));
-		Reference<AsyncVar<bool>> asyncIsExcluded(new AsyncVar<bool>(false));
+		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(
+			ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource).machineClassFitness(ProcessClass::ClusterController), false, ClusterControllerPriorityInfo::FitnessUnknown)));
 		vector<Future<Void>> v;
+		state Promise<Void> recoveredDiskFiles;
 		if ( coordFolder.size() )
 			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncProcessClass, asyncIsExcluded), "clusterController") );
+		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture()), "clusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncProcessClass, processClass, asyncIsExcluded, dataFolder, memoryLimit, metricsConnFile, metricsPrefix), "workerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles), "workerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		Void _ = wait( quorum(v,1) );

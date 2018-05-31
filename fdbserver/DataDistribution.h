@@ -27,7 +27,7 @@ struct RelocateShard {
 	KeyRange keys;
 	int priority;
 
-	RelocateShard() {}
+	RelocateShard() : priority(0) {}
 	RelocateShard( KeyRange const& keys, int priority ) : keys(keys), priority(priority) {}
 };
 
@@ -61,6 +61,7 @@ enum {
 
 struct IDataDistributionTeam {
 	virtual vector<StorageServerInterface> getLastKnownServerInterfaces() = 0;
+	virtual int size() = 0;
 	virtual vector<UID> const& getServerIDs() = 0;
 	virtual void addDataInFlightToTeam( int64_t delta ) = 0;
 	virtual int64_t getDataInFlightToTeam() = 0;
@@ -78,6 +79,7 @@ struct IDataDistributionTeam {
 	virtual bool isOptimal() = 0;
 	virtual bool isWrongConfiguration() = 0;
 	virtual void setWrongConfiguration(bool) = 0;
+	virtual void addServers(const vector<UID> &servers) = 0;
 
 	std::string getDesc() {
 		const auto& servers = getLastKnownServerInterfaces();
@@ -96,10 +98,11 @@ struct GetTeamRequest {
 	bool preferLowerUtilization;
 	double inflightPenalty;
 	std::vector<UID> sources;
+	std::vector<UID> completeSources;
 	Promise< Optional< Reference<IDataDistributionTeam> > > reply;
 
 	GetTeamRequest() {}
-	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty(inflightPenalty) {}
+	GetTeamRequest( bool wantsNewServers, bool wantsTrueBest, bool preferLowerUtilization, double inflightPenalty = 1.0 ) : wantsNewServers( wantsNewServers ), wantsTrueBest( wantsTrueBest ), preferLowerUtilization( preferLowerUtilization ), inflightPenalty( inflightPenalty ) {}
 };
 
 struct GetMetricsRequest {
@@ -117,7 +120,23 @@ struct TeamCollectionInterface {
 class ShardsAffectedByTeamFailure : public ReferenceCounted<ShardsAffectedByTeamFailure> {
 public:
 	ShardsAffectedByTeamFailure() {}
-	typedef vector<UID> Team;  // sorted
+	
+	struct Team {
+		vector<UID> servers;  // sorted
+		bool primary;
+
+		Team() : primary(true) {}
+		Team(vector<UID> const& servers, bool primary) : servers(servers), primary(primary) {}
+
+		bool operator < ( const Team& r ) const {
+			if( servers == r.servers ) return primary < r.primary;
+			return servers < r.servers; 
+		}
+		bool operator == ( const Team& r ) const {
+			return servers == r.servers && primary == r.primary;
+		}
+	};
+
 	// This tracks the data distribution on the data distribution server so that teamTrackers can
 	//   relocate the right shards when a team is degraded.
 
@@ -135,9 +154,9 @@ public:
 
 	int getNumberOfShards( UID ssID );
 	vector<KeyRange> getShardsFor( Team team );
-	vector<vector<UID>> getTeamsFor( KeyRangeRef keys );
+	vector<Team> getTeamsFor( KeyRangeRef keys );
 	void defineShard( KeyRangeRef keys );
-	void moveShard( KeyRangeRef keys, Team destinationTeam );
+	void moveShard( KeyRangeRef keys, std::vector<Team> destinationTeam );
 	void check();
 private:
 	struct OrderByTeamKey {
@@ -156,12 +175,23 @@ private:
 	void insert(Team team, KeyRange const& range);
 };
 
+struct ShardInfo {
+	Key key;
+	vector<UID> primarySrc;
+	vector<UID> remoteSrc;
+	vector<UID> primaryDest;
+	vector<UID> remoteDest;
+	bool hasDest;
+
+	explicit ShardInfo(Key key) : key(key), hasDest(false) {}
+};
+
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
-	typedef vector<UID> Team;  // sorted
 	int mode;
 	vector<std::pair<StorageServerInterface, ProcessClass>> allServers;
-	std::set< Team > teams;
-	vector<KeyRangeWith<std::pair<Team, Team>>> shards;
+	std::set<vector<UID>> primaryTeams;
+	std::set<vector<UID>> remoteTeams;
+	vector<ShardInfo> shards;
 };
 
 Future<Void> dataDistribution(
@@ -170,23 +200,27 @@ Future<Void> dataDistribution(
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges,
 	Reference<ILogSystem> const& logSystem,
 	Version const& recoveryCommitVersion,
-	double* const& lastLimited);
+	std::vector<Optional<Key>> const& primaryDcId,
+	std::vector<Optional<Key>> const& remoteDcIds,
+	double* const& lastLimited,
+	Future<Void> const& remoteRecovered);
 
 Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> const& initData,
 	Database const& cx,
-	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	PromiseStream<RelocateShard> const& output,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
+	Reference<AsyncVar<bool>> const& zeroHealthyTeams,
 	UID const& masterId);
 
 Future<Void> dataDistributionQueue(
 	Database const& cx,
 	PromiseStream<RelocateShard> const& input,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
-	TeamCollectionInterface const& teamCollection,
+	Reference<AsyncVar<bool>> const& processingUnhealthy,
+	vector<TeamCollectionInterface> const& teamCollection,
 	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	MoveKeysLock const& lock,
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
