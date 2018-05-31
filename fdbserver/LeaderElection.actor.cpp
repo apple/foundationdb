@@ -107,7 +107,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 
 		loop {
 			state Optional<std::pair<LeaderInfo, bool>> leader = getLeader( nominees->get() );
-			if( leader.present() && leader.get().first.forward ) { // TODO: Check if it is fine to not check bool
+			if( leader.present() && leader.get().first.forward ) {
 				// These coordinators are forwarded to another set.  But before we change our own cluster file, we need to make
 				// sure that a majority of coordinators know that.
 				// SOMEDAY: Wait briefly to see if other coordinators will tell us they already know, to save communication?
