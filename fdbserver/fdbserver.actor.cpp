@@ -1494,7 +1494,7 @@ int main(int argc, char* argv[]) {
 					if (listenError.isReady()) listenError.get();
 				} catch (Error& e) {
 					TraceEvent("BindError").error(e);
-					fprintf(stderr, "Error initializing networking with public address %s and listen address %s\n", publicAddress.toString().c_str(), listenAddress.toString().c_str());
+					fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n", publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}

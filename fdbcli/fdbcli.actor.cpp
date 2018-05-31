@@ -3197,7 +3197,7 @@ int main(int argc, char **argv) {
 	if ( opt.tlsKeyPath.size() ) {
 		try {
 			if (opt.tlsPassword.size())
-				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD);
+				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, opt.tlsPassword);
 
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, opt.tlsKeyPath);
 		} catch( Error& e ) {
