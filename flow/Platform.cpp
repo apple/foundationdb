@@ -937,10 +937,10 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
 	sum = 0;
 	for (cpustate = 0; cpustate < CPUSTATES; cpustate++)
 	{
-		long tmp = cur[state];
-		cur[state] -= last[state];
-		last[state] = tmp;
-		sum += cur[state];
+		long tmp = cur[cpustate];
+		cur[cpustate] -= last[cpustate];
+		last[cpustate] = tmp;
+		sum += cur[cpustate];
 	}
 
 	totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS]);
