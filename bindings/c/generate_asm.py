@@ -61,7 +61,7 @@ def write_windows_asm(asmfile, functions):
 def write_unix_asm(asmfile, functions, prefix):
     asmfile.write(".intel_syntax noprefix\n")
 
-    if platform == "linux":
+    if platform == "linux" or platform == "freebsd":
         asmfile.write("\n.data\n")
         for f in functions:
             asmfile.write("\t.extern fdb_api_ptr_%s\n" % f)
@@ -85,7 +85,7 @@ with open(asm, 'w') as asmfile, open(h, 'w') as hfile:
     hfile.write(
         "void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
 
-    if platform == "linux":
+    if platform == "linux" or platform == "freebsd":
         write_unix_asm(asmfile, functions, '')
     elif platform == "osx":
         write_unix_asm(asmfile, functions, '_')

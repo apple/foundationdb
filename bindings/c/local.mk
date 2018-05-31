@@ -34,6 +34,12 @@ ifeq ($(PLATFORM),linux)
   fdb_c_tests_LIBS += -lpthread
 endif
 
+ifeq ($(PLATFORM),freebsd)
+  fdb_c_LIBS += lib/libc++.a -lm -lpthread -lrt
+  fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -static-libstdc++ -Wl,-z,nodelete
+  fdb_c_tests_LIBS += -lpthread
+endif
+
 ifeq ($(PLATFORM),osx)
   fdb_c_LDFLAGS += -lc++ -Xlinker -exported_symbols_list -Xlinker bindings/c/fdb_c.symbols
   fdb_c_tests_LIBS += -lpthread
