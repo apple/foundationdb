@@ -20,15 +20,12 @@
 
 
 #include "Trace.h"
+#include "FileTraceLogWriter.h"
+#include "XmlTraceLogFormatter.h"
 #include "flow.h"
 #include "DeterministicRandom.h"
 #include <stdlib.h>
 #include <stdarg.h>
-#ifdef WIN32
-#include <windows.h>
-#undef max
-#undef min
-#endif
 #include <time.h>
 
 #include "IThreadPool.h"
@@ -37,26 +34,6 @@
 #include "EventTypes.actor.h"
 #include "TDMetric.actor.h"
 #include "MetricSample.h"
-
-#include <fcntl.h>
-#if defined(__unixish__)
-#define __open ::open
-#define __write ::write
-#define __close ::close
-#define __fsync ::fsync
-#define TRACEFILE_FLAGS O_WRONLY | O_CREAT | O_EXCL
-#define TRACEFILE_MODE 0664
-#elif defined(_WIN32)
-#include <io.h>
-#include <stdio.h>
-#include <sys/stat.h>
-#define __open _open
-#define __write _write
-#define __close _close
-#define __fsync _commit
-#define TRACEFILE_FLAGS _O_WRONLY | _O_CREAT | _O_EXCL
-#define TRACEFILE_MODE _S_IWRITE
-#endif
 
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
@@ -136,91 +113,14 @@ SuppressionMap suppressedEvents;
 static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 
-struct XmlTraceLogFormatter : public TraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
-	void addref() {
-		ReferenceCounted<XmlTraceLogFormatter>::addref();
-	}
-
-	void delref() {
-		ReferenceCounted<XmlTraceLogFormatter>::delref();
-	}
-
-	const char* getExtension() {
-		return "xml";
-	}
-
-	const char* getHeader() {
-		return "<?xml version=\"1.0\"?>\r\n<Trace>\r\n";
-	}
-
-	const char* getFooter() {
-		return "</Trace>\r\n";
-	}
-
-	std::string escape(std::string source) {
-		std::string result;
-		int offset = 0;
-		loop {
-			int index = source.find_first_of(std::string({'&', '"', '<', '>', '\r', '\n', '\0'}), offset);
-			if(index == source.npos) {
-				break;
-			}
-
-			result += source.substr(offset, index-offset);
-			if(source[index] == '&') {
-				result += "&amp;";
-			}
-			else if(source[index] == '"') {
-				result += "&quot;";
-			}
-			else if(source[index] == '<') {
-				result += "&lt;";
-			}
-			else if(source[index] == '>') {
-				result += "&gt;";
-			}
-			else if(source[index] == '\n' || source[index] == '\r') {
-				result += " ";
-			}
-			else if(source[index] == '\0') {
-				result += " ";
-				TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent").detail("Source", StringRef(source).printable()).detail("Character", StringRef(source.substr(index, 1)).printable());
-			}
-			else {
-				ASSERT(false);
-			}
-
-			offset = index+1;
-		}
-
-		if(offset == 0) {
-			return source;
-		}
-		else {
-			result += source.substr(offset);
-			return result;
-		}
-	}
-
-	std::string formatEvent(const TraceEventFields &fields) {
-		std::string event = "<Event ";
-
-		for(auto itr : fields) {
-			event += escape(itr.first) + "=\"" + escape(itr.second) + "\" ";
-		}
-
-		event += "/>\r\n";
-		return event;
-	}
-};
-
 struct TraceLog {
 
 private:
+	Reference<TraceLogWriter> logWriter;
 	Reference<TraceLogFormatter> formatter;
-	Standalone< VectorRef<StringRef> > buffer;
-	int file_length;
-	int buffer_length;
+	std::vector<TraceEventFields> eventBuffer;
+	int loggedLength;
+	int bufferLength;
 	bool opened;
 	int64_t preopenOverflowCount;
 	std::string basename;
@@ -285,98 +185,38 @@ public:
 	Reference<BarrierList> barriers;
 
 	struct WriterThread : IThreadPoolReceiver {
-		WriterThread( std::string directory, std::string processName, uint32_t maxLogsSize, std::string basename, std::string logGroup, Optional<NetworkAddress> localAddress, Reference<BarrierList> barriers, Reference<TraceLogFormatter> formatter ) 
-			: directory(directory), processName(processName), maxLogsSize(maxLogsSize), basename(basename), logGroup(logGroup), localAddress(localAddress), traceFileFD(0), index(0), barriers(barriers), formatter(formatter) {}
+		WriterThread( Reference<BarrierList> barriers, Reference<TraceLogWriter> logWriter, Reference<TraceLogFormatter> formatter ) 
+			: barriers(barriers), logWriter(logWriter), formatter(formatter) {}
 
 		virtual void init() {}
 
+		Reference<TraceLogWriter> logWriter;
 		Reference<TraceLogFormatter> formatter;
 		Reference<BarrierList> barriers;
-		int traceFileFD;
-		std::string directory;
-		std::string processName;
-		int maxLogsSize;
-		std::string basename;
-		std::string logGroup;
-		Optional<NetworkAddress> localAddress;
-		int index;
-
-		void lastError(int err) {
-			// Whenever we get a serious error writing a trace log, all flush barriers posted between the operation encountering
-			// the error and the occurrence of the error are unblocked, even though we haven't actually succeeded in flushing.
-			// Otherwise a permanent write error would make the program block forever.
-			if (err != 0 && err != EINTR) {
-				barriers->triggerAll();
-			}
-		}
-
-		void writeReliable(const uint8_t* buf, int count) {
-			auto ptr = buf;
-			int remaining = count;
-
-			while ( remaining ) {
-				int ret = __write( traceFileFD, ptr, remaining );
-				if ( ret > 0 ) {
-					lastError(0);
-					remaining -= ret;
-					ptr += ret;
-				} else {
-					lastError(errno);
-					threadSleep(0.1);
-				}
-			}
-		}
-		void writeReliable(const char* msg) {
-			writeReliable( (const uint8_t*)msg, strlen(msg) );
-		}
-
-		void handleTraceFileOpenError(const std::string& filename)
-		{
-		}
 
 		struct Open : TypedAction<WriterThread,Open> {
 			virtual double getTimeEstimate() { return 0; }
 		};
 		void action( Open& o ) {
-			close();
-			cleanupTraceFiles();
-
-			auto finalname = format("%s.%d.%s", basename.c_str(), ++index, formatter->getExtension());
-			while ( (traceFileFD = __open( finalname.c_str(), TRACEFILE_FLAGS, TRACEFILE_MODE )) == -1 ) {
-				lastError(errno);
-				if (errno == EEXIST)
-					finalname = format("%s.%d.%s", basename.c_str(), ++index, formatter->getExtension());
-				else {
-					fprintf(stderr, "ERROR: could not create trace log file `%s' (%d: %s)\n", finalname.c_str(), errno, strerror(errno));
-
-					int errorNum = errno;
-					onMainThreadVoid([finalname, errorNum]{
-						TraceEvent(SevWarnAlways, "TraceFileOpenError")
-							.detail("Filename", finalname)
-							.detail("ErrorCode", errorNum)
-							.detail("Error", strerror(errorNum))
-							.trackLatest("TraceFileOpenError"); }, NULL);
-					threadSleep(FLOW_KNOBS->TRACE_RETRY_OPEN_INTERVAL);
-				}
-			}
-			onMainThreadVoid([]{ latestEventCache.clear("TraceFileOpenError"); }, NULL);
-			lastError(0);
-
-			writeReliable(formatter->getHeader());
+			logWriter->open();
+			logWriter->write(formatter->getHeader());
 		}
 
 		struct Close : TypedAction<WriterThread,Close> {
 			virtual double getTimeEstimate() { return 0; }
 		};
 		void action( Close& c ) {
-			close();
+			logWriter->write(formatter->getFooter());
+			logWriter->close();
 		}
 
-		void close() {
-			if (traceFileFD) {
-				writeReliable(formatter->getFooter());
-				while ( __close(traceFileFD) ) threadSleep(0.1);
-			}
+		struct Roll : TypedAction<WriterThread,Roll> {
+			virtual double getTimeEstimate() { return 0; }
+		};
+		void action( Roll& c ) {
+			logWriter->write(formatter->getFooter());
+			logWriter->roll();
+			logWriter->write(formatter->getHeader());
 		}
 
 		struct Barrier : TypedAction<WriterThread, Barrier> {
@@ -387,57 +227,23 @@ public:
 		}
 
 		struct WriteBuffer : TypedAction<WriterThread, WriteBuffer> {
-			Standalone< VectorRef<StringRef> > buffer;
+			std::vector<TraceEventFields> events;
 
-			WriteBuffer( Standalone< VectorRef<StringRef> > buffer ) : buffer(buffer) {}
+			WriteBuffer(std::vector<TraceEventFields> events) : events(events) {}
 			virtual double getTimeEstimate() { return .001; }
 		};
 		void action( WriteBuffer& a ) {
-			if ( traceFileFD ) {
-				for ( auto i = a.buffer.begin(); i != a.buffer.end(); ++i ) {
-					writeReliable(i->begin(), i->size());
-				}
-
-				if(FLOW_KNOBS->TRACE_FSYNC_ENABLED) {
-					__fsync( traceFileFD );
-				}
-
-				a.buffer = Standalone< VectorRef<StringRef> >();
+			for(auto event : a.events) {
+				logWriter->write(formatter->formatEvent(event));
 			}
-		}
 
-		void cleanupTraceFiles() {
-			// Setting maxLogsSize=0 disables trace file cleanup based on dir size
-			if(!g_network->isSimulated() && maxLogsSize > 0) {
-				try {
-					std::vector<std::string> existingFiles = platform::listFiles(directory, ".xml");
-					std::vector<std::string> existingTraceFiles;
-
-					for(auto f = existingFiles.begin(); f != existingFiles.end(); ++f)
-						if(f->substr(0, processName.length()) == processName)
-							existingTraceFiles.push_back(*f);
-
-					// reverse sort, so we preserve the most recent files and delete the oldest
-					std::sort(existingTraceFiles.begin(), existingTraceFiles.end(), TraceLog::reverseCompareTraceFileName);
-
-					int64_t runningTotal = 0;
-					std::vector<std::string>::iterator fileListIterator = existingTraceFiles.begin();
-
-					while(runningTotal < maxLogsSize && fileListIterator != existingTraceFiles.end()) {
-						runningTotal += (fileSize(joinPath(directory, *fileListIterator)) + FLOW_KNOBS->ZERO_LENGTH_FILE_PAD);
-						++fileListIterator;
-					}
-
-					while(fileListIterator != existingTraceFiles.end()) {
-						deleteFile(joinPath(directory, *fileListIterator));
-						++fileListIterator;
-					}
-				} catch( Error & ) {}
+			if(FLOW_KNOBS->TRACE_SYNC_ENABLED) {
+				logWriter->sync();
 			}
 		}
 	};
 
-	TraceLog() : buffer_length(0), file_length(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
+	TraceLog() : bufferLength(0), loggedLength(0), opened(false), preopenOverflowCount(0), barriers(new BarrierList), logTraceEventMetrics(false), formatter(new XmlTraceLogFormatter()) {}
 
 	bool isOpen() const { return opened; }
 
@@ -449,12 +255,13 @@ public:
 		this->localAddress = na;
 
 		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), g_random->randomAlphaNumeric(6).c_str());
+		logWriter = Reference<TraceLogWriter>(new FileTraceLogWriter(directory, processName, basename, formatter->getExtension(), maxLogsSize, [this](){ barriers->triggerAll(); }));
 
 		if ( g_network->isSimulated() )
 			writer = Reference<IThreadPool>(new DummyThreadPool());
 		else
 			writer = createGenericThreadPool();
-		writer->addThread( new WriterThread(directory, processName, maxLogsSize, basename, logGroup, localAddress, barriers, formatter) );
+		writer->addThread( new WriterThread(barriers, logWriter, formatter) );
 
 		rollsize = rs;
 
@@ -470,7 +277,7 @@ public:
 			// 2. Simulated runs manually insert the Machine field at TraceEvent creation time. Real-world runs add this field at write time.
 			//
 			// Without the ability to resolve the ambiguity, we've chosen to always favor the real-world approach and not support such events in simulation.
-			buffer = Standalone<VectorRef<StringRef>>();
+			eventBuffer.clear();
 		}
 
 		opened = true;
@@ -478,35 +285,6 @@ public:
 			TraceEvent(SevWarn, "TraceLogPreopenOverflow").detail("OverflowEventCount", preopenOverflowCount);
 			preopenOverflowCount = 0;
 		}
-	}
-
-	static void extractTraceFileNameInfo(std::string const& filename, std::string &root, int &index) {
-		int split = filename.find_last_of('.', filename.size() - 5);
-		root = filename.substr(0, split);
-		if(sscanf(filename.substr(split + 1, filename.size() - split - 4).c_str(), "%d", &index) == EOF)
-			index = -1;
-	}
-
-	static bool compareTraceFileName (std::string const& f1, std::string const& f2) {
-		std::string root1;
-		std::string root2;
-
-		int index1;
-		int index2;
-
-		extractTraceFileNameInfo(f1, root1, index1);
-		extractTraceFileNameInfo(f2, root2, index2);
-
-		if(root1 != root2)
-			return root1 < root2;
-		if(index1 != index2)
-			return index1 < index2;
-
-		return f1 < f2;
-	}
-
-	static bool reverseCompareTraceFileName(std::string f1, std::string f2) {
-		return compareTraceFileName(f2, f1);
 	}
 
 	void writeEvent( TraceEventFields fields, std::string trackLatestKey, bool trackError ) {
@@ -520,17 +298,15 @@ public:
 			fields.addField("TrackLatestType", "Original");
 		}
 
-		std::string eventStr = formatter->formatEvent(fields);
-
 		MutexHolder hold(mutex);
-		if(!isOpen() && (preopenOverflowCount > 0 || buffer_length + eventStr.size() > FLOW_KNOBS->TRACE_LOG_MAX_PREOPEN_BUFFER)) {
+		if(!isOpen() && (preopenOverflowCount > 0 || bufferLength + fields.sizeBytes() > FLOW_KNOBS->TRACE_LOG_MAX_PREOPEN_BUFFER)) {
 			++preopenOverflowCount;
 			return;
 		}
 
 		// FIXME: What if we are using way too much memory for buffer?
-		buffer.push_back_deep( buffer.arena(), StringRef((const uint8_t*)eventStr.c_str(), eventStr.size()) );
-		buffer_length += eventStr.size();
+		eventBuffer.push_back(fields);
+		bufferLength += fields.sizeBytes();
 
 		if(trackError) {
 			latestEventCache.setLatestError(fields);
@@ -569,18 +345,21 @@ public:
 
 		MutexHolder hold(mutex);
 		bool roll = false;
-		if (!buffer.size()) return Void(); // SOMEDAY: maybe we still roll the tracefile here?
+		if (!eventBuffer.size()) return Void(); // SOMEDAY: maybe we still roll the tracefile here?
 
-		if (rollsize && buffer_length + file_length > rollsize) // SOMEDAY: more conditions to roll
+		if (rollsize && bufferLength + loggedLength > rollsize) // SOMEDAY: more conditions to roll
 			roll = true;
 
-		auto a = new WriterThread::WriteBuffer( std::move(buffer) );
-		file_length += buffer_length;
-		buffer = Standalone<VectorRef<StringRef>>();
-		buffer_length = 0;
+		auto a = new WriterThread::WriteBuffer( std::move(eventBuffer) );
+		loggedLength += bufferLength;
+		eventBuffer = std::vector<TraceEventFields>();
+		bufferLength = 0;
 		writer->post( a );
 
 		if (roll) {
+			auto o = new WriterThread::Roll;
+			writer->post(o);
+
 			std::vector<TraceEventFields> events = latestEventCache.getAllUnsafe();
 			for (int idx = 0; idx < events.size(); idx++) {
 				if(events[idx].size() > 0) {
@@ -598,13 +377,11 @@ public:
 						}
 					}
 
-					buffer.push_back_deep( buffer.arena(), StringRef(formatter->formatEvent(rolledFields)) );
+					eventBuffer.push_back(rolledFields);
 				}
 			}
 
-			auto o = new WriterThread::Open;
-			file_length = 0;
-			writer->post( o );
+			loggedLength = 0;
 		}
 
 		ThreadFuture<Void> f(new ThreadSingleAssignmentVar<Void>);
@@ -619,10 +396,10 @@ public:
 			MutexHolder hold(mutex);
 
 			// Write remaining contents
-			auto a = new WriterThread::WriteBuffer( std::move(buffer) );
-			file_length += buffer_length;
-			buffer = Standalone<VectorRef<StringRef>>();
-			buffer_length = 0;
+			auto a = new WriterThread::WriteBuffer( std::move(eventBuffer) );
+			loggedLength += bufferLength;
+			eventBuffer = std::vector<TraceEventFields>();
+			bufferLength = 0;
 			writer->post( a );
 
 			auto c = new WriterThread::Close();
@@ -830,7 +607,6 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 	this->severity = severity;
 	tmpEventMetric = new DynamicEventMetric(MetricNameRef());
 
-	length = 0;
 	if (isEnabled(type, severity)) {
 		enabled = true;
 
@@ -886,9 +662,8 @@ TraceEvent& TraceEvent::detailImpl( std::string key, std::string value, bool wri
 		}
 
 		fields.addField(key, value);
-		length += key.size() + value.size();
 
-		if(length > FLOW_KNOBS->TRACE_EVENT_MAX_SIZE) {
+		if(fields.sizeBytes() > FLOW_KNOBS->TRACE_EVENT_MAX_SIZE) {
 			TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", fields.toString().substr(300));	
 			enabled = false;
 		}
@@ -1182,12 +957,19 @@ TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::
 	fields.addField("Line", format("%d", line));
 }
 
+TraceEventFields::TraceEventFields() : bytes(0) {}
+
 void TraceEventFields::addField(std::string key, std::string value) {
+	bytes += key.size() + value.size();
 	fields.push_back(std::make_pair(key, value));
 }
 
 size_t TraceEventFields::size() const {
 	return fields.size();
+}
+
+size_t TraceEventFields::sizeBytes() const {
+	return bytes;
 }
 
 TraceEventFields::FieldIterator TraceEventFields::begin() const {

@@ -36,6 +36,8 @@
     <ClCompile Include="version.cpp" />
     <ClCompile Include="stacktrace.amalgamation.cpp" />
     <ClCompile Include="SignalSafeUnwind.cpp" />
+    <ClCompile Include="XmlTraceLogFormatter.cpp" />
+    <ClCompile Include="FileTraceLogWriter.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ActorCollection.h" />
@@ -72,6 +74,8 @@
     <ClInclude Include="SignalSafeUnwind.h" />
     <ClInclude Include="MetricSample.h" />
     <ClInclude Include="stacktrace.h" />
+    <ClInclude Include="XmlTraceLogFormatter.h" />
+    <ClInclude Include="FileTraceLogWriter.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="no_intellisense.opt" />

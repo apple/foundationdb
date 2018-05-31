@@ -58,7 +58,10 @@ public:
 	typedef std::vector<Field> FieldContainer;
 	typedef FieldContainer::const_iterator FieldIterator;
 
+	TraceEventFields();
+
 	size_t size() const;
+	size_t sizeBytes() const;
 	FieldIterator begin() const;
 	FieldIterator end() const;
 
@@ -72,6 +75,7 @@ public:
 
 private:
 	FieldContainer fields;
+	size_t bytes;
 };
 
 template <class Archive>
@@ -191,6 +195,17 @@ private:
 
 	bool init( Severity, const char* type );
 	bool init( Severity, struct TraceInterval& );
+};
+
+struct TraceLogWriter {
+	virtual void open() = 0;
+	virtual void roll() = 0;
+	virtual void close() = 0;
+	virtual void write(const std::string&) = 0;
+	virtual void sync() = 0;
+
+	virtual void addref() = 0;
+	virtual void delref() = 0;
 };
 
 struct TraceLogFormatter {

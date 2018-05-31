@@ -115,7 +115,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
 	init( MIN_TRACE_SEVERITY,                 isSimulated ? 0 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
-	init( TRACE_FSYNC_ENABLED,                                   0 );
+	init( TRACE_SYNC_ENABLED,                                    0 );
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
 	init( TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
