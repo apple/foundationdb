@@ -21,7 +21,6 @@
 
 #include "Trace.h"
 #include "flow.h"
-#include "fdbclient/FDBTypes.h"
 #include "DeterministicRandom.h"
 #include <stdlib.h>
 #include <stdarg.h>
@@ -185,7 +184,7 @@ struct XmlTraceLogFormatter : public TraceLogFormatter, ReferenceCounted<XmlTrac
 			}
 			else if(source[index] == '\0') {
 				result += " ";
-				TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent").detail("Source", printable(source)).detail("Character", printable(source.substr(index, 1)));
+				TraceEvent(SevWarnAlways, "StrippedIllegalCharacterFromTraceEvent").detail("Source", StringRef(source).printable()).detail("Character", StringRef(source.substr(index, 1)).printable());
 			}
 			else {
 				ASSERT(false);
