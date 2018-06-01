@@ -41,6 +41,7 @@ enum {
 	TaskFailureMonitor = 8700,
 	TaskResolutionMetrics = 8700,
 	TaskClusterController = 8650,
+	TaskProxyCommitDispatcher = 8640,
 	TaskTLogQueuingMetrics = 8620,
 	TaskTLogPop = 8610,
 	TaskTLogPeekReply = 8600,
