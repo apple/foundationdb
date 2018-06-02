@@ -808,6 +808,10 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
+			if(!(self->locality == tagLocalitySpecial || self->locality == tag.locality || tag.locality < 0)) {
+				continue;
+			}
+
 			if(tag.locality == tagLocalityLogRouter) {
 				if(!self->logRouterTags) {
 					continue;
@@ -1687,6 +1691,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID()) );
+		logData->locality = tagLocalitySpecial;
 		logData->stopped = true;
 		self->id_data[id1] = logData;
 		id_interf[id1] = recruited;
@@ -1992,7 +1997,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 	req.reply.send( recruited );
 
-	TraceEvent("TLogReady", logData->logId).detail("allTags", describe(req.allTags));
+	TraceEvent("TLogReady", logData->logId).detail("allTags", describe(req.allTags)).detail("locality", logData->locality);
 
 	updater = Void();
 	Void _ = wait( tLogCore( self, logData, recruited ) );
