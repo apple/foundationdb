@@ -25,7 +25,7 @@
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
 
-Optional<std::pair<LeaderInfo, bool>> getLeader( vector<Optional<LeaderInfo>> nominees );
+Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees );
 
 ACTOR Future<Void> submitCandidacy( Key key, LeaderElectionRegInterface coord, LeaderInfo myInfo, UID prevChangeID, Reference<AsyncVar<vector<Optional<LeaderInfo>>>> nominees, int index ) {
 	loop {
@@ -128,14 +128,14 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 				coordinators.ccf->notifyConnected();
 			}
 
-			if (leader.present() && leader.get().second && leader.get().first.changeID == myInfo.changeID) {
+			if (leader.present() && leader.get().second && leader.get().first.equalInternalId(myInfo)) {
 				TraceEvent("BecomingLeader", myInfo.changeID);
 				ASSERT( leader.get().first.serializedInfo == proposedSerializedInterface );
 				outSerializedLeader->set( leader.get().first.serializedInfo );
 				iAmLeader = true;
 				break;
 			}
-			if (leader.present() && leader.get().second) {
+			if (leader.present()) {
 				TraceEvent("LeaderChanged", myInfo.changeID).detail("ToID", leader.get().first.changeID);
 				if (leader.get().first.serializedInfo != proposedSerializedInterface) // We never set outSerializedLeader to our own interface unless we are ready to become leader!
 					outSerializedLeader->set( leader.get().first.serializedInfo );

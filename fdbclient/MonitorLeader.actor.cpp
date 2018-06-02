@@ -326,49 +326,53 @@ ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, Asyn
 
 // Also used in fdbserver/LeaderElection.actor.cpp!
 // bool represents if the LeaderInfo is a majority answer or not.
-Optional<std::pair<LeaderInfo, bool>> getLeader( vector<Optional<LeaderInfo>> nominees ) {
-	// If any coordinator says that the quorum is forwarded, then it is
-	for(int i=0; i<nominees.size(); i++)
-		if (nominees[i].present() && nominees[i].get().forward)
-			return std::pair<LeaderInfo, bool>(nominees[i].get(), true);
+// This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
+Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees ) {
+	vector<LeaderInfo> maskedNominees;
+	maskedNominees.reserve(nominees.size());
+	for (auto &nominee : nominees) {
+		if (nominee.present()) {
+			maskedNominees.push_back(nominee.get());
+			maskedNominees.back().changeID = UID(maskedNominees.back().changeID.first() & LeaderInfo::mask, maskedNominees.back().changeID.second());
+		}
+	}
 
-	if(!nominees.size())
+	// If any coordinator says that the quorum is forwarded, then it is
+	for(int i=0; i<maskedNominees.size(); i++)
+		if (maskedNominees[i].forward)
+			return std::pair<LeaderInfo, bool>(maskedNominees[i], true);
+
+	if(!maskedNominees.size())
 		return Optional<std::pair<LeaderInfo, bool>>();
 
-	std::sort(nominees.begin(), nominees.end(),
-		[](const Optional<LeaderInfo>& l, const Optional<LeaderInfo>& r) {
-		if (!l.present())
-			return true;
-		if (!r.present())
-			return false;
-		return UID(l.get().changeID.first() & l.get().mask, l.get().changeID.second()) < UID(r.get().changeID.first() & r.get().mask, r.get().changeID.second());
-	});
+	std::sort(maskedNominees.begin(), maskedNominees.end(),
+		[](const LeaderInfo& l, const LeaderInfo& r) { return l.changeID < r.changeID; });
 
 	int bestCount = 0;
-	Optional<LeaderInfo> bestNominee;
-	Optional<LeaderInfo> currentNominee;
+	LeaderInfo bestNominee;
+	LeaderInfo currentNominee;
 	int curCount = 0;
-	for (int i = 0; i < nominees.size(); i++) {
-		if (nominees[i].present()) {
-			if (currentNominee.present() && currentNominee.get().equalInternalId(nominees[i].get())) {
-				curCount++;
-			}
-			else {
-				currentNominee = nominees[i];
-				curCount = 1;
-			}
+	for (int i = 0; i < maskedNominees.size(); i++) {
+		if (currentNominee.equalInternalId(maskedNominees[i])) {
+			curCount++;
+		}
+		else {
 			if (curCount > bestCount) {
 				bestNominee = currentNominee;
 				bestCount = curCount;
 			}
+			currentNominee = maskedNominees[i];
+			curCount = 1;
 		}
+	}
+	if (curCount > bestCount) {
+		bestNominee = currentNominee;
+		bestCount = curCount;
 	}
 
 	if (bestCount >= nominees.size() / 2 + 1)
-		return std::pair<LeaderInfo, bool>(bestNominee.get(), true);
-	if (bestNominee.present())
-		return std::pair<LeaderInfo, bool>(bestNominee.get(), false);
-	return Optional<std::pair<LeaderInfo, bool>>();
+		return std::pair<LeaderInfo, bool>(bestNominee, true);
+	return std::pair<LeaderInfo, bool>(bestNominee, false);
 }
 
 struct MonitorLeaderInfo {
