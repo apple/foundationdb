@@ -364,7 +364,7 @@ ACTOR Future<Void> logRouterCore(
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
 			logRouterData.allowPops = db->get().recoveryState == 7;
-			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
+			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get(), true ));
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {
 			addActor.send( logRouterPeekMessages( &logRouterData, req ) );

@@ -1822,7 +1822,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 				logSystem->set(ILogSystem::fromOldLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
 				found = true;
 			} else if( self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom) ) {
-				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
+				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, false, true ));
 				found = true;
 			}
 			else if( self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
@@ -1909,17 +1909,16 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			logData->initialized = true;
 			self->newLogData.trigger();
 
-			if(req.isPrimary && logData->unrecoveredBefore <= req.knownCommittedVersion && !logData->stopped) {
-				logData->logRouterPopToVersion = req.knownCommittedVersion;
-				std::vector<Tag> tags;
-				tags.push_back(logData->remoteTag);
-				Void _ = wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.knownCommittedVersion, true) || logData->removed);
-			}
-
-			TraceEvent("TLogPullComplete", self->dbgid).detail("logId", logData->logId);
-
-			if(req.isPrimary && !req.recoverTags.empty() && !logData->stopped && req.knownCommittedVersion < req.recoverAt) {
-				Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) || logData->removed);
+			if(req.isPrimary && !logData->stopped && logData->unrecoveredBefore <= req.recoverAt) {
+				if(req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalityInvalid) {
+					logData->logRouterPopToVersion = req.recoverAt;
+					std::vector<Tag> tags;
+					tags.push_back(logData->remoteTag);
+					Void _ = wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) || logData->removed);
+				} else if(!req.recoverTags.empty()) {
+					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
+					Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) || logData->removed);
+				}
 			}
 
 			if(req.isPrimary && logData->version.get() < req.recoverAt && !logData->stopped) {

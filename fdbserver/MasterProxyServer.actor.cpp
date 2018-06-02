@@ -1191,7 +1191,6 @@ ACTOR Future<Void> masterProxyServerCore(
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get());
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true);
-	onError = onError || commitData.logSystem->onError();
 
 	addActor.send(transactionStarter(proxy, master, db, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, &commitData));

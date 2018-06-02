@@ -157,6 +157,7 @@ struct LogSystemConfig {
 	int32_t expectedLogSets;
 	UID recruitmentID;
 	bool stopped;
+	Optional<Version> previousEpochEndVersion;
 
 	LogSystemConfig() : logSystemType(0), logRouterTags(0), expectedLogSets(0), stopped(false) {}
 
@@ -217,7 +218,7 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID && stopped == r.stopped;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID && stopped == r.stopped && previousEpochEndVersion == r.previousEpochEndVersion;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -248,7 +249,7 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped;
+		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped & previousEpochEndVersion;
 	}
 };
 
