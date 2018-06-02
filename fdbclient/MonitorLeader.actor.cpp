@@ -353,7 +353,7 @@ Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInf
 	LeaderInfo currentNominee;
 	int curCount = 0;
 	for (int i = 0; i < maskedNominees.size(); i++) {
-		if (currentNominee.equalInternalId(maskedNominees[i])) {
+		if (currentNominee == maskedNominees[i]) {
 			curCount++;
 		}
 		else {
@@ -370,9 +370,8 @@ Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInf
 		bestCount = curCount;
 	}
 
-	if (bestCount >= nominees.size() / 2 + 1)
-		return std::pair<LeaderInfo, bool>(bestNominee, true);
-	return std::pair<LeaderInfo, bool>(bestNominee, false);
+	bool majority = bestCount >= nominees.size() / 2 + 1;
+	return std::pair<LeaderInfo, bool>(bestNominee, majority);
 }
 
 struct MonitorLeaderInfo {
