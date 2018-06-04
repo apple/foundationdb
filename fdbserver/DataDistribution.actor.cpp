@@ -275,7 +275,7 @@ ACTOR Future<Void> waitForAllDataRemoved( Database cx, UID serverID, Version add
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Version ver = wait( tr.getReadVersion() );
 
-			//we cannot remove a server immediately after adding it, because 
+			//we cannot remove a server immediately after adding it, because a perfectly timed master recovery could cause us to not store the mutations sent to the short lived storage server.
 			if(ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
 				bool canRemove = wait( canRemoveStorageServer( &tr, serverID ) );
 				if (canRemove) {
