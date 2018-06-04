@@ -341,7 +341,10 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 	}
 
 	if(self->logSystem->get() && self->allowPops) {
-		self->logSystem->get()->pop(minKnownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, self->routerTag);
+		//The knownCommittedVersion might not be committed on the primary logs, so subtracting max_read_transaction_life_versions will ensure it is committed.
+		//We then need to subtract max_read_transaction_life_versions again ensure we do not pop below the knownCommittedVersion of the primary logs.
+		//FIXME: if we get the true knownCommittedVersion when peeking from the primary logs we only need to subtract max_read_transaction_life_versions once.
+		self->logSystem->get()->pop(minKnownCommittedVersion - 2*SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, self->routerTag);
 	}
 	req.reply.send(Void());
 	self->minPopped.set(std::max(minPopped, self->minPopped.get()));
