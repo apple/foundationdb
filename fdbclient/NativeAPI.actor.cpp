@@ -2456,11 +2456,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 }
 
 Future<Void> Transaction::commitMutations() {
-	cx->transactionsCommitStarted++;
-
-	if(options.readOnly)
-		return transaction_read_only();
-
 	try {
 		//if this is a read-only transaction return immediately
 		if( !tr.transaction.write_conflict_ranges.size() && !tr.transaction.mutations.size() ) {
@@ -2470,6 +2465,11 @@ Future<Void> Transaction::commitMutations() {
 			versionstampPromise.sendError(no_commit_version());
 			return Void();
 		}
+
+		cx->transactionsCommitStarted++;
+
+		if(options.readOnly)
+			return transaction_read_only();
 
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
