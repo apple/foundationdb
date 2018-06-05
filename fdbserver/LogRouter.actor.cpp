@@ -335,7 +335,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 		}
 	}
 
-	while(!self->messageBlocks.empty() && self->messageBlocks.front().first <= minPopped) {
+	while(!self->messageBlocks.empty() && self->messageBlocks.front().first < minPopped) {
 		self->messageBlocks.pop_front();
 		Void _ = wait(yield(TaskUpdateStorage));
 	}
