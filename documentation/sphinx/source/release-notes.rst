@@ -2,14 +2,22 @@
 Release Notes
 #############
 
+5.2.3
+=====
+
+Fixes
+-----
+
+* A read-only transaction using the ``READ_LOCK_AWARE`` option would fail if committed. `(PR #437) https://github.com/apple/foundationdb/pull/437`_
+
 5.2.2
 =====
 
 Fixes
 -----
 
-* Build would fail on recent versions of Clang
-* Clusters running with TLS plugin would fail to start when client and server certificates used different validation rules
+* Build would fail on recent versions of Clang. `(PR #389) https://github.com/apple/foundationdb/pull/389/files`_
+* Clusters running with TLS plugin would fail to start when client and server certificates used different validation rules. `(PR #396) https://github.com/apple/foundationdb/pull/396`_
 
 5.2.1
 =====
