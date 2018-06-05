@@ -1892,6 +1892,33 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 	}
 }
 
+ACTOR Future<Void> updateHealthyKey(DDTeamCollection* self) {
+	state bool unhealthyInDatabase = true;
+	Void _ = wait(self->initialFailureReactionDelay);
+	Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
+	
+	loop {
+		while(unhealthyInDatabase == self->processingUnhealthy->get()) {
+			Void _ = wait(self->processingUnhealthy->onChange());
+		}
+
+		TraceEvent("DDUpdatingHealthy", self->masterId).detail("unhealthyInDatabase", unhealthyInDatabase);
+		state Transaction tr(self->cx);
+		loop {
+			try {
+				tr.addReadConflictRange(singleKeyRange(serversHealthyKey));
+				tr.set(serversHealthyKey, unhealthyInDatabase ? LiteralStringRef("1") : StringRef());
+				Void _ = wait( tr.commit() );
+				TraceEvent("DDUpdatedHealthy", self->masterId).detail("unhealthyInDatabase", unhealthyInDatabase);
+				unhealthyInDatabase = !unhealthyInDatabase;
+				break;
+			} catch( Error &e ) {
+				Void _ = wait( tr.onError(e) );
+			}
+		}
+	}
+}
+
 // Keep track of servers and teams -- serves requests for getRandomTeam
 ACTOR Future<Void> dataDistributionTeamCollection(
 	Reference<InitialDataDistribution> initData,
@@ -1929,6 +1956,9 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		
 		if(includedDCs.size()) {
 			self.addActor.send(updateReplicasKey(&self, includedDCs[0]));
+		}
+		if(primary) {
+			self.addActor.send(updateHealthyKey(&self));
 		}
 		// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 

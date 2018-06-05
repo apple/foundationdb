@@ -110,6 +110,7 @@ Future<ConfigurationResult::Type> changeConfig( Database const& cx, std::map<std
 
 Future<DatabaseConfiguration> getDatabaseConfiguration( Database const& cx );
 Future<Void> waitForFullReplication( Database const& cx );
+Future<Void> waitForHealthy( Database const& cx );
 
 struct IQuorumChange : ReferenceCounted<IQuorumChange> {
 	virtual ~IQuorumChange() {}

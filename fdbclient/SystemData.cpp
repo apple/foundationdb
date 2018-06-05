@@ -258,6 +258,8 @@ int decodeDatacenterReplicasValue( ValueRef const& value ) {
 	return s;
 }
 
+const KeyRef serversHealthyKey = LiteralStringRef("\xff\x02/serversHealthy");
+
 // serverListKeys.contains(k) iff k.startsWith( serverListKeys.begin ) because '/'+1 == '0'
 const KeyRangeRef serverListKeys(
 	LiteralStringRef("\xff/serverList/"),
