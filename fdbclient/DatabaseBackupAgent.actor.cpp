@@ -489,6 +489,7 @@ namespace dbBackup {
 
 			copyDefaultParameters(parentTask, task);
 
+			task->params[DatabaseBackupAgent::keyBeginVersion] = BinaryWriter::toValue(1, Unversioned()); //FIXME: remove in 6.X, only needed for 5.2 backward compatibility
 			task->params[DatabaseBackupAgent::keyEndVersion] = BinaryWriter::toValue(endVersion, Unversioned());
 
 			if (!waitFor) {

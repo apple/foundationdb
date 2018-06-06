@@ -1896,6 +1896,9 @@ namespace fileBackup {
 		StringRef getName() const { return name; };
 
 		static struct {
+			static TaskParam<Version> beginVersion() {
+				return LiteralStringRef(__FUNCTION__);
+			}
 			static TaskParam<Version> endVersion() {
 				return LiteralStringRef(__FUNCTION__);
 			}
@@ -1926,6 +1929,7 @@ namespace fileBackup {
 										 BackupConfig(logUid),
 										 waitFor,
 										 [=](Reference<Task> task) {
+											 Params.beginVersion().set(task, 1); //FIXME: remove in 6.X, only needed for 5.2 backward compatibility
 											 Params.endVersion().set(task, endVersion);
 											 Params.destUidValue().set(task, destUidValue);
 										 },
