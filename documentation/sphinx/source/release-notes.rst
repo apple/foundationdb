@@ -8,6 +8,7 @@ Release Notes
 Fixes
 -----
 
+* Backup would attempt to clear too many ranges in a single transaction when erasing log ranges. `(PR #440) https://github.com/apple/foundationdb/pull/440`_
 * A read-only transaction using the ``READ_LOCK_AWARE`` option would fail if committed. `(PR #437) https://github.com/apple/foundationdb/pull/437`_
 
 5.2.2
