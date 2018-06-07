@@ -287,25 +287,25 @@ uint64_t getResidentMemoryUsage() {
 #elif defined(__FreeBSD__)
 	uint64_t rssize = 0;
 
-    int status;
-    pid_t ppid = getpid();
-    int pidinfo[4];
-    pidinfo[0] = CTL_KERN;
-    pidinfo[1] = KERN_PROC;
-    pidinfo[2] = KERN_PROC_PID;
-    pidinfo[3] = (int)ppid;
-    
-    struct kinfo_proc procstk;
-    size_t len = sizeof(procstk);
-    
-    status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
-    if (status < 0){
-        TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
-        throw platform_error();
-    }
+	int status;
+	pid_t ppid = getpid();
+	int pidinfo[4];
+	pidinfo[0] = CTL_KERN;
+	pidinfo[1] = KERN_PROC;
+	pidinfo[2] = KERN_PROC_PID;
+	pidinfo[3] = (int)ppid;
 
-    rssize = (uint64_t)procstk.ki_rssize;
-    
+	struct kinfo_proc procstk;
+	size_t len = sizeof(procstk);
+
+	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
+		throw platform_error();
+	}
+
+	rssize = (uint64_t)procstk.ki_rssize;
+
 	return rssize;
 #elif defined(_WIN32)
 	PROCESS_MEMORY_COUNTERS_EX pmc;
@@ -347,24 +347,24 @@ uint64_t getMemoryUsage() {
 #elif defined(__FreeBSD__)
 	uint64_t vmsize = 0;
 
-    int status;
-    pid_t ppid = getpid();
-    int pidinfo[4];
-    pidinfo[0] = CTL_KERN;
-    pidinfo[1] = KERN_PROC;
-    pidinfo[2] = KERN_PROC_PID;
-    pidinfo[3] = (int)ppid;
-    
-    struct kinfo_proc procstk;
-    size_t len = sizeof(procstk);
-    
-    status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
-    if (status < 0){
-        TraceEvent(SevError, "GetMemoryUsage").GetLastError();
-        throw platform_error();
-    }
-    
-    vmsize = (uint64_t)procstk.ki_size >> PAGE_SHIFT;
+	int status;
+	pid_t ppid = getpid();
+	int pidinfo[4];
+	pidinfo[0] = CTL_KERN;
+	pidinfo[1] = KERN_PROC;
+	pidinfo[2] = KERN_PROC_PID;
+	pidinfo[3] = (int)ppid;
+
+	struct kinfo_proc procstk;
+	size_t len = sizeof(procstk);
+
+	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMemoryUsage").GetLastError();
+		throw platform_error();
+	}
+
+	vmsize = (uint64_t)procstk.ki_size >> PAGE_SHIFT;
 
 	return vmsize;
 #elif defined(_WIN32)
@@ -478,46 +478,46 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	memInfo.committed = memInfo.total - memInfo.available;
 #elif defined(__FreeBSD__)
 	int status;
-    
-    u_int page_size;
-    u_int free_count;
-    u_int active_count;
-    u_int inactive_count;
-    u_int wire_count;
-    
-    size_t uint_size;
-    
-    uint_size = sizeof(page_size);
-    
-    status = sysctlbyname("vm.stats.vm.v_page_size", &page_size, &uint_size, NULL, 0);
-    if (status < 0){
-        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+
+	u_int page_size;
+	u_int free_count;
+	u_int active_count;
+	u_int inactive_count;
+	u_int wire_count;
+
+	size_t uint_size;
+
+	uint_size = sizeof(page_size);
+
+	status = sysctlbyname("vm.stats.vm.v_page_size", &page_size, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
-    }
-    
-    status = sysctlbyname("vm.stats.vm.v_free_count", &free_count, &uint_size, NULL, 0);
-    if (status < 0){
-        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+	}
+
+	status = sysctlbyname("vm.stats.vm.v_free_count", &free_count, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
-    }
-    
-    status = sysctlbyname("vm.stats.vm.v_active_count", &active_count, &uint_size, NULL, 0);
-    if (status < 0){
-        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+	}
+
+	status = sysctlbyname("vm.stats.vm.v_active_count", &active_count, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+	throw platform_error();
+	}
+
+	status = sysctlbyname("vm.stats.vm.v_inactive_count", &inactive_count, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
-    }
-    
-    status = sysctlbyname("vm.stats.vm.v_inactive_count", &inactive_count, &uint_size, NULL, 0);
-    if (status < 0){
-        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
+	}
+
+	status = sysctlbyname("vm.stats.vm.v_wire_count", &wire_count, &uint_size, NULL, 0);
+	if (status < 0){
+		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
 		throw platform_error();
-    }
-    
-    status = sysctlbyname("vm.stats.vm.v_wire_count", &wire_count, &uint_size, NULL, 0);
-    if (status < 0){
-        TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
-		throw platform_error();
-    }
+	}
 
 	memInfo.total = (int64_t)((free_count + active_count + inactive_count + wire_count) * (u_int64_t)page_size);
 	memInfo.available = (int64_t)(free_count * (u_int64_t)page_size);
@@ -850,11 +850,10 @@ dev_t getDeviceId(std::string path) {
 #endif
 
 #if defined(__FreeBSD__)
-
 void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived,
 					   uint64_t& outSegs, uint64_t& retransSegs) {
 	INJECT_FAULT( platform_error, "getNetworkTraffic" );
-    
+
 	const char* ifa_name = nullptr;
 	try {
 		ifa_name = getInterfaceName(ip);
@@ -868,155 +867,154 @@ void getNetworkTraffic(uint32_t ip, uint64_t& bytesSent, uint64_t& bytesReceived
 	if (!ifa_name)
 		return;
 
-    struct ifaddrs *interfaces = NULL;
-    
-    if (getifaddrs(&interfaces))
-    {
-        TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
-        throw platform_error();
-    }
-    
-    int if_count, i;
-    int mib[6];
-    size_t ifmiblen;
-    struct ifmibdata ifmd;
-    
-    mib[0] = CTL_NET;
-    mib[1] = PF_LINK;
-    mib[2] = NETLINK_GENERIC;
-    mib[3] = IFMIB_IFDATA;
-    mib[4] = IFMIB_IFCOUNT;
-    mib[5] = IFDATA_GENERAL;
-    
-    ifmiblen = sizeof(ifmd);
-    
-    for (i = 1; i <= if_count; i++)
-    {
-        mib[4] = i;
-        
-        sysctl(mib, 6, &ifmd, &ifmiblen, (void *)0, 0);
-        
-        if (!strcmp(ifmd.ifmd_name, ifa_name))
-        {
-			bytesSent = ifmd.ifmd_data.ifi_obytes;
-            bytesReceived = ifmd.ifmd_data.ifi_ibytes;
-			break;
-        }
-    }
-    
-    freeifaddrs(interfaces);
-    
-    struct tcpstat tcpstat;
-    size_t stat_len;
-    stat_len = sizeof(tcpstat);
-    int tcpstatus = sysctlbyname("net.inet.tcp.stats", &tcpstat, &stat_len, NULL, 0);
-    if (tcpstatus < 0) {
-        TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
-        throw platform_error();
-    }
+	struct ifaddrs *interfaces = NULL;
 
-    outSegs = tcpstat.tcps_sndtotal;
-    retransSegs = tcpstat.tcps_sndrexmitpack;
+	if (getifaddrs(&interfaces))
+	{
+		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
+		throw platform_error();
+	}
+
+	int if_count, i;
+	int mib[6];
+	size_t ifmiblen;
+	struct ifmibdata ifmd;
+
+	mib[0] = CTL_NET;
+	mib[1] = PF_LINK;
+	mib[2] = NETLINK_GENERIC;
+	mib[3] = IFMIB_IFDATA;
+	mib[4] = IFMIB_IFCOUNT;
+	mib[5] = IFDATA_GENERAL;
+
+	ifmiblen = sizeof(ifmd);
+
+	for (i = 1; i <= if_count; i++)
+	{
+		mib[4] = i;
+
+		sysctl(mib, 6, &ifmd, &ifmiblen, (void *)0, 0);
+
+		if (!strcmp(ifmd.ifmd_name, ifa_name))
+		{
+			bytesSent = ifmd.ifmd_data.ifi_obytes;
+			bytesReceived = ifmd.ifmd_data.ifi_ibytes;
+			break;
+		}
+	}
+
+	freeifaddrs(interfaces);
+
+	struct tcpstat tcpstat;
+	size_t stat_len;
+	stat_len = sizeof(tcpstat);
+	int tcpstatus = sysctlbyname("net.inet.tcp.stats", &tcpstat, &stat_len, NULL, 0);
+	if (tcpstatus < 0) {
+		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
+		throw platform_error();
+	}
+
+	outSegs = tcpstat.tcps_sndtotal;
+	retransSegs = tcpstat.tcps_sndrexmitpack;
 }
 
 void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
 	INJECT_FAULT( platform_error, "getMachineLoad" );
-    
-    long cur[CPUSTATES], last[CPUSTATES];
-    size_t cur_sz = sizeof cur;
-    int state, j;
-    long sum;
-    double util;
-    
-    memset(last, 0, sizeof last);
-    
-    if (sysctlbyname("kern.cp_time", &cur, &cur_sz, NULL, 0) < 0)
-    {
-        TraceEvent(SevError, "GetMachineLoad").GetLastError();
-        throw platform_error();
-    }
-    
-    sum = 0;
-    for (state = 0; state < CPUSTATES; state++)
-    {
-        long tmp = cur[state];
-        cur[state] -= last[state];
-        last[state] = tmp;
-        sum += cur[state];
-    }
-    
-    totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS]);
-    
-    idleTime = (uint64_t)cur[CP_IDLE];
-    
+
+	long cur[CPUSTATES], last[CPUSTATES];
+	size_t cur_sz = sizeof cur;
+	int cpustate;
+	long sum;
+
+	memset(last, 0, sizeof last);
+
+	if (sysctlbyname("kern.cp_time", &cur, &cur_sz, NULL, 0) < 0)
+	{
+		TraceEvent(SevError, "GetMachineLoad").GetLastError();
+		throw platform_error();
+	}
+
+	sum = 0;
+	for (cpustate = 0; cpustate < CPUSTATES; cpustate++)
+	{
+		long tmp = cur[cpustate];
+		cur[cpustate] -= last[cpustate];
+		last[cpustate] = tmp;
+		sum += cur[cpustate];
+	}
+
+	totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS]);
+
+	idleTime = (uint64_t)cur[CP_IDLE];
+
 }
 
 void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint64_t& busyTicks, uint64_t& reads, uint64_t& writes, uint64_t& writeSectors, uint64_t& readSectors) {
 	INJECT_FAULT( platform_error, "getDiskStatistics" );
-    currentIOs = 0;
-    busyTicks = 0;
-    reads = 0;
-    writes = 0;
-    writeSectors = 0;
-    readSectors = 0;
+	currentIOs = 0;
+	busyTicks = 0;
+	reads = 0;
+	writes = 0;
+	writeSectors = 0;
+	readSectors = 0;
 
 	struct stat buf;
 	if (stat(directory.c_str(), &buf)) {
 		TraceEvent(SevError, "GetDiskStatisticsStatError").detail("Directory", directory).GetLastError();
 		throw platform_error();
 	}
-    
-    static struct statinfo dscur;
-    double etime;
-    struct timespec ts;
-    static int num_devices;
-    
-    kvm_t *kd = NULL;
-    
-    etime = ts.tv_nsec * 1e-6;
-    
-    int dn;
-    u_int64_t total_transfers_read, total_transfers_write;
-    u_int64_t total_blocks_read, total_blocks_write;
-    u_int64_t queue_len;
-    long double ms_per_transaction;
-    
-    dscur.dinfo = (struct devinfo *)calloc(1, sizeof(struct devinfo));
-    if (dscur.dinfo == NULL) {
-        TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
-        throw platform_error();
-    }
-    
-    if (devstat_getdevs(kd, &dscur) == -1) {
-        TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
-        throw platform_error();
-    }
-    
-    num_devices = dscur.dinfo->numdevs;
-    
-    for (dn = 0; dn < num_devices; dn++)
-    {
-        int di;
-        
-        if (devstat_compute_statistics(&dscur.dinfo->devices[dn], NULL, etime,
-                                       DSM_MS_PER_TRANSACTION, &ms_per_transaction,
-                                       DSM_TOTAL_TRANSFERS_READ, &total_transfers_read,
-                                       DSM_TOTAL_TRANSFERS_WRITE, &total_transfers_write,
-                                       DSM_TOTAL_BLOCKS_READ, &total_blocks_read,
-                                       DSM_TOTAL_BLOCKS_WRITE, &total_blocks_write,
-                                       DSM_QUEUE_LENGTH, &queue_len,
-                                       DSM_NONE) != 0) {
-            TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
-            throw platform_error();
-        }
 
-        currentIOs = queue_len;
-        busyTicks = (u_int64_t)ms_per_transaction;
-        reads = total_transfers_read;
-        writes = total_transfers_write;
-        writeSectors = total_blocks_read;
-        readSectors = total_blocks_write;        
-    }
+	static struct statinfo dscur;
+	double etime;
+	struct timespec ts;
+	static int num_devices;
+
+	kvm_t *kd = NULL;
+
+	etime = ts.tv_nsec * 1e-6;
+
+	int dn;
+	u_int64_t total_transfers_read, total_transfers_write;
+	u_int64_t total_blocks_read, total_blocks_write;
+	u_int64_t queue_len;
+	long double ms_per_transaction;
+
+	dscur.dinfo = (struct devinfo *)calloc(1, sizeof(struct devinfo));
+	if (dscur.dinfo == NULL) {
+		TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+		throw platform_error();
+	}
+
+	if (devstat_getdevs(kd, &dscur) == -1) {
+		TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+		throw platform_error();
+	}
+
+	num_devices = dscur.dinfo->numdevs;
+
+	for (dn = 0; dn < num_devices; dn++)
+	{
+		int di;
+
+		if (devstat_compute_statistics(&dscur.dinfo->devices[dn], NULL, etime,
+		DSM_MS_PER_TRANSACTION, &ms_per_transaction,
+		DSM_TOTAL_TRANSFERS_READ, &total_transfers_read,
+		DSM_TOTAL_TRANSFERS_WRITE, &total_transfers_write,
+		DSM_TOTAL_BLOCKS_READ, &total_blocks_read,
+		DSM_TOTAL_BLOCKS_WRITE, &total_blocks_write,
+		DSM_QUEUE_LENGTH, &queue_len,
+		DSM_NONE) != 0) {
+			TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
+			throw platform_error();
+		}
+
+		currentIOs = queue_len;
+		busyTicks = (u_int64_t)ms_per_transaction;
+		reads = total_transfers_read;
+		writes = total_transfers_write;
+		writeSectors = total_blocks_read;
+		readSectors = total_blocks_write;        
+	}
 	
 }
 
