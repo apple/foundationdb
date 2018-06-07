@@ -224,12 +224,13 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 
 		state KeySelector begin = firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
 		state KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
+		state int keysLimit = 10;
 		loop {
 			state Transaction tr(cx);
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, 10));
+				state Standalone<RangeResultRef> kvRange = wait(tr.getRange(begin, end, keysLimit));
 				if (kvRange.empty())
 					break;
 				txInfoEntries.arena().dependsOn(kvRange.arena());
@@ -237,6 +238,8 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 				begin = firstGreaterThan(kvRange.back().key);
 			}
 			catch (Error& e) {
+				if (e.code() == error_code_transaction_too_old)
+					keysLimit = std::max(1, keysLimit / 2);
 				Void _ = wait(tr.onError(e));
 			}
 		}
