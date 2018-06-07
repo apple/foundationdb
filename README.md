@@ -47,7 +47,7 @@ Developers on a OS for which there is no binary package, or who would like to st
 1. Install [Mono](https://www.freshports.org/lang/mono/).
 1. Install a [JDK](https://www.freshports.org/java/openjdk8/). FoundationDB currently builds with Java 8.
 1. Navigate to the directory where you checked out the foundationdb repo.
-1. Install gmake from ports(https://www.freshports.org/devel/gmake/) and Run `gmake`.
+1. Install [gmake](https://www.freshports.org/devel/gmake/) from ports and Run `gmake`.
 
 #### Linux
 
