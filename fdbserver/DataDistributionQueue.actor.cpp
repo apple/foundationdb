@@ -332,6 +332,7 @@ struct DDQueueData {
 	MasterInterface mi;
 	MoveKeysLock lock;
 	Database cx;
+	Version recoveryVersion;
 
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -394,12 +395,12 @@ struct DDQueueData {
 	DDQueueData( MasterInterface mi, MoveKeysLock lock, Database cx, std::vector<TeamCollectionInterface> teamCollections,
 		Reference<ShardsAffectedByTeamFailure> sABTF, PromiseStream<Promise<int64_t>> getAverageShardBytes,
 		int teamSize, int durableStorageQuorumPerTeam, PromiseStream<RelocateShard> input,
-		PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited ) :
+		PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited, Version recoveryVersion ) :
 			activeRelocations( 0 ), queuedRelocations( 0 ), bytesWritten ( 0 ), teamCollections( teamCollections ),
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), mi( mi ), lock( lock ),
 			cx( cx ), teamSize( teamSize ), durableStorageQuorumPerTeam( durableStorageQuorumPerTeam ), input( input ),
 			getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
-			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited),
+			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited), recoveryVersion(recoveryVersion),
 			suppressIntervals(0), lastInterval(0), unhealthyRelocations(0), rawProcessingUnhealthy( new AsyncVar<bool>(false) ) {}
 
 	void validate() {
@@ -953,6 +954,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				durableStorageQuorum, dataMovementComplete,
 				&self->startMoveKeysParallelismLock,
 				&self->finishMoveKeysParallelismLock,
+				self->recoveryVersion,
 				relocateShardInterval.pairID );
 			state Future<Void> pollHealth = (!anyHealthy || signalledTransferComplete) ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
 			try {
@@ -1153,9 +1155,10 @@ ACTOR Future<Void> dataDistributionQueue(
 	MasterInterface mi,
 	int teamSize,
 	int durableStorageQuorum,
-	double* lastLimited)
+	double* lastLimited,
+	Version recoveryVersion)
 {
-	state DDQueueData self( mi, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, durableStorageQuorum, input, getShardMetrics, lastLimited );
+	state DDQueueData self( mi, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, durableStorageQuorum, input, getShardMetrics, lastLimited, recoveryVersion );
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;
