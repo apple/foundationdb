@@ -838,7 +838,7 @@ struct DDTeamCollection {
 
 		std::map<Optional<Standalone<StringRef>>, int> machineTeams;
 		for(auto s = server_info.begin(); s != server_info.end(); ++s) {
-			if(!server_status.get(s->first).isUndesired) {
+			if(!server_status.get(s->first).isUnhealthy()) {
 				int stc = s->second->teams.size();
 				minTeams = std::min(minTeams, stc);
 				maxTeams = std::max(maxTeams, stc);
@@ -954,7 +954,7 @@ struct DDTeamCollection {
 		LocalityMap<UID> totalServers;
 
 		for(auto i = server_info.begin(); i != server_info.end(); ++i) {
-			if (!server_status.get(i->first).isUndesired) {
+			if (!server_status.get(i->first).isUnhealthy()) {
 				auto& id = i->first;
 				auto& locality = i->second->lastKnownInterface.locality;
 				totalServers.add(locality, &id);
@@ -1061,7 +1061,7 @@ struct DDTeamCollection {
 		std::set<Optional<Standalone<StringRef>>> machines;
 
 		for(auto i = self->server_info.begin(); i != self->server_info.end(); ++i) {
-			if (!self->server_status.get(i->first).isUndesired) {
+			if (!self->server_status.get(i->first).isUnhealthy()) {
 				++serverCount;
 				LocalityData& serverLocation = i->second->lastKnownInterface.locality;
 				machines.insert( serverLocation.zoneId() );
@@ -1091,7 +1091,7 @@ struct DDTeamCollection {
 			if( desiredTeams > teamCount ) {
 				std::set<UID> desiredServerSet;
 				for(auto i = self->server_info.begin(); i != self->server_info.end(); ++i)
-					if (!self->server_status.get(i->first).isUndesired)
+					if (!self->server_status.get(i->first).isUnhealthy())
 						desiredServerSet.insert(i->second->id);
 
 				vector<UID> desiredServerVector( desiredServerSet.begin(), desiredServerSet.end() );
@@ -1580,7 +1580,7 @@ ACTOR Future<Void> storageServerTracker(
 {
 	state Future<Void> failureTracker;
 	state ServerStatus status( false, false, server->lastKnownInterface.locality );
-	state bool lastIsUndesired = false;
+	state bool lastIsUnhealthy = false;
 	state Future<Void> metricsTracker = serverMetricsPolling( server );
 	state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 
@@ -1666,9 +1666,9 @@ ACTOR Future<Void> storageServerTracker(
 			if(hasWrongStoreTypeOrDC)
 				self->restartRecruiting.trigger();
 
-			if( lastIsUndesired && !status.isUndesired )
+			if( lastIsUnhealthy && !status.isUnhealthy() && !server->teams.size() )
 				self->doBuildTeams = true;
-			lastIsUndesired = status.isUndesired;
+			lastIsUnhealthy = status.isUnhealthy();
 
 			choose {
 				when( Void _ = wait( failureTracker ) ) {
@@ -2286,6 +2286,7 @@ DDTeamCollection* testTeamCollection(int teamSize, IRepPolicyRef policy, int pro
 			interface,
 			ProcessClass()
 		));
+		collection->server_status.set(uid, ServerStatus(false, false, interface.locality));
 	}
 
 	return collection;
