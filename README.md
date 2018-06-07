@@ -33,10 +33,21 @@ Developers on a OS for which there is no binary package, or who would like to st
 1. Install the Xcode command-line tools.
 1. Download version 1.52 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/).
 1. Set the `BOOSTDIR` environment variable to the location containing this boost installation.
-1. Install [Mono](http://www.mono-project.com/download/stable/).
-1. Install a [JDK](http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
+1. Install [Mono] from ports(https://www.freshports.org/lang/mono).
+1. Install a [JDK] from ports(http://www.oracle.com/technetwork/java/javase/downloads/index.html). FoundationDB currently builds with Java 8.
 1. Navigate to the directory where you checked out the foundationdb repo.
 1. Run `make`.
+
+#### FreeBSD
+
+1. Check out this repo on your server.
+1. Download version 1.52 of [Boost](https://sourceforge.net/projects/boost/files/boost/1.52.0/).
+1. Set the `BOOSTDIR` environment variable to the location containing this boost installation.
+1. Copy this folder to your home folder e.g. '~/boost_1_52_0'
+1. Install [Mono](https://www.freshports.org/lang/mono/).
+1. Install a [JDK](https://www.freshports.org/java/openjdk8/). FoundationDB currently builds with Java 8.
+1. Navigate to the directory where you checked out the foundationdb repo.
+1. Install [gmake](https://www.freshports.org/devel/gmake/) from ports and Run `gmake`.
 
 #### Linux
 
