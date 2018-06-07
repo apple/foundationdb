@@ -1628,17 +1628,20 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	throw io_error();
 }
 
-void atomicReplace( std::string const& path, std::string const& content ) {
+void atomicReplace( std::string const& path, std::string const& content, bool textmode ) {
 	FILE* f = 0;
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
 		std::string tempfilename = parentDirectory(path) + CANONICAL_PATH_SEPARATOR + g_random->randomUniqueID().toString() + ".tmp";
-		f = fopen( tempfilename.c_str(), "wt" );
+		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
 
-		if(fprintf( f, "%s", content.c_str() ) < 0)
+		if( textmode && fprintf( f, "%s", content.c_str() ) < 0)
+			throw io_error();
+
+		if (!textmode && fwrite(content.c_str(), sizeof(uint8_t), content.size(), f) != content.size())
 			throw io_error();
 
 		if(fflush(f) != 0)
