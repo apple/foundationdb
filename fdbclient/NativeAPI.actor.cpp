@@ -221,6 +221,7 @@ ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 			.detail("FutureVersions", cx->transactionsFutureVersions)
 			.detail("NotCommitted", cx->transactionsNotCommitted)
 			.detail("MaybeCommitted", cx->transactionsMaybeCommitted)
+			.detail("ResourceConstrained", cx->transactionsResourceConstrained)
 			.detail("MeanLatency", 1000 * cx->latencies.mean())
 			.detail("MedianLatency", 1000 * cx->latencies.median())
 			.detail("Latency90", 1000 * cx->latencies.percentile(0.90))
@@ -470,7 +471,7 @@ DatabaseContext::DatabaseContext(
 	int taskID, LocalityData clientLocality, bool enableLocalityLoadBalance, bool lockAware )
   : clientInfo(clientInfo), masterProxiesChangeTrigger(), cluster(cluster), clientInfoMonitor(clientInfoMonitor), dbName(dbName), dbId(dbId),
 	transactionReadVersions(0), transactionLogicalReads(0), transactionPhysicalReads(0), transactionCommittedMutations(0), transactionCommittedMutationBytes(0), transactionsCommitStarted(0), 
-	transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), taskID(taskID),
+	transactionsCommitCompleted(0), transactionsTooOld(0), transactionsFutureVersions(0), transactionsNotCommitted(0), transactionsMaybeCommitted(0), transactionsResourceConstrained(0), taskID(taskID),
 	outstandingWatches(0), maxOutstandingWatches(CLIENT_KNOBS->DEFAULT_MAX_OUTSTANDING_WATCHES), clientLocality(clientLocality), enableLocalityLoadBalance(enableLocalityLoadBalance), lockAware(lockAware),
 	latencies(1000), readLatencies(1000), commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000) 
 {
@@ -2165,9 +2166,10 @@ void Transaction::addWriteConflictRange( const KeyRangeRef& keys ) {
 	t.write_conflict_ranges.push_back_deep( req.arena, r );
 }
 
-double Transaction::getBackoff() {
+double Transaction::getBackoff(int errCode) {
 	double b = backoff * g_random->random01();
-	backoff = std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
+	backoff = errCode == error_code_proxy_memory_limit_exceeded ? std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF) :
+				std::min(backoff * CLIENT_KNOBS->BACKOFF_GROWTH_RATE, options.maxBackoff);
 	return b;
 }
 
@@ -2446,7 +2448,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
 			throw commit_unknown_result();
 		} else {
-			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked)
+			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded)
 				TraceEvent(SevError, "tryCommitError").error(e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
@@ -2456,11 +2458,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 }
 
 Future<Void> Transaction::commitMutations() {
-	cx->transactionsCommitStarted++;
-
-	if(options.readOnly)
-		return transaction_read_only();
-
 	try {
 		//if this is a read-only transaction return immediately
 		if( !tr.transaction.write_conflict_ranges.size() && !tr.transaction.mutations.size() ) {
@@ -2470,6 +2467,11 @@ Future<Void> Transaction::commitMutations() {
 			versionstampPromise.sendError(no_commit_version());
 			return Void();
 		}
+
+		cx->transactionsCommitStarted++;
+
+		if(options.readOnly)
+			return transaction_read_only();
 
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
@@ -2796,14 +2798,17 @@ Future<Void> Transaction::onError( Error const& e ) {
 	}
 	if (e.code() == error_code_not_committed ||
 		e.code() == error_code_commit_unknown_result ||
-		e.code() == error_code_database_locked)
+		e.code() == error_code_database_locked ||
+		e.code() == error_code_proxy_memory_limit_exceeded)
 	{
 		if(e.code() == error_code_not_committed)
 			cx->transactionsNotCommitted++;
 		if(e.code() == error_code_commit_unknown_result)
 			cx->transactionsMaybeCommitted++;
+		if (e.code() == error_code_proxy_memory_limit_exceeded)
+			cx->transactionsResourceConstrained++;
 
-		double backoff = getBackoff();
+		double backoff = getBackoff(e.code());
 		reset();
 		return delay( backoff, info.taskID );
 	}

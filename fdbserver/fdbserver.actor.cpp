@@ -850,7 +850,7 @@ int main(int argc, char* argv[]) {
 		std::string testServersStr;
 		NetworkAddress publicAddress, listenAddress;
 		const char *targetKey = NULL;
-		uint64_t memLimit = 8LL << 30;
+		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
 		bool buggifyEnabled = false, machineIdOverride = false, restarting = false;
 		Optional<Standalone<StringRef>> zoneId;
@@ -1391,7 +1391,9 @@ int main(int argc, char* argv[]) {
 		CLIENT_KNOBS = clientKnobs;
 
 		if (!serverKnobs->setKnob( "log_directory", logFolder )) ASSERT(false);
-
+		if (role != Simulation) {
+			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(memLimit))) ASSERT(false);
+		}
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
@@ -1409,6 +1411,7 @@ int main(int argc, char* argv[]) {
 				throw;
 			}
 		}
+		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
 
 		if (role == SkipListTest) {
 			skipListTest();
