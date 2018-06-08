@@ -937,7 +937,15 @@ ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessCla
 	BinaryReader br(StringRef(contents), IncludeVersion());
 	ClusterControllerPriorityInfo priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown);
 	br >> priorityInfo;
-	br.assertEnd();
+	if (!br.empty()) {
+		if (g_network->isSimulated()) {
+			ASSERT(0);
+		}
+		else {
+			TraceEvent(SevWarnAlways, "FitnessFileCorrupted").detail("filePath", filePath);
+			return ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource).machineClassFitness(ProcessClass::ClusterController), false, ClusterControllerPriorityInfo::FitnessUnknown);
+		}
+	}
 	return priorityInfo;
 }
 
