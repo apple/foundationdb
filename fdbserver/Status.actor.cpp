@@ -527,7 +527,7 @@ struct RolesInfo {
 			obj["query_queue_max"] = parseInt(extractAttribute(metrics, "QueryQueueMax"));
 			obj["finished_queries"] = parseCounter(extractAttribute(metrics, "FinishedQueries"));
 
-			Version version = parseInt64(extractAttribute(metrics, "version"));
+			Version version = parseInt64(extractAttribute(metrics, "Version"));
 			obj["data_version"] = version;
 
 			if(maxTLogVersion > 0) {

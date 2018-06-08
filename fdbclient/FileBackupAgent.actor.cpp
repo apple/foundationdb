@@ -705,7 +705,7 @@ namespace fileBackup {
 		if (taskVersion > version) {
 			state Error err = task_invalid_version();
 
-			TraceEvent(SevWarn, "BA_BackupRangeTaskFunc_Execute").detail("TaskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
+			TraceEvent(SevWarn, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
 			if (KeyBackedConfig::TaskParams.uid().exists(task)) {
 				std::string msg = format("%s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version);
 				Void _ = wait(BackupConfig(task).logError(cx, err, msg));

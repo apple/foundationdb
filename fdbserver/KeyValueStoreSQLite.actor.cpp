@@ -1392,7 +1392,7 @@ void SQLiteDB::createFromScratch() {
 		ASSERT( freetable == table+1 );
 		endTransaction();
 	} else {
-		TraceEvent("pgnoRoot").detail("Value", pgnoRoot);
+		TraceEvent("PgnoRoot").detail("Value", pgnoRoot);
 		checkError("CheckTables", SQLITE_CORRUPT);
 	}
 }

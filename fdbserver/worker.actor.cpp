@@ -815,7 +815,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
-				startRole( recruited.id(), interf.id(), "logRouter", details );
+				startRole( recruited.id(), interf.id(), "LogRouter", details );
 
 				DUMPTOKEN( recruited.peekMessages );
 				DUMPTOKEN( recruited.popMessages );

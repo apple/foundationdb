@@ -109,10 +109,10 @@ struct StatusWorkload : TestWorkload {
 				}
 			}
 		} catch (std::exception& e) {
-			TraceEvent(SevError,"schemaCoverageRequirementsException").detail("What", e.what());
+			TraceEvent(SevError,"SchemaCoverageRequirementsException").detail("What", e.what());
 			throw unknown_error();
 		} catch (...) {
-			TraceEvent(SevError,"schemaCoverageRequirementsException");
+			TraceEvent(SevError,"SchemaCoverageRequirementsException");
 			throw unknown_error();
 		}
 	}

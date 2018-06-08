@@ -109,7 +109,7 @@ namespace dbBackup {
 		Future<Void> checkTaskVersion(Tr tr, Reference<Task> task, StringRef name, uint32_t version) {
 		uint32_t taskVersion = task->getVersion();
 		if (taskVersion > version) {
-			TraceEvent(SevError, "BA_BackupRangeTaskFunc_execute").detail("TaskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
+			TraceEvent(SevError, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
 			Void _ = wait(logError(tr, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]),
 				format("ERROR: %s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version)));
 
@@ -1335,7 +1335,7 @@ namespace dbBackup {
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 			if (task->params[BackupAgentBase::destUid].size() == 0) {
-				TraceEvent("DBA_CopyDiffLogsUpgradeTaskFunc_abort_in_upgrade");
+				TraceEvent("DBA_CopyDiffLogsUpgradeTaskFuncAbortInUpgrade");
 				Key _ = wait(AbortOldBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::signal(onDone)));
 			} else {
 				Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());

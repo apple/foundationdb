@@ -1017,7 +1017,7 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 		// all but the last item are less than *pLimitBytes
 		ASSERT( result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0 );
 		/*if (*pLimitBytes <= 0)
-			TraceEvent(SevWarn, "readRangeLimitExceeded")
+			TraceEvent(SevWarn, "ReadRangeLimitExceeded")
 				.detail("Version", version)
 				.detail("Begin", printable(range.begin) )
 				.detail("End", printable(range.end) )
@@ -2510,7 +2510,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
 			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", updater.newOldestVersion).detail("DesiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MAX_READ_TRANSACTION_LIFE_VERSIONS", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
+			//	.detail("MaxReadTransactionLifeVersions", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
 
 			// Trigger updateStorage if necessary
 			ASSERT(updater.newOldestVersion <= data->version.get());
