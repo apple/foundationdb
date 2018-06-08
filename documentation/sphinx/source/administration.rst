@@ -636,7 +636,7 @@ Version-specific notes on upgrading
 Upgrading from 5.2.x
 --------------------
 
-Upgrades from 5.2.x will keep all of your old data and configuration settings. 
+Upgrades from 5.2.x will keep all your old data and configuration settings. 
 
 Upgrading from 4.4.x - 5.1.x
 ----------------------------
