@@ -941,7 +941,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 
 			//FIXME: do not add data in flight to servers that were already in the src.
-			destination.addDataInFlightToTeam(+metrics.bytes);
+			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 
 			TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", masterId)
 				.detail("PairId", relocateShardInterval.pairID)
@@ -991,13 +991,13 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			if( error.code() != error_code_move_to_removed_server ) {
 				if( !error.code() ) {
 					try {
-						Void _ = wait( destination.updatePhysicalMetrics() ); //prevent a gap between the polling for an increase in physical metrics and decrementing data in flight
+						Void _ = wait( healthyDestinations.updatePhysicalMetrics() ); //prevent a gap between the polling for an increase in physical metrics and decrementing data in flight
 					} catch( Error& e ) {
 						error = e;
 					}
 				}
 
-				destination.addDataInFlightToTeam( -metrics.bytes );
+				healthyDestinations.addDataInFlightToTeam( -metrics.bytes );
 
 				// onFinished.send( rs );
 				if( !error.code() ) {
@@ -1019,7 +1019,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				}
 			} else {
 				TEST(true);  // move to removed server
-				destination.addDataInFlightToTeam( -metrics.bytes );
+				healthyDestinations.addDataInFlightToTeam( -metrics.bytes );
 				Void _ = wait( delay( SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskDataDistributionLaunch ) );
 			}
 		}
