@@ -273,7 +273,7 @@ public:
 				logServerMap->add(worker.first.locality, &worker);
 			}
 			if (logServerSet->size() < required) {
-				TraceEvent(SevWarn,"GWFTADTooFew", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("tLogPolicy", policy->info()).detail("DesiredLogs", desired);
+				TraceEvent(SevWarn,"GWFTADTooFew", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("TLogPolicy", policy->info()).detail("DesiredLogs", desired);
 			}
 			else if (logServerSet->size() <= desired) {
 				if (logServerSet->validate(policy)) {
@@ -283,7 +283,7 @@ public:
 					bCompleted = true;
 					break;
 				}
-				TraceEvent(SevWarn,"GWFTADNotAcceptable", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("tLogPolicy",policy->info()).detail("DesiredLogs", desired);
+				TraceEvent(SevWarn,"GWFTADNotAcceptable", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("TLogPolicy",policy->info()).detail("DesiredLogs", desired);
 			}
 			// Try to select the desired size, if larger
 			else {
@@ -300,11 +300,11 @@ public:
 						tLocalities.push_back(object->first.locality);
 					}
 					TraceEvent("GWFTADBestResults", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("BestCount", bestSet.size()).detail("BestZones", ::describeZones(tLocalities))
-						.detail("BestDataHalls", ::describeDataHalls(tLocalities)).detail("tLogPolicy", policy->info()).detail("TotalResults", results.size()).detail("DesiredLogs", desired);
+						.detail("BestDataHalls", ::describeDataHalls(tLocalities)).detail("TLogPolicy", policy->info()).detail("TotalResults", results.size()).detail("DesiredLogs", desired);
 					bCompleted = true;
 					break;
 				}
-				TraceEvent(SevWarn,"GWFTADNoBest", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("tLogPolicy", policy->info()).detail("DesiredLogs", desired);
+				TraceEvent(SevWarn,"GWFTADNoBest", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("TLogPolicy", policy->info()).detail("DesiredLogs", desired);
 			}
 		}
 
@@ -318,7 +318,7 @@ public:
 			TraceEvent(SevWarn, "GetTLogTeamFailed").detail("Policy", policy->info()).detail("Processes", logServerSet->size()).detail("Workers", id_worker.size()).detail("FitnessGroups", fitness_workers.size())
 				.detail("TLogZones", ::describeZones(tLocalities)).detail("TLogDataHalls", ::describeDataHalls(tLocalities)).detail("MissingZones", ::describeZones(unavailableLocals))
 				.detail("MissingDataHalls", ::describeDataHalls(unavailableLocals)).detail("Required", required).detail("DesiredLogs", desired).detail("RatingTests",SERVER_KNOBS->POLICY_RATING_TESTS)
-				.detail("checkStable", checkStable).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
+				.detail("CheckStable", checkStable).detail("PolicyGenerations",SERVER_KNOBS->POLICY_GENERATIONS).backtrace();
 
 			logServerSet->clear();
 			logServerSet.clear();
@@ -675,10 +675,10 @@ public:
 			}
 			//If this cluster controller dies, do not prioritize recruiting the next one in the same DC
 			desiredDcIds.set(vector<Optional<Key>>());
-			TraceEvent("findWorkersForConfig").detail("replication", req.configuration.tLogReplicationFactor)
-				.detail("desiredLogs", req.configuration.getDesiredLogs()).detail("actualLogs", result.tLogs.size())
-				.detail("desiredProxies", req.configuration.getDesiredProxies()).detail("actualProxies", result.proxies.size())
-				.detail("desiredResolvers", req.configuration.getDesiredResolvers()).detail("actualResolvers", result.resolvers.size());
+			TraceEvent("FindWorkersForConfig").detail("Replication", req.configuration.tLogReplicationFactor)
+				.detail("DesiredLogs", req.configuration.getDesiredLogs()).detail("ActualLogs", result.tLogs.size())
+				.detail("DesiredProxies", req.configuration.getDesiredProxies()).detail("ActualProxies", result.proxies.size())
+				.detail("DesiredResolvers", req.configuration.getDesiredResolvers()).detail("ActualResolvers", result.resolvers.size());
 
 			if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
 				( RoleFitness(tlogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
@@ -882,13 +882,13 @@ public:
 		if(oldInFit.betterFitness(newInFit)) return false;
 
 		if(oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
-			TraceEvent("BetterMasterExists", id).detail("oldMasterFit", oldMasterFit).detail("newMasterFit", mworker.fitness)
-				.detail("oldTLogFitC", oldTLogFit.count).detail("newTLogFitC", newTLogFit.count)
-				.detail("oldTLogWorstFitT", oldTLogFit.worstFit).detail("newTLogWorstFitT", newTLogFit.worstFit)
-				.detail("oldTLogBestFitT", oldTLogFit.bestFit).detail("newTLogBestFitT", newTLogFit.bestFit)
-				.detail("oldInFitW", oldInFit.worstFit).detail("newInFitW", newInFit.worstFit)
-				.detail("oldInFitB", oldInFit.bestFit).detail("newInFitB", newInFit.bestFit)
-				.detail("oldInFitC", oldInFit.count).detail("newInFitC", newInFit.count);
+			TraceEvent("BetterMasterExists", id).detail("OldMasterFit", oldMasterFit).detail("NewMasterFit", mworker.fitness)
+				.detail("OldTLogFitC", oldTLogFit.count).detail("NewTLogFitC", newTLogFit.count)
+				.detail("OldTLogWorstFitT", oldTLogFit.worstFit).detail("NewTLogWorstFitT", newTLogFit.worstFit)
+				.detail("OldTLogBestFitT", oldTLogFit.bestFit).detail("NewTLogBestFitT", newTLogFit.bestFit)
+				.detail("OldInFitW", oldInFit.worstFit).detail("NewInFitW", newInFit.worstFit)
+				.detail("OldInFitB", oldInFit.bestFit).detail("NewInFitB", newInFit.bestFit)
+				.detail("OldInFitC", oldInFit.count).detail("NewInFitC", newInFit.count);
 			return true;
 		}
 
@@ -1022,7 +1022,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			if (e.code() == error_code_actor_cancelled) throw;
 
 			bool ok = e.code() == error_code_no_more_servers;
-			TraceEvent(ok ? SevWarn : SevError,"clusterWatchDatabaseRetrying", cluster->id).error(e);
+			TraceEvent(ok ? SevWarn : SevError,"ClusterWatchDatabaseRetrying", cluster->id).error(e);
 			if (!ok)
 				throw e;
 			Void _ = wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
@@ -1350,7 +1350,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			pivotDelay = std::max(0.0, pivotDelay - FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
 
 			TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
-			//TraceEvent("FailureDetectionAcceptableDelay").detail("ms", acceptableDelay*1000);
+			//TraceEvent("FailureDetectionAcceptableDelay").detail("Delay", acceptableDelay1000);
 
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
 				double delay = t - it->second.lastRequestTime;
@@ -1454,13 +1454,13 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest const& req ) {
 	req.reply.send( Void() );
 
-	TraceEvent("MasterRegistrationReceived", self->id).detail("dbName", printable(req.dbName)).detail("MasterId", req.id).detail("Master", req.mi.toString()).detail("Tlogs", describe(req.logSystemConfig.tLogs)).detail("Resolvers", req.resolvers.size())
+	TraceEvent("MasterRegistrationReceived", self->id).detail("DbName", printable(req.dbName)).detail("MasterId", req.id).detail("Master", req.mi.toString()).detail("Tlogs", describe(req.logSystemConfig.tLogs)).detail("Resolvers", req.resolvers.size())
 		.detail("RecoveryState", req.recoveryState).detail("RegistrationCount", req.registrationCount).detail("Proxies", req.proxies.size()).detail("RecoveryCount", req.recoveryCount);
 
 	//make sure the request comes from an active database
 	auto db = &self->db;
 	if ( db->serverInfo->get().master.id() != req.id || req.registrationCount <= db->masterRegistrationCount ) {
-		TraceEvent("MasterRegistrationNotFound", self->id).detail("dbName", printable(req.dbName)).detail("MasterId", req.id).detail("existingId", db->serverInfo->get().master.id()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
+		TraceEvent("MasterRegistrationNotFound", self->id).detail("DbName", printable(req.dbName)).detail("MasterId", req.id).detail("ExistingId", db->serverInfo->get().master.id()).detail("RegCount", req.registrationCount).detail("ExistingRegCount", db->masterRegistrationCount);
 		return;
 	}
 
@@ -1537,7 +1537,7 @@ void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
 	auto info = self->id_worker.find( w.locality.processId() );
 	ClusterControllerPriorityInfo newPriorityInfo = req.priorityInfo;
 
-	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerID",w.id()).detailext("ProcessID", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("pClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
+	TraceEvent("ClusterControllerActualWorkers", self->id).detail("WorkerId",w.id()).detailext("ProcessId", w.locality.processId()).detailext("ZoneId", w.locality.zoneId()).detailext("DataHall", w.locality.dataHallId()).detail("PClass", req.processClass.toString()).detail("Workers", self->id_worker.size()).detail("Registered", (info == self->id_worker.end() ? "False" : "True")).backtrace();
 
 	if ( w.address() == g_network->getLocalAddress() ) {
 		self->clusterControllerProcessId = w.locality.processId();

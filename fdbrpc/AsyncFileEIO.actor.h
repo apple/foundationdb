@@ -83,10 +83,10 @@ public:
 			TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError").error(e).GetLastError().detail("File", filename).detail("Flags", flags).detail("Mode", mode);
 			throw e;
 		}
-		TraceEvent("AsyncFileOpened").detail("Filename", filename).detail("fd", r->result).detail("Flags", flags).suppressFor(1.0);
+		TraceEvent("AsyncFileOpened").detail("Filename", filename).detail("Fd", r->result).detail("Flags", flags).suppressFor(1.0);
 
 		if ((flags & OPEN_LOCK) && !lock_fd(r->result)) {
-			TraceEvent(SevError, "UnableToLockFile").detail("filename", filename).GetLastError();
+			TraceEvent(SevError, "UnableToLockFile").detail("Filename", filename).GetLastError();
 			throw io_error();
 		}
 
@@ -142,7 +142,7 @@ public:
 				
 		struct stat buf;
 		if (fstat( fd, &buf )) {
-			TraceEvent("AsyncFileEIOFStatError").detail("fd",fd).GetLastError();
+			TraceEvent("AsyncFileEIOFStatError").detail("Fd",fd).GetLastError();
 			return io_error();
 		}
 		return buf.st_size;
@@ -183,7 +183,7 @@ public:
 
 		// rename() is atomic
 		if (rename( part_filename.c_str(), final_filename.c_str() )) {
-			TraceEvent("AsyncFileEIORenameError").detail("filename", final_filename).GetLastError();
+			TraceEvent("AsyncFileEIORenameError").detail("Filename", final_filename).GetLastError();
 			throw io_error();
 		}
 
@@ -254,7 +254,7 @@ private:
 	static void error( const char* context, int fd, eio_req* r, Reference<ErrorInfo> const& err = Reference<ErrorInfo>() ) {
 		Error e = io_error();
 		errno = r->errorno;
-		TraceEvent(context).detail("fd", fd).detail("Result", r->result).GetLastError().error(e);
+		TraceEvent(context).detail("Fd", fd).detail("Result", r->result).GetLastError().error(e);
 		if (err) err->set(e);
 		else throw e;
 	}
@@ -264,7 +264,7 @@ private:
 		state eio_req* r = eio_close(fd, 0, eio_callback, &p);
 		Void _ = wait( p.getFuture() );
 		if (r->result) error( "CloseError", fd, r );
-		TraceEvent("AsyncFileClosed").detail("fd", fd).suppressFor(1.0);
+		TraceEvent("AsyncFileClosed").detail("Fd", fd).suppressFor(1.0);
 	}
 
 	ACTOR static Future<int> read_impl( int fd, void* data, int length, int64_t offset ) {

@@ -114,7 +114,7 @@ struct ConflictRangeWorkload : TestWorkload {
 						int clearedB = g_random->randomInt(0, self->maxKeySpace-1);
 						clearedBegin = std::min(clearedA, clearedB);
 						clearedEnd = std::max(clearedA, clearedB)+1;
-						TraceEvent("ConflictRangeClear").detail("begin",clearedBegin).detail("end",clearedEnd);
+						TraceEvent("ConflictRangeClear").detail("Begin",clearedBegin).detail("End",clearedEnd);
 					}
 
 					tr0.clear( KeyRangeRef( StringRef( format( "%010d", 0 ) ), StringRef( format( "%010d", self->maxKeySpace ) ) ) );
@@ -275,8 +275,8 @@ struct ConflictRangeWorkload : TestWorkload {
 						}
 
 						TraceEvent(SevError, "ConflictRangeError").detail("Info", "Conflict returned, however results are the same")
-							.detail("randomSets",randomSets).detail("myKeyA",myKeyA).detail("myKeyB",myKeyB).detail("onEqualA",onEqualA).detail("onEqualB",onEqualB)
-							.detail("offsetA",offsetA).detail("offsetB",offsetB).detail("randomLimit",randomLimit).detail("size",originalResults.size()).detail("results", keyStr1).detail("original", keyStr2);
+							.detail("RandomSets",randomSets).detail("MyKeyA",myKeyA).detail("MyKeyB",myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB)
+							.detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("RandomLimit",randomLimit).detail("Size",originalResults.size()).detail("Results", keyStr1).detail("Original", keyStr2);
 
 						tr4 = Transaction(cx);
 						Standalone<RangeResultRef> res = wait( tr4.getRange( KeyRangeRef( StringRef( format( "%010d", 0 ) ), StringRef( format( "%010d", self->maxKeySpace ) ) ), 200 ) );
@@ -285,7 +285,7 @@ struct ConflictRangeWorkload : TestWorkload {
 							allKeyEntries += printable( res[i].key ) + " ";
 						}
 
-						TraceEvent("ConflictRangeDump").detail("keys", allKeyEntries);
+						TraceEvent("ConflictRangeDump").detail("Keys", allKeyEntries);
 					}
 					throw not_committed();
 				} else {
@@ -314,8 +314,8 @@ struct ConflictRangeWorkload : TestWorkload {
 
 						TraceEvent(SevError, "ConflictRangeError").detail("Info", "No conflict returned, however result sizes do not match")
 							.detail("OriginalSize", originalResults.size()).detail("NewSize", res.size())
-							.detail("randomSets",randomSets).detail("myKeyA",myKeyA).detail("myKeyB",myKeyB).detail("onEqualA",onEqualA).detail("onEqualB",onEqualB)
-							.detail("offsetA",offsetA).detail("offsetB",offsetB).detail("randomLimit",randomLimit).detail("size",originalResults.size()).detail("results", keyStr1).detail("original", keyStr2);
+							.detail("RandomSets",randomSets).detail("MyKeyA",myKeyA).detail("MyKeyB",myKeyB).detail("OnEqualA",onEqualA).detail("OnEqualB",onEqualB)
+							.detail("OffsetA",offsetA).detail("OffsetB",offsetB).detail("RandomLimit",randomLimit).detail("Size",originalResults.size()).detail("Results", keyStr1).detail("Original", keyStr2);
 					}
 				}
 			} catch (Error& e) {

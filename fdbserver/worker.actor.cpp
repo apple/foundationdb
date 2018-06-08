@@ -784,7 +784,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
-				startRole( recruited.id(), interf.id(), "logRouter", details );
+				startRole( recruited.id(), interf.id(), "LogRouter", details );
 
 				DUMPTOKEN( recruited.peekMessages );
 				DUMPTOKEN( recruited.popMessages );
@@ -939,7 +939,7 @@ ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessCla
 	br >> priorityInfo;
 	if (!br.empty()) {
 		if (g_network->isSimulated()) {
-			ASSERT(0);
+			ASSERT(false);
 		}
 		else {
 			TraceEvent(SevWarnAlways, "FitnessFileCorrupted").detail("filePath", filePath);
@@ -1007,7 +1007,7 @@ ACTOR Future<Void> fdbd(
 	try {
 
 		ServerCoordinators coordinators( connFile );
-		TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("machineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
+		TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		state vector<Future<Void>> v;
@@ -1024,11 +1024,11 @@ ACTOR Future<Void> fdbd(
 		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
 		Promise<Void> recoveredDiskFiles;
 
-		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "monitorAndWriteCCPriorityInfo"));
-		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture()), "clusterController") );
-		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
-		v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, processIDUid), "workerServer", UID(), &normalWorkerErrors()) );
+		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
+		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture()), "ClusterController") );
+		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
+		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, processIDUid), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		Void _ = wait( quorum(v,1) );

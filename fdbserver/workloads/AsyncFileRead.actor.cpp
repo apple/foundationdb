@@ -60,13 +60,13 @@ struct IOLog {
 		void dumpMetrics(std::string name){
 			double elapsed = now() - startTime;
 			TraceEvent("ProcessLog")
-				.detail("name", name)
-				.detail("hz", count / elapsed)
-				.detail("latency_ms", 1e3 * sumSq / elapsed / 2.0)
-				.detail("avg_latency_ms", 1e3 * sum / count)
-				.detail("max_latency_ms", 1e3 * max)
-				.detail("startTime", startTime)
-				.detail("elapsed", elapsed);
+				.detail("Name", name)
+				.detail("Hz", count / elapsed)
+				.detail("Latency", sumSq / elapsed / 2.0)
+				.detail("AvgLatency", sum / count)
+				.detail("MaxLatency", max)
+				.detail("StartTime", startTime)
+				.detail("Elapsed", elapsed);
 		}
 	};
 

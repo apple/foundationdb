@@ -965,7 +965,7 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			if(value == "true")
 				spec.phases = TestWorkload::CHECK;
 		} else if( attrib == "StderrSeverity" ) {
-			TraceEvent("StderrSeverity").detail("newSeverity", value);
+			TraceEvent("StderrSeverity").detail("NewSeverity", value);
 		}
 		else if (attrib == "ClientInfoLogging") {
 			if (value == "false") {
@@ -1127,9 +1127,9 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
 	Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
 	vector<Future<Void>> actors;
-	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "monitorLeader") );
-	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"extractClusterInterface") );
-	actors.push_back( reportErrors(failureMonitorClient( ci, false ),"failureMonitorClient") );
+	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "MonitorLeader") );
+	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"ExtractClusterInterface") );
+	actors.push_back( reportErrors(failureMonitorClient( ci, false ),"FailureMonitorClient") );
 
 	if(whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;
@@ -1166,11 +1166,11 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	if (at == TEST_HERE) {
 		Reference<AsyncVar<ServerDBInfo>> db( new AsyncVar<ServerDBInfo> );
 		vector<TesterInterface> iTesters(1);
-		actors.push_back( reportErrors(monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), db ), "monitorServerDBInfo") );  // FIXME: Locality
-		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "testerServerCore") );
+		actors.push_back( reportErrors(monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
+		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "TesterServerCore") );
 		tests = runTests( cc, ci, iTesters, testSpecs, startingConfiguration, locality );
 	} else {
-		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality), "runTests");
+		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality), "RunTests");
 	}
 
 	choose {

@@ -50,7 +50,7 @@ ACTOR Future<Void> waitFailureClient(RequestStream<ReplyPromise<Void>> waitFailu
 		} catch (Error &e){
 			if (e.code() == error_code_actor_cancelled)
 				throw;
-			TraceEvent(SevError, "waitFailureClientError").error(e);
+			TraceEvent(SevError, "WaitFailureClientError").error(e);
 			ASSERT(false); // unknown error from waitFailureServer
 		}
 	}
@@ -74,7 +74,7 @@ ACTOR Future<Void> waitFailureTracker(RequestStream<ReplyPromise<Void>> waitFail
 		} catch (Error &e){
 			if (e.code() == error_code_actor_cancelled)
 				throw;
-			TraceEvent(SevError, "waitFailureClientError").error(e);
+			TraceEvent(SevError, "WaitFailureClientError").error(e);
 			ASSERT(false); // unknown error from waitFailureServer
 		}
 	}

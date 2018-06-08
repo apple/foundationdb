@@ -165,14 +165,14 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) ASSERT(result.size() == self->key_commit.size());
 				else TEST(result.size() > 0);  // Not all data should always be lost.
 
-				//TraceEvent("VST_check0").detail("size", result.size()).detail("nodeCount", self->nodeCount).detail("key_commit", self->key_commit.size()).detail("readVersion", readVersion);
+				//TraceEvent("VST_Check0").detail("Size", result.size()).detail("NodeCount", self->nodeCount).detail("KeyCommit", self->key_commit.size()).detail("ReadVersion", readVersion);
 				for (auto it : result) {
 					const Standalone<StringRef> key = it.key.removePrefix(self->vsValuePrefix);
 					Version parsedVersion;
 					Standalone<StringRef> parsedVersionstamp;
 					std::tie(parsedVersion, parsedVersionstamp) = versionFromValue(it.value);
 
-					//TraceEvent("VST_check0a").detail("itKey", printable(it.key)).detail("itValue", printable(it.value)).detail("parsedVersion", parsedVersion);
+					//TraceEvent("VST_Check0a").detail("ItKey", printable(it.key)).detail("ItValue", printable(it.value)).detail("ParsedVersion", parsedVersion);
 					const auto& all_values_iter = self->key_commit.find(key);
 					ASSERT(all_values_iter != self->key_commit.end());  // Reading a key that we didn't commit.
 					const auto& all_values = all_values_iter->second;
@@ -187,7 +187,7 @@ struct VersionStampWorkload : TestWorkload {
 					Version commitVersion = value_pair_iter->first;
 					Standalone<StringRef> commitVersionstamp = value_pair_iter->second;
 
-					//TraceEvent("VST_check0b").detail("version", commitVersion).detail("commitVersion", printable(commitVersionstamp));
+					//TraceEvent("VST_Check0b").detail("Version", commitVersion).detail("CommitVersion", printable(commitVersionstamp));
 					ASSERT(parsedVersion <= readVersion);
 					ASSERT(commitVersionstamp.compare(parsedVersionstamp) == 0);
 				}
@@ -197,7 +197,7 @@ struct VersionStampWorkload : TestWorkload {
 				if (self->failIfDataLost) ASSERT(result.size() == self->versionStampKey_commit.size());
 				else TEST(result.size() > 0);  // Not all data should always be lost.
 
-				//TraceEvent("VST_check1").detail("size", result.size()).detail("vsKey_commit_size", self->versionStampKey_commit.size());
+				//TraceEvent("VST_Check1").detail("Size", result.size()).detail("VsKeyCommitSize", self->versionStampKey_commit.size());
 				for (auto it : result) {
 					const Standalone<StringRef> key = it.key.removePrefix(self->vsKeyPrefix);
 					Version parsedVersion;
@@ -205,7 +205,7 @@ struct VersionStampWorkload : TestWorkload {
 					std::tie(parsedVersion, parsedVersionstamp) = versionFromKey(key);
 
 					const Key vsKey = key.substr(4, 16);
-					//TraceEvent("VST_check1a").detail("itKey", printable(it.key)).detail("vsKey", printable(vsKey)).detail("itValue", printable(it.value)).detail("parsedVersion", parsedVersion);
+					//TraceEvent("VST_Check1a").detail("ItKey", printable(it.key)).detail("VsKey", printable(vsKey)).detail("ItValue", printable(it.value)).detail("ParsedVersion", parsedVersion);
 					const auto& all_values_iter = self->versionStampKey_commit.find(vsKey);
 					ASSERT(all_values_iter != self->versionStampKey_commit.end());  // Reading a key that we didn't commit.
 					const auto& all_values = all_values_iter->second;
@@ -220,7 +220,7 @@ struct VersionStampWorkload : TestWorkload {
 
 					Version commitVersion = value_pair_iter->first;
 					Standalone<StringRef> commitVersionstamp = value_pair_iter->second;
-					//TraceEvent("VST_check1b").detail("version", commitVersion).detail("commitVersion", printable(commitVersionstamp));
+					//TraceEvent("VST_Check1b").detail("Version", commitVersion).detail("CommitVersion", printable(commitVersionstamp));
 					ASSERT(parsedVersion <= readVersion);
 					ASSERT(commitVersionstamp.compare(parsedVersionstamp) == 0);
 				}
@@ -230,7 +230,7 @@ struct VersionStampWorkload : TestWorkload {
 				Void _ = wait(tr.onError(e));
 			}
 		}
-		TraceEvent("VST_check_end");
+		TraceEvent("VST_CheckEnd");
 		return true;
 	}
 
@@ -270,7 +270,7 @@ struct VersionStampWorkload : TestWorkload {
 
 			loop{
 				state bool error = false;
-				//TraceEvent("VST_commit_begin").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("clear", printable(range));
+				//TraceEvent("VST_CommitBegin").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("Clear", printable(range));
 				try {
 					tr.atomicOp(key, versionStampValue, MutationRef::SetVersionstampedValue);
 					tr.clear(range);
@@ -285,12 +285,12 @@ struct VersionStampWorkload : TestWorkload {
 				catch (Error &e) {
 					state Error err = e;
 					if (err.code() == error_code_database_locked) {
-						//TraceEvent("VST_commit_database_locked");
+						//TraceEvent("VST_CommitDatabaseLocked");
 						cx_is_primary = !cx_is_primary;
 						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);
 						break;
 					} else if (err.code() == error_code_commit_unknown_result) {
-						//TraceEvent("VST_commit_unknown_result").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).error(e);
+						//TraceEvent("VST_CommitUnknownResult").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).error(e);
 						loop {
 							state ReadYourWritesTransaction cur_tr(cx_is_primary ? cx : extraDB);
 							cur_tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -301,7 +301,7 @@ struct VersionStampWorkload : TestWorkload {
 									break;
 								}
 								const Version value_version = versionFromValue(vs_value.get()).first;
-								//TraceEvent("VST_commit_unknown_read").detail("vs_value", vs_value.present() ? printable(vs_value.get()) : "did not exist");
+								//TraceEvent("VST_CommitUnknownRead").detail("VsValue", vs_value.present() ? printable(vs_value.get()) : "did not exist");
 								const auto& value_ts = self->key_commit[key.removePrefix(self->vsValuePrefix)];
 								const auto& iter = std::find_if(value_ts.cbegin(), value_ts.cend(),
 									[value_version](const std::pair<Version, Standalone<StringRef>>& pair) {
@@ -326,14 +326,14 @@ struct VersionStampWorkload : TestWorkload {
 				}
 
 				if (error) {
-					TraceEvent("VST_commit_failed").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).error(err);
+					TraceEvent("VST_CommitFailed").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).error(err);
 					Void _ = wait(tr.onError(err));
 					continue;
 				}
 
 				const Standalone<StringRef> vsKeyKey = versionStampKey.removePrefix(self->vsKeyPrefix).substr(4, 16);
 				const auto& committedVersionPair = std::make_pair(committedVersion, committedVersionStamp);
-				//TraceEvent("VST_commit_success").detail("key", printable(key)).detail("vsKey", printable(versionStampKey)).detail("vsKeyKey", printable(vsKeyKey)).detail("clear", printable(range)).detail("version", tr.getCommittedVersion()).detail("vsValue", printable(committedVersionPair.second));
+				//TraceEvent("VST_CommitSuccess").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).detail("VsKeyKey", printable(vsKeyKey)).detail("Clear", printable(range)).detail("Version", tr.getCommittedVersion()).detail("VsValue", printable(committedVersionPair.second));
 				self->key_commit[key.removePrefix(self->vsValuePrefix)].push_back(committedVersionPair);
 				self->versionStampKey_commit[vsKeyKey].push_back(committedVersionPair);
 				break;
@@ -342,7 +342,7 @@ struct VersionStampWorkload : TestWorkload {
 			if (now() - startTime > self->testDuration)
 				break;
 		}
-		//TraceEvent("VST_start").detail("count", count).detail("nodeCount", self->nodeCount);
+		//TraceEvent("VST_Start").detail("Count", count).detail("NodeCount", self->nodeCount);
 		return Void();
 	}
 };

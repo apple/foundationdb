@@ -73,7 +73,7 @@ struct BackupToDBAbort : TestWorkload {
 	ACTOR static Future<Void> _start(BackupToDBAbort* self, Database cx) {
 		state DatabaseBackupAgent backupAgent(cx);
 
-		TraceEvent("BDBA_Start").detail("delay", self->abortDelay);
+		TraceEvent("BDBA_Start").detail("Delay", self->abortDelay);
 		Void _ = wait(delay(self->abortDelay));
 		TraceEvent("BDBA_Wait");
 		int _ = wait( backupAgent.waitBackup(self->extraDB, BackupAgentBase::getDefaultTag(), false) );

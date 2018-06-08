@@ -43,7 +43,7 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		// check task version
 		uint32_t taskVersion = task->getVersion();
 		if (taskVersion > SayHelloTaskFunc::version) {
-			TraceEvent("TaskBucketCorrectnessSayHello").detail("CheckTaskVersion", "taskVersion is larger than the funcVersion").detail("taskVersion", taskVersion).detail("funcVersion", SayHelloTaskFunc::version);
+			TraceEvent("TaskBucketCorrectnessSayHello").detail("CheckTaskVersion", "taskVersion is larger than the funcVersion").detail("TaskVersion", taskVersion).detail("FuncVersion", SayHelloTaskFunc::version);
 		}
 
 		state Reference<TaskFuture> done = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
@@ -67,7 +67,7 @@ struct SayHelloTaskFunc : TaskFuncBase {
 		} else {
 			int subtaskCount = atoi(task->params[LiteralStringRef("subtaskCount")].toString().c_str());
 			int currTaskNumber = atoi(value.removePrefix(LiteralStringRef("task_")).toString().c_str());
-			TraceEvent("TaskBucketCorrectnessSayHello").detail("subtaskCount", subtaskCount).detail("currTaskNumber", currTaskNumber);
+			TraceEvent("TaskBucketCorrectnessSayHello").detail("SubtaskCount", subtaskCount).detail("CurrTaskNumber", currTaskNumber);
 
 			if( currTaskNumber < subtaskCount - 1 ) {
 				state std::vector<Reference<TaskFuture>> vectorFuture;
@@ -208,13 +208,13 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 
 		try {
 			if (self->clientId == 0){
-				TraceEvent("TaskBucketCorrectness").detail("clearing_db", "...");
+				TraceEvent("TaskBucketCorrectness").detail("ClearingDb", "...");
 				Void _ = wait(taskBucket->clear(cx));
 
-				TraceEvent("TaskBucketCorrectness").detail("adding_tasks", "...");
+				TraceEvent("TaskBucketCorrectness").detail("AddingTasks", "...");
 				Void _ = wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) {return self->addInitTasks(tr, taskBucket, futureBucket, self->chained, self->subtaskCount); }));
 
-				TraceEvent("TaskBucketCorrectness").detail("running_tasks", "...");
+				TraceEvent("TaskBucketCorrectness").detail("RunningTasks", "...");
 			}
 
 			loop{
@@ -229,7 +229,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 								break;
 							else {
 								Void _ = wait(TaskBucket::debugPrintRange(cx, taskSubspace.key(), StringRef(format("client_%d", self->clientId))));
-								TraceEvent("TaskBucketCorrectness").detail("future_is_not_empty", "...");
+								TraceEvent("TaskBucketCorrectness").detail("FutureIsNotEmpty", "...");
 							}
 						}
 						else {
@@ -246,7 +246,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			}
 
 			if (self->clientId == 0){
-				TraceEvent("TaskBucketCorrectness").detail("not_tasks_remain", "...");
+				TraceEvent("TaskBucketCorrectness").detail("NotTasksRemain", "...");
 				Void _ = wait(TaskBucket::debugPrintRange(cx, StringRef(), StringRef()));
 			}
 		}
@@ -271,19 +271,19 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(KeyRangeRef(LiteralStringRef("Hello_\x00"), LiteralStringRef("Hello_\xff")), CLIENT_KNOBS->TOO_MANY));
 		if (values.size() != data.size()){
-			TraceEvent(SevError, "checkSayHello").detail("CountNotMatch_Is", values.size()).detail("ShouldBe", data.size());
+			TraceEvent(SevError, "CheckSayHello").detail("CountNotMatchIs", values.size()).detail("ShouldBe", data.size());
 			for (auto & s : values) {
-				TraceEvent("checkSayHello").detail("item", printable(s)).detail("value", printable(s.value));
+				TraceEvent("CheckSayHello").detail("Item", printable(s)).detail("Value", printable(s.value));
 			}
 			return false;
 		}
 
 		for (auto & s : values) {
-			// TraceEvent("checkSayHello").detail("item", printable(s)).detail("value", printable(s.value));
+			// TraceEvent("CheckSayHello").detail("Item", printable(s)).detail("Value", printable(s.value));
 			data.erase(s.value.toString());
 		}
 		if (data.size() != 0){
-			TraceEvent(SevError, "checkSayHello").detail("DataNotMatch", data.size());
+			TraceEvent(SevError, "CheckSayHello").detail("DataNotMatch", data.size());
 			return false;
 		}
 

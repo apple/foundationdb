@@ -1159,7 +1159,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 			if (backupVersion[i].get().present()) {
 				double seconds_behind = ((double)readVer - BinaryReader::fromStringRef<Version>(backupVersion[i].get().get(), Unversioned())) / CLIENT_KNOBS->CORE_VERSIONSPERSECOND;
 				tagRoot.create("seconds_behind") = seconds_behind;
-				//TraceEvent("BackupMetrics").detail("secondsBehind", seconds_behind);
+				//TraceEvent("BackupMetrics").detail("SecondsBehind", seconds_behind);
 			}
 
 			tagRoot.create("backup_state") = BackupAgentBase::getStateText(status);
@@ -2999,7 +2999,7 @@ int main(int argc, char* argv[]) {
 		TraceEvent(SevError, "MainError").error(e);
 		status = FDB_EXIT_MAIN_ERROR;
 	} catch (std::exception& e) {
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		status = FDB_EXIT_MAIN_EXCEPTION;
 	}
 
