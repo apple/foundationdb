@@ -92,7 +92,7 @@ std::map<std::string, std::pair<uint32_t,int>> VFSAsyncFile::filename_lockCount_
 static int asyncClose(sqlite3_file *pFile){
 	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
 
-	/*TraceEvent("VFSAsyncClose").detail("fd", p->file->debugFD())
+	/*TraceEvent("VFSAsyncClose").detail("Fd", p->file->debugFD())
 		.detail("Filename", p->filename).detail("ZCRefs", p->debug_zcrefs)
 		.detail("ZCReads", p->debug_zcreads).detail("NormalReads", p->debug_reads).backtrace();*/
 	//printf("Closing %s: %d zcrefs, %d/%d reads zc\n", filename.c_str(), debug_zcrefs, debug_zcreads, debug_zcreads+debug_reads);
@@ -201,7 +201,7 @@ static int asyncSync(sqlite3_file *pFile, int flags){
 	} catch (Error& e) {
 		TraceEvent("VFSSyncError")
 			.detail("Filename", p->filename)
-			.detail("sqlite3_file", (int64_t)pFile)
+			.detail("Sqlite3File", (int64_t)pFile)
 			.detail("IAsyncFile", (int64_t)p->file.getPtr())
 			.error(e);
 		
@@ -225,7 +225,7 @@ static int VFSAsyncFileSize(sqlite3_file *pFile, sqlite_int64 *pSize){
 static int asyncLock(sqlite3_file *pFile, int eLock){
 	VFSAsyncFile *p = (VFSAsyncFile*)pFile;
 
-	//TraceEvent("FileLock").detail("File", p->filename).detail("fd", p->file->debugFD()).detail("PrevLockLevel", p->lockLevel).detail("Op", eLock).detail("LockCount", *p->pLockCount);
+	//TraceEvent("FileLock").detail("File", p->filename).detail("Fd", p->file->debugFD()).detail("PrevLockLevel", p->lockLevel).detail("Op", eLock).detail("LockCount", *p->pLockCount);
 
 	return eLock == EXCLUSIVE_LOCK ? SQLITE_BUSY : SQLITE_OK;
 }
@@ -373,7 +373,7 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 	  } else if (flags & SQLITE_SHM_SHARED) {
 		  for(int i=ofst; i<ofst+n; i++)
 			  if ( memInfo->exclusiveLocks[i] != ((pDbFd->sharedMemoryExclusiveLocks>>i)&1) ) {
-				  //TraceEvent("ShmLocked").detail("File", DEBUG_DETERMINISM ? 0 : (int64_t)pDbFd).detail("Acquiring", "Shared").detail("i", i).detail("Exclusive", memInfo->exclusiveLocks[i]).detail("MyExclusive", pDbFd->sharedMemoryExclusiveLocks);
+				  //TraceEvent("ShmLocked").detail("File", DEBUG_DETERMINISM ? 0 : (int64_t)pDbFd).detail("Acquiring", "Shared").detail("I", i).detail("Exclusive", memInfo->exclusiveLocks[i]).detail("MyExclusive", pDbFd->sharedMemoryExclusiveLocks);
 				  return SQLITE_BUSY;
 			  }
 		  for(int i=ofst; i<ofst+n; i++)
@@ -386,7 +386,7 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 			  if ( memInfo->exclusiveLocks[i] != ((pDbFd->sharedMemoryExclusiveLocks>>i)&1) ||
 				   memInfo->sharedLocks[i] != ((pDbFd->sharedMemorySharedLocks>>i)&1) )
 			  {
-				  //TraceEvent("ShmLocked").detail("File", DEBUG_DETERMINISM ? 0 : (int64_t)pDbFd).detail("Acquiring", "Exclusive").detail("i", i).detail("Exclusive", memInfo->exclusiveLocks[i]).detail("MyExclusive", pDbFd->sharedMemoryExclusiveLocks).detail("Shared", memInfo->sharedLocks[i]).detail("MyShared", pDbFd->sharedMemorySharedLocks);
+				  //TraceEvent("ShmLocked").detail("File", DEBUG_DETERMINISM ? 0 : (int64_t)pDbFd).detail("Acquiring", "Exclusive").detail("I", i).detail("Exclusive", memInfo->exclusiveLocks[i]).detail("MyExclusive", pDbFd->sharedMemoryExclusiveLocks).detail("Shared", memInfo->sharedLocks[i]).detail("MyShared", pDbFd->sharedMemorySharedLocks);
 				  return SQLITE_BUSY;
 			  }
 		  for(int i=ofst; i<ofst+n; i++)
@@ -448,7 +448,7 @@ static int asyncDeviceCharacteristics(sqlite3_file *pFile){ return 0; }
 	}
 
 	VFSAsyncFile::~VFSAsyncFile() {
-		//TraceEvent("VFSAsyncFileDel").detail("filename", filename);
+		//TraceEvent("VFSAsyncFileDel").detail("Filename", filename);
 		if (!--filename_lockCount_openCount[filename].second) {
 			filename_lockCount_openCount.erase(filename);
 
@@ -523,9 +523,9 @@ static int asyncOpen(
 
 		/*TraceEvent("VFSOpened")
 			.detail("Filename", p->filename)
-			.detail("fd", DEBUG_DETERMINISM ? 0 : p->file->debugFD())
+			.detail("Fd", DEBUG_DETERMINISM ? 0 : p->file->debugFD())
 			.detail("Flags", flags)
-			.detail("sqlite3_file", DEBUG_DETERMINISM ? 0 : (int64_t)pFile)
+			.detail("Sqlite3File", DEBUG_DETERMINISM ? 0 : (int64_t)pFile)
 			.detail("IAsyncFile", DEBUG_DETERMINISM ? 0 : (int64_t)p->file.getPtr());*/
 	} catch (Error& e) {
 		TraceEvent("SQLiteOpenFail").detail("Filename", p->filename).error(e);

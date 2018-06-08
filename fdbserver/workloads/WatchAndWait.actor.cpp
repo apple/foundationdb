@@ -99,13 +99,13 @@ struct WatchAndWaitWorkload : TestWorkload {
 		uint64_t endNode = (self->nodeCount * (self->clientId+1)) / self->clientCount;
 		uint64_t startNode = (self->nodeCount * self->clientId) / self->clientCount;
 		uint64_t NodesPerWatch = self->nodeCount / self->watchCount;
-		TraceEvent("WatchAndWaitExpect").detail("duration", self->testDuration).detail("expectedCount", (endNode - startNode) / NodesPerWatch).detail("end", endNode).detail("start", startNode).detail("npw", NodesPerWatch);
+		TraceEvent("WatchAndWaitExpect").detail("Duration", self->testDuration).detail("ExpectedCount", (endNode - startNode) / NodesPerWatch).detail("End", endNode).detail("Start", startNode).detail("Npw", NodesPerWatch);
 		for( uint64_t i = startNode; i < endNode; i += NodesPerWatch ) {
 			watches.push_back( self->watchAndWait( cx, self, i ) );
 			watchCounter++;
 		}
 		Void _ = wait( delay( self->testDuration )); // || waitForAll( watches )
-		TraceEvent("WatchAndWaitEnd").detail("duration", self->testDuration);
+		TraceEvent("WatchAndWaitEnd").detail("Duration", self->testDuration);
 		return Void();
 	}
 

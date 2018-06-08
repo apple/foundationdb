@@ -135,6 +135,36 @@ SuppressionMap suppressedEvents;
 static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 
+void badField(const char *key, const char *type) {
+	fprintf(stderr, "Bad trace event %s, %s\n", type, key);
+	//ASSERT_WE_THINK(false);
+}
+
+void validateFieldName(const char *key, const char *type, bool allowOneUnderscore=false) {
+	if(g_network && g_network->isSimulated()) {
+		if(key[0] < 'A' || key[0] > 'Z') {
+			badField(key, type);
+			return;
+		}
+
+		const char* underscore = strchr(key, '_');
+		if(!allowOneUnderscore && underscore) {
+			badField(key, type);
+			return;
+		}
+		else if(underscore) {
+			if(underscore[1] < 'A' || underscore[1] > 'Z') {
+				badField(key, type);
+				return;
+			}
+			underscore = strchr(&underscore[1], '_');
+			if(underscore) {
+				badField(key, type);
+				return;
+			}
+		}
+	}
+}
 
 struct TraceLog {
 	Standalone< VectorRef<StringRef> > buffer;
@@ -677,6 +707,7 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 	tmpEventMetric = new DynamicEventMetric(MetricNameRef());
 	tmpEventMetric->setField("Severity", (int64_t)severity);
 
+	validateFieldName(type, type, true);
 	length = 0;
 	if (isEnabled(type, severity)) {
 		enabled = true;
@@ -711,6 +742,7 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 }
 
 TraceEvent& TraceEvent::detail( const char* key, const char* value ) {
+	validateFieldName(key, type);
 	if (enabled) {
 		if( strlen( value ) > 495 ) {
 			char replacement[500];
@@ -794,6 +826,7 @@ TraceEvent& TraceEvent::_detailf( const char* key, const char* valueFormat, ... 
 	return *this;
 }
 TraceEvent& TraceEvent::detailfv( const char* key, const char* valueFormat, va_list args, bool writeEventMetricField ) {
+	validateFieldName(key, type);
 	if (enabled) {
 		writef( " %s=\"", key );
 		va_list args2;
@@ -925,7 +958,7 @@ TraceEvent::~TraceEvent() {
 				}
 			}
 			if (severity > SevWarnAlways) {
-				latestEventCache.setLatestError( std::string(buffer, length) + " latestError=\"1\"/>\r\n" );
+				latestEventCache.setLatestError( std::string(buffer, length) + " LatestError=\"1\"/>\r\n" );
 			}
 		}
 	} catch( Error &e ) {

@@ -315,7 +315,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					Void _ = wait( tr.onError(e) );
 
 					if(retries%10 == 0) {
-						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "startMoveKeysRetrying", relocationIntervalId)
+						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId)
 							.detail("Keys", printable(keys))
 							.detail("BeginKey", printable(begin))
 							.detail("NumTries", retries)
@@ -556,7 +556,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						ASSERT(false);
 					}
 
-					waitInterval = TraceInterval("RelocateShard_FinishMoveKeys_WaitDurable");
+					waitInterval = TraceInterval("RelocateShard_FinishMoveKeysWaitDurable");
 					TraceEvent(SevDebug, waitInterval.begin(), relocationIntervalId)
 						.detail("KeyBegin", printable(keys.begin))
 						.detail("KeyEnd", printable(keys.end));
@@ -627,7 +627,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					Void _ = wait( tr.onError(error) );
 					retries++;
 					if(retries%10 == 0) {
-						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_finishMoveKeysRetrying", relocationIntervalId)
+						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_FinishMoveKeysRetrying", relocationIntervalId)
 							.error(err)
 							.detail("KeyBegin", printable(keys.begin))
 							.detail("KeyEnd", printable(keys.end))
@@ -771,7 +771,7 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 				TraceEvent(SevWarn,"NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
 				Void _ = wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskDataDistributionLaunch) );
 				tr.reset();
-				TraceEvent("RemoveStorageServerRetrying").detail("canRemove", canRemove);
+				TraceEvent("RemoveStorageServerRetrying").detail("CanRemove", canRemove);
 			} else {
 
 				state Future<Optional<Value>> fListKey = tr.get( serverListKeyFor(serverID) );
