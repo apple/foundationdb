@@ -930,8 +930,7 @@ ACTOR Future<Void> printOnFirstConnected( Reference<AsyncVar<Optional<ClusterInt
 	}
 }
 
-ClusterControllerPriorityInfo getCCPriorityInfo(std::string folder, ProcessClass processClass) {
-	std::string filePath = joinPath(folder, "fitness");
+ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessClass processClass) {
 	if (!fileExists(filePath))
 		return ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource).machineClassFitness(ProcessClass::ClusterController), false, ClusterControllerPriorityInfo::FitnessUnknown);
 	std::string contents(readFileBytes(filePath, 1000));
@@ -942,9 +941,7 @@ ClusterControllerPriorityInfo getCCPriorityInfo(std::string folder, ProcessClass
 	return priorityInfo;
 }
 
-ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string folder, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
-	state std::string filePath = joinPath(folder, "fitness");
-
+ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
 	loop {
 		Void _ = wait(asyncPriorityInfo->onChange());
 		std::string contents(BinaryWriter::toValue(asyncPriorityInfo->get(), IncludeVersion()).toString());
@@ -1013,12 +1010,13 @@ ACTOR Future<Void> fdbd(
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
 		// Only one process can execute on a dataFolder from this point onwards
 
+		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(new AsyncVar<Optional<ClusterControllerFullInterface>>);
 		Reference<AsyncVar<Optional<ClusterInterface>>> ci(new AsyncVar<Optional<ClusterInterface>>);
-		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(dataFolder, processClass)));
+		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
 		Promise<Void> recoveredDiskFiles;
 
-		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(dataFolder, asyncPriorityInfo), "monitorAndWriteCCPriorityInfo"));
+		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "monitorAndWriteCCPriorityInfo"));
 		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture()), "clusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
