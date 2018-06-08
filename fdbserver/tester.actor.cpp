@@ -965,7 +965,7 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			if(value == "true")
 				spec.phases = TestWorkload::CHECK;
 		} else if( attrib == "StderrSeverity" ) {
-			TraceEvent("StderrSeverity").detail("newSeverity", value);
+			TraceEvent("StderrSeverity").detail("NewSeverity", value);
 		}
 		else if (attrib == "ClientInfoLogging") {
 			if (value == "false") {
