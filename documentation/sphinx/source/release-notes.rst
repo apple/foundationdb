@@ -18,7 +18,7 @@ Fixes
 -----
 
 * Build would fail on recent versions of Clang. `(PR #389) https://github.com/apple/foundationdb/pull/389/files`_
-* Clusters running with TLS plugin would fail to start when client and server certificates used different validation rules. `(PR #396) https://github.com/apple/foundationdb/pull/396`_
+* Clusters running with TLS plugin would reject clients using non-server certificates. `(PR #396) https://github.com/apple/foundationdb/pull/396`_
 
 5.2.1
 =====
