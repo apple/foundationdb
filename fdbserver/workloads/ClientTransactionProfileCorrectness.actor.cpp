@@ -225,8 +225,8 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		state KeySelector begin = firstGreaterOrEqual(CLIENT_LATENCY_INFO_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin));
 		state KeySelector end = firstGreaterOrEqual(strinc(begin.getKey()));
 		state int keysLimit = 10;
+		state Transaction tr(cx);
 		loop {
-			state Transaction tr(cx);
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -236,6 +236,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 				txInfoEntries.arena().dependsOn(kvRange.arena());
 				txInfoEntries.append(txInfoEntries.arena(), kvRange.begin(), kvRange.size());
 				begin = firstGreaterThan(kvRange.back().key);
+				tr.reset();
 			}
 			catch (Error& e) {
 				if (e.code() == error_code_transaction_too_old)
