@@ -90,7 +90,7 @@ struct MemoryLifetime : KVWorkload {
 					state Value getRange_newValue = self->randomValue();
 					state bool getRange_isSnapshot = g_random->random01() < 0.5;
 
-					//TraceEvent("MemoryLifetimeCheck").detail("isReverse", getRange_isReverse).detail("startKey", printable(getRange_startKey)).detail("randomStart", getRange_randomStart).detail("newValue", getRange_newValue.size()).detail("isSnapshot", getRange_isSnapshot);
+					//TraceEvent("MemoryLifetimeCheck").detail("IsReverse", getRange_isReverse).detail("StartKey", printable(getRange_startKey)).detail("RandomStart", getRange_randomStart).detail("NewValue", getRange_newValue.size()).detail("IsSnapshot", getRange_isSnapshot);
 					if(getRange_randomStart)
 						tr.set(getRange_startKey, getRange_newValue);
 					state Standalone<RangeResultRef> getRange_res1 = wait( tr.getRange(getRange_queryRange, GetRangeLimits(4000), getRange_isSnapshot, getRange_isReverse) );
@@ -103,16 +103,16 @@ struct MemoryLifetime : KVWorkload {
 					for(int i = 0; i < getRange_res1.size(); i++) {
 						if(getRange_res1[i].key != getRange_res2[i].key) {
 							TraceEvent(SevError, "MemoryLifetimeCheckKeyError")
-								.detail("key1", printable(getRange_res1[i].key)).detail("key2", printable(getRange_res2[i].key))
-								.detail("value1", getRange_res1[i].value.size()).detail("value2", getRange_res2[i].value.size())
-								.detail("i", i).detail("size", getRange_res2.size());
+								.detail("Key1", printable(getRange_res1[i].key)).detail("Key2", printable(getRange_res2[i].key))
+								.detail("Value1", getRange_res1[i].value.size()).detail("Value2", getRange_res2[i].value.size())
+								.detail("I", i).detail("Size", getRange_res2.size());
 							ASSERT(false);
 						}
 						if(getRange_res1[i].value != getRange_res2[i].value) {
 							TraceEvent(SevError, "MemoryLifetimeCheckValueError")
-								.detail("key1", printable(getRange_res1[i].key)).detail("key2", printable(getRange_res2[i].key))
-								.detail("value1", getRange_res1[i].value.size()).detail("value2", getRange_res2[i].value.size())
-								.detail("i", i).detail("size", getRange_res2.size());
+								.detail("Key1", printable(getRange_res1[i].key)).detail("Key2", printable(getRange_res2[i].key))
+								.detail("Value1", getRange_res1[i].value.size()).detail("Value2", getRange_res2[i].value.size())
+								.detail("I", i).detail("Size", getRange_res2.size());
 							ASSERT(false);
 						}
 					}

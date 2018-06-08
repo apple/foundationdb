@@ -2060,7 +2060,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
 	printf("%s\n", errMsg.c_str());
-	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line))).detail("error", printable(StringRef(errMsg)));
+	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("Error", printable(StringRef(errMsg)));
 }
 
 struct CLIOptions {
@@ -2305,7 +2305,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 		try {
 			state UID randomID = g_random->randomUniqueID();
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line)));
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line)));
 
 			bool malformed, partial;
 			state std::vector<std::vector<StringRef>> parsed = parseLine(line, malformed, partial);
@@ -3079,7 +3079,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				is_error = true;
 			}
 
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line))).detail("is_error", is_error);
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("IsError", is_error);
 
 		} catch (Error& e) {
 			if(e.code() != error_code_actor_cancelled)

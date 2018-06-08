@@ -111,7 +111,7 @@ public:
 				break;
 			}
 			catch (Error& e) {
-				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("errCode", e.code());
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
 				Void _ = wait(delay(1));
 			}
 		}
@@ -120,7 +120,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != intValue) {
-			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("opOn", "StorageServer").detail("op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 
@@ -130,7 +130,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != intValue) {
-			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("opOn", "RYWLayer").detail("op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpSetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", intValue).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 		return Void();
@@ -149,7 +149,7 @@ public:
 				break;
 			}
 			catch (Error& e) {
-				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("errCode", e.code());
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
 				Void _ = wait(delay(1));
 			}
 		}
@@ -158,7 +158,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != 0) {
-			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("opOn", "StorageServer").detail("op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 
@@ -168,7 +168,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != 0) {
-			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("opOn", "RYWLayer").detail("op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpUnsetOnNonExistingKeyUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", 0).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 		return Void();
@@ -197,7 +197,7 @@ public:
 				break;
 			}
 			catch (Error& e) {
-				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("errCode", e.code());
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
 				Void _ = wait(delay(1));
 			}
 		}
@@ -205,7 +205,7 @@ public:
 		ASSERT(outputVal.present());
 		Value output = outputVal.get();
 		if (output != opFunc(existingVal, otherVal)) {
-			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("opOn", "StorageServer").detail("op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
+			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("OpOn", "StorageServer").detail("Op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
 			self->testFailed = true;
 		}
 
@@ -214,7 +214,7 @@ public:
 		ASSERT(outputVal.present());
 		Value output = outputVal.get();
 		if (output != opFunc(existingVal, otherVal)) {
-			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("opOn", "RYWLayer").detail("op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
+			TraceEvent(SevError, "AtomicOpOnEmptyValueUnexpectedOutput").detail("OpOn", "RYWLayer").detail("Op", opType).detail("ExpectedOutput", opFunc(existingVal, otherVal).toString()).detail("ActualOutput", output.toString());
 			self->testFailed = true;
 		}
 		return Void();
@@ -240,7 +240,7 @@ public:
 				break;
 			}
 			catch (Error& e) {
-				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("errCode", e.code());
+				TraceEvent(SevInfo, "AtomicOpApiThrow").detail("ErrCode", e.code());
 				Void _ = wait(delay(1));
 			}
 		}
@@ -250,7 +250,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != opFunc(intValue1, intValue2)) {
-			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("opOn", "StorageServer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("OpOn", "StorageServer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 
@@ -261,7 +261,7 @@ public:
 		ASSERT(outputVal.present() && outputVal.get().size() == sizeof(uint64_t));
 		memcpy(&output, outputVal.get().begin(), outputVal.get().size());
 		if (output != opFunc(intValue1, intValue2)) {
-			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("opOn", "RYWLayer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
+			TraceEvent(SevError, "AtomicOpApiCorrectnessUnexpectedOutput").detail("OpOn", "RYWLayer").detail("InValue1", intValue1).detail("InValue2", intValue2).detail("AtomicOp", opType).detail("ExpectedOutput", opFunc(intValue1, intValue2)).detail("ActualOutput", output);
 			self->testFailed = true;
 		}
 
@@ -272,7 +272,7 @@ public:
 		state int currentApiVersion = getApiVersion(cx);
 		state Key key = self->getTestKey("test_key_min_");
 
-		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("opType", "MIN");
+		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("OpType", "MIN");
 		// API Version 500
 		setApiVersion(&cx, 500);
 		TraceEvent(SevInfo, "Running Atomic Op Min Correctness Test Api Version 500");
@@ -305,7 +305,7 @@ public:
 		state int currentApiVersion = getApiVersion(cx);
 		state Key key = self->getTestKey("test_key_and_");
 
-		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("opType", "AND");
+		TraceEvent("AtomicOpCorrectnessApiWorkload").detail("OpType", "AND");
 		// API Version 500
 		setApiVersion(&cx, 500);
 		TraceEvent(SevInfo, "Running Atomic Op AND Correctness Test Api Version 500");

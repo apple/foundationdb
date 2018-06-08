@@ -269,7 +269,7 @@ struct SQLiteDB : NonCopyable {
 		TraceEvent("BTreeIntegrityCheckBegin").detail("Filename", filename);
 		char* e = sqlite3BtreeIntegrityCheck(btree, tables, 3, 1000, &errors, verbose);
 		if (!(g_network->isSimulated() && (g_simulator.getCurrentProcess()->fault_injection_p1 || g_simulator.getCurrentProcess()->rebooting))) {
-			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheck").detail("filename", filename).detail("ErrorTotal", errors);
+			TraceEvent((errors||e) ? SevError : SevInfo, "BTreeIntegrityCheck").detail("Filename", filename).detail("ErrorTotal", errors);
 			if(e != nullptr) {
 				// e is a string containing 1 or more lines.  Create a separate trace event for each line.
 				char *lineStart = e;
@@ -282,7 +282,7 @@ struct SQLiteDB : NonCopyable {
 
 					// If the line length found is not zero then print a trace event
 					if(*lineStart != '\0')
-						TraceEvent(SevError, "BTreeIntegrityCheck").detail("filename", filename).detail("ErrorDetail", lineStart);
+						TraceEvent(SevError, "BTreeIntegrityCheck").detail("Filename", filename).detail("ErrorDetail", lineStart);
 					lineStart = lineEnd;
 				}
 			}
@@ -1262,7 +1262,7 @@ int SQLiteDB::checkAllPageChecksums() {
 
 	TraceEvent("SQLitePageChecksumScanEnd")
 		.detail("Elapsed", DEBUG_DETERMINISM ? 0 : timer()-startT)
-		.detail("filename", filename)
+		.detail("Filename", filename)
 		.detail("CorruptPages", corruptPages)
 		.detail("ReadErrors", readErrors)
 		.detail("TotalErrors", totalErrors);
@@ -1275,7 +1275,7 @@ int SQLiteDB::checkAllPageChecksums() {
 void SQLiteDB::open(bool writable) {
 	ASSERT( !haveMutex );
 	double startT = timer();
-	//TraceEvent("KVThreadInitStage").detail("Stage",1).detail("filename", filename).detail("writable", writable);
+	//TraceEvent("KVThreadInitStage").detail("Stage",1).detail("Filename", filename).detail("Writable", writable);
 
 	// First try to open an existing file
 	std::string apath = abspath(filename);
@@ -1283,7 +1283,7 @@ void SQLiteDB::open(bool writable) {
 	ErrorOr<Reference<IAsyncFile>> dbFile = waitForAndGet( errorOr( IAsyncFileSystem::filesystem()->open( apath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0 ) ) );
 	ErrorOr<Reference<IAsyncFile>> walFile = waitForAndGet( errorOr( IAsyncFileSystem::filesystem()->open( walpath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0 ) ) );
 
-	//TraceEvent("KVThreadInitStage").detail("Stage",15).detail("filename", apath).detail("writable", writable).detail("isErr", dbFile.isError());
+	//TraceEvent("KVThreadInitStage").detail("Stage",15).detail("Filename", apath).detail("Writable", writable).detail("IsErr", dbFile.isError());
 
 	if (writable) {
 		if (dbFile.isError() && dbFile.getError().code() == error_code_file_not_found && !fileExists(apath) && // db file is missing
@@ -1318,7 +1318,7 @@ void SQLiteDB::open(bool writable) {
 	if (dbFile.isError()) throw dbFile.getError(); // If we've failed to open the file, throw an exception
 	if (walFile.isError()) throw walFile.getError(); // If we've failed to open the file, throw an exception
 
-	//TraceEvent("KVThreadInitStage").detail("Stage",2).detail("filename", filename).detail("writable", writable);
+	//TraceEvent("KVThreadInitStage").detail("Stage",2).detail("Filename", filename).detail("Writable", writable);
 
 	// Now that the file itself is open and locked, let sqlite open the database
 	// Note that VFSAsync will also call g_network->open (including for the WAL), so its flags are important, too
@@ -1330,7 +1330,7 @@ void SQLiteDB::open(bool writable) {
 
 	sqlite3_extended_result_codes(db, 1);
 
-	//TraceEvent("KVThreadInitStage").detail("Stage",3).detail("filename", filename).detail("writable", writable);
+	//TraceEvent("KVThreadInitStage").detail("Stage",3).detail("Filename", filename).detail("Writable", writable);
 
 	//Statement(*this, "PRAGMA cache_size = 100").execute();
 
@@ -1346,7 +1346,7 @@ void SQLiteDB::open(bool writable) {
 		Statement(*this, "PRAGMA wal_autocheckpoint = -1").nextRow();
 	}
 
-	//TraceEvent("KVThreadInitStage").detail("Stage",4).detail("filename", filename).detail("writable", writable);
+	//TraceEvent("KVThreadInitStage").detail("Stage",4).detail("Filename", filename).detail("Writable", writable);
 
 	sqlite3_mutex_enter(db->mutex);
 	haveMutex = true;
@@ -1356,7 +1356,7 @@ void SQLiteDB::open(bool writable) {
 	this->dbFile = dbFile.get();
 	this->walFile = walFile.get();
 
-	TraceEvent("KVThreadInitTime").detail("Elapsed", DEBUG_DETERMINISM ? 0 : timer()-startT).detail("filename", filename).detail("writable", writable);
+	TraceEvent("KVThreadInitTime").detail("Elapsed", DEBUG_DETERMINISM ? 0 : timer()-startT).detail("Filename", filename).detail("Writable", writable);
 	ASSERT(vfsAsyncIsOpen(filename));
 }
 
@@ -1392,7 +1392,7 @@ void SQLiteDB::createFromScratch() {
 		ASSERT( freetable == table+1 );
 		endTransaction();
 	} else {
-		TraceEvent("pgnoRoot").detail("value", pgnoRoot);
+		TraceEvent("pgnoRoot").detail("Value", pgnoRoot);
 		checkError("CheckTables", SQLITE_CORRUPT);
 	}
 }
@@ -1662,7 +1662,7 @@ private:
 			checkFreePages();
 			++writesComplete;
 			if (t3-a.issuedTime > 10.0*g_random->random01())
-				TraceEvent("KVCommit10s_sample", dbgid).detail("Queued", t1-a.issuedTime).detail("Commit", t2-t1).detail("Checkpoint", t3-t2);
+				TraceEvent("KVCommit10sSample", dbgid).detail("Queued", t1-a.issuedTime).detail("Commit", t2-t1).detail("Checkpoint", t3-t2);
 
 			diskBytesUsed = waitForAndGet( conn.dbFile->size() ) + waitForAndGet( conn.walFile->size() );
 

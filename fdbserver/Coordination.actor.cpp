@@ -150,11 +150,11 @@ ACTOR Future<Void> localGenerationReg( GenerationRegInterface interf, OnDemandSt
 				store->set( KeyValueRef( wrq.kv.key, BinaryWriter::toValue(v, IncludeVersion()) ) );
 				Void _ = wait(store->commit());
 				TraceEvent("GenerationRegWrote").detail("From", wrq.reply.getEndpoint().address).detail("Key", printable(wrq.kv.key))
-					.detail("reqGen", wrq.gen.generation).detail("Returning", v.writeGen.generation);
+					.detail("ReqGen", wrq.gen.generation).detail("Returning", v.writeGen.generation);
 				wrq.reply.send( v.writeGen );
 			} else {
 				TraceEvent("GenerationRegWriteFail").detail("From", wrq.reply.getEndpoint().address).detail("Key", printable(wrq.kv.key))
-					.detail("reqGen", wrq.gen.generation).detail("readGen", v.readGen.generation).detail("writeGen", v.writeGen.generation);
+					.detail("ReqGen", wrq.gen.generation).detail("ReadGen", v.readGen.generation).detail("WriteGen", v.writeGen.generation);
 				wrq.reply.send( std::max( v.readGen, v.writeGen ) );
 			}
 		}
@@ -416,7 +416,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 	state GenerationRegInterface myInterface( g_network );
 	state OnDemandStore store( dataFolder, myID );
 
-	TraceEvent("CoordinationServer", myID).detail("myInterfaceAddr", myInterface.read.getEndpoint().address).detail("Folder", dataFolder);
+	TraceEvent("CoordinationServer", myID).detail("MyInterfaceAddr", myInterface.read.getEndpoint().address).detail("Folder", dataFolder);
 
 	try {
 		Void _ = wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store) || store.getError() );
