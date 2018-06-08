@@ -423,14 +423,14 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 			int index(0);
 			for (auto & s : rangevalue){
 				uint64_t groupKey = groupBy(s.key).first;
-				//TraceEvent("Log_readCommitted").detail("GroupKey", groupKey).detail("SkipGroup", skipGroup).detail("NextKey", printable(nextKey.key)).detail("End", printable(end.key)).detail("Valuesize", value.size()).detail("Index",index++).detail("Size",s.value.size());
+				//TraceEvent("Log_ReadCommitted").detail("GroupKey", groupKey).detail("SkipGroup", skipGroup).detail("NextKey", printable(nextKey.key)).detail("End", printable(end.key)).detail("Valuesize", value.size()).detail("Index",index++).detail("Size",s.value.size());
 				if (groupKey != skipGroup){
 					if (rcGroup.version == -1){
 						rcGroup.version = tr.getReadVersion().get();
 						rcGroup.groupKey = groupKey;
 					}
 					else if (rcGroup.groupKey != groupKey) {
-						//TraceEvent("Log_readCommitted").detail("SendGroup0", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("Data_length",rcGroup.items[0].value.size());
+						//TraceEvent("Log_ReadCommitted").detail("SendGroup0", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("Data_length",rcGroup.items[0].value.size());
 						//state uint32_t len(0);
 						//for (size_t j = 0; j < rcGroup.items.size(); ++j) {
 						//	len += rcGroup.items[j].value.size();
@@ -454,7 +454,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 				if (rcGroup.version != -1){
 					releaser.remaining -= rcGroup.items.expectedSize(); //its the responsibility of the caller to release after this point
 					ASSERT(releaser.remaining >= 0);
-					//TraceEvent("Log_readCommitted").detail("SendGroup1", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("DataLength", rcGroup.items[0].value.size());
+					//TraceEvent("Log_ReadCommitted").detail("SendGroup1", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("DataLength", rcGroup.items[0].value.size());
 					results.send(rcGroup);
 				}
 
