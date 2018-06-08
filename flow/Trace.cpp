@@ -149,7 +149,7 @@ void validateFieldName(const char *key, const char *type, bool allowUnderscores=
 
 		const char* underscore = strchr(key, '_');
 		while(underscore) {
-			if(!allowUnderscores || ((underscore[1] < 'A' || underscore[1] > 'Z') && key[0] != '_')) {
+			if(!allowUnderscores || ((underscore[1] < 'A' || underscore[1] > 'Z') && key[0] != '_' && key[0] != '\0')) {
 				badField(key, type);
 				return;
 			}
