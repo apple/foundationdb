@@ -955,6 +955,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				&self->startMoveKeysParallelismLock,
 				&self->finishMoveKeysParallelismLock,
 				self->recoveryVersion,
+				self->teamCollections.size() > 1,
 				relocateShardInterval.pairID );
 			state Future<Void> pollHealth = (!anyHealthy || signalledTransferComplete) ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
 			try {

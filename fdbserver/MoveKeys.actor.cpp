@@ -407,8 +407,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 // keyServers[k].dest must be the same for all k in keys
 // Set serverKeys[dest][keys] = true; serverKeys[src][keys] = false for all src not in dest
 // Should be cancelled and restarted if keyServers[keys].dest changes (?so this is no longer true?)
-ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> destinationTeam,
-		MoveKeysLock lock, int durableStorageQuorum, FlowLock *finishMoveKeysParallelismLock, Version recoveryVersion, UID relocationIntervalId )
+ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> destinationTeam, MoveKeysLock lock, int durableStorageQuorum, FlowLock *finishMoveKeysParallelismLock, Version recoveryVersion, bool hasRemote, UID relocationIntervalId )
 {
 	state TraceInterval interval("RelocateShard_FinishMoveKeys");
 	state TraceInterval waitInterval("");
@@ -568,7 +567,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					state vector<UID> newDestinations;
 					std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 					for(auto& it : dest) {
-						if(!completeSrcSet.count(it)) {
+						if(!hasRemote || !completeSrcSet.count(it)) {
 							newDestinations.push_back(it);
 						}
 					}
@@ -840,6 +839,7 @@ ACTOR Future<Void> moveKeys(
 	FlowLock *startMoveKeysParallelismLock,
 	FlowLock *finishMoveKeysParallelismLock,
 	Version recoveryVersion,
+	bool hasRemote,
 	UID relocationIntervalId)
 {
 	ASSERT( destinationTeam.size() );
@@ -848,7 +848,7 @@ ACTOR Future<Void> moveKeys(
 
 	state Future<Void> completionSignaller = checkFetchingState( cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId );
 
-	Void _ = wait( finishMoveKeys( cx, keys, destinationTeam, lock, durableStorageQuorum, finishMoveKeysParallelismLock, recoveryVersion, relocationIntervalId ) );
+	Void _ = wait( finishMoveKeys( cx, keys, destinationTeam, lock, durableStorageQuorum, finishMoveKeysParallelismLock, recoveryVersion, hasRemote, relocationIntervalId ) );
 
 	//This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
