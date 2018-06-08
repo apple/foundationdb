@@ -453,6 +453,18 @@ public:
 		return s;
 	}
 
+	std::string toHexString() const {
+		std::string s;
+		for (int i = 0; i<length; i++) {
+			uint8_t b = (*this)[i];
+			if(isalnum(b))
+				s.append(format("%02x (%c) ", b, b));
+			else
+				s.append(format("%02x ", b));
+		}
+		return s;
+	}
+
 	int expectedSize() const { return size(); }
 
 	int compare( StringRef const& other ) const {

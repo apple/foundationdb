@@ -155,6 +155,10 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MOVEKEYS_LOCK_POLLING_DELAY,                           5.0 );
 	init( DEBOUNCE_RECRUITING_DELAY,                             5.0 );
 
+	// Redwood Storage Engine
+	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_LIMIT,                   30 );
+	init( PREFIX_TREE_IMMEDIATE_KEY_SIZE_MIN,                     0 );
+
 	// KeyValueStore SQLITE
 	init( CLEAR_BUFFER_SIZE,                                   20000 );
 	init( READ_VALUE_TIME_ESTIMATE,                           .00005 );
