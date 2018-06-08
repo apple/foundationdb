@@ -136,32 +136,25 @@ static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottle
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 
 void badField(const char *key, const char *type) {
-	fprintf(stderr, "Bad trace event %s, %s\n", type, key);
+	fprintf(stderr, "Invalid trace event detail name: Type=%s, Field=%s\n", type, key);
 	//ASSERT_WE_THINK(false);
 }
 
-void validateFieldName(const char *key, const char *type, bool allowOneUnderscore=false) {
+void validateFieldName(const char *key, const char *type, bool allowUnderscores=false) {
 	if(g_network && g_network->isSimulated()) {
-		if(key[0] < 'A' || key[0] > 'Z') {
+		if((key[0] < 'A' || key[0] > 'Z') && key[0] != '_') {
 			badField(key, type);
 			return;
 		}
 
 		const char* underscore = strchr(key, '_');
-		if(!allowOneUnderscore && underscore) {
-			badField(key, type);
-			return;
-		}
-		else if(underscore) {
-			if(underscore[1] < 'A' || underscore[1] > 'Z') {
+		while(underscore) {
+			if(!allowUnderscores || ((underscore[1] < 'A' || underscore[1] > 'Z') && key[0] != '_')) {
 				badField(key, type);
 				return;
 			}
+				
 			underscore = strchr(&underscore[1], '_');
-			if(underscore) {
-				badField(key, type);
-				return;
-			}
 		}
 	}
 }
