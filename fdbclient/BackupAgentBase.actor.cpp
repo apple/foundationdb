@@ -77,7 +77,7 @@ Standalone<VectorRef<KeyRangeRef>> getLogRanges(Version beginVersion, Version en
 
 	Key baLogRangePrefix = destUidValue.withPrefix(backupLogKeys.begin);
 
-	//TraceEvent("getLogRanges").detail("destUidValue", destUidValue).detail("prefix", printable(StringRef(baLogRangePrefix)));
+	//TraceEvent("GetLogRanges").detail("DestUidValue", destUidValue).detail("Prefix", printable(StringRef(baLogRangePrefix)));
 
 	for (int64_t vblock = beginVersion / blockSize; vblock < (endVersion + blockSize - 1) / blockSize; ++vblock) {
 		int64_t tb = vblock * blockSize / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -100,7 +100,7 @@ Standalone<VectorRef<KeyRangeRef>> getApplyRanges(Version beginVersion, Version 
 
 	Key baLogRangePrefix = backupUid.withPrefix(applyLogKeys.begin);
 
-	//TraceEvent("getLogRanges").detail("backupUid", backupUid).detail("prefix", printable(StringRef(baLogRangePrefix)));
+	//TraceEvent("GetLogRanges").detail("BackupUid", backupUid).detail("Prefix", printable(StringRef(baLogRangePrefix)));
 
 	for (int64_t vblock = beginVersion / CLIENT_KNOBS->APPLY_BLOCK_SIZE; vblock < (endVersion + CLIENT_KNOBS->APPLY_BLOCK_SIZE - 1) / CLIENT_KNOBS->APPLY_BLOCK_SIZE; ++vblock) {
 		int64_t tb = vblock * CLIENT_KNOBS->APPLY_BLOCK_SIZE / CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
@@ -148,8 +148,8 @@ Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value) {
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
 		if (protocolVersion <= 0x0FDB00A200090001){
-			TraceEvent(SevError, "decodeBackupLogValue").detail("incompatible_protocol_version", protocolVersion)
-				.detail("valueSize", value.size()).detail("value", printable(value));
+			TraceEvent(SevError, "DecodeBackupLogValue").detail("IncompatibleProtocolVersion", protocolVersion)
+				.detail("ValueSize", value.size()).detail("Value", printable(value));
 			throw incompatible_protocol_version();
 		}
 
@@ -188,14 +188,14 @@ Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value) {
 
 		ASSERT(consumed == totalBytes);
 		if (value.size() != offset) {
-			TraceEvent(SevError, "BA_decodeBackupLogValue").detail("unexpected_extra_data_size", value.size()).detail("offset", offset).detail("totalBytes", totalBytes).detail("consumed", consumed).detail("originalOffset", originalOffset);
+			TraceEvent(SevError, "BA_DecodeBackupLogValue").detail("UnexpectedExtraDataSize", value.size()).detail("Offset", offset).detail("TotalBytes", totalBytes).detail("Consumed", consumed).detail("OriginalOffset", originalOffset);
 			throw restore_corrupted_data();
 		}
 
 		return result;
 	}
 	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_decodeBackupLogValue").error(e).GetLastError().detail("valueSize", value.size()).detail("value", printable(value));
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
 		throw;
 	}
 }
@@ -207,8 +207,8 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
 		if (protocolVersion <= 0x0FDB00A200090001){
-			TraceEvent(SevError, "decodeBackupLogValue").detail("incompatible_protocol_version", protocolVersion)
-				.detail("valueSize", value.size()).detail("value", printable(value));
+			TraceEvent(SevError, "DecodeBackupLogValue").detail("IncompatibleProtocolVersion", protocolVersion)
+				.detail("ValueSize", value.size()).detail("Value", printable(value));
 			throw incompatible_protocol_version();
 		}
 
@@ -280,7 +280,7 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 			}
 			else {
 				Version ver = key_version->rangeContaining(logValue.param1).value();
-				//TraceEvent("ApplyMutation").detail("logValue", logValue.toString()).detail("version", version).detail("ver", ver).detail("apply", version > ver && ver != invalidVersion);
+				//TraceEvent("ApplyMutation").detail("LogValue", logValue.toString()).detail("Version", version).detail("Ver", ver).detail("Apply", version > ver && ver != invalidVersion);
 				if (version > ver && ver != invalidVersion) {
 					if(removePrefix.size()) {
 						logValue.param1 = logValue.param1.removePrefix(removePrefix);
@@ -298,12 +298,12 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 
 		ASSERT(consumed == totalBytes);
 		if (value.size() != offset) {
-			TraceEvent(SevError, "BA_decodeBackupLogValue").detail("unexpected_extra_data_size", value.size()).detail("offset", offset).detail("totalBytes", totalBytes).detail("consumed", consumed).detail("originalOffset", originalOffset);
+			TraceEvent(SevError, "BA_DecodeBackupLogValue").detail("UnexpectedExtraDataSize", value.size()).detail("Offset", offset).detail("TotalBytes", totalBytes).detail("Consumed", consumed).detail("OriginalOffset", originalOffset);
 			throw restore_corrupted_data();
 		}
 	}
 	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_decodeBackupLogValue").error(e).GetLastError().detail("valueSize", value.size()).detail("value", printable(value));
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
 		throw;
 	}
 }
@@ -312,7 +312,7 @@ ACTOR Future<Void> logErrorWorker(Reference<ReadYourWritesTransaction> tr, Key k
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	if(now() - lastErrorTime > CLIENT_KNOBS->BACKUP_ERROR_DELAY) {
-		TraceEvent("BA_logError").detail("key", printable(keyErrors)).detail("message", message);
+		TraceEvent("BA_LogError").detail("Key", printable(keyErrors)).detail("Message", message);
 		lastErrorTime = now();
 	}
 	tr->set(keyErrors, message);
@@ -423,19 +423,19 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 			int index(0);
 			for (auto & s : rangevalue){
 				uint64_t groupKey = groupBy(s.key).first;
-				//TraceEvent("log_readCommitted").detail("groupKey", groupKey).detail("skipGroup", skipGroup).detail("nextKey", printable(nextKey.key)).detail("end", printable(end.key)).detail("valuesize", value.size()).detail("index",index++).detail("size",s.value.size());
+				//TraceEvent("Log_ReadCommitted").detail("GroupKey", groupKey).detail("SkipGroup", skipGroup).detail("NextKey", printable(nextKey.key)).detail("End", printable(end.key)).detail("Valuesize", value.size()).detail("Index",index++).detail("Size",s.value.size());
 				if (groupKey != skipGroup){
 					if (rcGroup.version == -1){
 						rcGroup.version = tr.getReadVersion().get();
 						rcGroup.groupKey = groupKey;
 					}
 					else if (rcGroup.groupKey != groupKey) {
-						//TraceEvent("log_readCommitted").detail("sendGroup0", rcGroup.groupKey).detail("itemSize", rcGroup.items.size()).detail("data_length",rcGroup.items[0].value.size());
+						//TraceEvent("Log_ReadCommitted").detail("SendGroup0", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("Data_length",rcGroup.items[0].value.size());
 						//state uint32_t len(0);
 						//for (size_t j = 0; j < rcGroup.items.size(); ++j) {
 						//	len += rcGroup.items[j].value.size();
 						//}
-						//TraceEvent("SendGroup").detail("groupKey", rcGroup.groupKey).detail("version", rcGroup.version).detail("length", len).detail("releaser.remaining", releaser.remaining);
+						//TraceEvent("SendGroup").detail("GroupKey", rcGroup.groupKey).detail("Version", rcGroup.version).detail("Length", len).detail("Releaser.remaining", releaser.remaining);
 						releaser.remaining -= rcGroup.items.expectedSize(); //its the responsibility of the caller to release after this point
 						ASSERT(releaser.remaining >= 0);
 						results.send(rcGroup);
@@ -454,7 +454,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 				if (rcGroup.version != -1){
 					releaser.remaining -= rcGroup.items.expectedSize(); //its the responsibility of the caller to release after this point
 					ASSERT(releaser.remaining >= 0);
-					//TraceEvent("log_readCommitted").detail("sendGroup1", rcGroup.groupKey).detail("itemSize", rcGroup.items.size()).detail("data_length", rcGroup.items[0].value.size());
+					//TraceEvent("Log_ReadCommitted").detail("SendGroup1", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("DataLength", rcGroup.items[0].value.size());
 					results.send(rcGroup);
 				}
 
@@ -619,151 +619,117 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 			beginVersion = newEndVersion;
 		}
 	} catch( Error &e ) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "AM_error").error(e);
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError").error(e);
 		throw;	
 	}
 }
 
-ACTOR Future<Void> _clearLogRanges(Reference<ReadYourWritesTransaction> tr, bool clearVersionHistory, Key logUidValue, Key destUidValue, Version beginVersion, Version endVersion) {
+ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> endVersion, bool checkBackupUid, Version backupUid) {
 	state Key backupLatestVersionsPath = destUidValue.withPrefix(backupLatestVersionsPrefix);
 	state Key backupLatestVersionsKey = logUidValue.withPrefix(backupLatestVersionsPath);
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state Standalone<RangeResultRef> backupVersions = wait(tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
-
-	// Make sure version history key does exist and lower the beginVersion if needed
-	bool foundSelf = false;
-	for (auto backupVersion : backupVersions) {
-		Key currLogUidValue = backupVersion.key.removePrefix(backupLatestVersionsPrefix).removePrefix(destUidValue);
-
-		if (currLogUidValue == logUidValue) {
-			foundSelf = true;
-			beginVersion = std::min(beginVersion, BinaryReader::fromStringRef<Version>(backupVersion.value, Unversioned()));
-		}
-	}
-
-	// Do not clear anything if version history key cannot be found
-	if (!foundSelf) {
+	if (!destUidValue.size()) {
 		return Void();
 	}
 
-	Version nextSmallestVersion = endVersion;
-	bool clearLogRangesRequired = true;
+	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+	loop{
+		try {
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-	// More than one backup/DR with the same range
-	if (backupVersions.size() > 1) {
-		for (auto backupVersion : backupVersions) {
-			Key currLogUidValue = backupVersion.key.removePrefix(backupLatestVersionsPrefix).removePrefix(destUidValue);
-			Version currVersion = BinaryReader::fromStringRef<Version>(backupVersion.value, Unversioned());
-
-			if (currLogUidValue == logUidValue) {
-				continue;
-			} else if (currVersion > beginVersion) {
-				nextSmallestVersion = std::min(currVersion, nextSmallestVersion);
-			} else {
-				// If we can find a version less than or equal to beginVersion, clearing log ranges is not required
-				clearLogRangesRequired = false;
-				break;
-			}
-		}
-	}
-
-	if (clearVersionHistory && backupVersions.size() == 1) {
-		// Clear version history
-		tr->clear(prefixRange(backupLatestVersionsPath));
-
-		// Clear everything under blog/[destUid]
-		tr->clear(prefixRange(destUidValue.withPrefix(backupLogKeys.begin)));
-
-		// Disable committing mutations into blog
-		tr->clear(prefixRange(destUidValue.withPrefix(logRangesRange.begin)));
-	} else {
-		if (clearVersionHistory) {
-			// Clear current backup version history
-			tr->clear(backupLatestVersionsKey);
-		} else {
-			// Update current backup latest version
-			tr->set(backupLatestVersionsKey, BinaryWriter::toValue<Version>(endVersion, Unversioned()));
-		}
-
-		// Clear log ranges if needed
-		if (clearLogRangesRequired) {
-			Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(beginVersion, nextSmallestVersion, destUidValue);
-			for (auto& range : ranges) {
-				tr->clear(range);
-			}
-		}
-	}
-
-	return Void();
-}
-
-// The difference between beginVersion and endVersion should not be too large
-Future<Void> clearLogRanges(Reference<ReadYourWritesTransaction> tr, bool clearVersionHistory, Key logUidValue, Key destUidValue, Version beginVersion, Version endVersion) {
-	return _clearLogRanges(tr, clearVersionHistory, logUidValue, destUidValue, beginVersion, endVersion);
-}
-
-ACTOR static Future<Void> _eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> beginVersion, Optional<Version> endVersion, bool checkBackupUid, Version backupUid) {
-	if ((beginVersion.present() && endVersion.present() && endVersion.get() <= beginVersion.get()) || !destUidValue.size())
-		return Void();
-
-	state Version currBeginVersion;
-	state Version endVersionValue;
-	state Version currEndVersion;
-	state bool clearVersionHistory;
-
-	ASSERT(beginVersion.present() == endVersion.present());
-	if (beginVersion.present()) {
-		currBeginVersion = beginVersion.get();
-		endVersionValue = endVersion.get();
-		clearVersionHistory = false;
-	} else {
-		// If beginVersion and endVersion are not presented, it means backup is done and we need to clear version history.
-		// Set currBeginVersion to INTMAX_MAX and it will be set to the correct version in clearLogRanges().
-		// Set endVersionValue to INTMAX_MAX since we need to clear log ranges up to next smallest version.
-		currBeginVersion = endVersionValue = currEndVersion = INTMAX_MAX;
-		clearVersionHistory = true;
-	}
-
-
-	while (currBeginVersion < endVersionValue || clearVersionHistory) {
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		
-		loop{
-			try {
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-
-				if (checkBackupUid) {
-					Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
-					Optional<Value> v = wait( tr->get( sourceStates.pack(DatabaseBackupAgent::keyFolderId) ) );
-					if(v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) > backupUid)
-						return Void();
-				}
-
-				if (!clearVersionHistory) {
-					currEndVersion = std::min(currBeginVersion + CLIENT_KNOBS->CLEAR_LOG_RANGE_COUNT * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE, endVersionValue);
-				}
-
-				Void _ = wait(clearLogRanges(tr, clearVersionHistory, logUidValue, destUidValue, currBeginVersion, currEndVersion));
-				Void _ = wait(tr->commit());
-
-				if (clearVersionHistory) {
+			if (checkBackupUid) {
+				Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
+				Optional<Value> v = wait( tr->get( sourceStates.pack(DatabaseBackupAgent::keyFolderId) ) );
+				if(v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) > backupUid)
 					return Void();
+			}
+
+			state Standalone<RangeResultRef> backupVersions = wait(tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
+
+			// Make sure version history key does exist and lower the beginVersion if needed
+			state Version currBeginVersion = invalidVersion;
+			for (auto backupVersion : backupVersions) {
+				Key currLogUidValue = backupVersion.key.removePrefix(backupLatestVersionsPrefix).removePrefix(destUidValue);
+
+				if (currLogUidValue == logUidValue) {
+					currBeginVersion = BinaryReader::fromStringRef<Version>(backupVersion.value, Unversioned());
+					break;
+				}
+			}
+
+			// Do not clear anything if version history key cannot be found
+			if (currBeginVersion == invalidVersion) {
+				return Void();
+			}
+
+			state Version currEndVersion = currBeginVersion + CLIENT_KNOBS->CLEAR_LOG_RANGE_COUNT * CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE;
+			if(endVersion.present()) {
+				currEndVersion = std::min(currEndVersion, endVersion.get());
+			}
+
+			state Version nextSmallestVersion = currEndVersion;
+			bool clearLogRangesRequired = true;
+
+			// More than one backup/DR with the same range
+			if (backupVersions.size() > 1) {
+				for (auto backupVersion : backupVersions) {
+					Key currLogUidValue = backupVersion.key.removePrefix(backupLatestVersionsPrefix).removePrefix(destUidValue);
+					Version currVersion = BinaryReader::fromStringRef<Version>(backupVersion.value, Unversioned());
+
+					if (currLogUidValue == logUidValue) {
+						continue;
+					} else if (currVersion > currBeginVersion) {
+						nextSmallestVersion = std::min(currVersion, nextSmallestVersion);
+					} else {
+						// If we can find a version less than or equal to beginVersion, clearing log ranges is not required
+						clearLogRangesRequired = false;
+						break;
+					}
+				}
+			}
+
+			if (!endVersion.present() && backupVersions.size() == 1) {
+				// Clear version history
+				tr->clear(prefixRange(backupLatestVersionsPath));
+
+				// Clear everything under blog/[destUid]
+				tr->clear(prefixRange(destUidValue.withPrefix(backupLogKeys.begin)));
+
+				// Disable committing mutations into blog
+				tr->clear(prefixRange(destUidValue.withPrefix(logRangesRange.begin)));
+			} else {
+				if (!endVersion.present() && currEndVersion >= nextSmallestVersion) {
+					// Clear current backup version history
+					tr->clear(backupLatestVersionsKey);
+				} else {
+					// Update current backup latest version
+					tr->set(backupLatestVersionsKey, BinaryWriter::toValue<Version>(currEndVersion, Unversioned()));
 				}
 
-				currBeginVersion = currEndVersion;
-				break;
-			} catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				// Clear log ranges if needed
+				if (clearLogRangesRequired) {
+					Standalone<VectorRef<KeyRangeRef>> ranges = getLogRanges(currBeginVersion, nextSmallestVersion, destUidValue);
+					for (auto& range : ranges) {
+						tr->clear(range);
+					}
+				}
 			}
+			Void _ = wait(tr->commit());
+
+			if (!endVersion.present() && (backupVersions.size() == 1 || currEndVersion >= nextSmallestVersion)) {
+				return Void();
+			}
+			if(endVersion.present() && currEndVersion == endVersion.get()) {
+				return Void();
+			}
+			tr->reset();
+		} catch (Error &e) {
+			Void _ = wait(tr->onError(e));
 		}
 	}
-
-	return Void();
 }
 
-Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> beginVersion, Optional<Version> endVersion, bool checkBackupUid, Version backupUid) {
-	return _eraseLogData(cx, logUidValue, destUidValue, beginVersion, endVersion, checkBackupUid, backupUid);
+Future<Void> eraseLogData(Database cx, Key logUidValue, Key destUidValue, Optional<Version> endVersion, bool checkBackupUid, Version backupUid) {
+	return _eraseLogData(cx, logUidValue, destUidValue, endVersion, checkBackupUid, backupUid);
 }

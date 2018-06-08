@@ -229,17 +229,17 @@ public:
 	ACTOR static Future<bool> taskVerify(Reference<TaskBucket> tb, Reference<ReadYourWritesTransaction> tr, Reference<Task> task) {
 
 		if (task->params.find(Task::reservedTaskParamValidKey) == task->params.end()) {
-			TraceEvent("TB_taskVerify_invalidTask")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("reservedTaskParamValidKey", "missing");
+			TraceEvent("TB_TaskVerifyInvalidTask")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ReservedTaskParamValidKey", "missing");
 			return false;
 		}
 
 		if (task->params.find(Task::reservedTaskParamValidValue) == task->params.end()) {
-			TraceEvent("TB_taskVerify_invalidTask")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("reservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("reservedTaskParamValidValue", "missing");
+			TraceEvent("TB_TaskVerifyInvalidTask")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+				.detail("ReservedTaskParamValidValue", "missing");
 			return false;
 		}
 
@@ -248,20 +248,20 @@ public:
 		Optional<Value> keyValue = wait(tr->get(task->params[Task::reservedTaskParamValidKey]));
 
 		if (!keyValue.present()) {
-			TraceEvent("TB_taskVerify_invalidTask")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("reservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("reservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
-				.detail("keyValue", "missing");
+			TraceEvent("TB_TaskVerifyInvalidTask")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+				.detail("ReservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
+				.detail("KeyValue", "missing");
 			return false;
 		}
 
 		if (keyValue.get().compare(StringRef(task->params[Task::reservedTaskParamValidValue]))) {
-			TraceEvent("TB_taskVerify_abortedTask")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("reservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
-				.detail("reservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
-				.detail("keyValue", printable(keyValue.get()));
+			TraceEvent("TB_TaskVerifyAbortedTask")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ReservedTaskParamValidKey", printable(task->params[Task::reservedTaskParamValidKey]))
+				.detail("ReservedTaskParamValidValue", printable(task->params[Task::reservedTaskParamValidValue]))
+				.detail("KeyValue", printable(keyValue.get()));
 			return false;
 		}
 
@@ -704,14 +704,14 @@ public:
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		Standalone<RangeResultRef> values = wait(tr->getRange(subspace.range(), CLIENT_KNOBS->TOO_MANY));
-		TraceEvent("TaskBucket").detail("debugPrintRange", "Print DB Range").detail("key", printable(subspace.key())).detail("count", values.size()).detail("msg", printable(msg));
+		TraceEvent("TaskBucket").detail("DebugPrintRange", "Print DB Range").detail("Key", printable(subspace.key())).detail("Count", values.size()).detail("Msg", printable(msg));
 		/*
 		printf("debugPrintRange  key: (%d) %s\n", values.size(), printable(subspace.key()).c_str());
 		for (auto & s : values) {
 			printf("   key: %-40s   value: %s\n", printable(s.key).c_str(), printable(s.value).c_str());
-			TraceEvent("TaskBucket").detail("debugPrintRange", printable(msg))
-				.detail("key", printable(s.key))
-				.detail("value", printable(s.value));
+			TraceEvent("TaskBucket").detail("DebugPrintRange", printable(msg))
+				.detail("Key", printable(s.key))
+				.detail("Value", printable(s.value));
 		}*/
 
 		return Void();
@@ -835,9 +835,9 @@ ACTOR static Future<Key> actorAddTask(TaskBucket* tb, Reference<ReadYourWritesTr
 	Optional<Value> validationValue = wait(tr->get(validationKey));
 
 	if (!validationValue.present()) {
-		TraceEvent(SevError, "TB_addTask_invalidKey")
-			.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-			.detail("validationKey", printable(validationKey));
+		TraceEvent(SevError, "TB_AddTaskInvalidKey")
+			.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+			.detail("ValidationKey", printable(validationKey));
 		throw invalid_option_value();
 	}
 
@@ -1103,9 +1103,9 @@ public:
 		Optional<Value> validationValue = wait(tr->get(validationKey));
 
 		if (!validationValue.present()) {
-			TraceEvent(SevError, "TB_onSetAddTask_invalidKey")
-				.detail("task", printable(task->params[Task::reservedTaskParamKeyType]))
-				.detail("validationKey", printable(validationKey));
+			TraceEvent(SevError, "TB_OnSetAddTaskInvalidKey")
+				.detail("Task", printable(task->params[Task::reservedTaskParamKeyType]))
+				.detail("ValidationKey", printable(validationKey));
 			throw invalid_option_value();
 		}
 

@@ -72,6 +72,7 @@ public:
 	std::string getValue(std::string key) const;
 
 	std::string toString() const;
+	void validateFormat() const;
 
 private:
 	FieldContainer fields;

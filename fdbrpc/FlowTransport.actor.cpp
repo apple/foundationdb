@@ -516,14 +516,14 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 			uint32_t calculatedChecksum = crc32c_append(0, p, packetLen);
 			if (calculatedChecksum != packetChecksum) {
 				if (isBuggifyEnabled) {
-					TraceEvent(SevInfo, "ChecksumMismatchExp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+					TraceEvent(SevInfo, "ChecksumMismatchExp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)calculatedChecksum);
 				} else {
-					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+					TraceEvent(SevWarnAlways, "ChecksumMismatchUnexp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)calculatedChecksum);
 				}
 				throw checksum_failed();
 			} else {
 				if (isBuggifyEnabled) {
-					TraceEvent(SevError, "ChecksumMatchUnexp").detail("packetChecksum", (int)packetChecksum).detail("calculatedChecksum", (int)calculatedChecksum);
+					TraceEvent(SevError, "ChecksumMatchUnexp").detail("PacketChecksum", (int)packetChecksum).detail("CalculatedChecksum", (int)calculatedChecksum);
 				}
 			}
 		}

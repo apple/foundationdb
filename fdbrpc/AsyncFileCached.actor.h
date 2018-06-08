@@ -229,15 +229,15 @@ private:
 
 	ACTOR static Future<Reference<IAsyncFile>> open_impl( std::string filename, int flags, int mode, Reference<EvictablePageCache> pageCache ) {
 		try {
-			TraceEvent("AFCUnderlyingOpenBegin").detail("filename", filename);
+			TraceEvent("AFCUnderlyingOpenBegin").detail("Filename", filename);
 			if(flags & IAsyncFile::OPEN_CACHED_READ_ONLY)
 				flags = flags & ~IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_READONLY;
 			else
 				flags = flags & ~IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_READWRITE;
 			state Reference<IAsyncFile> f = wait( IAsyncFileSystem::filesystem()->open(filename, flags | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED, mode) );
-			TraceEvent("AFCUnderlyingOpenEnd").detail("filename", filename);
+			TraceEvent("AFCUnderlyingOpenEnd").detail("Filename", filename);
 			int64_t l = wait( f->size() );
-			TraceEvent("AFCUnderlyingSize").detail("filename", filename).detail("size", l);
+			TraceEvent("AFCUnderlyingSize").detail("Filename", filename).detail("Size", l);
 			auto& of = openFiles[filename];
 			of.f = new AsyncFileCached(f, filename, l, pageCache);
 			of.opened = Future<Reference<IAsyncFile>>();

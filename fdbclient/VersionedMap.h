@@ -635,7 +635,7 @@ public:
 			int count=0, height=0;
 			PTreeImpl::validate<MapPair<K,std::pair<T,Version>>>( root, at, NULL, NULL, count, height );
 			if ( height > 100 )
-				TraceEvent(SevWarnAlways, "DiabolicalPTreeSize").detail("size", count).detail("height", height);
+				TraceEvent(SevWarnAlways, "DiabolicalPTreeSize").detail("Size", count).detail("Height", height);
 		}
 	private:
 		Tree root;

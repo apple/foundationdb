@@ -973,7 +973,7 @@ ACTOR Future<Void> fdbd(
 {
 	try {
 		ServerCoordinators coordinators( connFile );
-		TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("machineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
+		TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
 		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
@@ -984,10 +984,10 @@ ACTOR Future<Void> fdbd(
 		state Promise<Void> recoveredDiskFiles;
 		if ( coordFolder.size() )
 			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
-		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture()), "clusterController") );
-		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "extractClusterInterface") );
-		v.push_back( reportErrors(failureMonitorClient( ci, true ), "failureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles), "workerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture()), "ClusterController") );
+		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
+		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		Void _ = wait( quorum(v,1) );

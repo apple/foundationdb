@@ -344,7 +344,7 @@ ACTOR Future<Void> shardSplitter(
 			.detail("MetricsBytes", metrics.bytes)
 			.detail("Bandwidth", bandwidthStatus == BandwidthStatusHigh ? "High" : bandwidthStatus == BandwidthStatusNormal ? "Normal" : "Low")
 			.detail("BytesPerKSec", metrics.bytesPerKSecond)
-			.detail("numShards", numShards);
+			.detail("NumShards", numShards);
 	}
 
 	if( numShards > 1 ) {
@@ -695,7 +695,7 @@ ACTOR Future<Void> dataDistributionTracker(
 			when( Void _ = wait( self.sizeChanges.getResult() ) ) {}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError, "dataDistributionTrackerError", self.masterId).error(e);
+		TraceEvent(SevError, "DataDistributionTrackerError", self.masterId).error(e);
 		throw e;
 	}
 }

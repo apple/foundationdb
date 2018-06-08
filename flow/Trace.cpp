@@ -234,6 +234,7 @@ public:
 		};
 		void action( WriteBuffer& a ) {
 			for(auto event : a.events) {
+				event.validateFormat();
 				logWriter->write(formatter->formatEvent(event));
 			}
 
@@ -292,7 +293,7 @@ public:
 			fields.addField("Machine", format("%d.%d.%d.%d:%d", (localAddress.get().ip>>24)&0xff, (localAddress.get().ip>>16)&0xff, (localAddress.get().ip>>8)&0xff, localAddress.get().ip&0xff, localAddress.get().port));
 		}
 
-		fields.addField("logGroup", logGroup);
+		fields.addField("LogGroup", logGroup);
 
 		if(!trackLatestKey.empty()) {
 			fields.addField("TrackLatestType", "Original");
@@ -1019,4 +1020,39 @@ std::string TraceEventFields::toString() const {
 	}
 
 	return str;
+}
+
+bool validateField(const char *key, bool allowOneUnderscore) {
+	if(key[0] < 'A' || key[0] > 'Z') {
+		return false;
+	}
+
+	const char* underscore = strchr(key, '_');
+	if(!allowOneUnderscore && underscore) {
+		return false;
+	}
+	else if(underscore) {
+		if(underscore[1] < 'A' || underscore[1] > 'Z') {
+			return false;
+		}
+		underscore = strchr(&underscore[1], '_');
+		if(underscore) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void TraceEventFields::validateFormat() const {
+	if(g_network && g_network->isSimulated()) {
+		for(Field field : fields) {
+			if(!validateField(field.first.c_str(), false)) {
+				fprintf(stderr, "Trace event detail name `%s' is invalid in:\n\t%s\n", field.first.c_str(), toString().c_str());
+			}
+			if(field.first == "Type" && !validateField(field.second.c_str(), true)) {
+				fprintf(stderr, "Trace event detail Type `%s' is invalid\n", field.second.c_str());
+			}
+		}
+	}
 }

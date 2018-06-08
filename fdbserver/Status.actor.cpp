@@ -408,15 +408,15 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj["stored_bytes"] = parseInt64(metrics.getValue("bytesStored"));
-			obj["kvstore_used_bytes"] = parseInt64(metrics.getValue("kvstoreBytesUsed"));
-			obj["kvstore_free_bytes"] = parseInt64(metrics.getValue("kvstoreBytesFree"));
-			obj["kvstore_available_bytes"] = parseInt64(metrics.getValue("kvstoreBytesAvailable"));
-			obj["kvstore_total_bytes"] = parseInt64(metrics.getValue("kvstoreBytesTotal"));
-			obj["input_bytes"] = parseCounter(metrics.getValue("bytesInput"));
-			obj["durable_bytes"] = parseCounter(metrics.getValue("bytesDurable"));
+			obj["stored_bytes"] = parseInt64(metrics.getValue("BytesStored"));
+			obj["kvstore_used_bytes"] = parseInt64(metrics.getValue("KvstoreBytesUsed"));
+			obj["kvstore_free_bytes"] = parseInt64(metrics.getValue("KvstoreBytesFree"));
+			obj["kvstore_available_bytes"] = parseInt64(metrics.getValue("KvstoreBytesAvailable"));
+			obj["kvstore_total_bytes"] = parseInt64(metrics.getValue("KvstoreBytesTotal"));
+			obj["input_bytes"] = parseCounter(metrics.getValue("BytesInput"));
+			obj["durable_bytes"] = parseCounter(metrics.getValue("BytesDurable"));
 			obj["query_queue_max"] = parseInt(metrics.getValue("QueryQueueMax"));
-			obj["finished_queries"] = parseCounter(metrics.getValue("finishedQueries"));
+			obj["finished_queries"] = parseCounter(metrics.getValue("FinishedQueries"));
 
 			Version version = parseInt64(metrics.getValue("version"));
 			obj["data_version"] = version;
@@ -436,17 +436,17 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj["kvstore_used_bytes"] = parseInt64(metrics.getValue("kvstoreBytesUsed"));
-			obj["kvstore_free_bytes"] = parseInt64(metrics.getValue("kvstoreBytesFree"));
-			obj["kvstore_available_bytes"] = parseInt64(metrics.getValue("kvstoreBytesAvailable"));
-			obj["kvstore_total_bytes"] = parseInt64(metrics.getValue("kvstoreBytesTotal"));
-			obj["queue_disk_used_bytes"] = parseInt64(metrics.getValue("queueDiskBytesUsed"));
-			obj["queue_disk_free_bytes"] = parseInt64(metrics.getValue("queueDiskBytesFree"));
-			obj["queue_disk_available_bytes"] = parseInt64(metrics.getValue("queueDiskBytesAvailable"));
-			obj["queue_disk_total_bytes"] = parseInt64(metrics.getValue("queueDiskBytesTotal"));
-			obj["input_bytes"] = parseCounter(metrics.getValue("bytesInput"));
-			obj["durable_bytes"] = parseCounter(metrics.getValue("bytesDurable"));
-			obj["data_version"] = parseInt64(metrics.getValue("version"));
+			obj["kvstore_used_bytes"] = parseInt64(metrics.getValue("KvstoreBytesUsed"));
+			obj["kvstore_free_bytes"] = parseInt64(metrics.getValue("KvstoreBytesFree"));
+			obj["kvstore_available_bytes"] = parseInt64(metrics.getValue("KvstoreBytesAvailable"));
+			obj["kvstore_total_bytes"] = parseInt64(metrics.getValue("KvstoreBytesTotal"));
+			obj["queue_disk_used_bytes"] = parseInt64(metrics.getValue("QueueDiskBytesUsed"));
+			obj["queue_disk_free_bytes"] = parseInt64(metrics.getValue("QueueDiskBytesFree"));
+			obj["queue_disk_available_bytes"] = parseInt64(metrics.getValue("QueueDiskBytesAvailable"));
+			obj["queue_disk_total_bytes"] = parseInt64(metrics.getValue("QueueDiskBytesTotal"));
+			obj["input_bytes"] = parseCounter(metrics.getValue("BytesInput"));
+			obj["durable_bytes"] = parseCounter(metrics.getValue("BytesDurable"));
+			obj["data_version"] = parseInt64(metrics.getValue("Version"));
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
 				throw e;
@@ -1214,11 +1214,11 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 		StatusObject mutations=makeCounter(), mutationBytes=makeCounter(), txnConflicts=makeCounter(), txnStartOut=makeCounter(), txnCommitOutSuccess=makeCounter();
 
 		for (auto &ps : proxyStats) {
-			mutations = addCounters( mutations, parseCounter(ps.getValue("mutations")) );
-			mutationBytes = addCounters( mutationBytes, parseCounter(ps.getValue("mutationBytes")) );
-			txnConflicts = addCounters( txnConflicts, parseCounter(ps.getValue("txnConflicts")) );
-			txnStartOut = addCounters( txnStartOut, parseCounter(ps.getValue("txnStartOut")) );
-			txnCommitOutSuccess = addCounters( txnCommitOutSuccess, parseCounter(ps.getValue("txnCommitOutSuccess")) );
+			mutations = addCounters( mutations, parseCounter(ps.getValue("Mutations")) );
+			mutationBytes = addCounters( mutationBytes, parseCounter(ps.getValue("MutationBytes")) );
+			txnConflicts = addCounters( txnConflicts, parseCounter(ps.getValue("TxnConflicts")) );
+			txnStartOut = addCounters( txnStartOut, parseCounter(ps.getValue("TxnStartOut")) );
+			txnCommitOutSuccess = addCounters( txnCommitOutSuccess, parseCounter(ps.getValue("TxnCommitOutSuccess")) );
 		}
 
 		operationsObj["writes"] = mutations;
@@ -1307,9 +1307,9 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 		StatusObject readBytes = makeCounter();
 
 		for(auto &ss : storageServers.get()) {
-			reads = addCounters(reads, parseCounter(ss.second.getValue("finishedQueries")));
-			readKeys = addCounters(readKeys, parseCounter(ss.second.getValue("rowsQueried")));
-			readBytes = addCounters(readBytes, parseCounter(ss.second.getValue("bytesQueried")));
+			reads = addCounters(reads, parseCounter(ss.second.getValue("FinishedQueries")));
+			readKeys = addCounters(readKeys, parseCounter(ss.second.getValue("RowsQueried")));
+			readBytes = addCounters(readBytes, parseCounter(ss.second.getValue("BytesQueried")));
 		}
 
 		operationsObj["reads"] = reads;

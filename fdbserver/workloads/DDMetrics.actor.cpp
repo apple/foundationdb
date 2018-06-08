@@ -50,7 +50,7 @@ struct DDMetricsWorkload : TestWorkload {
 
 	ACTOR Future<Void> work( Database cx, DDMetricsWorkload *self ) {
 		try {
-			TraceEvent("DDMetricsWaiting").detail("startDelay", self->startDelay);
+			TraceEvent("DDMetricsWaiting").detail("StartDelay", self->startDelay);
 			Void _ = wait( delay( self->startDelay ) );
 			TraceEvent("DDMetricsStarting");
 			state double startTime = now();

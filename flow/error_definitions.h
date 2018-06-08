@@ -62,6 +62,7 @@ ERROR( database_locked, 1038, "Database is locked" )
 ERROR( cluster_version_changed, 1039, "The protocol version of the cluster has changed" )
 ERROR( external_client_already_loaded, 1040, "External client has already been loaded" )
 ERROR( lookup_failed, 1041, "DNS lookup failed" )
+ERROR( proxy_memory_limit_exceeded, 1042, "Proxy commit memory limit exceeded")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )

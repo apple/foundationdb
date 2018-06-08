@@ -144,9 +144,9 @@ struct MachineAttritionWorkload : TestWorkload {
 			g_simulator.killDataCenter( target, kt );
 		} else {
 			while ( killedMachines < self->machinesToKill && self->machines.size() > self->machinesToLeave) {
-				TraceEvent("WorkerKillBegin").detail("killedMachines", killedMachines)
-					.detail("machinesToKill", self->machinesToKill).detail("machinesToLeave", self->machinesToLeave)
-					.detail("machines", self->machines.size());
+				TraceEvent("WorkerKillBegin").detail("KilledMachines", killedMachines)
+					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
+					.detail("Machines", self->machines.size());
 				TEST(true);  // Killing a machine
 
 				Void _ = wait( delay( delayBeforeKill ) );
@@ -170,10 +170,10 @@ struct MachineAttritionWorkload : TestWorkload {
 				LocalityData targetMachine = self->machines.back();
 
 				TraceEvent("Assassination").detail("TargetMachine", targetMachine.toString())
-					.detailext("zoneId", targetMachine.zoneId())
-					.detail("Reboot", self->reboot).detail("killedMachines", killedMachines)
-					.detail("machinesToKill", self->machinesToKill).detail("machinesToLeave", self->machinesToLeave)
-					.detail("machines", self->machines.size()).detail("Replace", self->replacement);
+					.detailext("ZoneId", targetMachine.zoneId())
+					.detail("Reboot", self->reboot).detail("KilledMachines", killedMachines)
+					.detail("MachinesToKill", self->machinesToKill).detail("MachinesToLeave", self->machinesToLeave)
+					.detail("Machines", self->machines.size()).detail("Replace", self->replacement);
 
 				if (self->reboot) {
 					if( g_random->random01() > 0.5 ) {

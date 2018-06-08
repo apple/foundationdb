@@ -50,7 +50,7 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 
 		for( int i = 0; i < workers.size(); i++ ) {
 			if( workers[i].first.address() == dbInfo->get().master.address() ) {
-				TraceEvent("GetMasterWorker").detail("Database", printable(cx->dbName)).detail("Stage", "GotWorkers").detail("masterId", dbInfo->get().master.id()).detail("workerId", workers[i].first.id());
+				TraceEvent("GetMasterWorker").detail("Database", printable(cx->dbName)).detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.id()).detail("WorkerId", workers[i].first.id());
 				return workers[i].first;
 			}
 		}
@@ -94,8 +94,8 @@ int64_t getQueueSize( TraceEventFields md ) {
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;
 
-	sscanf(md.getValue("bytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
-	sscanf(md.getValue("bytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
+	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
+	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
 
 	return inputBytes - durableBytes;
 }
@@ -330,9 +330,9 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			Void _ = wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
 							&& success( storageQueueSize ) && success( dataDistributionActive ) && success( storageServersRecruiting ) );
 			TraceEvent(("QuietDatabase" + phase).c_str())
-				.detail("dataInFlight", dataInFlight.get()).detail("maxTLogQueueSize", tLogQueueSize.get()).detail("dataDistributionQueueSize", dataDistributionQueueSize.get())
-				.detail("maxStorageQueueSize", storageQueueSize.get()).detail("dataDistributionActive", dataDistributionActive.get())
-				.detail("storageServersRecruiting", storageServersRecruiting.get());
+				.detail("DataInFlight", dataInFlight.get()).detail("MaxTLogQueueSize", tLogQueueSize.get()).detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+				.detail("MaxStorageQueueSize", storageQueueSize.get()).detail("DataDistributionActive", dataDistributionActive.get())
+				.detail("StorageServersRecruiting", storageServersRecruiting.get());
 
 			if( dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate
 				|| dataDistributionQueueSize.get() > maxDataDistributionQueueSize || storageQueueSize.get() > maxStorageServerQueueGate

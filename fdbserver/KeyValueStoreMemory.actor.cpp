@@ -408,9 +408,9 @@ private:
 		bool ok = count < 1e6;
 		if( !ok ) {
 			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommit_queue", id)
-				.detail("bytes", total)
-				.detail("log", log)
-				.detail("ops", count)
+				.detail("Bytes", total)
+				.detail("Log", log)
+				.detail("Ops", count)
 				.detail("LastLoggedLocation", log_location)
 				.detail("Details", count);
 		}
@@ -490,9 +490,9 @@ private:
 					if (h.op == OpSnapshotItem) { // snapshot data item
 						/*if (p1 < uncommittedNextKey) {
 							TraceEvent(SevError, "RecSnapshotBack", self->id)
-								.detail("nextKey", printable(uncommittedNextKey))
-								.detail("p1", printable(p1))
-								.detail("nextlocation", self->log->getNextReadLocation());
+								.detail("NextKey", printable(uncommittedNextKey))
+								.detail("P1", printable(p1))
+								.detail("Nextlocation", self->log->getNextReadLocation());
 						}
 						ASSERT( p1 >= uncommittedNextKey );*/
 						if( p1 >= uncommittedNextKey )
@@ -502,9 +502,9 @@ private:
 						++dbgSnapshotItemCount;
 					} else if (h.op == OpSnapshotEnd || h.op == OpSnapshotAbort) { // snapshot complete
 						TraceEvent("RecSnapshotEnd", self->id)
-							.detail("nextKey", printable(uncommittedNextKey))
-							.detail("nextlocation", self->log->getNextReadLocation())
-							.detail("isSnapshotEnd", h.op == OpSnapshotEnd);
+							.detail("NextKey", printable(uncommittedNextKey))
+							.detail("Nextlocation", self->log->getNextReadLocation())
+							.detail("IsSnapshotEnd", h.op == OpSnapshotEnd);
 
 						if(h.op == OpSnapshotEnd) {
 							uncommittedPrevSnapshotEnd = uncommittedSnapshotEnd;
@@ -531,7 +531,7 @@ private:
 					} else if (h.op == OpRollback) { // rollback previous transaction
 						recoveryQueue.rollback();
 						TraceEvent("KVSMemRecSnapshotRollback", self->id)
-							.detail("nextKey", printable(uncommittedNextKey));
+							.detail("NextKey", printable(uncommittedNextKey));
 						uncommittedNextKey = self->recoveredSnapshotKey;
 						uncommittedPrevSnapshotEnd = self->previousSnapshotEnd;
 						uncommittedSnapshotEnd = self->currentSnapshotEnd;
@@ -646,10 +646,10 @@ private:
 			if (next == self->data.end()) {
 				auto thisSnapshotEnd = self->log_op( OpSnapshotEnd, StringRef(), StringRef() );
 				//TraceEvent("SnapshotEnd", self->id)
-				//	.detail("lastKey", printable(lastKey.present() ? lastKey.get() : LiteralStringRef("<none>")))
-				//	.detail("currentSnapshotEndLoc", self->currentSnapshotEnd)
-				//	.detail("previousSnapshotEndLoc", self->previousSnapshotEnd)
-				//	.detail("thisSnapshotEnd", thisSnapshotEnd)
+				//	.detail("LastKey", printable(lastKey.present() ? lastKey.get() : LiteralStringRef("<none>")))
+				//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
+				//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
+				//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
 				//	.detail("Items", snapItems)
 				//	.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
 				//	.detail("SnapshotSize", snapshotBytes);

@@ -217,11 +217,11 @@ void Knobs::initKnob( std::string& knob, const std::string& value, const std::st
 
 void Knobs::trace() {
 	for(auto &k : double_knobs)
-		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for(auto &k : int_knobs)
-		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for(auto &k : int64_knobs)
-		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 	for(auto &k : string_knobs)
-		TraceEvent("Knob").detail(k.first.c_str(), *k.second );
+		TraceEvent("Knob").detail("Name", k.first.c_str()).detail("Value", *k.second);
 }

@@ -453,7 +453,7 @@ Key logRangesEncodeKey(KeyRef keyBegin, UID logUid) {
 // Returns the start key and optionally the logRange Uid
 KeyRef logRangesDecodeKey(KeyRef key, UID* logUid) {
 	if (key.size() < logRangesRange.begin.size() + sizeof(UID)) {
-		TraceEvent(SevError, "InvalidDecodeKey").detail("key", printable(key));
+		TraceEvent(SevError, "InvalidDecodeKey").detail("Key", printable(key));
 		ASSERT(false);
 	}
 
