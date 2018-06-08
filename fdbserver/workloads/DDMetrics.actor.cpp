@@ -40,7 +40,7 @@ struct DDMetricsWorkload : TestWorkload {
 	ACTOR Future<int> getHighPriorityRelocationsInFlight( Database cx, DDMetricsWorkload *self ) {
 		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
 
-		TraceEvent("getHighPriorityReliocationsInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
+		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
 		Standalone<StringRef> md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/MovingData" ) ) ), 1.0 ) );
 		int relocations;

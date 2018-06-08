@@ -1741,11 +1741,10 @@ bool createDirectory( std::string const& directory ) {
 			if (errno == EEXIST)
 				continue;
 
-			TraceEvent(SevError, "mkdir").detail("Directory", directory).GetLastError();
+			TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
 			if (errno == EACCES)
 				throw file_not_writable();
 			else {
-				TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
 				throw platform_error();
 			}
 		}
@@ -2074,7 +2073,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 	FILE* f = fopen(filename.c_str(), "wb");
 	if (!f)
 	{
-		TraceEvent(SevError, "writeFileBytes").detail("Filename", filename).GetLastError();
+		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
 		throw file_not_writable();
 	}
 
@@ -2082,7 +2081,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 		size_t length = fwrite(data, sizeof(uint8_t), count, f);
 		if (length != count)
 		{
-			TraceEvent(SevError, "writeFileBytes").detail("Filename", filename).detail("WrittenLength", length).GetLastError();
+			TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).detail("WrittenLength", length).GetLastError();
 			throw file_not_writable();
 		}
 	}

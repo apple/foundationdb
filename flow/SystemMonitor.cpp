@@ -127,10 +127,10 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 
 			for (int i = 0; i<NetworkMetrics::SLOW_EVENT_BINS; i++)
 				if (int c = g_network->networkMetrics.countSlowEvents[i] - statState->networkMetricsState.countSlowEvents[i])
-					n.detail(format("N2_SlowTask%dM", 1 << i).c_str(), c);
+					n.detail(format("SlowTask%dM", 1 << i).c_str(), c);
 			for (int i = 0; i<NetworkMetrics::PRIORITY_BINS; i++)
 				if (double x = g_network->networkMetrics.secSquaredPriorityBlocked[i] - statState->networkMetricsState.secSquaredPriorityBlocked[i])
-					n.detail(format("N2_S2Pri%d", g_network->networkMetrics.priorityBins[i]).c_str(), x);
+					n.detail(format("S2Pri%d", g_network->networkMetrics.priorityBins[i]).c_str(), x);
 		}
 
 		if(machineMetrics) {

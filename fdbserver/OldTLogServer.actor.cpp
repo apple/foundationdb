@@ -843,7 +843,7 @@ namespace oldTLog {
 			if(it->first != currentVersion) {
 				if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 					endVersion = it->first;
-					//TraceEvent("tLogPeekMessagesReached2", self->dbgid);
+					//TraceEvent("TLogPeekMessagesReached2", self->dbgid);
 					break;
 				}
 
@@ -897,7 +897,7 @@ namespace oldTLog {
 			return Void();
 		}
 
-		//TraceEvent("tLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", printable(req.tag1)).detail("Tag2", printable(req.tag2));
+		//TraceEvent("TLogPeekMessages0", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", printable(req.tag1)).detail("Tag2", printable(req.tag2));
 		// Wait until we have something to return that the caller doesn't already have
 		if( logData->version.get() < req.begin ) {
 			Void _ = wait( logData->version.whenAtLeast( req.begin ) );
@@ -907,7 +907,7 @@ namespace oldTLog {
 		state Version endVersion = logData->version.get() + 1;
 
 		//grab messages from disk
-		//TraceEvent("tLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", printable(req.tag1)).detail("Tag2", printable(req.tag2));
+		//TraceEvent("TLogPeekMessages", self->dbgid).detail("ReqBeginEpoch", req.begin.epoch).detail("ReqBeginSeq", req.begin.sequence).detail("Epoch", self->epoch()).detail("PersistentDataSeq", self->persistentDataSequence).detail("Tag1", printable(req.tag1)).detail("Tag2", printable(req.tag2));
 		if( req.begin <= logData->persistentDataDurableVersion ) {
 			// Just in case the durable version changes while we are waiting for the read, we grab this data from memory.  We may or may not actually send it depending on
 			// whether we get enough data from disk.

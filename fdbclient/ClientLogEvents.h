@@ -124,15 +124,15 @@ namespace FdbClientLogEvents {
 
 		void logEvent(std::string id) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
-				TraceEvent("TransactionTrace_Commit_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
+				TraceEvent("TransactionTrace_CommitReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
 			}
 
 			for (auto &write_range : req.transaction.write_conflict_ranges) {
-				TraceEvent("TransactionTrace_Commit_WriteConflictRange").detail("TransactionID", id).detail("Begin", printable(write_range.begin)).detail("End", printable(write_range.end));
+				TraceEvent("TransactionTrace_CommitWriteConflictRange").detail("TransactionID", id).detail("Begin", printable(write_range.begin)).detail("End", printable(write_range.end));
 			}
 
 			for (auto &mutation : req.transaction.mutations) {
-				TraceEvent("TransactionTrace_Commit_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
+				TraceEvent("TransactionTrace_CommitMutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
 			}
 
 			TraceEvent("TransactionTrace_Commit").detail("TransactionID", id).detail("Latency", latency).detail("NumMutations", numMutations).detail("CommitSizeBytes", commitBytes);
@@ -194,15 +194,15 @@ namespace FdbClientLogEvents {
 
 		void logEvent(std::string id) const {
 			for (auto &read_range : req.transaction.read_conflict_ranges) {
-				TraceEvent("TransactionTrace_CommitError_ReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
+				TraceEvent("TransactionTrace_CommitErrorReadConflictRange").detail("TransactionID", id).detail("Begin", printable(read_range.begin)).detail("End", printable(read_range.end));
 			}
 
 			for (auto &write_range : req.transaction.write_conflict_ranges) {
-				TraceEvent("TransactionTrace_CommitError_WriteConflictRange").detail("TransactionID", id).detail("Begin", printable(write_range.begin)).detail("End", printable(write_range.end));
+				TraceEvent("TransactionTrace_CommitErrorWriteConflictRange").detail("TransactionID", id).detail("Begin", printable(write_range.begin)).detail("End", printable(write_range.end));
 			}
 
 			for (auto &mutation : req.transaction.mutations) {
-				TraceEvent("TransactionTrace_CommitError_Mutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
+				TraceEvent("TransactionTrace_CommitErrorMutation").detail("TransactionID", id).detail("Mutation", mutation.toString());
 			}
 
 			TraceEvent("TransactionTrace_CommitError").detail("TransactionID", id).detail("ErrCode", errCode);

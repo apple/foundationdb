@@ -62,7 +62,7 @@ Version getVersionFromString(std::string const& value) {
 	Version version(-1);
 	int n = 0;
 	if (sscanf(value.c_str(), "%lld%n", (long long*)&version, &n) != 1 || n != value.size()) {
-		TraceEvent(SevWarnAlways, "getVersionFromString").detail("InvalidVersion", value);
+		TraceEvent(SevWarnAlways, "GetVersionFromString").detail("InvalidVersion", value);
 		throw restore_invalid_version();
 	}
 	return version;
@@ -430,7 +430,7 @@ ACTOR Future<Void> readCommitted(Database cx, PromiseStream<RCGroup> results, Fu
 						rcGroup.groupKey = groupKey;
 					}
 					else if (rcGroup.groupKey != groupKey) {
-						//TraceEvent("Log_ReadCommitted").detail("SendGroup0", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("Data_length",rcGroup.items[0].value.size());
+						//TraceEvent("Log_ReadCommitted").detail("SendGroup0", rcGroup.groupKey).detail("ItemSize", rcGroup.items.size()).detail("DataLength",rcGroup.items[0].value.size());
 						//state uint32_t len(0);
 						//for (size_t j = 0; j < rcGroup.items.size(); ++j) {
 						//	len += rcGroup.items[j].value.size();
