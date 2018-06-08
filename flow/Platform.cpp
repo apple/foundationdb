@@ -1628,17 +1628,20 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	throw io_error();
 }
 
-void atomicReplace( std::string const& path, std::string const& content ) {
+void atomicReplace( std::string const& path, std::string const& content, bool textmode ) {
 	FILE* f = 0;
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
 		std::string tempfilename = parentDirectory(path) + CANONICAL_PATH_SEPARATOR + g_random->randomUniqueID().toString() + ".tmp";
-		f = fopen( tempfilename.c_str(), "wt" );
+		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
 
-		if(fprintf( f, "%s", content.c_str() ) < 0)
+		if( textmode && fprintf( f, "%s", content.c_str() ) < 0)
+			throw io_error();
+
+		if (!textmode && fwrite(content.c_str(), sizeof(uint8_t), content.size(), f) != content.size())
 			throw io_error();
 
 		if(fflush(f) != 0)
@@ -1741,11 +1744,10 @@ bool createDirectory( std::string const& directory ) {
 			if (errno == EEXIST)
 				continue;
 
-			TraceEvent(SevError, "mkdir").detail("Directory", directory).GetLastError();
+			TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
 			if (errno == EACCES)
 				throw file_not_writable();
 			else {
-				TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
 				throw platform_error();
 			}
 		}
@@ -2074,7 +2076,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 	FILE* f = fopen(filename.c_str(), "wb");
 	if (!f)
 	{
-		TraceEvent(SevError, "writeFileBytes").detail("Filename", filename).GetLastError();
+		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
 		throw file_not_writable();
 	}
 
@@ -2082,7 +2084,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 		size_t length = fwrite(data, sizeof(uint8_t), count, f);
 		if (length != count)
 		{
-			TraceEvent(SevError, "writeFileBytes").detail("Filename", filename).detail("WrittenLength", length).GetLastError();
+			TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).detail("WrittenLength", length).GetLastError();
 			throw file_not_writable();
 		}
 	}

@@ -418,7 +418,7 @@ struct RolesInfo {
 			obj["query_queue_max"] = parseInt(metrics.getValue("QueryQueueMax"));
 			obj["finished_queries"] = parseCounter(metrics.getValue("FinishedQueries"));
 
-			Version version = parseInt64(metrics.getValue("version"));
+			Version version = parseInt64(metrics.getValue("Version"));
 			obj["data_version"] = version;
 
 			if(maxTLogVersion > 0) {

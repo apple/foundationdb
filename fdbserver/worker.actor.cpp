@@ -479,7 +479,8 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 }
 
 ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> ccInterface, LocalityData localities,
-	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles ) {
+	Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo, ProcessClass initialClass, std::string folder, int64_t memoryLimit, std::string metricsConnFile, std::string metricsPrefix, Promise<Void> recoveredDiskFiles,
+	UID processIDUid) {
 	state PromiseStream< ErrorInfo > errors;
 	state Future<Void> handleErrors = workerHandleErrors( errors.getFuture() );  // Needs to be stopped last
 	state ActorCollection errorForwarders(false);
@@ -490,40 +491,8 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo( new AsyncVar<ServerDBInfo>(ServerDBInfo(LiteralStringRef("DB"))) );
 	state Future<Void> metricsLogger;
-	state UID processIDUid;
 	state PromiseStream<InitializeTLogRequest> tlogRequests;
 	state Future<Void> tlog = Void();
-
-	platform::createDirectory( folder );
-
-	try {
-		state std::string lockFilePath = joinPath(folder, "processId");
-		state ErrorOr<Reference<IAsyncFile>> lockFile = wait( errorOr( IAsyncFileSystem::filesystem(g_network)->open( lockFilePath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600 ) ) );
-
-		if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found && !fileExists(lockFilePath)) {
-			Reference<IAsyncFile> _lockFile = wait( IAsyncFileSystem::filesystem()->open( lockFilePath, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK | IAsyncFile::OPEN_READWRITE, 0600 ) );
-			lockFile = _lockFile;
-			processIDUid = g_random->randomUniqueID();
-			BinaryWriter wr(IncludeVersion());
-			wr << processIDUid;
-			Void _ = wait( lockFile.get()->write(wr.getData(), wr.getLength(), 0) );
-			Void _ = wait( lockFile.get()->sync() );
-		} else {
-			if (lockFile.isError()) throw lockFile.getError(); // If we've failed to open the file, throw an exception
-
-			int64_t fileSize = wait( lockFile.get()->size() );
-			state Key fileData = makeString(fileSize);
-			int length = wait(lockFile.get()->read(mutateString(fileData), fileSize, 0));
-			processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
-		}
-	} catch(Error& e) {
-		if( e.code() != error_code_actor_cancelled ) {
-			if( !e.isInjectedFault() )
-				fprintf(stderr, "ERROR: error creating or opening process id file `%s'.\n", joinPath(folder, "processId").c_str());
-			TraceEvent(SevError, "OpenProcessIdError").error(e);
-		}
-		throw;
-	}
 
 	state Standalone<StringRef> processID = processIDUid.toString();
 	state LocalityData locality = localities;
@@ -815,7 +784,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
-				startRole( recruited.id(), interf.id(), "logRouter", details );
+				startRole( recruited.id(), interf.id(), "LogRouter", details );
 
 				DUMPTOKEN( recruited.peekMessages );
 				DUMPTOKEN( recruited.popMessages );
@@ -961,6 +930,70 @@ ACTOR Future<Void> printOnFirstConnected( Reference<AsyncVar<Optional<ClusterInt
 	}
 }
 
+ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessClass processClass) {
+	if (!fileExists(filePath))
+		return ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource).machineClassFitness(ProcessClass::ClusterController), false, ClusterControllerPriorityInfo::FitnessUnknown);
+	std::string contents(readFileBytes(filePath, 1000));
+	BinaryReader br(StringRef(contents), IncludeVersion());
+	ClusterControllerPriorityInfo priorityInfo(ProcessClass::UnsetFit, false, ClusterControllerPriorityInfo::FitnessUnknown);
+	br >> priorityInfo;
+	if (!br.empty()) {
+		if (g_network->isSimulated()) {
+			ASSERT(false);
+		}
+		else {
+			TraceEvent(SevWarnAlways, "FitnessFileCorrupted").detail("filePath", filePath);
+			return ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource).machineClassFitness(ProcessClass::ClusterController), false, ClusterControllerPriorityInfo::FitnessUnknown);
+		}
+	}
+	return priorityInfo;
+}
+
+ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
+	loop {
+		Void _ = wait(asyncPriorityInfo->onChange());
+		std::string contents(BinaryWriter::toValue(asyncPriorityInfo->get(), IncludeVersion()).toString());
+		atomicReplace(filePath, contents, false);
+	}
+}
+
+ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
+	state UID processIDUid;
+	platform::createDirectory(folder);
+
+	try {
+		state std::string lockFilePath = joinPath(folder, "processId");
+		state ErrorOr<Reference<IAsyncFile>> lockFile = wait(errorOr(IAsyncFileSystem::filesystem(g_network)->open(lockFilePath, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_LOCK, 0600)));
+
+		if (lockFile.isError() && lockFile.getError().code() == error_code_file_not_found && !fileExists(lockFilePath)) {
+			Reference<IAsyncFile> _lockFile = wait(IAsyncFileSystem::filesystem()->open(lockFilePath, IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_LOCK | IAsyncFile::OPEN_READWRITE, 0600));
+			lockFile = _lockFile;
+			processIDUid = g_random->randomUniqueID();
+			BinaryWriter wr(IncludeVersion());
+			wr << processIDUid;
+			Void _ = wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));
+			Void _ = wait(lockFile.get()->sync());
+		}
+		else {
+			if (lockFile.isError()) throw lockFile.getError(); // If we've failed to open the file, throw an exception
+
+			int64_t fileSize = wait(lockFile.get()->size());
+			state Key fileData = makeString(fileSize);
+			int length = wait(lockFile.get()->read(mutateString(fileData), fileSize, 0));
+			processIDUid = BinaryReader::fromStringRef<UID>(fileData, IncludeVersion());
+		}
+	}
+	catch (Error& e) {
+		if (e.code() != error_code_actor_cancelled) {
+			if (!e.isInjectedFault())
+				fprintf(stderr, "ERROR: error creating or opening process id file `%s'.\n", joinPath(folder, "processId").c_str());
+			TraceEvent(SevError, "OpenProcessIdError").error(e);
+		}
+		throw;
+	}
+	return processIDUid;
+}
+
 ACTOR Future<Void> fdbd(
 	Reference<ClusterConnectionFile> connFile,
 	LocalityData localities,
@@ -972,22 +1005,30 @@ ACTOR Future<Void> fdbd(
 	std::string metricsPrefix )
 {
 	try {
+
 		ServerCoordinators coordinators( connFile );
 		TraceEvent("StartingFDBD").detailext("ZoneID", localities.zoneId()).detailext("MachineId", localities.machineId()).detail("DiskPath", dataFolder).detail("CoordPath", coordFolder);
 
 		// SOMEDAY: start the services on the machine in a staggered fashion in simulation?
-		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
-		Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
-		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(
-			ClusterControllerPriorityInfo(ProcessClass(processClass.classType(), ProcessClass::CommandLineSource).machineClassFitness(ProcessClass::ClusterController), false, ClusterControllerPriorityInfo::FitnessUnknown)));
-		vector<Future<Void>> v;
-		state Promise<Void> recoveredDiskFiles;
+		state vector<Future<Void>> v;
+		// Endpoints should be registered first before any process trying to connect to it. So coordinationServer actor should be the first one executed before any other.
 		if ( coordFolder.size() )
 			v.push_back( fileNotFoundToNever( coordinationServer( coordFolder ) ) ); //SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up their files
+		
+		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));
+		// Only one process can execute on a dataFolder from this point onwards
+
+		std::string fitnessFilePath = joinPath(dataFolder, "fitness");
+		Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc(new AsyncVar<Optional<ClusterControllerFullInterface>>);
+		Reference<AsyncVar<Optional<ClusterInterface>>> ci(new AsyncVar<Optional<ClusterInterface>>);
+		Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo(new AsyncVar<ClusterControllerPriorityInfo>(getCCPriorityInfo(fitnessFilePath, processClass)));
+		Promise<Void> recoveredDiskFiles;
+
+		v.push_back(reportErrors(monitorAndWriteCCPriorityInfo(fitnessFilePath, asyncPriorityInfo), "MonitorAndWriteCCPriorityInfo"));
 		v.push_back( reportErrors( processClass == ProcessClass::TesterClass ? monitorLeader( connFile, cc ) : clusterController( connFile, cc , asyncPriorityInfo, recoveredDiskFiles.getFuture()), "ClusterController") );
 		v.push_back( reportErrors(extractClusterInterface( cc, ci ), "ExtractClusterInterface") );
 		v.push_back( reportErrors(failureMonitorClient( ci, true ), "FailureMonitorClient") );
-		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles), "WorkerServer", UID(), &normalWorkerErrors()) );
+		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, processIDUid), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
 		Void _ = wait( quorum(v,1) );

@@ -1022,23 +1022,18 @@ std::string TraceEventFields::toString() const {
 	return str;
 }
 
-bool validateField(const char *key, bool allowOneUnderscore) {
-	if(key[0] < 'A' || key[0] > 'Z') {
+bool validateField(const char *key, bool allowUnderscores) {
+	if((key[0] < 'A' || key[0] > 'Z') && key[0] != '_') {
 		return false;
 	}
 
 	const char* underscore = strchr(key, '_');
-	if(!allowOneUnderscore && underscore) {
-		return false;
-	}
-	else if(underscore) {
-		if(underscore[1] < 'A' || underscore[1] > 'Z') {
+	while(underscore) {
+		if(!allowUnderscores || ((underscore[1] < 'A' || underscore[1] > 'Z') && key[0] != '_' && key[0] != '\0')) {
 			return false;
 		}
+
 		underscore = strchr(&underscore[1], '_');
-		if(underscore) {
-			return false;
-		}
 	}
 
 	return true;

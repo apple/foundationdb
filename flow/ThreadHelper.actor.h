@@ -557,7 +557,7 @@ ACTOR template <class R, class F> Future<Void> doOnMainThread( Future<Void> sign
 		result->send(r);
 	} catch (Error& e) {
 		if(!result->canBeSet()) {
-			TraceEvent(SevError, "onMainThreadSetTwice").error(e,true);
+			TraceEvent(SevError, "OnMainThreadSetTwice").error(e,true);
 		}
 		result->sendError(e);
 	}

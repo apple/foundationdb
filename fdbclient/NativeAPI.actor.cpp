@@ -2690,7 +2690,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 		}
 	} catch (Error& e) {
 		if( e.code() != error_code_broken_promise && e.code() != error_code_actor_cancelled )
-			TraceEvent(SevError, "getConsistentReadVersionError").error(e);
+			TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
 		throw;
 	}
 }

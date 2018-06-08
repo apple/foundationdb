@@ -1180,7 +1180,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
 		Void _ = wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? 36000.0 : 5400.0));
 	} catch (Error& e) {
-		TraceEvent(SevError, "setupAndRunError").error(e);
+		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 
 	TraceEvent("SimulatedSystemDestruct");

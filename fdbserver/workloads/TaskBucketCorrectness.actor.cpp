@@ -271,19 +271,19 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 
 		Standalone<RangeResultRef> values = wait(tr->getRange(KeyRangeRef(LiteralStringRef("Hello_\x00"), LiteralStringRef("Hello_\xff")), CLIENT_KNOBS->TOO_MANY));
 		if (values.size() != data.size()){
-			TraceEvent(SevError, "checkSayHello").detail("CountNotMatch_Is", values.size()).detail("ShouldBe", data.size());
+			TraceEvent(SevError, "CheckSayHello").detail("CountNotMatchIs", values.size()).detail("ShouldBe", data.size());
 			for (auto & s : values) {
-				TraceEvent("checkSayHello").detail("Item", printable(s)).detail("Value", printable(s.value));
+				TraceEvent("CheckSayHello").detail("Item", printable(s)).detail("Value", printable(s.value));
 			}
 			return false;
 		}
 
 		for (auto & s : values) {
-			// TraceEvent("checkSayHello").detail("Item", printable(s)).detail("Value", printable(s.value));
+			// TraceEvent("CheckSayHello").detail("Item", printable(s)).detail("Value", printable(s.value));
 			data.erase(s.value.toString());
 		}
 		if (data.size() != 0){
-			TraceEvent(SevError, "checkSayHello").detail("DataNotMatch", data.size());
+			TraceEvent(SevError, "CheckSayHello").detail("DataNotMatch", data.size());
 			return false;
 		}
 

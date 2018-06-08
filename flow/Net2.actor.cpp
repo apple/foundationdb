@@ -549,7 +549,7 @@ void Net2::run() {
 
 #ifdef WIN32
 	if (timeBeginPeriod(1) != TIMERR_NOERROR)
-		TraceEvent(SevError, "timeBeginPeriodError");
+		TraceEvent(SevError, "TimeBeginPeriodError");
 #endif
 
 	timeOffsetLogger = logTimeOffset();
