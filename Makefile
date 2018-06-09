@@ -55,7 +55,7 @@ else ifeq ($(PLATFORM),FreeBSD)
   CFLAGS += -stdlib=libc++ -Wno-error=unused-command-line-argument
   CXXFLAGS += -std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option -Wno-varargs
   LDFLAGS += -lutil -ldevstat -lkvm
-  BOOSTDIR ?= $(HOME)/boost_1_52_0
+  BOOSTDIR ?= /usr/local/include
   DLEXT := so
   java_DLEXT := so
   TARGET_LIBC_VERSION ?= 2.11

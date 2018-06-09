@@ -996,7 +996,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 
 int main(int argc, char** argv) {
 	std::string lockfile = "/var/run/fdbmonitor.pid";
-	std::string _confpath = std::string(PREFIX) + "/etc/foundationdb/foundationdb.conf";
+	std::string _confpath = "/usr/local/etc/foundationdb/foundationdb.conf";
 
 	std::vector<const char *> additional_watch_paths;
 
