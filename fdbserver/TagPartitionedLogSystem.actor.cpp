@@ -105,9 +105,9 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	virtual std::string describe() {
 		std::string result;
 		for( int i = 0; i < tLogs.size(); i++ ) {
-			result = format("%d: ", i);
+			result += format("%d: ", i);
 			for( int j = 0; j < tLogs[i]->logServers.size(); j++) {
-				result = result + tLogs[i]->logServers[j]->get().id().toString() + ((j == tLogs[i]->logServers.size() - 1) ? " " : ", ");
+				result += tLogs[i]->logServers[j]->get().id().toString() + ((j == tLogs[i]->logServers.size() - 1) ? " " : ", ");
 			}
 		}
 		return result;
