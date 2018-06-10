@@ -1223,29 +1223,6 @@ ACTOR Future<Void> waitForFullReplication( Database cx ) {
 	}
 }
 
-ACTOR Future<Void> waitForHealthy( Database cx ) {
-	state ReadYourWritesTransaction tr(cx);
-	loop {
-		try {
-			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
-			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
-
-			Optional<Value> healthy = wait( tr.get(serversHealthyKey) );
-			if(healthy.present() && healthy.get().size()) {
-				return Void();
-			}
-
-			state Future<Void> watchFuture = tr.watch(serversHealthyKey);
-			Void _ = wait( tr.commit() );
-			Void _ = wait( watchFuture );
-			tr.reset();
-		} catch (Error& e) {
-			Void _ = wait( tr.onError(e) );
-		}
-	}
-}
-
 ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
 	loop {
 		state Transaction tr(cx);

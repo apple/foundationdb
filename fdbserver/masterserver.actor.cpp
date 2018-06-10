@@ -1189,7 +1189,6 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		tr.write_conflict_ranges.append_deep(recoveryCommitRequest.arena, itr.write_conflict_ranges.begin(), itr.write_conflict_ranges.size());
 	}
 
-	tr.set(recoveryCommitRequest.arena, serversHealthyKey, StringRef());
 	tr.set(recoveryCommitRequest.arena, backupVersionKey, backupVersionValue);
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());

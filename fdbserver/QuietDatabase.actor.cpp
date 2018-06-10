@@ -287,9 +287,7 @@ ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
 	Void _ = wait( delay(time) );
 
 	if(g_network->isSimulated()) {
-		TraceEvent(SevWarnAlways, "DisablingFearless_WaitForHealthy");
-		Void _ = wait( waitForHealthy(cx) );
-		TraceEvent(SevWarnAlways, "DisablingFearless_Configure");
+		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
 		g_simulator.hasRemoteReplication = false;
 		ConfigurationResult::Type _ = wait( changeConfig( cx, "remote_none" ) );
 		if (g_network->isSimulated() && g_simulator.extraDB) {
