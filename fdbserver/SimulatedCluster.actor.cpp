@@ -926,7 +926,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
 		g_simulator.remoteDcId = simconfig.db.regions[1].dcId;
 		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
-		ASSERT(simconfig.db.regions[0].satelliteTLogPolicy->info() == simconfig.db.regions[1].satelliteTLogPolicy->info());
+		ASSERT((!simconfig.db.regions[0].satelliteTLogPolicy && !simconfig.db.regions[1].satelliteTLogPolicy) || simconfig.db.regions[0].satelliteTLogPolicy->info() == simconfig.db.regions[1].satelliteTLogPolicy->info());
 		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
 		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
 
