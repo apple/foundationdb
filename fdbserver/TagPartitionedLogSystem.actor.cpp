@@ -476,7 +476,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 
 				if(!localOldSets.size()) {
-					TraceEvent("TLogPeekNoLocalSets", dbgid).detail("tag", tag.toString()).detail("begin", begin).detail("end", end).detail("lastBegin", lastBegin);
+					TraceEvent("TLogPeekNoLocalSets", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin);
 					if(throwIfDead) {
 						throw worker_removed();
 					} else {
