@@ -1934,9 +1934,9 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		initData = Reference<InitialDataDistribution>();
 		self.addActor.send(serverGetTeamRequests(tci, &self));
 
-		TraceEvent("DDTeamCollectionBegin", masterId).detail("primary", primary);
+		TraceEvent("DDTeamCollectionBegin", masterId).detail("Primary", primary);
 		Void _ = wait( readyToStart || error );
-		TraceEvent("DDTeamCollectionReadyToStart", masterId).detail("primary", primary);
+		TraceEvent("DDTeamCollectionReadyToStart", masterId).detail("Primary", primary);
 		
 		self.addActor.send(storageRecruiter( &self, db ));
 		self.addActor.send(monitorStorageServerRecruitment( &self ));
