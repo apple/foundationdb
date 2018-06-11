@@ -186,7 +186,7 @@ The following format informally describes the JSON containing the status data. T
                   "name": <  "incorrect_cluster_file_contents"
                            | ...
                           >,
-                  "description": "Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally."
+                  "description": "Cluster file contents do not match current cluster connection string. Verify cluster file and its parent directory is writable and has not been overwritten externally."
               }
           ],
           "reasons": [

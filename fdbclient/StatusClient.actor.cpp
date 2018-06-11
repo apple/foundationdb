@@ -325,7 +325,7 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<ClusterConnectionFile> 
 		description += ClusterConnectionFile(f->getFilename()).getConnectionString().toString().c_str();
 		description += "\nThe current connection string is: ";
 		description += f->getConnectionString().toString().c_str();
-		description += "\nVerify cluster file is writable and has not been overwritten externally. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
+		description += "\nVerify cluster file and its parent directory is writable and has not been overwritten externally. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
 		messages->push_back(makeMessage("incorrect_cluster_file_contents", description.c_str()));
 	}
 
