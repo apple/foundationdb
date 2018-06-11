@@ -533,6 +533,7 @@ struct DDTeamCollection {
 	bool primary;
 	Reference<AsyncVar<bool>> processingUnhealthy;
 	Future<Void> readyToStart;
+	Future<Void> checkTeamDelay;
 
 	DDTeamCollection(
 		Database const& cx,
@@ -547,8 +548,8 @@ struct DDTeamCollection {
 		Future<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 		Reference<AsyncVar<bool>> processingUnhealthy)
 		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
-		 configuration(configuration), serverChanges(serverChanges), readyToStart(readyToStart),
-		 initialFailureReactionDelay( delayed( readyToStart, BUGGIFY ? 0 : SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution ) ), healthyTeamCount( 0 ),
+		 configuration(configuration), serverChanges(serverChanges), readyToStart(readyToStart), checkTeamDelay( delay( SERVER_KNOBS->CHECK_TEAM_DELAY, TaskDataDistribution) ),
+		 initialFailureReactionDelay( delayed( readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskDataDistribution ) ), healthyTeamCount( 0 ),
 		 initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
 		 unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs), zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), processingUnhealthy(processingUnhealthy)
 	{
@@ -586,6 +587,7 @@ struct DDTeamCollection {
 	ACTOR Future<Void> checkBuildTeams( DDTeamCollection* self ) {
 		state Promise<Void> restart;
 
+		Void _ = wait( self->checkTeamDelay );
 		while( !self->teamBuilder.isReady() )
 			Void _ = wait( self->teamBuilder );
 
