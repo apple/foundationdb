@@ -2019,6 +2019,9 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 			Void _ = wait( checkEmptyQueue(&self) && checkRecovered(&self) );
 		}
 
+		//Disk errors need a chance to kill this actor.
+		Void _ = wait(delay(0.0));
+
 		if(recovered.canBeSet()) recovered.send(Void());
 
 		self.sharedActors.send( cleanupPeekTrackers(&self) );
