@@ -54,7 +54,7 @@ Python API
 Installation
 ============
 
-The FoundationDB Python API is compatible with Python 2.7 - 3.4. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed.
+The FoundationDB Python API is compatible with Python 2.7 - 3.6. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed.
 
 On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see :ref:`installing-client-binaries`). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually.
 
