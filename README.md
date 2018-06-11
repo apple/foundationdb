@@ -50,3 +50,7 @@ Developers on a OS for which there is no binary package, or who would like to st
 1. Run `make`.
 
 This will build the fdbserver binary and the python bindings. If you want to build our other bindings, you will need to install a runtime for the language whose binding you want to build. Each binding has an `.mk` file which provides specific targets for that binding.
+
+## Release Process
+
+At present, FoundationDB goes through a variety of testing and vetting procedures before it is declared to be production ready. Many of these tests can happen at any stage in the development cycle, but some of them happen only after a release candidate build has been identified by creating a new tag in this repository (marked as pre-release). Once such a tag has been created, users who wish to do so are encouraged to build versions of the FoundationDB server and client binaries and deploy them to their own QA and testing environments to verify that their application continues to function with the new version of the database. Any errors that are encountered should be reported through the normal mechanisms (forum posts or issues as appropriate). However, we do not yet encourage users to begin upgrading their production environments until such time as the vetting has been completed. At that time, the appropriate tag will be updated indicating that it is now recommended for production use, and the downloads page on our website will be updated to distribute the new binaries.
