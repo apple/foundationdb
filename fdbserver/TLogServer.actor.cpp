@@ -2020,7 +2020,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		}
 
 		//Disk errors need a chance to kill this actor.
-		Void _ = wait(delay(0.0));
+		Void _ = wait(delay(0.000001));
 
 		if(recovered.canBeSet()) recovered.send(Void());
 
