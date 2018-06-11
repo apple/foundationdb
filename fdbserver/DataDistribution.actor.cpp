@@ -553,9 +553,11 @@ struct DDTeamCollection {
 		 initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
 		 unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs), zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), processingUnhealthy(processingUnhealthy)
 	{
-		TraceEvent("DDTrackerStarting", masterId)
-			.detail( "State", "Inactive" )
-			.trackLatest( format("%s/DDTrackerStarting", printable(cx->dbName).c_str() ).c_str() );
+		if(!primary || configuration.remoteTLogReplicationFactor <= 0) {
+			TraceEvent("DDTrackerStarting", masterId)
+				.detail( "State", "Inactive" )
+				.trackLatest( format("%s/DDTrackerStarting", printable(cx->dbName).c_str() ).c_str() );
+		}
 	}
 
 	~DDTeamCollection() {
@@ -577,9 +579,11 @@ struct DDTeamCollection {
 		Void _ = wait(signal);
 		Void _ = wait(delay(SERVER_KNOBS->LOG_ON_COMPLETION_DELAY, TaskDataDistribution));
 
-		TraceEvent("DDTrackerStarting", self->masterId)
-			.detail( "State", "Active" )
-			.trackLatest( format("%s/DDTrackerStarting", printable(self->cx->dbName).c_str() ).c_str() );
+		if(!self->primary || self->configuration.remoteTLogReplicationFactor <= 0) {
+			TraceEvent("DDTrackerStarting", self->masterId)
+				.detail( "State", "Active" )
+				.trackLatest( format("%s/DDTrackerStarting", printable(self->cx->dbName).c_str() ).c_str() );
+		}
 
 		return Void();
 	}
