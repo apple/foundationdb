@@ -808,6 +808,10 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
+			if(!(self->locality == tagLocalitySpecial || self->locality == tag.locality || tag.locality < 0)) {
+				continue;
+			}
+
 			if(tag.locality == tagLocalityLogRouter) {
 				if(!self->logRouterTags) {
 					continue;
@@ -1687,6 +1691,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID()) );
+		logData->locality = tagLocalitySpecial;
 		logData->stopped = true;
 		self->id_data[id1] = logData;
 		id_interf[id1] = recruited;
@@ -1822,7 +1827,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 				logSystem->set(ILogSystem::fromOldLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
 				found = true;
 			} else if( self->dbInfo->get().logSystemConfig.isEqualIds(recoverFrom) ) {
-				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig ));
+				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, false, true ));
 				found = true;
 			}
 			else if( self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
@@ -1909,17 +1914,16 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			logData->initialized = true;
 			self->newLogData.trigger();
 
-			if(req.isPrimary && logData->unrecoveredBefore <= req.knownCommittedVersion && !logData->stopped) {
-				logData->logRouterPopToVersion = req.knownCommittedVersion;
-				std::vector<Tag> tags;
-				tags.push_back(logData->remoteTag);
-				Void _ = wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.knownCommittedVersion, true) || logData->removed);
-			}
-
-			TraceEvent("TLogPullComplete", self->dbgid).detail("LogId", logData->logId);
-
-			if(req.isPrimary && !req.recoverTags.empty() && !logData->stopped && req.knownCommittedVersion < req.recoverAt) {
-				Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) || logData->removed);
+			if(req.isPrimary && !logData->stopped && logData->unrecoveredBefore <= req.recoverAt) {
+				if(req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalityInvalid) {
+					logData->logRouterPopToVersion = req.recoverAt;
+					std::vector<Tag> tags;
+					tags.push_back(logData->remoteTag);
+					Void _ = wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) || logData->removed);
+				} else if(!req.recoverTags.empty()) {
+					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
+					Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) || logData->removed);
+				}
 			}
 
 			if(req.isPrimary && logData->version.get() < req.recoverAt && !logData->stopped) {
@@ -1993,7 +1997,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 
 	req.reply.send( recruited );
 
-	TraceEvent("TLogReady", logData->logId).detail("AllTags", describe(req.allTags));
+	TraceEvent("TLogReady", logData->logId).detail("AllTags", describe(req.allTags)).detail("Locality", logData->locality);
 
 	updater = Void();
 	Void _ = wait( tLogCore( self, logData, recruited ) );
@@ -2014,6 +2018,9 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		} else {
 			Void _ = wait( checkEmptyQueue(&self) && checkRecovered(&self) );
 		}
+
+		//Disk errors need a chance to kill this actor.
+		Void _ = wait(delay(0.000001));
 
 		if(recovered.canBeSet()) recovered.send(Void());
 

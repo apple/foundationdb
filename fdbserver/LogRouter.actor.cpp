@@ -335,13 +335,16 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 		}
 	}
 
-	while(!self->messageBlocks.empty() && self->messageBlocks.front().first <= minPopped) {
+	while(!self->messageBlocks.empty() && self->messageBlocks.front().first < minPopped) {
 		self->messageBlocks.pop_front();
 		Void _ = wait(yield(TaskUpdateStorage));
 	}
 
 	if(self->logSystem->get() && self->allowPops) {
-		self->logSystem->get()->pop(minKnownCommittedVersion - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, self->routerTag);
+		//The knownCommittedVersion might not be committed on the primary logs, so subtracting max_read_transaction_life_versions will ensure it is committed.
+		//We then need to subtract max_read_transaction_life_versions again ensure we do not pop below the knownCommittedVersion of the primary logs.
+		//FIXME: if we get the true knownCommittedVersion when peeking from the primary logs we only need to subtract max_read_transaction_life_versions once.
+		self->logSystem->get()->pop(minKnownCommittedVersion - 2*SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, self->routerTag);
 	}
 	req.reply.send(Void());
 	self->minPopped.set(std::max(minPopped, self->minPopped.get()));
@@ -364,7 +367,7 @@ ACTOR Future<Void> logRouterCore(
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
 			logRouterData.allowPops = db->get().recoveryState == 7;
-			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get() ));
+			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get(), true ));
 		}
 		when( TLogPeekRequest req = waitNext( interf.peekMessages.getFuture() ) ) {
 			addActor.send( logRouterPeekMessages( &logRouterData, req ) );

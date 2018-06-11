@@ -1092,13 +1092,19 @@ public:
 			bool tooManyDead = false;
 			bool notEnoughLeft = false;
 			bool primaryTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false) : primaryProcessesDead.validate(tLogPolicy);
+			if(remoteTLogPolicy && !primaryTLogsDead) {
+				primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
+			}
 
 			if(!primaryDcId.present()) {
 				tooManyDead = primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
 				notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy);
 			} else {
 				bool remoteTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo, remoteProcessesDead, tLogPolicy, remoteLocalitiesLeft, tLogWriteAntiQuorum, false) : remoteProcessesDead.validate(tLogPolicy);
-				
+				if(remoteTLogPolicy && !remoteTLogsDead) {
+					remoteTLogsDead = remoteProcessesDead.validate(remoteTLogPolicy);
+				}
+
 				if(!hasSatelliteReplication) {
 					notEnoughLeft = ( !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) ) && ( !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy) );
 					if(hasRemoteReplication) {

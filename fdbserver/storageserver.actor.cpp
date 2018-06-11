@@ -855,7 +855,7 @@ ACTOR Future<Void> getShardState_impl( StorageServer* data, GetShardStateRequest
 		}
 
 		if( !onChange.size() ) {
-			req.reply.send(data->version.get());
+			req.reply.send(std::make_pair(data->version.get(), data->durableVersion.get()));
 			return Void();
 		}
 
@@ -3179,7 +3179,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			when (GetShardStateRequest req = waitNext(ssi.getShardState.getFuture()) ) {
 				if (req.mode == GetShardStateRequest::NO_WAIT ) {
 					if( self->isReadable( req.keys ) )
-						req.reply.send(self->version.get());
+						req.reply.send(std::make_pair(self->version.get(),self->durableVersion.get()));
 					else
 						req.reply.sendError(wrong_shard_server());
 				} else {

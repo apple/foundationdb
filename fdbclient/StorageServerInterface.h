@@ -201,7 +201,7 @@ struct GetShardStateRequest {
 	
 	KeyRange keys;
 	int32_t mode;
-	ReplyPromise< Version > reply;
+	ReplyPromise< std::pair<Version,Version> > reply;
 	GetShardStateRequest() {}
 	GetShardStateRequest( KeyRange const& keys, waitMode mode ) : keys(keys), mode(mode) {}
 

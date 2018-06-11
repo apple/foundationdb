@@ -196,14 +196,14 @@ Future<T> timeoutError( Future<T> what, double time, int taskID = TaskDefaultDel
 }
 
 ACTOR template <class T>
-Future<T> delayed( Future<T> what, double time = 0.0 ) {
+Future<T> delayed( Future<T> what, double time = 0.0, int taskID = TaskDefaultDelay  ) {
 	try {
 		state T t = wait( what );
-		Void _ = wait( delay(time) );
+		Void _ = wait( delay( time, taskID ) );
 		return t;
 	} catch( Error &e ) {
 		state Error err = e;
-		Void _ = wait( delay(time) );
+		Void _ = wait( delay( time, taskID ) );
 		throw err;
 	}
 }

@@ -157,11 +157,26 @@ struct LogSystemConfig {
 	int32_t expectedLogSets;
 	UID recruitmentID;
 	bool stopped;
+	Optional<Version> previousEpochEndVersion;
 
 	LogSystemConfig() : logSystemType(0), logRouterTags(0), expectedLogSets(0), stopped(false) {}
 
 	std::string toString() const { 
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
+	}
+
+	std::vector<TLogInterface> allLocalLogs() const {
+		std::vector<TLogInterface> results;
+		for( int i = 0; i < tLogs.size(); i++ ) {
+			if(tLogs[i].isLocal) {
+				for( int j = 0; j < tLogs[i].tLogs.size(); j++ ) {
+					if( tLogs[i].tLogs[j].present() ) {
+						results.push_back(tLogs[i].tLogs[j].interf());
+					}
+				}
+			}
+		}
+		return results;
 	}
 
 	std::vector<TLogInterface> allPresentLogs() const {
@@ -203,7 +218,7 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID && stopped == r.stopped;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID && stopped == r.stopped && previousEpochEndVersion == r.previousEpochEndVersion;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -234,7 +249,7 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped;
+		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped & previousEpochEndVersion;
 	}
 };
 
