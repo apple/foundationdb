@@ -192,13 +192,13 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 		std::string mode = it.toString();
 		auto m = configForToken( mode );
 		if( !m.size() ) {
-			TraceEvent(SevWarnAlways, "UnknownOption").detail("option", mode);
+			TraceEvent(SevWarnAlways, "UnknownOption").detail("Option", mode);
 			return ConfigurationResult::UNKNOWN_OPTION;
 		}
 
 		for( auto t = m.begin(); t != m.end(); ++t ) {
 			if( outConf.count( t->first ) ) {
-				TraceEvent(SevWarnAlways, "ConflictingOption").detail("option", printable(StringRef(t->first)));
+				TraceEvent(SevWarnAlways, "ConflictingOption").detail("Option", printable(StringRef(t->first)));
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
@@ -1107,7 +1107,7 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 			Void _ = wait( tr.commit() );
 			return oldMode;
 		} catch (Error& e) {
-			TraceEvent("setDDModeRetrying").error(e);
+			TraceEvent("SetDDModeRetrying").error(e);
 			Void _ = wait (tr.onError(e));
 		}
 	}
@@ -1247,7 +1247,7 @@ ACTOR Future<Void> lockDatabase( Transaction* tr, UID id ) {
 		if(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
 			return Void();
 		} else {
-			//TraceEvent("DBA_lock_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 			throw database_locked();
 		}
 	}
@@ -1266,7 +1266,7 @@ ACTOR Future<Void> lockDatabase( Reference<ReadYourWritesTransaction> tr, UID id
 		if(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
 			return Void();
 		} else {
-			//TraceEvent("DBA_lock_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 			throw database_locked();
 		}
 	}
@@ -1300,7 +1300,7 @@ ACTOR Future<Void> unlockDatabase( Transaction* tr, UID id ) {
 		return Void();
 
 	if(val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_unlock_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 		throw database_locked();
 	}
 
@@ -1317,7 +1317,7 @@ ACTOR Future<Void> unlockDatabase( Reference<ReadYourWritesTransaction> tr, UID 
 		return Void();
 
 	if(val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_unlock_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 		throw database_locked();
 	}
 
@@ -1346,7 +1346,7 @@ ACTOR Future<Void> checkDatabaseLock( Transaction* tr, UID id ) {
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_check_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
 
@@ -1359,7 +1359,7 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_check_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
 

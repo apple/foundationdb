@@ -204,7 +204,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 					Void _ = wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 					commitMessages(self, ver, messages);
 					self->version.set( ver );
-					//TraceEvent("LogRouterVersion").detail("ver",ver);
+					//TraceEvent("LogRouterVersion").detail("Ver",ver);
 				}
 				lastVer = ver;
 				ver = r->version().version;
@@ -249,7 +249,7 @@ void peekMessagesFromMemory( LogRouterData* self, TLogPeekRequest const& req, Bi
 	ASSERT( !messages.getLength() );
 
 	auto& deque = get_version_messages(self, req.tag);
-	//TraceEvent("tLogPeekMem", self->dbgid).detail("Tag", printable(req.tag1)).detail("pDS", self->persistentDataSequence).detail("pDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
+	//TraceEvent("TLogPeekMem", self->dbgid).detail("Tag", printable(req.tag1)).detail("PDS", self->persistentDataSequence).detail("PDDS", self->persistentDataDurableSequence).detail("Oldest", map1.empty() ? 0 : map1.begin()->key ).detail("OldestMsgCount", map1.empty() ? 0 : map1.begin()->value.size());
 
 	auto it = std::lower_bound(deque.begin(), deque.end(), std::make_pair(req.begin, LengthPrefixedStringRef()), CompareFirst<std::pair<Version, LengthPrefixedStringRef>>());
 
@@ -258,7 +258,7 @@ void peekMessagesFromMemory( LogRouterData* self, TLogPeekRequest const& req, Bi
 		if(it->first != currentVersion) {
 			if (messages.getLength() >= SERVER_KNOBS->DESIRED_TOTAL_BYTES) {
 				endVersion = currentVersion + 1;
-				//TraceEvent("tLogPeekMessagesReached2", self->dbgid);
+				//TraceEvent("TLogPeekMessagesReached2", self->dbgid);
 				break;
 			}
 
@@ -280,7 +280,7 @@ Version poppedVersion( LogRouterData* self, Tag tag) {
 ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest req ) {
 	state BinaryWriter messages(Unversioned());
 
-	//TraceEvent("LogRouterPeek1", self->dbgid).detail("from", req.reply.getEndpoint().address).detail("ver", self->version.get()).detail("begin", req.begin);
+	//TraceEvent("LogRouterPeek1", self->dbgid).detail("From", req.reply.getEndpoint().address).detail("Ver", self->version.get()).detail("Begin", req.begin);
 	if( req.returnIfBlocked && self->version.get() < req.begin ) {
 		//TraceEvent("LogRouterPeek2", self->dbgid);
 		req.reply.sendError(end_of_stream());
@@ -297,7 +297,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 	if(poppedVer > req.begin || req.begin < self->startVersion) {
 		//This should only happen if a packet is sent multiple times and the reply is not needed. 
 		// Since we are using popped differently, do not send a reply.
-		TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid).detail("begin", req.begin).detail("popped", poppedVer).detail("start", self->startVersion);
+		TraceEvent(SevWarnAlways, "LogRouterPeekPopped", self->dbgid).detail("Begin", req.begin).detail("Popped", poppedVer).detail("Start", self->startVersion);
 		req.reply.send( Never() );
 		return Void();
 	}
@@ -413,7 +413,7 @@ ACTOR Future<Void> logRouter(
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
 	try {
-		TraceEvent("LogRouterStart", interf.id()).detail("start", req.startVersion).detail("tag", req.routerTag.toString()).detail("localities", req.tLogLocalities.size()).detail("hasBestPolicy", req.hasBestPolicy).detail("locality", req.locality);
+		TraceEvent("LogRouterStart", interf.id()).detail("Start", req.startVersion).detail("Tag", req.routerTag.toString()).detail("Localities", req.tLogLocalities.size()).detail("HasBestPolicy", req.hasBestPolicy).detail("Locality", req.locality);
 		state Future<Void> core = logRouterCore(interf, req, db);
 		loop choose{
 			when(Void _ = wait(core)) { return Void(); }

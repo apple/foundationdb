@@ -156,7 +156,7 @@ public:
 		for (auto entry : resultEntries) {
 			locations.push_back(locationOffset + *logServerMap->getObject(entry));
 		}
-		//TraceEvent("getPushLocations").detail("Policy", tLogPolicy->info())
+		//TraceEvent("GetPushLocations").detail("Policy", tLogPolicy->info())
 		//	.detail("Results", locations.size()).detail("Selection", logServerSet->size())
 		//	.detail("Included", alsoServers.size()).detail("Duration", timer() - t);
 	}

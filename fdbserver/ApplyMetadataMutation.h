@@ -106,7 +106,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
 					TraceEvent(SevDebug, "SendingPrivateMutation", dbgid).detail("Original", m.toString()).detail("Privatized", privatized.toString()).detail("Server", serverKeysDecodeServer(m.param1))
-						.detail("tagKey", printable(serverTagKeyFor( serverKeysDecodeServer(m.param1) ))).detail("tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ).toString());
+						.detail("TagKey", printable(serverTagKeyFor( serverKeysDecodeServer(m.param1) ))).detail("Tag", decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ).toString());
 
 					toCommit->addTag( decodeServerTagValue( txnStateStore->readValue( serverTagKeyFor( serverKeysDecodeServer(m.param1) ) ).get().get() ) );
 					toCommit->addTypedMessage(privatized);
@@ -118,7 +118,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if(toCommit) {
 					MutationRef privatized = m;
 					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					TraceEvent("ServerTag", dbgid).detail("server", id).detail("tag", tag.toString());
+					TraceEvent("ServerTag", dbgid).detail("Server", id).detail("Tag", tag.toString());
 
 					toCommit->addTag(tag);
 					toCommit->addTypedMessage(LogProtocolMessage());
@@ -151,7 +151,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				if(Optional<StringRef>(m.param2) != txnStateStore->readValue(m.param1).get().cast_to<StringRef>()) { // FIXME: Make this check more specific, here or by reading configuration whenever there is a change
 					if(!m.param1.startsWith( excludedServersPrefix ) && m.param1 != excludedServersVersionKey) {
 						auto t = txnStateStore->readValue(m.param1).get();
-						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("toCommit", toCommit!=NULL);
+						TraceEvent("MutationRequiresRestart", dbgid).detail("M", m.toString()).detail("PrevValue", t.present() ? printable(t.get()) : "(none)").detail("ToCommit", toCommit!=NULL);
 						if(confChange) *confChange = true;
 					}
 				}
@@ -227,8 +227,8 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					}
 
 					// Log the modification
-					TraceEvent("LogRangeAdd").detail("logRanges", vecBackupKeys->size()).detail("mutationKey", printable(m.param1))
-						.detail("logRangeBegin", printable(logRangeBegin)).detail("logRangeEnd", printable(logRangeEnd));
+					TraceEvent("LogRangeAdd").detail("LogRanges", vecBackupKeys->size()).detail("MutationKey", printable(m.param1))
+						.detail("LogRangeBegin", printable(logRangeBegin)).detail("LogRangeEnd", printable(logRangeEnd));
 				}
 			}
 			else if (m.param1.startsWith(globalKeysPrefix)) {
@@ -254,7 +254,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 			}
 			else if (m.param1 == minRequiredCommitVersionKey) {
 				Version requested = BinaryReader::fromStringRef<Version>(m.param2, Unversioned());
-				TraceEvent("MinRequiredCommitVersion", dbgid).detail("min", requested).detail("current", popVersion).detail("hasConf", !!confChange);
+				TraceEvent("MinRequiredCommitVersion", dbgid).detail("Min", requested).detail("Current", popVersion).detail("HasConf", !!confChange);
 				if(!initialCommit) txnStateStore->set(KeyValueRef(m.param1, m.param2));
 				if (confChange) *confChange = true;
 				TEST(true);  // Recovering at a higher version.
@@ -292,7 +292,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					auto serverKeysCleared = txnStateStore->readRange( range & serverTagKeys ).get();	// read is expected to be immediately available
 					for(auto &kv : serverKeysCleared) {
 						Tag tag = decodeServerTagValue(kv.value);
-						TraceEvent("ServerTagRemove").detail("popVersion", popVersion).detail("tag", tag.toString()).detail("server", decodeServerTagKey(kv.key));
+						TraceEvent("ServerTagRemove").detail("PopVersion", popVersion).detail("Tag", tag.toString()).detail("Server", decodeServerTagKey(kv.key));
 						logSystem->pop( popVersion, decodeServerTagValue(kv.value) );
 						(*tag_popped)[tag] = popVersion;
 
@@ -320,7 +320,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					auto serverKeysCleared = txnStateStore->readRange( range & serverTagHistoryKeys ).get();	// read is expected to be immediately available
 					for(auto &kv : serverKeysCleared) {
 						Tag tag = decodeServerTagValue(kv.value);
-						TraceEvent("ServerTagHistoryRemove").detail("popVersion", popVersion).detail("tag", tag.toString()).detail("version", decodeServerTagHistoryKey(kv.key));
+						TraceEvent("ServerTagHistoryRemove").detail("PopVersion", popVersion).detail("Tag", tag.toString()).detail("Version", decodeServerTagHistoryKey(kv.key));
 						logSystem->pop( popVersion, tag );
 						(*tag_popped)[tag] = popVersion;
 					}
@@ -362,8 +362,8 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 				KeyRangeRef commonLogRange(range & logRangesRange);
 
 				TraceEvent("LogRangeClear")
-					.detail("rangeBegin", printable(range.begin)).detail("rangeEnd", printable(range.end))
-					.detail("intersectBegin", printable(commonLogRange.begin)).detail("intersectEnd", printable(commonLogRange.end));
+					.detail("RangeBegin", printable(range.begin)).detail("RangeEnd", printable(range.end))
+					.detail("IntersectBegin", printable(commonLogRange.begin)).detail("IntersectEnd", printable(commonLogRange.end));
 
 				// Remove the key range from the vector, if defined
 				if (vecBackupKeys) {
@@ -374,7 +374,7 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 					// read is expected to be immediately available
 					auto logRangesAffected = txnStateStore->readRange(commonLogRange).get();
 
-					TraceEvent("LogRangeClearBegin").detail("affectedLogRanges", logRangesAffected.size());
+					TraceEvent("LogRangeClearBegin").detail("AffectedLogRanges", logRangesAffected.size());
 
 					// Add the backup name to the backup locations that do not have it
 					for (auto logRangeAffected : logRangesAffected)
@@ -385,9 +385,9 @@ static void applyMetadataMutations(UID const& dbgid, Arena &arena, VectorRef<Mut
 						// Decode the log destination and key value
 						logKeyEnd = logRangesDecodeValue(logRangeAffected.value, &logDestination);
 
-						TraceEvent("LogRangeErase").detail("affectedKey", printable(logRangeAffected.key)).detail("affectedValue", printable(logRangeAffected.value))
-							.detail("logKeyBegin", printable(logKeyBegin)).detail("logKeyEnd", printable(logKeyEnd))
-							.detail("logDestination", printable(logDestination));
+						TraceEvent("LogRangeErase").detail("AffectedKey", printable(logRangeAffected.key)).detail("AffectedValue", printable(logRangeAffected.value))
+							.detail("LogKeyBegin", printable(logKeyBegin)).detail("LogKeyEnd", printable(logKeyEnd))
+							.detail("LogDestination", printable(logDestination));
 
 						// Identify the locations to place the backup key
 						auto logRanges = vecBackupKeys->modify(KeyRangeRef(logKeyBegin, logKeyEnd));

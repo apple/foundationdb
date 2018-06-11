@@ -114,9 +114,9 @@ struct CoordinatedStateImpl {
 		UniqueGeneration wgen = wait( self->replicatedWrite( self, GenerationRegWriteRequest( KeyValueRef(self->coordinators.clusterKey, v), self->gen ) ) );
 		self->stage = 6;
 
-		TraceEvent("CoordinatedStateSet").detail("gen", self->gen.generation).detail("wgen", wgen.generation)
-			.detail("genu", self->gen.uid).detail("wgenu", wgen.uid)
-			.detail("cgen", self->conflictGen);
+		TraceEvent("CoordinatedStateSet").detail("Gen", self->gen.generation).detail("Wgen", wgen.generation)
+			.detail("Genu", self->gen.uid).detail("Wgenu", wgen.uid)
+			.detail("Cgen", self->conflictGen);
 
 		if (wgen == self->gen)
 			return Void();

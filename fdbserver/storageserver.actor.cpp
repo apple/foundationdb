@@ -407,38 +407,38 @@ public:
 
 		Counters(StorageServer* self)
 			: cc("StorageServer", self->thisServerID.toString()),
-			getKeyQueries("getKeyQueries", cc),
-			getValueQueries("getValueQueries",cc),
-			getRangeQueries("getRangeQueries", cc),
+			getKeyQueries("GetKeyQueries", cc),
+			getValueQueries("GetValueQueries",cc),
+			getRangeQueries("GetRangeQueries", cc),
 			allQueries("QueryQueue", cc),
-			finishedQueries("finishedQueries", cc),
-			rowsQueried("rowsQueried", cc),
-			bytesQueried("bytesQueried", cc),
-			bytesInput("bytesInput", cc),
-			bytesDurable("bytesDurable", cc),
-			bytesFetched("bytesFetched", cc),
-			mutationBytes("mutationBytes", cc),
-			updateBatches("updateBatches", cc),
-			updateVersions("updateVersions", cc),
-			loops("loops", cc)
+			finishedQueries("FinishedQueries", cc),
+			rowsQueried("RowsQueried", cc),
+			bytesQueried("BytesQueried", cc),
+			bytesInput("BytesInput", cc),
+			bytesDurable("BytesDurable", cc),
+			bytesFetched("BytesFetched", cc),
+			mutationBytes("MutationBytes", cc),
+			updateBatches("UpdateBatches", cc),
+			updateVersions("UpdateVersions", cc),
+			loops("Loops", cc)
 		{
-			specialCounter(cc, "lastTLogVersion", [self](){return self->lastTLogVersion; });
-			specialCounter(cc, "version", [self](){return self->version.get(); });
-			specialCounter(cc, "storageVersion", [self](){return self->storageVersion(); });
-			specialCounter(cc, "durableVersion", [self](){return self->durableVersion.get(); });
-			specialCounter(cc, "desiredOldestVersion", [self](){return self->desiredOldestVersion.get(); });
+			specialCounter(cc, "LastTLogVersion", [self](){ return self->lastTLogVersion; });
+			specialCounter(cc, "Version", [self](){ return self->version.get(); });
+			specialCounter(cc, "StorageVersion", [self](){ return self->storageVersion(); });
+			specialCounter(cc, "DurableVersion", [self](){ return self->durableVersion.get(); });
+			specialCounter(cc, "DesiredOldestVersion", [self](){ return self->desiredOldestVersion.get(); });
 
-			specialCounter(cc, "FetchKeysFetchActive", [self](){return self->fetchKeysParallelismLock.activePermits(); });
-			specialCounter(cc, "FetchKeysWaiting", [self](){return self->fetchKeysParallelismLock.waiters(); });
+			specialCounter(cc, "FetchKeysFetchActive", [self](){ return self->fetchKeysParallelismLock.activePermits(); });
+			specialCounter(cc, "FetchKeysWaiting", [self](){ return self->fetchKeysParallelismLock.waiters(); });
 
-			specialCounter(cc, "QueryQueueMax", [self](){return self->getAndResetMaxQueryQueueSize(); });
+			specialCounter(cc, "QueryQueueMax", [self](){ return self->getAndResetMaxQueryQueueSize(); });
 
-			specialCounter(cc, "bytesStored", [self](){return self->metrics.byteSample.getEstimate(allKeys); });
+			specialCounter(cc, "BytesStored", [self](){ return self->metrics.byteSample.getEstimate(allKeys); });
 
-			specialCounter(cc, "kvstoreBytesUsed", [self](){ return self->storage.getStorageBytes().used; });
-			specialCounter(cc, "kvstoreBytesFree", [self](){ return self->storage.getStorageBytes().free; });
-			specialCounter(cc, "kvstoreBytesAvailable", [self](){ return self->storage.getStorageBytes().available; });
-			specialCounter(cc, "kvstoreBytesTotal", [self](){ return self->storage.getStorageBytes().total; });
+			specialCounter(cc, "KvstoreBytesUsed", [self](){ return self->storage.getStorageBytes().used; });
+			specialCounter(cc, "KvstoreBytesFree", [self](){ return self->storage.getStorageBytes().free; });
+			specialCounter(cc, "KvstoreBytesAvailable", [self](){ return self->storage.getStorageBytes().available; });
+			specialCounter(cc, "KvstoreBytesTotal", [self](){ return self->storage.getStorageBytes().total; });
 		}
 	} counters;
 
@@ -773,7 +773,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 				GetValueRequest getReq( req.key, latest, req.debugID );
 				state Future<Void> getValue = getValueQ( data, getReq ); //we are relying on the delay zero at the top of getValueQ, if removed we need one here
 				GetValueReply reply = wait( getReq.reply.getFuture() );
-				//TraceEvent("watcherCheckValue").detail("key", printable( req.key ) ).detail("value", printable( req.value ) ).detail("currentValue", printable( v ) ).detail("ver", latest);
+				//TraceEvent("WatcherCheckValue").detail("Key", printable( req.key ) ).detail("Value", printable( req.value ) ).detail("CurrentValue", printable( v ) ).detail("Ver", latest);
 
 				debugMutation("ShardWatchValue", latest, MutationRef(MutationRef::DebugKey, req.key, reply.value.present() ? StringRef( reply.value.get() ) : LiteralStringRef("<null>") ) );
 
@@ -999,10 +999,10 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 			if (more) { // if there might be more data, begin reading right after what we already found to find out
 				//if (track) printf("more\n");
 				if (!(limit<=0 || *pLimitBytes<=0 || result.data.end()[-1].key == atStorageVersion.end()[-1].key))
-					TraceEvent(SevError, "readRangeIssue", data->thisServerID).detail("rB", printable(readBegin)).detail("rE", printable(readEnd))
-						.detail("vStart", vStart ? printable(vStart.key()) : "nil").detail("vEnd", vEnd ? printable(vEnd.key()) : "nil")
-						.detail("atStorageVersionBack", printable(atStorageVersion.end()[-1].key)).detail("resultBack", printable(result.data.end()[-1].key))
-						.detail("limit", limit).detail("*pLimitBytes", *pLimitBytes).detail("resultSize", result.data.size()).detail("prevSize", prevSize);
+					TraceEvent(SevError, "ReadRangeIssue", data->thisServerID).detail("ReadBegin", printable(readBegin)).detail("ReadEnd", printable(readEnd))
+						.detail("VStart", vStart ? printable(vStart.key()) : "nil").detail("VEnd", vEnd ? printable(vEnd.key()) : "nil")
+						.detail("AtStorageVersionBack", printable(atStorageVersion.end()[-1].key)).detail("ResultBack", printable(result.data.end()[-1].key))
+						.detail("Limit", limit).detail("LimitBytes", *pLimitBytes).detail("ResultSize", result.data.size()).detail("PrevSize", prevSize);
 				readBegin = readBeginTemp = keyAfter( result.data.end()[-1].key );
 				ASSERT( limit<=0 || *pLimitBytes<=0 || result.data.end()[-1].key == atStorageVersion.end()[-1].key );
 			} else if (vStart && vStart->isClearTo()){ // if vStart is a clear, skip it.
@@ -1017,12 +1017,12 @@ ACTOR Future<GetKeyValuesReply> readRange( StorageServer* data, Version version,
 		// all but the last item are less than *pLimitBytes
 		ASSERT( result.data.size() == 0 || *pLimitBytes + result.data.end()[-1].expectedSize() + sizeof(KeyValueRef) > 0 );
 		/*if (*pLimitBytes <= 0)
-			TraceEvent(SevWarn, "readRangeLimitExceeded")
-				.detail("version", version)
-				.detail("begin", printable(range.begin) )
-				.detail("end", printable(range.end) )
-				.detail("limitReamin", limit)
-				.detail("lBytesRemain", *pLimitBytes); */
+			TraceEvent(SevWarn, "ReadRangeLimitExceeded")
+				.detail("Version", version)
+				.detail("Begin", printable(range.begin) )
+				.detail("End", printable(range.end) )
+				.detail("LimitReamin", limit)
+				.detail("LimitBytesRemain", *pLimitBytes); */
 
 		/*GetKeyValuesReply correct = wait( readRangeOld(data, version, range, originalLimit, originalLimitBytes) );
 		bool prefix_equal = true;
@@ -1203,7 +1203,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterVersion");
-			//.detail("shardBegin", printable(shard.begin)).detail("shardEnd", printable(shard.end));
+			//.detail("ShardBegin", printable(shard.begin)).detail("ShardEnd", printable(shard.end));
 		//} catch (Error& e) { TraceEvent("WrongShardServer", data->thisServerID).detail("Begin", req.begin.toString()).detail("End", req.end.toString()).detail("Version", version).detail("Shard", "None").detail("In", "getKeyValues>getShardKeyRange"); throw e; }
 
 		if ( !selectorInRange(req.end, shard) && !(req.end.isFirstGreaterOrEqual() && req.end.getKey() == shard.end) ) {
@@ -1219,7 +1219,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 		state Key end = wait(fEnd);
 		if( req.debugID.present() )
 			g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterKeys");
-			//.detail("off1",offset1).detail("off2",offset2).detail("reqBegin",printable(req.begin.getKey())).detail("reqEnd",printable(req.end.getKey()));
+			//.detail("Off1",offset1).detail("Off2",offset2).detail("ReqBegin",printable(req.begin.getKey())).detail("ReqEnd",printable(req.end.getKey()));
 
 		// Offsets of zero indicate begin/end keys in this shard, which obviously means we can answer the query
 		// An end offset of 1 is also OK because the end key is exclusive, so if the first key of the next shard is the end the last actual key returned must be from this shard.
@@ -1236,7 +1236,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 		if (begin >= end) {
 			if( req.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.Send");
-				//.detail("begin",printable(begin)).detail("end",printable(end));
+				//.detail("Begin",printable(begin)).detail("End",printable(end));
 
 			GetKeyValuesReply none;
 			none.version = version;
@@ -1253,7 +1253,7 @@ ACTOR Future<Void> getKeyValues( StorageServer* data, GetKeyValuesRequest req )
 
 			if( req.debugID.present() )
 				g_traceBatch.addEvent("TransactionDebug", req.debugID.get().first(), "storageserver.getKeyValues.AfterReadRange");
-				//.detail("begin",printable(begin)).detail("end",printable(end)).detail("sizeOf",r.data.size());
+				//.detail("Begin",printable(begin)).detail("End",printable(end)).detail("SizeOf",r.data.size());
 			data->checkChangeCounter( changeCounter, KeyRangeRef( std::min<KeyRef>(begin, std::min<KeyRef>(req.begin.getKey(), req.end.getKey())), std::max<KeyRef>(end, std::max<KeyRef>(req.begin.getKey(), req.end.getKey())) ) );
 			if (EXPENSIVE_VALIDATION) {
 				for (int i = 0; i < r.data.size(); i++)
@@ -1890,7 +1890,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 					debug_getRangeRetries++;
 					if (debug_nextRetryToLog==debug_getRangeRetries){
 						debug_nextRetryToLog += std::min(debug_nextRetryToLog, 1024);
-						TraceEvent(SevWarn, "FetchPast", data->thisServerID).detail("totalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
+						TraceEvent(SevWarn, "FetchPast", data->thisServerID).detail("TotalAttempts", debug_getRangeRetries).detail("FKID", interval.pairID).detail("V", lastFV).detail("N", fetchVersion).detail("E", data->version.get());
 					}
 				} else if (e.code() == error_code_future_version) {
 					TEST(true); // fetchKeys got future_version, so there must be a huge storage lag somewhere.  Keep trying.
@@ -2298,7 +2298,7 @@ private:
 					.detail("FromVersion", fromVersion)
 					.detail("ToVersion", rollbackVersion)
 					.detail("AtVersion", currentVersion)
-					.detail("storageVersion", data->storageVersion());
+					.detail("StorageVersion", data->storageVersion());
 				ASSERT( rollbackVersion >= data->storageVersion() );
 			}
 			// Don't let oldestVersion (and thus storageVersion) go into the rolled back range of versions
@@ -2508,9 +2508,9 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 			data->version.set( ver );		// Triggers replies to waiting gets for new version(s)
 			if (data->otherError.getFuture().isReady()) data->otherError.getFuture().get();
 
-			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("ver", ver).detail("dataVersion", data->version.get())
-			//	.detail("lastTLogVersion", data->lastTLogVersion).detail("newOldest", updater.newOldestVersion).detail("desiredOldest",data->desiredOldestVersion.get())
-			//	.detail("MAX_READ_TRANSACTION_LIFE_VERSIONS", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
+			//TraceEvent("StorageServerUpdated", data->thisServerID).detail("Ver", ver).detail("DataVersion", data->version.get())
+			//	.detail("LastTLogVersion", data->lastTLogVersion).detail("NewOldest", updater.newOldestVersion).detail("DesiredOldest",data->desiredOldestVersion.get())
+			//	.detail("MaxReadTransactionLifeVersions", SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS);
 
 			// Trigger updateStorage if necessary
 			ASSERT(updater.newOldestVersion <= data->version.get());
@@ -3324,9 +3324,9 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 							}
 							self->allHistory = self->history;
 
-							TraceEvent("SSTag", self->thisServerID).detail("myTag", self->tag.toString());
+							TraceEvent("SSTag", self->thisServerID).detail("MyTag", self->tag.toString());
 							for(auto it : self->history) {
-								TraceEvent("SSHistory", self->thisServerID).detail("ver", it.first).detail("tag", it.second.toString());
+								TraceEvent("SSHistory", self->thisServerID).detail("Ver", it.first).detail("Tag", it.second.toString());
 							}
 
 							if(self->history.size() && BUGGIFY) {

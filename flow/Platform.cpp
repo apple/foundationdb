@@ -691,11 +691,11 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 			writeSectors = wr_sectors;
 			readSectors = rd_sectors;
 
-			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("ignore", ignore).detail("rd_ios", rd_ios)
-			//	.detail("rd_merges", rd_merges).detail("rd_sectors", rd_sectors).detail("rd_ticks", rd_ticks).detail("wr_ios", wr_ios).detail("wr_merges", wr_merges)
-			//	.detail("wr_sectors", wr_sectors).detail("wr_ticks", wr_ticks).detail("cur_ios", cur_ios).detail("ticks", ticks).detail("aveq", aveq)
-			//	.detail("currentIOs", currentIOs).detail("busyTicks", busyTicks).detail("reads", reads).detail("writes", writes).detail("writeSectors", writeSectors)
-			//  .detail("readSectors", readSectors);
+			//TraceEvent("DiskMetricsRaw").detail("Input", line).detail("Ignore", ignore).detail("RdIos", rd_ios)
+			//	.detail("RdMerges", rd_merges).detail("RdSectors", rd_sectors).detail("RdTicks", rd_ticks).detail("WrIos", wr_ios).detail("WrMerges", wr_merges)
+			//	.detail("WrSectors", wr_sectors).detail("WrTicks", wr_ticks).detail("CurIos", cur_ios).detail("Ticks", ticks).detail("Aveq", aveq)
+			//	.detail("CurrentIOs", currentIOs).detail("BusyTicks", busyTicks).detail("Reads", reads).detail("Writes", writes).detail("WriteSectors", writeSectors)
+			//  .detail("ReadSectors", readSectors);
 			return;
 		} else
 			disk_stream.ignore( std::numeric_limits<std::streamsize>::max(), '\n');
@@ -1628,17 +1628,20 @@ void renameFile( std::string const& fromPath, std::string const& toPath ) {
 	throw io_error();
 }
 
-void atomicReplace( std::string const& path, std::string const& content ) {
+void atomicReplace( std::string const& path, std::string const& content, bool textmode ) {
 	FILE* f = 0;
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
 		std::string tempfilename = parentDirectory(path) + CANONICAL_PATH_SEPARATOR + g_random->randomUniqueID().toString() + ".tmp";
-		f = fopen( tempfilename.c_str(), "wt" );
+		f = textmode ? fopen( tempfilename.c_str(), "wt" ) : fopen(tempfilename.c_str(), "wb");
 		if(!f)
 			throw io_error();
 
-		if(fprintf( f, "%s", content.c_str() ) < 0)
+		if( textmode && fprintf( f, "%s", content.c_str() ) < 0)
+			throw io_error();
+
+		if (!textmode && fwrite(content.c_str(), sizeof(uint8_t), content.size(), f) != content.size())
 			throw io_error();
 
 		if(fflush(f) != 0)
@@ -1680,7 +1683,7 @@ void atomicReplace( std::string const& path, std::string const& content ) {
 		INJECT_FAULT( io_error, "atomicReplace" );
 	}
 	catch(Error &e) {
-		TraceEvent(SevWarn, "AtomicReplace").detail("path", path).error(e).GetLastError();
+		TraceEvent(SevWarn, "AtomicReplace").detail("Path", path).error(e).GetLastError();
 		if (f) fclose(f);
 		throw;
 	}
@@ -1741,11 +1744,10 @@ bool createDirectory( std::string const& directory ) {
 			if (errno == EEXIST)
 				continue;
 
-			TraceEvent(SevError, "mkdir").detail("Directory", directory).GetLastError();
+			TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
 			if (errno == EACCES)
 				throw file_not_writable();
 			else {
-				TraceEvent(SevError, "CreateDirectory").detail("Directory", directory).GetLastError();
 				throw platform_error();
 			}
 		}
@@ -1808,7 +1810,7 @@ std::string parentDirectory( std::string const& filename ) {
 	size_t sep = abs.find_last_of( CANONICAL_PATH_SEPARATOR );
 	if (sep == std::string::npos) {
 		TraceEvent(SevError, "GetParentDirectoryOfFile")
-			.detail("file", filename)
+			.detail("File", filename)
 			.GetLastError();
 		throw platform_error();
 	}
@@ -2074,7 +2076,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 	FILE* f = fopen(filename.c_str(), "wb");
 	if (!f)
 	{
-		TraceEvent(SevError, "writeFileBytes").detail("Filename", filename).GetLastError();
+		TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).GetLastError();
 		throw file_not_writable();
 	}
 
@@ -2082,7 +2084,7 @@ void writeFileBytes(std::string const& filename, const uint8_t* data, size_t cou
 		size_t length = fwrite(data, sizeof(uint8_t), count, f);
 		if (length != count)
 		{
-			TraceEvent(SevError, "writeFileBytes").detail("Filename", filename).detail("WrittenLength", length).GetLastError();
+			TraceEvent(SevError, "WriteFileBytes").detail("Filename", filename).detail("WrittenLength", length).GetLastError();
 			throw file_not_writable();
 		}
 	}
@@ -2507,9 +2509,9 @@ void crashHandler(int sig) {
 
 	fflush(stdout);
 	TraceEvent(error ? SevError : SevInfo, error ? "Crash" : "ProcessTerminated")
-		.detail("signal", sig)
-		.detail("name", strsignal(sig))
-		.detail("trace", backtrace);
+		.detail("Signal", sig)
+		.detail("Name", strsignal(sig))
+		.detail("Trace", backtrace);
 	flushTraceFileVoid();
 
 	fprintf(stderr, "SIGNAL: %s (%d)\n", strsignal(sig), sig);

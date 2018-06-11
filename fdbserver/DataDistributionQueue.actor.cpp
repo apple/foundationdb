@@ -487,10 +487,10 @@ struct DDQueueData {
 				for( int i = 0; i < it->second.ledger.size() - 1; i++ ) {
 					if( it->second.ledger[i] < it->second.ledger[i+1] )
 						TraceEvent(SevError, "DDQueueValidateError12").detail("Problem", "ascending ledger problem")
-						.detail("ledgerLevel", i).detail("ledgerValueA", it->second.ledger[i]).detail("ledgerValueB", it->second.ledger[i+1]);
+						.detail("LedgerLevel", i).detail("LedgerValueA", it->second.ledger[i]).detail("LedgerValueB", it->second.ledger[i+1]);
 					if( it->second.ledger[i] < 0.0 )
 						TraceEvent(SevError, "DDQueueValidateError13").detail("Problem", "negative ascending problem")
-						.detail("ledgerLevel", i).detail("ledgerValue", it->second.ledger[i]);
+						.detail("LedgerLevel", i).detail("LedgerValue", it->second.ledger[i]);
 				}
 			}
 
@@ -834,7 +834,7 @@ struct DDQueueData {
 			//logRelocation( rd, "LaunchedRelocation" );
 		}
 		if( now() - startTime > .001 && g_random->random01()<0.001 )
-			TraceEvent(SevWarnAlways, "LaunchingQueueSlowx1000").detail("elapsed", now() - startTime );
+			TraceEvent(SevWarnAlways, "LaunchingQueueSlowx1000").detail("Elapsed", now() - startTime );
 
 		/*if( startedHere > 0 ) {
 			TraceEvent("StartedDDRelocators", mi.id())
@@ -987,7 +987,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				error = e;
 			}
 
-			//TraceEvent("RelocateShardFinished", masterId).detail("relocateId", relocateShardInterval.pairID);
+			//TraceEvent("RelocateShardFinished", masterId).detail("RelocateId", relocateShardInterval.pairID);
 
 			if( error.code() != error_code_move_to_removed_server ) {
 				if( !error.code() ) {
@@ -1004,7 +1004,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				if( !error.code() ) {
 					TraceEvent(relocateShardInterval.end(), masterId).detail("Result","Success");
 					if(rd.keys.begin == keyServersPrefix) {
-						TraceEvent("MovedKeyServerKeys").detail("dest", destination.getDesc()).trackLatest("MovedKeyServers");
+						TraceEvent("MovedKeyServerKeys").detail("Dest", destination.getDesc()).trackLatest("MovedKeyServers");
 					}
 
 					if( !signalledTransferComplete ) {
@@ -1060,11 +1060,11 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 	for( int i = 0; i < shards.size(); i++ ) {
 		if( moveShard == shards[i] ) {
 			TraceEvent(priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ? "BgDDMountainChopper" : "BgDDValleyFiller", self->mi.id())
-				.detail("sourceBytes", sourceBytes)
-				.detail("destBytes", destBytes)
-				.detail("shardBytes", metrics.bytes)
-				.detail("sourceTeam", sourceTeam->getDesc())
-				.detail("destTeam", destTeam->getDesc());
+				.detail("SourceBytes", sourceBytes)
+				.detail("DestBytes", destBytes)
+				.detail("ShardBytes", metrics.bytes)
+				.detail("SourceTeam", sourceTeam->getDesc())
+				.detail("DestTeam", destTeam->getDesc());
 
 			self->input.send( RelocateShard( moveShard, priority ) );
 			return true;
@@ -1262,7 +1262,7 @@ ACTOR Future<Void> dataDistributionQueue(
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we are killed by the master dying
 			e.code() != error_code_movekeys_conflict)
-			TraceEvent(SevError, "dataDistributionQueueError", mi.id()).error(e);
+			TraceEvent(SevError, "DataDistributionQueueError", mi.id()).error(e);
 		throw e;
 	}
 }

@@ -312,7 +312,7 @@ void updateRate( Ratekeeper* self ) {
 				.detail("ActualTPS", actualTPS)
 				.detail("InputRate", inputRate)
 				.detail("VerySmoothDurableBytesRate", ss.verySmoothDurableBytes.smoothRate())
-				.detail("b", b);
+				.detail("B", b);
 		}*/
 
 		// Don't let any storage server use up its target bytes faster than its MVCC window!
@@ -423,7 +423,7 @@ void updateRate( Ratekeeper* self ) {
 		if( tl.lastReply.bytesInput - tl.lastReply.bytesDurable > tl.lastReply.storageBytes.free - minFreeSpace / 2 ) {
 			if(now() - self->lastWarning > 5.0) {
 				self->lastWarning = now();
-				TraceEvent(SevWarnAlways, "RkTlogMinFreeSpaceZero").detail("reasonId", tl.id);
+				TraceEvent(SevWarnAlways, "RkTlogMinFreeSpaceZero").detail("ReasonId", tl.id);
 			}
 			reasonID = tl.id;
 			limitReason = limitReason_t::log_server_min_free_space;

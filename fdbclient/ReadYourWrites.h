@@ -119,7 +119,6 @@ public:
 
 	void cancel();
 	void reset();
-	double getBackoff() { return tr.getBackoff(); }
 	void debugTransaction(UID dID) { tr.debugTransaction(dID); }
 
 	Future<Void> debug_onIdle() {  return reading; }

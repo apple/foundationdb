@@ -323,8 +323,8 @@ ACTOR Future<Void> storageServerFailureTracker(
 				: waitFailureClient(server.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, 0, TaskDataDistribution) ) )
 			{
 				status->isFailed = !status->isFailed;
-				TraceEvent("StatusMapChange", masterId).detail("ServerID", server.id()).detail("Status", status->toString()).
-					detail("Available", IFailureMonitor::failureMonitor().getState(server.waitFailure.getEndpoint()).isAvailable());
+				TraceEvent("StatusMapChange", masterId).detail("ServerID", server.id()).detail("Status", status->toString())
+					.detail("Available", IFailureMonitor::failureMonitor().getState(server.waitFailure.getEndpoint()).isAvailable());
 			}
 			when ( Void _ = wait( status->isUnhealthy() ? waitForAllDataRemoved(cx, server.id(), addedVersion) : Never() ) ) { break; }
 		}
@@ -384,7 +384,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 			Void _ = wait( tr.onError(e) );
 
 			ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
-			TraceEvent("getInitialTeamsRetry", masterId);
+			TraceEvent("GetInitialTeamsRetry", masterId);
 		}
 	}
 
@@ -463,7 +463,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 				Void _ = wait( tr.onError(e) );
 
 				ASSERT(!succeeded); //We shouldn't be retrying if we have already started modifying result in this loop
-				TraceEvent("getInitialTeamsKeyServersRetry", masterId);
+				TraceEvent("GetInitialTeamsKeyServersRetry", masterId);
 			}
 		}
 
@@ -967,7 +967,7 @@ struct DDTeamCollection {
 		}
 
 		if(totalServers.size() < configuration.storageTeamSize ) {
-			TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId).detail("Reason","Not enough servers for a team").detail("Servers",totalServers.size()).detail("teamSize", configuration.storageTeamSize);
+			TraceEvent(SevWarn, "DataDistributionBuildTeams", masterId).detail("Reason","Not enough servers for a team").detail("Servers",totalServers.size()).detail("TeamSize", configuration.storageTeamSize);
 			return addedTeams;
 		}
 
@@ -1175,7 +1175,7 @@ struct DDTeamCollection {
 		}
 		allServers.push_back( newServer.id() );
 
-		TraceEvent("AddedStorageServer", masterId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("address", newServer.waitFailure.getEndpoint().address);
+		TraceEvent("AddedStorageServer", masterId).detail("ServerID", newServer.id()).detail("ProcessClass", processClass.toString()).detail("WaitFailureToken", newServer.waitFailure.getEndpoint().token).detail("Address", newServer.waitFailure.getEndpoint().address);
 		auto &r = server_info[newServer.id()] = Reference<TCServerInfo>( new TCServerInfo( newServer, processClass ) );
 		r->tracker = storageServerTracker( this, cx, r.getPtr(), &server_status, lock, masterId, &server_info, serverChanges, errorOut, addedVersion );
 		restartTeamBuilder.trigger();
@@ -1259,7 +1259,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 	try {
 		loop {
-			TraceEvent("TeamHealthChangeDetected", self->masterId).detail("isReady", self->initialFailureReactionDelay.isReady() );
+			TraceEvent("TeamHealthChangeDetected", self->masterId).detail("IsReady", self->initialFailureReactionDelay.isReady() );
 			// Check if the number of degraded machines has changed
 			state vector<Future<Void>> change;
 			auto servers = team->getServerIDs();
@@ -1292,8 +1292,8 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 			if( serversLeft != lastServersLeft || anyUndesired != lastAnyUndesired || anyWrongConfiguration != lastWrongConfiguration || wrongSize || recheck ) {
 				TraceEvent("TeamHealthChanged", self->masterId)
-					.detail("Team", team->getDesc()).detail("serversLeft", serversLeft)
-					.detail("lastServersLeft", lastServersLeft).detail("ContainsUndesiredServer", anyUndesired)
+					.detail("Team", team->getDesc()).detail("ServersLeft", serversLeft)
+					.detail("LastServersLeft", lastServersLeft).detail("ContainsUndesiredServer", anyUndesired)
 					.detail("HealthyTeamsCount", self->healthyTeamCount).detail("IsWrongConfiguration", anyWrongConfiguration);
 
 				bool healthy = matchesPolicy && !anyUndesired && team->getServerIDs().size() == self->configuration.storageTeamSize && team->getServerIDs().size() == serversLeft;
@@ -1399,7 +1399,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 						}
 					}
 				} else {
-					TraceEvent("TeamHealthNotReady", self->masterId).detail("healthyTeamCount", self->healthyTeamCount);
+					TraceEvent("TeamHealthNotReady", self->masterId).detail("HealthyTeamCount", self->healthyTeamCount);
 				}
 			}
 
@@ -1777,7 +1777,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection *self, RecruitStorageRepl
 	isr.interfaceId = interfaceId;
 
 	TraceEvent("DDRecruiting").detail("State", "Sending request to worker").detail("WorkerID", candidateWorker.worker.id())
-		.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("interf", interfaceId).detail("addr", candidateWorker.worker.address());
+		.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("Interf", interfaceId).detail("Addr", candidateWorker.worker.address());
 
 	self->recruitingIds.insert(interfaceId);
 	self->recruitingLocalities.insert(candidateWorker.worker.address());
@@ -1788,7 +1788,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection *self, RecruitStorageRepl
 	self->recruitingStream.set(self->recruitingStream.get()-1);
 
 	TraceEvent("DDRecruiting").detail("State", "Finished request").detail("WorkerID", candidateWorker.worker.id())
-		.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("interf", interfaceId).detail("addr", candidateWorker.worker.address());
+		.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("Interf", interfaceId).detail("Addr", candidateWorker.worker.address());
 
 	if( newServer.isError() ) {
 		TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
@@ -1880,17 +1880,17 @@ ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId)
 	Void _ = wait(self->initialFailureReactionDelay);
 	Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
 	while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
-		TraceEvent("DDUpdatingStalled", self->masterId).detail("dcId", printable(dcId)).detail("zeroHealthy", self->zeroHealthyTeams->get()).detail("processingUnhealthy", self->processingUnhealthy->get());
+		TraceEvent("DDUpdatingStalled", self->masterId).detail("DcId", printable(dcId)).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
 		Void _ = wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
 	}
-	TraceEvent("DDUpdatingReplicas", self->masterId).detail("dcId", printable(dcId)).detail("replicas", self->configuration.storageTeamSize);
+	TraceEvent("DDUpdatingReplicas", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
 	state Transaction tr(self->cx);
 	loop {
 		try {
 			tr.addReadConflictRange(singleKeyRange(datacenterReplicasKeyFor(dcId)));
 			tr.set(datacenterReplicasKeyFor(dcId), datacenterReplicasValue(self->configuration.storageTeamSize));
 			Void _ = wait( tr.commit() );
-			TraceEvent("DDUpdatedReplicas", self->masterId).detail("dcId", printable(dcId)).detail("replicas", self->configuration.storageTeamSize);
+			TraceEvent("DDUpdatedReplicas", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
 			return Void();
 		} catch( Error &e ) {
 			Void _ = wait( tr.onError(e) );
@@ -1973,7 +1973,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_movekeys_conflict)
-			TraceEvent(SevError, "dataDistributionTeamCollectionError", masterId).error(e);
+			TraceEvent(SevError, "DataDistributionTeamCollectionError", masterId).error(e);
 		throw e;
 	}
 }
@@ -2133,9 +2133,9 @@ ACTOR Future<Void> dataDistribution(
 				TraceEvent("DDInitTookMoveKeysLock", mi.id());
 				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, mi.id(), lock, configuration.remoteTLogReplicationFactor > 0 ? remoteDcIds : std::vector<Optional<Key>>() ) );
 				if(initData->shards.size() > 1) {
-					TraceEvent("DDInitGotInitialDD", mi.id()).detail("b", printable(initData->shards.end()[-2].key)).detail("e", printable(initData->shards.end()[-1].key)).detail("src", describe(initData->shards.end()[-2].primarySrc)).detail("dest", describe(initData->shards.end()[-2].primaryDest)).trackLatest("InitialDD");
+					TraceEvent("DDInitGotInitialDD", mi.id()).detail("B", printable(initData->shards.end()[-2].key)).detail("E", printable(initData->shards.end()[-1].key)).detail("Src", describe(initData->shards.end()[-2].primarySrc)).detail("Dest", describe(initData->shards.end()[-2].primaryDest)).trackLatest("InitialDD");
 				} else {
-					TraceEvent("DDInitGotInitialDD", mi.id()).detail("b","").detail("e", "").detail("src", "[no items]").detail("dest", "[no items]").trackLatest("InitialDD");
+					TraceEvent("DDInitGotInitialDD", mi.id()).detail("B","").detail("E", "").detail("Src", "[no items]").detail("Dest", "[no items]").trackLatest("InitialDD");
 				}
 
 				if (initData->mode) break;
@@ -2219,7 +2219,7 @@ ACTOR Future<Void> dataDistribution(
 			if( e.code() != error_code_movekeys_conflict )
 				throw err;
 			bool ddEnabled = wait( isDataDistributionEnabled(cx) );
-			TraceEvent("DataDistributionMoveKeysConflict").detail("ddEnabled", ddEnabled);
+			TraceEvent("DataDistributionMoveKeysConflict").detail("DataDistributionEnabled", ddEnabled);
 			if( ddEnabled )
 				throw err;
 		}

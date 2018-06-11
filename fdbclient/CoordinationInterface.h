@@ -93,7 +93,7 @@ private:
 
 struct LeaderInfo {
 	UID changeID;
-	uint64_t mask = ~(127ll << 57);
+	static const uint64_t mask = ~(127ll << 57);
 	Value serializedInfo;
 	bool forward;  // If true, serializedInfo is a connection string instead!
 

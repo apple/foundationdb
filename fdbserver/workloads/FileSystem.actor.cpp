@@ -310,7 +310,7 @@ struct FileSystemWorkload : TestWorkload {
 			begin = begin + transfered;
 		}
 		if( self->loggingQueries ) {
-			TraceEvent("DeletionQueryResults").detail("serverID", serverID)
+			TraceEvent("DeletionQueryResults").detail("ServerID", serverID)
 				.detail("PathBase", base).detail("DeletedFiles", deletedFiles);
 		}
 		return Optional<Version>(Version(0));

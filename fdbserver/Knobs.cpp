@@ -228,6 +228,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION,     0.1 );
 	init( COMMIT_TRANSACTION_BATCH_INTERVAL_SMOOTHER_ALPHA,       0.1 );
 	init( COMMIT_TRANSACTION_BATCH_COUNT_MAX,                   32768 ); if( randomize && BUGGIFY ) COMMIT_TRANSACTION_BATCH_COUNT_MAX = 1000; // Do NOT increase this number beyond 32768, as CommitIds only budget 2 bytes for storing transaction id within each batch
+	init( COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT,              8LL << 30 ); if (randomize && BUGGIFY) COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT = g_random->randomInt64(100LL << 20,  8LL << 30);
 
 	// these settings disable batch bytes scaling.  Try COMMIT_TRANSACTION_BATCH_BYTES_MAX=1e6, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_BASE=50000, COMMIT_TRANSACTION_BATCH_BYTES_SCALE_POWER=0.5?
 	init( COMMIT_TRANSACTION_BATCH_BYTES_MIN,                  100000 );
@@ -239,6 +240,8 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( RESOLVER_COALESCE_TIME,                                1.0 );
 	init( BUGGIFIED_ROW_LIMIT,                  APPLY_MUTATION_BYTES ); if( randomize && BUGGIFY ) BUGGIFIED_ROW_LIMIT = g_random->randomInt(3, 30);
 	init( PROXY_SPIN_DELAY,                                     0.01 );
+	init( COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL,                 0.5  );
+	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,         10.0 );
 
 	// Master Server
 	init( MASTER_LOGGING_DELAY,                                  1.0 );
@@ -294,6 +297,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MIN_REBOOT_TIME,                                       4.0 ); if( longReboots ) MIN_REBOOT_TIME = 10.0;
 	init( MAX_REBOOT_TIME,                                       5.0 ); if( longReboots ) MAX_REBOOT_TIME = 20.0;
 	init( LOG_DIRECTORY,                                          ".");  // Will be set to the command line flag.
+	init(SERVER_MEM_LIMIT, 8LL << 30);
 
 	//Ratekeeper
 	bool slowRateKeeper = randomize && BUGGIFY;

@@ -48,6 +48,7 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( DEFAULT_BACKOFF,                         .01 ); if( randomize && BUGGIFY ) DEFAULT_BACKOFF = g_random->random01();
 	init( DEFAULT_MAX_BACKOFF,                     1.0 );
 	init( BACKOFF_GROWTH_RATE,                     2.0 );
+	init( RESOURCE_CONSTRAINED_MAX_BACKOFF,       30.0 );
 
 	init( TRANSACTION_SIZE_LIMIT,                  1e7 );
 	init( KEY_SIZE_LIMIT,                          1e4 );

@@ -163,7 +163,7 @@ struct PingWorkload : TestWorkload {
 			self->totalMessageLatency += elapsed;
 			self->maxMessageLatency += std::max(0.0, elapsed*1000.0 - self->maxMessageLatency.getValue());
 			++self->messages;
-			if (self->logging) TraceEvent("Ping").detail("ms", elapsed*1000.0).detail("To", addr);
+			if (self->logging) TraceEvent("Ping").detail("Elapsed", elapsed).detail("To", addr);
 		}
 	}
 

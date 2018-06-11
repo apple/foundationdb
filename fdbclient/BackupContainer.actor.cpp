@@ -1184,7 +1184,7 @@ Reference<IBackupContainer> IBackupContainer::openContainer(std::string url)
 		m.detail("Description", "Invalid container specification.  See help.").detail("URL", url);
 
 		if(e.code() == error_code_backup_invalid_url)
-			m.detail("lastOpenError", lastOpenError);
+			m.detail("LastOpenError", lastOpenError);
 		throw;
 	}
 }
@@ -1222,7 +1222,7 @@ ACTOR Future<std::vector<std::string>> listContainers_impl(std::string baseURL) 
 		m.detail("Description", "Invalid backup container URL prefix.  See help.").detail("URL", baseURL);
 
 		if(e.code() == error_code_backup_invalid_url)
-			m.detail("lastOpenError", IBackupContainer::lastOpenError);
+			m.detail("LastOpenError", IBackupContainer::lastOpenError);
 		throw;
 	}
 }
