@@ -720,7 +720,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
 		int storage_servers = g_random->randomInt(1, generateFearless ? 4 : 5);
-		int replication_factor = g_random->randomInt(1, generateFearless ? 4 : 5);
+		//FIXME: log replicas must be more than storage replicas because otherwise better master exists will not recognize it needs to change dcs
+		int replication_factor = g_random->randomInt(storage_servers, generateFearless ? 4 : 5);
 		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d storage_quorum:=%d "
