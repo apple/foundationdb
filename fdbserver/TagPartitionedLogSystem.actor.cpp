@@ -1748,8 +1748,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogs[1]->logServers.resize( recr.satelliteTLogs.size() );  // Dummy interfaces, so that logSystem->getPushLocations() below uses the correct size
 			logSystem->tLogs[1]->updateLocalitySet(satelliteLocalities);
 
-			for(int i = 0; i < oldLogSystem->logRouterTags; i++) {
-				Tag tag(tagLocalityLogRouter, i);
+			for(int i = -1; i < oldLogSystem->logRouterTags; i++) {
+				Tag tag = i == -1 ? txsTag : Tag(tagLocalityLogRouter, i);
 				locations.clear();
 				logSystem->tLogs[1]->getPushLocations( vector<Tag>(1, tag), locations, 0 );
 				for(int loc : locations)
