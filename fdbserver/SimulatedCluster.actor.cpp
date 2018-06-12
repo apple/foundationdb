@@ -761,12 +761,20 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		StatusObject primaryObj;
-		primaryObj["id"] = "0";
-		primaryObj["priority"] = 0;
+		StatusObject primaryDcObj;
+		primaryDcObj["id"] = "0";
+		primaryDcObj["priority"] = 0;
+		StatusArray primaryDcArr;
+		primaryDcArr.push_back(primaryDcObj);
+		primaryObj["datacenters"] = primaryDcArr;
 
 		StatusObject remoteObj;
-		remoteObj["id"] = "1";
-		remoteObj["priority"] = 1;
+		StatusObject remoteDcObj;
+		remoteDcObj["id"] = "1";
+		remoteDcObj["priority"] = 1;
+		StatusArray remoteDcArr;
+		remoteDcArr.push_back(remoteDcObj);
+		remoteObj["datacenters"] = remoteDcArr;
 
 		bool needsRemote = generateFearless;
 		if(generateFearless) {
