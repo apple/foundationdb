@@ -2,6 +2,19 @@
 Release Notes
 #############
 
+5.2.4
+=====
+
+Features
+--------
+
+* tls_verify_peers splits input using the '|' character. `(PR #468) https://github.com/apple/foundationdb/pull/468`_
+
+Fixes
+-----
+
+* fdbcli kill command did not work when TLS was enabled. `(PR #471) https://github.com/apple/foundationdb/pull/471`_
+
 5.2.3
 =====
 
