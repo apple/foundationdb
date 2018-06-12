@@ -1110,7 +1110,7 @@ the most part, this also implies that ``T == fdb.tuple.unpack(fdb.tuple.pack(T))
    differ from the default sort when non-ASCII characters are included within the string), and UUIDs are sorted
    based on their big-endian byte representation. Single-precision floating point numbers are sorted before all
    double-precision floating point numbers, and for floating point numbers, -NaN is sorted before -Infinity which
-   is sorted before finite numbers which are sorted before Infinity which is sorted before NaN. Different represetations
+   is sorted before finite numbers which are sorted before Infinity which is sorted before NaN. Different representations
    of NaN are not treated as equal.
 
    Additionally, the tuple serialization contract is such that after they are serialized, the byte-string representations
