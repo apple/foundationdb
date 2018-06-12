@@ -51,7 +51,7 @@ C
 
 FoundationDB's C bindings are installed with the FoundationDB client binaries. You can find more details in the :doc:`C API Documentation <api-c>`.
 
-Python 2.7 - 3.4
+Python 2.7 - 3.5
 ----------------
 
 On macOS and Windows, the FoundationDB Python API bindings are installed as part of your FoundationDB installation.
