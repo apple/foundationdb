@@ -332,6 +332,7 @@ struct DDQueueData {
 	MasterInterface mi;
 	MoveKeysLock lock;
 	Database cx;
+	Version recoveryVersion;
 
 	std::vector<TeamCollectionInterface> teamCollections;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -394,12 +395,12 @@ struct DDQueueData {
 	DDQueueData( MasterInterface mi, MoveKeysLock lock, Database cx, std::vector<TeamCollectionInterface> teamCollections,
 		Reference<ShardsAffectedByTeamFailure> sABTF, PromiseStream<Promise<int64_t>> getAverageShardBytes,
 		int teamSize, int durableStorageQuorumPerTeam, PromiseStream<RelocateShard> input,
-		PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited ) :
+		PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited, Version recoveryVersion ) :
 			activeRelocations( 0 ), queuedRelocations( 0 ), bytesWritten ( 0 ), teamCollections( teamCollections ),
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), mi( mi ), lock( lock ),
 			cx( cx ), teamSize( teamSize ), durableStorageQuorumPerTeam( durableStorageQuorumPerTeam ), input( input ),
 			getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
-			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited),
+			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited), recoveryVersion(recoveryVersion),
 			suppressIntervals(0), lastInterval(0), unhealthyRelocations(0), rawProcessingUnhealthy( new AsyncVar<bool>(false) ) {}
 
 	void validate() {
@@ -486,10 +487,10 @@ struct DDQueueData {
 				for( int i = 0; i < it->second.ledger.size() - 1; i++ ) {
 					if( it->second.ledger[i] < it->second.ledger[i+1] )
 						TraceEvent(SevError, "DDQueueValidateError12").detail("Problem", "ascending ledger problem")
-						.detail("ledgerLevel", i).detail("ledgerValueA", it->second.ledger[i]).detail("ledgerValueB", it->second.ledger[i+1]);
+						.detail("LedgerLevel", i).detail("LedgerValueA", it->second.ledger[i]).detail("LedgerValueB", it->second.ledger[i+1]);
 					if( it->second.ledger[i] < 0.0 )
 						TraceEvent(SevError, "DDQueueValidateError13").detail("Problem", "negative ascending problem")
-						.detail("ledgerLevel", i).detail("ledgerValue", it->second.ledger[i]);
+						.detail("LedgerLevel", i).detail("LedgerValue", it->second.ledger[i]);
 				}
 			}
 
@@ -833,7 +834,7 @@ struct DDQueueData {
 			//logRelocation( rd, "LaunchedRelocation" );
 		}
 		if( now() - startTime > .001 && g_random->random01()<0.001 )
-			TraceEvent(SevWarnAlways, "LaunchingQueueSlowx1000").detail("elapsed", now() - startTime );
+			TraceEvent(SevWarnAlways, "LaunchingQueueSlowx1000").detail("Elapsed", now() - startTime );
 
 		/*if( startedHere > 0 ) {
 			TraceEvent("StartedDDRelocators", mi.id())
@@ -940,7 +941,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 
 			//FIXME: do not add data in flight to servers that were already in the src.
-			destination.addDataInFlightToTeam(+metrics.bytes);
+			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
 
 			TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", masterId)
 				.detail("PairId", relocateShardInterval.pairID)
@@ -953,6 +954,8 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				durableStorageQuorum, dataMovementComplete,
 				&self->startMoveKeysParallelismLock,
 				&self->finishMoveKeysParallelismLock,
+				self->recoveryVersion,
+				self->teamCollections.size() > 1,
 				relocateShardInterval.pairID );
 			state Future<Void> pollHealth = (!anyHealthy || signalledTransferComplete) ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
 			try {
@@ -984,24 +987,24 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				error = e;
 			}
 
-			//TraceEvent("RelocateShardFinished", masterId).detail("relocateId", relocateShardInterval.pairID);
+			//TraceEvent("RelocateShardFinished", masterId).detail("RelocateId", relocateShardInterval.pairID);
 
 			if( error.code() != error_code_move_to_removed_server ) {
 				if( !error.code() ) {
 					try {
-						Void _ = wait( destination.updatePhysicalMetrics() ); //prevent a gap between the polling for an increase in physical metrics and decrementing data in flight
+						Void _ = wait( healthyDestinations.updatePhysicalMetrics() ); //prevent a gap between the polling for an increase in physical metrics and decrementing data in flight
 					} catch( Error& e ) {
 						error = e;
 					}
 				}
 
-				destination.addDataInFlightToTeam( -metrics.bytes );
+				healthyDestinations.addDataInFlightToTeam( -metrics.bytes );
 
 				// onFinished.send( rs );
 				if( !error.code() ) {
 					TraceEvent(relocateShardInterval.end(), masterId).detail("Result","Success");
 					if(rd.keys.begin == keyServersPrefix) {
-						TraceEvent("MovedKeyServerKeys").detail("dest", destination.getDesc()).trackLatest("MovedKeyServers");
+						TraceEvent("MovedKeyServerKeys").detail("Dest", destination.getDesc()).trackLatest("MovedKeyServers");
 					}
 
 					if( !signalledTransferComplete ) {
@@ -1017,7 +1020,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				}
 			} else {
 				TEST(true);  // move to removed server
-				destination.addDataInFlightToTeam( -metrics.bytes );
+				healthyDestinations.addDataInFlightToTeam( -metrics.bytes );
 				Void _ = wait( delay( SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskDataDistributionLaunch ) );
 			}
 		}
@@ -1057,11 +1060,11 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 	for( int i = 0; i < shards.size(); i++ ) {
 		if( moveShard == shards[i] ) {
 			TraceEvent(priority == PRIORITY_REBALANCE_OVERUTILIZED_TEAM ? "BgDDMountainChopper" : "BgDDValleyFiller", self->mi.id())
-				.detail("sourceBytes", sourceBytes)
-				.detail("destBytes", destBytes)
-				.detail("shardBytes", metrics.bytes)
-				.detail("sourceTeam", sourceTeam->getDesc())
-				.detail("destTeam", destTeam->getDesc());
+				.detail("SourceBytes", sourceBytes)
+				.detail("DestBytes", destBytes)
+				.detail("ShardBytes", metrics.bytes)
+				.detail("SourceTeam", sourceTeam->getDesc())
+				.detail("DestTeam", destTeam->getDesc());
 
 			self->input.send( RelocateShard( moveShard, priority ) );
 			return true;
@@ -1153,9 +1156,10 @@ ACTOR Future<Void> dataDistributionQueue(
 	MasterInterface mi,
 	int teamSize,
 	int durableStorageQuorum,
-	double* lastLimited)
+	double* lastLimited,
+	Version recoveryVersion)
 {
-	state DDQueueData self( mi, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, durableStorageQuorum, input, getShardMetrics, lastLimited );
+	state DDQueueData self( mi, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, durableStorageQuorum, input, getShardMetrics, lastLimited, recoveryVersion );
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;
@@ -1258,7 +1262,7 @@ ACTOR Future<Void> dataDistributionQueue(
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we are killed by the master dying
 			e.code() != error_code_movekeys_conflict)
-			TraceEvent(SevError, "dataDistributionQueueError", mi.id()).error(e);
+			TraceEvent(SevError, "DataDistributionQueueError", mi.id()).error(e);
 		throw e;
 	}
 }

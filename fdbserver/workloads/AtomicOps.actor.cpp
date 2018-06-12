@@ -45,7 +45,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		// Atomic OPs Min and And have modified behavior from api version 510. Hence allowing testing for older version (500) with a 10% probability
 		// Actual change of api Version happens in setup
 		apiVersion500 = ((sharedRandomNumber % 10) == 0);
-		TraceEvent("AtomicOpsApiVersion500").detail("apiVersion500", apiVersion500);
+		TraceEvent("AtomicOpsApiVersion500").detail("ApiVersion500", apiVersion500);
 
 		int64_t randNum = sharedRandomNumber / 10;
 		if(opType == -1)
@@ -87,7 +87,7 @@ struct AtomicOpsWorkload : TestWorkload {
 		default:
 			ASSERT(false);
 		}
-		TraceEvent("AtomicWorkload").detail("opType", opType);
+		TraceEvent("AtomicWorkload").detail("OpType", opType);
 	}
 
 	virtual std::string description() { return "AtomicOps"; }
@@ -188,7 +188,7 @@ struct AtomicOpsWorkload : TestWorkload {
 					}
 
 					if(tr.get(LiteralStringRef("xlogResult")).get() != tr.get(LiteralStringRef("xopsResult")).get()) {
-						TraceEvent(SevError, "LogMismatch").detail("logResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("opsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
+						TraceEvent(SevError, "LogMismatch").detail("LogResult", printable(tr.get(LiteralStringRef("xlogResult")).get())).detail("OpsResult",  printable(tr.get(LiteralStringRef("xopsResult")).get().get()));
 					}
 
 					if( self->opType == MutationRef::AddValue ) {
@@ -202,7 +202,7 @@ struct AtomicOpsWorkload : TestWorkload {
 							logResult += intValue;
 						}
 						if(logResult != opsResult) {
-							TraceEvent(SevError, "LogAddMismatch").detail("logResult", logResult).detail("opResult", opsResult).detail("opsResultStr", printable(opsResultStr)).detail("size", opsResultStr.size());
+							TraceEvent(SevError, "LogAddMismatch").detail("LogResult", logResult).detail("OpResult", opsResult).detail("OpsResultStr", printable(opsResultStr)).detail("Size", opsResultStr.size());
 						}
 					}
 					break;

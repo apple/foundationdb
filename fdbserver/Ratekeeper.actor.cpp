@@ -312,7 +312,7 @@ void updateRate( Ratekeeper* self ) {
 				.detail("ActualTPS", actualTPS)
 				.detail("InputRate", inputRate)
 				.detail("VerySmoothDurableBytesRate", ss.verySmoothDurableBytes.smoothRate())
-				.detail("b", b);
+				.detail("B", b);
 		}*/
 
 		// Don't let any storage server use up its target bytes faster than its MVCC window!
@@ -423,7 +423,7 @@ void updateRate( Ratekeeper* self ) {
 		if( tl.lastReply.bytesInput - tl.lastReply.bytesDurable > tl.lastReply.storageBytes.free - minFreeSpace / 2 ) {
 			if(now() - self->lastWarning > 5.0) {
 				self->lastWarning = now();
-				TraceEvent(SevWarnAlways, "RkTlogMinFreeSpaceZero").detail("reasonId", tl.id);
+				TraceEvent(SevWarnAlways, "RkTlogMinFreeSpaceZero").detail("ReasonId", tl.id);
 			}
 			reasonID = tl.id;
 			limitReason = limitReason_t::log_server_min_free_space;
@@ -531,7 +531,7 @@ ACTOR Future<Void> rateKeeper(
 	TraceEvent("RkStorageServerQueueSizeParameters").detail("Target", SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER).detail("Spring", SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER).detail("EBrake", SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES)
 		.detail("Rate", (SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER - SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER) / ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) + 2.0));
 
-	tlogInterfs = dbInfo->get().logSystemConfig.allPresentLogs();
+	tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 	for( int i = 0; i < tlogInterfs.size(); i++ )
 		tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );
 
@@ -566,8 +566,8 @@ ACTOR Future<Void> rateKeeper(
 			}
 			when (Void _ = wait(err.getFuture())) {}
 			when (Void _ = wait(dbInfo->onChange())) {
-				if( tlogInterfs != dbInfo->get().logSystemConfig.allPresentLogs() ) {
-					tlogInterfs = dbInfo->get().logSystemConfig.allPresentLogs();
+				if( tlogInterfs != dbInfo->get().logSystemConfig.allLocalLogs() ) {
+					tlogInterfs = dbInfo->get().logSystemConfig.allLocalLogs();
 					tlogTrackers = std::vector<Future<Void>>();
 					for( int i = 0; i < tlogInterfs.size(); i++ )
 						tlogTrackers.push_back( splitError( trackTLogQueueInfo(&self, tlogInterfs[i]), err ) );

@@ -156,7 +156,7 @@ public:
 		for (auto entry : resultEntries) {
 			locations.push_back(locationOffset + *logServerMap->getObject(entry));
 		}
-		//TraceEvent("getPushLocations").detail("Policy", tLogPolicy->info())
+		//TraceEvent("GetPushLocations").detail("Policy", tLogPolicy->info())
 		//	.detail("Results", locations.size()).detail("Selection", logServerSet->size())
 		//	.detail("Included", alsoServers.size()).detail("Duration", timer() - t);
 	}
@@ -473,8 +473,8 @@ struct ILogSystem {
 	virtual Future<Void> endEpoch() = 0;
 		// Ends the current epoch without starting a new one
 
-	static Reference<ILogSystem> fromServerDBInfo( UID const& dbgid, struct ServerDBInfo const& db );
-	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const&, bool excludeRemote = false );
+	static Reference<ILogSystem> fromServerDBInfo( UID const& dbgid, struct ServerDBInfo const& db, bool usePreviousEpochEnd = false );
+	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const&, bool excludeRemote = false, bool usePreviousEpochEnd = false );
 		// Constructs a new ILogSystem implementation from the given ServerDBInfo/LogSystemConfig.  Might return a null reference if there isn't a fully recovered log system available.
 		// The caller can peek() the returned log system and can push() if it has version numbers reserved for it and prevVersions
 

@@ -67,7 +67,7 @@ struct MoveKeysWorkload : TestWorkload {
 
 			state int oldMode = wait( setDDMode( cx, 0 ) );
 			TraceEvent("RMKStartModeSetting");
-			Void _ = wait( timeout( reportErrors( self->worker( cx, self ), "moveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
+			Void _ = wait( timeout( reportErrors( self->worker( cx, self ), "MoveKeysWorkloadWorkerError" ), self->testDuration, Void() ) );
 			// Always set the DD mode back, even if we die with an error
 			TraceEvent("RMKDoneMoving");
 			int _ = wait( setDDMode( cx, oldMode ) );
@@ -136,7 +136,7 @@ struct MoveKeysWorkload : TestWorkload {
 			state Promise<Void> signal;
 			Void _ = wait( moveKeys( cx, keys, destinationTeamIDs, destinationTeamIDs, lock, 
 										self->configuration.durableStorageQuorum, 
-										signal, &fl1, &fl2, relocateShardInterval.pairID ) );
+										signal, &fl1, &fl2, invalidVersion, false, relocateShardInterval.pairID ) );
 			TraceEvent(relocateShardInterval.end()).detail("Result","Success");
 			return Void();
 		} catch (Error& e) {

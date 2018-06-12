@@ -227,7 +227,8 @@ Future<Void> dataDistributionQueue(
 	MasterInterface const& mi,
 	int const& teamSize,
 	int const& durableStorageQuorum,
-	double* const& lastLimited );
+	double* const& lastLimited,
+	Version const& recoveryVersion);
 
 //Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {

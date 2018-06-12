@@ -90,9 +90,9 @@ ACTOR Future<Void> resolveBatch(
 
 	while( self->totalStateBytes.get() > SERVER_KNOBS->RESOLVER_STATE_MEMORY_LIMIT && self->recentStateTransactionSizes.size() && 
 		proxyInfo.lastVersion > self->recentStateTransactionSizes.front().first && req.version > self->neededVersion.get() ) {
-		/*TraceEvent("ResolveBatchDelay").detail("From", proxyAddress).detail("stateBytes", self->totalStateBytes.get()).detail("RecentStateTransactionSize", self->recentStateTransactionSizes.size())
-			.detail("lastVersion", proxyInfo.lastVersion).detail("RequestVersion", req.version).detail("NeededVersion", self->neededVersion.get())
-			.detail("recentStateVer", self->recentStateTransactions.begin()->key);*/
+		/*TraceEvent("ResolveBatchDelay").detail("From", proxyAddress).detail("StateBytes", self->totalStateBytes.get()).detail("RecentStateTransactionSize", self->recentStateTransactionSizes.size())
+			.detail("LastVersion", proxyInfo.lastVersion).detail("RequestVersion", req.version).detail("NeededVersion", self->neededVersion.get())
+			.detail("RecentStateVer", self->recentStateTransactions.begin()->key);*/
 
 		Void _ = wait( self->totalStateBytes.onChange() || self->neededVersion.onChange() );
 	}

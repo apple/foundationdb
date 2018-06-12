@@ -446,12 +446,12 @@ TEST_CASE("fdbserver/metrics/TraceEvents") {
 			stringMetric = Standalone<StringRef>(StringRef((uint8_t *)s, strlen(s)), arena);
 
 			TraceEvent("Dummy")
-				.detail("a", x)
-				.detail("x", 1.5 * x)
-				.detail("d", s)
-				.detail("j", sin(2.0 * x))
-				.detail("k", sin(3.0 * x))
-				.detail("s", sstart + (double)chunk * sin(10.0 * i / chunk));
+				.detail("A", x)
+				.detail("X", 1.5 * x)
+				.detail("D", s)
+				.detail("J", sin(2.0 * x))
+				.detail("K", sin(3.0 * x))
+				.detail("S", sstart + (double)chunk * sin(10.0 * i / chunk));
 		}
 		Void _ = wait(delay(w));
 
@@ -460,14 +460,14 @@ TEST_CASE("fdbserver/metrics/TraceEvents") {
 			intMetric = x;
 			boolMetric = x % 2 > 0;
 			TraceEvent("Dummy")
-				.detail("a", x)
-				.detail("x", 1.5 * x)
-				.detail("b", x*2)
-				.detail("y", 3.0 * x)
-				.detail("d", d[x % 3])
-				.detail("j", sin(2.0 * x))
-				.detail("k", sin(3.0 * x))
-				.detail("s", sstart + (double)chunk * sin(40.0 * i / chunk));
+				.detail("A", x)
+				.detail("X", 1.5 * x)
+				.detail("B", x*2)
+				.detail("Y", 3.0 * x)
+				.detail("D", d[x % 3])
+				.detail("J", sin(2.0 * x))
+				.detail("K", sin(3.0 * x))
+				.detail("S", sstart + (double)chunk * sin(40.0 * i / chunk));
 		}
 		Void _ = wait(delay(w));
 
@@ -476,14 +476,14 @@ TEST_CASE("fdbserver/metrics/TraceEvents") {
 			intMetric = x;
 			boolMetric = x % 2 > 0;
 			TraceEvent("Dummy")
-				.detail("a", x)
-				.detail("x", 1.5 * x)
-				.detail("c", x*3)
-				.detail("z", 4.5 * x)
-				.detail("d", d[x % 3])
-				.detail("j", sin(2.0 * x))
-				.detail("k", sin(3.0 * x))
-				.detail("s", sstart + (double)chunk * sin(160.0 * i / chunk));
+				.detail("A", x)
+				.detail("X", 1.5 * x)
+				.detail("C", x*3)
+				.detail("Z", 4.5 * x)
+				.detail("D", d[x % 3])
+				.detail("J", sin(2.0 * x))
+				.detail("K", sin(3.0 * x))
+				.detail("S", sstart + (double)chunk * sin(160.0 * i / chunk));
 		}
 		Void _ = wait(delay(w));
 

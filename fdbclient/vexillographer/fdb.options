@@ -46,8 +46,8 @@ description is not currently required but encouraged.
             paramType="Int" paramDescription="max total size of trace files"
             description="Sets the maximum size of all the trace output files put together. This value should be in the range ``[0, INT64_MAX]``. If the value is set to 0, there is no limit on the total size of the files. The default is a maximum size of 104,857,600 bytes. If the default roll size is used, this means that a maximum of 10 trace files will be written at a time."/>
     <Option name="trace_log_group" code="33"
-            paramType="String" paramDescription="value of the logGroup attribute"
-            description="Sets the 'logGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'."/>
+            paramType="String" paramDescription="value of the LogGroup attribute"
+            description="Sets the 'LogGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'."/>
     <Option name="knob" code="40"
             paramType="String" paramDescription="knob_name=knob_value"
             description="Set internal tuning or debugging knobs"/>

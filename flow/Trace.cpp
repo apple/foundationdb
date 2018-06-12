@@ -135,6 +135,29 @@ SuppressionMap suppressedEvents;
 static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 
+void badField(const char *key, const char *type) {
+	fprintf(stderr, "Invalid trace event detail name: Type=%s, Field=%s\n", type, key);
+	//ASSERT_WE_THINK(false);
+}
+
+void validateFieldName(const char *key, const char *type, bool allowUnderscores=false) {
+	if(g_network && g_network->isSimulated()) {
+		if((key[0] < 'A' || key[0] > 'Z') && key[0] != '_') {
+			badField(key, type);
+			return;
+		}
+
+		const char* underscore = strchr(key, '_');
+		while(underscore) {
+			if(!allowUnderscores || ((underscore[1] < 'A' || underscore[1] > 'Z') && key[0] != '_' && key[0] != '\0')) {
+				badField(key, type);
+				return;
+			}
+				
+			underscore = strchr(&underscore[1], '_');
+		}
+	}
+}
 
 struct TraceLog {
 	Standalone< VectorRef<StringRef> > buffer;
@@ -677,6 +700,7 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 	tmpEventMetric = new DynamicEventMetric(MetricNameRef());
 	tmpEventMetric->setField("Severity", (int64_t)severity);
 
+	validateFieldName(type, type, true);
 	length = 0;
 	if (isEnabled(type, severity)) {
 		enabled = true;
@@ -711,6 +735,7 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 }
 
 TraceEvent& TraceEvent::detail( const char* key, const char* value ) {
+	validateFieldName(key, type);
 	if (enabled) {
 		if( strlen( value ) > 495 ) {
 			char replacement[500];
@@ -794,6 +819,7 @@ TraceEvent& TraceEvent::_detailf( const char* key, const char* valueFormat, ... 
 	return *this;
 }
 TraceEvent& TraceEvent::detailfv( const char* key, const char* valueFormat, va_list args, bool writeEventMetricField ) {
+	validateFieldName(key, type);
 	if (enabled) {
 		writef( " %s=\"", key );
 		va_list args2;
@@ -890,7 +916,7 @@ TraceEvent::~TraceEvent() {
 				}
 			} // End of Throttler
 
-			_detailf("logGroup", "%.*s", g_traceLog.logGroup.size(), g_traceLog.logGroup.data());
+			_detailf("LogGroup", "%.*s", g_traceLog.logGroup.size(), g_traceLog.logGroup.data());
 			if (!trackingKey.empty()) {
 				if(!isNetworkThread()) {
 					TraceEvent(SevError, "TrackLatestFromNonNetworkThread");
@@ -925,7 +951,7 @@ TraceEvent::~TraceEvent() {
 				}
 			}
 			if (severity > SevWarnAlways) {
-				latestEventCache.setLatestError( std::string(buffer, length) + " latestError=\"1\"/>\r\n" );
+				latestEventCache.setLatestError( std::string(buffer, length) + " LatestError=\"1\"/>\r\n" );
 			}
 		}
 	} catch( Error &e ) {
@@ -1038,7 +1064,7 @@ void TraceBatch::dump() {
 
 	for(int i = 0; i < attachBatch.size(); i++) {
 		char buffer[256];
-		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" ID=\"%016" PRIx64 "\" To=\"%016" PRIx64 "\"/>\r\n",
+		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" LogGroup=\"%.*s\" ID=\"%016" PRIx64 "\" To=\"%016" PRIx64 "\"/>\r\n",
 			(int)SevInfo, attachBatch[i].time, attachBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			attachBatch[i].id, attachBatch[i].to);
 		g_traceLog.write( buffer, length );
@@ -1046,7 +1072,7 @@ void TraceBatch::dump() {
 
 	for(int i = 0; i < eventBatch.size(); i++) {
 		char buffer[256];
-		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" ID=\"%016" PRIx64 "\" Location=\"%s\"/>\r\n",
+		int length = sprintf(buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"%s\" Machine=\"%d.%d.%d.%d:%d\" LogGroup=\"%.*s\" ID=\"%016" PRIx64 "\" Location=\"%s\"/>\r\n",
 			(int)SevInfo, eventBatch[i].time, eventBatch[i].name, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			eventBatch[i].id, eventBatch[i].location );
 		g_traceLog.write( buffer, length );
@@ -1054,7 +1080,7 @@ void TraceBatch::dump() {
 
 	for(int i = 0; i < buggifyBatch.size(); i++) {
 		char buffer[256];
-		int length = sprintf( buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"BuggifySection\" Machine=\"%d.%d.%d.%d:%d\" logGroup=\"%.*s\" Activated=\"%d\" File=\"%s\" Line=\"%d\"/>\r\n",
+		int length = sprintf( buffer, "<Event Severity=\"%d\" Time=\"%.6f\" Type=\"BuggifySection\" Machine=\"%d.%d.%d.%d:%d\" LogGroup=\"%.*s\" Activated=\"%d\" File=\"%s\" Line=\"%d\"/>\r\n",
 			(int)SevInfo, buggifyBatch[i].time, (local.ip>>24)&0xff,(local.ip>>16)&0xff,(local.ip>>8)&0xff,local.ip&0xff,local.port, (int)g_traceLog.logGroup.size(), g_traceLog.logGroup.data(),
 			buggifyBatch[i].activated, buggifyBatch[i].file.c_str(), buggifyBatch[i].line );
 		g_traceLog.write( buffer, length );

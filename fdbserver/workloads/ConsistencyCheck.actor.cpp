@@ -280,7 +280,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 		}
 
-		TraceEvent("ConsistencyCheck_FinishedCheck").detail("repetitions", self->repetitions);
+		TraceEvent("ConsistencyCheck_FinishedCheck").detail("Repetitions", self->repetitions);
 
 		return Void();
 	}
@@ -628,7 +628,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			//In a quiescent database, check that the team size is the same as the desired team size
 			if(self->firstClient && self->performQuiescentChecks && sourceStorageServers.size() != configuration.storageTeamSize)
 			{
-				TraceEvent("ConsistencyCheck_InvalidTeamSize").detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("teamSize", sourceStorageServers.size()).detail("desiredTeamSize", configuration.storageTeamSize);
+				TraceEvent("ConsistencyCheck_InvalidTeamSize").detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("TeamSize", sourceStorageServers.size()).detail("DesiredTeamSize", configuration.storageTeamSize);
 				self->testFailure("Invalid team size");
 				return false;
 			}
@@ -983,7 +983,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 
 			if(bytesReadInRange > 0) {
-				TraceEvent("ConsistencyCheck_ReadRange").detail("range", printable(range)).detail("bytesRead", bytesReadInRange);
+				TraceEvent("ConsistencyCheck_ReadRange").detail("Range", printable(range)).detail("BytesRead", bytesReadInRange);
 			}
 		}
 
@@ -1167,7 +1167,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		for( auto it : workers ) {
 			ISimulator::ProcessInfo* info = g_simulator.getProcessByAddress(it.first.address());
 			if(!info || info->failed) {
-				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("addr", it.first.address());
+				TraceEvent("ConsistencyCheck_FailedWorkerInList").detail("Addr", it.first.address());
 				return false;
 			}
 			workerAddresses.insert( NetworkAddress(it.first.address().ip, it.first.address().port, true, false) );
@@ -1177,7 +1177,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		for(int i = 0; i < all.size(); i++) {
 			if( all[i]->isReliable() && all[i]->name == std::string("Server") && all[i]->startingClass != ProcessClass::TesterClass ) {
 				if(!workerAddresses.count(all[i]->address)) {
-					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("addr", all[i]->address);
+					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);
 					return false;
 				}
 			}
@@ -1220,7 +1220,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		// Check cluster controller
 		ProcessClass::Fitness bestClusterControllerFitness = getBestAvailableFitness(nonExcludedClassTypes, ProcessClass::ClusterController);
 		if (!nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) || nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].machineClassFitness(ProcessClass::ClusterController) != bestClusterControllerFitness) {
-			TraceEvent("ConsistencyCheck_ClusterControllerNotBest").detail("bestClusterControllerFitness", bestClusterControllerFitness).detail("existingClusterControllerFit", nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) ? nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].machineClassFitness(ProcessClass::ClusterController) : -1);
+			TraceEvent("ConsistencyCheck_ClusterControllerNotBest").detail("BestClusterControllerFitness", bestClusterControllerFitness).detail("ExistingClusterControllerFit", nonExcludedWorkerProcessMap.count(db.clusterInterface.clientInterface.address()) ? nonExcludedWorkerProcessMap[db.clusterInterface.clientInterface.address()].machineClassFitness(ProcessClass::ClusterController) : -1);
 			return false;
 		}
 
@@ -1234,7 +1234,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 
 		if (!allWorkerProcessMap.count(db.master.address()) || (!nonExcludedWorkerProcessMap.count(db.master.address()) && bestMasterFitness != ProcessClass::ExcludeFit) || nonExcludedWorkerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) != bestMasterFitness) {
-			TraceEvent("ConsistencyCheck_MasterNotBest").detail("bestMasterFitness", bestMasterFitness).detail("existingMasterFit", nonExcludedWorkerProcessMap.count(db.master.address()) ? nonExcludedWorkerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) : -1);
+			TraceEvent("ConsistencyCheck_MasterNotBest").detail("BestMasterFitness", bestMasterFitness).detail("ExistingMasterFit", nonExcludedWorkerProcessMap.count(db.master.address()) ? nonExcludedWorkerProcessMap[db.master.address()].machineClassFitness(ProcessClass::Master) : -1);
 			return false;
 		}
 
@@ -1242,7 +1242,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		ProcessClass::Fitness bestMasterProxyFitness = getBestAvailableFitness(nonExcludedClassTypes, ProcessClass::Proxy);
 		for (auto masterProxy : db.client.proxies) {
 			if (!nonExcludedWorkerProcessMap.count(masterProxy.address()) || nonExcludedWorkerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) != bestMasterProxyFitness) {
-				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("bestMasterProxyFitness", bestMasterProxyFitness).detail("existingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) : -1);
+				TraceEvent("ConsistencyCheck_ProxyNotBest").detail("BestMasterProxyFitness", bestMasterProxyFitness).detail("ExistingMasterProxyFitness", nonExcludedWorkerProcessMap.count(masterProxy.address()) ? nonExcludedWorkerProcessMap[masterProxy.address()].machineClassFitness(ProcessClass::Proxy) : -1);
 				return false;
 			}
 		}
@@ -1251,7 +1251,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		ProcessClass::Fitness bestResolverFitness = getBestAvailableFitness(nonExcludedClassTypes, ProcessClass::Resolver);
 		for (auto resolver : db.resolvers) {
 			if (!nonExcludedWorkerProcessMap.count(resolver.address()) || nonExcludedWorkerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) != bestResolverFitness) {
-				TraceEvent("ConsistencyCheck_ResolverNotBest").detail("bestResolverFitness", bestResolverFitness).detail("existingResolverFitness", nonExcludedWorkerProcessMap.count(resolver.address()) ? nonExcludedWorkerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) : -1);
+				TraceEvent("ConsistencyCheck_ResolverNotBest").detail("BestResolverFitness", bestResolverFitness).detail("ExistingResolverFitness", nonExcludedWorkerProcessMap.count(resolver.address()) ? nonExcludedWorkerProcessMap[resolver.address()].machineClassFitness(ProcessClass::Resolver) : -1);
 				return false;
 			}
 		}

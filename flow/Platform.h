@@ -298,7 +298,7 @@ bool deleteFile( std::string const& filename );
 void renameFile( std::string const& fromPath, std::string const& toPath );
 
 // Atomically replaces the contents of the specified file.
-void atomicReplace( std::string const& path, std::string const& content );
+void atomicReplace( std::string const& path, std::string const& content, bool textmode = true );
 
 // Read a file into memory
 std::string readFileBytes( std::string const& filename, int maxSize );

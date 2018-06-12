@@ -260,7 +260,7 @@ ACTOR Future<Void> newProxies( Reference<MasterData> self, RecruitFromConfigurat
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
 		req.firstProxy = i == 0;
-		TraceEvent("ProxyReplies",self->dbgid).detail("workerID", recr.proxies[i].id());
+		TraceEvent("ProxyReplies",self->dbgid).detail("WorkerID", recr.proxies[i].id());
 		initializationReplies.push_back( transformErrors( throwErrorOr( recr.proxies[i].masterProxy.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 	}
 
@@ -278,7 +278,7 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, RecruitFromConfigur
 		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
 		req.proxyCount = recr.proxies.size();
 		req.resolverCount = recr.resolvers.size();
-		TraceEvent("ResolverReplies",self->dbgid).detail("workerID", recr.resolvers[i].id());
+		TraceEvent("ResolverReplies",self->dbgid).detail("WorkerID", recr.resolvers[i].id());
 		initializationReplies.push_back( transformErrors( throwErrorOr( recr.resolvers[i].resolver.getReplyUnlessFailedFor( req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY ) ), master_recovery_failed() ) );
 	}
 
@@ -292,7 +292,7 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 	if(self->configuration.remoteTLogReplicationFactor > 0) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if( !self->dcId_locality.count(recr.dcId) ) {
-			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("primaryId", printable(recr.dcId));
+			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("PrimaryId", printable(recr.dcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
 			tr.set(tr.arena(), tagLocalityListKeyFor(recr.dcId), tagLocalityListValue(loc));
@@ -301,7 +301,7 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 		}
 
 		if( !self->dcId_locality.count(remoteDcId) ) {
-			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("remoteId", printable(remoteDcId));
+			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("RemoteId", printable(remoteDcId));
 			int8_t loc = self->getNextLocality();
 			Standalone<CommitTransactionRef> tr;
 			tr.set(tr.arena(), tagLocalityListKeyFor(remoteDcId), tagLocalityListValue(loc));
@@ -456,7 +456,7 @@ ACTOR Future<Void> updateRegistration( Reference<MasterData> self, Reference<ILo
 
 		trigger =  self->registrationTrigger.onTrigger();
 
-		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("logs", describe(logSystem->getLogSystemConfig().tLogs));
+		TraceEvent("MasterUpdateRegistration", self->dbgid).detail("RecoveryCount", self->cstate.myDBState.recoveryCount).detail("Logs", describe(logSystem->getLogSystemConfig().tLogs));
 
 		if (!self->cstateUpdated.isSet()) {
 			Void _ = wait(sendMasterRegistration(self.getPtr(), logSystem->getLogSystemConfig(), self->provisionalProxies, self->resolvers, self->cstate.myDBState.recoveryCount, self->cstate.prevDBState.getPriorCommittedLogServers() ));
@@ -543,7 +543,7 @@ ACTOR Future<Void> recruitEverything( Reference<MasterData> self, vector<Storage
 			.detail("DesiredProxies", self->configuration.getDesiredProxies())
 			.detail("RequiredResolvers", 1)
 			.detail("DesiredResolvers", self->configuration.getDesiredResolvers())
-			.detail("storeType", self->configuration.storageServerStoreType)
+			.detail("StoreType", self->configuration.storageServerStoreType)
 			.trackLatest("MasterRecoveryState");
 	
 	//FIXME: we only need log routers for the same locality as the master
@@ -614,13 +614,13 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 		if ( self->recoveryTransactionVersion < minRequiredCommitVersion ) self->recoveryTransactionVersion = minRequiredCommitVersion;
 	}
 
-	TraceEvent("MasterRecovering", self->dbgid).detail("lastEpochEnd", self->lastEpochEnd).detail("recoveryTransactionVersion", self->recoveryTransactionVersion);
+	TraceEvent("MasterRecovering", self->dbgid).detail("LastEpochEnd", self->lastEpochEnd).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
 	Standalone<VectorRef<KeyValueRef>> rawConf = wait( self->txnStateStore->readRange( configKeys ) );
 	self->configuration.fromKeyValues( rawConf );
 	self->originalConfiguration = self->configuration;
 	self->hasConfiguration = true;
-	TraceEvent("MasterRecoveredConfig", self->dbgid).detail("conf", self->configuration.toString()).trackLatest("RecoveredConfig");
+	TraceEvent("MasterRecoveredConfig", self->dbgid).detail("Conf", self->configuration.toString()).trackLatest("RecoveredConfig");
 
 	Standalone<VectorRef<KeyValueRef>> rawLocalities = wait( self->txnStateStore->readRange( tagLocalityListKeys ) );
 	self->dcId_locality.clear();
@@ -930,7 +930,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 		for (int i = 0; i < futures.size(); i++) {
 			total += futures[i].get();
 			metrics.insert(std::make_pair(futures[i].get(), i), NoMetric());
-			//TraceEvent("ResolverMetric").detail("i", i).detail("metric", futures[i].get());
+			//TraceEvent("ResolverMetric").detail("I", i).detail("Metric", futures[i].get());
 		}
 		if( metrics.lastItem()->first - metrics.begin()->first > SERVER_KNOBS->MIN_BALANCE_DIFFERENCE ) {
 			try {
@@ -950,7 +950,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 					ResolutionSplitReply split = wait( brokenPromiseToNever(self->resolvers[metrics.lastItem()->second].split.getReply(req, TaskResolutionMetrics)) );
 					KeyRangeRef moveRange = range.second ? KeyRangeRef( range.first.begin, split.key ) : KeyRangeRef( split.key, range.first.end );
 					movedRanges.push_back_deep(movedRanges.arena(), ResolverMoveRef(moveRange, dest));
-					TraceEvent("MovingResolutionRange").detail("src", src).detail("dest", dest).detail("amount", amount).detail("startRange", printable(range.first)).detail("moveRange", printable(moveRange)).detail("used", split.used).detail("KeyResolverRanges", key_resolver.size());
+					TraceEvent("MovingResolutionRange").detail("Src", src).detail("Dest", dest).detail("Amount", amount).detail("StartRange", printable(range.first)).detail("MoveRange", printable(moveRange)).detail("Used", split.used).detail("KeyResolverRanges", key_resolver.size());
 					amount -= split.used;
 					if(moveRange != range.first || amount <= 0 )
 						break;
@@ -958,7 +958,7 @@ ACTOR Future<Void> resolutionBalancing(Reference<MasterData> self) {
 				for(auto& it : movedRanges)
 					key_resolver.insert(it.range, it.dest);
 				//for(auto& it : key_resolver.ranges())
-				//	TraceEvent("KeyResolver").detail("range", printable(it.range())).detail("value", it.value());
+				//	TraceEvent("KeyResolver").detail("Range", printable(it.range())).detail("Value", it.value());
 
 				self->resolverChangesVersion = self->version + 1;
 				for (auto& p : self->proxies)
@@ -1204,7 +1204,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	self->addActor.send( waitResolverFailure( self->resolvers ) );
 	self->addActor.send( waitProxyFailure( self->proxies ) );
 	self->addActor.send( provideVersions(self) );
-	self->addActor.send( reportErrors(updateRegistration(self, self->logSystem), "updateRegistration", self->dbgid) );
+	self->addActor.send( reportErrors(updateRegistration(self, self->logSystem), "UpdateRegistration", self->dbgid) );
 	self->registrationTrigger.trigger();
 
 	Void _ = wait(discardCommit(self->txnStateStore, self->txnStateLogAdapter));
@@ -1255,14 +1255,14 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	double recoveryDuration = now() - recoverStartTime;
 
 	TraceEvent((recoveryDuration > 4 && !g_network->isSimulated()) ? SevWarnAlways : SevInfo, "MasterRecoveryDuration", self->dbgid)
-		.detail("recoveryDuration", recoveryDuration)
+		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryDuration");
 
 	TraceEvent("MasterRecoveryState", self->dbgid)
 		.detail("StatusCode", RecoveryStatus::fully_recovered)
 		.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
-		.detail("storeType", self->configuration.storageServerStoreType)
-		.detail("recoveryDuration", recoveryDuration)
+		.detail("StoreType", self->configuration.storageServerStoreType)
+		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");
 
 	// Now that the master is recovered we can start auxiliary services that happen to run here

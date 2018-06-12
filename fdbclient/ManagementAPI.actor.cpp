@@ -192,13 +192,13 @@ ConfigurationResult::Type buildConfiguration( std::vector<StringRef> const& mode
 		std::string mode = it.toString();
 		auto m = configForToken( mode );
 		if( !m.size() ) {
-			TraceEvent(SevWarnAlways, "UnknownOption").detail("option", mode);
+			TraceEvent(SevWarnAlways, "UnknownOption").detail("Option", mode);
 			return ConfigurationResult::UNKNOWN_OPTION;
 		}
 
 		for( auto t = m.begin(); t != m.end(); ++t ) {
 			if( outConf.count( t->first ) ) {
-				TraceEvent(SevWarnAlways, "ConflictingOption").detail("option", printable(StringRef(t->first)));
+				TraceEvent(SevWarnAlways, "ConflictingOption").detail("Option", printable(StringRef(t->first)));
 				return ConfigurationResult::CONFLICTING_OPTIONS;
 			}
 			outConf[t->first] = t->second;
@@ -1107,7 +1107,7 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 			Void _ = wait( tr.commit() );
 			return oldMode;
 		} catch (Error& e) {
-			TraceEvent("setDDModeRetrying").error(e);
+			TraceEvent("SetDDModeRetrying").error(e);
 			Void _ = wait (tr.onError(e));
 		}
 	}
@@ -1185,42 +1185,40 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
 }
 
 ACTOR Future<Void> waitForFullReplication( Database cx ) {
+	state ReadYourWritesTransaction tr(cx);
 	loop {
-		state ReadYourWritesTransaction tr(cx);
-		loop {
-			try {
-				tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
-				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-				tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+		try {
+			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
+			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 
-				Standalone<RangeResultRef> confResults = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
-				ASSERT( !confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY );
-				state DatabaseConfiguration config;
-				config.fromKeyValues((VectorRef<KeyValueRef>) confResults);
+			Standalone<RangeResultRef> confResults = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
+			ASSERT( !confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY );
+			state DatabaseConfiguration config;
+			config.fromKeyValues((VectorRef<KeyValueRef>) confResults);
 			
-				state std::vector<Future<Optional<Value>>> replicasFutures;
-				for(auto& region : config.regions) {
-					replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
-				}
-				Void _ = wait( waitForAll(replicasFutures) );
-
-				state std::vector<Future<Void>> watchFutures;
-				for(int i = 0; i < config.regions.size(); i++) {
-					if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize ) {
-						watchFutures.push_back(tr.watch(datacenterReplicasKeyFor(config.regions[i].dcId)));
-					}
-				}
-
-				if( !watchFutures.size() || (config.remoteTLogReplicationFactor == 0 && watchFutures.size() < config.regions.size())) {
-					return Void();
-				}
-
-				Void _ = wait( tr.commit() );
-				Void _ = wait( waitForAny(watchFutures) );
-				break;
-			} catch (Error& e) {
-				Void _ = wait( tr.onError(e) );
+			state std::vector<Future<Optional<Value>>> replicasFutures;
+			for(auto& region : config.regions) {
+				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
+			Void _ = wait( waitForAll(replicasFutures) );
+
+			state std::vector<Future<Void>> watchFutures;
+			for(int i = 0; i < config.regions.size(); i++) {
+				if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize ) {
+					watchFutures.push_back(tr.watch(datacenterReplicasKeyFor(config.regions[i].dcId)));
+				}
+			}
+
+			if( !watchFutures.size() || (config.remoteTLogReplicationFactor == 0 && watchFutures.size() < config.regions.size())) {
+				return Void();
+			}
+
+			Void _ = wait( tr.commit() );
+			Void _ = wait( waitForAny(watchFutures) );
+			tr.reset();
+		} catch (Error& e) {
+			Void _ = wait( tr.onError(e) );
 		}
 	}
 }
@@ -1249,7 +1247,7 @@ ACTOR Future<Void> lockDatabase( Transaction* tr, UID id ) {
 		if(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
 			return Void();
 		} else {
-			//TraceEvent("DBA_lock_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 			throw database_locked();
 		}
 	}
@@ -1268,7 +1266,7 @@ ACTOR Future<Void> lockDatabase( Reference<ReadYourWritesTransaction> tr, UID id
 		if(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
 			return Void();
 		} else {
-			//TraceEvent("DBA_lock_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+			//TraceEvent("DBA_LockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 			throw database_locked();
 		}
 	}
@@ -1302,7 +1300,7 @@ ACTOR Future<Void> unlockDatabase( Transaction* tr, UID id ) {
 		return Void();
 
 	if(val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_unlock_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 		throw database_locked();
 	}
 
@@ -1319,7 +1317,7 @@ ACTOR Future<Void> unlockDatabase( Reference<ReadYourWritesTransaction> tr, UID 
 		return Void();
 
 	if(val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_unlock_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
+		//TraceEvent("DBA_UnlockLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()));
 		throw database_locked();
 	}
 
@@ -1348,7 +1346,7 @@ ACTOR Future<Void> checkDatabaseLock( Transaction* tr, UID id ) {
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_check_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
 
@@ -1361,7 +1359,7 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	Optional<Value> val = wait( tr->get(databaseLockedKey) );
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
-		//TraceEvent("DBA_check_locked").detail("expecting", id).detail("lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
+		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
 		throw database_locked();
 	}
 

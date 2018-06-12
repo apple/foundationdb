@@ -60,14 +60,14 @@ struct ProxyStats {
 
 	explicit ProxyStats(UID id, Version* pVersion, NotifiedVersion* pCommittedVersion, int64_t *commitBatchesMemBytesCountPtr)
 	  : cc("ProxyStats", id.toString()),
-		txnStartIn("txnStartIn", cc), txnStartOut("txnStartOut", cc), txnStartBatch("txnStartBatch", cc), txnSystemPriorityStartIn("txnSystemPriorityStartIn", cc), txnSystemPriorityStartOut("txnSystemPriorityStartOut", cc), txnBatchPriorityStartIn("txnBatchPriorityStartIn", cc), txnBatchPriorityStartOut("txnBatchPriorityStartOut", cc),
-		txnDefaultPriorityStartIn("txnDefaultPriorityStartIn", cc), txnDefaultPriorityStartOut("txnDefaultPriorityStartOut", cc), txnCommitIn("txnCommitIn", cc),	txnCommitVersionAssigned("txnCommitVersionAssigned", cc), txnCommitResolving("txnCommitResolving", cc), txnCommitResolved("txnCommitResolved", cc), txnCommitOut("txnCommitOut", cc),
-		txnCommitOutSuccess("txnCommitOutSuccess", cc), txnConflicts("txnConflicts", cc), commitBatchIn("commitBatchIn", cc), commitBatchOut("commitBatchOut", cc), mutationBytes("mutationBytes", cc), mutations("mutations", cc), conflictRanges("conflictRanges", cc), lastCommitVersionAssigned(0)
+		txnStartIn("TxnStartIn", cc), txnStartOut("TxnStartOut", cc), txnStartBatch("TxnStartBatch", cc), txnSystemPriorityStartIn("TxnSystemPriorityStartIn", cc), txnSystemPriorityStartOut("TxnSystemPriorityStartOut", cc), txnBatchPriorityStartIn("TxnBatchPriorityStartIn", cc), txnBatchPriorityStartOut("TxnBatchPriorityStartOut", cc),
+		txnDefaultPriorityStartIn("TxnDefaultPriorityStartIn", cc), txnDefaultPriorityStartOut("TxnDefaultPriorityStartOut", cc), txnCommitIn("TxnCommitIn", cc),	txnCommitVersionAssigned("TxnCommitVersionAssigned", cc), txnCommitResolving("TxnCommitResolving", cc), txnCommitResolved("TxnCommitResolved", cc), txnCommitOut("TxnCommitOut", cc),
+		txnCommitOutSuccess("TxnCommitOutSuccess", cc), txnConflicts("TxnConflicts", cc), commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc), conflictRanges("ConflictRanges", cc), lastCommitVersionAssigned(0)
 	{
-		specialCounter(cc, "lastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
-		specialCounter(cc, "version", [pVersion](){return *pVersion; });
-		specialCounter(cc, "committedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
-		specialCounter(cc, "commitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
+		specialCounter(cc, "LastAssignedCommitVersion", [this](){return this->lastCommitVersionAssigned;});
+		specialCounter(cc, "Version", [pVersion](){return *pVersion; });
+		specialCounter(cc, "CommittedVersion", [pCommittedVersion](){ return pCommittedVersion->get(); });
+		specialCounter(cc, "CommitBatchesMemBytesCount", [commitBatchesMemBytesCountPtr]() { return *commitBatchesMemBytesCountPtr; });
 		logger = traceCounters("ProxyMetrics", id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "ProxyMetrics");
 	}
 };
@@ -153,7 +153,7 @@ ACTOR Future<Void> queueTransactionStartRequests(std::priority_queue< std::pair<
 ACTOR void discardCommit(UID id, Future<LogSystemDiskQueueAdapter::CommitMessage> fcm, Future<Void> dummyCommitState) {
 	ASSERT(!dummyCommitState.isReady());
 	LogSystemDiskQueueAdapter::CommitMessage cm = wait(fcm);
-	TraceEvent("Discarding", id).detail("count", cm.messages.size());
+	TraceEvent("Discarding", id).detail("Count", cm.messages.size());
 	cm.acknowledge.send(Void());
 	ASSERT(dummyCommitState.isReady());
 }
@@ -346,7 +346,7 @@ ACTOR Future<Void> commitBatch(
 
 	if(localBatchNumber == 2 && !debugID.present() && self->firstProxy && !g_network->isSimulated()) {
 		debugID = g_random->randomUniqueID();
-		TraceEvent("SecondCommitBatch", self->dbgid).detail("debugID", debugID.get());
+		TraceEvent("SecondCommitBatch", self->dbgid).detail("DebugID", debugID.get());
 	}
 
 	if (debugID.present())
@@ -381,7 +381,7 @@ ACTOR Future<Void> commitBatch(
 			r->value().push_back(std::make_pair(versionReply.resolverChangesVersion,it.dest));
 	}
 
-	//TraceEvent("ProxyGotVer", self->dbgid).detail("commit", commitVersion).detail("prev", prevVersion);
+	//TraceEvent("ProxyGotVer", self->dbgid).detail("Commit", commitVersion).detail("Prev", prevVersion);
 
 	if (debugID.present())
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "MasterProxyServer.commitBatch.GotCommitVersion");
@@ -737,8 +737,8 @@ ACTOR Future<Void> commitBatch(
 
 //				if (debugMutation("BackupProxyCommit", commitVersion, backupMutation)) {
 //					TraceEvent("BackupProxyCommitTo", self->dbgid).detail("To", describe(tags)).detail("BackupMutation", backupMutation.toString())
-//						.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("destPath", printable(logRangeMutation.first))
-//						.detail("partIndex", part).detail("partIndexEndian", bigEndian32(part)).detail("partData", printable(backupMutation.param1));
+//						.detail("BackupMutationSize", val.size()).detail("Version", commitVersion).detail("DestPath", printable(logRangeMutation.first))
+//						.detail("PartIndex", part).detail("PartIndexEndian", bigEndian32(part)).detail("PartData", printable(backupMutation.param1));
 //				}
 			}
 		}
@@ -864,7 +864,7 @@ ACTOR Future<Void> commitBatch(
 		}
 		self->keyResolvers.coalesce(allKeys);
 		if(self->keyResolvers.size() != lastSize)
-			TraceEvent("KeyResolverSize", self->dbgid).detail("size", self->keyResolvers.size());
+			TraceEvent("KeyResolverSize", self->dbgid).detail("Size", self->keyResolvers.size());
 	}
 
 	// Dynamic batching for commits
@@ -1013,15 +1013,15 @@ ACTOR static Future<Void> transactionStarter(
 			forwardPromise(GRVTimer, delayJittered(SERVER_KNOBS->START_TRANSACTION_BATCH_QUEUE_CHECK_INTERVAL, TaskProxyGRVTimer));
 
 		/*TraceEvent("GRVBatch", proxy.id())
-		.detail("elapsed", elapsed)
-		.detail("nTransactionToStart", nTransactionsToStart)
-		.detail("transactionRate", transactionRate)
-		.detail("transactionQueueSize", transactionQueue.size())
-		.detail("numTransactionsStarted", transactionsStarted[0] + transactionsStarted[1]) 
-		.detail("numSystemTransactionsStarted", systemTransactionsStarted[0] + systemTransactionsStarted[1])
-		.detail("numNonSystemTransactionsStarted", transactionsStarted[0] + transactionsStarted[1] - systemTransactionsStarted[0] - systemTransactionsStarted[1])
-		.detail("transactionBudget", transactionBudget)
-		.detail("lastLeftToStart", leftToStart);*/
+		.detail("Elapsed", elapsed)
+		.detail("NTransactionToStart", nTransactionsToStart)
+		.detail("TransactionRate", transactionRate)
+		.detail("TransactionQueueSize", transactionQueue.size())
+		.detail("NumTransactionsStarted", transactionsStarted[0] + transactionsStarted[1]) 
+		.detail("NumSystemTransactionsStarted", systemTransactionsStarted[0] + systemTransactionsStarted[1])
+		.detail("NumNonSystemTransactionsStarted", transactionsStarted[0] + transactionsStarted[1] - systemTransactionsStarted[0] - systemTransactionsStarted[1])
+		.detail("TransactionBudget", transactionBudget)
+		.detail("LastLeftToStart", leftToStart);*/
 
 		// dynamic batching
 		ReplyPromise<GetReadVersionReply> GRVReply;
@@ -1199,11 +1199,11 @@ ACTOR Future<Void> masterProxyServerCore(
 	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get());
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true);
-	onError = onError || commitData.logSystem->onError();
+
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is only a approximate formula for limiting the memory used.
 	// COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR is an estimate based on experiments and not an accurate one.
 	state int64_t commitBatchesMemoryLimit = std::min(SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT, static_cast<int64_t>((SERVER_KNOBS->SERVER_MEM_LIMIT * SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
-	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("bytesLimit", commitBatchesMemoryLimit);
+	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(transactionStarter(proxy, master, db, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, &commitData));

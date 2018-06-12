@@ -165,7 +165,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 		Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
 		state Database extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
 
-		TraceEvent("StartingDrAgents").detail("connFile", connFile->getConnectionString().toString()).detail("extraString", extraFile->getConnectionString().toString());
+		TraceEvent("StartingDrAgents").detail("ConnFile", connFile->getConnectionString().toString()).detail("ExtraString", extraFile->getConnectionString().toString());
 
 		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
 		state DatabaseBackupAgent extraAgent = DatabaseBackupAgent(extraDB);
@@ -219,7 +219,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 		TraceEvent("SimulatedFDBDPreWait").detail("Cycles", cycles).detail("RandomId", randomId)
 			.detail("Address", NetworkAddress(ip, port, true, false))
 			.detailext("ZoneId", localities.zoneId())
-			.detail("waitTime", waitTime).detail("Port", port);
+			.detail("WaitTime", waitTime).detail("Port", port);
 
 		Void _ = wait( delay( waitTime ) );
 
@@ -422,8 +422,8 @@ ACTOR Future<Void> simulatedMachine(
 				.detail("CFolder0", coordFolders[0])
 				.detail("MachineIPs", toIPVectorString(ips))
 				.detail("SSL", sslEnabled)
-				.detail("processes", processes.size())
-				.detail("bootCount", bootCount)
+				.detail("Processes", processes.size())
+				.detail("BootCount", bootCount)
 				.detail("ProcessClass", processClass.toString())
 				.detail("Restarting", restarting)
 				.detail("UseSeedFile", useSeedFile)
@@ -657,12 +657,12 @@ ACTOR Future<Void> restartSimulatedSystem(
 		g_simulator.processesPerMachine = processesPerMachine;
 	}
 	catch (Error& e) {
-		TraceEvent(SevError, "restartSimulationError").error(e);
+		TraceEvent(SevError, "RestartSimulationError").error(e);
 	}
 
 	TraceEvent("RestartSimulatorSettings")
-		.detail("desiredCoordinators", g_simulator.desiredCoordinators)
-		.detail("processesPerMachine", g_simulator.processesPerMachine);
+		.detail("DesiredCoordinators", g_simulator.desiredCoordinators)
+		.detail("ProcessesPerMachine", g_simulator.processesPerMachine);
 
 	Void _ = wait(delay(1.0));
 
@@ -720,7 +720,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
 		int storage_servers = g_random->randomInt(1, generateFearless ? 4 : 5);
-		int replication_factor = g_random->randomInt(1, generateFearless ? 4 : 5);
+		//FIXME: log replicas must be more than storage replicas because otherwise better master exists will not recognize it needs to change dcs
+		int replication_factor = g_random->randomInt(storage_servers, generateFearless ? 4 : 5);
 		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d storage_quorum:=%d "
@@ -924,7 +925,8 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	if(simconfig.db.regions.size() == 2) {
 		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
 		g_simulator.remoteDcId = simconfig.db.regions[1].dcId;
-		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0 && simconfig.db.regions[0].satelliteTLogPolicy == simconfig.db.regions[1].satelliteTLogPolicy;
+		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
+		ASSERT((!simconfig.db.regions[0].satelliteTLogPolicy && !simconfig.db.regions[1].satelliteTLogPolicy) || simconfig.db.regions[0].satelliteTLogPolicy->info() == simconfig.db.regions[1].satelliteTLogPolicy->info());
 		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
 		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
 
@@ -951,7 +953,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
 	ASSERT(!g_simulator.hasRemoteReplication || g_simulator.remoteTLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
-	TraceEvent("simulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
+	TraceEvent("SimulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
 
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;
@@ -1063,9 +1065,9 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.processesPerMachine = processesPerMachine;
 
 	TraceEvent("SetupSimulatorSettings")
-		.detail("desiredCoordinators", g_simulator.desiredCoordinators)
-		.detail("physicalDatacenters", g_simulator.physicalDatacenters)
-		.detail("processesPerMachine", g_simulator.processesPerMachine);
+		.detail("DesiredCoordinators", g_simulator.desiredCoordinators)
+		.detail("PhysicalDatacenters", g_simulator.physicalDatacenters)
+		.detail("ProcessesPerMachine", g_simulator.processesPerMachine);
 
 	// SOMEDAY: add locality for testers to simulate network topology
 	// FIXME: Start workers with tester class instead, at least sometimes run tests with the testers-only flag
@@ -1180,7 +1182,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
 		Void _ = wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? 36000.0 : 5400.0));
 	} catch (Error& e) {
-		TraceEvent(SevError, "setupAndRunError").error(e);
+		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 
 	TraceEvent("SimulatedSystemDestruct");

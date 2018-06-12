@@ -1240,7 +1240,7 @@ ThreadFuture<Reference<ICluster>> MultiVersionApi::createCluster(const char *clu
 	}
 	else {
 		for( auto it : externalClients ) {
-			TraceEvent("CreatingClusterOnExternalClient").detail("LibraryPath", it.second->libPath).detail("failed", it.second->failed);
+			TraceEvent("CreatingClusterOnExternalClient").detail("LibraryPath", it.second->libPath).detail("Failed", it.second->failed);
 		}
 		return mapThreadFuture<Reference<ICluster>, Reference<ICluster>>(clusterFuture, [this, clusterFile](ErrorOr<Reference<ICluster>> cluster) {
 			if(cluster.isError()) {

@@ -94,9 +94,9 @@ Future<Void> checkMoveKeysLockReadOnly( Transaction* tr, MoveKeysLock lock ) {
 	return checkMoveKeysLock(tr, lock, false);
 }
 
-ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<Version> > fReply, UID uid, Version version ) {
-	ErrorOr<Version> reply = wait( fReply );
-	if (!reply.present() || reply.get() < version)
+ACTOR Future<Optional<UID>> checkReadWrite( Future< ErrorOr<std::pair<Version,Version>> > fReply, UID uid, Version version ) {
+	ErrorOr<std::pair<Version,Version>> reply = wait( fReply );
+	if (!reply.present() || reply.get().first < version)
 		return Optional<UID>();
 	return Optional<UID>(uid);
 }
@@ -315,7 +315,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					Void _ = wait( tr.onError(e) );
 
 					if(retries%10 == 0) {
-						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "startMoveKeysRetrying", relocationIntervalId)
+						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId)
 							.detail("Keys", printable(keys))
 							.detail("BeginKey", printable(begin))
 							.detail("NumTries", retries)
@@ -342,11 +342,11 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 	return Void();
 }
 
-ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange keys, Version minVersion, GetShardStateRequest::waitMode mode){
+ACTOR Future<Void> waitForShardReady( StorageServerInterface server, KeyRange keys, Version minVersion, Version recoveryVersion, GetShardStateRequest::waitMode mode){
 	loop {
 		try {
-			Version rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskMoveKeys ) );
-			if (rep >= minVersion) {
+			std::pair<Version,Version> rep = wait( server.getShardState.getReply( GetShardStateRequest(keys, mode), TaskMoveKeys ) );
+			if (rep.first >= minVersion && (recoveryVersion == invalidVersion || rep.second >= recoveryVersion)) {
 				return Void();
 			}
 			Void _ = wait( delayJittered( SERVER_KNOBS->SHARD_READY_DELAY, TaskMoveKeys ) );
@@ -386,7 +386,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
 				ASSERT( si.id() == dest[s] );
-				requests.push_back( waitForShardReady( si, keys, tr.getReadVersion().get(), GetShardStateRequest::FETCHING ) );
+				requests.push_back( waitForShardReady( si, keys, tr.getReadVersion().get(), invalidVersion, GetShardStateRequest::FETCHING ) );
 			}
 
 			Void _ = wait( timeoutError( waitForAll( requests ),
@@ -407,8 +407,7 @@ ACTOR Future<Void> checkFetchingState( Database cx, vector<UID> dest, KeyRange k
 // keyServers[k].dest must be the same for all k in keys
 // Set serverKeys[dest][keys] = true; serverKeys[src][keys] = false for all src not in dest
 // Should be cancelled and restarted if keyServers[keys].dest changes (?so this is no longer true?)
-ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> destinationTeam,
-		MoveKeysLock lock, int durableStorageQuorum, FlowLock *finishMoveKeysParallelismLock, UID relocationIntervalId )
+ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> destinationTeam, MoveKeysLock lock, int durableStorageQuorum, FlowLock *finishMoveKeysParallelismLock, Version recoveryVersion, bool hasRemote, UID relocationIntervalId )
 {
 	state TraceInterval interval("RelocateShard_FinishMoveKeys");
 	state TraceInterval waitInterval("");
@@ -556,7 +555,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						ASSERT(false);
 					}
 
-					waitInterval = TraceInterval("RelocateShard_FinishMoveKeys_WaitDurable");
+					waitInterval = TraceInterval("RelocateShard_FinishMoveKeysWaitDurable");
 					TraceEvent(SevDebug, waitInterval.begin(), relocationIntervalId)
 						.detail("KeyBegin", printable(keys.begin))
 						.detail("KeyEnd", printable(keys.end));
@@ -568,7 +567,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					state vector<UID> newDestinations;
 					std::set<UID> completeSrcSet(completeSrc.begin(), completeSrc.end());
 					for(auto& it : dest) {
-						if(!completeSrcSet.count(it)) {
+						if(!hasRemote || !completeSrcSet.count(it)) {
 							newDestinations.push_back(it);
 						}
 					}
@@ -590,7 +589,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					}
 
 					for(int s=0; s<storageServerInterfaces.size(); s++)
-						serverReady.push_back( waitForShardReady( storageServerInterfaces[s], keys, tr.getReadVersion().get(), GetShardStateRequest::READABLE) );
+						serverReady.push_back( waitForShardReady( storageServerInterfaces[s], keys, tr.getReadVersion().get(), recoveryVersion, GetShardStateRequest::READABLE) );
 					Void _ = wait( timeout(
 						smartQuorum( serverReady, std::max<int>(0, durableStorageQuorum - (dest.size() - newDestinations.size())), SERVER_KNOBS->SERVER_READY_QUORUM_INTERVAL, TaskMoveKeys ),
 						SERVER_KNOBS->SERVER_READY_QUORUM_TIMEOUT, Void(), TaskMoveKeys ) );
@@ -627,7 +626,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					Void _ = wait( tr.onError(error) );
 					retries++;
 					if(retries%10 == 0) {
-						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_finishMoveKeysRetrying", relocationIntervalId)
+						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_FinishMoveKeysRetrying", relocationIntervalId)
 							.error(err)
 							.detail("KeyBegin", printable(keys.begin))
 							.detail("KeyEnd", printable(keys.end))
@@ -771,7 +770,7 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 				TraceEvent(SevWarn,"NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
 				Void _ = wait( delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskDataDistributionLaunch) );
 				tr.reset();
-				TraceEvent("RemoveStorageServerRetrying").detail("canRemove", canRemove);
+				TraceEvent("RemoveStorageServerRetrying").detail("CanRemove", canRemove);
 			} else {
 
 				state Future<Optional<Value>> fListKey = tr.get( serverListKeyFor(serverID) );
@@ -839,6 +838,8 @@ ACTOR Future<Void> moveKeys(
 	Promise<Void> dataMovementComplete,
 	FlowLock *startMoveKeysParallelismLock,
 	FlowLock *finishMoveKeysParallelismLock,
+	Version recoveryVersion,
+	bool hasRemote,
 	UID relocationIntervalId)
 {
 	ASSERT( destinationTeam.size() );
@@ -847,7 +848,7 @@ ACTOR Future<Void> moveKeys(
 
 	state Future<Void> completionSignaller = checkFetchingState( cx, healthyDestinations, keys, dataMovementComplete, relocationIntervalId );
 
-	Void _ = wait( finishMoveKeys( cx, keys, destinationTeam, lock, durableStorageQuorum, finishMoveKeysParallelismLock, relocationIntervalId ) );
+	Void _ = wait( finishMoveKeys( cx, keys, destinationTeam, lock, durableStorageQuorum, finishMoveKeysParallelismLock, recoveryVersion, hasRemote, relocationIntervalId ) );
 
 	//This is defensive, but make sure that we always say that the movement is complete before moveKeys completes
 	completionSignaller.cancel();
