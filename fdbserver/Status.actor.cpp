@@ -1558,7 +1558,7 @@ static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configurat
 
 static std::string getIssueDescription(std::string name) {
 	if(name == "incorrect_cluster_file_contents") {
-		return "Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.";
+		return "Cluster file contents do not match current cluster connection string. Verify the cluster file and its parent directory are writable and that the cluster file has not been overwritten externally.";
 	}
 
 	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which is currently the only possible message
