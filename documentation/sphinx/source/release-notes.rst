@@ -16,7 +16,7 @@ Performance
 
 * Transaction logs do not copy mutations from previous generations of transaction logs. `(PR #339) <https://github.com/apple/foundationdb/pull/339>`_
 * Load balancing temporarily avoids communicating with storage servers that have fallen behind.
-* Avoid assigning storage servers responsiblity for keys they do not have.
+* Avoid assigning storage servers responsibility for keys they do not have.
 
 Fixes
 -----
