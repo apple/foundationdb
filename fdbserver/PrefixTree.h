@@ -290,7 +290,7 @@ struct PrefixTree {
 			return Parser(this).keyLen();
 		}
 
-	};
+	} __attribute__((packed, aligned(1)));
 
 	uint16_t size;   // size in bytes
 	Node root;
@@ -830,7 +830,7 @@ public:
 
 		// We now know enough about the fields present and their lengths to set the flag bits and write a header
 		// If any int is more than 8 bits then use large ints
-		bool large = prefixLen > 255 || splitLen > 255 || suffixLen > 255;
+		bool large = prefixLen > 255 || splitLen > 255 || suffixLen > 255 || val.size() > 255;
 		root.flags = large ? Node::USE_LARGE_LENGTHS : 0;
 
 		if(prefixSourceLeft)

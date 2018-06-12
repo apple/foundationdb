@@ -33,7 +33,6 @@
 #include "IKeyValueStore.h"
 #include "PrefixTree.h"
 
-#pragma pack(push, 1)
 struct BTreePage {
 	enum EPageFlags { IS_LEAF = 1};
 
@@ -44,12 +43,13 @@ struct BTreePage {
 
 	std::string toString() const {
 		std::string r;
-		r += format("BTreePage %p tree %p flags 0x%X count %d kvBytes %d\n", this, &tree, (int)flags, (int)count, (int)kvBytes);
+		r += format("BTreePage %p tree %p flags 0x%X count %d kvBytes %d", this, &tree, (int)flags, (int)count, (int)kvBytes);
 		if(count > 0) {
 			PrefixTree::Cursor c = tree.getCursor();
 			c.moveFirst();
 
 			do {
+				r += "\n  ";
 				Tuple t = Tuple::unpack(c.getKey());
 				for(int i = 0; i < t.size(); ++i) {
 					if(i != 0)
@@ -64,15 +64,13 @@ struct BTreePage {
 					r += format("'%s'", c.getValue().printable().c_str());
 				else
 					r += format("Page %u", *(const uint32_t *)c.getValue().begin());
-				r += "\n";
 
 			} while(c.moveNext());
 		}
 
 		return r;
 	}
-};
-#pragma pack(pop)
+} __attribute__((packed, aligned(1)));
 
 static void writeEmptyPage(Reference<IPage> page, uint8_t newFlags, int pageSize) {
 	BTreePage *btpage = (BTreePage *)page->begin();
@@ -87,18 +85,18 @@ template<typename Allocator>
 static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::EntriesT &entries, uint8_t newFlags, Allocator const &newPageFn, int pageSize) {
 	vector<std::pair<int, Reference<IPage>>> pages;
 
-	const float avgOverheadPerNode = 4.5;
-
 	int start = 0;
 	// User key/value bytes in page
 	int kvBytes = entries[start].key.size() + entries[start].value.size();
 	// Estimate of per-node overhead
+	const int avgOverheadPerNode = 6;
 	int overheadEstimate = avgOverheadPerNode;
 	int uniqueBytes = kvBytes;
 
 	int i = start + 1;
 	const int iEnd = entries.size();
 
+	// Subtrace space used for page and prefix tree headers
 	pageSize -= sizeof(BTreePage) + sizeof(PrefixTree);
 
 	// Go all the way to the first out of bound index so the same page building block can catch the last incomplete page
@@ -106,30 +104,37 @@ static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::Ent
 		bool end = i == iEnd;
 		int common = end ? 0 : commonPrefixLength(entries[i].key, entries[i - 1].key);
 
+		int valueSize = entries[i].value.size();
+		int kvAdd = entries[i].key.size() + valueSize;
+		int uniqueAdd = kvAdd - common;
+		int overheadAdd = avgOverheadPerNode + (valueSize ? 1 : 0);
+
 		// If the item is unlikely to fit within the page or the end is reached, write page for the interval [start, i)
-		if((uniqueBytes + (int)overheadEstimate) > pageSize || end) {
+		if((uniqueBytes + overheadEstimate + kvAdd + uniqueAdd + overheadAdd) > pageSize || end) {
 			Reference<IPage> page = newPageFn();
 			BTreePage *btpage = (BTreePage *)page->begin();
 			btpage->flags = newFlags;
 			btpage->kvBytes = kvBytes;
 			btpage->count = i - start;
 			// TODO:  Key boundary for tree level compression
-			ASSERT(btpage->tree.build(&entries[start], &entries[i], StringRef()) <= pageSize);
+			int written = btpage->tree.build(&entries[start], &entries[i], StringRef());
+			if(written > pageSize) {
+				printf("ERROR:  Wrote %d bytes to %d byte page. recs %d  uniqueBytes %d  overheadEstimate %d\n", written, pageSize, i - start, uniqueBytes, overheadEstimate);
+				ASSERT(false);
+			}
 			pages.push_back({start, page});
 			start = i;
 			kvBytes = 0;
 			overheadEstimate = 0;
-			uniqueBytes = 0;
+			uniqueBytes = common;
 			common = 0;
 			if(end)
 				break;
 		}
 
-		int valueSize = entries[i].value.size();
-		int kvSize = entries[i].key.size() + valueSize;
-		kvBytes += kvSize;
-		uniqueBytes += kvSize - common;
-		overheadEstimate += avgOverheadPerNode + valueSize ? 1 : 0;
+		kvBytes += kvAdd;
+		uniqueBytes += uniqueAdd;
+		overheadEstimate += overheadAdd;
 		++i;
 	}
 
@@ -1014,8 +1019,15 @@ private:
 
 		KeyVersionValue kvv;  // The decoded current internal record in the tree
 
-		std::string toString() const {
-			return format("cursor(0x%p) %s %s", this, pathToString().c_str(), valid() ? kvv.toString().c_str() : "<>");
+		std::string toString(const char *wrapPrefix = "") const {
+			std::string r;
+			r += format("InternalCursor(%p) ver=%lld oob=%d valid=%d", this, m_pages->getVersion(), outOfBound, valid());
+			r += format("\n%s  KVV: %s", wrapPrefix, kvv.toString().c_str());
+			for(const PageEntryLocation &p : m_path) {
+				std::string cur = p.cursor.valid() ? format("'%s' -> '%s'", p.cursor.getKey().toHexString().c_str(), p.cursor.getValue().toHexString().c_str()) : "invalid";
+				r += format("\n%s  Page %d (%d records, %d bytes)  Cursor %s", wrapPrefix, p.pageNumber, p.btPage->count, p.btPage->kvBytes, cur.c_str());
+			}
+			return r;
 		}
 
 	private:
@@ -1051,6 +1063,7 @@ private:
 			else {
 				self->m_path.resize(1);
 			}
+			self->outOfBound = 0;
 			return Void();
 		}
 
@@ -1058,20 +1071,22 @@ private:
 			state TraversalPathT &path = self->m_path;
 			Void _ = wait(reset(self));
 
+			debug_printf("InternalCursor::seekLTE(%s): start  %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->toString("  ").c_str());
+
 			loop {
-				debug_printf("seekLTE(%s): loop start path: %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
 				state PageEntryLocation *p = &path.back();
 
 				if(p->btPage->count == 0) {
 					ASSERT(path.size() == 1);  // This must be the root page.
+					self->outOfBound = -1;
 					self->kvv.version = invalidVersion;
-					debug_printf("seekLTE(%s): root page empty\n", KeyVersionValue::unpack(key).toString().c_str());
+					debug_printf("InternalCursor::seekLTE(%s): Exit, root page empty.  %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->toString("  ").c_str());
 					return Void();
 				}
 
 				state bool foundLTE = p->cursor.seekLessThanOrEqual(key);
-				debug_printf("seekLTE(%s): seekResult: %d  path: %s\n", KeyVersionValue::unpack(key).toString().c_str(), foundLTE, self->pathToString().c_str());
-
+				debug_printf("InternalCursor::seekLTE(%s): Seek on path tail, result %d.  %s\n", KeyVersionValue::unpack(key).toString().c_str(), foundLTE, self->toString("  ").c_str());
+				
 				if(p->btPage->flags & BTreePage::IS_LEAF) {
 					// It is possible for the current leaf key to be between the page's lower bound (in the parent page) and the 
 					// first record in the leaf page, which means we must move backwards 1 step in the database to find the
@@ -1083,8 +1098,7 @@ private:
 						// Found the target record
 						self->kvv = KeyVersionValue::unpack(path.back().cursor.getKV());
 					}
-					debug_printf("seekLTE(%s): Leaf page.  path: %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->pathToString().c_str());
-					debug_printf("seekLTE(%s): Returning kvv = %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->kvv.toString().c_str());
+					debug_printf("InternalCursor::seekLTE(%s): Exit, Found leaf page. %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->toString("  ").c_str());
 					return Void();
 				}
 				else {
@@ -1092,18 +1106,12 @@ private:
 					// TODO:  It would, however, be more efficient to check foundLTE and if false move to the previous sibling page.
 					// But the page should NOT be empty so let's assert that the cursor is valid.
 					ASSERT(p->cursor.valid());
-					Void _ = wait(pushPage(self, (LogicalPageID)*(uint32_t *)path.back().cursor.getValue().begin()));
+					LogicalPageID newPage = (LogicalPageID)*(uint32_t *)path.back().cursor.getValue().begin();
+					debug_printf("InternalCursor::seekLTE(%s): Found internal page, going to page %d.  %s\n", 
+						KeyVersionValue::unpack(key).toString().c_str(), newPage, self->toString("  ").c_str());
+					Void _ = wait(pushPage(self, newPage));
 				}
 			}
-		}
-
-		std::string pathToString() const {
-			std::string s = format("@%lld: ", m_pages->getVersion());
-			for(const PageEntryLocation &p : m_path) {
-				std::string cur = p.cursor.valid() ? format("'%s' -> '%s'", p.cursor.getKey().toHexString().c_str(), p.cursor.getValue().toHexString().c_str()) : "invalid";
-				s.append(format(" [page %d, count %d, kvBytes %d, cursor at '%s']", p.pageNumber, p.btPage->count, p.btPage->kvBytes, cur.c_str()));
-			}
-			return s;
 		}
 
 		// Move one 'internal' key/value/version/valueindex/value record.
@@ -1112,12 +1120,21 @@ private:
 			state TraversalPathT &path = self->m_path;
 			state const char *dir = fwd ? "forward" : "backward";
 
-			debug_printf("move(%s): start:         %s\n", dir, self->pathToString().c_str());
+			debug_printf("InternalCursor::move(%s) start  %s\n", dir, self->toString("  ").c_str());
 
 			// If cursor was out of bound, adjust out of boundness by 1 in the correct direction
 			if(self->outOfBound != 0) {
 				self->outOfBound += fwd ? 1 : -1;
-				debug_printf("move(%s): was OutOfBound, which is now %d\n", dir, self->outOfBound);
+				// If we appear to be inbounds, see if we're off the other end of the db or if the page cursor is valid.
+				if(self->outOfBound == 0) {
+					if(!path.empty() && path.back().cursor.valid()) {
+						self->kvv = KeyVersionValue::unpack(path.back().cursor.getKV());
+					}
+					else {
+						self->outOfBound = fwd ? 1 : -1;
+					}
+				}
+				debug_printf("InternalCursor::move(%s) was out of bound, exiting  %s\n", dir, self->toString("  ").c_str());
 				return Void();
 			}
 
@@ -1126,11 +1143,14 @@ private:
 			while(--i >= 0) {
 				PrefixTree::Cursor &c = path[i].cursor;
 				bool success = fwd ? c.moveNext() : c.movePrev();
-				debug_printf("move(%s): during ascent, move result was %d\n", dir, success);
 				if(success) {
+					debug_printf("InternalCursor::move(%s) Move successful on path index %d\n", dir, i);
 					break;
+				} else {
+					debug_printf("InternalCursor::move(%s) Move failed on path index %d\n", dir, i);
 				}
 			}
+			debug_printf("InternalCursor::move(%s) Finished ascending  %s\n", dir, self->toString("  ").c_str());
 
 			// If no path part could be moved without going out of range then the
 			// new cursor position is either before the first record or after the last.
@@ -1139,7 +1159,7 @@ private:
 			// will make it valid again, pointing to the previous target record.
 			if(i < 0) {
 				self->outOfBound = fwd ? 1 : -1;
-				debug_printf("move(%s): Passed first/last record in db.\n", dir);
+				debug_printf("InternalCursor::move(%s) Passed an end of the database  %s\n", dir, self->toString("  ").c_str());
 				return Void();
 			}
 
@@ -1148,7 +1168,7 @@ private:
 			path.resize(i + 1);
 			state PageEntryLocation *p = &(path.back());
 
-			debug_printf("move(%s): after ascent:  %s\n", dir, self->pathToString().c_str());
+			debug_printf("InternalCursor::move(%s): Descending if needed to find a leaf\n", dir);
 
 			// Now we must traverse downward if needed until we are at a leaf level.
 			// Each movement down will start on the far left or far right depending on fwd
@@ -1163,15 +1183,15 @@ private:
 					p->cursor.moveFirst();
 				else
 					p->cursor.moveLast();
-			}
 
-			debug_printf("move(%s): after descent: %s\n", dir, self->pathToString().c_str());
+				debug_printf("InternalCursor::move(%s) Descended one level  %s\n", dir, self->toString("  ").c_str());
+			}
 
 			// Found the target record, unpack it
 			ASSERT(p->cursor.valid());
 			self->kvv = KeyVersionValue::unpack(p->cursor.getKV());
 
-			debug_printf("move(%s): Returning kvv = %s\n", dir, self->kvv.toString().c_str());
+			debug_printf("InternalCursor::move(%s) Exiting  %s\n", dir, self->toString("  ").c_str());
 			return Void();
 		}
 	};
@@ -1210,6 +1230,15 @@ private:
 		void addref() { ReferenceCounted<Cursor>::addref(); }
 		void delref() { ReferenceCounted<Cursor>::delref(); }
 
+		std::string toString(const char *wrapPrefix = "") const {
+			std::string r;
+			r += format("Cursor(%p) ver: %lld key: %s value: %s\n", this, m_version,
+				(m_kv.present() ? m_kv.get().key.printable().c_str() : "<np>"),
+				(m_kv.present() ? m_kv.get().value.printable().c_str() : ""));
+			r += format("%s  InternalCursor: %s\n", wrapPrefix, m_icursor.toString(format("%s    ", wrapPrefix).c_str()).c_str());
+			return r;
+		}
+
 	private:
 		Version m_version;
 		Reference<IPagerSnapshot> m_pagerSnapshot;
@@ -1230,7 +1259,7 @@ private:
 			self->m_kv = Optional<KeyValueRef>();
 
 			Void _ = wait(icur.seekLessThanOrEqual(record));
-			debug_printf("find%sE('%s'): %s\n", cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT"), target.toString().c_str(), icur.kvv.toString().c_str());
+			debug_printf("find%sE('%s'): %s\n", cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT"), target.toString().c_str(), icur.toString().c_str());
 
 			// If we found the target key, return it as it is valid for any cmp option
 			if(icur.valid() && icur.kvv.value.present() && icur.kvv.key == key) {
@@ -1731,11 +1760,16 @@ TEST_CASE("/redwood/correctness") {
 	state VersionedBTree *btree = new VersionedBTree(pager, pagerFile, pageSize);
 	Void _ = wait(btree->init());
 
+	state int maxCommits = 10;
+	state int maxVersionsPerCommit = 4;
+	state int maxChangesPerVersion = 5;
+
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
-	state int maxKeySize = 10; //(pageSize / 4) - 40;
+	// TODO:  Handle arbitrarily large keys
+	state int maxKeySize = 5; //(pageSize / 4) - 40;
 	ASSERT(maxKeySize > 0);
-	state int maxValueSize = 10; // pageSize * 3;
+	state int maxValueSize = 5; //pageSize * 3;
 
 	printf("Using page size %d, max key size %d, max value size %d\n", pageSize, maxKeySize, maxValueSize);
 
@@ -1746,7 +1780,7 @@ TEST_CASE("/redwood/correctness") {
 	printf("Starting from version: %lld\n", lastVer);
 
 	state Version version = lastVer + 1;
-	state int commits = g_random->randomInt(1, 2);
+	state int commits = g_random->randomInt(1, maxCommits);
 	//printf("Will do %d commits\n", commits);
 	state double insertTime = 0;
 	state int64_t keyBytesInserted = 0;
@@ -1754,12 +1788,12 @@ TEST_CASE("/redwood/correctness") {
 
 	while(commits--) {
 		state double startTime = now();
-		int versions = g_random->randomInt(1, 5);
+		int versions = g_random->randomInt(1, maxVersionsPerCommit);
 		debug_printf("  Commit will have %d versions\n", versions);
 		while(versions--) {
 			++version;
 			btree->setWriteVersion(version);
-			int changes = g_random->randomInt(0, 3);
+			int changes = g_random->randomInt(0, maxChangesPerVersion);
 			debug_printf("    Version %lld will have %d changes\n", version, changes);
 			while(changes--) {
 				if(g_random->random01() < .10) {
