@@ -1455,7 +1455,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	req.reply.send( Void() );
 
 	TraceEvent("MasterRegistrationReceived", self->id).detail("DbName", printable(req.dbName)).detail("MasterId", req.id).detail("Master", req.mi.toString()).detail("Tlogs", describe(req.logSystemConfig.tLogs)).detail("Resolvers", req.resolvers.size())
-		.detail("RecoveryState", req.recoveryState).detail("RegistrationCount", req.registrationCount).detail("Proxies", req.proxies.size()).detail("RecoveryCount", req.recoveryCount);
+		.detail("RecoveryState", (int)req.recoveryState).detail("RegistrationCount", req.registrationCount).detail("Proxies", req.proxies.size()).detail("RecoveryCount", req.recoveryCount);
 
 	//make sure the request comes from an active database
 	auto db = &self->db;

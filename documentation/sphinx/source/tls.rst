@@ -189,7 +189,7 @@ A FoundationDB server or client will only communicate with peers that present a 
 Certificate field verification
 ------------------------------
 
-With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient. You can specify multiple verification strings by providing additional tls_verify_peers command line arguments.
+With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient. You can specify multiple verification strings by providing additional tls_verify_peers command line arguments or concatenating them with ``|``. All ``,`` or ``|`` in the verify peers fields should be escaped with ``\``.
 
 Turning down the validation
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^

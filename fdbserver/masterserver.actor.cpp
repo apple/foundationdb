@@ -212,7 +212,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	Reference<AsyncVar<ServerDBInfo>> dbInfo;
 	int64_t registrationCount; // Number of different MasterRegistrationRequests sent to clusterController
 
-	RecoveryState::RecoveryState recoveryState;
+	RecoveryState recoveryState;
 
 	AsyncVar<Standalone<VectorRef<ResolverMoveRef>>> resolverChanges;
 	Version resolverChangesVersion;
