@@ -309,7 +309,7 @@
 
 .. |option-snapshot-ryw-disable-blurb| replace::
 
-    If this option is set more times in this transction than the enable option, snapshot reads will *not* see the effects of prior writes in the same transaction.
+    If this option is set more times in this transaction than the enable option, snapshot reads will *not* see the effects of prior writes in the same transaction.
 
 .. |option-priority-batch-blurb| replace::
     This transaction should be treated as low priority (other transactions should be processed first).  Useful for doing potentially saturating batch work without interfering with the latency of other operations.

@@ -2,7 +2,50 @@
 Release Notes
 #############
 
+
 6.0.0
+=====
+
+5.2.4
+=====
+
+Features
+--------
+
+* tls_verify_peers splits input using the '|' character. `(PR #468) https://github.com/apple/foundationdb/pull/468`_
+
+Fixes
+-----
+
+* fdbcli kill command did not work when TLS was enabled. `(PR #471) https://github.com/apple/foundationdb/pull/471`_
+
+5.2.3
+=====
+
+Fixes
+-----
+
+* Backup would attempt to clear too many ranges in a single transaction when erasing log ranges. `(PR #440) https://github.com/apple/foundationdb/pull/440`_
+* A read-only transaction using the ``READ_LOCK_AWARE`` option would fail if committed. `(PR #437) https://github.com/apple/foundationdb/pull/437`_
+
+5.2.2
+=====
+
+Fixes
+-----
+
+* Build would fail on recent versions of Clang. `(PR #389) https://github.com/apple/foundationdb/pull/389/files`_
+* Clusters running with TLS plugin would reject clients using non-server certificates. `(PR #396) https://github.com/apple/foundationdb/pull/396`_
+
+5.2.1
+=====
+
+Fixes
+-----
+
+* Client input validation would handle inputs to versionstamp mutations incorrectly if the API version was less than 520. `(Issue #387) <https://github.com/apple/foundationdb/issues/387>`_
+
+5.2.0
 =====
 
 Features

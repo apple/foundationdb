@@ -71,7 +71,7 @@ You can change coordinators when the following conditions are met:
 
 * a majority of the current coordinators are available;
 * all of the new coordinators are available; and
-* client and server cluster files are writable.
+* client and server cluster files and their parent directories are writable.
 
 ``fdbcli`` supports a ``coordinators`` command to specify the new list of coordinators::
 
