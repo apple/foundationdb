@@ -201,7 +201,7 @@ struct GetShardStateRequest {
 	
 	KeyRange keys;
 	int32_t mode;
-	ReplyPromise< Version > reply;
+	ReplyPromise< std::pair<Version,Version> > reply;
 	GetShardStateRequest() {}
 	GetShardStateRequest( KeyRange const& keys, waitMode mode ) : keys(keys), mode(mode) {}
 
@@ -344,12 +344,11 @@ struct StorageQueuingMetricsReply {
 	int64_t instanceID;  // changes if bytesDurable and bytesInput reset
 	int64_t bytesDurable, bytesInput;
 	StorageBytes storageBytes;
-	double readReplyRate; // for status
 	Version v; // current storage server version
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & localTime & instanceID & bytesDurable & bytesInput & readReplyRate & v & storageBytes;
+		ar & localTime & instanceID & bytesDurable & bytesInput & v & storageBytes;
 	}
 };
 

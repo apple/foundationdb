@@ -25,7 +25,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/MasterProxyInterface.h"
-#include "DatabaseConfiguration.h"
+#include "fdbclient/DatabaseConfiguration.h"
 #include "MasterInterface.h"
 #include "TLogInterface.h"
 #include "WorkerInterface.h"
@@ -67,15 +67,16 @@ struct ClusterControllerFullInterface {
 struct RecruitFromConfigurationRequest {
 	DatabaseConfiguration configuration;
 	bool recruitSeedServers;
+	int maxOldLogRouters;
 	ReplyPromise< struct RecruitFromConfigurationReply > reply;
 
 	RecruitFromConfigurationRequest() {}
-	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers)
-		: configuration(configuration), recruitSeedServers(recruitSeedServers) {}
+	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration, bool recruitSeedServers, int maxOldLogRouters)
+		: configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & configuration & recruitSeedServers & reply;
+		ar & configuration & recruitSeedServers & maxOldLogRouters & reply;
 	}
 };
 
@@ -85,12 +86,12 @@ struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> proxies;
 	vector<WorkerInterface> resolvers;
 	vector<WorkerInterface> storageServers;
-	int logRouterCount;
+	vector<WorkerInterface> oldLogRouters;
 	Optional<Key> dcId;
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & dcId & logRouterCount;
+		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & oldLogRouters & dcId;
 	}
 };
 

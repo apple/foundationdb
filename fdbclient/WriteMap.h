@@ -142,7 +142,7 @@ public:
 		bool following_conflict = it.entry().following_keys_conflict;
 		bool is_conflict = addConflict || it.is_conflict_range();
 		bool following_unreadable = it.entry().following_keys_unreadable;
-		bool is_unreadable = it.is_unreadable() || operation == MutationRef::SetVersionstampedValue || operation == MutationRef::SetVersionstampedKey;
+		bool is_unreadable = it.is_unreadable() || operation == MutationRef::SetVersionstampedValue ||  operation == MutationRef::SetVersionstampedKey;
 		bool is_dependent = operation != MutationRef::SetValue && operation != MutationRef::SetVersionstampedValue && operation != MutationRef::SetVersionstampedKey;
 
 		if (it.entry().key != key) {

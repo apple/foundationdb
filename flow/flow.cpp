@@ -158,12 +158,12 @@ StringRef strinc(StringRef const& str, Arena& arena) {
 }
 
 StringRef addVersionStampAtEnd(StringRef const& str, Arena& arena) {
-	int16_t size = str.size();
-	uint8_t* s = new (arena) uint8_t[size + 12];
+	int32_t size = str.size();
+	uint8_t* s = new (arena) uint8_t[size + 14];
 	memcpy(s, str.begin(), size);
 	memset(&s[size], 0, 10);
-	memcpy(&s[size+10], &size, 2);
-	return StringRef(s,size + 12);
+	memcpy(&s[size+10], &size, 4);
+	return StringRef(s,size + 14);
 }
 
 Standalone<StringRef> addVersionStampAtEnd(StringRef const& str) {

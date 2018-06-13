@@ -202,7 +202,7 @@ struct DDBalanceWorkload : TestWorkload {
 		}
 
 		if(maxMovedAmount < end-begin) {
-				TraceEvent(SevError, "LostKeys").detail("maxMoved",maxMovedAmount).detail("ShouldHaveMoved",end-begin).detail("ClientId", self->clientId).detail("MoverId", moverId)
+				TraceEvent(SevError, "LostKeys").detail("MaxMoved",maxMovedAmount).detail("ShouldHaveMoved",end-begin).detail("ClientId", self->clientId).detail("MoverId", moverId)
 								.detail("CurrentBin", sourceBin).detail("NextBin", destinationBin);
 				ASSERT( false );
 		}

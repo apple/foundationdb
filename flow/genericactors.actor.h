@@ -196,14 +196,14 @@ Future<T> timeoutError( Future<T> what, double time, int taskID = TaskDefaultDel
 }
 
 ACTOR template <class T>
-Future<T> delayed( Future<T> what, double time = 0.0 ) {
+Future<T> delayed( Future<T> what, double time = 0.0, int taskID = TaskDefaultDelay  ) {
 	try {
 		state T t = wait( what );
-		Void _ = wait( delay(time) );
+		Void _ = wait( delay( time, taskID ) );
 		return t;
 	} catch( Error &e ) {
 		state Error err = e;
-		Void _ = wait( delay(time) );
+		Void _ = wait( delay( time, taskID ) );
 		throw err;
 	}
 }
@@ -725,6 +725,20 @@ void forwardVector( Future<V> values, std::vector<Promise<T>> out ) {
 		out[i].send( in[i] );
 }
 
+ACTOR template <class T> 
+Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> out, double time ) {
+	try {
+		loop {
+			Void _ = wait( delay( time ) );
+			out->set( in->get() );
+			Void _ = wait( in->onChange() );
+		}
+	} catch (Error& e) {
+		out->set( in->get() );
+		throw;
+	}
+}
+
 Future<bool> allTrue( const std::vector<Future<bool>>& all );
 Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output );
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );
@@ -849,6 +863,7 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 
 ACTOR template <class T>
 Future<Void> smartQuorum( std::vector<Future<T>> results, int required, double extraSeconds, int taskID = TaskDefaultDelay ) {
+	if (results.empty()) return Void();
 	Void _ = wait(quorum(results, required));
 	choose {
 		when (Void _ = wait(quorum(results, (int)results.size()))) {return Void();}

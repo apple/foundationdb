@@ -33,6 +33,7 @@
     <ClInclude Include="ClusterInterface.h" />
     <ClInclude Include="CommitTransaction.h" />
     <ClInclude Include="CoordinationInterface.h" />
+    <ClInclude Include="DatabaseConfiguration.h" />
     <ActorCompiler Include="DatabaseContext.h" />
     <ActorCompiler Include="EventTypes.actor.h">
       <EnableCompile Condition="'$(Configuration)|$(Platform)'=='Debug|X64'">false</EnableCompile>
@@ -86,6 +87,7 @@
     <ActorCompiler Include="BackupAgentBase.actor.cpp" />
     <ActorCompiler Include="BackupContainer.actor.cpp" />
     <ActorCompiler Include="DatabaseBackupAgent.actor.cpp" />
+    <ClCompile Include="DatabaseConfiguration.cpp" />
     <ClCompile Include="AutoPublicAddress.cpp" />
     <ClCompile Include="FDBOptions.g.cpp" />
     <ActorCompiler Include="FileBackupAgent.actor.cpp" />

@@ -60,7 +60,9 @@ Future<Void> moveKeys(
 	Promise<Void> const& dataMovementComplete,
 	FlowLock* const& startMoveKeysParallelismLock,
 	FlowLock* const& finishMoveKeysParallelismLock,
-	UID const& relocationIntervalId);  // for logging only
+	Version const& recoveryVersion,
+	bool const& hasRemote,
+	UID const& relocationIntervalId); // for logging only
 // Eventually moves the given keys to the given destination team
 // Caller is responsible for cancelling it before issuing an overlapping move,
 // for restarting the remainder, and for not otherwise cancelling it before

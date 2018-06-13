@@ -965,7 +965,7 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 			if(value == "true")
 				spec.phases = TestWorkload::CHECK;
 		} else if( attrib == "StderrSeverity" ) {
-			TraceEvent("StderrSeverity").detail("newSeverity", value);
+			TraceEvent("StderrSeverity").detail("NewSeverity", value);
 		}
 		else if (attrib == "ClientInfoLogging") {
 			if (value == "false") {
@@ -995,24 +995,6 @@ vector<TestSpec> readTests( ifstream& ifs ) {
 	}
 
 	return result;
-}
-
-ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
-	Void _ = wait( delay(time) );
-
-	if(g_network->isSimulated()) {
-		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
-		g_simulator.hasRemoteReplication = false;
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "remote_none" ) );
-		if (g_network->isSimulated() && g_simulator.extraDB) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
-			Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
-			ConfigurationResult::Type _ = wait(changeConfig(extraDB, "remote_none"));
-		}
-	}
-
-	return Void();
 }
 
 ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControllerFullInterface>>> cc, Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector< TesterInterface > testers, vector<TestSpec> tests, StringRef startingConfiguration, LocalityData locality ) {
@@ -1081,10 +1063,6 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		}
 	}
 
-	if (useDB) {
-		state Future<Void> reconfig = reconfigureAfter(cx, 300 + (g_random->random01()*300));
-	}
-
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for(; idx < tests.size(); idx++ ) {
@@ -1115,7 +1093,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 		Reference<AsyncVar<Optional<struct ClusterInterface>>> ci, vector<TestSpec> tests, test_location_t at, 
 		int minTestersExpected, StringRef startingConfiguration, LocalityData locality ) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) | GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
-	state Future<Void> testerTimeout = delay(60.0); // wait 60 sec for testers to show up
+	state Future<Void> testerTimeout = delay(600.0); // wait 600 sec for testers to show up
 	state vector<std::pair<WorkerInterface, ProcessClass>> workers;
 
 	loop {
@@ -1149,9 +1127,9 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	Reference<AsyncVar<Optional<ClusterControllerFullInterface>>> cc( new AsyncVar<Optional<ClusterControllerFullInterface>> );
 	Reference<AsyncVar<Optional<ClusterInterface>>> ci( new AsyncVar<Optional<ClusterInterface>> );
 	vector<Future<Void>> actors;
-	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "monitorLeader") );
-	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"extractClusterInterface") );
-	actors.push_back( reportErrors(failureMonitorClient( ci, false ),"failureMonitorClient") );
+	actors.push_back( reportErrors(monitorLeader( connFile, cc ), "MonitorLeader") );
+	actors.push_back( reportErrors(extractClusterInterface( cc,ci ),"ExtractClusterInterface") );
+	actors.push_back( reportErrors(failureMonitorClient( ci, false ),"FailureMonitorClient") );
 
 	if(whatToRun == TEST_TYPE_CONSISTENCY_CHECK) {
 		TestSpec spec;
@@ -1188,11 +1166,11 @@ ACTOR Future<Void> runTests( Reference<ClusterConnectionFile> connFile, test_typ
 	if (at == TEST_HERE) {
 		Reference<AsyncVar<ServerDBInfo>> db( new AsyncVar<ServerDBInfo> );
 		vector<TesterInterface> iTesters(1);
-		actors.push_back( reportErrors(monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), db ), "monitorServerDBInfo") );  // FIXME: Locality
-		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "testerServerCore") );
+		actors.push_back( reportErrors(monitorServerDBInfo( cc, Reference<ClusterConnectionFile>(), LocalityData(), db ), "MonitorServerDBInfo") );  // FIXME: Locality
+		actors.push_back( reportErrors(testerServerCore( iTesters[0], connFile, db, locality ), "TesterServerCore") );
 		tests = runTests( cc, ci, iTesters, testSpecs, startingConfiguration, locality );
 	} else {
-		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality), "runTests");
+		tests = reportErrors(runTests(cc, ci, testSpecs, at, minTestersExpected, startingConfiguration, locality), "RunTests");
 	}
 
 	choose {

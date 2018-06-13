@@ -37,7 +37,6 @@
     <ActorCompiler Include="Coordination.actor.cpp" />
     <ActorCompiler Include="CoordinatedState.actor.cpp" />
     <ActorCompiler Include="CoroFlow.actor.cpp" />
-    <ClCompile Include="DatabaseConfiguration.cpp" />
     <ActorCompiler Include="MasterProxyServer.actor.cpp" />
     <ActorCompiler Include="KeyValueStoreSQLite.actor.cpp" />
     <ActorCompiler Include="LeaderElection.actor.cpp" />
@@ -153,7 +152,6 @@
     <ClInclude Include="CoordinatedState.h" />
     <ClInclude Include="CoordinationInterface.h" />
     <ClInclude Include="CoroFlow.h" />
-    <ClInclude Include="DatabaseConfiguration.h" />
     <ClInclude Include="DataDistribution.h" />
     <ClInclude Include="DBCoreState.h" />
     <ClInclude Include="IDiskQueue.h" />

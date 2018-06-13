@@ -313,7 +313,7 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 			Void _ = wait( delay( 5.0 ) );  // Wait for the data distribution in a small test to start
 			loop {
 				int64_t inFlight = wait( getDataInFlight( cx, workload->dbInfo ) );
-				TraceEvent("DynamicWarming").detail("inFlight", inFlight);
+				TraceEvent("DynamicWarming").detail("InFlight", inFlight);
 				if( inFlight > 1e6 ) {  // Wait for just 1 MB to be in flight
 					Void _ = wait( delay( 1.0 ) );
 				} else {

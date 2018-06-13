@@ -21,12 +21,14 @@
 #include "FDBLibTLSSession.h"
 
 #include <openssl/bio.h>
+#include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509_vfy.h>
 
 #include <exception>
-#include <iostream>
 
+#include <set>
 #include <string.h>
 #include <limits.h>
 
@@ -54,8 +56,9 @@ static ssize_t tls_write_func(struct tls *ctx, const void *buf, size_t buflen, v
 	return (ssize_t)rv;
 }
 
-FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) :
-	tls_ctx(NULL), tls_sctx(NULL), policy(policy), send_func(send_func), send_ctx(send_ctx), recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false), uid(uid) {
+FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) :
+	tls_ctx(NULL), tls_sctx(NULL), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
+	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false), uid(uid) {
 
 	if (is_client) {
 		if ((tls_ctx = tls_client()) == NULL) {
@@ -67,7 +70,7 @@ FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_cl
 			tls_free(tls_ctx);
 			throw std::runtime_error("FDBLibTLSConfigureError");
 		}
-		if (tls_connect_cbs(tls_ctx, tls_read_func, tls_write_func, this, NULL) == -1) {
+		if (tls_connect_cbs(tls_ctx, tls_read_func, tls_write_func, this, servername) == -1) {
 			policy->logf("FDBLibTLSConnectError", uid, true, "LibTLSErrorMessage", tls_error(tls_ctx), NULL);
 			tls_free(tls_ctx);
 			throw std::runtime_error("FDBLibTLSConnectError");
@@ -96,8 +99,6 @@ FDBLibTLSSession::~FDBLibTLSSession() {
 	tls_free(tls_ctx);
 	tls_free(tls_sctx);
 }
-
-int password_cb(char *buf, int size, int rwflag, void *u);
 
 bool match_criteria(X509_NAME *name, int nid, const char *value, size_t len) {
 	unsigned char *name_entry_utf8 = NULL, *criteria_utf8 = NULL;
@@ -138,65 +139,125 @@ bool match_criteria(X509_NAME *name, int nid, const char *value, size_t len) {
 	return rc;
 }
 
-bool FDBLibTLSSession::check_criteria() {
+std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
+	X509_STORE_CTX *store_ctx = NULL;
 	X509_NAME *subject, *issuer;
-	const uint8_t *cert_pem;
-	size_t cert_pem_len;
-	X509 *cert = NULL;
 	BIO *bio = NULL;
 	bool rc = false;
+	// if returning false, give a reason string
+	std::string reason = "";
 
 	// If certificate verification is disabled, there's nothing more to do.
-	if (!policy->verify_cert)
-		return true;
+	if (!verify->verify_cert)
+		return std::make_tuple(true, reason);
 
-	// If no criteria have been specified, then we're done.
-	if (policy->subject_criteria.size() == 0 && policy->issuer_criteria.size() == 0)
+	// Verify the certificate.
+	if ((store_ctx = X509_STORE_CTX_new()) == NULL) {
+		policy->logf("FDBLibTLSOutOfMemory", uid, true, NULL);
+		reason = "FDBLibTLSOutOfMemory";
+		goto err;
+	}
+	if (!X509_STORE_CTX_init(store_ctx, NULL, sk_X509_value(certs, 0), certs)) {
+		reason = "FDBLibTLSStoreCtxInit";
+		goto err;
+	}
+	X509_STORE_CTX_trusted_stack(store_ctx, policy->roots);
+	X509_STORE_CTX_set_default(store_ctx, is_client ? "ssl_server" : "ssl_client");
+	if (!verify->verify_time)
+		X509_VERIFY_PARAM_set_flags(X509_STORE_CTX_get0_param(store_ctx), X509_V_FLAG_NO_CHECK_TIME);
+	if (X509_verify_cert(store_ctx) <= 0) {
+		const char *errstr = X509_verify_cert_error_string(X509_STORE_CTX_get_error(store_ctx));
+		reason = "FDBLibTLSVerifyCert VerifyError " + std::string(errstr);
+		goto err;
+	}
+
+	// Check subject criteria.
+	if ((subject = X509_get_subject_name(sk_X509_value(store_ctx->chain, 0))) == NULL) {
+		reason = "FDBLibTLSCertSubjectError";
+		goto err;
+	}
+	for (auto &pair: verify->subject_criteria) {
+		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
+			reason = "FDBLibTLSCertSubjectMatchFailure";
+			goto err;
+		}
+	}
+
+	// Check issuer criteria.
+	if ((issuer = X509_get_issuer_name(sk_X509_value(store_ctx->chain, 0))) == NULL) {
+		reason = "FDBLibTLSCertIssuerError";
+		goto err;
+	}
+	for (auto &pair: verify->issuer_criteria) {
+		if (!match_criteria(issuer, pair.first, pair.second.c_str(), pair.second.size())) {
+			reason = "FDBLibTLSCertIssuerMatchFailure";
+			goto err;
+		}
+	}
+
+	// Check root criteria - this is the subject of the final certificate in the stack.
+	if ((subject = X509_get_subject_name(sk_X509_value(store_ctx->chain, sk_X509_num(store_ctx->chain) - 1))) == NULL) {
+		reason = "FDBLibTLSRootSubjectError";
+		goto err;
+	}
+	for (auto &pair: verify->root_criteria) {
+		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
+			reason = "FDBLibTLSRootSubjectMatchFailure";
+			goto err;
+		}
+	}
+
+	// If we got this far, everything checked out...
+	rc = true;
+
+ err:
+	X509_STORE_CTX_free(store_ctx);
+
+	return std::make_tuple(rc, reason);
+}
+
+bool FDBLibTLSSession::verify_peer() {
+	struct stack_st_X509 *certs = NULL;
+	const uint8_t *cert_pem;
+	size_t cert_pem_len;
+	bool rc = false;
+	std::set<std::string> verify_failure_reasons;
+	bool verify_success;
+	std::string verify_failure_reason;
+
+	// If no verify peer rules have been set, we are relying on standard
+	// libtls verification.
+	if (policy->verify_rules.empty())
 		return true;
 
 	if ((cert_pem = tls_peer_cert_chain_pem(tls_ctx, &cert_pem_len)) == NULL) {
 		policy->logf("FDBLibTLSNoCertError", uid, true, NULL);
 		goto err;
 	}
-	if ((bio = BIO_new_mem_buf((void *)cert_pem, cert_pem_len)) == NULL) {
-		policy->logf("FDBLibTLSOutOfMemory", NULL, true, NULL);
+	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == NULL)
 		goto err;
-	}
-	if ((cert = PEM_read_bio_X509(bio, NULL, password_cb, NULL)) == NULL) {
-		policy->logf("FDBLibTLSCertPEMError", uid, true, NULL);
-		goto err;
-	}
 
-	// Check subject criteria.
-	if ((subject = X509_get_subject_name(cert)) == NULL) {
-		policy->logf("FDBLibTLSCertSubjectError", uid, true, NULL);
-		goto err;
-	}
-	for (auto &pair: policy->subject_criteria) {
-		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
-			policy->logf("FDBLibTLSCertSubjectMatchFailure", uid, true, NULL);
-			goto err;
+	// Any matching rule is sufficient.
+	for (auto &verify_rule: policy->verify_rules) {
+		std::tie(verify_success, verify_failure_reason) = check_verify(verify_rule, certs);
+		if (verify_success) {
+			rc = true;
+			break;
+		} else {
+			if (verify_failure_reason.length() > 0)
+				verify_failure_reasons.insert(verify_failure_reason);
 		}
-        }
-
-	// Check issuer criteria.
-	if ((issuer = X509_get_issuer_name(cert)) == NULL) {
-		policy->logf("FDBLibTLSCertIssuerError", uid, true, NULL);
-		goto err;
 	}
-	for (auto &pair: policy->issuer_criteria) {
-		if (!match_criteria(issuer, pair.first, pair.second.c_str(), pair.second.size())) {
-			policy->logf("FDBLibTLSCertIssuerMatchFailure", uid, true, NULL);
-			goto err;
-		}
-        }
 
-	// If we got this far, everything checked out...
-	rc = true;
+	if (!rc) {
+		// log the various failure reasons
+		for (std::string reason : verify_failure_reasons) {
+			policy->logf(reason.c_str(), uid, false, NULL);
+		}
+	}
 
  err:
-	BIO_free_all(bio);
-	X509_free(cert);
+	sk_X509_pop_free(certs, X509_free);
 
 	return rc;
 }
@@ -206,7 +267,7 @@ int FDBLibTLSSession::handshake() {
 
 	switch (rv) {
 	case 0:
-		if (!check_criteria())
+		if (!verify_peer())
 			return FAILED;
 		handshake_completed = true;
 		return SUCCESS;

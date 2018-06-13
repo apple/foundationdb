@@ -116,11 +116,10 @@ T simulate( const T& in ) {
 	return out;
 }
 
-static void simInitTLS() {
-	Reference<TLSOptions> options( new TLSOptions );
-	options->set_cert_data( certBytes );
-	options->set_key_data( certBytes );
-	options->register_network();
+static void simInitTLS(Reference<TLSOptions> tlsOptions) {
+	tlsOptions->set_cert_data( certBytes );
+	tlsOptions->set_key_data( certBytes );
+	tlsOptions->register_network();
 }
 
 ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
@@ -166,7 +165,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 		Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
 		state Database extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
 
-		TraceEvent("StartingDrAgents").detail("connFile", connFile->getConnectionString().toString()).detail("extraString", extraFile->getConnectionString().toString());
+		TraceEvent("StartingDrAgents").detail("ConnFile", connFile->getConnectionString().toString()).detail("ExtraString", extraFile->getConnectionString().toString());
 
 		state DatabaseBackupAgent dbAgent = DatabaseBackupAgent(cx);
 		state DatabaseBackupAgent extraAgent = DatabaseBackupAgent(extraDB);
@@ -198,7 +197,8 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 		Reference<ClusterConnectionFile> connFile,
 		uint32_t ip,
-		bool useSSL,
+		bool sslEnabled,
+		Reference<TLSOptions> tlsOptions,
 		uint16_t port,
 		LocalityData localities,
 		ProcessClass processClass,
@@ -219,7 +219,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 		TraceEvent("SimulatedFDBDPreWait").detail("Cycles", cycles).detail("RandomId", randomId)
 			.detail("Address", NetworkAddress(ip, port, true, false))
 			.detailext("ZoneId", localities.zoneId())
-			.detail("waitTime", waitTime).detail("Port", port);
+			.detail("WaitTime", waitTime).detail("Port", port);
 
 		Void _ = wait( delay( waitTime ) );
 
@@ -233,7 +233,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				.detailext("DataHall", localities.dataHallId())
 				.detail("Address", process->address.toString())
 				.detail("Excluded", process->excluded)
-				.detail("UsingSSL", useSSL);
+				.detail("UsingSSL", sslEnabled);
 			TraceEvent("ProgramStart").detail("Cycles", cycles).detail("RandomId", randomId)
 				.detail("SourceVersion", getHGVersion())
 				.detail("Version", FDB_VT_VERSION)
@@ -250,8 +250,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				//SOMEDAY: test lower memory limits, without making them too small and causing the database to stop making progress
 				FlowTransport::createInstance(1);
 				Sim2FileSystem::newFileSystem();
-				simInitTLS();
-				NetworkAddress n(ip, port, true, useSSL);
+				if (sslEnabled) {
+					tlsOptions->register_network();
+				}
+				NetworkAddress n(ip, port, true, sslEnabled);
 				Future<Void> listen = FlowTransport::transport().bind( n, n );
 				Future<Void> fd = fdbd( connFile, localities, processClass, *dataFolder, *coordFolder, 500e6, "", "");
 				Future<Void> backup = runBackupAgents ? runBackup(connFile) : Future<Void>(Never());
@@ -359,6 +361,7 @@ ACTOR Future<Void> simulatedMachine(
 		ClusterConnectionString connStr,
 		std::vector<uint32_t> ips,
 		bool sslEnabled,
+		Reference<TLSOptions> tlsOptions,
 		LocalityData localities,
 		ProcessClass processClass,
 		std::string baseFolder,
@@ -405,7 +408,7 @@ ACTOR Future<Void> simulatedMachine(
 			for( int i = 0; i < ips.size(); i++ ) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
 				Reference<ClusterConnectionFile> clusterFile(useSeedFile ? new ClusterConnectionFile(path, connStr.toString()) : new ClusterConnectionFile(path));
-				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, i + 1, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, runBackupAgents));
+				processes.push_back(simulatedFDBDRebooter(clusterFile, ips[i], sslEnabled, tlsOptions, i + 1, localities, processClass, &myFolders[i], &coordFolders[i], baseFolder, connStr, useSeedFile, runBackupAgents));
 				TraceEvent("SimulatedMachineProcess", randomId).detail("Address", NetworkAddress(ips[i], i+1, true, false)).detailext("ZoneId", localities.zoneId()).detailext("DataHall", localities.dataHallId()).detail("Folder", myFolders[i]);
 			}
 
@@ -419,8 +422,8 @@ ACTOR Future<Void> simulatedMachine(
 				.detail("CFolder0", coordFolders[0])
 				.detail("MachineIPs", toIPVectorString(ips))
 				.detail("SSL", sslEnabled)
-				.detail("processes", processes.size())
-				.detail("bootCount", bootCount)
+				.detail("Processes", processes.size())
+				.detail("BootCount", bootCount)
 				.detail("ProcessClass", processClass.toString())
 				.detail("Restarting", restarting)
 				.detail("UseSeedFile", useSeedFile)
@@ -591,8 +594,9 @@ ACTOR Future<Void> simulatedMachine(
 
 #include "fdbclient/MonitorLeader.h"
 
-ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, std::string baseFolder,
-										  int* pTesterCount, Optional<ClusterConnectionString> *pConnString) {
+ACTOR Future<Void> restartSimulatedSystem(
+		vector<Future<Void>> *systemActors, std::string baseFolder, int* pTesterCount,
+		Optional<ClusterConnectionString> *pConnString, Reference<TLSOptions> tlsOptions, int extraDB) {
 	CSimpleIni ini;
 	ini.SetUnicode();
 	ini.LoadFile(joinPath(baseFolder, "restartInfo.ini").c_str());
@@ -605,7 +609,11 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 		int processesPerMachine = atoi(ini.GetValue("META", "processesPerMachine"));
 		int desiredCoordinators = atoi(ini.GetValue("META", "desiredCoordinators"));
 		int testerCount = atoi(ini.GetValue("META", "testerCount"));
+		bool enableExtraDB = (extraDB == 3);
 		ClusterConnectionString conn(ini.GetValue("META", "connectionString"));
+		if (enableExtraDB) {
+			g_simulator.extraDB = new ClusterConnectionString(ini.GetValue("META", "connectionString"));
+		}
 		*pConnString = conn;
 		*pTesterCount = testerCount;
 		bool usingSSL = conn.toString().find(":tls") != std::string::npos;
@@ -639,8 +647,9 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, zoneId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
 
+			// SOMEDAY: parse backup agent from test file
 			systemActors->push_back( reportErrors( simulatedMachine(
-				conn, ipAddrs, usingSSL, localities, processClass, baseFolder, true, i == useSeedForMachine, false ),
+				conn, ipAddrs, usingSSL, tlsOptions, localities, processClass, baseFolder, true, i == useSeedForMachine, enableExtraDB ),
 				processClass == ProcessClass::TesterClass ? "SimulatedTesterMachine" : "SimulatedMachine") );
 		}
 
@@ -648,12 +657,12 @@ ACTOR Future<Void> restartSimulatedSystem(vector<Future<Void>> *systemActors, st
 		g_simulator.processesPerMachine = processesPerMachine;
 	}
 	catch (Error& e) {
-		TraceEvent(SevError, "restartSimulationError").error(e);
+		TraceEvent(SevError, "RestartSimulationError").error(e);
 	}
 
 	TraceEvent("RestartSimulatorSettings")
-		.detail("desiredCoordinators", g_simulator.desiredCoordinators)
-		.detail("processesPerMachine", g_simulator.processesPerMachine);
+		.detail("DesiredCoordinators", g_simulator.desiredCoordinators)
+		.detail("ProcessesPerMachine", g_simulator.processesPerMachine);
 
 	Void _ = wait(delay(1.0));
 
@@ -695,7 +704,7 @@ StringRef StringRefOf(const char* s) {
 
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
-	bool generateFearless = false; //FIXME g_random->random01() < 0.5;
+	bool generateFearless = g_random->random01() < 0.5;
 	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
@@ -712,7 +721,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
 		int storage_servers = g_random->randomInt(1, generateFearless ? 4 : 5);
-		int replication_factor = g_random->randomInt(1, generateFearless ? 4 : 5);
+		//FIXME: log replicas must be more than storage replicas because otherwise better master exists will not recognize it needs to change dcs
+		int replication_factor = g_random->randomInt(storage_servers, generateFearless ? 4 : 5);
 		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
 		set_config(format("storage_replicas:=%d storage_quorum:=%d "
@@ -753,11 +763,11 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		StatusObject primaryObj;
 		primaryObj["id"] = "0";
-		primaryObj["priority"] = 1;
+		primaryObj["priority"] = 0;
 
 		StatusObject remoteObj;
 		remoteObj["id"] = "1";
-		remoteObj["priority"] = 0;
+		remoteObj["priority"] = 1;
 
 		bool needsRemote = generateFearless;
 		if(generateFearless) {
@@ -846,7 +856,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			}
 
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
-			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 		}
 
 		StatusArray regionArr;
@@ -858,7 +867,10 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 	}
 	
-	if(generateFearless) {
+	if(generateFearless && minimumReplication > 1) { 
+		//low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that is down during failures).
+		machine_count = 16;
+	} else if(generateFearless) {
 		machine_count = 12;
 	} else if(db.tLogPolicy && db.tLogPolicy->info() == "data_hall^2 x zoneid^2 x 1") {
 		machine_count = 9;
@@ -885,8 +897,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 }
 
 void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseFolder,
-							int* pTesterCount, Optional<ClusterConnectionString> *pConnString,
-							Standalone<StringRef> *pStartingConfiguration, int extraDB, int minimumReplication)
+                           int* pTesterCount, Optional<ClusterConnectionString> *pConnString,
+                           Standalone<StringRef> *pStartingConfiguration, int extraDB, int minimumReplication, Reference<TLSOptions> tlsOptions)
 {
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(extraDB, minimumReplication);
@@ -914,7 +926,8 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	if(simconfig.db.regions.size() == 2) {
 		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
 		g_simulator.remoteDcId = simconfig.db.regions[1].dcId;
-		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0 && simconfig.db.regions[0].satelliteTLogPolicy == simconfig.db.regions[1].satelliteTLogPolicy;
+		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
+		ASSERT((!simconfig.db.regions[0].satelliteTLogPolicy && !simconfig.db.regions[1].satelliteTLogPolicy) || simconfig.db.regions[0].satelliteTLogPolicy->info() == simconfig.db.regions[1].satelliteTLogPolicy->info());
 		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
 		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
 
@@ -941,7 +954,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
 	ASSERT(!g_simulator.hasRemoteReplication || g_simulator.remoteTLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
-	TraceEvent("simulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
+	TraceEvent("SimulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
 
 	const int dataCenters = simconfig.datacenters;
 	const int machineCount = simconfig.machine_count;
@@ -952,7 +965,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	bool assignClasses = machineCount - dataCenters > 4 && g_random->random01() < 0.5;
 
 	// Use SSL 5% of the time
-	bool sslEnabled = g_random->random01() < 0.05;
+	bool sslEnabled = g_random->random01() < 0.05 && tlsOptions->enabled();
 	TEST( sslEnabled ); // SSL enabled
 	TEST( !sslEnabled ); // SSL disabled
 
@@ -977,7 +990,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 
 	ASSERT( coordinatorAddresses.size() == coordinatorCount );
 	ClusterConnectionString conn(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
-	
+
 	// If extraDB==0, leave g_simulator.extraDB as null because the test does not use DR.
 	if(extraDB==1) {
 		// The DR database can be either a new database or itself
@@ -989,7 +1002,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		// The DR database is the same database
 		g_simulator.extraDB = new ClusterConnectionString(coordinatorAddresses, LiteralStringRef("TestCluster:0"));
 	}
-	
+
 	*pConnString = conn;
 
 	TraceEvent("SimulatedConnectionString").detail("String", conn.toString()).detail("ConfigString", printable(StringRef(startingConfigString)));
@@ -1012,7 +1025,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			if(assignClasses) {
 				if(assignedMachines < 4)
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 2), ProcessClass::CommandLineSource); //Unset or Storage
-				else if(assignedMachines == 4 && !g_simulator.hasRemoteReplication && !g_simulator.hasSatelliteReplication)
+				else if(assignedMachines == 4 && !simconfig.db.regions.size())
 					processClass = ProcessClass((ProcessClass::ClassType) (g_random->randomInt(0, 2) * ProcessClass::ResolutionClass), ProcessClass::CommandLineSource); //Unset or Resolution
 				else
 					processClass = ProcessClass((ProcessClass::ClassType) g_random->randomInt(0, 3), ProcessClass::CommandLineSource); //Unset, Storage, or Transaction
@@ -1027,7 +1040,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 			// check the sslEnablementMap using only one ip(
 			LocalityData	localities(Optional<Standalone<StringRef>>(), zoneId, zoneId, dcUID);
 			localities.set(LiteralStringRef("data_hall"), dcUID);
-			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled,
+			systemActors->push_back(reportErrors(simulatedMachine(conn, ips, sslEnabled, tlsOptions,
 				localities, processClass, baseFolder, false, machine == useSeedForMachine, true ), "SimulatedMachine"));
 
 			if (extraDB && g_simulator.extraDB->toString() != conn.toString()) {
@@ -1039,7 +1052,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 				Standalone<StringRef> newZoneId = Standalone<StringRef>(g_random->randomUniqueID().toString());
 				LocalityData	localities(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, dcUID);
 				localities.set(LiteralStringRef("data_hall"), dcUID);
-				systemActors->push_back(reportErrors(simulatedMachine(*g_simulator.extraDB, extraIps, sslEnabled,
+				systemActors->push_back(reportErrors(simulatedMachine(*g_simulator.extraDB, extraIps, sslEnabled, tlsOptions,
 					localities,
 					processClass, baseFolder, false, machine == useSeedForMachine, false ), "SimulatedMachine"));
 			}
@@ -1053,9 +1066,9 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.processesPerMachine = processesPerMachine;
 
 	TraceEvent("SetupSimulatorSettings")
-		.detail("desiredCoordinators", g_simulator.desiredCoordinators)
-		.detail("physicalDatacenters", g_simulator.physicalDatacenters)
-		.detail("processesPerMachine", g_simulator.processesPerMachine);
+		.detail("DesiredCoordinators", g_simulator.desiredCoordinators)
+		.detail("PhysicalDatacenters", g_simulator.physicalDatacenters)
+		.detail("ProcessesPerMachine", g_simulator.processesPerMachine);
 
 	// SOMEDAY: add locality for testers to simulate network topology
 	// FIXME: Start workers with tester class instead, at least sometimes run tests with the testers-only flag
@@ -1067,7 +1080,7 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		Standalone<StringRef> newZoneId = Standalone<StringRef>(g_random->randomUniqueID().toString());
 		LocalityData	localities(Optional<Standalone<StringRef>>(), newZoneId, newZoneId, Optional<Standalone<StringRef>>());
 		systemActors->push_back( reportErrors( simulatedMachine(
-			conn, ips, sslEnabled,
+			conn, ips, sslEnabled, tlsOptions,
 			localities, ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource),
 			baseFolder, false, i == useSeedForMachine, false ),
 			"SimulatedTesterMachine") );
@@ -1136,7 +1149,7 @@ void checkExtraDB(const char *testFile, int &extraDB, int &minimumReplication) {
 	ifs.close();
 }
 
-ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting ) {
+ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool rebooting, Reference<TLSOptions> tlsOptions ) {
 	state vector<Future<Void>> systemActors;
 	state Optional<ClusterConnectionString> connFile;
 	state Standalone<StringRef> startingConfiguration;
@@ -1149,18 +1162,20 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 			"TestSystem", 0x01010101, 1, LocalityData(Optional<Standalone<StringRef>>(), Standalone<StringRef>(g_random->randomUniqueID().toString()), Optional<Standalone<StringRef>>(), Optional<Standalone<StringRef>>()), ProcessClass(ProcessClass::TesterClass, ProcessClass::CommandLineSource), "", "" ), TaskDefaultYield ) );
 	Sim2FileSystem::newFileSystem();
 	FlowTransport::createInstance(1);
-	simInitTLS();
+	if (tlsOptions->enabled()) {
+		simInitTLS(tlsOptions);
+	}
 
 	TEST(true);  // Simulation start
 
 	try {
 		//systemActors.push_back( startSystemMonitor(dataFolder) );
 		if (rebooting) {
-			Void _ = wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile), 100.0 ) );
+			Void _ = wait( timeoutError( restartSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, tlsOptions, extraDB), 100.0 ) );
 		}
 		else {
 			g_expect_full_pointermap = 1;
-			setupSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB, minimumReplication );
+			setupSimulatedSystem( &systemActors, dataFolder, &testerCount, &connFile, &startingConfiguration, extraDB, minimumReplication, tlsOptions );
 			Void _ = wait( delay(1.0) ); // FIXME: WHY!!!  //wait for machines to boot
 		}
 		std::string clusterFileDir = joinPath( dataFolder, g_random->randomUniqueID().toString() );
@@ -1168,7 +1183,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
 		Void _ = wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? 36000.0 : 5400.0));
 	} catch (Error& e) {
-		TraceEvent(SevError, "setupAndRunError").error(e);
+		TraceEvent(SevError, "SetupAndRunError").error(e);
 	}
 
 	TraceEvent("SimulatedSystemDestruct");

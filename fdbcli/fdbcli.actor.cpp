@@ -854,7 +854,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 				outputString += "\n  Redundancy mode        - ";
 				std::string strVal;
 
-				if (statusObjConfig.get("redundancy.factor", strVal)){
+				if (statusObjConfig.get("redundancy_mode", strVal)){
 					outputString += strVal;
 				} else
 					outputString += "unknown";
@@ -2060,7 +2060,7 @@ void fdbcli_comp_cmd(std::string const& text, std::vector<std::string>& lc) {
 
 void LogCommand(std::string line, UID randomID, std::string errMsg) {
 	printf("%s\n", errMsg.c_str());
-	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line))).detail("error", printable(StringRef(errMsg)));
+	TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("Error", printable(StringRef(errMsg)));
 }
 
 struct CLIOptions {
@@ -2078,6 +2078,8 @@ struct CLIOptions {
 	std::string tlsCertPath;
 	std::string tlsKeyPath;
 	std::string tlsVerifyPeers;
+	std::string tlsCAPath;
+	std::string tlsPassword;
 
 	CLIOptions( int argc, char* argv[] )
 		: trace(false),
@@ -2151,8 +2153,14 @@ struct CLIOptions {
 			case TLSOptions::OPT_TLS_CERTIFICATES:
 				tlsCertPath = args.OptionArg();
 				break;
+			case TLSOptions::OPT_TLS_CA_FILE:
+				tlsCAPath = args.OptionArg();
+				break;
 			case TLSOptions::OPT_TLS_KEY:
 				tlsKeyPath = args.OptionArg();
+				break;
+			case TLSOptions::OPT_TLS_PASSWORD:
+				tlsPassword = args.OptionArg();
 				break;
 			case TLSOptions::OPT_TLS_VERIFY_PEERS:
 				tlsVerifyPeers = args.OptionArg();
@@ -2297,7 +2305,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 		try {
 			state UID randomID = g_random->randomUniqueID();
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line)));
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line)));
 
 			bool malformed, partial;
 			state std::vector<std::vector<StringRef>> parsed = parseLine(line, malformed, partial);
@@ -3071,7 +3079,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				is_error = true;
 			}
 
-			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("command", printable(StringRef(line))).detail("is_error", is_error);
+			TraceEvent(SevInfo, "CLICommandLog", randomID).detail("Command", printable(StringRef(line))).detail("IsError", is_error);
 
 		} catch (Error& e) {
 			if(e.code() != error_code_actor_cancelled)
@@ -3177,8 +3185,20 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	}
+	if (opt.tlsCAPath.size()) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_CA_PATH, opt.tlsCAPath);
+		}
+		catch (Error& e) {
+			fprintf(stderr, "ERROR: cannot set TLS CA path to `%s' (%s)\n", opt.tlsCAPath.c_str(), e.what());
+			return 1;
+		}
+	}
 	if ( opt.tlsKeyPath.size() ) {
 		try {
+			if (opt.tlsPassword.size())
+				setNetworkOption(FDBNetworkOptions::TLS_PASSWORD, opt.tlsPassword);
+
 			setNetworkOption(FDBNetworkOptions::TLS_KEY_PATH, opt.tlsKeyPath);
 		} catch( Error& e ) {
 			fprintf(stderr, "ERROR: cannot set TLS key path to `%s' (%s)\n", opt.tlsKeyPath.c_str(), e.what());

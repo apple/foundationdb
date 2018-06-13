@@ -325,45 +325,53 @@ ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, Asyn
 }
 
 // Also used in fdbserver/LeaderElection.actor.cpp!
-Optional<LeaderInfo> getLeader( vector<Optional<LeaderInfo>> nominees ) {
+// bool represents if the LeaderInfo is a majority answer or not.
+// This function also masks the first 7 bits of changeId of the nominees and returns the Leader with masked changeId
+Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees ) {
+	vector<LeaderInfo> maskedNominees;
+	maskedNominees.reserve(nominees.size());
+	for (auto &nominee : nominees) {
+		if (nominee.present()) {
+			maskedNominees.push_back(nominee.get());
+			maskedNominees.back().changeID = UID(maskedNominees.back().changeID.first() & LeaderInfo::mask, maskedNominees.back().changeID.second());
+		}
+	}
+
 	// If any coordinator says that the quorum is forwarded, then it is
-	for(int i=0; i<nominees.size(); i++)
-		if (nominees[i].present() && nominees[i].get().forward)
-			return nominees[i].get();
+	for(int i=0; i<maskedNominees.size(); i++)
+		if (maskedNominees[i].forward)
+			return std::pair<LeaderInfo, bool>(maskedNominees[i], true);
 
-	if(!nominees.size())
-		return Optional<LeaderInfo>();
-	// There is a leader if a majority of the nominees are the same.
-	// If there is a majority, the median item is in it.
+	if(!maskedNominees.size())
+		return Optional<std::pair<LeaderInfo, bool>>();
+
+	std::sort(maskedNominees.begin(), maskedNominees.end(),
+		[](const LeaderInfo& l, const LeaderInfo& r) { return l.changeID < r.changeID; });
+
 	int bestCount = 0;
-	Optional<LeaderInfo> currentNominee;
-	for(int i=0; i<nominees.size(); i++) {
-		if( (nominees[i].present() != currentNominee.present()) || (currentNominee.present() && !currentNominee.get().equalInternalId(nominees[i].get()) ) ) {
-			if(bestCount > 0) {
-				bestCount--;
-			} else {
-				bestCount = 1;
-				currentNominee = nominees[i];
+	LeaderInfo bestNominee;
+	LeaderInfo currentNominee;
+	int curCount = 0;
+	for (int i = 0; i < maskedNominees.size(); i++) {
+		if (currentNominee == maskedNominees[i]) {
+			curCount++;
+		}
+		else {
+			if (curCount > bestCount) {
+				bestNominee = currentNominee;
+				bestCount = curCount;
 			}
-		} else {
-			bestCount++;
+			currentNominee = maskedNominees[i];
+			curCount = 1;
 		}
 	}
-
-	if(!currentNominee.present())
-		return Optional<LeaderInfo>();
-
-	int amountBest = 0;
-	for(int i=0; i<nominees.size(); i++) {
-		if( nominees[i].present() && currentNominee.get().equalInternalId(nominees[i].get()) ) {
-			amountBest++;
-		}
+	if (curCount > bestCount) {
+		bestNominee = currentNominee;
+		bestCount = curCount;
 	}
 
-	if(amountBest >= nominees.size()/2 + 1) {
-		return currentNominee;
-	}
-	return Optional<LeaderInfo>();
+	bool majority = bestCount >= nominees.size() / 2 + 1;
+	return std::pair<LeaderInfo, bool>(bestNominee, majority);
 }
 
 struct MonitorLeaderInfo {
@@ -389,12 +397,12 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 	allActors = waitForAll(actors);
 
 	loop {
-		Optional<LeaderInfo> leader = getLeader(nominees);
-		TraceEvent("MonitorLeaderChange").detail("NewLeader", leader.present() ? leader.get().changeID : UID(1,1));
+		Optional<std::pair<LeaderInfo, bool>> leader = getLeader(nominees);
+		TraceEvent("MonitorLeaderChange").detail("NewLeader", leader.present() ? leader.get().first.changeID : UID(1,1));
 		if (leader.present()) {
-			if( leader.get().forward ) {
-				TraceEvent("MonitorLeaderForwarding").detail("NewConnStr", leader.get().serializedInfo.toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
-				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().serializedInfo.toString())));
+			if( leader.get().first.forward ) {
+				TraceEvent("MonitorLeaderForwarding").detail("NewConnStr", leader.get().first.serializedInfo.toString()).detail("OldConnStr", info.intermediateConnFile->getConnectionString().toString());
+				info.intermediateConnFile = Reference<ClusterConnectionFile>(new ClusterConnectionFile(connFile->getFilename(), ClusterConnectionString(leader.get().first.serializedInfo.toString())));
 				return info;
 			}
 			if(connFile != info.intermediateConnFile) {
@@ -410,7 +418,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 			info.hasConnected = true;
 			connFile->notifyConnected();
 
-			outSerializedLeaderInfo->set( leader.get().serializedInfo );
+			outSerializedLeaderInfo->set( leader.get().first.serializedInfo );
 		}
 		Void _ = wait( nomineeChange.onTrigger() || allActors );
 	}

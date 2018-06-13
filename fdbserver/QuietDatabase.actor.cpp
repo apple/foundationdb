@@ -50,7 +50,7 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 
 		for( int i = 0; i < workers.size(); i++ ) {
 			if( workers[i].first.address() == dbInfo->get().master.address() ) {
-				TraceEvent("GetMasterWorker").detail("Database", printable(cx->dbName)).detail("Stage", "GotWorkers").detail("masterId", dbInfo->get().master.id()).detail("workerId", workers[i].first.id());
+				TraceEvent("GetMasterWorker").detail("Database", printable(cx->dbName)).detail("Stage", "GotWorkers").detail("MasterId", dbInfo->get().master.id()).detail("WorkerId", workers[i].first.id());
 				return workers[i].first;
 			}
 		}
@@ -94,8 +94,8 @@ int64_t getQueueSize( Standalone<StringRef> md ) {
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;
 
-	sscanf(extractAttribute(md.toString(), "bytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
-	sscanf(extractAttribute(md.toString(), "bytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
+	sscanf(extractAttribute(md.toString(), "BytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
+	sscanf(extractAttribute(md.toString(), "BytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
 
 	return inputBytes - durableBytes;
 }
@@ -283,8 +283,27 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 	}
 }
 
+ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
+	Void _ = wait( delay(time) );
+
+	if(g_network->isSimulated()) {
+		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
+		g_simulator.hasRemoteReplication = false;
+		ConfigurationResult::Type _ = wait( changeConfig( cx, "remote_none" ) );
+		if (g_network->isSimulated() && g_simulator.extraDB) {
+			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
+			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
+			Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
+			ConfigurationResult::Type _ = wait(changeConfig(extraDB, "remote_none"));
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0 ) {
+	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100));
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 
@@ -311,9 +330,9 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			Void _ = wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
 							&& success( storageQueueSize ) && success( dataDistributionActive ) && success( storageServersRecruiting ) );
 			TraceEvent(("QuietDatabase" + phase).c_str())
-				.detail("dataInFlight", dataInFlight.get()).detail("maxTLogQueueSize", tLogQueueSize.get()).detail("dataDistributionQueueSize", dataDistributionQueueSize.get())
-				.detail("maxStorageQueueSize", storageQueueSize.get()).detail("dataDistributionActive", dataDistributionActive.get())
-				.detail("storageServersRecruiting", storageServersRecruiting.get());
+				.detail("DataInFlight", dataInFlight.get()).detail("MaxTLogQueueSize", tLogQueueSize.get()).detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
+				.detail("MaxStorageQueueSize", storageQueueSize.get()).detail("DataDistributionActive", dataDistributionActive.get())
+				.detail("StorageServersRecruiting", storageServersRecruiting.get());
 
 			if( dataInFlight.get() > dataInFlightGate || tLogQueueSize.get() > maxTLogQueueGate
 				|| dataDistributionQueueSize.get() > maxDataDistributionQueueSize || storageQueueSize.get() > maxStorageServerQueueGate

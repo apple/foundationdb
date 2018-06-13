@@ -30,7 +30,7 @@ Open a Python interactive interpreter and import the FoundationDB API module::
 
 Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions::
 
-    >>> fdb.api_version(510)
+    >>> fdb.api_version(520)
 
 Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the :ref:`default cluster file <default-cluster-file>`. ::
 
@@ -38,20 +38,20 @@ Next, we open a FoundationDB database.  The API will connect to the FoundationDB
 
 We are ready to use the database. In Python, using the ``[]`` operator on the db object is a convenient syntax for performing a read or write on the database. First, let's simply write a key-value pair:
 
-    >>> db['hello'] = 'world'
+    >>> db[b'hello'] = b'world'
 
 When this command returns without exception, the modification is durably stored in FoundationDB! Under the covers, this function creates a transaction with a single modification. We'll see later how to do multiple operations in a single transaction. For now, let's read back the data::
 
-    >>> print 'hello', db['hello']
+    >>> print 'hello', db[b'hello']
     hello world
 
 If this is all working, it looks like we are ready to start building a real application. For reference, here's the full code for "hello world"::
 
     import fdb
-    fdb.api_version(510)
+    fdb.api_version(520)
     db = fdb.open()
-    db['hello'] = 'world'
-    print 'hello', db['hello']
+    db[b'hello'] = b'world'
+    print 'hello', db[b'hello']
 
 Class scheduling application
 ============================
@@ -91,7 +91,7 @@ FoundationDB includes a few tools that make it easy to model data using this app
 opening a :ref:`directory <developer-guide-directories>` in the database::
 
     import fdb
-    fdb.api_version(510)
+    fdb.api_version(520)
 
     db = fdb.open()
     scheduling = fdb.directory.create_or_open(db, ('scheduling',))
@@ -260,23 +260,6 @@ Idempotence
 
 Occasionally, a transaction might be retried even after it succeeds (for example, if the client loses contact with the cluster at just the wrong moment). This can cause problems if transactions are not written to be idempotent, i.e. to have the same effect if committed twice as if committed once. There are generic design patterns for :ref:`making any transaction idempotent <developer-guide-unknown-results>`, but many transactions are naturally idempotent. For example, all of the transactions in this tutorial are idempotent.
 
-Dropping with limited seats
----------------------------
-
-Let's finish up the limited seats feature by modifying the drop function:
-
-.. code-block:: python
-    :emphasize-lines: 4,5
-
-    @fdb.transactional
-    def drop(tr, s, c):
-        rec = attends.pack((s, c))
-        if not tr[rec].present(): return  # not taking this class
-        tr[course.pack((c,))] = fdb.tuple.pack((fdb.tuple.unpack(tr[course.pack((c,))])[0] + 1,))
-        del tr[rec]
-
-This case is easier than signup because there are no constraints we can hit. We just need to make sure the student is in the class and to "give back" one seat when the student drops.
-
 More features?!
 ---------------
 
@@ -349,7 +332,7 @@ Here's the code for the scheduling tutorial::
     import fdb
     import fdb.tuple
 
-    fdb.api_version(510)
+    fdb.api_version(520)
 
 
     ####################################

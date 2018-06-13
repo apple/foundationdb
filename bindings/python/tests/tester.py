@@ -32,14 +32,7 @@ import traceback
 
 sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..')]
 import fdb
-
-assert not fdb.is_api_version_selected()
-try:
-    fdb.get_api_version()
-except RuntimeError as e:
-    assert str(e) == 'API version is not set'
 fdb.api_version(int(sys.argv[2]))
-assert int(sys.argv[2]) == fdb.get_api_version()
 
 from fdb import six
 from fdb.impl import strinc
@@ -138,7 +131,6 @@ def test_options(tr):
     tr.options.set_read_your_writes_disable()
     tr.options.set_read_system_keys()
     tr.options.set_access_system_keys()
-    tr.options.set_durability_dev_null_is_web_scale()
     tr.options.set_timeout(60 * 1000)
     tr.options.set_retry_limit(50)
     tr.options.set_max_retry_delay(100)
@@ -529,19 +521,6 @@ class Tester:
                     Tester.wait_empty(self.db, prefix)
                     inst.push(b"WAITED_FOR_EMPTY")
                 elif inst.op == six.u("UNIT_TESTS"):
-                    assert fdb.is_api_version_selected()
-                    api_version = fdb.get_api_version()
-                    try:
-                        fdb.api_version(api_version + 1)
-                        raise RuntimeError('Was not stopped from selecting two API versions')
-                    except RuntimeError as e:
-                        assert str(e) == 'FDB API already loaded at version {}'.format(api_version)
-                    try:
-                        fdb.api_version(api_version - 1)
-                        raise RuntimeError('Was not stopped from selecting two API versions')
-                    except RuntimeError as e:
-                        assert str(e) == 'FDB API already loaded at version {}'.format(api_version)
-                    fdb.api_version(api_version)
                     try:
                         db.options.set_location_cache_size(100001)
 

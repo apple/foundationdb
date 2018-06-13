@@ -82,12 +82,12 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 					tr.set( key, value.get() );
 				else
 					tr.clear( key );
-				//TraceEvent("FTWSetBegin").detail("key", printable(key)).detail("value", printable(value));
+				//TraceEvent("FTWSetBegin").detail("Key", printable(key)).detail("Value", printable(value));
 				Void _ = wait( tr.commit() );
-				//TraceEvent("FTWSetEnd").detail("key", printable(key)).detail("value", printable(value)).detail("ver", tr.getCommittedVersion());
+				//TraceEvent("FTWSetEnd").detail("Key", printable(key)).detail("Value", printable(value)).detail("Ver", tr.getCommittedVersion());
 				return tr.getCommittedVersion();
 			} catch( Error &e ) {
-				//TraceEvent("FTWSetError").detail("key", printable(key)).detail("value", printable(value)).error(e);
+				//TraceEvent("FTWSetError").detail("Key", printable(key)).detail("Value", printable(value)).error(e);
 				Void _ = wait( tr.onError(e) );
 			}
 		}
@@ -117,23 +117,23 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 							getDuration = now() - watchEnd;
 						}
 						lastReadVersion = tr.getReadVersion().get();
-						//TraceEvent("FTWGet").detail("key", printable(setKey)).detail("value", printable(val)).detail("ver", tr.getReadVersion().get());
+						//TraceEvent("FTWGet").detail("Key", printable(setKey)).detail("Value", printable(val)).detail("Ver", tr.getReadVersion().get());
 						if( val == setValue )
 							break;
 						ASSERT( first );
 						state Future<Void> watchFuture = tr.watch( setKey );
 						Void _ = wait( tr.commit() );
-						//TraceEvent("FTWStartWatch").detail("key", printable(setKey));
+						//TraceEvent("FTWStartWatch").detail("Key", printable(setKey));
 						Void _ = wait( watchFuture );
 						watchEnd = now();
 						first = false;
 					} catch( Error &e ) {
-						//TraceEvent("FTWWatchError").detail("key", printable(setKey)).error(e);
+						//TraceEvent("FTWWatchError").detail("Key", printable(setKey)).error(e);
 						Void _ = wait( tr.onError(e) );
 					}
 				}
 				Version ver = wait( setFuture );
-				//TraceEvent("FTWWatchDone").detail("key", printable(setKey));
+				//TraceEvent("FTWWatchDone").detail("Key", printable(setKey));
 				ASSERT( lastReadVersion - ver >= SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT || lastReadVersion - ver < SERVER_KNOBS->VERSIONS_PER_SECOND*(12+getDuration) );
 
 				if( now() - testStart > self->testDuration )

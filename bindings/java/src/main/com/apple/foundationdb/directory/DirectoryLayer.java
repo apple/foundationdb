@@ -1035,7 +1035,10 @@ public class DirectoryLayer implements Directory {
 				Range oldAllocations = new Range(allocator.recent.getKey(), allocator.recent.get(windowStart).getKey());
 
 				CompletableFuture<byte[]> newCountRead;
-				// SOMEDAY: synchronize on something transaction local
+				// SOMEDAY: this code would work as written if synchronized on something transaction local.
+				// The reason we don't synchronize on the Transaction tr itself is that the user could also be using it 
+				// for synchronization. If they did, then synchronizing on tr here could lead to performance issues or 
+				// deadlocks.
 				synchronized(HighContentionAllocator.class) {
 					if(windowStart > initialWindowStart) {
 						tr.clear(oldCounters);
@@ -1073,7 +1076,10 @@ public class DirectoryLayer implements Directory {
 
 				AsyncIterable<KeyValue> counterRange;
 				CompletableFuture<byte[]> allocationTemp;
-				// SOMEDAY: synchronize on something transaction local
+				// SOMEDAY: this code would work as written if synchronized on something transaction local.
+				// The reason we don't synchronize on the Transaction tr itself is that the user could also be using it 
+				// for synchronization. If they did, then synchronizing on tr here could lead to performance issues or 
+				// deadlocks.
 				synchronized(HighContentionAllocator.class) {
 					counterRange = tr.snapshot().getRange(countersRange, 1, true);
 					allocationTemp = tr.get(allocationKey);

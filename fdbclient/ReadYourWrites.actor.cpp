@@ -490,15 +490,15 @@ public:
 		//TraceEvent("RYWSelectorsStartForward", randomID).detail("ByteLimit", limits.bytes).detail("RowLimit", limits.rows);
 
 		loop {
-			/*TraceEvent("RYWSelectors", randomID).detail("begin", begin.toString())
-				.detail("end", end.toString())
-				.detail("reached", limits.isReached())
-				.detail("itemsPastEnd", itemsPastEnd)
-				.detail("endOffset", -end.offset)
-				.detail("itBegin", printable(it.beginKey().toStandaloneStringRef()))
-				.detail("itEnd", printable(itEnd.beginKey().toStandaloneStringRef()))
-				.detail("unknown", it.is_unknown_range())
-				.detail("requests", requestCount);*/
+			/*TraceEvent("RYWSelectors", randomID).detail("Begin", begin.toString())
+				.detail("End", end.toString())
+				.detail("Reached", limits.isReached())
+				.detail("ItemsPastEnd", itemsPastEnd)
+				.detail("EndOffset", -end.offset)
+				.detail("ItBegin", printable(it.beginKey().toStandaloneStringRef()))
+				.detail("ItEnd", printable(itEnd.beginKey().toStandaloneStringRef()))
+				.detail("Unknown", it.is_unknown_range())
+				.detail("Requests", requestCount);*/
 
 			if( !result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey() ) {
 				return RangeResultRef(false, false);
@@ -589,13 +589,13 @@ public:
 				ASSERT( !requestLimit.hasRowLimit() || requestLimit.rows > 0 );
 				ASSERT( requestLimit.hasRowLimit() || requestLimit.hasByteLimit() );
 				
-				//TraceEvent("RYWIssuing", randomID).detail("begin", read_begin.toString()).detail("end", read_end.toString()).detail("bytes", requestLimit.bytes).detail("rows", requestLimit.rows).detail("limits", limits.bytes).detail("reached", limits.isReached()).detail("requestCount", requestCount).detail("singleClears", singleClears).detail("ucEnd", printable(ucEnd.beginKey().toStandaloneStringRef())).detail("minRows", requestLimit.minRows);
+				//TraceEvent("RYWIssuing", randomID).detail("Begin", read_begin.toString()).detail("End", read_end.toString()).detail("Bytes", requestLimit.bytes).detail("Rows", requestLimit.rows).detail("Limits", limits.bytes).detail("Reached", limits.isReached()).detail("RequestCount", requestCount).detail("SingleClears", singleClears).detail("UcEnd", printable(ucEnd.beginKey().toStandaloneStringRef())).detail("MinRows", requestLimit.minRows);
 
 				additionalRows = 0;
 				Standalone<RangeResultRef> snapshot_read = wait( ryw->tr.getRange( read_begin, read_end, requestLimit, true, false ) );
 				KeyRangeRef range = getKnownKeyRange( snapshot_read, read_begin, read_end, ryw->arena );
 				
-				//TraceEvent("RYWCacheInsert", randomID).detail("Range", printable(range)).detail("expectedSize", snapshot_read.expectedSize()).detail("rows", snapshot_read.size()).detail("results", printable(snapshot_read)).detail("more", snapshot_read.more).detail("readToBegin", snapshot_read.readToBegin).detail("readThroughEnd", snapshot_read.readThroughEnd).detail("readThrough", printable(snapshot_read.readThrough));
+				//TraceEvent("RYWCacheInsert", randomID).detail("Range", printable(range)).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", printable(snapshot_read)).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", printable(snapshot_read.readThrough));
 
 				if( ryw->cache.insert( range, snapshot_read ) )
 					ryw->arena.dependsOn(snapshot_read.arena());
@@ -615,7 +615,7 @@ public:
 
 				itemsPastEnd += maxCount - count;
 				
-				//TraceEvent("RYWaddKV", randomID).detail("key", printable(it.beginKey().toStandaloneStringRef())).detail("count", count).detail("maxCount", maxCount).detail("itemsPastEnd", itemsPastEnd);
+				//TraceEvent("RYWaddKV", randomID).detail("Key", printable(it.beginKey().toStandaloneStringRef())).detail("Count", count).detail("MaxCount", maxCount).detail("ItemsPastEnd", itemsPastEnd);
 				if( count ) result.append( result.arena(), start, count );
 				++it;
 			} else
@@ -756,19 +756,19 @@ public:
 			resolveKeySelectorFromCache( begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset );
 		}
 
-		//TraceEvent("RYWSelectorsStartReverse", randomID).detail("byteLimit", limits.bytes).detail("rowLimit", limits.rows);
+		//TraceEvent("RYWSelectorsStartReverse", randomID).detail("ByteLimit", limits.bytes).detail("RowLimit", limits.rows);
 		
 		loop {
-			/*TraceEvent("RYWSelectors", randomID).detail("begin", begin.toString())
-				.detail("end", end.toString())
-				.detail("reached", limits.isReached())
-				.detail("itemsPastBegin", itemsPastBegin)
-				.detail("endOffset", end.offset)
-				.detail("itBegin", printable(it.beginKey().toStandaloneStringRef()))
-				.detail("itEnd", printable(itEnd.beginKey().toStandaloneStringRef()))
-				.detail("unknown", it.is_unknown_range())
-				.detail("kv", it.is_kv())
-				.detail("requests", requestCount);*/
+			/*TraceEvent("RYWSelectors", randomID).detail("Begin", begin.toString())
+				.detail("End", end.toString())
+				.detail("Reached", limits.isReached())
+				.detail("ItemsPastBegin", itemsPastBegin)
+				.detail("EndOffset", end.offset)
+				.detail("ItBegin", printable(it.beginKey().toStandaloneStringRef()))
+				.detail("ItEnd", printable(itEnd.beginKey().toStandaloneStringRef()))
+				.detail("Unknown", it.is_unknown_range())
+				.detail("Kv", it.is_kv())
+				.detail("Requests", requestCount);*/
 
 			if(!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
 				return RangeResultRef(false, false);
@@ -862,13 +862,13 @@ public:
 				ASSERT( !requestLimit.hasRowLimit() || requestLimit.rows > 0 );
 				ASSERT( requestLimit.hasRowLimit() || requestLimit.hasByteLimit() );
 
-				//TraceEvent("RYWIssuing", randomID).detail("begin", read_begin.toString()).detail("end", read_end.toString()).detail("bytes", requestLimit.bytes).detail("rows", requestLimit.rows).detail("limits", limits.bytes).detail("reached", limits.isReached()).detail("requestCount", requestCount).detail("singleClears", singleClears).detail("ucEnd", printable(ucEnd.beginKey().toStandaloneStringRef())).detail("minRows", requestLimit.minRows);
+				//TraceEvent("RYWIssuing", randomID).detail("Begin", read_begin.toString()).detail("End", read_end.toString()).detail("Bytes", requestLimit.bytes).detail("Rows", requestLimit.rows).detail("Limits", limits.bytes).detail("Reached", limits.isReached()).detail("RequestCount", requestCount).detail("SingleClears", singleClears).detail("UcEnd", printable(ucEnd.beginKey().toStandaloneStringRef())).detail("MinRows", requestLimit.minRows);
 
 				additionalRows = 0;
 				Standalone<RangeResultRef> snapshot_read = wait( ryw->tr.getRange( read_begin, read_end, requestLimit, true, true ) );
 				KeyRangeRef range = getKnownKeyRangeBack( snapshot_read, read_begin, read_end, ryw->arena );
 
-				//TraceEvent("RYWCacheInsert", randomID).detail("Range", printable(range)).detail("expectedSize", snapshot_read.expectedSize()).detail("rows", snapshot_read.size()).detail("results", printable(snapshot_read)).detail("more", snapshot_read.more).detail("readToBegin", snapshot_read.readToBegin).detail("readThroughEnd", snapshot_read.readThroughEnd).detail("readThrough", printable(snapshot_read.readThrough));
+				//TraceEvent("RYWCacheInsert", randomID).detail("Range", printable(range)).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", printable(snapshot_read)).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", printable(snapshot_read.readThrough));
 				
 				RangeResultRef reversed;
 				reversed.resize(ryw->arena, snapshot_read.size());
@@ -895,7 +895,7 @@ public:
 					}
 
 					itemsPastBegin += maxCount - count;
-					//TraceEvent("RYWaddKV", randomID).detail("key", printable(it.beginKey().toStandaloneStringRef())).detail("count", count).detail("maxCount", maxCount).detail("itemsPastBegin", itemsPastBegin);
+					//TraceEvent("RYWaddKV", randomID).detail("Key", printable(it.beginKey().toStandaloneStringRef())).detail("Count", count).detail("MaxCount", maxCount).detail("ItemsPastBegin", itemsPastBegin);
 					if( count ) {
 						int size = result.size();
 						result.resize(result.arena(),size+count);
@@ -940,8 +940,8 @@ public:
 						std::swap(itCopy->value[i--], itCopy->value.back());
 					itCopy->value.pop_back();
 				} else if( !valueKnown || 
-					       (itCopy->value[i]->setPresent && (itCopy->value[i]->setValue.present() != val.present() || (val.present() && itCopy->value[i]->setValue.get() != val.get()))) ||
-					       (itCopy->value[i]->valuePresent && (itCopy->value[i]->value.present() != val.present() || (val.present() && itCopy->value[i]->value.get() != val.get()))) ) {
+						   (itCopy->value[i]->setPresent && (itCopy->value[i]->setValue.present() != val.present() || (val.present() && itCopy->value[i]->setValue.get() != val.get()))) ||
+						   (itCopy->value[i]->valuePresent && (itCopy->value[i]->value.present() != val.present() || (val.present() && itCopy->value[i]->value.get() != val.get()))) ) {
 					itCopy->value[i]->onChangeTrigger.send(Void());
 					if( i < itCopy->value.size() - 1 )
 						std::swap(itCopy->value[i--], itCopy->value.back());
@@ -1487,17 +1487,6 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 	if(operand.size() > CLIENT_KNOBS->VALUE_SIZE_LIMIT)
 		throw value_too_large();
 
-	if(operationType == MutationRef::SetVersionstampedKey) {
-		KeyRangeRef range = getVersionstampKeyRange(arena, key, getMaxReadKey()); // this does validation of the key and needs to be performed before the readYourWritesDisabled path
-		if(!options.readYourWritesDisabled) {
-			writeRangeToNativeTransaction(range);
-			writes.addUnmodifiedAndUnreadableRange(range);
-		}
-	}
-
-	if (operationType == MutationRef::SetVersionstampedValue && operand.size() < 10)
-		throw client_invalid_operation();
-		
 	if (tr.apiVersionAtLeast(510)) {
 		if (operationType == MutationRef::Min)
 			operationType = MutationRef::MinV2;
@@ -1505,15 +1494,43 @@ void ReadYourWritesTransaction::atomicOp( const KeyRef& key, const ValueRef& ope
 			operationType = MutationRef::AndV2;
 	}
 
-	if(options.readYourWritesDisabled) {
-		return tr.atomicOp(key, operand, (MutationRef::Type) operationType, addWriteConflict);
+	KeyRef k;
+	if(!tr.apiVersionAtLeast(520) && operationType == MutationRef::SetVersionstampedKey) {
+		k = key.withSuffix( LiteralStringRef("\x00\x00"), arena );
+	} else {
+		k = KeyRef( arena, key );
+	}
+	ValueRef v;
+	if(!tr.apiVersionAtLeast(520) && operationType == MutationRef::SetVersionstampedValue) {
+		v = operand.withSuffix( LiteralStringRef("\x00\x00\x00\x00"), arena );
+	} else {
+		v = ValueRef( arena, operand );
 	}
 
-	KeyRef k = KeyRef( arena, key );
-	ValueRef v = ValueRef( arena, operand );
+	if(operationType == MutationRef::SetVersionstampedKey) {
+		KeyRangeRef range = getVersionstampKeyRange(arena, k, getMaxReadKey()); // this does validation of the key and needs to be performed before the readYourWritesDisabled path
+		if(!options.readYourWritesDisabled) {
+			writeRangeToNativeTransaction(range);
+			writes.addUnmodifiedAndUnreadableRange(range);
+		}
+	}
+
+	if(operationType == MutationRef::SetVersionstampedValue) {
+		if(v.size() < 4)
+			throw client_invalid_operation();
+		int32_t pos;
+		memcpy(&pos, v.end() - sizeof(int32_t), sizeof(int32_t));
+		pos = littleEndian32(pos);
+		if (pos < 0 || pos + 10 > v.size() - 4)
+			throw client_invalid_operation();
+	}
+
+	if(options.readYourWritesDisabled) {
+		return tr.atomicOp(k, v, (MutationRef::Type) operationType, addWriteConflict);
+	}
 
 	writes.mutate(k, (MutationRef::Type) operationType, v, addWriteConflict);
-	RYWImpl::triggerWatches(this, key, Optional<ValueRef>(), false);
+	RYWImpl::triggerWatches(this, k, Optional<ValueRef>(), false);
 }
 
 void ReadYourWritesTransaction::set( const KeyRef& key, const ValueRef& value ) {

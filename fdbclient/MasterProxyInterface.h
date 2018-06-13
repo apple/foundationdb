@@ -55,7 +55,7 @@ struct MasterProxyInterface {
 	void initEndpoints() {
 		getConsistentReadVersion.getEndpoint(TaskProxyGetConsistentReadVersion);
 		getRawCommittedVersion.getEndpoint(TaskProxyGetRawCommittedVersion);
-		commit.getEndpoint(TaskProxyCommit);
+		commit.getEndpoint(TaskProxyCommitDispatcher);
 		getKeyServersLocations.getEndpoint(TaskProxyGetKeyServersLocations);
 	}
 };

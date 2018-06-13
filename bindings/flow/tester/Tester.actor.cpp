@@ -1538,7 +1538,6 @@ struct UnitTestsFunc : InstructionFunc {
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_ACCESS_SYSTEM_KEYS);
-		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_DURABILITY_DEV_NULL_IS_WEB_SCALE);
 		const uint64_t timeout = 60*1000;
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TIMEOUT, Optional<StringRef>(StringRef((const uint8_t*)&timeout, 8)));
 		const uint64_t retryLimit = 50;
@@ -1619,11 +1618,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 			}
 
 			// Flow directory operations don't support snapshot reads
-			if (isDirectory && isSnapshot) {
-				Version readVersion = wait(instruction->tr->getReadVersion());
-				instruction->tr = Reference<Transaction>(new Transaction(data->db));
-				instruction->tr->setVersion(readVersion);
-			}
+			ASSERT(!isDirectory || !isSnapshot);
 
 			data->stack.index = idx;
 			Void _ = wait(InstructionFunc::call(op.toString(), data, instruction));
@@ -1744,7 +1739,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(NetworkAddress(), false);
 
-		API *fdb = FDB::API::selectAPIVersion(510);
+		API *fdb = FDB::API::selectAPIVersion(520);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
@@ -1755,7 +1750,7 @@ ACTOR void _test_versionstamp() {
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();
 
-		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl"), FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
+		tr->atomicOp(LiteralStringRef("foo"), LiteralStringRef("blahblahbl\x00\x00\x00\x00"), FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
 
 		Void _ = wait(tr->commit()); // should use retry loop
 
@@ -1821,7 +1816,7 @@ int main( int argc, char** argv ) {
 	}
 	catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}
 }

@@ -56,7 +56,7 @@ extern bool noUnseed;
 
 class KeyValueStoreMemory : public IKeyValueStore, NonCopyable {
 public:
-	KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot );
+	KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent );
 
 	// IClosable
 	virtual Future<Void> getError() { return log->getError(); }
@@ -154,6 +154,12 @@ public:
 		if(!recovering.isReady())
 			return waitAndCommit(this, sequential);
 
+		if(!disableSnapshot && replaceContent && !firstCommitWithSnapshot) {
+			transactionSize += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
+			committedWriteBytes += SERVER_KNOBS->REPLACE_CONTENTS_BYTES;
+			semiCommit();
+		}
+
 		if(transactionIsLarge) {
 			fullSnapshot(data);
 			resetSnapshot = true;
@@ -186,6 +192,7 @@ public:
 		committedDataSize = data.sumTo(data.end());
 		transactionSize = 0;
 		transactionIsLarge = false;
+		firstCommitWithSnapshot = false;
 
 		addActor.send( commitAndUpdateVersions( this, c, previousSnapshotEnd ) );
 		return c;
@@ -353,6 +360,9 @@ private:
 
 	bool resetSnapshot; //Set to true after a fullSnapshot is performed.  This causes the regular snapshot mechanism to restart
 	bool disableSnapshot;
+	bool replaceContent;
+	bool firstCommitWithSnapshot;
+	int snapshotCount;
 
 	int64_t memoryLimit; //The upper limit on the memory used by the store (excluding, possibly, some clear operations)
 	std::vector<std::pair<KeyValueMapPair, uint64_t>> dataSets;
@@ -398,9 +408,9 @@ private:
 		bool ok = count < 1e6;
 		if( !ok ) {
 			TraceEvent(/*ok ? SevInfo : */SevWarnAlways, "KVSMemCommit_queue", id)
-				.detail("bytes", total)
-				.detail("log", log)
-				.detail("ops", count)
+				.detail("Bytes", total)
+				.detail("Log", log)
+				.detail("Ops", count)
 				.detail("LastLoggedLocation", log_location)
 				.detail("Details", count);
 		}
@@ -480,9 +490,9 @@ private:
 					if (h.op == OpSnapshotItem) { // snapshot data item
 						/*if (p1 < uncommittedNextKey) {
 							TraceEvent(SevError, "RecSnapshotBack", self->id)
-								.detail("nextKey", printable(uncommittedNextKey))
-								.detail("p1", printable(p1))
-								.detail("nextlocation", self->log->getNextReadLocation());
+								.detail("NextKey", printable(uncommittedNextKey))
+								.detail("P1", printable(p1))
+								.detail("Nextlocation", self->log->getNextReadLocation());
 						}
 						ASSERT( p1 >= uncommittedNextKey );*/
 						if( p1 >= uncommittedNextKey )
@@ -492,9 +502,9 @@ private:
 						++dbgSnapshotItemCount;
 					} else if (h.op == OpSnapshotEnd || h.op == OpSnapshotAbort) { // snapshot complete
 						TraceEvent("RecSnapshotEnd", self->id)
-							.detail("nextKey", printable(uncommittedNextKey))
-							.detail("nextlocation", self->log->getNextReadLocation())
-							.detail("isSnapshotEnd", h.op == OpSnapshotEnd);
+							.detail("NextKey", printable(uncommittedNextKey))
+							.detail("Nextlocation", self->log->getNextReadLocation())
+							.detail("IsSnapshotEnd", h.op == OpSnapshotEnd);
 
 						if(h.op == OpSnapshotEnd) {
 							uncommittedPrevSnapshotEnd = uncommittedSnapshotEnd;
@@ -521,7 +531,7 @@ private:
 					} else if (h.op == OpRollback) { // rollback previous transaction
 						recoveryQueue.rollback();
 						TraceEvent("KVSMemRecSnapshotRollback", self->id)
-							.detail("nextKey", printable(uncommittedNextKey));
+							.detail("NextKey", printable(uncommittedNextKey));
 						uncommittedNextKey = self->recoveredSnapshotKey;
 						uncommittedPrevSnapshotEnd = self->previousSnapshotEnd;
 						uncommittedSnapshotEnd = self->currentSnapshotEnd;
@@ -579,6 +589,7 @@ private:
 	//Snapshots an entire data set
 	void fullSnapshot( IndexedSet< KeyValueMapPair, uint64_t> &snapshotData ) {
 		previousSnapshotEnd = log_op(OpSnapshotAbort, StringRef(), StringRef());
+		replaceContent = false;
 
 		//Clear everything since we are about to write the whole database
 		log_op(OpClearToEnd, allKeys.begin, StringRef());
@@ -635,10 +646,10 @@ private:
 			if (next == self->data.end()) {
 				auto thisSnapshotEnd = self->log_op( OpSnapshotEnd, StringRef(), StringRef() );
 				//TraceEvent("SnapshotEnd", self->id)
-				//	.detail("lastKey", printable(lastKey.present() ? lastKey.get() : LiteralStringRef("<none>")))
-				//	.detail("currentSnapshotEndLoc", self->currentSnapshotEnd)
-				//	.detail("previousSnapshotEndLoc", self->previousSnapshotEnd)
-				//	.detail("thisSnapshotEnd", thisSnapshotEnd)
+				//	.detail("LastKey", printable(lastKey.present() ? lastKey.get() : LiteralStringRef("<none>")))
+				//	.detail("CurrentSnapshotEndLoc", self->currentSnapshotEnd)
+				//	.detail("PreviousSnapshotEndLoc", self->previousSnapshotEnd)
+				//	.detail("ThisSnapshotEnd", thisSnapshotEnd)
 				//	.detail("Items", snapItems)
 				//	.detail("CommittedWrites", self->notifiedCommittedWriteBytes.get())
 				//	.detail("SnapshotSize", snapshotBytes);
@@ -646,6 +657,10 @@ private:
 				ASSERT(thisSnapshotEnd >= self->currentSnapshotEnd);
 				self->previousSnapshotEnd = self->currentSnapshotEnd;
 				self->currentSnapshotEnd = thisSnapshotEnd;
+
+				if(++self->snapshotCount == 2) {
+					self->replaceContent = false;
+				}
 				nextKey = Key();
 				nextKeyAfter = false;
 				snapItems = 0;
@@ -689,10 +704,9 @@ private:
 	}
 };
 
-KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot )
-	: log(log), id(id), previousSnapshotEnd(-1), currentSnapshotEnd(-1),
-	  resetSnapshot(false), memoryLimit(memoryLimit), committedWriteBytes(0),
-	  committedDataSize(0), transactionSize(0), transactionIsLarge(false), disableSnapshot(disableSnapshot)
+KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memoryLimit, bool disableSnapshot, bool replaceContent )
+	: log(log), id(id), previousSnapshotEnd(-1), currentSnapshotEnd(-1), resetSnapshot(false), memoryLimit(memoryLimit), committedWriteBytes(0),
+	  committedDataSize(0), transactionSize(0), transactionIsLarge(false), disableSnapshot(disableSnapshot), replaceContent(replaceContent), snapshotCount(0), firstCommitWithSnapshot(true)
 {
 	recovering = recover( this );
 	snapshotting = snapshot( this );
@@ -702,9 +716,9 @@ KeyValueStoreMemory::KeyValueStoreMemory( IDiskQueue* log, UID id, int64_t memor
 IKeyValueStore* keyValueStoreMemory( std::string const& basename, UID logID, int64_t memoryLimit, std::string ext ) {
 	TraceEvent("KVSMemOpening", logID).detail("Basename", basename).detail("MemoryLimit", memoryLimit);
 	IDiskQueue *log = openDiskQueue( basename, ext, logID);
-	return new KeyValueStoreMemory( log, logID, memoryLimit, false );
+	return new KeyValueStoreMemory( log, logID, memoryLimit, false, false );
 }
 
-IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot ) {
-	return new KeyValueStoreMemory( queue, logID, memoryLimit, disableSnapshot );
+IKeyValueStore* keyValueStoreLogSystem( class IDiskQueue* queue, UID logID, int64_t memoryLimit, bool disableSnapshot, bool replaceContent ) {
+	return new KeyValueStoreMemory( queue, logID, memoryLimit, disableSnapshot, replaceContent );
 }

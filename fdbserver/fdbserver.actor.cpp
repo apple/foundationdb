@@ -538,7 +538,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError,"dumpDatabaseError").error(e).detail("Filename", outputFilename);
+		TraceEvent(SevError,"DumpDatabaseError").error(e).detail("Filename", outputFilename);
 		throw;
 	}
 }
@@ -849,7 +849,7 @@ int main(int argc, char* argv[]) {
 		std::string testServersStr;
 		NetworkAddress publicAddress, listenAddress;
 		const char *targetKey = NULL;
-		uint64_t memLimit = 8LL << 30;
+		uint64_t memLimit = 8LL << 30; // Nice to maintain the same default value for memLimit and SERVER_KNOBS->SERVER_MEM_LIMIT and SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT
 		uint64_t storageMemLimit = 1LL << 30;
 		bool buggifyEnabled = false, machineIdOverride = false, restarting = false;
 		Optional<Standalone<StringRef>> zoneId;
@@ -868,7 +868,8 @@ int main(int argc, char* argv[]) {
 		bool testOnServers = false;
 
 		Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
-		std::string tlsCertPath, tlsKeyPath, tlsVerifyPeers;
+		std::string tlsCertPath, tlsKeyPath, tlsCAPath, tlsPassword;
+		std::vector<std::string> tlsVerifyPeers;
 		double fileIoTimeout = 0.0;
 		bool fileIoWarnOnly = false;
 
@@ -1192,7 +1193,8 @@ int main(int argc, char* argv[]) {
 					break;
 				case TLSOptions::OPT_TLS_PLUGIN:
 					try {
-						tlsOptions->set_plugin_name_or_path( args.OptionArg() );
+						const char* plugin_path = args.OptionArg();
+						tlsOptions->set_plugin_name_or_path( plugin_path ? plugin_path : "" );
 					} catch (Error& e) {
 						fprintf(stderr, "ERROR: cannot load TLS plugin `%s' (%s)\n", args.OptionArg(), e.what());
 						printHelpTeaser(argv[0]);
@@ -1202,11 +1204,17 @@ int main(int argc, char* argv[]) {
 				case TLSOptions::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args.OptionArg();
 					break;
+				case TLSOptions::OPT_TLS_PASSWORD:
+					tlsPassword = args.OptionArg();
+					break;
+				case TLSOptions::OPT_TLS_CA_FILE:
+					tlsCAPath = args.OptionArg();
+					break;
 				case TLSOptions::OPT_TLS_KEY:
 					tlsKeyPath = args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_VERIFY_PEERS:
-					tlsVerifyPeers = args.OptionArg();
+					tlsVerifyPeers.push_back(args.OptionArg());
 					break;
 			}
 		}
@@ -1382,7 +1390,9 @@ int main(int argc, char* argv[]) {
 		CLIENT_KNOBS = clientKnobs;
 
 		if (!serverKnobs->setKnob( "log_directory", logFolder )) ASSERT(false);
-
+		if (role != Simulation) {
+			if (!serverKnobs->setKnob("commit_batches_mem_bytes_hard_limit", std::to_string(memLimit))) ASSERT(false);
+		}
 		for(auto k=knobs.begin(); k!=knobs.end(); ++k) {
 			try {
 				if (!flowKnobs->setKnob( k->first, k->second ) &&
@@ -1400,6 +1410,7 @@ int main(int argc, char* argv[]) {
 				throw;
 			}
 		}
+		if (!serverKnobs->setKnob("server_mem_limit", std::to_string(memLimit))) ASSERT(false);
 
 		if (role == SkipListTest) {
 			skipListTest();
@@ -1466,8 +1477,14 @@ int main(int argc, char* argv[]) {
 
 			if ( tlsCertPath.size() )
 				tlsOptions->set_cert_file( tlsCertPath );
-			if ( tlsKeyPath.size() )
-				tlsOptions->set_key_file( tlsKeyPath );
+			if (tlsCAPath.size())
+				tlsOptions->set_ca_file(tlsCAPath);
+			if (tlsKeyPath.size()) {
+				if (tlsPassword.size())
+					tlsOptions->set_key_password(tlsPassword);
+
+				tlsOptions->set_key_file(tlsKeyPath);
+			}
 			if ( tlsVerifyPeers.size() )
 				tlsOptions->set_verify_peers( tlsVerifyPeers );
 
@@ -1479,7 +1496,7 @@ int main(int argc, char* argv[]) {
 					if (listenError.isReady()) listenError.get();
 				} catch (Error& e) {
 					TraceEvent("BindError").error(e);
-					fprintf(stderr, "Error initializing networking with public address %s and listen address %s\n", publicAddress.toString().c_str(), listenAddress.toString().c_str());
+					fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n", publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
 				}
@@ -1585,7 +1602,7 @@ int main(int argc, char* argv[]) {
 				platform::createDirectory( dataFolder );
 			}
 
-			setupAndRun( dataFolder, testFile, restarting );
+			setupAndRun( dataFolder, testFile, restarting, tlsOptions );
 			g_simulator.run();
 		} else if (role == FDBD) {
 			ASSERT( connectionFile );
@@ -1761,7 +1778,7 @@ int main(int argc, char* argv[]) {
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("std::exception", e.what());
+		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}

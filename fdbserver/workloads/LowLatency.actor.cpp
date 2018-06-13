@@ -73,7 +73,7 @@ struct LowLatencyWorkload : TestWorkload {
 					}
 				}
 				if(now() - operationStart > self->maxLatency) {
-					TraceEvent(SevError, "LatencyTooLarge").detail("maxLatency", self->maxLatency).detail("observedLatency", now() - operationStart);
+					TraceEvent(SevError, "LatencyTooLarge").detail("MaxLatency", self->maxLatency).detail("ObservedLatency", now() - operationStart);
 					self->ok = false;
 				}
 				if( now() - testStart > self->testDuration )

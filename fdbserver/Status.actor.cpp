@@ -517,17 +517,17 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj["stored_bytes"] = parseInt64(extractAttribute(metrics, "bytesStored"));
-			obj["kvstore_used_bytes"] = parseInt64(extractAttribute(metrics, "kvstoreBytesUsed"));
-			obj["kvstore_free_bytes"] = parseInt64(extractAttribute(metrics, "kvstoreBytesFree"));
-			obj["kvstore_available_bytes"] = parseInt64(extractAttribute(metrics, "kvstoreBytesAvailable"));
-			obj["kvstore_total_bytes"] = parseInt64(extractAttribute(metrics, "kvstoreBytesTotal"));
-			obj["input_bytes"] = parseCounter(extractAttribute(metrics, "bytesInput"));
-			obj["durable_bytes"] = parseCounter(extractAttribute(metrics, "bytesDurable"));
+			obj["stored_bytes"] = parseInt64(extractAttribute(metrics, "BytesStored"));
+			obj["kvstore_used_bytes"] = parseInt64(extractAttribute(metrics, "KvstoreBytesUsed"));
+			obj["kvstore_free_bytes"] = parseInt64(extractAttribute(metrics, "KvstoreBytesFree"));
+			obj["kvstore_available_bytes"] = parseInt64(extractAttribute(metrics, "KvstoreBytesAvailable"));
+			obj["kvstore_total_bytes"] = parseInt64(extractAttribute(metrics, "KvstoreBytesTotal"));
+			obj["input_bytes"] = parseCounter(extractAttribute(metrics, "BytesInput"));
+			obj["durable_bytes"] = parseCounter(extractAttribute(metrics, "BytesDurable"));
 			obj["query_queue_max"] = parseInt(extractAttribute(metrics, "QueryQueueMax"));
-			obj["finished_queries"] = parseCounter(extractAttribute(metrics, "finishedQueries"));
+			obj["finished_queries"] = parseCounter(extractAttribute(metrics, "FinishedQueries"));
 
-			Version version = parseInt64(extractAttribute(metrics, "version"));
+			Version version = parseInt64(extractAttribute(metrics, "Version"));
 			obj["data_version"] = version;
 
 			if(maxTLogVersion > 0) {
@@ -545,17 +545,17 @@ struct RolesInfo {
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
 		try {
-			obj["kvstore_used_bytes"] = parseInt64(extractAttribute(metrics, "kvstoreBytesUsed"));
-			obj["kvstore_free_bytes"] = parseInt64(extractAttribute(metrics, "kvstoreBytesFree"));
-			obj["kvstore_available_bytes"] = parseInt64(extractAttribute(metrics, "kvstoreBytesAvailable"));
-			obj["kvstore_total_bytes"] = parseInt64(extractAttribute(metrics, "kvstoreBytesTotal"));
-			obj["queue_disk_used_bytes"] = parseInt64(extractAttribute(metrics, "queueDiskBytesUsed"));
-			obj["queue_disk_free_bytes"] = parseInt64(extractAttribute(metrics, "queueDiskBytesFree"));
-			obj["queue_disk_available_bytes"] = parseInt64(extractAttribute(metrics, "queueDiskBytesAvailable"));
-			obj["queue_disk_total_bytes"] = parseInt64(extractAttribute(metrics, "queueDiskBytesTotal"));
-			obj["input_bytes"] = parseCounter(extractAttribute(metrics, "bytesInput"));
-			obj["durable_bytes"] = parseCounter(extractAttribute(metrics, "bytesDurable"));
-			obj["data_version"] = parseInt64(extractAttribute(metrics, "version"));
+			obj["kvstore_used_bytes"] = parseInt64(extractAttribute(metrics, "KvstoreBytesUsed"));
+			obj["kvstore_free_bytes"] = parseInt64(extractAttribute(metrics, "KvstoreBytesFree"));
+			obj["kvstore_available_bytes"] = parseInt64(extractAttribute(metrics, "KvstoreBytesAvailable"));
+			obj["kvstore_total_bytes"] = parseInt64(extractAttribute(metrics, "KvstoreBytesTotal"));
+			obj["queue_disk_used_bytes"] = parseInt64(extractAttribute(metrics, "QueueDiskBytesUsed"));
+			obj["queue_disk_free_bytes"] = parseInt64(extractAttribute(metrics, "QueueDiskBytesFree"));
+			obj["queue_disk_available_bytes"] = parseInt64(extractAttribute(metrics, "QueueDiskBytesAvailable"));
+			obj["queue_disk_total_bytes"] = parseInt64(extractAttribute(metrics, "QueueDiskBytesTotal"));
+			obj["input_bytes"] = parseCounter(extractAttribute(metrics, "BytesInput"));
+			obj["durable_bytes"] = parseCounter(extractAttribute(metrics, "BytesDurable"));
+			obj["data_version"] = parseInt64(extractAttribute(metrics, "Version"));
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
 				throw e;
@@ -1296,9 +1296,13 @@ static std::set<StringRef> getTLogEligibleMachines(vector<std::pair<WorkerInterf
 	return tlogEligibleMachines;
 }
 
-ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, StatusObject *qos, StatusObject *data_overlay, std::set<std::string> *incomplete_reasons) {
+ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker, 
+	std::string dbName, StatusObject *qos, StatusObject *data_overlay, std::set<std::string> *incomplete_reasons, Future<ErrorOr<vector<std::pair<StorageServerInterface, std::string>>>> storageServerFuture) 
+{
 	state StatusObject statusObj;
 	state StatusObject operationsObj;
+	state StatusObject bytesObj;
+	state StatusObject keysObj;
 
 	// Writes and conflicts
 	try {
@@ -1319,18 +1323,15 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 		StatusObject mutations=makeCounter(), mutationBytes=makeCounter(), txnConflicts=makeCounter(), txnStartOut=makeCounter(), txnCommitOutSuccess=makeCounter();
 
 		for (auto &ps : proxyStats) {
-			mutations = addCounters( mutations, parseCounter(extractAttribute(ps, LiteralStringRef("mutations"))) );
-			mutationBytes = addCounters( mutationBytes, parseCounter(extractAttribute(ps, LiteralStringRef("mutationBytes"))) );
-			txnConflicts = addCounters( txnConflicts, parseCounter(extractAttribute(ps, LiteralStringRef("txnConflicts"))) );
-			txnStartOut = addCounters( txnStartOut, parseCounter(extractAttribute(ps, LiteralStringRef("txnStartOut"))) );
-			txnCommitOutSuccess = addCounters( txnCommitOutSuccess, parseCounter(extractAttribute(ps, LiteralStringRef("txnCommitOutSuccess"))) );
+			mutations = addCounters( mutations, parseCounter(extractAttribute(ps, LiteralStringRef("Mutations"))) );
+			mutationBytes = addCounters( mutationBytes, parseCounter(extractAttribute(ps, LiteralStringRef("MutationBytes"))) );
+			txnConflicts = addCounters( txnConflicts, parseCounter(extractAttribute(ps, LiteralStringRef("TxnConflicts"))) );
+			txnStartOut = addCounters( txnStartOut, parseCounter(extractAttribute(ps, LiteralStringRef("TxnStartOut"))) );
+			txnCommitOutSuccess = addCounters( txnCommitOutSuccess, parseCounter(extractAttribute(ps, LiteralStringRef("TxnCommitOutSuccess"))) );
 		}
 
 		operationsObj["writes"] = mutations;
-
-		StatusObject bytesObj;
 		bytesObj["written"] = mutationBytes;
-		statusObj["bytes"] = bytesObj;
 
 		StatusObject transactions;
 		transactions["conflicted"] = txnConflicts;
@@ -1345,12 +1346,11 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 		incomplete_reasons->insert("Unknown mutations, conflicts, and transactions state.");
 	}
 
-	// Transactions and reads
+	// Transactions
 	try {
 		Standalone<StringRef> md = wait( timeoutError(mWorker.first.eventLogRequest.getReply( EventLogRequest(StringRef(dbName+"/RkUpdate") ) ), 1.0) );
 		double tpsLimit = parseDouble(extractAttribute(md, LiteralStringRef("TPSLimit")));
 		double transPerSec = parseDouble(extractAttribute(md, LiteralStringRef("ReleasedTPS")));
-		double readReplyRate = parseDouble(extractAttribute(md, LiteralStringRef("ReadReplyRate")));
 		int ssCount = parseInt(extractAttribute(md, LiteralStringRef("StorageServers")));
 		int tlogCount = parseInt(extractAttribute(md, LiteralStringRef("TLogs")));
 		int64_t worstFreeSpaceStorageServer = parseInt64(extractAttribute(md, LiteralStringRef("WorstFreeSpaceStorageServer")));
@@ -1361,11 +1361,6 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 		int64_t totalDiskUsageBytes = parseInt64(extractAttribute(md, LiteralStringRef("TotalDiskUsageBytes")));
 		int64_t worstVersionLag = parseInt64(extractAttribute(md, LiteralStringRef("WorstStorageServerVersionLag")));
 		int64_t limitingVersionLag = parseInt64(extractAttribute(md, LiteralStringRef("LimitingStorageServerVersionLag")));
-
-		StatusObject readsObj;
-		readsObj["hz"] = readReplyRate;
-		operationsObj["reads"] = readsObj;
-
 		(*data_overlay)["total_disk_used_bytes"] = totalDiskUsageBytes;
 
 		if(ssCount > 0) {
@@ -1406,9 +1401,41 @@ ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struc
 	} catch (Error &e){
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		incomplete_reasons->insert("Unknown read and performance state.");
+		incomplete_reasons->insert("Unknown performance state.");
 	}
+
+	// Reads
+	try {
+		ErrorOr<vector<std::pair<StorageServerInterface, std::string>>> storageServers = wait(storageServerFuture);
+		if(!storageServers.present()) {
+			throw storageServers.getError();
+		}
+
+		StatusObject reads = makeCounter();
+		StatusObject readKeys = makeCounter();
+		StatusObject readBytes = makeCounter();
+
+		for(auto &ss : storageServers.get()) {
+			reads = addCounters(reads, parseCounter(extractAttribute(ss.second, LiteralStringRef("FinishedQueries"))));
+			readKeys = addCounters(readKeys, parseCounter(extractAttribute(ss.second, LiteralStringRef("RowsQueried"))));
+			readBytes = addCounters(readBytes, parseCounter(extractAttribute(ss.second, LiteralStringRef("BytesQueried"))));
+		}
+
+		operationsObj["reads"] = reads;
+		keysObj["read"] = readKeys;
+		bytesObj["read"] = readBytes;
+
+	}
+	catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw;
+		incomplete_reasons->insert("Unknown read state.");
+	}
+
+
 	statusObj["operations"] = operationsObj;
+	statusObj["keys"] = keysObj;
+	statusObj["bytes"] = bytesObj;
 
 	return statusObj;
 }
@@ -1767,13 +1794,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["latency_probe"] = latencyProbeResults;
 			}
 
-			state int minReplicasRemaining = -1;
-			std::vector<Future<StatusObject>> futures2;
-			futures2.push_back(dataStatusFetcher(mWorker, dbName, &minReplicasRemaining));
-			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, dbName, &qos, &data_overlay, &status_incomplete_reasons));
-			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
-			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
-
 			// Start getting storage servers now (using system priority) concurrently.  Using sys priority because having storage servers
 			// in status output is important to give context to error messages in status that reference a storage server role ID.
 			state std::unordered_map<NetworkAddress, WorkerInterface> address_workers;
@@ -1781,6 +1801,13 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				address_workers[worker.first.address()] = worker.first;
 			state Future<ErrorOr<vector<std::pair<StorageServerInterface, std::string>>>> storageServerFuture = errorOr(getStorageServersAndMetrics(cx, address_workers));
 			state Future<ErrorOr<vector<std::pair<TLogInterface, std::string>>>> tLogFuture = errorOr(getTLogsAndMetrics(db, address_workers));
+
+			state int minReplicasRemaining = -1;
+			std::vector<Future<StatusObject>> futures2;
+			futures2.push_back(dataStatusFetcher(mWorker, dbName, &minReplicasRemaining));
+			futures2.push_back(workloadStatusFetcher(db, workers, mWorker, dbName, &qos, &data_overlay, &status_incomplete_reasons, storageServerFuture));
+			futures2.push_back(layerStatusFetcher(cx, &messages, &status_incomplete_reasons));
+			futures2.push_back(lockedStatusFetcher(db, &messages, &status_incomplete_reasons));
 
 			state std::vector<StatusObject> workerStatuses = wait(getAll(futures2));
 

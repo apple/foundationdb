@@ -107,10 +107,6 @@ const KeyRangeRef serverTagKeys(
 	LiteralStringRef("\xff/serverTag/"),
 	LiteralStringRef("\xff/serverTag0") );
 const KeyRef serverTagPrefix = serverTagKeys.begin;
-const KeyRef serverTagMaxOldKey = LiteralStringRef("\xff/serverTagMax");
-const KeyRangeRef serverTagMaxKeys(
-	LiteralStringRef("\xff/serverTagMax/"),
-	LiteralStringRef("\xff/serverTagMax0") );
 const KeyRangeRef serverTagConflictKeys(
 	LiteralStringRef("\xff/serverTagConflict/"),
 	LiteralStringRef("\xff/serverTagConflict0") );
@@ -119,13 +115,6 @@ const KeyRangeRef serverTagHistoryKeys(
 	LiteralStringRef("\xff/serverTagHistory/"),
 	LiteralStringRef("\xff/serverTagHistory0") );
 const KeyRef serverTagHistoryPrefix = serverTagHistoryKeys.begin;
-
-const Key serverMaxTagKeyFor( int8_t tagLocality ) {
-	BinaryWriter wr(Unversioned());
-	wr.serializeBytes( serverTagMaxKeys.begin );
-	wr << tagLocality;
-	return wr.toStringRef();
-}
 
 const Key serverTagKeyFor( UID serverID ) {
 	BinaryWriter wr(Unversioned());
@@ -209,36 +198,6 @@ const Key serverTagConflictKeyFor( Tag tag ) {
 	return wr.toStringRef();
 }
 
-const Value serverTagMaxValue( Tag tag ) {
-	BinaryWriter wr(Unversioned()); //This has to be unversioned because we are using an atomic op to max it
-	wr << tag;
-	return wr.toStringRef();
-}
-
-Tag decodeServerTagMaxValue( ValueRef const& value ) {
-	Tag s;
-	BinaryReader reader( value, Unversioned() );
-	reader >> s;
-	return s;
-}
-
-Tag decodeServerTagMaxValueOld( ValueRef const& value ) {
-	Tag s;
-	BinaryReader reader( value, Unversioned() );
-	int16_t id;
-	reader >> id;
-	if(id == invalidTagOld) {
-		s = invalidTag;
-	} else if(id == txsTagOld) {
-		s = txsTag;
-	} else {
-		ASSERT(id >= 0);
-		s.id = id;
-		s.locality = tagLocalityUpgraded;
-	}
-	return s;
-}
-
 const KeyRangeRef tagLocalityListKeys(
 	LiteralStringRef("\xff/tagLocalityList/"),
 	LiteralStringRef("\xff/tagLocalityList0") );
@@ -264,6 +223,36 @@ Optional<Value> decodeTagLocalityListKey( KeyRef const& key ) {
 }
 int8_t decodeTagLocalityListValue( ValueRef const& value ) {
 	int8_t s;
+	BinaryReader reader( value, IncludeVersion() );
+	reader >> s;
+	return s;
+}
+
+const KeyRangeRef datacenterReplicasKeys(
+	LiteralStringRef("\xff\x02/datacenterReplicas/"),
+	LiteralStringRef("\xff\x02/datacenterReplicas0") );
+const KeyRef datacenterReplicasPrefix = datacenterReplicasKeys.begin;
+
+const Key datacenterReplicasKeyFor( Optional<Value> dcID ) {
+	BinaryWriter wr(AssumeVersion(currentProtocolVersion));
+	wr.serializeBytes( datacenterReplicasKeys.begin );
+	wr << dcID;
+	return wr.toStringRef();
+}
+
+const Value datacenterReplicasValue( int const& replicas ) {
+	BinaryWriter wr(IncludeVersion());
+	wr << replicas;
+	return wr.toStringRef();
+}
+Optional<Value> decodeDatacenterReplicasKey( KeyRef const& key ) {
+	Optional<Value> dcID;
+	BinaryReader rd( key.removePrefix(datacenterReplicasKeys.begin), AssumeVersion(currentProtocolVersion) );
+	rd >> dcID;
+	return dcID;
+}
+int decodeDatacenterReplicasValue( ValueRef const& value ) {
+	int s;
 	BinaryReader reader( value, IncludeVersion() );
 	reader >> s;
 	return s;
@@ -464,7 +453,7 @@ Key logRangesEncodeKey(KeyRef keyBegin, UID logUid) {
 // Returns the start key and optionally the logRange Uid
 KeyRef logRangesDecodeKey(KeyRef key, UID* logUid) {
 	if (key.size() < logRangesRange.begin.size() + sizeof(UID)) {
-		TraceEvent(SevError, "InvalidDecodeKey").detail("key", printable(key));
+		TraceEvent(SevError, "InvalidDecodeKey").detail("Key", printable(key));
 		ASSERT(false);
 	}
 
