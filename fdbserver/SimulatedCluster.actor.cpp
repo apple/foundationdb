@@ -766,7 +766,6 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		primaryDcObj["priority"] = 0;
 		StatusArray primaryDcArr;
 		primaryDcArr.push_back(primaryDcObj);
-		primaryObj["datacenters"] = primaryDcArr;
 
 		StatusObject remoteObj;
 		StatusObject remoteDcObj;
@@ -774,23 +773,20 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		remoteDcObj["priority"] = 1;
 		StatusArray remoteDcArr;
 		remoteDcArr.push_back(remoteDcObj);
-		remoteObj["datacenters"] = remoteDcArr;
 
 		bool needsRemote = generateFearless;
 		if(generateFearless) {
 			StatusObject primarySatelliteObj;
 			primarySatelliteObj["id"] = "2";
 			primarySatelliteObj["priority"] = 1;
-			StatusArray primarySatellitesArr;
-			primarySatellitesArr.push_back(primarySatelliteObj);
-			primaryObj["satellites"] = primarySatellitesArr;
+			primarySatelliteObj["satellite"] = 1;
+			primaryDcArr.push_back(primarySatelliteObj);
 
 			StatusObject remoteSatelliteObj;
 			remoteSatelliteObj["id"] = "3";
 			remoteSatelliteObj["priority"] = 1;
-			StatusArray remoteSatellitesArr;
-			remoteSatellitesArr.push_back(remoteSatelliteObj);
-			remoteObj["satellites"] = remoteSatellitesArr;
+			remoteSatelliteObj["satellite"] = 1;
+			remoteDcArr.push_back(remoteSatelliteObj);
 
 			int satellite_replication_type = g_random->randomInt(0,5);
 			switch (satellite_replication_type) {
@@ -830,7 +826,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				primaryObj["satellite_logs"] = logs;
 				remoteObj["satellite_logs"] = logs;
 			}
-			
+
 			int remote_replication_type = g_random->randomInt(0,5);
 			switch (remote_replication_type) {
 			case 0: {
@@ -865,6 +861,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
 		}
 
+		primaryObj["datacenters"] = primaryDcArr;
+		remoteObj["datacenters"] = remoteDcArr;
+
 		StatusArray regionArr;
 		regionArr.push_back(primaryObj);
 		if(needsRemote || g_random->random01() < 0.5) {
@@ -873,8 +872,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 
 		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 	}
-	
-	if(generateFearless && minimumReplication > 1) { 
+
+	if(generateFearless && minimumReplication > 1) {
 		//low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that is down during failures).
 		machine_count = 16;
 	} else if(generateFearless) {

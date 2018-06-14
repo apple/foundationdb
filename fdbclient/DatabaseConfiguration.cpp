@@ -58,12 +58,27 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 		regions->clear();
 		for (StatusObjectReader dc : regionArray) {
 			RegionInfo info;
-			StatusArray dcArray = dc["datacenters"].get_array();
-			if (dcArray.size() != 1) throw invalid_option();
-			std::string idStr;
-			StatusObject dcOne = dcArray[0].get_obj();
-			info.dcId = dcOne.at("id").get_str();
-			info.priority = dcOne.at("priority").get_int();
+			json_spirit::mArray datacenters;
+			dc.get("datacenters", datacenters);
+			bool nonSatelliteDatacenters = 0;
+			for (StatusObjectReader s : datacenters) {
+				std::string idStr;
+				if (s.has("satellite") && s.last().get_int() == 1) {
+					SatelliteInfo satInfo;
+					s.get("id", idStr);
+					satInfo.dcId = idStr;
+					s.get("priority", satInfo.priority);
+					info.satellites.push_back(satInfo);
+				} else {
+					if (nonSatelliteDatacenters > 0) throw invalid_option();
+					nonSatelliteDatacenters++;
+					s.get("id", idStr);
+					info.dcId = idStr;
+					s.get("priority", info.priority);
+				}
+			}
+			std::sort(info.satellites.begin(), info.satellites.end(), SatelliteInfo::sort_by_priority() );
+			if (nonSatelliteDatacenters != 1) throw invalid_option();
 			dc.tryGet("satellite_logs", info.satelliteDesiredTLogCount);
 			std::string satelliteReplication;
 			if(dc.tryGet("satellite_redundancy_mode", satelliteReplication)) {
@@ -99,18 +114,6 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 			dc.tryGet("satellite_log_replicas", info.satelliteTLogReplicationFactor);
 			dc.tryGet("satellite_usable_dcs", info.satelliteTLogUsableDcs);
 			dc.tryGet("satellite_anti_quorum", info.satelliteTLogWriteAntiQuorum);
-			json_spirit::mArray satellites;
-			if( dc.tryGet("satellites", satellites) ) {
-				for (StatusObjectReader s : satellites) {
-					SatelliteInfo satInfo;
-					std::string sidStr;
-					s.get("id", sidStr);
-					satInfo.dcId = sidStr;
-					s.get("priority", satInfo.priority);
-					info.satellites.push_back(satInfo);
-				}
-				std::sort(info.satellites.begin(), info.satellites.end(), SatelliteInfo::sort_by_priority() );
-			}
 			regions->push_back(info);
 		}
 		std::sort(regions->begin(), regions->end(), RegionInfo::sort_by_priority() );
@@ -250,7 +253,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 				dcObj["id"] = r.dcId.toString();
 				dcObj["priority"] = r.priority;
 				dcArr.push_back(dcObj);
-				regionObj["datacenters"] = dcArr;
 
 				if(r.satelliteTLogReplicationFactor == 1 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0) {
 					regionObj["satellite_redundancy_mode"] = "one_satellite_single";
@@ -274,17 +276,17 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 				}
 
 				if(r.satellites.size()) {
-					StatusArray satellitesArr;
 					for(auto& s : r.satellites) {
 						StatusObject satObj;
 						satObj["id"] = s.dcId.toString();
 						satObj["priority"] = s.priority;
+						satObj["satellite"] = 1;
 
-						satellitesArr.push_back(satObj);
+						dcArr.push_back(satObj);
 					}
-					regionObj["satellites"] = satellitesArr;
 				}
 
+				regionObj["datacenters"] = dcArr;
 				regionArr.push_back(regionObj);
 			}
 			result["regions"] = regionArr;
