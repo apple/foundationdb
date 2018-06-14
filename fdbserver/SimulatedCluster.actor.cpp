@@ -763,7 +763,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		StatusObject primaryObj;
 		StatusObject primaryDcObj;
 		primaryDcObj["id"] = "0";
-		primaryDcObj["priority"] = 0;
+		primaryDcObj["priority"] = 2;
 		StatusArray primaryDcArr;
 		primaryDcArr.push_back(primaryDcObj);
 

@@ -202,6 +202,7 @@ struct RegisterMasterRequest {
 	Optional<DatabaseConfiguration> configuration;
 	vector<UID> priorCommittedLogServers;
 	RecoveryState recoveryState;
+	bool recoveryStalled;
 
 	ReplyPromise<Void> reply;
 
@@ -210,7 +211,7 @@ struct RegisterMasterRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & dbName & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & reply;
+		ar & dbName & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & recoveryStalled & reply;
 	}
 };
 
