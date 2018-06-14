@@ -397,31 +397,31 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 		try {
 			Optional<Standalone<StringRef>> value = wait( tr.get(logsKey) );
 			ASSERT(value.present());
-
-			std::vector<OptionalInterface<TLogInterface>> logConf;
 			auto logs = decodeLogsValue(value.get());
-			for(auto& log : self->logSystem->getLogSystemConfig().tLogs) {
-				for(auto& tl : log.tLogs) {
-					logConf.push_back(tl);
-				}
+
+			std::set<UID> logIds;
+			for(auto& log : logs.first) {
+				logIds.insert(log.first);
 			}
 
-			bool match = (logs.first.size() == logConf.size());
-			if(match) {
-				for(int i = 0; i < logs.first.size(); i++) {
-					if(logs.first[i].first != logConf[i].id()) {
-						match = false;
+			bool found = false;
+			for(auto& logSet : self->logSystem->getLogSystemConfig().tLogs) {
+				for(auto& log : logSet.tLogs) {
+					if(logIds.count(log.id())) {
+						found = true;
 						break;
 					}
 				}
+				if(found) {
+					break;
+				}
 			}
 
-			if(!match) {
+			if(!found) {
 				TEST(true); //old master attempted to change logsKey
 				return Void();
 			}
 
-			//FIXME: include remote logs in the log key
 			tr.set(logsKey, self->logSystem->getLogsValue());
 			Void _ = wait( tr.commit() );
 			return Void();
