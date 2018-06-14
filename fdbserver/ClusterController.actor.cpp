@@ -513,15 +513,31 @@ public:
 
 		std::vector<std::pair<WorkerInterface, ProcessClass>> satelliteLogs;
 		if(region.satelliteTLogReplicationFactor > 0) {
-			std::set<Optional<Key>> satelliteDCs;
-			for(auto& s : region.satellites) {
-				satelliteDCs.insert(s.dcId);
-			}
-			//FIXME: recruitment does not respect usable_dcs, a.k.a if usable_dcs is 1 we should recruit all tlogs in one data center
-			satelliteLogs = getWorkersForTlogs( req.configuration, region.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(dcId), region.satelliteTLogPolicy, id_used, false, satelliteDCs );
+			int startDC = 0;
+			loop {
+				if(startDC > 0 && startDC >= region.satellites.size() + 1 - region.satelliteTLogUsableDcs) {
+					throw no_more_servers();
+				}
 
-			for(int i = 0; i < satelliteLogs.size(); i++) {
-				result.satelliteTLogs.push_back(satelliteLogs[i].first);
+				try {
+					std::set<Optional<Key>> satelliteDCs;
+					for(int s = startDC; s < std::min<int>(startDC + region.satelliteTLogUsableDcs, region.satellites.size()); s++) {
+						satelliteDCs.insert(region.satellites[s].dcId);
+					}
+
+					satelliteLogs = getWorkersForTlogs( req.configuration, region.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(dcId), region.satelliteTLogPolicy, id_used, false, satelliteDCs );
+
+					for(int i = 0; i < satelliteLogs.size(); i++) {
+						result.satelliteTLogs.push_back(satelliteLogs[i].first);
+					}
+					break;
+				} catch (Error &e) {
+					if(e.code() != error_code_no_more_servers) {
+						throw;
+					}
+				}
+
+				startDC++;
 			}
 		}
 
