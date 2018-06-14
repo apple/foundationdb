@@ -61,7 +61,7 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 			std::string idStr;
 			dc.get("id", idStr);
 			info.dcId = idStr;
-			dc.get("priority", info.priority);
+			dc.tryGet("priority", info.priority);
 			dc.tryGet("satellite_logs", info.satelliteDesiredTLogCount);
 			std::string satelliteReplication;
 			if(dc.tryGet("satellite_redundancy_mode", satelliteReplication)) {

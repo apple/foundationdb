@@ -762,7 +762,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		StatusObject primaryObj;
 		primaryObj["id"] = "0";
-		primaryObj["priority"] = 0;
+		primaryObj["priority"] = 2;
 
 		StatusObject remoteObj;
 		remoteObj["id"] = "1";
