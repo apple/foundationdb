@@ -1619,8 +1619,10 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
-		TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
-		flushAndExit(0);
+		if(g_network->isSimulated()) {
+			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
+			flushAndExit(0);
+		}
 
 		TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid).detail("Format", printable(fFormat.get().get())).detail("Expected", persistFormat.value.toString());
 		throw worker_recovery_failed();
