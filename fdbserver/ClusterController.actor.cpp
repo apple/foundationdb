@@ -577,9 +577,6 @@ public:
 			if(regions[0].priority == regions[1].priority && clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get()) {
 				std::swap(regions[0], regions[1]);
 			}
-			if(regions[0].priority < 0) {
-				throw no_more_servers();
-			}
 			bool setPrimaryDesired = false;
 			try {
 				auto reply = findWorkersForConfiguration(req, regions[0].dcId);
@@ -614,9 +611,6 @@ public:
 				throw;
 			}
 		} else if(req.configuration.regions.size() == 1) {
-			if(req.configuration.regions[0].priority < 0) {
-				throw no_more_servers();
-			}
 			vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(req.configuration.regions[0].dcId);
 			desiredDcIds.set(dcPriority);
