@@ -46,6 +46,8 @@ void checksum(std::string const &file, Reference<const IPage> page, LogicalPageI
 	sumOut->part2 = logical; 
 	hashlittle2(pData, page->size(), &sumOut->part1, &sumOut->part2);
 
+	debug_printf("checksum %s logical %d physical %d checksums page %s calculated %s\n", write ? "write" : "read", logical, physical, write ? "NA" : pSumInPage->toString().c_str(), sumOut->toString().c_str());
+
 	// Verify if not in write mode
 	if(!write && sum != *pSumInPage) {
 		auto e = checksum_failed();
@@ -63,6 +65,10 @@ void checksum(std::string const &file, Reference<const IPage> page, LogicalPageI
 
 IndirectShadowPage::IndirectShadowPage() : allocated(true) {
 	data = (uint8_t*)FastAllocator<4096>::allocate();
+#if VALGRIND
+	// Prevent valgrind errors caused by writing random unneeded bytes to disk.
+	memset(data, 0, size());
+#endif
 }
 
 IndirectShadowPage::IndirectShadowPage(uint8_t *data) : data(data), allocated(false) {}
@@ -861,7 +867,7 @@ void PagerFile::init(uint64_t fileSize, uint32_t pagesAllocated) {
 }
 
 void PagerFile::startVacuuming() {
-	vacuuming = vacuumer(pager, this);
+	vacuuming = Never(); //vacuumer(pager, this);
 }
 
 void PagerFile::shutdown() {

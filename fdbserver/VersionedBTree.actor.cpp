@@ -41,6 +41,10 @@ struct BTreePage {
 	uint32_t kvBytes;
 	PrefixTree tree;
 
+	static inline int GetHeaderSize() {
+		return sizeof(BTreePage) - sizeof(PrefixTree);
+	}
+
 	std::string toString() const {
 		std::string r;
 		r += format("BTreePage %p tree %p flags 0x%X count %d kvBytes %d", this, &tree, (int)flags, (int)count, (int)kvBytes);
@@ -96,13 +100,11 @@ static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::Ent
 	int i = start + 1;
 	const int iEnd = entries.size();
 
-	// Subtrace space used for page and prefix tree headers
-	pageSize -= sizeof(BTreePage) + sizeof(PrefixTree);
+	// Subtract space used for btree page and prefix tree headers, this is how much we can write
+	pageSize -= (BTreePage::GetHeaderSize() + PrefixTree::GetHeaderSize());
 
-	// Go all the way to the first out of bound index so the same page building block can catch the last incomplete page
-	while(i <= iEnd) {
-		bool end = i == iEnd;
-		int common = end ? 0 : commonPrefixLength(entries[i].key, entries[i - 1].key);
+	while(i < iEnd) {
+		int common = commonPrefixLength(entries[i].key, entries[i - 1].key);
 
 		int valueSize = entries[i].value.size();
 		int kvAdd = entries[i].key.size() + valueSize;
@@ -110,7 +112,7 @@ static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::Ent
 		int overheadAdd = avgOverheadPerNode + (valueSize ? 1 : 0);
 
 		// If the item is unlikely to fit within the page or the end is reached, write page for the interval [start, i)
-		if((uniqueBytes + overheadEstimate + kvAdd + uniqueAdd + overheadAdd) > pageSize || end) {
+		if((uniqueBytes + overheadEstimate + uniqueAdd + overheadAdd) > pageSize) {
 			Reference<IPage> page = newPageFn();
 			BTreePage *btpage = (BTreePage *)page->begin();
 			btpage->flags = newFlags;
@@ -128,8 +130,6 @@ static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::Ent
 			overheadEstimate = 0;
 			uniqueBytes = common;
 			common = 0;
-			if(end)
-				break;
 		}
 
 		kvBytes += kvAdd;
@@ -138,6 +138,22 @@ static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::Ent
 		++i;
 	}
 
+	// Flush last page, if not empty
+	if(i > start) {
+		Reference<IPage> page = newPageFn();
+		BTreePage *btpage = (BTreePage *)page->begin();
+		btpage->flags = newFlags;
+		btpage->kvBytes = kvBytes;
+		btpage->count = i - start;
+		// TODO:  Key boundary for tree level compression
+		int written = btpage->tree.build(&entries[start], &entries[i], StringRef());
+		if(written > pageSize) {
+			printf("ERROR:  Wrote %d bytes to %d byte page. recs %d  uniqueBytes %d  overheadEstimate %d\n", written, pageSize, i - start, uniqueBytes, overheadEstimate);
+			ASSERT(false);
+		}
+		pages.push_back({start, page});
+	}
+	
 	//debug_printf("buildPages: returning pages.size %lu, kvpairs %lu\n", pages.size(), kvPairs.size());
 	return pages;
 }
@@ -605,7 +621,7 @@ private:
 
 		Reference<const IPage> rawPage = wait(snapshot->getPhysicalPage(root));
 		state BTreePage *page = (BTreePage *) rawPage->begin();
-		debug_printf("Read page: id=%d ver=%lld\n%s\n", root, snapshot->getVersion(), page->toString().c_str());
+		debug_printf("commitSubtree: read page: id=%d ver=%lld\n%s\n", root, snapshot->getVersion(), page->toString().c_str());
 
 		PrefixTree::Cursor existingCursor = page->tree.getCursor();  // TODO: pass key boundary leading to this page
 		bool existingCursorValid = existingCursor.moveFirst();
@@ -1051,7 +1067,7 @@ private:
 
 		ACTOR static Future<Void> pushPage(InternalCursor *self, LogicalPageID id) {
 			Reference<const IPage> rawPage = wait(self->m_pages->getPhysicalPage(id));
-			debug_printf("Read page: id=%d ver=%lld\n%s\n", id, self->m_pages->getVersion(), ((const BTreePage *)rawPage->begin())->toString().c_str());
+			debug_printf("InternalCursor: Read page: id=%d ver=%lld\n%s\n", id, self->m_pages->getVersion(), ((const BTreePage *)rawPage->begin())->toString().c_str());
 			self->m_path.emplace_back(rawPage, id);
 			return Void();
 		}
@@ -1232,10 +1248,10 @@ private:
 
 		std::string toString(const char *wrapPrefix = "") const {
 			std::string r;
-			r += format("Cursor(%p) ver: %lld key: %s value: %s\n", this, m_version,
+			r += format("Cursor(%p) ver: %lld key: %s value: %s", this, m_version,
 				(m_kv.present() ? m_kv.get().key.printable().c_str() : "<np>"),
 				(m_kv.present() ? m_kv.get().value.printable().c_str() : ""));
-			r += format("%s  InternalCursor: %s\n", wrapPrefix, m_icursor.toString(format("%s    ", wrapPrefix).c_str()).c_str());
+			r += format("\n%s  InternalCursor: %s", wrapPrefix, m_icursor.toString(format("%s    ", wrapPrefix).c_str()).c_str());
 			return r;
 		}
 
@@ -1385,6 +1401,7 @@ private:
 			if(kvv.valueIndex == -1) {
 				ASSERT(kvv.value.present());
 				kv.value = ValueRef(self->m_arena, kvv.value.get());
+				debug_printf("readFullKVPair:  Unsplit, exit.  %s\n", self->toString("  ").c_str());
 				return Void();
 			}
 
@@ -1407,6 +1424,7 @@ private:
 					memcpy(wptr, part.begin(), part.size());
 					wptr += part.size();
 				}
+				debug_printf("readFullKVPair:  Read chunks 0 and onward, exiting.  %s\n", self->toString("  ").c_str());
 				return Void();
 			}
 
@@ -1424,6 +1442,7 @@ private:
 				Void _ = wait(self->m_icursor.move(false));
 			}
 
+			debug_printf("readFullKVPair:  Read from last chunk backward.  Exiting. %s\n", self->toString("  ").c_str());
 			return Void();
 		}
 	};
@@ -1632,9 +1651,12 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 
 	// Randomly use the cursor for something else first.
 	if(g_random->coinflip()) {
+		debug_printf("VerifyRange: Dummy seek\n");
 		state Key randomKey = randomKV().key;
 		Void _ = wait(g_random->coinflip() ? cur->findFirstEqualOrGreater(randomKey, true, 0) : cur->findLastLessOrEqual(randomKey, true, 0));
 	}
+
+	debug_printf("VerifyRange: Actual seek\n");
 	Void _ = wait(cur->findFirstEqualOrGreater(start, true, 0));
 
 	state std::vector<KeyValue> results;

@@ -295,6 +295,10 @@ struct PrefixTree {
 	uint16_t size;   // size in bytes
 	Node root;
 
+	static inline int GetHeaderSize() {
+		return sizeof(PrefixTree) - sizeof(root);
+	}
+
 private:
 	struct PathEntry {
 		const Node *node;
@@ -919,7 +923,7 @@ Node::Parser p(&root);
 printf("parser: headerLen %d prefixLen %d leftPos %d rightPos %d split %s suffix %s val %s\n", 
 	   p.headerLen, p.prefixLen, p.leftPos, p.rightPos, p.splitString().toString().c_str(), p.suffixString().toString().c_str(), p.valueString().toString().c_str());
 */
-		return p8 - &root.flags;
+		return p8 - (uint8_t *)&root;
 	}
 
 } __attribute__((packed, aligned(1)));
