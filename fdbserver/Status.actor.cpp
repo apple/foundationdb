@@ -1068,8 +1068,9 @@ ACTOR static Future<StatusObject> latencyProbeFetcher(Database cx, StatusArray *
 	return statusObj;
 }
 
-ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database cx, StatusArray *messages, std::set<std::string> *status_incomplete_reasons){
+ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> loadConfiguration(Database cx, StatusArray *messages, std::set<std::string> *status_incomplete_reasons){
 	state Optional<DatabaseConfiguration> result;
+	state Optional<bool> fullReplication;
 	state Transaction tr(cx);
 	state Future<Void> getConfTimeout = delay(5.0);
 
@@ -1090,7 +1091,34 @@ ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database 
 					result = configuration;
 				}
 				when(Void _ = wait(getConfTimeout)) {
-					messages->push_back(makeMessage("unreadable_configuration", "Unable to read database configuration."));
+					if(!result.present()) {
+						messages->push_back(makeMessage("unreadable_configuration", "Unable to read database configuration."));
+					} else {
+						messages->push_back(makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
+					}
+					break;
+				}
+			}
+
+			ASSERT(result.present());
+			state std::vector<Future<Optional<Value>>> replicasFutures;
+			for(auto& region : result.get().regions) {
+				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
+			}
+
+			choose {
+				when( Void _ = wait( waitForAll(replicasFutures) ) ) {
+					int unreplicated = 0;
+					for(int i = 0; i < result.get().regions.size(); i++) {
+						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
+							unreplicated++;
+						}
+					}
+
+					fullReplication = (!unreplicated || (result.get().remoteTLogReplicationFactor == 0 && unreplicated < result.get().regions.size()));
+				}
+				when(Void _ = wait(getConfTimeout)) {
+					messages->push_back(makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 				}
 			}
 			break;
@@ -1099,7 +1127,7 @@ ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database 
 			Void _ = wait(tr.onError(e));
 		}
 	}
-	return result;
+	return std::make_pair(result, fullReplication);
 }
 
 static StatusObject configurationFetcher(Optional<DatabaseConfiguration> conf, ServerCoordinators coordinators, std::set<std::string> *incomplete_reasons) {
@@ -1803,11 +1831,17 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["protocol_version"] = format("%llx", currentProtocolVersion);
 
-		state Optional<DatabaseConfiguration> configuration = Optional<DatabaseConfiguration>();
+		state Optional<DatabaseConfiguration> configuration;
+		state Optional<bool> fullReplication;
 
 		if(!(recoveryStateStatus.count("name") && recoveryStateStatus["name"] == RecoveryStatus::names[RecoveryStatus::configuration_missing])) {
-			Optional<DatabaseConfiguration> _configuration = wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
-			configuration = _configuration;
+			std::pair<Optional<DatabaseConfiguration>,Optional<bool>> loadResults = wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
+			configuration = loadResults.first;
+			fullReplication = loadResults.second;
+		}
+
+		if(fullReplication.present()) {
+			statusObj["full_replication"] = fullReplication.get();
 		}
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);

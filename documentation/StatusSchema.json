@@ -237,6 +237,7 @@
                "$enum":[  
                   "unreachable_master_worker",
                   "unreadable_configuration",
+                  "full_replication_timeout",
                   "client_issues",
                   "unreachable_processes",
                   "immediate_priority_transaction_start_probe_timeout",
@@ -338,6 +339,7 @@
       },
       "cluster_controller_timestamp":1415650089,
       "protocol_version":"fdb00a400050001",
+      "full_replication":true,
       "configuration":{
          "log_anti_quorum":0,
          "log_replicas":2,
