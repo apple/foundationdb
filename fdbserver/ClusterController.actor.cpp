@@ -794,10 +794,11 @@ public:
 				if ( tlogWorker->second.priorityInfo.isExcluded )
 					return true;
 
-				if(logSet.isLocal && logSet.hasBestPolicy > HasBestPolicyNone) {
-					tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
-				} else if(logSet.isLocal) {
+				if(logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 					satellite_tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
+				}
+				else if(logSet.isLocal) {
+					tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
 				} else {
 					remote_tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
 				}
@@ -1952,7 +1953,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 		state Optional<TLogInterface> remoteLog;
 		if(self->db.serverInfo->get().recoveryState == RecoveryState::REMOTE_RECOVERED) {
 			for(auto& logSet : self->db.serverInfo->get().logSystemConfig.tLogs) {
-				if(logSet.isLocal && logSet.hasBestPolicy) {
+				if(logSet.isLocal && logSet.locality != tagLocalitySatellite) {
 					for(auto& tLog : logSet.tLogs) {
 						if(tLog.present()) {
 							primaryLog = tLog.interf();

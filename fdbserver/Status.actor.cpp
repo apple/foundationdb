@@ -1511,19 +1511,19 @@ static StatusArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<
 					}
 				}
 				maxFaultTolerance = std::max(maxFaultTolerance, it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs);
-				if(it.tLogs[i].isLocal && it.tLogs[i].hasBestPolicy) {
+				if(it.tLogs[i].isLocal && it.tLogs[i].locality == tagLocalitySatellite) {
+					statusObj["satellite_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
+					statusObj["satellite_log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
+					statusObj["satellite_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
+				}
+				else if(it.tLogs[i].isLocal) {
 					statusObj["log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
 					statusObj["log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
 					statusObj["log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
 				}
-				else if(!it.tLogs[i].isLocal) {
+				else {
 					statusObj["remote_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
 					statusObj["remote_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - failedLogs;
-				}
-				else if(it.tLogs[i].isLocal && !it.tLogs[i].hasBestPolicy) {
-					statusObj["satellite_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
-					statusObj["satellite_log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
-					statusObj["satellite_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
 				}
 			}
 			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, maxFaultTolerance);

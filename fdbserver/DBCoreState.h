@@ -41,20 +41,19 @@ struct CoreTLogSet {
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	IRepPolicyRef tLogPolicy;
 	bool isLocal;
-	int32_t hasBestPolicy;
 	int8_t locality;
 	Version startVersion;
 
-	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
+	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
 
 	bool operator == (CoreTLogSet const& rhs) const { 
-		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal && hasBestPolicy == rhs.hasBestPolicy &&
+		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal &&
 			locality == rhs.locality && startVersion == rhs.startVersion && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info()))); 
 	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & tLogs & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & hasBestPolicy & locality & startVersion;
+		ar & tLogs & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & locality & startVersion;
 	}
 };
 
