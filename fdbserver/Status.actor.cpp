@@ -1283,16 +1283,34 @@ ACTOR static Future<vector<std::pair<TLogInterface, std::string>>> getTLogsAndMe
 	return results;
 }
 
-static std::set<StringRef> getTLogEligibleMachines(vector<std::pair<WorkerInterface, ProcessClass>> workers, DatabaseConfiguration configuration) {
-	std::set<StringRef> tlogEligibleMachines;
+static int getTLogEligibleMachines(vector<std::pair<WorkerInterface, ProcessClass>> workers, DatabaseConfiguration configuration) {
+	std::set<StringRef> allMachines;
+	std::map<Key,std::set<StringRef>> dcId_machine;
 	for(auto worker : workers) {
 		if(worker.second.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign
 			&& !configuration.isExcludedServer(worker.first.address()))
 		{
-			tlogEligibleMachines.insert(worker.first.locality.zoneId().get());
+			allMachines.insert(worker.first.locality.zoneId().get());
+			if(worker.first.locality.dcId().present()) {
+				dcId_machine[worker.first.locality.dcId().get()].insert(worker.first.locality.zoneId().get());
+			}
 		}
 	}
 
+	if(configuration.regions.size() == 0) {
+		return allMachines.size();
+	} 
+	int tlogEligibleMachines = std::numeric_limits<int>::max();
+	for(auto& region : configuration.regions) {
+		tlogEligibleMachines = std::min<int>( tlogEligibleMachines, dcId_machine[region.dcId].size() - std::max( configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) ) );
+		if(region.satelliteTLogReplicationFactor > 0) {
+			int totalSatelliteEligible = 0;
+			for(auto& sat : region.satellites) {
+				totalSatelliteEligible += dcId_machine[sat.dcId].size();
+			}
+			tlogEligibleMachines = std::min<int>( tlogEligibleMachines, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
+		}
+	}
 	return tlogEligibleMachines;
 }
 
@@ -1465,11 +1483,19 @@ static StatusArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<
 					}
 				}
 				maxFaultTolerance = std::max(maxFaultTolerance, it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs);
-				//FIXME: add information for remote and satellites
-				if(i==0) {
+				if(it.tLogs[i].isLocal && it.tLogs[i].hasBestPolicy) {
 					statusObj["log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
 					statusObj["log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
 					statusObj["log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
+				}
+				else if(!it.tLogs[i].isLocal) {
+					statusObj["remote_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
+					statusObj["remote_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - failedLogs;
+				}
+				else if(it.tLogs[i].isLocal && !it.tLogs[i].hasBestPolicy) {
+					statusObj["satellite_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
+					statusObj["satellite_log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
+					statusObj["satellite_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
 				}
 			}
 			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, maxFaultTolerance);
@@ -1528,7 +1554,7 @@ static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configurat
 	statusObj["max_machine_failures_without_losing_data"] = std::max(machineFailuresWithoutLosingData, 0);
 
 	// without losing availablity
-	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(numTLogEligibleMachines - configuration.minMachinesRequiredPerDatacenter(), machineFailuresWithoutLosingData), 0);
+	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(numTLogEligibleMachines, machineFailuresWithoutLosingData), 0);
 	return statusObj;
 }
 
@@ -1817,8 +1843,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			if(configuration.present()) {
-				std::set<StringRef> tlogEligibleMachines = getTLogEligibleMachines(workers, configuration.get());
-				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, tlogEligibleMachines.size(), minReplicasRemaining);
+				int tlogEligibleMachines = getTLogEligibleMachines(workers, configuration.get());
+				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, tlogEligibleMachines, minReplicasRemaining);
 			}
 
 			StatusObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
