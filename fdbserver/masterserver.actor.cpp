@@ -1195,6 +1195,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, backupVersionKey, backupVersionValue);
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
+	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
 
 	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, NULL, NULL);
 	mmApplied = tr.mutations.size();
