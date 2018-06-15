@@ -1619,8 +1619,10 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
-		TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
-		flushAndExit(0);
+		if(g_network->isSimulated()) {
+			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
+			flushAndExit(0);
+		}
 
 		TraceEvent(SevError, "UnsupportedDBFormat", self->dbgid).detail("Format", printable(fFormat.get().get())).detail("Expected", persistFormat.value.toString());
 		throw worker_recovery_failed();
@@ -1915,7 +1917,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			self->newLogData.trigger();
 
 			if(req.isPrimary && !logData->stopped && logData->unrecoveredBefore <= req.recoverAt) {
-				if(req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalityInvalid) {
+				if(req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalitySatellite) {
 					logData->logRouterPopToVersion = req.recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);

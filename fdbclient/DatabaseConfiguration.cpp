@@ -160,24 +160,22 @@ bool DatabaseConfiguration::isValid() const {
 		getDesiredRemoteLogs() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
 		regions.size() <= 2 &&
-		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && regions.size() == 2 && durableStorageQuorum == storageTeamSize ) ) ) ) {
+		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && regions.size() == 2 && durableStorageQuorum == storageTeamSize ) ) &&
+		( regions.size() == 0 || regions[0].priority >= 0 ) ) ) {
 		return false;
 	}
 
 	std::set<Key> dcIds;
-	std::set<int> priorities;
 	dcIds.insert(Key());
 	for(auto& r : regions) {
 		if( !(!dcIds.count(r.dcId) &&
-			!priorities.count(r.priority) &&
 			r.satelliteTLogReplicationFactor >= 0 &&
 			r.satelliteTLogWriteAntiQuorum >= 0 &&
-			r.satelliteTLogUsableDcs >= 0 &&
+			r.satelliteTLogUsableDcs >= 1 &&
 			( r.satelliteTLogReplicationFactor == 0 || ( r.satelliteTLogPolicy && r.satellites.size() ) ) ) ) {
 			return false;
 		}
 		dcIds.insert(r.dcId);
-		priorities.insert(r.priority);
 		for(auto& s : r.satellites) {
 			if(dcIds.count(s.dcId)) {
 				return false;

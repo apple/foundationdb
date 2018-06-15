@@ -513,15 +513,31 @@ public:
 
 		std::vector<std::pair<WorkerInterface, ProcessClass>> satelliteLogs;
 		if(region.satelliteTLogReplicationFactor > 0) {
-			std::set<Optional<Key>> satelliteDCs;
-			for(auto& s : region.satellites) {
-				satelliteDCs.insert(s.dcId);
-			}
-			//FIXME: recruitment does not respect usable_dcs, a.k.a if usable_dcs is 1 we should recruit all tlogs in one data center
-			satelliteLogs = getWorkersForTlogs( req.configuration, region.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(dcId), region.satelliteTLogPolicy, id_used, false, satelliteDCs );
+			int startDC = 0;
+			loop {
+				if(startDC > 0 && startDC >= region.satellites.size() + 1 - region.satelliteTLogUsableDcs) {
+					throw no_more_servers();
+				}
 
-			for(int i = 0; i < satelliteLogs.size(); i++) {
-				result.satelliteTLogs.push_back(satelliteLogs[i].first);
+				try {
+					std::set<Optional<Key>> satelliteDCs;
+					for(int s = startDC; s < std::min<int>(startDC + region.satelliteTLogUsableDcs, region.satellites.size()); s++) {
+						satelliteDCs.insert(region.satellites[s].dcId);
+					}
+
+					satelliteLogs = getWorkersForTlogs( req.configuration, region.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(dcId), region.satelliteTLogPolicy, id_used, false, satelliteDCs );
+
+					for(int i = 0; i < satelliteLogs.size(); i++) {
+						result.satelliteTLogs.push_back(satelliteLogs[i].first);
+					}
+					break;
+				} catch (Error &e) {
+					if(e.code() != error_code_no_more_servers) {
+						throw;
+					}
+				}
+
+				startDC++;
 			}
 		}
 
@@ -561,9 +577,6 @@ public:
 			if(regions[0].priority == regions[1].priority && clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get()) {
 				std::swap(regions[0], regions[1]);
 			}
-			if(regions[0].priority < 0) {
-				throw no_more_servers();
-			}
 			bool setPrimaryDesired = false;
 			try {
 				auto reply = findWorkersForConfiguration(req, regions[0].dcId);
@@ -598,9 +611,6 @@ public:
 				throw;
 			}
 		} else if(req.configuration.regions.size() == 1) {
-			if(req.configuration.regions[0].priority < 0) {
-				throw no_more_servers();
-			}
 			vector<Optional<Key>> dcPriority;
 			dcPriority.push_back(req.configuration.regions[0].dcId);
 			desiredDcIds.set(dcPriority);
@@ -784,10 +794,11 @@ public:
 				if ( tlogWorker->second.priorityInfo.isExcluded )
 					return true;
 
-				if(logSet.isLocal && logSet.hasBestPolicy > HasBestPolicyNone) {
-					tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
-				} else if(logSet.isLocal) {
+				if(logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 					satellite_tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
+				}
+				else if(logSet.isLocal) {
+					tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
 				} else {
 					remote_tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
 				}
@@ -1740,7 +1751,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections)));
+			ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
 
@@ -1942,7 +1953,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 		state Optional<TLogInterface> remoteLog;
 		if(self->db.serverInfo->get().recoveryState == RecoveryState::REMOTE_RECOVERED) {
 			for(auto& logSet : self->db.serverInfo->get().logSystemConfig.tLogs) {
-				if(logSet.isLocal && logSet.hasBestPolicy) {
+				if(logSet.isLocal && logSet.locality != tagLocalitySatellite) {
 					for(auto& tLog : logSet.tLogs) {
 						if(tLog.present()) {
 							primaryLog = tLog.interf();

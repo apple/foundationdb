@@ -44,12 +44,11 @@ public:
 	std::vector<int> logIndexArray;
 	std::map<int,LocalityEntry>	logEntryMap;
 	bool isLocal;
-	int32_t hasBestPolicy;
 	int8_t locality;
 	Version startVersion;
 	std::vector<Future<TLogLockResult>> replies;
 
-	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
+	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 
 	std::string logRouterString() {
 		std::string result;
@@ -74,17 +73,8 @@ public:
 	}
 
 	int bestLocationFor( Tag tag ) {
-		if(hasBestPolicy == HasBestPolicyNone) {
-			return -1;
-		} else if(hasBestPolicy == HasBestPolicyId) {
-			//This policy supports upgrades from 5.X
-			if(tag == txsTag) return txsTagOld % logServers.size();
-			return tag.id % logServers.size();
-		} else {
-			//Unsupported policy
-			ASSERT(false);
-			throw internal_error();
-		}
+		if(tag == txsTag) return txsTagOld % logServers.size();
+		return tag.id % logServers.size();
 	}
 
 	void updateLocalitySet() {
@@ -127,11 +117,9 @@ public:
 		alsoServers.clear();
 		resultEntries.clear();
 
-		if(hasBestPolicy) {
-			for(auto& t : tags) {
-				if(t.locality == locality || t.locality == tagLocalitySpecial || locality == tagLocalitySpecial || (isLocal && t.locality == tagLocalityLogRouter)) {
-					newLocations.push_back(bestLocationFor(t));
-				}
+		for(auto& t : tags) {
+			if(locality == tagLocalitySpecial || t.locality == locality || t.locality < 0) {
+				newLocations.push_back(bestLocationFor(t));
 			}
 		}
 
