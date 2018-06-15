@@ -1326,7 +1326,7 @@ static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, Proces
 	}
 
 	if(configuration.regions.size() == 0) {
-		return allMachines.size();
+		return allMachines.size() - std::max( configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
 	} 
 	int extraTlogEligibleMachines = std::numeric_limits<int>::max();
 	for(auto& region : configuration.regions) {
