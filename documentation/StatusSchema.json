@@ -193,6 +193,7 @@
       "incompatible_connections":[  
 
       ],
+      "datacenter_version_difference":0,
       "database_available":true,
       "database_locked":false,
       "generation":2,
