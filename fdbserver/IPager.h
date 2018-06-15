@@ -27,7 +27,7 @@
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
 
-//#define REDWOOD_DEBUG 1
+#define REDWOOD_DEBUG 0
 
 #define debug_printf_always(args...) fprintf(stdout, args)
 

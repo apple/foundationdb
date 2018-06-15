@@ -89,30 +89,29 @@ template<typename Allocator>
 static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::EntriesT &entries, uint8_t newFlags, Allocator const &newPageFn, int pageSize) {
 	vector<std::pair<int, Reference<IPage>>> pages;
 
-	int start = 0;
-	// User key/value bytes in page
-	int kvBytes = entries[start].key.size() + entries[start].value.size();
-	// Estimate of per-node overhead
-	const int avgOverheadPerNode = 6;
-	int overheadEstimate = avgOverheadPerNode;
-	int uniqueBytes = kvBytes;
+	int kvBytes = 0;     // User key/value bytes in page
+	int maxOverhead = 0; // Max overhead that could be needed for the records that will be in the prefix tree
+	int uniqueBytes = 0; // Data byte count in serialized tree
 
-	int i = start + 1;
+	int start = 0;
+	int i = 0;
 	const int iEnd = entries.size();
 
-	// Subtract space used for btree page and prefix tree headers, this is how much we can write
+	// Subtract space used for btree page and prefix tree headers to get prefix tree node space available/
 	pageSize -= (BTreePage::GetHeaderSize() + PrefixTree::GetHeaderSize());
 
 	while(i < iEnd) {
-		int common = commonPrefixLength(entries[i].key, entries[i - 1].key);
+		int common = (i == 0) ? 0 : commonPrefixLength(entries[i].key, entries[i - 1].key);
 
 		int valueSize = entries[i].value.size();
 		int kvAdd = entries[i].key.size() + valueSize;
 		int uniqueAdd = kvAdd - common;
-		int overheadAdd = avgOverheadPerNode + (valueSize ? 1 : 0);
+		int overheadAdd = PrefixTree::Node::getMaxOverhead(i, entries[i].key.size(), entries[i].value.size());
+		//debug_printf("Trying to add index %d  klen %d  vlen %d  common %d  overhead %d\n", i, entries[i].key.size(), entries[i].value.size(), common, overheadAdd);
 
 		// If the item is unlikely to fit within the page or the end is reached, write page for the interval [start, i)
-		if((uniqueBytes + overheadEstimate + uniqueAdd + overheadAdd) > pageSize) {
+		if((uniqueBytes + maxOverhead + uniqueAdd + overheadAdd) > pageSize) {
+			ASSERT(i != 0);
 			Reference<IPage> page = newPageFn();
 			BTreePage *btpage = (BTreePage *)page->begin();
 			btpage->flags = newFlags;
@@ -121,20 +120,20 @@ static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::Ent
 			// TODO:  Key boundary for tree level compression
 			int written = btpage->tree.build(&entries[start], &entries[i], StringRef());
 			if(written > pageSize) {
-				printf("ERROR:  Wrote %d bytes to %d byte page. recs %d  uniqueBytes %d  overheadEstimate %d\n", written, pageSize, i - start, uniqueBytes, overheadEstimate);
+				printf("ERROR:  Wrote %d bytes to %d byte page. recs %d  uniqueBytes %d  maxOverhead %d\n", written, pageSize, i - start, uniqueBytes, maxOverhead);
 				ASSERT(false);
 			}
 			pages.push_back({start, page});
 			start = i;
 			kvBytes = 0;
-			overheadEstimate = 0;
+			maxOverhead = 0;
 			uniqueBytes = common;
 			common = 0;
 		}
 
 		kvBytes += kvAdd;
 		uniqueBytes += uniqueAdd;
-		overheadEstimate += overheadAdd;
+		maxOverhead += overheadAdd;
 		++i;
 	}
 
@@ -148,7 +147,7 @@ static vector<std::pair<int, Reference<IPage>>> buildPages(const PrefixTree::Ent
 		// TODO:  Key boundary for tree level compression
 		int written = btpage->tree.build(&entries[start], &entries[i], StringRef());
 		if(written > pageSize) {
-			printf("ERROR:  Wrote %d bytes to %d byte page. recs %d  uniqueBytes %d  overheadEstimate %d\n", written, pageSize, i - start, uniqueBytes, overheadEstimate);
+			printf("ERROR:  Wrote %d bytes to %d byte page. recs %d  uniqueBytes %d  maxOverhead %d\n", written, pageSize, i - start, uniqueBytes, maxOverhead);
 			ASSERT(false);
 		}
 		pages.push_back({start, page});
@@ -678,8 +677,7 @@ private:
 				while(iMutations != iMutationsEnd) {
 					const SingleKeyMutation &m = iMutations->second;
 					//                ( (page_size - map_overhead) / min_kvpairs_per_leaf ) - kvpair_overhead_est - keybytes
-					int maxPartSize = ((self->m_pageSize - 1 - 4) / 3) - 21 - iMutationBoundary->first.size();
-					ASSERT(maxPartSize > 0);
+					int maxPartSize = std::min(255, self->m_pageSize / 4);
 					if(m.isClear() || m.value.size() <= maxPartSize) {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
@@ -807,7 +805,7 @@ private:
 			state std::vector<Future<VersionedChildrenT>> futureChildren;
 			state std::vector<LogicalPageID> childPageIDs;
 
-			bool first = false;
+			bool first = true;
 			while(existingCursorValid) {
 				// The lower bound for the first child is lowerBoundKey
 				Key childLowerBound = first ? lowerBoundKey : existingCursor.getKey();
@@ -1789,9 +1787,9 @@ TEST_CASE("/redwood/correctness") {
 	// We must be able to fit at least two any two keys plus overhead in a page to prevent
 	// a situation where the tree cannot be grown upward with decreasing level size.
 	// TODO:  Handle arbitrarily large keys
-	state int maxKeySize = 5; //(pageSize / 4) - 40;
+	state int maxKeySize = pageSize / 4;
 	ASSERT(maxKeySize > 0);
-	state int maxValueSize = 5; //pageSize * 3;
+	state int maxValueSize = pageSize * 3;
 
 	printf("Using page size %d, max key size %d, max value size %d\n", pageSize, maxKeySize, maxValueSize);
 
@@ -1931,13 +1929,15 @@ TEST_CASE("/redwood/performance/set") {
 	Void _ = wait(btree->init());
 
 	state int nodeCount = 100000;
-	state int maxChangesPerVersion = 5;
-	state int versions = 1000;
-	int maxKeySize = 100;
+	state int maxChangesPerVersion = 100;
+	state int versions = 5000;
+	int maxKeySize = 50;
 	int maxValueSize = 500;
 
 	state std::string key(maxKeySize, 'k');
 	state std::string value(maxKeySize, 'v');
+	state int64_t kvBytes = 0;
+	state int records = 0;
 
 	state double startTime = now();
 	while(--versions) {
@@ -1953,11 +1953,15 @@ TEST_CASE("/redwood/performance/set") {
 			kv.key = StringRef((uint8_t *)key.data(), g_random->randomInt(10, key.size()));
 			kv.value = StringRef((uint8_t *)value.data(), g_random->randomInt(0, value.size()));
 			btree->set(kv);
+			kvBytes += kv.key.size() + kv.value.size();
+			++records;
 		}
 
 		if(g_random->random01() < .01) {
 			printf("Committing %lld\n", version);
 			Void _ = wait(btree->commit());
+			double elapsed = now() - startTime;
+			printf("Wrote (cumulative) %d bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 		}
 	}
 
@@ -1966,6 +1970,9 @@ TEST_CASE("/redwood/performance/set") {
 	Future<Void> closedFuture = pager->onClosed();
 	pager->close();
 	Void _ = wait(closedFuture);
+
+	double elapsed = now() - startTime;
+	printf("Wrote (final) %d bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 
 	return Void();
 }

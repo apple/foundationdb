@@ -255,8 +255,16 @@ struct PrefixTree {
 			}
 		};
 
-		static const int getMaxOverhead() {
-			return 9;
+		static inline int getMaxOverhead(int index, int keySize, int valueSize) {
+			bool large = (valueSize > 255 || keySize > 255);
+			int overhead = 1 + (large ? 2 : 1);  // flags and prefix len
+			// Value length size if present
+			if(valueSize > 0)
+				overhead += large ? 2 : 1;
+			overhead += large ? 4 : 2;  // Worst case scenario for split and suffix lengths
+			if(index % 2 != 0)
+				overhead += 2;  // Left child length, about half of all nodes will have one
+			return overhead;
 		}
 
 	public:
