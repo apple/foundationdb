@@ -1631,7 +1631,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSystem->tLogs[1]->tLogPolicy = region.satelliteTLogPolicy;
 			logSystem->tLogs[1]->isLocal = true;
 			logSystem->tLogs[1]->hasBestPolicy = HasBestPolicyNone;
-			logSystem->tLogs[1]->locality = tagLocalityInvalid;
+			logSystem->tLogs[1]->locality = tagLocalitySatellite;
 			logSystem->tLogs[1]->startVersion = oldLogSystem->knownCommittedVersion + 1;
 			logSystem->expectedLogSets++;
 		}
@@ -1760,7 +1760,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				req.recoverAt = oldLogSystem->epochEndVersion.get();
 				req.knownCommittedVersion = oldLogSystem->knownCommittedVersion;
 				req.epoch = recoveryCount;
-				req.locality = tagLocalityInvalid;
+				req.locality = tagLocalitySatellite;
 				req.remoteTag = Tag();
 				req.isPrimary = true;
 				req.allTags = satelliteTags;

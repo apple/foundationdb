@@ -1917,7 +1917,7 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 			self->newLogData.trigger();
 
 			if(req.isPrimary && !logData->stopped && logData->unrecoveredBefore <= req.recoverAt) {
-				if(req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalityInvalid) {
+				if(req.recoverFrom.logRouterTags > 0 && req.locality != tagLocalitySatellite) {
 					logData->logRouterPopToVersion = req.recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
