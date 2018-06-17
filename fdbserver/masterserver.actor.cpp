@@ -219,6 +219,7 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 	std::set<UID> resolverNeedingChanges;
 
 	PromiseStream<Future<Void>> addActor;
+	Reference<AsyncVar<bool>> recruitmentStalled;
 
 	MasterData(
 		Reference<AsyncVar<ServerDBInfo>> const& dbInfo,
@@ -246,7 +247,8 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  txnStateStore(0),
 		  memoryLimit(2e9),
 		  addActor(addActor),
-		  hasConfiguration(false)
+		  hasConfiguration(false),
+		  recruitmentStalled( Reference<AsyncVar<bool>>( new AsyncVar<bool>() ) )
 	{
 	}
 	~MasterData() { if(txnStateStore) txnStateStore->close(); }
@@ -311,10 +313,10 @@ ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfig
 
 		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers = brokenPromiseToNever( self->clusterController.recruitRemoteFromConfiguration.getReply( RecruitRemoteFromConfigurationRequest( self->configuration, remoteDcId, recr.tLogs.size() ) ) );
 
-		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[recr.dcId], self->dcId_locality[remoteDcId], self->allTags ) );
+		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, fRemoteWorkers, self->configuration, self->cstate.myDBState.recoveryCount + 1, self->dcId_locality[recr.dcId], self->dcId_locality[remoteDcId], self->allTags, self->recruitmentStalled ) );
 		self->logSystem = newLogSystem;
 	} else {
-		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, tagLocalitySpecial, tagLocalitySpecial, self->allTags ) );
+		Reference<ILogSystem> newLogSystem = wait( oldLogSystem->newEpoch( recr, Never(), self->configuration, self->cstate.myDBState.recoveryCount + 1, tagLocalitySpecial, tagLocalitySpecial, self->allTags, self->recruitmentStalled ) );
 		self->logSystem = newLogSystem;
 	}
 	return Void();
@@ -395,31 +397,31 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 		try {
 			Optional<Standalone<StringRef>> value = wait( tr.get(logsKey) );
 			ASSERT(value.present());
-
-			std::vector<OptionalInterface<TLogInterface>> logConf;
 			auto logs = decodeLogsValue(value.get());
-			for(auto& log : self->logSystem->getLogSystemConfig().tLogs) {
-				for(auto& tl : log.tLogs) {
-					logConf.push_back(tl);
-				}
+
+			std::set<UID> logIds;
+			for(auto& log : logs.first) {
+				logIds.insert(log.first);
 			}
 
-			bool match = (logs.first.size() == logConf.size());
-			if(match) {
-				for(int i = 0; i < logs.first.size(); i++) {
-					if(logs.first[i].first != logConf[i].id()) {
-						match = false;
+			bool found = false;
+			for(auto& logSet : self->logSystem->getLogSystemConfig().tLogs) {
+				for(auto& log : logSet.tLogs) {
+					if(logIds.count(log.id())) {
+						found = true;
 						break;
 					}
 				}
+				if(found) {
+					break;
+				}
 			}
 
-			if(!match) {
+			if(!found) {
 				TEST(true); //old master attempted to change logsKey
 				return Void();
 			}
 
-			//FIXME: include remote logs in the log key
 			tr.set(logsKey, self->logSystem->getLogsValue());
 			Void _ = wait( tr.commit() );
 			return Void();
@@ -442,6 +444,7 @@ Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& lo
 	masterReq.registrationCount = ++self->registrationCount;
 	masterReq.priorCommittedLogServers = priorCommittedLogServers;
 	masterReq.recoveryState = self->recoveryState;
+	masterReq.recoveryStalled = self->recruitmentStalled->get();
 	return brokenPromiseToNever( self->clusterController.registerMaster.getReply( masterReq ) );
 }
 
@@ -704,7 +707,7 @@ ACTOR Future<Void> sendInitialCommitToResolvers( Reference<MasterData> self ) {
 
 ACTOR Future<Void> triggerUpdates( Reference<MasterData> self, Reference<ILogSystem> oldLogSystem ) {
 	loop {
-		Void _ = wait( oldLogSystem->onLogSystemConfigChange() || self->cstate.fullyRecovered.getFuture() );
+		Void _ = wait( oldLogSystem->onLogSystemConfigChange() || self->cstate.fullyRecovered.getFuture() || self->recruitmentStalled->onChange() );
 		if(self->cstate.fullyRecovered.isSet())
 			return Void();
 
@@ -1192,6 +1195,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 	tr.set(recoveryCommitRequest.arena, backupVersionKey, backupVersionValue);
 	tr.set(recoveryCommitRequest.arena, coordinatorsKey, self->coordinators.ccf->getConnectionString().toString());
 	tr.set(recoveryCommitRequest.arena, logsKey, self->logSystem->getLogsValue());
+	tr.set(recoveryCommitRequest.arena, primaryDatacenterKey, self->myInterface.locality.dcId().present() ? self->myInterface.locality.dcId().get() : StringRef());
 
 	applyMetadataMutations(self->dbgid, recoveryCommitRequest.arena, tr.mutations.slice(mmApplied, tr.mutations.size()), self->txnStateStore, NULL, NULL);
 	mmApplied = tr.mutations.size();

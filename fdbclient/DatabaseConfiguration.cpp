@@ -58,10 +58,27 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 		regions->clear();
 		for (StatusObjectReader dc : regionArray) {
 			RegionInfo info;
-			std::string idStr;
-			dc.get("id", idStr);
-			info.dcId = idStr;
-			dc.get("priority", info.priority);
+			json_spirit::mArray datacenters;
+			dc.get("datacenters", datacenters);
+			bool nonSatelliteDatacenters = 0;
+			for (StatusObjectReader s : datacenters) {
+				std::string idStr;
+				if (s.has("satellite") && s.last().get_int() == 1) {
+					SatelliteInfo satInfo;
+					s.get("id", idStr);
+					satInfo.dcId = idStr;
+					s.get("priority", satInfo.priority);
+					info.satellites.push_back(satInfo);
+				} else {
+					if (nonSatelliteDatacenters > 0) throw invalid_option();
+					nonSatelliteDatacenters++;
+					s.get("id", idStr);
+					info.dcId = idStr;
+					s.get("priority", info.priority);
+				}
+			}
+			std::sort(info.satellites.begin(), info.satellites.end(), SatelliteInfo::sort_by_priority() );
+			if (nonSatelliteDatacenters != 1) throw invalid_option();
 			dc.tryGet("satellite_logs", info.satelliteDesiredTLogCount);
 			std::string satelliteReplication;
 			if(dc.tryGet("satellite_redundancy_mode", satelliteReplication)) {
@@ -97,18 +114,6 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 			dc.tryGet("satellite_log_replicas", info.satelliteTLogReplicationFactor);
 			dc.tryGet("satellite_usable_dcs", info.satelliteTLogUsableDcs);
 			dc.tryGet("satellite_anti_quorum", info.satelliteTLogWriteAntiQuorum);
-			json_spirit::mArray satellites;
-			if( dc.tryGet("satellites", satellites) ) {
-				for (StatusObjectReader s : satellites) {
-					SatelliteInfo satInfo;
-					std::string sidStr;
-					s.get("id", sidStr);
-					satInfo.dcId = sidStr;
-					s.get("priority", satInfo.priority);
-					info.satellites.push_back(satInfo);
-				}
-				std::sort(info.satellites.begin(), info.satellites.end(), SatelliteInfo::sort_by_priority() );
-			}
 			regions->push_back(info);
 		}
 		std::sort(regions->begin(), regions->end(), RegionInfo::sort_by_priority() );
@@ -155,24 +160,22 @@ bool DatabaseConfiguration::isValid() const {
 		getDesiredRemoteLogs() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
 		regions.size() <= 2 &&
-		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && regions.size() == 2 && durableStorageQuorum == storageTeamSize ) ) ) ) {
+		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && regions.size() == 2 && durableStorageQuorum == storageTeamSize ) ) &&
+		( regions.size() == 0 || regions[0].priority >= 0 ) ) ) {
 		return false;
 	}
 
 	std::set<Key> dcIds;
-	std::set<int> priorities;
 	dcIds.insert(Key());
 	for(auto& r : regions) {
 		if( !(!dcIds.count(r.dcId) &&
-			!priorities.count(r.priority) &&
 			r.satelliteTLogReplicationFactor >= 0 &&
 			r.satelliteTLogWriteAntiQuorum >= 0 &&
-			r.satelliteTLogUsableDcs >= 0 &&
+			r.satelliteTLogUsableDcs >= 1 &&
 			( r.satelliteTLogReplicationFactor == 0 || ( r.satelliteTLogPolicy && r.satellites.size() ) ) ) ) {
 			return false;
 		}
 		dcIds.insert(r.dcId);
-		priorities.insert(r.priority);
 		for(auto& s : r.satellites) {
 			if(dcIds.count(s.dcId)) {
 				return false;
@@ -246,44 +249,47 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if(regions.size()) {
 			StatusArray regionArr;
 			for(auto& r : regions) {
+				StatusObject regionObj;
+				StatusArray dcArr;
 				StatusObject dcObj;
 				dcObj["id"] = r.dcId.toString();
 				dcObj["priority"] = r.priority;
+				dcArr.push_back(dcObj);
 
 				if(r.satelliteTLogReplicationFactor == 1 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0) {
-					dcObj["satellite_redundancy_mode"] = "one_satellite_single";
+					regionObj["satellite_redundancy_mode"] = "one_satellite_single";
 				} else if(r.satelliteTLogReplicationFactor == 2 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0) {
-					dcObj["satellite_redundancy_mode"] = "one_satellite_double";
+					regionObj["satellite_redundancy_mode"] = "one_satellite_double";
 				} else if(r.satelliteTLogReplicationFactor == 3 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0) {
-					dcObj["satellite_redundancy_mode"] = "one_satellite_triple";
+					regionObj["satellite_redundancy_mode"] = "one_satellite_triple";
 				} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 0) {
-					dcObj["satellite_redundancy_mode"] = "two_satellite_safe";
+					regionObj["satellite_redundancy_mode"] = "two_satellite_safe";
 				} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 2) {
-					dcObj["satellite_redundancy_mode"] = "two_satellite_fast";
+					regionObj["satellite_redundancy_mode"] = "two_satellite_fast";
 				} else if(r.satelliteTLogReplicationFactor != 0) {
-					dcObj["satellite_log_replicas"] = r.satelliteTLogReplicationFactor;
-					dcObj["satellite_usable_dcs"] = r.satelliteTLogUsableDcs;
-					dcObj["satellite_anti_quorum"] = r.satelliteTLogWriteAntiQuorum;
-					if(r.satelliteTLogPolicy) dcObj["satellite_log_policy"] = r.satelliteTLogPolicy->info();
+					regionObj["satellite_log_replicas"] = r.satelliteTLogReplicationFactor;
+					regionObj["satellite_usable_dcs"] = r.satelliteTLogUsableDcs;
+					regionObj["satellite_anti_quorum"] = r.satelliteTLogWriteAntiQuorum;
+					if(r.satelliteTLogPolicy) regionObj["satellite_log_policy"] = r.satelliteTLogPolicy->info();
 				}
 
 				if( r.satelliteDesiredTLogCount != -1 ) {
-					dcObj["satellite_logs"] = r.satelliteDesiredTLogCount;
+					regionObj["satellite_logs"] = r.satelliteDesiredTLogCount;
 				}
 
 				if(r.satellites.size()) {
-					StatusArray satellitesArr;
 					for(auto& s : r.satellites) {
 						StatusObject satObj;
 						satObj["id"] = s.dcId.toString();
 						satObj["priority"] = s.priority;
+						satObj["satellite"] = 1;
 
-						satellitesArr.push_back(satObj);
+						dcArr.push_back(satObj);
 					}
-					dcObj["satellites"] = satellitesArr;
 				}
 
-				regionArr.push_back(dcObj);
+				regionObj["datacenters"] = dcArr;
+				regionArr.push_back(regionObj);
 			}
 			result["regions"] = regionArr;
 		}

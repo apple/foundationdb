@@ -739,6 +739,13 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 	}
 }
 
+ACTOR template <class T> 
+Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+	Void _ = wait( delay( time ) );
+	var->set( val );
+	return Void();
+}
+
 Future<bool> allTrue( const std::vector<Future<bool>>& all );
 Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output );
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );

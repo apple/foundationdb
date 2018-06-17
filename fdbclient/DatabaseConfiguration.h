@@ -57,7 +57,7 @@ struct RegionInfo {
 
 	std::vector<SatelliteInfo> satellites;
 
-	RegionInfo() : priority(0), satelliteDesiredTLogCount(-1), satelliteTLogReplicationFactor(0), satelliteTLogWriteAntiQuorum(0), satelliteTLogUsableDcs(0) {}
+	RegionInfo() : priority(0), satelliteDesiredTLogCount(-1), satelliteTLogReplicationFactor(0), satelliteTLogWriteAntiQuorum(0), satelliteTLogUsableDcs(1) {}
 
 	struct sort_by_priority {
 		bool operator ()(RegionInfo const&a, RegionInfo const& b) const { return a.priority > b.priority; }

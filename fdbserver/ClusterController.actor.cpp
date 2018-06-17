@@ -89,11 +89,12 @@ public:
 		std::map<NetworkAddress, std::string> traceLogGroupMap;
 		Promise<Void> forceMasterFailure;
 		int64_t masterRegistrationCount;
+		bool recoveryStalled;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
 
-		DBInfo() : masterRegistrationCount(0),
+		DBInfo() : masterRegistrationCount(0), recoveryStalled(false),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
 			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo( LiteralStringRef("DB") ) ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskDefaultEndpoint, true ) )  // SOMEDAY: Locality!
@@ -512,15 +513,31 @@ public:
 
 		std::vector<std::pair<WorkerInterface, ProcessClass>> satelliteLogs;
 		if(region.satelliteTLogReplicationFactor > 0) {
-			std::set<Optional<Key>> satelliteDCs;
-			for(auto& s : region.satellites) {
-				satelliteDCs.insert(s.dcId);
-			}
-			//FIXME: recruitment does not respect usable_dcs, a.k.a if usable_dcs is 1 we should recruit all tlogs in one data center
-			satelliteLogs = getWorkersForTlogs( req.configuration, region.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(dcId), region.satelliteTLogPolicy, id_used, false, satelliteDCs );
+			int startDC = 0;
+			loop {
+				if(startDC > 0 && startDC >= region.satellites.size() + 1 - region.satelliteTLogUsableDcs) {
+					throw no_more_servers();
+				}
 
-			for(int i = 0; i < satelliteLogs.size(); i++) {
-				result.satelliteTLogs.push_back(satelliteLogs[i].first);
+				try {
+					std::set<Optional<Key>> satelliteDCs;
+					for(int s = startDC; s < std::min<int>(startDC + region.satelliteTLogUsableDcs, region.satellites.size()); s++) {
+						satelliteDCs.insert(region.satellites[s].dcId);
+					}
+
+					satelliteLogs = getWorkersForTlogs( req.configuration, region.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(dcId), region.satelliteTLogPolicy, id_used, false, satelliteDCs );
+
+					for(int i = 0; i < satelliteLogs.size(); i++) {
+						result.satelliteTLogs.push_back(satelliteLogs[i].first);
+					}
+					break;
+				} catch (Error &e) {
+					if(e.code() != error_code_no_more_servers) {
+						throw;
+					}
+				}
+
+				startDC++;
 			}
 		}
 
@@ -556,35 +573,39 @@ public:
 
 	RecruitFromConfigurationReply findWorkersForConfiguration( RecruitFromConfigurationRequest const& req ) {
 		if(req.configuration.regions.size() > 1) {
+			std::vector<RegionInfo> regions = req.configuration.regions;
+			if(regions[0].priority == regions[1].priority && clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get()) {
+				std::swap(regions[0], regions[1]);
+			}
 			bool setPrimaryDesired = false;
 			try {
-				auto reply = findWorkersForConfiguration(req, req.configuration.regions[0].dcId);
+				auto reply = findWorkersForConfiguration(req, regions[0].dcId);
 				setPrimaryDesired = true;
 				vector<Optional<Key>> dcPriority;
-				dcPriority.push_back(req.configuration.regions[0].dcId);
-				dcPriority.push_back(req.configuration.regions[1].dcId);
+				dcPriority.push_back(regions[0].dcId);
+				dcPriority.push_back(regions[1].dcId);
 				desiredDcIds.set(dcPriority);
 				if(reply.isError()) {
 					throw reply.getError();
-				} else if(clusterControllerDcId.present() && req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
+				} else if(clusterControllerDcId.present() && regions[0].dcId == clusterControllerDcId.get()) {
 					return reply.get();
 				}
 				throw no_more_servers();
 			} catch( Error& e ) {
-				if (e.code() != error_code_no_more_servers) {
+				if (e.code() != error_code_no_more_servers || regions[1].priority < 0 || now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) {
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
-				auto reply = findWorkersForConfiguration(req, req.configuration.regions[1].dcId);
+				auto reply = findWorkersForConfiguration(req, regions[1].dcId);
 				if(!setPrimaryDesired) {
 					vector<Optional<Key>> dcPriority;
-					dcPriority.push_back(req.configuration.regions[1].dcId);
-					dcPriority.push_back(req.configuration.regions[0].dcId);
+					dcPriority.push_back(regions[1].dcId);
+					dcPriority.push_back(regions[0].dcId);
 					desiredDcIds.set(dcPriority);
 				}
 				if(reply.isError()) {
 					throw reply.getError();
-				} else if(clusterControllerDcId.present() && req.configuration.regions[1].dcId == clusterControllerDcId.get()) {
+				} else if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get()) {
 					return reply.get();
 				}
 				throw;
@@ -690,36 +711,51 @@ public:
 		}
 	}
 
-	void checkPrimaryDC() {
-		if(db.config.regions.size() > 1 && clusterControllerDcId.present() && db.config.regions[0].dcId != clusterControllerDcId.get()) {
-			try {
-				std::map< Optional<Standalone<StringRef>>, int> id_used;
-				getWorkerForRoleInDatacenter(db.config.regions[0].dcId, ProcessClass::ClusterController, ProcessClass::ExcludeFit, db.config, id_used, true);
-				getWorkerForRoleInDatacenter(db.config.regions[0].dcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, true);
+	void checkRegions(const std::vector<RegionInfo>& regions) {
+		if(desiredDcIds.get().present() && desiredDcIds.get().get().size() == 2 && desiredDcIds.get().get()[0].get() == regions[0].dcId && desiredDcIds.get().get()[1].get() == regions[1].dcId) {
+			return;
+		}
+		
+		try {
+			std::map< Optional<Standalone<StringRef>>, int> id_used;
+			getWorkerForRoleInDatacenter(regions[0].dcId, ProcessClass::ClusterController, ProcessClass::ExcludeFit, db.config, id_used, true);
+			getWorkerForRoleInDatacenter(regions[0].dcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, true);
 			
-				std::set<Optional<Key>> primaryDC;
-				primaryDC.insert(db.config.regions[0].dcId);
-				getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true, primaryDC);
+			std::set<Optional<Key>> primaryDC;
+			primaryDC.insert(regions[0].dcId);
+			getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true, primaryDC);
 			
-				if(db.config.regions[0].satelliteTLogReplicationFactor > 0) {
-					std::set<Optional<Key>> satelliteDCs;
-					for(auto &s : db.config.regions[0].satellites) {
-						satelliteDCs.insert(s.dcId);
-					}
-					getWorkersForTlogs(db.config, db.config.regions[0].satelliteTLogReplicationFactor, db.config.getDesiredSatelliteLogs(db.config.regions[0].dcId), db.config.regions[0].satelliteTLogPolicy, id_used, true, satelliteDCs);
+			if(regions[0].satelliteTLogReplicationFactor > 0) {
+				std::set<Optional<Key>> satelliteDCs;
+				for(auto &s : regions[0].satellites) {
+					satelliteDCs.insert(s.dcId);
 				}
+				getWorkersForTlogs(db.config, regions[0].satelliteTLogReplicationFactor, db.config.getDesiredSatelliteLogs(regions[0].dcId), regions[0].satelliteTLogPolicy, id_used, true, satelliteDCs);
+			}
 
-				getWorkerForRoleInDatacenter( db.config.regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
-				getWorkerForRoleInDatacenter( db.config.regions[0].dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
+			getWorkerForRoleInDatacenter( regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
+			getWorkerForRoleInDatacenter( regions[0].dcId, ProcessClass::Proxy, ProcessClass::ExcludeFit, db.config, id_used, true );
 
-				vector<Optional<Key>> dcPriority;
-				dcPriority.push_back(db.config.regions[0].dcId);
-				dcPriority.push_back(db.config.regions[1].dcId);
-				desiredDcIds.set(dcPriority);
-			} catch( Error &e ) {
-				if(e.code() != error_code_no_more_servers) {
-					throw;
+			vector<Optional<Key>> dcPriority;
+			dcPriority.push_back(regions[0].dcId);
+			dcPriority.push_back(regions[1].dcId);
+			desiredDcIds.set(dcPriority);
+		} catch( Error &e ) {
+			if(e.code() != error_code_no_more_servers) {
+				throw;
+			}
+		}
+	}
+
+	void checkRecoveryStalled() {
+		if(db.serverInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION && db.recoveryStalled ) {
+			if(db.config.regions.size() > 1 && clusterControllerDcId.present()) {
+				auto regions = db.config.regions;
+				if(clusterControllerDcId.get() == regions[0].dcId) {
+					std::swap(regions[0], regions[1]);
 				}
+				ASSERT(clusterControllerDcId.get() == regions[1].dcId);
+				checkRegions(regions);
 			}
 		}
 	}
@@ -732,7 +768,10 @@ public:
 			return false;
 		}
 
-		checkPrimaryDC();
+		if(db.config.regions.size() > 1 && clusterControllerDcId.present() && db.config.regions[0].priority > db.config.regions[1].priority &&
+			db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated && datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+			checkRegions(db.config.regions);
+		}
 
 		// Get master process
 		auto masterWorker = id_worker.find(dbi.master.locality.processId());
@@ -755,10 +794,11 @@ public:
 				if ( tlogWorker->second.priorityInfo.isExcluded )
 					return true;
 
-				if(logSet.isLocal && logSet.hasBestPolicy > HasBestPolicyNone) {
-					tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
-				} else if(logSet.isLocal) {
+				if(logSet.isLocal && logSet.locality == tagLocalitySatellite) {
 					satellite_tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
+				}
+				else if(logSet.isLocal) {
+					tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
 				} else {
 					remote_tlogs.push_back(std::make_pair(tlogWorker->second.interf, tlogWorker->second.processClass));
 				}
@@ -917,9 +957,11 @@ public:
 	DBInfo db;
 	Database cx;
 	double startTime;
+	Version datacenterVersionDifference;
+	bool versionDifferenceUpdated;
 
 	explicit ClusterControllerData( ClusterControllerFullInterface ccInterface )
-		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now())
+		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -987,6 +1029,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				iMaster = newMaster.get();
 
 				db->masterRegistrationCount = 0;
+				db->recoveryStalled = false;
 				db->forceMasterFailure = Promise<Void>();
 
 				auto dbInfo = ServerDBInfo( LiteralStringRef("DB") );
@@ -1182,6 +1225,8 @@ ACTOR Future<Void> doCheckOutstandingMasterRequests( ClusterControllerData* self
 }
 
 void checkOutstandingMasterRequests( ClusterControllerData* self ) {
+	self->checkRecoveryStalled();
+
 	if( !self->betterMasterExistsChecker.isReady() )
 		return;
 
@@ -1465,6 +1510,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	}
 
 	db->masterRegistrationCount = req.registrationCount;
+	db->recoveryStalled = req.recoveryStalled;
 	if ( req.configuration.present() ) {
 		db->config = req.configuration.get();
 
@@ -1705,7 +1751,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				}
 			}
 
-			ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections)));
+			ErrorOr<StatusReply> result = wait(errorOr(clusterGetStatus(self->db.serverInfo, self->cx, workers, self->db.workersWithIssues, self->db.clientsWithIssues, self->db.clientVersionMap, self->db.traceLogGroupMap, coordinators, incompatibleConnections, self->datacenterVersionDifference)));
 			if (result.isError() && result.getError().code() == error_code_actor_cancelled)
 				throw result.getError();
 
@@ -1893,6 +1939,65 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 	}
 }
 
+ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *self ) {
+	loop {
+		self->versionDifferenceUpdated = false;
+		if(self->db.serverInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED && self->db.config.remoteTLogReplicationFactor == 0) {
+			self->versionDifferenceUpdated = true;
+			self->datacenterVersionDifference = 0;
+			Void _ = wait(self->db.serverInfo->onChange());
+			continue;
+		}
+
+		state Optional<TLogInterface> primaryLog;
+		state Optional<TLogInterface> remoteLog;
+		if(self->db.serverInfo->get().recoveryState == RecoveryState::REMOTE_RECOVERED) {
+			for(auto& logSet : self->db.serverInfo->get().logSystemConfig.tLogs) {
+				if(logSet.isLocal && logSet.locality != tagLocalitySatellite) {
+					for(auto& tLog : logSet.tLogs) {
+						if(tLog.present()) {
+							primaryLog = tLog.interf();
+							break;
+						}
+					}
+				}
+				if(!logSet.isLocal) {
+					for(auto& tLog : logSet.tLogs) {
+						if(tLog.present()) {
+							remoteLog = tLog.interf();
+							break;
+						}
+					}
+				}
+			}
+		}
+
+		if(!primaryLog.present() || !remoteLog.present()) {
+			Void _ = wait(self->db.serverInfo->onChange());
+			continue;
+		}
+		
+		state Future<Void> onChange = self->db.serverInfo->onChange();
+		loop {
+			state Future<TLogQueuingMetricsReply> primaryMetrics = primaryLog.get().getQueuingMetrics.getReply( TLogQueuingMetricsRequest() );
+			state Future<TLogQueuingMetricsReply> remoteMetrics = remoteLog.get().getQueuingMetrics.getReply( TLogQueuingMetricsRequest() );
+			
+			Void _ = wait( ( success(primaryMetrics) && success(remoteMetrics) ) || onChange );
+			if(onChange.isReady()) {
+				break;
+			}
+
+			self->versionDifferenceUpdated = true;
+			self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
+
+			Void _ = wait( delay(SERVER_KNOBS->VERSION_LAG_METRIC_INTERVAL) || onChange );
+			if(onChange.isReady()) {
+				break;
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf, Future<Void> leaderFail, ServerCoordinators coordinators ) {
 	state ClusterControllerData self( interf );
 	state Future<Void> coordinationPingDelay = delay( SERVER_KNOBS->WORKER_COORDINATION_PING_DELAY );
@@ -1910,6 +2015,7 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 	addActor.send( monitorClientTxnInfoConfigs(&self.db) );
 	addActor.send( updatedChangingDatacenters(&self) );
 	addActor.send( updatedChangedDatacenters(&self) );
+	addActor.send( updateDatacenterVersionDifference(&self) );
 	//printf("%s: I am the cluster controller\n", g_network->getLocalAddress().toString().c_str());
 
 	loop choose {

@@ -105,7 +105,6 @@ struct LogRouterData {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
-		logSet.hasBestPolicy = req.hasBestPolicy;
 		logSet.locality = req.locality;
 		logSet.updateLocalitySet(req.tLogLocalities);
 
@@ -413,7 +412,7 @@ ACTOR Future<Void> logRouter(
 	Reference<AsyncVar<ServerDBInfo>> db)
 {
 	try {
-		TraceEvent("LogRouterStart", interf.id()).detail("Start", req.startVersion).detail("Tag", req.routerTag.toString()).detail("Localities", req.tLogLocalities.size()).detail("HasBestPolicy", req.hasBestPolicy).detail("Locality", req.locality);
+		TraceEvent("LogRouterStart", interf.id()).detail("Start", req.startVersion).detail("Tag", req.routerTag.toString()).detail("Localities", req.tLogLocalities.size()).detail("Locality", req.locality);
 		state Future<Void> core = logRouterCore(interf, req, db);
 		loop choose{
 			when(Void _ = wait(core)) { return Void(); }
