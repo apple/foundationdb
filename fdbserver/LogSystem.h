@@ -77,16 +77,14 @@ public:
 		satelliteTagLocations.clear();
 		satelliteTagLocations.resize(std::max(logRouterTags,oldLogRouterTags) + 1);
 		
-		std::vector<std::set<int>> used_servers;
-		used_servers.resize(satelliteTagLocations.size() + 1);
+		std::set<std::pair<int,int>> used_servers;
 		for(int i = 0; i < tLogLocalities.size(); i++) {
-			used_servers[0].insert(i);
+			used_servers.insert(std::make_pair(0,i));
 		}
 
 		LocalitySetRef serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int,int>>());
 		LocalityMap<std::pair<int,int>>* serverMap = (LocalityMap<std::pair<int,int>>*) serverSet.getPtr();
-		std::vector<std::pair<int,int>> serverLocations;
-		serverLocations.resize(tLogLocalities.size());
+		std::vector<std::pair<int,int>> resultPairs;
 		for(int loc = 0; loc < satelliteTagLocations.size(); loc++) {
 			int team = loc;
 			if(loc < logRouterTags) {
@@ -95,42 +93,33 @@ public:
 				team = 0;
 			}
 
-			int used = 0;
-			int nextServerLocation = 0;
+			bool teamComplete = false;
 			alsoServers.resize(1);
 			serverMap->clear();
-			loop {
-				ASSERT(used < used_servers.size());
-				if(!used_servers[used].size()) {
-					continue;
-				}
-				
-				for(int idx : used_servers[used]) {
-					serverLocations[nextServerLocation].first = used;
-					serverLocations[nextServerLocation].second = idx;
-					auto entry = serverMap->add(tLogLocalities[idx], &serverLocations[nextServerLocation]);
-					nextServerLocation++;
-					if(!satelliteTagLocations[team].size()) {
-						satelliteTagLocations[team].push_back(idx);
-						alsoServers[0] = entry;
-					}
+			resultPairs.clear();
+			for(auto& used_idx : used_servers) {
+				auto entry = serverMap->add(tLogLocalities[used_idx.second], &used_idx);
+				if(!resultPairs.size()) {
+					resultPairs.push_back(used_idx);
+					alsoServers[0] = entry;
 				}
 
 				resultEntries.clear();
 				if( serverSet->selectReplicas(tLogPolicy, alsoServers, resultEntries) ) {
-					for (auto& entry : resultEntries) {
-						auto obj = serverMap->getObject(entry);
-						satelliteTagLocations[team].push_back(obj->second);
-						used_servers[obj->first].erase(obj->second);
-						used_servers[obj->first+1].insert(obj->second);
+					for(auto& entry : resultEntries) {
+						resultPairs.push_back(*serverMap->getObject(entry));
 					}
-
-					used_servers[serverLocations[0].first].erase(serverLocations[0].second);
-					used_servers[serverLocations[0].first+1].insert(serverLocations[0].second);
+					for(auto& res : resultPairs) {
+						satelliteTagLocations[team].push_back(res.second);
+						used_servers.erase(res);
+						res.first++;
+						used_servers.insert(res);
+					}
+					teamComplete = true;
 					break;
 				}
-				used++;
 			}
+			ASSERT(teamComplete);
 		}
 
 		checkSatelliteTagLocations();
@@ -201,7 +190,7 @@ public:
 	void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations, int locationOffset ) {
 		if(locality == tagLocalitySatellite) {
 			for(auto& t : tags) {
-				if(t.locality < 0) {
+				if(t == txsTag || t.locality == tagLocalityLogRouter) {
 					for(int loc : satelliteTagLocations[t == txsTag ? 0 : t.id + 1]) {
 						locations.push_back(locationOffset + loc);
 					}

@@ -808,7 +808,11 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
-			if(!(self->locality == tagLocalitySpecial || self->locality == tag.locality || tag.locality < 0)) {
+			if(self->locality == tagLocalitySatellite) {
+				if(!(tag == txsTag || tag.locality == tagLocalityLogRouter)) {
+					continue;
+				}
+			} else if(!(self->locality == tagLocalitySpecial || self->locality == tag.locality || tag.locality < 0)) {
 				continue;
 			}
 
