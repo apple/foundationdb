@@ -1159,12 +1159,12 @@ private:
 				bool success = fwd ? c.moveNext() : c.movePrev();
 				if(success) {
 					debug_printf("InternalCursor::move(%s) Move successful on path index %d\n", dir, i);
+					path.resize(i + 1);
 					break;
 				} else {
 					debug_printf("InternalCursor::move(%s) Move failed on path index %d\n", dir, i);
 				}
 			}
-			debug_printf("InternalCursor::move(%s) Finished ascending  %s\n", dir, self->toString("  ").c_str());
 
 			// If no path part could be moved without going out of range then the
 			// new cursor position is either before the first record or after the last.
@@ -1177,9 +1177,7 @@ private:
 				return Void();
 			}
 
-			// We were able to advance the cursor on one of the pages in the page traversal path, so 
-			// resize the path to stop at that page.
-			path.resize(i + 1);
+			// We were able to advance the cursor on one of the pages in the page traversal path, so now traverse down to leaf level
 			state PageEntryLocation *p = &(path.back());
 
 			debug_printf("InternalCursor::move(%s): Descending if needed to find a leaf\n", dir);
@@ -1211,7 +1209,7 @@ private:
 	};
 
 	// Cursor is for reading and interating over user visible KV pairs at a specific version
-	class Cursor : public IStoreCursor, public ReferenceCounted<Cursor> {
+	class Cursor : public IStoreCursor, public ReferenceCounted<Cursor>, public NonCopyable {
 	public:
 		Cursor(Version version, IPager *pager, LogicalPageID root)
 		  : m_version(version), m_pagerSnapshot(pager->getReadSnapshot(version)), m_icursor(m_pagerSnapshot, root) {
@@ -1310,11 +1308,12 @@ private:
 			// TODO: use needValue
 			state InternalCursor &i = self->m_icursor;
 
-			debug_printf("next(): cursor %s\n", i.toString().c_str());
+			debug_printf("Cursor::next(): cursor %s\n", i.toString().c_str());
 
 			// Make sure we are one record past the last user key
 			if(self->m_kv.present()) {
 				while(i.valid() && i.kvv.key <= self->m_kv.get().key) {
+					debug_printf("Cursor::next(): Advancing internal cursor to get passed previous returned user key.  cursor %s\n", i.toString().c_str());
 					Void _ = wait(i.move(true));
 				}
 			}
@@ -1326,6 +1325,9 @@ private:
 				if(!i.valid())
 					break;
 				Void _ = wait(i.move(true));
+				// If the previous cursor position was a set at a version at or before v and the new cursor position
+				// is not valid or a newer version of the same key or a different key, then get the full record
+				// for the previous cursor position
 				if(iLast.kvv.version <= v
 					&& iLast.kvv.value.present()
 					&& (
@@ -1336,6 +1338,7 @@ private:
 				) {
 					// Assume that next is the most likely next move, so save the one-too-far cursor position.
 					std::swap(i, iLast);
+					// readFullKVPair will have to go backwards to read the value
 					Void _ = wait(readFullKVPair(self));
 					std::swap(i, iLast);
 					return Void();
@@ -1350,7 +1353,7 @@ private:
 			// TODO:  use needValue
 			state InternalCursor &i = self->m_icursor;
 
-			debug_printf("prev(): cursor %s\n", i.toString().c_str());
+			debug_printf("Cursor::prev(): cursor %s\n", i.toString().c_str());
 
 			// Make sure we are one record before the last user key
 			if(self->m_kv.present()) {
@@ -1412,8 +1415,10 @@ private:
 					ASSERT(kvv.value.present());
 					parts.push_back(kvv.value.get());
 					size += kvv.value.get().size();
+					debug_printf("readFullKVPair:  Advancing to see if there is another chunk %s\n", self->toString("  ").c_str());
 					Void _ = wait(self->m_icursor.move(true));
 					if(!kvv.valid() || kvv.version != valueVersion || kvv.key != kv.key)
+						debug_printf("readFullKVPair:  Advanced, something doesn't match so no more chunks.  %s\n", self->toString("  ").c_str());
 						break;
 				}
 				kv.value = makeString(size, self->m_arena);
@@ -1961,7 +1966,7 @@ TEST_CASE("/redwood/performance/set") {
 			printf("Committing %lld\n", version);
 			Void _ = wait(btree->commit());
 			double elapsed = now() - startTime;
-			printf("Wrote (cumulative) %d bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
+			printf("Wrote (cumulative) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 		}
 	}
 
@@ -1972,7 +1977,7 @@ TEST_CASE("/redwood/performance/set") {
 	Void _ = wait(closedFuture);
 
 	double elapsed = now() - startTime;
-	printf("Wrote (final) %d bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
+	printf("Wrote (final) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 
 	return Void();
 }

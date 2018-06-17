@@ -319,6 +319,18 @@ private:
 		}
 		PathEntry(const Node *node, StringRef prefix, bool left, int moves) : node(node), prefix(prefix), nodeTypeLeft(left), moves(moves) {
 		}
+		PathEntry(const PathEntry &rhs) {
+			*this = rhs;
+		}
+
+		PathEntry & operator= (const PathEntry &rhs) {
+			node = rhs.node;
+			nodeTypeLeft = rhs.nodeTypeLeft;
+			moves = rhs.moves;
+			prefixBuffer = VectorRef<uint8_t>((uint8_t *)rhs.prefix.begin(), rhs.prefix.size());
+			prefix = StringRef(prefixBuffer.begin(), prefixBuffer.size());
+			return *this;
+		}
 
 		void init(const Node *_node, const PathEntry *prefixSource, bool left, int _moves) {
 			node = _node;
