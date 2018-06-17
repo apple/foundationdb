@@ -47,6 +47,7 @@ public:
 	int8_t locality;
 	Version startVersion;
 	std::vector<Future<TLogLockResult>> replies;
+	std::vector<std::vector<int>> satelliteTagLocations;
 
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 
@@ -72,7 +73,92 @@ public:
 		return result;
 	}
 
+	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags) {
+		satelliteTagLocations.clear();
+		satelliteTagLocations.resize(std::max(logRouterTags,oldLogRouterTags) + 1);
+		
+		std::vector<std::set<int>> used_servers;
+		used_servers.resize(satelliteTagLocations.size() + 1);
+		for(int i = 0; i < tLogLocalities.size(); i++) {
+			used_servers[0].insert(i);
+		}
+
+		LocalitySetRef serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int,int>>());
+		LocalityMap<std::pair<int,int>>* serverMap = (LocalityMap<std::pair<int,int>>*) serverSet.getPtr();
+		std::vector<std::pair<int,int>> serverLocations;
+		serverLocations.resize(tLogLocalities.size());
+		for(int loc = 0; loc < satelliteTagLocations.size(); loc++) {
+			int team = loc;
+			if(loc < logRouterTags) {
+				team = loc + 1;
+			} else if(loc == logRouterTags) {
+				team = 0;
+			}
+
+			int used = 0;
+			int nextServerLocation = 0;
+			alsoServers.resize(1);
+			serverMap->clear();
+			loop {
+				ASSERT(used < used_servers.size());
+				if(!used_servers[used].size()) {
+					continue;
+				}
+				
+				for(int idx : used_servers[used]) {
+					serverLocations[nextServerLocation].first = used;
+					serverLocations[nextServerLocation].second = idx;
+					auto entry = serverMap->add(tLogLocalities[idx], &serverLocations[nextServerLocation]);
+					nextServerLocation++;
+					if(!satelliteTagLocations[team].size()) {
+						satelliteTagLocations[team].push_back(idx);
+						alsoServers[0] = entry;
+					}
+				}
+
+				resultEntries.clear();
+				if( serverSet->selectReplicas(tLogPolicy, alsoServers, resultEntries) ) {
+					for (auto& entry : resultEntries) {
+						auto obj = serverMap->getObject(entry);
+						satelliteTagLocations[team].push_back(obj->second);
+						used_servers[obj->first].erase(obj->second);
+						used_servers[obj->first+1].insert(obj->second);
+					}
+
+					used_servers[serverLocations[0].first].erase(serverLocations[0].second);
+					used_servers[serverLocations[0].first+1].insert(serverLocations[0].second);
+					break;
+				}
+				used++;
+			}
+		}
+
+		checkSatelliteTagLocations();
+	}
+
+	void checkSatelliteTagLocations() {
+		std::vector<int> used;
+		used.resize(tLogLocalities.size());
+		for(auto team : satelliteTagLocations) {
+			for(auto loc : team) {
+				used[loc]++;
+			}
+		}
+		int minUsed = satelliteTagLocations.size();
+		int maxUsed = 0;
+		for(auto i : used) {
+			minUsed = std::min(minUsed, i);
+			maxUsed = std::max(maxUsed, i);
+		}
+		TraceEvent(maxUsed - minUsed > 1 ? (g_network->isSimulated() ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed);
+	}
+
 	int bestLocationFor( Tag tag ) {
+		if(locality == tagLocalitySatellite) {
+			return satelliteTagLocations[tag == txsTag ? 0 : tag.id + 1][0];
+		}
+
+		//the following logic supports upgrades from 5.X
 		if(tag == txsTag) return txsTagOld % logServers.size();
 		return tag.id % logServers.size();
 	}
@@ -113,6 +199,17 @@ public:
 	}
 
 	void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations, int locationOffset ) {
+		if(locality == tagLocalitySatellite) {
+			for(auto& t : tags) {
+				if(t.locality < 0) {
+					for(int loc : satelliteTagLocations[t == txsTag ? 0 : t.id + 1]) {
+						locations.push_back(locationOffset + loc);
+					}
+				}
+			}
+			return;
+		}
+
 		newLocations.clear();
 		alsoServers.clear();
 		resultEntries.clear();
