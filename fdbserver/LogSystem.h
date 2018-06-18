@@ -196,6 +196,7 @@ public:
 					}
 				}
 			}
+			uniquify(locations);
 			return;
 		}
 
