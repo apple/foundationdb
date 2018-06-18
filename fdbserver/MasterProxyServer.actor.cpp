@@ -1196,7 +1196,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	for(auto r = rs.begin(); r != rs.end(); ++r)
 		r->value().push_back(std::make_pair<Version,int>(0,0));
 
-	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get());
+	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true);
 
@@ -1220,7 +1220,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
 			if(db->get().master.id() == master.id() && db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
-				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get());
+				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}
