@@ -37,6 +37,7 @@ void DatabaseConfiguration::resetInternal() {
 	usableRegions = 1;
 	regions.clear();
 	tLogPolicy = storagePolicy = remoteTLogPolicy = IRepPolicyRef();
+	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = 0;
 }
 
@@ -299,6 +300,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if( resolverCount != -1 ) {
 			result["resolvers"] = resolverCount;
 		}
+		if( remoteDesiredTLogCount != -1 ) {
+			result["remote_logs"] = remoteDesiredTLogCount;
+		}
 		if( autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
 			result["auto_proxies"] = autoMasterProxyCount;
 		}
@@ -336,6 +340,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);
 	else if (ck == LiteralStringRef("log_replication_policy")) parseReplicationPolicy(&tLogPolicy, value);
+	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
 	else if (ck == LiteralStringRef("usable_regions")) parse(&usableRegions, value);

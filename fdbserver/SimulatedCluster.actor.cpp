@@ -864,6 +864,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			default:
 				ASSERT(false);  // Programmer forgot to adjust cases.
 			}
+
+			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
 		}
 
 		primaryObj["datacenters"] = primaryDcArr;

@@ -161,6 +161,7 @@ struct DatabaseConfiguration {
 	KeyValueStoreType storageServerStoreType;
 
 	// Remote TLogs
+	int32_t remoteDesiredTLogCount;
 	int32_t remoteTLogReplicationFactor;
 	IRepPolicyRef remoteTLogPolicy;
 
@@ -175,7 +176,7 @@ struct DatabaseConfiguration {
 	int32_t getDesiredProxies() const { if(masterProxyCount == -1) return autoMasterProxyCount; return masterProxyCount; }
 	int32_t getDesiredResolvers() const { if(resolverCount == -1) return autoResolverCount; return resolverCount; }
 	int32_t getDesiredLogs() const { if(desiredTLogCount == -1) return autoDesiredTLogCount; return desiredTLogCount; }
-	int32_t getDesiredRemoteLogs() const { return getDesiredLogs(); }
+	int32_t getDesiredRemoteLogs() const { if(remoteDesiredTLogCount == -1) return getDesiredLogs(); return remoteDesiredTLogCount;  }
 	int32_t getDesiredSatelliteLogs( Optional<Key> dcId ) const {
 		auto desired = getRegion(dcId).satelliteDesiredTLogCount;
 		if(desired == -1) return autoDesiredTLogCount; return desired;

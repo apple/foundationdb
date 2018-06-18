@@ -360,6 +360,7 @@
          }],
          "remote_redundancy_mode":"remote_single",
          "remote_log_replicas":3,
+         "remote_logs":5,
          "usable_regions":1,
          "storage_quorum":1,
          "storage_replicas":1,
