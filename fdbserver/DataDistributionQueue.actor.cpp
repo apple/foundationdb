@@ -345,7 +345,6 @@ struct DDQueueData {
 	int queuedRelocations;
 	int bytesWritten;
 	int teamSize;
-	int durableStorageQuorumPerTeam;
 
 	std::map<UID, Busyness> busymap;
 
@@ -394,12 +393,10 @@ struct DDQueueData {
 
 	DDQueueData( MasterInterface mi, MoveKeysLock lock, Database cx, std::vector<TeamCollectionInterface> teamCollections,
 		Reference<ShardsAffectedByTeamFailure> sABTF, PromiseStream<Promise<int64_t>> getAverageShardBytes,
-		int teamSize, int durableStorageQuorumPerTeam, PromiseStream<RelocateShard> input,
-		PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited, Version recoveryVersion ) :
+		int teamSize, PromiseStream<RelocateShard> input, PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited, Version recoveryVersion ) :
 			activeRelocations( 0 ), queuedRelocations( 0 ), bytesWritten ( 0 ), teamCollections( teamCollections ),
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), mi( mi ), lock( lock ),
-			cx( cx ), teamSize( teamSize ), durableStorageQuorumPerTeam( durableStorageQuorumPerTeam ), input( input ),
-			getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
+			cx( cx ), teamSize( teamSize ), input( input ), getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
 			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited), recoveryVersion(recoveryVersion),
 			suppressIntervals(0), lastInterval(0), unhealthyRelocations(0), rawProcessingUnhealthy( new AsyncVar<bool>(false) ) {}
 
@@ -863,7 +860,6 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 	state std::vector<ShardsAffectedByTeamFailure::Team> destinationTeams;
 	state ParallelTCInfo healthyDestinations;
 	state bool anyHealthy = false;
-	state int durableStorageQuorum = 0;
 
 	try {
 		if(now() - self->lastInterval < 1.0) {
@@ -892,7 +888,6 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				destinationTeams.clear();
 				healthyDestinations.clear();
 				anyHealthy = false;
-				durableStorageQuorum = 0;
 				loop{
 					if (tciIndex == self->teamCollections.size()) {
 						break;
@@ -912,9 +907,6 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 						if(bestTeam.get()->isHealthy()) {
 							healthyDestinations.addTeam(bestTeam.get());
 							anyHealthy = true;
-							durableStorageQuorum += self->durableStorageQuorumPerTeam;
-						} else {
-							durableStorageQuorum += bestTeam.get()->size();
 						}
 					}
 					else {
@@ -951,12 +943,8 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			state Promise<Void> dataMovementComplete;
 			state Future<Void> doMoveKeys = moveKeys(
 				self->cx, rd.keys, destination.getServerIDs(), healthyDestinations.getServerIDs(), self->lock,
-				durableStorageQuorum, dataMovementComplete,
-				&self->startMoveKeysParallelismLock,
-				&self->finishMoveKeysParallelismLock,
-				self->recoveryVersion,
-				self->teamCollections.size() > 1,
-				relocateShardInterval.pairID );
+				dataMovementComplete, &self->startMoveKeysParallelismLock, &self->finishMoveKeysParallelismLock,
+				self->recoveryVersion,self->teamCollections.size() > 1, relocateShardInterval.pairID );
 			state Future<Void> pollHealth = (!anyHealthy || signalledTransferComplete) ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
 			try {
 				loop {
@@ -1155,11 +1143,10 @@ ACTOR Future<Void> dataDistributionQueue(
 	PromiseStream<Promise<int64_t>> getAverageShardBytes,
 	MasterInterface mi,
 	int teamSize,
-	int durableStorageQuorum,
 	double* lastLimited,
 	Version recoveryVersion)
 {
-	state DDQueueData self( mi, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, durableStorageQuorum, input, getShardMetrics, lastLimited, recoveryVersion );
+	state DDQueueData self( mi, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, input, getShardMetrics, lastLimited, recoveryVersion );
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;

@@ -724,11 +724,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		int replication_factor = g_random->randomInt(storage_servers, generateFearless ? 4 : 5);
 		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
-		set_config(format("storage_replicas:=%d storage_quorum:=%d "
-		                  "log_replicas:=%d log_anti_quorum:=%1 "
+		set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
 		                  "replica_datacenters:=1 min_replica_datacenters:=1",
-		                  storage_servers, storage_servers,
-		                  replication_factor, anti_quorum));
+		                  storage_servers, replication_factor, anti_quorum));
 		break;
 	}
 	case 1: {

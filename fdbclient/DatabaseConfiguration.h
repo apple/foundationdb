@@ -108,7 +108,6 @@ struct DatabaseConfiguration {
 		return result;
 	}
 
-	// SOMEDAY: think about changing storageTeamSize to durableStorageQuorum
 	int32_t minDatacentersRequired() const {
 		int minRequired = 0;
 		for(auto& r : regions) {
@@ -131,11 +130,11 @@ struct DatabaseConfiguration {
 			worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
 		}
 		if(usableRegions > 1 && worstSatellite > 0) {
-			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, worstSatellite - 1), durableStorageQuorum - 1);
+			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, worstSatellite - 1), storageTeamSize - 1);
 		} else if(worstSatellite > 0) {
-			return std::min(tLogReplicationFactor + worstSatellite - 2 - tLogWriteAntiQuorum, durableStorageQuorum - 1);
+			return std::min(tLogReplicationFactor + worstSatellite - 2 - tLogWriteAntiQuorum, storageTeamSize - 1);
 		}
-		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, durableStorageQuorum - 1);
+		return std::min(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, storageTeamSize - 1);
 	}
 
 	// MasterProxy Servers
@@ -156,7 +155,6 @@ struct DatabaseConfiguration {
 
 	// Storage Servers
 	IRepPolicyRef storagePolicy;
-	int32_t durableStorageQuorum;
 	int32_t storageTeamSize;
 	KeyValueStoreType storageServerStoreType;
 

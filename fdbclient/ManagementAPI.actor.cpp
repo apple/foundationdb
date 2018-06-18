@@ -133,8 +133,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else
 		redundancySpecified = false;
 	if (redundancySpecified) {
-		out[p+"storage_replicas"] =
-			out[p+"storage_quorum"] = redundancy;
+		out[p+"storage_replicas"] = redundancy;
 		out[p+"log_replicas"] = log_replicas;
 		out[p+"log_anti_quorum"] = "0";
 
@@ -242,7 +241,6 @@ bool isCompleteConfiguration( std::map<std::string, std::string> const& options 
 
 	return 	options.count( p+"log_replicas" ) == 1 &&
 			options.count( p+"log_anti_quorum" ) == 1 &&
-			options.count( p+"storage_quorum" ) == 1 &&
 			options.count( p+"storage_replicas" ) == 1 &&
 			options.count( p+"log_engine" ) == 1 &&
 			options.count( p+"storage_engine" ) == 1;
