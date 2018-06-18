@@ -102,7 +102,7 @@ struct DatabaseConfiguration {
 			result++;
 		}
 		
-		if(remoteTLogReplicationFactor > 0) {
+		if(usableRegions > 1) {
 			result++;
 		}
 		return result;
@@ -130,7 +130,7 @@ struct DatabaseConfiguration {
 		for(auto& r : regions) {
 			worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
 		}
-		if(remoteTLogReplicationFactor > 0 && worstSatellite > 0) {
+		if(usableRegions > 1 && worstSatellite > 0) {
 			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, worstSatellite - 1), durableStorageQuorum - 1);
 		} else if(worstSatellite > 0) {
 			return std::min(tLogReplicationFactor + worstSatellite - 2 - tLogWriteAntiQuorum, durableStorageQuorum - 1);
@@ -161,11 +161,11 @@ struct DatabaseConfiguration {
 	KeyValueStoreType storageServerStoreType;
 
 	// Remote TLogs
-	int32_t remoteDesiredTLogCount;
 	int32_t remoteTLogReplicationFactor;
 	IRepPolicyRef remoteTLogPolicy;
 
 	//Data centers
+	int32_t usableRegions;
 	std::vector<RegionInfo> regions;
 
 	// Excluded servers (no state should be here)
@@ -175,11 +175,13 @@ struct DatabaseConfiguration {
 	int32_t getDesiredProxies() const { if(masterProxyCount == -1) return autoMasterProxyCount; return masterProxyCount; }
 	int32_t getDesiredResolvers() const { if(resolverCount == -1) return autoResolverCount; return resolverCount; }
 	int32_t getDesiredLogs() const { if(desiredTLogCount == -1) return autoDesiredTLogCount; return desiredTLogCount; }
-	int32_t getDesiredRemoteLogs() const { if(remoteDesiredTLogCount == -1) return getDesiredLogs(); return remoteDesiredTLogCount; }
+	int32_t getDesiredRemoteLogs() const { return getDesiredLogs(); }
 	int32_t getDesiredSatelliteLogs( Optional<Key> dcId ) const {
 		auto desired = getRegion(dcId).satelliteDesiredTLogCount;
 		if(desired == -1) return autoDesiredTLogCount; return desired;
 	}
+	int32_t getRemoteTLogReplicationFactor() const { if(remoteTLogReplicationFactor == 0) return tLogReplicationFactor; return remoteTLogReplicationFactor; }
+	IRepPolicyRef getRemoteTLogPolicy() const { if(remoteTLogReplicationFactor == 0) return tLogPolicy; return remoteTLogPolicy; }
 
 	bool operator == ( DatabaseConfiguration const& rhs ) const {
 		const_cast<DatabaseConfiguration*>(this)->makeConfigurationImmutable();

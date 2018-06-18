@@ -34,10 +34,9 @@ void DatabaseConfiguration::resetInternal() {
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
+	usableRegions = 1;
 	regions.clear();
 	tLogPolicy = storagePolicy = remoteTLogPolicy = IRepPolicyRef();
-
-	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = 0;
 }
 
@@ -144,8 +143,8 @@ bool DatabaseConfiguration::isValid() const {
 	if( !(initialized &&
 		tLogWriteAntiQuorum >= 0 &&
 		tLogReplicationFactor >= 1 &&
-		durableStorageQuorum >= 1 &&
 		storageTeamSize >= 1 &&
+		durableStorageQuorum == storageTeamSize &&
 		getDesiredProxies() >= 1 &&
 		getDesiredLogs() >= 1 &&
 		getDesiredResolvers() >= 1 &&
@@ -159,8 +158,10 @@ bool DatabaseConfiguration::isValid() const {
 		tLogPolicy &&
 		getDesiredRemoteLogs() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
+		usableRegions >= 1 &&
+		usableRegions <= 2 &&
 		regions.size() <= 2 &&
-		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && regions.size() == 2 && durableStorageQuorum == storageTeamSize ) ) &&
+		( usableRegions == 1 || regions.size() == 2 ) &&
 		( regions.size() == 0 || regions[0].priority >= 0 ) ) ) {
 		return false;
 	}
@@ -229,18 +230,17 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_engine"] = "memory";
 		}
 
-		if( remoteTLogReplicationFactor == 0 ) {
-			result["remote_redundancy_mode"] = "remote_none";
-		} else if( remoteTLogReplicationFactor == 1 ) {
+		if( remoteTLogReplicationFactor == 1 ) {
 			result["remote_redundancy_mode"] = "remote_single";
 		} else if( remoteTLogReplicationFactor == 2 ) {
 			result["remote_redundancy_mode"] = "remote_double";
 		} else if( remoteTLogReplicationFactor == 3 ) {
 			result["remote_redundancy_mode"] = "remote_triple";
-		} else {
+		} else if( remoteTLogReplicationFactor > 3 ) {
 			result["remote_log_replicas"] = remoteTLogReplicationFactor;
 			if(noPolicies && remoteTLogPolicy) result["remote_log_policy"] = remoteTLogPolicy->info();
 		}
+		result["usable_regions"] = usableRegions;
 
 		if(regions.size()) {
 			StatusArray regionArr;
@@ -299,9 +299,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if( resolverCount != -1 ) {
 			result["resolvers"] = resolverCount;
 		}
-		if( remoteDesiredTLogCount != -1 ) {
-			result["remote_logs"] = remoteDesiredTLogCount;
-		}
 		if( autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
 			result["auto_proxies"] = autoMasterProxyCount;
 		}
@@ -339,9 +336,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("auto_logs")) parse(&autoDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("storage_replication_policy")) parseReplicationPolicy(&storagePolicy, value);
 	else if (ck == LiteralStringRef("log_replication_policy")) parseReplicationPolicy(&tLogPolicy, value);
-	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
+	else if (ck == LiteralStringRef("usable_regions")) parse(&usableRegions, value);
 	else if (ck == LiteralStringRef("regions")) parse(&regions, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect

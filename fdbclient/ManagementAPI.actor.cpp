@@ -65,7 +65,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "satellite_logs" || key == "usable_regions") && isInteger(value) ) {
 			out[p+key] = value;
 		}
 
@@ -151,7 +151,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	std::string remote_redundancy, remote_log_replicas;
 	IRepPolicyRef remoteTLogPolicy;
 	bool remoteRedundancySpecified = true;
-	if (mode == "remote_none") {
+	if (mode == "remote_default") {
 		remote_redundancy="0";
 		remote_log_replicas="0";
 		remoteTLogPolicy = IRepPolicyRef();
@@ -1210,7 +1210,7 @@ ACTOR Future<Void> waitForFullReplication( Database cx ) {
 				}
 			}
 
-			if( !watchFutures.size() || (config.remoteTLogReplicationFactor == 0 && watchFutures.size() < config.regions.size())) {
+			if( !watchFutures.size() || (config.usableRegions == 1 && watchFutures.size() < config.regions.size())) {
 				return Void();
 			}
 

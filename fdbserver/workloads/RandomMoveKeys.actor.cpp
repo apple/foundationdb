@@ -175,7 +175,7 @@ struct MoveKeysWorkload : TestWorkload {
 
 		ASSERT( self->configuration.storageTeamSize > 0 );
 
-		if(self->configuration.remoteTLogReplicationFactor > 0) { //FIXME: add support for generating random teams across DCs
+		if(self->configuration.usableRegions > 1) { //FIXME: add support for generating random teams across DCs
 			return Void();
 		}
 
