@@ -42,6 +42,7 @@ packaging/msi/FDBInstaller.wix*
 .ccache
 .deps/
 .objs/
+obj/
 bindings/c/fdb_c.symbols
 bindings/go/build
 bindings/go/godoc

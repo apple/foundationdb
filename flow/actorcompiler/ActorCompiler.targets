@@ -16,7 +16,7 @@
       <Targets>_ActorCompiler</Targets>
     </AvailableItemName>
     <!-- This item is used to reference the actorcompiler .exe; possibly a property would be better? -->
-    <ActorCompilerExe Include="$(SolutionDir)bin\$(Configuration)\actorcompiler.exe"/>
+    <ActorCompilerExe Include="$(SolutionDir)bin\$(Configuration)\netcoreapp2.0\actorcompiler.dll"/>
   </ItemGroup>
   <PropertyGroup>
     <!-- The "fast up to date check" done by the IDE (not MSBuild!) doesn't notice when the compiler .exe has changed,
@@ -49,6 +49,6 @@
     Inputs="@(ActorCompilerExe);@(ActorCompiler)"
     Outputs="@(ActorCompiler->'%(RelativeDir)%(Filename).g%(Extension)')"
     >
-    <Exec Command="&quot;@(ActorCompilerExe)&quot; %(ActorCompiler.Identity) %(ActorCompiler.RelativeDir)%(ActorCompiler.Filename).g%(ActorCompiler.Extension) %(ActorCompiler.ActorCompilerOptions)"/>
+    <Exec Command="dotnet &quot;@(ActorCompilerExe)&quot; %(ActorCompiler.Identity) %(ActorCompiler.RelativeDir)%(ActorCompiler.Filename).g%(ActorCompiler.Extension) %(ActorCompiler.ActorCompilerOptions)"/>
   </Target>
 </Project>
