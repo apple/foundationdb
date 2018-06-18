@@ -280,8 +280,8 @@ public:
 	IRepPolicyRef tLogPolicy;
 	int32_t tLogWriteAntiQuorum;
 	Optional<Standalone<StringRef>> primaryDcId;
-	bool hasRemoteReplication;
 	IRepPolicyRef remoteTLogPolicy;
+	int32_t usableRegions;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;
 	IRepPolicyRef satelliteTLogPolicy;

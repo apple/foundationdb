@@ -29,14 +29,14 @@ DatabaseConfiguration::DatabaseConfiguration()
 void DatabaseConfiguration::resetInternal() {
 	// does NOT reset rawConfiguration
 	initialized = false;
-	masterProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor = durableStorageQuorum = storageTeamSize = -1;
+	masterProxyCount = resolverCount = desiredTLogCount = tLogWriteAntiQuorum = tLogReplicationFactor = storageTeamSize = -1;
 	tLogDataStoreType = storageServerStoreType = KeyValueStoreType::END;
 	autoMasterProxyCount = CLIENT_KNOBS->DEFAULT_AUTO_PROXIES;
 	autoResolverCount = CLIENT_KNOBS->DEFAULT_AUTO_RESOLVERS;
 	autoDesiredTLogCount = CLIENT_KNOBS->DEFAULT_AUTO_LOGS;
+	usableRegions = 1;
 	regions.clear();
 	tLogPolicy = storagePolicy = remoteTLogPolicy = IRepPolicyRef();
-
 	remoteDesiredTLogCount = -1;
 	remoteTLogReplicationFactor = 0;
 }
@@ -144,12 +144,10 @@ bool DatabaseConfiguration::isValid() const {
 	if( !(initialized &&
 		tLogWriteAntiQuorum >= 0 &&
 		tLogReplicationFactor >= 1 &&
-		durableStorageQuorum >= 1 &&
 		storageTeamSize >= 1 &&
 		getDesiredProxies() >= 1 &&
 		getDesiredLogs() >= 1 &&
 		getDesiredResolvers() >= 1 &&
-		durableStorageQuorum <= storageTeamSize &&
 		tLogDataStoreType != KeyValueStoreType::END &&
 		storageServerStoreType != KeyValueStoreType::END &&
 		autoMasterProxyCount >= 1 &&
@@ -159,8 +157,10 @@ bool DatabaseConfiguration::isValid() const {
 		tLogPolicy &&
 		getDesiredRemoteLogs() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
+		usableRegions >= 1 &&
+		usableRegions <= 2 &&
 		regions.size() <= 2 &&
-		( remoteTLogReplicationFactor == 0 || ( remoteTLogPolicy && regions.size() == 2 && durableStorageQuorum == storageTeamSize ) ) &&
+		( usableRegions == 1 || regions.size() == 2 ) &&
 		( regions.size() == 0 || regions[0].priority >= 0 ) ) ) {
 		return false;
 	}
@@ -194,16 +194,16 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		std::string tlogInfo = tLogPolicy->info();
 		std::string storageInfo = storagePolicy->info();
 		bool customRedundancy = false;
-		if( durableStorageQuorum == storageTeamSize && tLogWriteAntiQuorum == 0 ) {
-			if( tLogReplicationFactor == 1 && durableStorageQuorum == 1 ) {
+		if( tLogWriteAntiQuorum == 0 ) {
+			if( tLogReplicationFactor == 1 && storageTeamSize == 1 ) {
 				result["redundancy_mode"] = "single";
-			} else if( tLogReplicationFactor == 2 && durableStorageQuorum == 2 ) {
+			} else if( tLogReplicationFactor == 2 && storageTeamSize == 2 ) {
 				result["redundancy_mode"] = "double";
-			} else if( tLogReplicationFactor == 4 && durableStorageQuorum == 6 && tlogInfo == "dcid^2 x zoneid^2 x 1" && storageInfo == "dcid^3 x zoneid^2 x 1" ) {
+			} else if( tLogReplicationFactor == 4 && storageTeamSize == 6 && tlogInfo == "dcid^2 x zoneid^2 x 1" && storageInfo == "dcid^3 x zoneid^2 x 1" ) {
 				result["redundancy_mode"] = "three_datacenter";
-			} else if( tLogReplicationFactor == 3 && durableStorageQuorum == 3 ) {
+			} else if( tLogReplicationFactor == 3 && storageTeamSize == 3 ) {
 				result["redundancy_mode"] = "triple";
-			} else if( tLogReplicationFactor == 4 && durableStorageQuorum == 3 && tlogInfo == "data_hall^2 x zoneid^2 x 1" && storageInfo == "data_hall^3 x 1" ) {
+			} else if( tLogReplicationFactor == 4 && storageTeamSize == 3 && tlogInfo == "data_hall^2 x zoneid^2 x 1" && storageInfo == "data_hall^3 x 1" ) {
 				result["redundancy_mode"] = "three_data_hall";
 			} else {
 				customRedundancy = true;
@@ -214,7 +214,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 		if(customRedundancy) {
 			result["storage_replicas"] = storageTeamSize;
-			result["storage_quorum"] = durableStorageQuorum;
 			result["log_replicas"] = tLogReplicationFactor;
 			result["log_anti_quorum"] = tLogWriteAntiQuorum;
 			if(!noPolicies) result["storage_replication_policy"] = storagePolicy->info();
@@ -229,18 +228,17 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 			result["storage_engine"] = "memory";
 		}
 
-		if( remoteTLogReplicationFactor == 0 ) {
-			result["remote_redundancy_mode"] = "remote_none";
-		} else if( remoteTLogReplicationFactor == 1 ) {
+		if( remoteTLogReplicationFactor == 1 ) {
 			result["remote_redundancy_mode"] = "remote_single";
 		} else if( remoteTLogReplicationFactor == 2 ) {
 			result["remote_redundancy_mode"] = "remote_double";
 		} else if( remoteTLogReplicationFactor == 3 ) {
 			result["remote_redundancy_mode"] = "remote_triple";
-		} else {
+		} else if( remoteTLogReplicationFactor > 3 ) {
 			result["remote_log_replicas"] = remoteTLogReplicationFactor;
 			if(noPolicies && remoteTLogPolicy) result["remote_log_policy"] = remoteTLogPolicy->info();
 		}
+		result["usable_regions"] = usableRegions;
 
 		if(regions.size()) {
 			StatusArray regionArr;
@@ -330,7 +328,6 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("logs")) parse(&desiredTLogCount, value);
 	else if (ck == LiteralStringRef("log_replicas")) parse(&tLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("log_anti_quorum")) parse(&tLogWriteAntiQuorum, value);
-	else if (ck == LiteralStringRef("storage_quorum")) parse(&durableStorageQuorum, value);
 	else if (ck == LiteralStringRef("storage_replicas")) parse(&storageTeamSize, value);
 	else if (ck == LiteralStringRef("log_engine")) { parse((&type), value); tLogDataStoreType = (KeyValueStoreType::StoreType)type; }
 	else if (ck == LiteralStringRef("storage_engine")) { parse((&type), value); storageServerStoreType = (KeyValueStoreType::StoreType)type; }
@@ -342,6 +339,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("remote_logs")) parse(&remoteDesiredTLogCount, value);
 	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
+	else if (ck == LiteralStringRef("usable_regions")) parse(&usableRegions, value);
 	else if (ck == LiteralStringRef("regions")) parse(&regions, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect

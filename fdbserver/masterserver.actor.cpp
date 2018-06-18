@@ -291,7 +291,7 @@ ACTOR Future<Void> newResolvers( Reference<MasterData> self, RecruitFromConfigur
 }
 
 ACTOR Future<Void> newTLogServers( Reference<MasterData> self, RecruitFromConfigurationReply recr, Reference<ILogSystem> oldLogSystem, vector<Standalone<CommitTransactionRef>>* initialConfChanges ) {
-	if(self->configuration.remoteTLogReplicationFactor > 0) {
+	if(self->configuration.usableRegions > 1) {
 		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
 		if( !self->dcId_locality.count(recr.dcId) ) {
 			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("PrimaryId", printable(recr.dcId));
