@@ -583,7 +583,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 		}
 	}
 
-	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(newPersistentDataVersion, Unversioned()) ) ); 
+	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(newPersistentDataVersion, Unversioned()) ) );
 	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin), BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned()) ) );
 	logData->persistentDataVersion = newPersistentDataVersion;
 
@@ -843,7 +843,7 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 				addedBytes += SERVER_KNOBS->VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
 			}
 		}
-		
+
 		msgSize -= msg.message.size();
 	}
 	self->messageBlocks.push_back( std::make_pair(version, block) );
@@ -1175,21 +1175,21 @@ ACTOR Future<Void> tLogCommit(
 		Void _ = wait(delay(0, g_network->getCurrentTask()));
 	}
 
-	if(logData->stopped) {
-		req.reply.sendError( tlog_stopped() );
-		return Void();
-	}
-
 	state double waitStartT = 0;
-	while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES ) {
+	while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES && !logData->stopped ) {
 		if (now() - waitStartT >= 1) {
 			TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
 				.detail("Version", logData->version.get())
 				.detail("PersistentDataVersion", logData->persistentDataVersion)
-				.detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion).suppressFor(1.0);
+				.detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion);
 			waitStartT = now();
 		}
 		Void _ = wait( delayJittered(.005, TaskTLogCommit) );
+	}
+
+	if(logData->stopped) {
+		req.reply.sendError( tlog_stopped() );
+		return Void();
 	}
 
 	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
@@ -1240,7 +1240,7 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 	// PERSIST: Initial setup of persistentData for a brand new tLog for a new database
 	IKeyValueStore *storage = self->persistentData;
 	storage->set( persistFormat );
-	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(logData->version.get(), Unversioned()) ) ); 
+	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(logData->version.get(), Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin), BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistLocalityKeys.begin), BinaryWriter::toValue(logData->locality, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistLogRouterTagsKeys.begin), BinaryWriter::toValue(logData->logRouterTags, Unversioned()) ) );
@@ -1477,20 +1477,20 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 			}
 		}
 
-		if(logData->stopped) {
-			return Void();
-		}
-
 		state double waitStartT = 0;
-		while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES ) {
+		while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES && !logData->stopped ) {
 			if (now() - waitStartT >= 1) {
 				TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
 					.detail("Version", logData->version.get())
 					.detail("PersistentDataVersion", logData->persistentDataVersion)
-					.detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion).suppressFor(1.0);
+					.detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion);
 				waitStartT = now();
 			}
 			Void _ = wait( delayJittered(.005, TaskTLogCommit) );
+		}
+
+		if(logData->stopped) {
+			return Void();
 		}
 
 		Version ver = 0;
