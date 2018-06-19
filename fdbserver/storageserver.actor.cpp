@@ -2323,9 +2323,8 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
 		state double waitStartT = 0;
-		while ( data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES && data->durableVersion.get() < data->desiredOldestVersion.get() )
-		{
-			if (now() - waitStartT >= .1) {
+		while ( data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES && data->durableVersion.get() < data->desiredOldestVersion.get() ) {
+			if (now() - waitStartT >= 1) {
 				TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
 					.detail("Version", data->version.get())
 					.detail("DurableVersion", data->durableVersion.get()).suppressFor(1.0);

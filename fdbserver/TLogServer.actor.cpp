@@ -1180,6 +1180,18 @@ ACTOR Future<Void> tLogCommit(
 		return Void();
 	}
 
+	state double waitStartT = 0;
+	while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES ) {
+		if (now() - waitStartT >= 1) {
+			TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
+				.detail("Version", logData->version.get())
+				.detail("PersistentDataVersion", logData->persistentDataVersion)
+				.detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion).suppressFor(1.0);
+			waitStartT = now();
+		}
+		Void _ = wait( delayJittered(.005, TaskTLogCommit) );
+	}
+
 	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
@@ -1448,7 +1460,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(Void _ = wait( r ? r->getMore() : Never() ) ) {
+				when(Void _ = wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
 					if(poppedIsKnownCommitted) {
 						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
 					}
@@ -1467,6 +1479,18 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 
 		if(logData->stopped) {
 			return Void();
+		}
+
+		state double waitStartT = 0;
+		while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES ) {
+			if (now() - waitStartT >= 1) {
+				TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
+					.detail("Version", logData->version.get())
+					.detail("PersistentDataVersion", logData->persistentDataVersion)
+					.detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion).suppressFor(1.0);
+				waitStartT = now();
+			}
+			Void _ = wait( delayJittered(.005, TaskTLogCommit) );
 		}
 
 		Version ver = 0;
