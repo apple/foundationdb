@@ -1175,13 +1175,8 @@ ACTOR Future<Void> tLogCommit(
 		Void _ = wait(delay(0, g_network->getCurrentTask()));
 	}
 
-	if(logData->stopped) {
-		req.reply.sendError( tlog_stopped() );
-		return Void();
-	}
-
 	state double waitStartT = 0;
-	while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES ) {
+	while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES && !logData->stopped ) {
 		if (now() - waitStartT >= 1) {
 			TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
 				.detail("Version", logData->version.get())
@@ -1190,6 +1185,11 @@ ACTOR Future<Void> tLogCommit(
 			waitStartT = now();
 		}
 		Void _ = wait( delayJittered(.005, TaskTLogCommit) );
+	}
+
+	if(logData->stopped) {
+		req.reply.sendError( tlog_stopped() );
+		return Void();
 	}
 
 	if (logData->version.get() == req.prevVersion) {  // Not a duplicate (check relies on no waiting between here and self->version.set() below!)
@@ -1477,12 +1477,8 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 			}
 		}
 
-		if(logData->stopped) {
-			return Void();
-		}
-
 		state double waitStartT = 0;
-		while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES ) {
+		while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES && !logData->stopped ) {
 			if (now() - waitStartT >= 1) {
 				TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
 					.detail("Version", logData->version.get())
@@ -1491,6 +1487,10 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				waitStartT = now();
 			}
 			Void _ = wait( delayJittered(.005, TaskTLogCommit) );
+		}
+
+		if(logData->stopped) {
+			return Void();
 		}
 
 		Version ver = 0;
