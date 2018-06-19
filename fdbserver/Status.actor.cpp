@@ -1115,7 +1115,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 						}
 					}
 
-					fullReplication = (!unreplicated || (result.get().remoteTLogReplicationFactor == 0 && unreplicated < result.get().regions.size()));
+					fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
 				}
 				when(Void _ = wait(getConfTimeout)) {
 					messages->push_back(makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
@@ -1326,11 +1326,11 @@ static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, Proces
 	}
 
 	if(configuration.regions.size() == 0) {
-		return allMachines.size() - std::max( configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) );
+		return allMachines.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
 	} 
 	int extraTlogEligibleMachines = std::numeric_limits<int>::max();
 	for(auto& region : configuration.regions) {
-		extraTlogEligibleMachines = std::min<int>( extraTlogEligibleMachines, dcId_machine[region.dcId].size() - std::max( configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) ) );
+		extraTlogEligibleMachines = std::min<int>( extraTlogEligibleMachines, dcId_machine[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) ) );
 		if(region.satelliteTLogReplicationFactor > 0) {
 			int totalSatelliteEligible = 0;
 			for(auto& sat : region.satellites) {

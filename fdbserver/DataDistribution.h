@@ -226,7 +226,6 @@ Future<Void> dataDistributionQueue(
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
 	MasterInterface const& mi,
 	int const& teamSize,
-	int const& durableStorageQuorum,
 	double* const& lastLimited,
 	Version const& recoveryVersion);
 

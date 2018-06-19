@@ -47,6 +47,7 @@ public:
 	int8_t locality;
 	Version startVersion;
 	std::vector<Future<TLogLockResult>> replies;
+	std::vector<std::vector<int>> satelliteTagLocations;
 
 	LogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 
@@ -72,7 +73,81 @@ public:
 		return result;
 	}
 
+	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags) {
+		satelliteTagLocations.clear();
+		satelliteTagLocations.resize(std::max(logRouterTags,oldLogRouterTags) + 1);
+		
+		std::set<std::pair<int,int>> used_servers;
+		for(int i = 0; i < tLogLocalities.size(); i++) {
+			used_servers.insert(std::make_pair(0,i));
+		}
+
+		LocalitySetRef serverSet = Reference<LocalitySet>(new LocalityMap<std::pair<int,int>>());
+		LocalityMap<std::pair<int,int>>* serverMap = (LocalityMap<std::pair<int,int>>*) serverSet.getPtr();
+		std::vector<std::pair<int,int>> resultPairs;
+		for(int loc = 0; loc < satelliteTagLocations.size(); loc++) {
+			int team = loc;
+			if(loc < logRouterTags) {
+				team = loc + 1;
+			} else if(loc == logRouterTags) {
+				team = 0;
+			}
+
+			bool teamComplete = false;
+			alsoServers.resize(1);
+			serverMap->clear();
+			resultPairs.clear();
+			for(auto& used_idx : used_servers) {
+				auto entry = serverMap->add(tLogLocalities[used_idx.second], &used_idx);
+				if(!resultPairs.size()) {
+					resultPairs.push_back(used_idx);
+					alsoServers[0] = entry;
+				}
+
+				resultEntries.clear();
+				if( serverSet->selectReplicas(tLogPolicy, alsoServers, resultEntries) ) {
+					for(auto& entry : resultEntries) {
+						resultPairs.push_back(*serverMap->getObject(entry));
+					}
+					for(auto& res : resultPairs) {
+						satelliteTagLocations[team].push_back(res.second);
+						used_servers.erase(res);
+						res.first++;
+						used_servers.insert(res);
+					}
+					teamComplete = true;
+					break;
+				}
+			}
+			ASSERT(teamComplete);
+		}
+
+		checkSatelliteTagLocations();
+	}
+
+	void checkSatelliteTagLocations() {
+		std::vector<int> used;
+		used.resize(tLogLocalities.size());
+		for(auto team : satelliteTagLocations) {
+			for(auto loc : team) {
+				used[loc]++;
+			}
+		}
+		int minUsed = satelliteTagLocations.size();
+		int maxUsed = 0;
+		for(auto i : used) {
+			minUsed = std::min(minUsed, i);
+			maxUsed = std::max(maxUsed, i);
+		}
+		TraceEvent(maxUsed - minUsed > 1 ? (g_network->isSimulated() ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed);
+	}
+
 	int bestLocationFor( Tag tag ) {
+		if(locality == tagLocalitySatellite) {
+			return satelliteTagLocations[tag == txsTag ? 0 : tag.id + 1][0];
+		}
+
+		//the following logic supports upgrades from 5.X
 		if(tag == txsTag) return txsTagOld % logServers.size();
 		return tag.id % logServers.size();
 	}
@@ -113,6 +188,18 @@ public:
 	}
 
 	void getPushLocations( std::vector<Tag> const& tags, std::vector<int>& locations, int locationOffset ) {
+		if(locality == tagLocalitySatellite) {
+			for(auto& t : tags) {
+				if(t == txsTag || t.locality == tagLocalityLogRouter) {
+					for(int loc : satelliteTagLocations[t == txsTag ? 0 : t.id + 1]) {
+						locations.push_back(locationOffset + loc);
+					}
+				}
+			}
+			uniquify(locations);
+			return;
+		}
+
 		newLocations.clear();
 		alsoServers.clear();
 		resultEntries.clear();
@@ -461,8 +548,8 @@ struct ILogSystem {
 	virtual Future<Void> endEpoch() = 0;
 		// Ends the current epoch without starting a new one
 
-	static Reference<ILogSystem> fromServerDBInfo( UID const& dbgid, struct ServerDBInfo const& db, bool usePreviousEpochEnd = false );
-	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const&, bool excludeRemote = false, bool usePreviousEpochEnd = false );
+	static Reference<ILogSystem> fromServerDBInfo( UID const& dbgid, struct ServerDBInfo const& db, bool usePreviousEpochEnd = false, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() );
+	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const&, bool excludeRemote = false, bool usePreviousEpochEnd = false, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() );
 		// Constructs a new ILogSystem implementation from the given ServerDBInfo/LogSystemConfig.  Might return a null reference if there isn't a fully recovered log system available.
 		// The caller can peek() the returned log system and can push() if it has version numbers reserved for it and prevVersions
 

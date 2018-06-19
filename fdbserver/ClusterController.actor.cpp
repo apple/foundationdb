@@ -459,8 +459,9 @@ public:
 
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
-			
-		auto remoteLogs = getWorkersForTlogs( req.configuration, req.configuration.remoteTLogReplicationFactor, req.configuration.getDesiredRemoteLogs(), req.configuration.remoteTLogPolicy, id_used, false, remoteDC );
+		
+
+		auto remoteLogs = getWorkersForTlogs( req.configuration, req.configuration.getRemoteTLogReplicationFactor(), req.configuration.getDesiredRemoteLogs(), req.configuration.getRemoteTLogPolicy(), id_used, false, remoteDC );
 		for(int i = 0; i < remoteLogs.size(); i++) {
 			result.remoteTLogs.push_back(remoteLogs[i].first);
 		}
@@ -890,12 +891,12 @@ public:
 		if(oldSatelliteTLogFit < newSatelliteTLogFit) return false;
 
 		RoleFitness oldRemoteTLogFit(remote_tlogs, ProcessClass::TLog);
-		RoleFitness newRemoteTLogFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForTlogs(db.config, db.config.remoteTLogReplicationFactor, db.config.getDesiredRemoteLogs(), db.config.remoteTLogPolicy, id_used, true, remoteDC) : remote_tlogs, ProcessClass::TLog);
+		RoleFitness newRemoteTLogFit((db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForTlogs(db.config, db.config.getRemoteTLogReplicationFactor(), db.config.getDesiredRemoteLogs(), db.config.getRemoteTLogPolicy(), id_used, true, remoteDC) : remote_tlogs, ProcessClass::TLog);
 
 		if(oldRemoteTLogFit < newRemoteTLogFit) return false;
 
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter);
-		RoleFitness newLogRoutersFit((db.config.remoteTLogReplicationFactor > 0 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newTLogFit.count, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
+		RoleFitness newLogRoutersFit((db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newTLogFit.count, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
 
 		if(oldLogRoutersFit.count < oldTLogFit.count) {
 			oldLogRoutersFit.worstFit = ProcessClass::NeverAssign;
@@ -1942,7 +1943,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *self ) {
 	loop {
 		self->versionDifferenceUpdated = false;
-		if(self->db.serverInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED && self->db.config.remoteTLogReplicationFactor == 0) {
+		if(self->db.serverInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED && self->db.config.usableRegions == 1) {
 			self->versionDifferenceUpdated = true;
 			self->datacenterVersionDifference = 0;
 			Void _ = wait(self->db.serverInfo->onChange());

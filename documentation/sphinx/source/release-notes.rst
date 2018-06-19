@@ -25,6 +25,11 @@ Fixes
 * Watches registered on a lagging storage server would take a long time to trigger.
 * The cluster controller would not start a new generation until it recovered its files from disk.
 
+Status
+------
+
+* The replication factor in status JSON is stored under "redundancy_mode" instead of "redundancy":"factor". `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
+
 Other Changes
 -------------
 

@@ -725,11 +725,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		int replication_factor = g_random->randomInt(storage_servers, generateFearless ? 4 : 5);
 		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
-		set_config(format("storage_replicas:=%d storage_quorum:=%d "
-		                  "log_replicas:=%d log_anti_quorum:=%1 "
+		set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
 		                  "replica_datacenters:=1 min_replica_datacenters:=1",
-		                  storage_servers, storage_servers,
-		                  replication_factor, anti_quorum));
+		                  storage_servers, replication_factor, anti_quorum));
 		break;
 	}
 	case 1: {
@@ -828,6 +826,14 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				remoteObj["satellite_logs"] = logs;
 			}
 
+			if (g_random->random01() < 0.5) {
+				TEST( true );  // Simulated cluster using one region
+				needsRemote = false;
+			} else {
+				TEST( true );  // Simulated cluster using two regions
+				db.usableRegions = 2;
+			}
+
 			int remote_replication_type = g_random->randomInt(0,5);
 			switch (remote_replication_type) {
 			case 0: {
@@ -836,8 +842,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				break;
 			}
 			case 1: {
-				needsRemote = false;
-				TEST( true );  // Simulated cluster using no remote redundancy mode
+				TEST( true );  // Simulated cluster using default remote redundancy mode
 				break;
 			}
 			case 2: {
@@ -927,8 +932,8 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;
 	g_simulator.tLogPolicy = simconfig.db.tLogPolicy;
 	g_simulator.tLogWriteAntiQuorum = simconfig.db.tLogWriteAntiQuorum;
-	g_simulator.hasRemoteReplication = simconfig.db.remoteTLogReplicationFactor > 0;
-	g_simulator.remoteTLogPolicy = simconfig.db.remoteTLogPolicy;
+	g_simulator.remoteTLogPolicy = simconfig.db.getRemoteTLogPolicy();
+	g_simulator.usableRegions = simconfig.db.usableRegions;
 
 	if(simconfig.db.regions.size() == 2) {
 		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
@@ -959,7 +964,6 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	}
 		
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
-	ASSERT(!g_simulator.hasRemoteReplication || g_simulator.remoteTLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
 	TraceEvent("SimulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
 

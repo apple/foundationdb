@@ -188,7 +188,7 @@ static const KeyRangeRef persistRecoveryCountKeys = KeyRangeRef( LiteralStringRe
 // Updated on updatePersistentData()
 static const KeyRangeRef persistCurrentVersionKeys = KeyRangeRef( LiteralStringRef( "version/" ), LiteralStringRef( "version0" ) );
 static const KeyRangeRef persistKnownCommittedVersionKeys = KeyRangeRef( LiteralStringRef( "knownCommitted/" ), LiteralStringRef( "knownCommitted0" ) );
-static const KeyRangeRef persistUnrecoveredBeforeVersionKeys = KeyRangeRef( LiteralStringRef( "UnrecoveredBefore/" ), LiteralStringRef( "UnrecoveredBefore0" ) );
+static const KeyRangeRef persistLocalityKeys = KeyRangeRef( LiteralStringRef( "Locality/" ), LiteralStringRef( "Locality0" ) );
 static const KeyRangeRef persistLogRouterTagsKeys = KeyRangeRef( LiteralStringRef( "LogRouterTags/" ), LiteralStringRef( "LogRouterTags0" ) );
 static const KeyRange persistTagMessagesKeys = prefixRange(LiteralStringRef("TagMsg/"));
 static const KeyRange persistTagPoppedKeys = prefixRange(LiteralStringRef("TagPop/"));
@@ -445,7 +445,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 			Key logIdKey = BinaryWriter::toValue(logId,Unversioned());
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)) );
-			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistUnrecoveredBeforeVersionKeys.begin)) );
+			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistLocalityKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistLogRouterTagsKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistRecoveryCountKeys.begin)) );
 			Key msgKey = logIdKey.withPrefix(persistTagMessagesKeys.begin);
@@ -583,7 +583,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 		}
 	}
 
-	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(newPersistentDataVersion, Unversioned()) ) ); 
+	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(newPersistentDataVersion, Unversioned()) ) );
 	self->persistentData->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin), BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned()) ) );
 	logData->persistentDataVersion = newPersistentDataVersion;
 
@@ -808,7 +808,11 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
-			if(!(self->locality == tagLocalitySpecial || self->locality == tag.locality || tag.locality < 0)) {
+			if(self->locality == tagLocalitySatellite) {
+				if(!(tag == txsTag || tag.locality == tagLocalityLogRouter)) {
+					continue;
+				}
+			} else if(!(self->locality == tagLocalitySpecial || self->locality == tag.locality || tag.locality < 0)) {
 				continue;
 			}
 
@@ -839,7 +843,7 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 				addedBytes += SERVER_KNOBS->VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
 			}
 		}
-		
+
 		msgSize -= msg.message.size();
 	}
 	self->messageBlocks.push_back( std::make_pair(version, block) );
@@ -1171,6 +1175,18 @@ ACTOR Future<Void> tLogCommit(
 		Void _ = wait(delay(0, g_network->getCurrentTask()));
 	}
 
+	state double waitStartT = 0;
+	while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES && !logData->stopped ) {
+		if (now() - waitStartT >= 1) {
+			TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
+				.detail("Version", logData->version.get())
+				.detail("PersistentDataVersion", logData->persistentDataVersion)
+				.detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion);
+			waitStartT = now();
+		}
+		Void _ = wait( delayJittered(.005, TaskTLogCommit) );
+	}
+
 	if(logData->stopped) {
 		req.reply.sendError( tlog_stopped() );
 		return Void();
@@ -1225,9 +1241,9 @@ ACTOR Future<Void> initPersistentState( TLogData* self, Reference<LogData> logDa
 	state IKeyValueStore *storage = self->persistentData;
 	Void _ = wait(storage->init());
 	storage->set( persistFormat );
-	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(logData->version.get(), Unversioned()) ) ); 
+	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistCurrentVersionKeys.begin), BinaryWriter::toValue(logData->version.get(), Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistKnownCommittedVersionKeys.begin), BinaryWriter::toValue(logData->knownCommittedVersion, Unversioned()) ) );
-	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistUnrecoveredBeforeVersionKeys.begin), BinaryWriter::toValue(logData->unrecoveredBefore, Unversioned()) ) );
+	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistLocalityKeys.begin), BinaryWriter::toValue(logData->locality, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistLogRouterTagsKeys.begin), BinaryWriter::toValue(logData->logRouterTags, Unversioned()) ) );
 	storage->set( KeyValueRef( BinaryWriter::toValue(logData->logId,Unversioned()).withPrefix(persistRecoveryCountKeys.begin), BinaryWriter::toValue(logData->recoveryCount, Unversioned()) ) );
 
@@ -1445,7 +1461,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 	while (!endVersion.present() || logData->version.get() < endVersion.get()) {
 		loop {
 			choose {
-				when(Void _ = wait( r ? r->getMore() : Never() ) ) {
+				when(Void _ = wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
 					if(poppedIsKnownCommitted) {
 						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
 					}
@@ -1460,6 +1476,18 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					dbInfoChange = logData->logSystem->onChange();
 				}
 			}
+		}
+
+		state double waitStartT = 0;
+		while( self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_HARD_LIMIT_BYTES && !logData->stopped ) {
+			if (now() - waitStartT >= 1) {
+				TraceEvent(SevWarn, "TLogUpdateLag", logData->logId)
+					.detail("Version", logData->version.get())
+					.detail("PersistentDataVersion", logData->persistentDataVersion)
+					.detail("PersistentDataDurableVersion", logData->persistentDataDurableVersion);
+				waitStartT = now();
+			}
+			Void _ = wait( delayJittered(.005, TaskTLogCommit) );
 		}
 
 		if(logData->stopped) {
@@ -1610,14 +1638,14 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 	state Future<Optional<Value>> fFormat = storage->readValue(persistFormat.key);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fVers = storage->readRange(persistCurrentVersionKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fKnownCommitted = storage->readRange(persistKnownCommittedVersionKeys);
-	state Future<Standalone<VectorRef<KeyValueRef>>> fUnrecoveredBefore = storage->readRange(persistUnrecoveredBeforeVersionKeys);
+	state Future<Standalone<VectorRef<KeyValueRef>>> fLocality = storage->readRange(persistLocalityKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fLogRouterTags = storage->readRange(persistLogRouterTagsKeys);
 	state Future<Standalone<VectorRef<KeyValueRef>>> fRecoverCounts = storage->readRange(persistRecoveryCountKeys);
 
 	// FIXME: metadata in queue?
 
 	Void _ = wait( waitForAll( (vector<Future<Optional<Value>>>(), fFormat ) ) );
-	Void _ = wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fKnownCommitted, fUnrecoveredBefore, fLogRouterTags, fRecoverCounts) ) );
+	Void _ = wait( waitForAll( (vector<Future<Standalone<VectorRef<KeyValueRef>>>>(), fVers, fKnownCommitted, fLocality, fLogRouterTags, fRecoverCounts) ) );
 
 	if (fFormat.get().present() && !persistFormatReadableRange.contains( fFormat.get().get() )) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
@@ -1659,9 +1687,9 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 	ASSERT(fVers.get().size() == fRecoverCounts.get().size());
 
-	state std::map<UID, Version> id_unrecoveredBefore;
-	for(auto it : fUnrecoveredBefore.get()) {
-		id_unrecoveredBefore[ BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistUnrecoveredBeforeVersionKeys.begin), Unversioned())] = BinaryReader::fromStringRef<Version>( it.value, Unversioned() );
+	state std::map<UID, int8_t> id_locality;
+	for(auto it : fLocality.get()) {
+		id_locality[ BinaryReader::fromStringRef<UID>(it.key.removePrefix(persistLocalityKeys.begin), Unversioned())] = BinaryReader::fromStringRef<int8_t>( it.value, Unversioned() );
 	}
 
 	state std::map<UID, int> id_logRouterTags;
@@ -1695,13 +1723,11 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 		//We do not need the remoteTag, because we will not be loading any additional data
 		logData = Reference<LogData>( new LogData(self, recruited, Tag(), true, id_logRouterTags[id1], UID()) );
-		logData->locality = tagLocalitySpecial;
+		logData->locality = id_locality[id1];
 		logData->stopped = true;
 		self->id_data[id1] = logData;
 		id_interf[id1] = recruited;
 
-		logData->unrecoveredBefore = id_unrecoveredBefore[id1];
-		logData->recoveredAt = logData->unrecoveredBefore;
 		logData->knownCommittedVersion = id_knownCommitted[id1];
 		Version ver = BinaryReader::fromStringRef<Version>( fVers.get()[idx].value, Unversioned() );
 		logData->persistentDataVersion = ver;

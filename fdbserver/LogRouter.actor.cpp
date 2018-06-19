@@ -179,7 +179,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	loop {
 		loop {
 			choose {
-				when(Void _ = wait( r ? r->getMore() : Never() ) ) {
+				when(Void _ = wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
 					break;
 				}
 				when( Void _ = wait( dbInfoChange ) ) { //FIXME: does this actually happen?
@@ -336,7 +336,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 
 	while(!self->messageBlocks.empty() && self->messageBlocks.front().first < minPopped) {
 		self->messageBlocks.pop_front();
-		Void _ = wait(yield(TaskUpdateStorage));
+		Void _ = wait(yield(TaskTLogPop));
 	}
 
 	if(self->logSystem->get() && self->allowPops) {
