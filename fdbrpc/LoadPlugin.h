@@ -20,13 +20,14 @@
 
 #pragma once
 
+// Will need to be defined at link time
+extern "C" void *get_plugin(const char *plugin_type_name_and_version);
+
 template <class T>
 Reference<T> loadPlugin( std::string const& plugin_name ) {
-	void* plugin = loadLibrary( plugin_name.c_str() );
-	void *(*get_plugin)(const char*) = (void*(*)(const char*))loadFunction( plugin, "get_plugin" );
-
-	if ( get_plugin )
-		return Reference<T>( (T*)get_plugin( T::get_plugin_type_name_and_version() ) );
-	else
-		return Reference<T>( NULL );
+#ifdef __TLS_DISABLED__
+	return Reference<T>( NULL );
+#else
+	return (plugin_name.empty()) ? Reference<T>( NULL ) : Reference<T>( (T*)get_plugin( T::get_plugin_type_name_and_version() ) );
+#endif
 }

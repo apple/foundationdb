@@ -25,6 +25,10 @@ fdbcli_LDFLAGS := $(fdbrpc_LDFLAGS)
 fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a -ldl
 fdbcli_STATIC_LIBS :=
 
+ifndef __TLS_DISABLED__
+fdb_cli_LIBS += lib/libFDBLibTLS.a /usr/local/lib/libtls.a /usr/local/lib/libssl.a /usr/local/lib/libcrypto.a
+endif
+
 fdbcli_GENERATED_SOURCES += versions.h
 
 ifeq ($(PLATFORM),linux)

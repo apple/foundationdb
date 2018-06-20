@@ -26,6 +26,10 @@ fdb_c_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
 fdb_c_tests_LIBS := -Llib -lfdb_c
 fdb_c_tests_HEADERS := -Ibindings/c
 
+ifndef __TLS_DISABLED__
+fdb_c_LIBS += lib/libFDBLibTLS.a /usr/local/lib/libtls.a /usr/local/lib/libssl.a /usr/local/lib/libcrypto.a
+endif
+
 CLEAN_TARGETS += fdb_c_tests_clean
 
 ifeq ($(PLATFORM),linux)

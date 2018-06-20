@@ -24,6 +24,10 @@ fdbbackup_CFLAGS := $(fdbclient_CFLAGS)
 fdbbackup_LDFLAGS := $(fdbrpc_LDFLAGS)
 fdbbackup_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
 
+ifndef __TLS_DISABLED__
+fdbbackup_LIBS += lib/libFDBLibTLS.a /usr/local/lib/libtls.a /usr/local/lib/libssl.a /usr/local/lib/libcrypto.a
+endif
+
 ifeq ($(PLATFORM),linux)
   fdbbackup_LIBS += -ldl -lpthread -lrt
   fdbbackup_LDFLAGS += -static-libstdc++ -static-libgcc

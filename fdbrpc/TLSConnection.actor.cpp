@@ -194,13 +194,6 @@ Reference<IListener> TLSNetworkConnections::listen( NetworkAddress localAddr ) {
 // 5MB for loading files into memory
 #define CERT_FILE_MAX_SIZE (5 * 1024 * 1024)
 
-void TLSOptions::set_plugin_name_or_path( std::string const& plugin_name_or_path ) {
-	if ( plugin )
-		throw invalid_option();
-
-	init_plugin( plugin_name_or_path );
-}
-
 void TLSOptions::set_cert_file( std::string const& cert_file ) {
 	try {
 		TraceEvent("TLSConnectionSettingCertFile").detail("CertFilePath", cert_file);
@@ -374,22 +367,15 @@ static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_erro
 	va_end( ap );
 }
 
-void TLSOptions::init_plugin( std::string const& plugin_path ) {
-	std::string path;
+void TLSOptions::init_plugin() {
+	std::string plugin_path = platform::getDefaultPluginPath("fdb-libressl-plugin");
 
-	if ( plugin_path.length() ) {
-		path = plugin_path;
-	} else {
-		if ( !platform::getEnvironmentVar( "FDB_TLS_PLUGIN", path ) )
-			// FIXME: should there be other fallbacks?
-			path = platform::getDefaultPluginPath("fdb-libressl-plugin");
-	}
+	TraceEvent("TLSConnectionLoadingPlugin").detail("PluginPath", plugin_path);
 
-	TraceEvent("TLSConnectionLoadingPlugin").detail("PluginPath", path);
-	plugin = loadPlugin<ITLSPlugin>( path.c_str() );
+	plugin = loadPlugin<ITLSPlugin>( plugin_path.c_str() );
+
 	if ( !plugin ) {
-		// FIXME: allow?
-		TraceEvent(SevError, "TLSConnectionPluginInitError").detail("Plugin", path).GetLastError();
+		TraceEvent(SevError, "TLSConnectionPluginInitError").detail("Plugin", plugin_path).GetLastError();
 		throw tls_error();
 	}
 
