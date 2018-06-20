@@ -72,21 +72,29 @@ GENDIR/%.actor.g.h: GENDIR/%.actor.h $(ACTORCOMPILER)
 # or .cpp files. We have no mechanism to detect dependencies on
 # generated headers before compilation.
 
-define run-gplusplus-GENNAME() =
-@echo "Compiling      $(<:${OBJDIR}/%=%)"
-@mkdir -p $(DEPSDIR)/$(<D) && \
-mkdir -p $(OBJDIR)/$(<D) && \
-$(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@ && \
-cp $(DEPSDIR)/$<.d.tmp $(DEPSDIR)/$<.d && \
-sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' -e '/^$$/ d' -e 's/$$/ :/' < $(DEPSDIR)/$<.d.tmp >> $(DEPSDIR)/$<.d && \
-rm $(DEPSDIR)/$<.d.tmp
-endef
-
 $(OBJDIR)/GENDIR/%.cpp.o: GENDIR/%.cpp $(ALL_MAKEFILES) | $(filter %.h,$(GENERATED_SOURCES))
-	${run-gplusplus-GENNAME()}
+	@echo "Compiling      $(<:${OBJDIR}/%=%)"
+ifeq ($(VERBOSE),1)
+	@echo $(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@
+endif
+	@mkdir -p $(DEPSDIR)/$(<D) && \
+	mkdir -p $(OBJDIR)/$(<D) && \
+	$(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@ && \
+	cp $(DEPSDIR)/$<.d.tmp $(DEPSDIR)/$<.d && \
+	sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' -e '/^$$/ d' -e 's/$$/ :/' < $(DEPSDIR)/$<.d.tmp >> $(DEPSDIR)/$<.d && \
+	rm $(DEPSDIR)/$<.d.tmp
 
 $(OBJDIR)/GENDIR/%.cpp.o: $(OBJDIR)/GENDIR/%.cpp $(ALL_MAKEFILES) | $(filter %.h,$(GENERATED_SOURCES))
-	${run-gplusplus-GENNAME()}
+	@echo "Compiling      $(<:${OBJDIR}/%=%)"
+ifeq ($(VERBOSE),1)
+	@echo $(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@
+endif
+	@mkdir -p $(DEPSDIR)/$(<D) && \
+	mkdir -p $(OBJDIR)/$(<D) && \
+	$(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@ && \
+	cp $(DEPSDIR)/$<.d.tmp $(DEPSDIR)/$<.d && \
+	sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' -e '/^$$/ d' -e 's/$$/ :/' < $(DEPSDIR)/$<.d.tmp >> $(DEPSDIR)/$<.d && \
+	rm $(DEPSDIR)/$<.d.tmp
 
 $(OBJDIR)/GENDIR/%.c.o: GENDIR/%.c $(ALL_MAKEFILES) | $(filter %.h,$(GENERATED_SOURCES))
 	@echo "Compiling      $<"
