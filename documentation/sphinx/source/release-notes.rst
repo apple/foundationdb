@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+5.2.5
+=====
+
+Fixes
+-----
+
+* Don't disable certificate checks by default. `(PR #511) https://github.com/apple/foundationdb/pull/511`_
+
 5.2.4
 =====
 
