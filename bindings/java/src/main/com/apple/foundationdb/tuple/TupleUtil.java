@@ -21,10 +21,11 @@
 package com.apple.foundationdb.tuple;
 
 import java.math.BigInteger;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -63,6 +64,28 @@ class TupleUtil {
 	private static final byte[] TRUE_ARR           = new byte[]{0x27};
 	private static final byte[] VERSIONSTAMP_ARR   = new byte[]{0x33};
 
+	private static final ThreadLocal<DecodeResult> DECODE_RESULT_THREAD_LOCAL =
+			new ThreadLocal<DecodeResult>() {
+				@Override
+				protected DecodeResult initialValue() {
+					return new DecodeResult();
+				}
+			};
+	private static final ThreadLocal<EncodeResult> ENCODE_RESULT_THREAD_LOCAL =
+			new ThreadLocal<EncodeResult>() {
+				@Override
+				protected EncodeResult initialValue() {
+					return new EncodeResult();
+				}
+			};
+	private static final ThreadLocal<byte[]> NINE_BYTES_THREAD_LOCAL =
+			new ThreadLocal<byte[]>() {
+				@Override
+				protected byte[] initialValue() {
+					return new byte[9];
+				}
+			};
+
 	static {
 		size_limits = new BigInteger[9];
 		for(int i = 0; i < 9; i++) {
@@ -73,22 +96,30 @@ class TupleUtil {
 	}
 
 	static class DecodeResult {
-		final int end;
-		final Object o;
+		int end;
+		Object o;
 
-		DecodeResult(int pos, Object o) {
-			this.end = pos;
+		DecodeResult() {
+		}
+
+		DecodeResult set(int end, Object o) {
+			this.end = end;
 			this.o = o;
+			return this;
 		}
 	}
 
 	static class EncodeResult {
-		final int totalLength;
-		final int versionPos;
+		int totalLength;
+		int versionPos;
 
-		EncodeResult(int totalLength, int versionPos) {
+		EncodeResult() {
+		}
+
+		EncodeResult set(int totalLength, int versionPos) {
 			this.totalLength = totalLength;
 			this.versionPos = versionPos;
+			return this;
 		}
 	}
 
@@ -159,95 +190,91 @@ class TupleUtil {
 		throw new IllegalArgumentException("Unsupported data type: " + o.getClass().getName());
 	}
 
-	static EncodeResult encode(Object t, boolean nested, List<byte[]> encoded) {
+	static EncodeResult encode(Object t, boolean nested, ByteArrayOutputStream baos) throws IOException {
 		if(t == null) {
 			if(nested) {
-				encoded.add(NULL_ESCAPED_ARR);
-				return new EncodeResult(NULL_ESCAPED_ARR.length, -1);
+				baos.write(NULL_ESCAPED_ARR);
+				return ENCODE_RESULT_THREAD_LOCAL.get().set(NULL_ESCAPED_ARR.length, -1);
 			}
 			else {
-				encoded.add(NULL_ARR);
-				return new EncodeResult(NULL_ARR.length, -1);
+				baos.write(NULL_ARR);
+				return ENCODE_RESULT_THREAD_LOCAL.get().set(NULL_ARR.length, -1);
 			}
 		}
 		if(t instanceof byte[])
-			return encode((byte[]) t, encoded);
+			return encode((byte[]) t, baos);
 		if(t instanceof String)
-			return encode((String)t, encoded);
+			return encode((String)t, baos);
 		if(t instanceof BigInteger)
-			return encode((BigInteger)t, encoded);
+			return encode((BigInteger)t, baos);
 		if(t instanceof Float)
-			return encode((Float)t, encoded);
+			return encode((Float)t, baos);
 		if(t instanceof Double)
-			return encode((Double)t, encoded);
+			return encode((Double)t, baos);
 		if(t instanceof Boolean)
-			return encode((Boolean)t, encoded);
+			return encode((Boolean)t, baos);
 		if(t instanceof UUID)
-			return encode((UUID)t, encoded);
+			return encode((UUID)t, baos);
 		if(t instanceof Number)
-			return encode(((Number)t).longValue(), encoded);
+			return encode(((Number)t).longValue(), baos);
 		if(t instanceof Versionstamp)
-			return encode((Versionstamp)t, encoded);
+			return encode((Versionstamp)t, baos);
 		if(t instanceof List<?>)
-			return encode((List<?>)t, encoded);
+			return encode((List<?>)t, baos);
 		if(t instanceof Tuple)
-			return encode(((Tuple)t).getItems(), encoded);
+			return encode(((Tuple)t).getItems(), baos);
 		throw new IllegalArgumentException("Unsupported data type: " + t.getClass().getName());
 	}
 
-	static EncodeResult encode(Object t, List<byte[]> encoded) {
-		return encode(t, false, encoded);
+	static EncodeResult encode(Object t, ByteArrayOutputStream baos) throws IOException {
+		return encode(t, false, baos);
 	}
 
-	static EncodeResult encode(byte[] bytes, List<byte[]> encoded) {
-		encoded.add(BYTES_ARR);
-		byte[] escaped = ByteArrayUtil.replace(bytes, NULL_ARR, NULL_ESCAPED_ARR);
-		encoded.add(escaped);
-		encoded.add(new byte[] {nil});
-
+	static EncodeResult encode(byte[] bytes, ByteArrayOutputStream baos) throws IOException {
+		final int length = baos.size();
+		baos.write(BYTES_ARR);
+		replace(baos, bytes, NULL_ARR, NULL_ESCAPED_ARR);
+		baos.write(NULL_ARR);
 		//System.out.println("Joining bytes...");
-		return new EncodeResult(2 + escaped.length,-1);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(baos.size() - length, -1);
 	}
 
-	static EncodeResult encode(String s, List<byte[]> encoded) {
-		encoded.add(STRING_ARR);
-		byte[] escaped = ByteArrayUtil.replace(s.getBytes(UTF8), NULL_ARR, NULL_ESCAPED_ARR);
-		encoded.add(escaped);
-		encoded.add(NULL_ARR);
-
+	static EncodeResult encode(String s, ByteArrayOutputStream baos) throws IOException {
+		final int length = baos.size();
+		baos.write(STRING_ARR);
+		replace(baos, s.getBytes(UTF8), NULL_ARR, NULL_ESCAPED_ARR);
+		baos.write(NULL_ARR);
 		//System.out.println("Joining string...");
-		return new EncodeResult(2 + escaped.length, -1);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(baos.size() - length, -1);
 	}
 
-	static EncodeResult encode(BigInteger i, List<byte[]> encoded) {
+	static EncodeResult encode(BigInteger i, ByteArrayOutputStream baos) throws IOException {
 		//System.out.println("Encoding integral " + i);
 		if(i.equals(BigInteger.ZERO)) {
-			encoded.add(new byte[]{INT_ZERO_CODE});
-			return new EncodeResult(1,-1);
+			baos.write(new byte[]{INT_ZERO_CODE});
+			return ENCODE_RESULT_THREAD_LOCAL.get().set(1, -1);
 		}
 		byte[] bytes = i.toByteArray();
+		final int baosLength = baos.size();
 		if(i.compareTo(BigInteger.ZERO) > 0) {
 			if(i.compareTo(size_limits[size_limits.length-1]) > 0) {
 				int length = byteLength(bytes);
 				if(length > 0xff) {
 					throw new IllegalArgumentException("BigInteger magnitude is too large (more than 255 bytes)");
 				}
-				byte[] result = new byte[length + 2];
-				result[0] = POS_INT_END;
-				result[1] = (byte)(length);
-				System.arraycopy(bytes, bytes.length - length, result, 2, length);
-				encoded.add(result);
-				return new EncodeResult(result.length, -1);
+
+				baos.write(POS_INT_END);
+				baos.write((byte)length);
+				baos.write(bytes, bytes.length - length, length);
+				return ENCODE_RESULT_THREAD_LOCAL.get().set(baos.size() - baosLength, -1);
 			}
 			int n = ByteArrayUtil.bisectLeft(size_limits, i);
 			assert n <= size_limits.length;
 			//byte[] bytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(i).array();
 			//System.out.println("  -- integral has 'n' of " + n + " and output bytes of " + bytes.length);
-			byte[] result = new byte[n+1];
-			result[0] = (byte)(INT_ZERO_CODE + n);
-			System.arraycopy(bytes, bytes.length - n, result, 1, n);
-			encoded.add(result);
-			return new EncodeResult(result.length, -1);
+			baos.write((byte)(INT_ZERO_CODE + n));
+			baos.write(bytes, bytes.length - n, n);
+			return ENCODE_RESULT_THREAD_LOCAL.get().set(baos.size() - baosLength, -1);
 		}
 		if(i.negate().compareTo(size_limits[size_limits.length-1]) > 0) {
 			int length = byteLength(i.negate().toByteArray());
@@ -256,17 +283,18 @@ class TupleUtil {
 			}
 			BigInteger offset = BigInteger.ONE.shiftLeft(length*8).subtract(BigInteger.ONE);
 			byte[] adjusted = i.add(offset).toByteArray();
-			byte[] result = new byte[length + 2];
-			result[0] = NEG_INT_START;
-			result[1] = (byte)(length ^ 0xff);
+
+			baos.write(NEG_INT_START);
+			baos.write((byte)(length ^ 0xff));
 			if(adjusted.length >= length) {
-				System.arraycopy(adjusted, adjusted.length - length, result, 2, length);
+				baos.write(adjusted, adjusted.length - length, length);
 			} else {
-				Arrays.fill(result, 2, result.length - adjusted.length, (byte)0x00);
-				System.arraycopy(adjusted, 0, result, result.length - adjusted.length, adjusted.length);
+				for (int j = 0; j < length + 2 - adjusted.length; ++j) {
+					baos.write(nil);
+				}
+				baos.write(adjusted, 0, adjusted.length);
 			}
-			encoded.add(result);
-			return new EncodeResult(result.length, -1);
+			return ENCODE_RESULT_THREAD_LOCAL.get().set(baos.size() - baosLength, -1);
 		}
 		int n = ByteArrayUtil.bisectLeft(size_limits, i.negate());
 
@@ -274,64 +302,63 @@ class TupleUtil {
 
 		long maxv = size_limits[n].add(i).longValue();
 		byte[] adjustedBytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(maxv).array();
-		byte[] result = new byte[n+1];
-		result[0] = (byte)(20 - n);
-		System.arraycopy(adjustedBytes, adjustedBytes.length - n, result, 1, n);
-		encoded.add(result);
-		return new EncodeResult(result.length, -1);
+
+		baos.write((byte)(20 - n));
+		baos.write(adjustedBytes, adjustedBytes.length - n, n);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(baos.size() - baosLength, -1);
 	}
 
-	static EncodeResult encode(Integer i, List<byte[]> encoded) {
-		return encode(i.longValue(), encoded);
+	static EncodeResult encode(Integer i, ByteArrayOutputStream baos) throws IOException {
+		return encode(i.longValue(), baos);
 	}
 
-	static EncodeResult encode(long i, List<byte[]> encoded) {
-		return encode(BigInteger.valueOf(i), encoded);
+	static EncodeResult encode(long i, ByteArrayOutputStream baos) throws IOException {
+		return encode(BigInteger.valueOf(i), baos);
 	}
 
-	static EncodeResult encode(Float f, List<byte[]> encoded) {
+	static EncodeResult encode(Float f, ByteArrayOutputStream baos) throws IOException {
 		byte[] result = ByteBuffer.allocate(5).order(ByteOrder.BIG_ENDIAN).put(FLOAT_CODE).putFloat(f).array();
 		floatingPointCoding(result, 1, true);
-		encoded.add(result);
-		return new EncodeResult(result.length, -1);
+		baos.write(result);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(result.length, -1);
 	}
 
-	static EncodeResult encode(Double d, List<byte[]> encoded) {
+	static EncodeResult encode(Double d, ByteArrayOutputStream baos) throws IOException {
 		byte[] result = ByteBuffer.allocate(9).order(ByteOrder.BIG_ENDIAN).put(DOUBLE_CODE).putDouble(d).array();
 		floatingPointCoding(result, 1, true);
-		encoded.add(result);
-		return new EncodeResult(result.length, -1);
+		baos.write(result);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(result.length, -1);
 	}
 
-	static EncodeResult encode(Boolean b, List<byte[]> encoded) {
+	static EncodeResult encode(Boolean b, ByteArrayOutputStream baos) throws IOException {
 		if (b) {
-			encoded.add(TRUE_ARR);
+			baos.write(TRUE_ARR);
 		} else {
-			encoded.add(FALSE_ARR);
+			baos.write(FALSE_ARR);
 		}
-		return new EncodeResult(1, -1);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(1, -1);
 	}
 
-	static EncodeResult encode(UUID uuid, List<byte[]> encoded) {
+	static EncodeResult encode(UUID uuid, ByteArrayOutputStream baos) throws IOException {
 		byte[] result = ByteBuffer.allocate(17).put(UUID_CODE).order(ByteOrder.BIG_ENDIAN)
 				.putLong(uuid.getMostSignificantBits()).putLong(uuid.getLeastSignificantBits())
 				.array();
-		encoded.add(result);
-		return new EncodeResult(result.length, -1);
+		baos.write(result);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(result.length, -1);
 	}
 
-	static EncodeResult encode(Versionstamp v, List<byte[]> encoded) {
-		encoded.add(VERSIONSTAMP_ARR);
-		encoded.add(v.getBytes());
-		return new EncodeResult(1 + Versionstamp.LENGTH, (v.isComplete() ? -1 : 1));
+	static EncodeResult encode(Versionstamp v, ByteArrayOutputStream baos) throws IOException {
+		baos.write(VERSIONSTAMP_ARR);
+		baos.write(v.getBytes());
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(1 + Versionstamp.LENGTH, (v.isComplete() ? -1 : 1));
 	}
 
-	static EncodeResult encode(List<?> value, List<byte[]> encoded) {
+	static EncodeResult encode(List<?> value, ByteArrayOutputStream baos) throws IOException {
 		int lenSoFar = 0;
 		int versionPos = -1;
-		encoded.add(NESTED_ARR);
+		baos.write(NESTED_ARR);
 		for(Object t : value) {
-			EncodeResult childResult = encode(t, true, encoded);
+			EncodeResult childResult = encode(t, true, baos);
 			if(childResult.versionPos > 0) {
 				if(versionPos > 0) {
 					throw new IllegalArgumentException("Multiple incomplete Versionstamps included in Tuple");
@@ -340,71 +367,91 @@ class TupleUtil {
 			}
 			lenSoFar += childResult.totalLength;
 		}
-		encoded.add(NULL_ARR);
-		return new EncodeResult(lenSoFar + 2, (versionPos < 0 ? -1 : versionPos + 1));
+		baos.write(NULL_ARR);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(lenSoFar + 2, (versionPos < 0 ? -1 : versionPos + 1));
 	}
 
-	static DecodeResult decode(byte[] rep, int pos, int last) {
+	static DecodeResult decode(byte[] rep, int pos, int last, boolean decode) {
 		//System.out.println("Decoding '" + ArrayUtils.printable(rep) + "' at " + pos);
 
 		// SOMEDAY: codes over 127 will be a problem with the signed Java byte mess
 		int code = rep[pos];
 		int start = pos + 1;
 		if(code == nil) {
-			return new DecodeResult(start, null);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start, null);
 		}
 		if(code == BYTES_CODE) {
-			int end = ByteArrayUtil.findTerminator(rep, (byte)0x0, (byte)0xff, start, last);
-			//System.out.println("End of byte string: " + end);
-			byte[] range = ByteArrayUtil.replace(rep, start, end - start, NULL_ESCAPED_ARR, new byte[] { nil });
-			//System.out.println(" -> byte string contents: '" + ArrayUtils.printable(range) + "'");
-			return new DecodeResult(end + 1, range);
+			int end = ByteArrayUtil.findTerminator(rep, nil, (byte)0xff, start, last);
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(end + 1, null);
+			}
+			byte[] value = Arrays.copyOfRange(rep, start, end);
+			value = replace(value, NULL_ESCAPED_ARR, NULL_ARR);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(end + 1, value);
 		}
 		if(code == STRING_CODE) {
-			int end = ByteArrayUtil.findTerminator(rep, (byte)0x0, (byte)0xff, start, last);
-			//System.out.println("End of UTF8 string: " + end);
-			byte[] stringBytes = ByteArrayUtil.replace(rep, start, end - start, NULL_ESCAPED_ARR, new byte[] { nil });
-			String str = new String(stringBytes, UTF8);
-			//System.out.println(" -> UTF8 string contents: '" + str + "'");
-			return new DecodeResult(end + 1, str);
+			int end = ByteArrayUtil.findTerminator(rep, nil, (byte)0xff, start, last);
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(end + 1, null);
+			}
+			byte[] value = Arrays.copyOfRange(rep, start, end);
+			value = replace(value, NULL_ESCAPED_ARR, NULL_ARR);
+			String str = new String(value, UTF8);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(end + 1, str);
 		}
 		if(code == FLOAT_CODE) {
-			byte[] resBytes = Arrays.copyOfRange(rep, start, start+4);
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(start + Float.BYTES, null);
+			}
+			byte[] resBytes = Arrays.copyOfRange(rep, start, start + Float.BYTES);
 			floatingPointCoding(resBytes, 0, false);
 			float res = ByteBuffer.wrap(resBytes).order(ByteOrder.BIG_ENDIAN).getFloat();
-			return new DecodeResult(start + 4, res);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start + Float.BYTES, res);
 		}
 		if(code == DOUBLE_CODE) {
-			byte[] resBytes = Arrays.copyOfRange(rep, start, start+8);
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(start + Double.BYTES, null);
+			}
+			byte[] resBytes = Arrays.copyOfRange(rep, start, start + Double.BYTES);
 			floatingPointCoding(resBytes, 0, false);
 			double res = ByteBuffer.wrap(resBytes).order(ByteOrder.BIG_ENDIAN).getDouble();
-			return new DecodeResult(start + 8, res);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start + Double.BYTES, res);
 		}
 		if(code == FALSE_CODE) {
-			return new DecodeResult(start, false);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start, false);
 		}
 		if(code == TRUE_CODE) {
-			return new DecodeResult(start, true);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start, true);
 		}
 		if(code == UUID_CODE) {
-			ByteBuffer bb = ByteBuffer.wrap(rep, start, 16).order(ByteOrder.BIG_ENDIAN);
+			final int UUIDBytes = 16;
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(start + UUIDBytes, null);
+			}
+			ByteBuffer bb = ByteBuffer.wrap(rep, start, UUIDBytes).order(ByteOrder.BIG_ENDIAN);
 			long msb = bb.getLong();
 			long lsb = bb.getLong();
-			return new DecodeResult(start + 16, new UUID(msb, lsb));
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start + UUIDBytes, new UUID(msb, lsb));
 		}
 		if(code == POS_INT_END) {
 			int n = rep[start] & 0xff;
-			return new DecodeResult(start + n + 1, new BigInteger(ByteArrayUtil.join(new byte[]{0x00}, Arrays.copyOfRange(rep, start+1, start+n+1))));
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(start + n + 1, null);
+			}
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start + n + 1,
+					new BigInteger(ByteArrayUtil.join(NULL_ARR, Arrays.copyOfRange(rep, start+1, start+n+1))));
 		}
 		if(code == NEG_INT_START) {
 			int n = (rep[start] ^ 0xff) & 0xff;
-			BigInteger origValue = new BigInteger(ByteArrayUtil.join(new byte[]{0x00}, Arrays.copyOfRange(rep, start+1, start+n+1)));
-			BigInteger offset = BigInteger.ONE.shiftLeft(n*8).subtract(BigInteger.ONE);
-			return new DecodeResult(start + n + 1, origValue.subtract(offset));
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(start + n + 1, null);
+			}
+			BigInteger origValue = new BigInteger(ByteArrayUtil.join(NULL_ARR, Arrays.copyOfRange(rep, start + 1, start + n + 1)));
+			BigInteger offset = BigInteger.ONE.shiftLeft(n * 8).subtract(BigInteger.ONE);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start + n + 1, origValue.subtract(offset));
 		}
 		if(code > NEG_INT_START && code < POS_INT_END) {
 			// decode a long
-			byte[] longBytes = new byte[9];
 			boolean upper = code >= INT_ZERO_CODE;
 			int n = upper ? code - 20 : 20 - code;
 			int end = start + n;
@@ -412,27 +459,36 @@ class TupleUtil {
 			if(rep.length < end) {
 				throw new RuntimeException("Invalid tuple (possible truncation)");
 			}
-
-			System.arraycopy(rep, start, longBytes, longBytes.length-n, n);
-			if (!upper)
-				for(int i=longBytes.length-n; i<longBytes.length; i++)
-					longBytes[i] = (byte)(longBytes[i] ^ 0xff);
-
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(end, 0);
+			}
+			byte[] longBytes = NINE_BYTES_THREAD_LOCAL.get();
+			Arrays.fill(longBytes, (byte) 0);
+			System.arraycopy(rep, start, longBytes, longBytes.length - n, n);
+			if (!upper) {
+				for (int i = longBytes.length - n; i < longBytes.length; i++) {
+					longBytes[i] = (byte) (longBytes[i] ^ 0xff);
+				}
+			}
 			BigInteger val = new BigInteger(longBytes);
-			if (!upper) val = val.negate();
+			if (!upper) {
+				val = val.negate();
+			}
 
 			// Convert to long if in range -- otherwise, leave as BigInteger.
-			if (val.compareTo(BigInteger.valueOf(Long.MIN_VALUE))<0||
-				val.compareTo(BigInteger.valueOf(Long.MAX_VALUE))>0) {
+			if (val.compareTo(BigInteger.valueOf(Long.MIN_VALUE)) < 0 ||
+					val.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) > 0) {
 				// This can occur if the thing can be represented with 8 bytes but not
 				// the right sign information.
-				return new DecodeResult(end, val);
+				return DECODE_RESULT_THREAD_LOCAL.get().set(end, val);
 			}
-			return new DecodeResult(end, val.longValue());
+			return DECODE_RESULT_THREAD_LOCAL.get().set(end, val.longValue());
 		}
 		if(code == VERSIONSTAMP_CODE) {
-			return new DecodeResult(
-					start + Versionstamp.LENGTH,
+			if (!decode) {
+				return DECODE_RESULT_THREAD_LOCAL.get().set(start + Versionstamp.LENGTH, null);
+			}
+			return DECODE_RESULT_THREAD_LOCAL.get().set(start + Versionstamp.LENGTH,
 					Versionstamp.fromBytes(Arrays.copyOfRange(rep, start, start + Versionstamp.LENGTH)));
 		}
 		if(code == NESTED_CODE) {
@@ -448,12 +504,12 @@ class TupleUtil {
 						break;
 					}
 				} else {
-					DecodeResult subResult = decode(rep, endPos, last);
+					DecodeResult subResult = decode(rep, endPos, last, decode);
 					items.add(subResult.o);
 					endPos = subResult.end;
 				}
 			}
-			return new DecodeResult(endPos, items);
+			return DECODE_RESULT_THREAD_LOCAL.get().set(endPos, items);
 		}
 		throw new IllegalArgumentException("Unknown tuple data type " + code + " at index " + pos);
 	}
@@ -543,21 +599,21 @@ class TupleUtil {
 		int pos = start;
 		int end = start + length;
 		while(pos < end) {
-			DecodeResult decoded = decode(bytes, pos, end);
+			DecodeResult decoded = decode(bytes, pos, end, true);
 			items.add(decoded.o);
 			pos = decoded.end;
 		}
 		return items;
 	}
 
-	static EncodeResult encodeAll(List<Object> items, byte[] prefix, List<byte[]> encoded) {
+	static EncodeResult encodeAll(List<Object> items, byte[] prefix, ByteArrayOutputStream baos) throws IOException {
 		if(prefix != null) {
-			encoded.add(prefix);
+			baos.write(prefix);
 		}
 		int lenSoFar = (prefix == null) ? 0 : prefix.length;
 		int versionPos = -1;
 		for(Object t : items) {
-			EncodeResult result = encode(t, encoded);
+			EncodeResult result = encode(t, baos);
 			if(result.versionPos > 0) {
 				if(versionPos > 0) {
 					throw new IllegalArgumentException("Multiple incomplete Versionstamps included in Tuple");
@@ -567,35 +623,43 @@ class TupleUtil {
 			lenSoFar += result.totalLength;
 		}
 		//System.out.println("Joining whole tuple...");
-		return new EncodeResult(lenSoFar, versionPos);
+		return ENCODE_RESULT_THREAD_LOCAL.get().set(lenSoFar, versionPos);
 	}
 
 	static byte[] pack(List<Object> items, byte[] prefix) {
-		List<byte[]> encoded = new ArrayList<>(2 * items.size() + (prefix == null ? 0 : 1));
-		EncodeResult result = encodeAll(items, prefix, encoded);
+		ByteArrayOutputStream baos = new ByteArrayOutputStream(16 * items.size());
+		EncodeResult result = null;
+		try {
+			result = encodeAll(items, prefix, baos);
+		} catch (IOException e) {
+			throw new AssertionError();
+		}
 		if(result.versionPos > 0) {
 			throw new IllegalArgumentException("Incomplete Versionstamp included in vanilla tuple pack");
-		} else {
-			return ByteArrayUtil.join(null, encoded);
 		}
+		return baos.toByteArray();
 	}
 
 	static byte[] packWithVersionstamp(List<Object> items, byte[] prefix) {
-		List<byte[]> encoded = new ArrayList<>(2 * items.size() + (prefix == null ? 1 : 2));
-		EncodeResult result = encodeAll(items, prefix, encoded);
-		if(result.versionPos < 0) {
-			throw new IllegalArgumentException("No incomplete Versionstamp included in tuple pack with versionstamp");
-		} else {
-			if(result.versionPos > 0xffff) {
-				throw new IllegalArgumentException("Tuple has incomplete version at position " + result.versionPos + " which is greater than the maximum " + 0xffff);
-			}
-			if (FDB.instance().getAPIVersion() < 520) {
-				encoded.add(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort((short)result.versionPos).array());
+		ByteArrayOutputStream baos = new ByteArrayOutputStream(16 * items.size());
+		try {
+			EncodeResult result = encodeAll(items, prefix, baos);
+			if(result.versionPos < 0) {
+				throw new IllegalArgumentException("No incomplete Versionstamp included in tuple pack with versionstamp");
 			} else {
-				encoded.add(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(result.versionPos).array());
+				if(result.versionPos > 0xffff) {
+					throw new IllegalArgumentException("Tuple has incomplete version at position " + result.versionPos + " which is greater than the maximum " + 0xffff);
+				}
+				if (FDB.instance().getAPIVersion() < 520) {
+					baos.write(ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN).putShort((short)result.versionPos).array());
+				} else {
+					baos.write(ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putInt(result.versionPos).array());
+				}
 			}
-			return ByteArrayUtil.join(null, encoded);
+		} catch (IOException e) {
+			throw new AssertionError();
 		}
+		return baos.toByteArray();
 	}
 
 	static boolean hasIncompleteVersionstamp(Stream<?> items) {
@@ -614,10 +678,63 @@ class TupleUtil {
 		});
 	}
 
+	static void replace(ByteArrayOutputStream baos, byte array[], byte search[], byte replace[]) {
+		int i = 0;
+		int j = 0;
+		while (i <= array.length - search.length) {
+			if (ByteArrayUtil.regionEquals(array, i, search)) {
+				baos.write(array, j, i - j);
+				try {
+					baos.write(replace);
+				} catch (IOException e) {
+					throw new AssertionError(e);
+				}
+				i += search.length;
+				j = i;
+			} else {
+				i++;
+			}
+		}
+		baos.write(array, j, array.length - j);
+	}
+
+	static byte[] replace(byte array[], byte search[], byte replace[]) {
+		int i = 0;
+		int j = 0;
+		int k = 0;
+		byte[] toReturn = null;
+		while (i <= array.length - search.length) {
+			if (ByteArrayUtil.regionEquals(array, i, search)) {
+				if (toReturn == null) {
+					double ratio = (double) replace.length / search.length;
+					if (ratio < 1) ratio = 1;
+					toReturn = new byte[(int) Math.ceil(array.length * ratio)];
+				}
+				System.arraycopy(array, j, toReturn, k, i - j);
+				k += i - j;
+				System.arraycopy(replace, 0, toReturn, k, replace.length);
+				k += replace.length;
+				i += search.length;
+				j = i;
+			} else {
+				i++;
+			}
+		}
+		if (toReturn == null) return array;
+		System.arraycopy(array, j, toReturn, k, array.length - j);
+		k += array.length - j;
+		if (k != toReturn.length) {
+			byte[] shrunk = new byte[k];
+			System.arraycopy(toReturn, 0, shrunk, 0, k);
+			return shrunk;
+		}
+		return toReturn;
+	}
+
 	public static void main(String[] args) {
 		try {
 			byte[] bytes = pack(Collections.singletonList(4), null);
-			assert 4 == (Integer)(decode(bytes, 0, bytes.length).o);
+			assert 4 == (Integer)(decode(bytes, 0, bytes.length, true).o);
 		} catch (Exception e) {
 			e.printStackTrace();
 			System.out.println("Error " + e.getMessage());
@@ -625,7 +742,7 @@ class TupleUtil {
 
 		try {
 			byte[] bytes = pack(Collections.singletonList("\u021Aest \u0218tring"), null);
-			String string = (String)(decode(bytes, 0, bytes.length).o);
+			String string = (String)(decode(bytes, 0, bytes.length, true).o);
 			System.out.println("contents -> " + string);
 			assert "\u021Aest \u0218tring".equals(string);
 		} catch (Exception e) {

@@ -52,9 +52,13 @@ endif
 
 JAVA_GENERATED_SOURCES := bindings/java/src/main/com/apple/foundationdb/NetworkOptions.java bindings/java/src/main/com/apple/foundationdb/ClusterOptions.java bindings/java/src/main/com/apple/foundationdb/DatabaseOptions.java bindings/java/src/main/com/apple/foundationdb/TransactionOptions.java bindings/java/src/main/com/apple/foundationdb/StreamingMode.java bindings/java/src/main/com/apple/foundationdb/ConflictRangeType.java bindings/java/src/main/com/apple/foundationdb/MutationType.java bindings/java/src/main/com/apple/foundationdb/FDBException.java
 
-JAVA_SOURCES := $(JAVA_GENERATED_SOURCES) bindings/java/src/main/com/apple/foundationdb/*.java bindings/java/src/main/com/apple/foundationdb/async/*.java bindings/java/src/main/com/apple/foundationdb/tuple/*.java bindings/java/src/main/com/apple/foundationdb/directory/*.java bindings/java/src/main/com/apple/foundationdb/subspace/*.java bindings/java/src/test/com/apple/foundationdb/test/*.java
+JAVA_SOURCES := $(JAVA_GENERATED_SOURCES) bindings/java/src/main/com/apple/foundationdb/*.java bindings/java/src/main/com/apple/foundationdb/async/*.java bindings/java/src/main/com/apple/foundationdb/tuple/*.java bindings/java/src/main/com/apple/foundationdb/directory/*.java bindings/java/src/main/com/apple/foundationdb/subspace/*.java bindings/java/src/test/com/apple/foundationdb/test/*.java bindings/java/src/junit/com/apple/foundationdb/tuple/*.java
 
-fdb_java: bindings/java/foundationdb-client.jar bindings/java/foundationdb-tests.jar
+fdb_java: bindings/java/foundationdb-client.jar bindings/java/foundationdb-tests.jar bindings/java/foundationdb-junit-tests.jar
+	@echo "Run The JUnit Tests"
+	@java -cp bindings/java/foundationdb-client.jar:bindings/java/foundationdb-junit-tests.jar:bindings/java/.dependencies/junit-4.12.jar:bindings/java/.dependencies/hamcrest-all-1.3.jar org.junit.runner.JUnitCore com.apple.foundationdb.tuple.AllTests
+
+fdb_java_skip_tests: bindings/java/foundationdb-client.jar bindings/java/foundationdb-tests.jar bindings/java/foundationdb-junit-tests.jar
 
 bindings/java/foundationdb-tests.jar: bindings/java/.classstamp
 	@echo "Building       $@"
@@ -67,10 +71,20 @@ bindings/java/foundationdb-client.jar: bindings/java/.classstamp lib/libfdb_java
 	@cp lib/libfdb_java.$(DLEXT) bindings/java/classes/main/lib/$(PLATFORM)/$(java_ARCH)/libfdb_java.$(java_DLEXT)
 	@jar cf $@ -C bindings/java/classes/main com/apple/foundationdb -C bindings/java/classes/main lib
 
+bindings/java/foundationdb-junit-tests.jar: bindings/java/.classstamp bindings/java/.dependencies/hamcrest-all-1.3.jar
+	@echo "Building       $@"
+	@jar cf $@ -C bindings/java/classes/junit com/apple/foundationdb
+
+bindings/java/.dependencies/hamcrest-all-1.3.jar:
+	@echo "Download       hamcrest-all"
+	@mkdir -p bindings/java/.dependencies
+	@curl -so bindings/java/.dependencies/hamcrest-all-1.3.jar "http://search.maven.org/remotecontent?filepath=org/hamcrest/hamcrest-all/1.3/hamcrest-all-1.3.jar"
+
 fdb_java_jar_clean:
 	@rm -rf $(JAVA_GENERATED_SOURCES)
 	@rm -rf bindings/java/classes
-	@rm -f bindings/java/foundationdb-client.jar bindings/java/foundationdb-tests.jar bindings/java/.classstamp
+	@rm -rf bindings/java/.dependencies
+	@rm -f bindings/java/foundationdb-client.jar bindings/java/foundationdb-tests.jar bindings/java/foundationdb-junit-tests.jar bindings/java/.classstamp
 
 # Redefinition of a target already defined in generated.mk, but it's "okay" and the way things were done before.
 fdb_java_clean: fdb_java_jar_clean
@@ -94,14 +108,21 @@ bindings/java/src/main/com/apple/foundationdb/%Options.java: bindings/java/src/m
 bindings/java/src/main/overview.html: bindings/java/src/main/overview.html.in $(ALL_MAKEFILES) versions.target
 	@m4 -DVERSION=$(VERSION) $< > $@
 
-bindings/java/.classstamp: $(JAVA_SOURCES)
+bindings/java/.classstamp: $(JAVA_SOURCES) bindings/java/.dependencies/junit-4.12.jar
 	@echo "Compiling      Java source"
 	@rm -rf bindings/java/classes
 	@mkdir -p bindings/java/classes/main
 	@mkdir -p bindings/java/classes/test
+	@mkdir -p bindings/java/classes/junit
 	@$(JAVAC) $(JAVAFLAGS) -d bindings/java/classes/main bindings/java/src/main/com/apple/foundationdb/*.java bindings/java/src/main/com/apple/foundationdb/async/*.java bindings/java/src/main/com/apple/foundationdb/tuple/*.java bindings/java/src/main/com/apple/foundationdb/directory/*.java bindings/java/src/main/com/apple/foundationdb/subspace/*.java
 	@$(JAVAC) $(JAVAFLAGS) -cp bindings/java/classes/main -d bindings/java/classes/test bindings/java/src/test/com/apple/foundationdb/test/*.java
+	@$(JAVAC) $(JAVAFLAGS) -cp bindings/java/classes/main:bindings/java/.dependencies/junit-4.12.jar -d bindings/java/classes/junit bindings/java/src/junit/com/apple/foundationdb/tuple/*.java
 	@echo timestamp > bindings/java/.classstamp
+
+bindings/java/.dependencies/junit-4.12.jar:
+	@echo "Download       junit"
+	@mkdir -p bindings/java/.dependencies
+	@curl -so bindings/java/.dependencies/junit-4.12.jar "http://search.maven.org/remotecontent?filepath=junit/junit/4.12/junit-4.12.jar"
 
 javadoc: $(JAVA_SOURCES) bindings/java/src/main/overview.html
 	@echo "Generating     Javadocs"
@@ -140,7 +161,7 @@ ifeq ($(PLATFORM),linux)
 	sed -e 's/-PRERELEASE/-SNAPSHOT/g' bindings/java/pom.xml > "$@"
 
   packages/fdb-java-$(JARVER).jar: fdb_java versions.target
-	@echo "Building       $@"
+	@echo "Building      $@"
 	@rm -f $@
 	@rm -rf packages/jar_regular
 	@mkdir -p packages/jar_regular
@@ -159,6 +180,11 @@ ifeq ($(PLATFORM),linux)
 	@echo "Building       $@"
 	@rm -f $@
 	@cp $(TOPDIR)/bindings/java/foundationdb-tests.jar packages/fdb-java-$(JARVER)-tests.jar
+
+  packages/fdb-java-$(JARVER)-junit-tests.jar: fdb_java versions.target
+	@echo "Building       $@"
+	@rm -f $@
+	@cp $(TOPDIR)/bindings/java/foundationdb-junit-tests.jar packages/fdb-java-$(JARVER)-junit-tests.jar
 
   packages/fdb-java-$(JARVER)-sources.jar: $(JAVA_GENERATED_SOURCES) versions.target
 	@echo "Building       $@"
@@ -181,7 +207,7 @@ ifeq ($(PLATFORM),linux)
 	@cd packages/bundle_regular && jar cf $(TOPDIR)/$@ *
 	@rm -rf packages/bundle_regular
 
-  fdb_java_release: packages/fdb-java-$(JARVER)-bundle.jar packages/fdb-java-$(JARVER)-tests.jar
+  fdb_java_release: packages/fdb-java-$(JARVER)-bundle.jar packages/fdb-java-$(JARVER)-tests.jar packages/fdb-java-$(JARVER)-junit-tests.jar
 
   fdb_java_release_clean:
 	@echo "Cleaning       Java release"

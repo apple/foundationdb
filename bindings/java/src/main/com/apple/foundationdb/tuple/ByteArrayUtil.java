@@ -418,5 +418,94 @@ public class ByteArrayUtil {
 		return s.toString();
 	}
 
+	/**
+	 * Converts the appropriate bytes to Object.
+	 *
+	 * @param bytes The encoded elements.
+	 * @param num Converts the element at {@code num} to Object.
+	 *
+	 * @return The decoded Object.
+	 *
+	 * @throws RuntimeException if an element isn't completely skipped.
+	 * @throws IllegalArgumentException if the element at {@code num} has an unsupported type.
+	 * @throws NullPointerException if {@code bytes} is {@code null}.
+	 */
+	public static Object getObject(byte[] bytes, int num) {
+		return getObject(bytes, num, 0, null, null);
+	}
+
+	/**
+	 * Converts the appropriate bytes to Object.
+	 *
+	 * @param bytes The encoded elements.
+	 * @param num Converts the element at {@code num} to Object.
+	 * @param skip The number of bytes to be skiped.
+	 *
+	 * @return The decoded Object.
+	 *
+	 * @throws RuntimeException if an element isn't completely skipped.
+	 * @throws IllegalArgumentException if the element at {@code num} has an unsupported type.
+	 * @throws NullPointerException if {@code bytes} is {@code null}.
+	 */
+	public static Object getObject(byte[] bytes, int num, int skip) {
+		return getObject(bytes, num, skip, null, null);
+	}
+
+	/**
+	 * Converts the appropriate bytes to Object.
+	 *
+	 * @param bytes The encoded elements.
+	 * @param num Converts the element at {@code num} to Object.
+	 * @param skip The number of bytes to be skiped.
+	 * @param count Gets the count of encoded elements.
+	 *
+	 * @return The decoded Object.
+	 *
+	 * @throws RuntimeException if an element isn't completely skipped.
+	 * @throws IllegalArgumentException if the element at {@code num} has an unsupported type.
+	 * @throws NullPointerException if {@code bytes} is {@code null}.
+	 */
+	public static Object getObject(byte[] bytes, int num, int skip, int[] count) {
+		return getObject(bytes, num, skip, count, null);
+	}
+
+	/**
+	 * Converts the appropriate bytes to Object.
+	 *
+	 * @param bytes The encoded elements.
+	 * @param num Converts the element at {@code num} to Object.
+	 * @param skip The number of bytes to be skiped.
+	 * @param count Gets the count of encoded elements.
+	 * @param offset Gets the starting byte number of the next element.
+	 *
+	 * @return The decoded Object.
+	 *
+	 * @throws RuntimeException if an element isn't completely skipped.
+	 * @throws IllegalArgumentException if the element at {@code num} has an unsupported type.
+	 * @throws NullPointerException if {@code bytes} is {@code null}.
+	 */
+	public static Object getObject(byte[] bytes, int num, int skip, int[] count, int[] offset) {
+		int end = skip;
+		int thisend = 0;
+		int length = bytes.length;
+		Object o = null;
+		int i = 0;
+		while (true) {
+			TupleUtil.DecodeResult dr = TupleUtil.decode(bytes, end, bytes.length, i == num);
+			end = dr.end;
+			if (i++ == num) {
+				o = dr.o;
+				thisend = end;
+				if (count == null) {
+					break;
+				}
+			}
+			if (end == length) break;
+		}
+		if (count != null) count[0] = i;
+		if (offset != null) offset[0] = thisend;
+		return o;
+	}
+
 	private ByteArrayUtil() {}
 }
