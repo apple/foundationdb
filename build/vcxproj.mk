@@ -25,7 +25,7 @@ CLEAN_TARGETS += GENNAME()_clean
 
 GENNAME()_ALL_SOURCES := $(addprefix GENDIR/,GENSOURCES)
 
-GENNAME()_BUILD_SOURCES := $(patsubst %.actor.cpp,%.actor.g.cpp,$(filter-out %.h %.hpp,$(GENNAME()_ALL_SOURCES)))
+GENNAME()_BUILD_SOURCES := $(patsubst %.actor.cpp,${OBJDIR}/%.actor.g.cpp,$(filter-out %.h %.hpp,$(GENNAME()_ALL_SOURCES)))
 GENNAME()_GENERATED_SOURCES := $(patsubst %.actor.h,%.actor.g.h,$(patsubst %.actor.cpp,${OBJDIR}/%.actor.g.cpp,$(filter %.actor.h %.actor.cpp,$(GENNAME()_ALL_SOURCES))))
 GENERATED_SOURCES += $(GENNAME()_GENERATED_SOURCES)
 
@@ -49,7 +49,7 @@ VPATH += $(addprefix :,$(patsubst -L%,%,$(filter -L%,$(GENNAME()_LDFLAGS))))
 
 IGNORE := $(shell echo $(VPATH))
 
-GENNAME()_OBJECTS := $(addprefix $(OBJDIR)/,$(GENNAME()_BUILD_SOURCES:=.o))
+GENNAME()_OBJECTS := $(addprefix $(OBJDIR)/,$(filter-out $(OBJDIR)/%,$(GENNAME()_BUILD_SOURCES:=.o))) $(filter $(OBJDIR)/%,$(GENNAME()_BUILD_SOURCES:=.o))
 GENNAME()_DEPS := $(addprefix $(DEPSDIR)/,$(GENNAME()_BUILD_SOURCES:=.d))
 
 .PHONY: GENNAME()_clean GENNAME
@@ -73,6 +73,7 @@ GENDIR/%.actor.g.h: GENDIR/%.actor.h $(ACTORCOMPILER)
 # generated headers before compilation.
 
 define run-gplusplus-GENNAME() =
+@echo "Compiling      $(<:${OBJDIR}/%=%)"
 @mkdir -p $(DEPSDIR)/$(<D) && \
 mkdir -p $(OBJDIR)/$(<D) && \
 $(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@ && \
