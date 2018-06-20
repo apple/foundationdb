@@ -51,6 +51,17 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 	NetworkData netData;
 	netData.init();
 	if (!DEBUG_DETERMINISM && currentStats.initialized) {
+		int64_t unusedMemory = 0;
+		unusedMemory += FastAllocator<16>::getMemoryUnused();
+		unusedMemory += FastAllocator<32>::getMemoryUnused();
+		unusedMemory += FastAllocator<64>::getMemoryUnused();
+		unusedMemory += FastAllocator<128>::getMemoryUnused();
+		unusedMemory += FastAllocator<256>::getMemoryUnused();
+		unusedMemory += FastAllocator<512>::getMemoryUnused();
+		unusedMemory += FastAllocator<1024>::getMemoryUnused();
+		unusedMemory += FastAllocator<2048>::getMemoryUnused();
+		unusedMemory += FastAllocator<4096>::getMemoryUnused();
+
 		{
 			TraceEvent e(eventName.c_str());
 			e
@@ -60,6 +71,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("UptimeSeconds", now() - machineState.monitorStartTime)
 				.detail("Memory", currentStats.processMemory)
 				.detail("ResidentMemory", currentStats.processResidentMemory)
+				.detail("UnusedAllocatedMemory", unusedMemory)
 				.detail("MbpsSent", ((netData.bytesSent - statState->networkState.bytesSent) * 8e-6) / currentStats.elapsed)
 				.detail("MbpsReceived", ((netData.bytesReceived - statState->networkState.bytesReceived) * 8e-6) / currentStats.elapsed)
 				.detail("DiskTotalBytes", currentStats.processDiskTotalBytes)
