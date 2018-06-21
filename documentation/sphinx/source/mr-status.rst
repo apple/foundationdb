@@ -218,6 +218,7 @@ The following format informally describes the JSON containing the status data. T
           "memory": {
             "available_bytes": 0, //an estimate of the process' fair share of the memory available to fdbservers
             "limit_bytes": 0, // memory limit per process
+            "unused_allocated_bytes": 0,
             "used_bytes": 0
           },
           "messages": [
