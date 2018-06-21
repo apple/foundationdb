@@ -91,7 +91,7 @@ TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLS
 		// If session is NULL, we're trusting policy->create_session
 		// to have used its provided logging function to have logged
 		// the error
-		throw internal_error();
+		throw tls_error();
 	}
 	handshook = handshake(this);
 }
