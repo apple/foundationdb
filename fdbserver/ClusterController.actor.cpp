@@ -1941,6 +1941,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 }
 
 ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *self ) {
+	double lastLogTime = 0;
 	loop {
 		self->versionDifferenceUpdated = false;
 		if(self->db.serverInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED && self->db.config.usableRegions == 1) {
@@ -1977,12 +1978,12 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 			Void _ = wait(self->db.serverInfo->onChange());
 			continue;
 		}
-		
+
 		state Future<Void> onChange = self->db.serverInfo->onChange();
 		loop {
 			state Future<TLogQueuingMetricsReply> primaryMetrics = primaryLog.get().getQueuingMetrics.getReply( TLogQueuingMetricsRequest() );
 			state Future<TLogQueuingMetricsReply> remoteMetrics = remoteLog.get().getQueuingMetrics.getReply( TLogQueuingMetricsRequest() );
-			
+
 			Void _ = wait( ( success(primaryMetrics) && success(remoteMetrics) ) || onChange );
 			if(onChange.isReady()) {
 				break;
@@ -1990,6 +1991,10 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 
 			self->versionDifferenceUpdated = true;
 			self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
+			if(now() - lastLogTime > SERVER_KNOBS->CLUSTER_CONTROLLER_LOGGING_DELAY) {
+				lastLogTime = now();
+				TraceEvent("DatacenterVersionDifference", self->id).detail("Difference", self->datacenterVersionDifference);
+			}
 
 			Void _ = wait( delay(SERVER_KNOBS->VERSION_LAG_METRIC_INTERVAL) || onChange );
 			if(onChange.isReady()) {
