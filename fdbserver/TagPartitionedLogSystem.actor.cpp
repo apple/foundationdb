@@ -30,17 +30,15 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "RecoveryState.h"
 
-ACTOR static Future<Void> reportTLogCommitErrors( Future<Void> commitReply, UID debugID ) {
-	try {
-		Void _ = wait(commitReply);
-		return Void();
-	} catch (Error& e) {
-		if (e.code() == error_code_broken_promise)
-			throw master_tlog_failed();
-		else if (e.code() != error_code_actor_cancelled && e.code() != error_code_tlog_stopped)
-			TraceEvent(SevError, "MasterTLogCommitRequestError", debugID).error(e);
-		throw;
+ACTOR Future<Version> minVersionWhenReady( Future<Void> f, std::vector<Future<Version>> replies) {
+	Void _ = wait(f);
+	Version minVersion = std::numeric_limits<Version>::max();
+	for(auto& reply : replies) {
+		if(reply.isReady() && !reply.isError()) {
+			minVersion = std::min(minVersion, reply.get());
+		}
 	}
+	return minVersion;
 }
 
 struct OldLogData {
@@ -391,27 +389,26 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Future<Void> push( Version prevVersion, Version version, Version knownCommittedVersion, LogPushData& data, Optional<UID> debugID ) {
+	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, LogPushData& data, Optional<UID> debugID ) {
 		// FIXME: Randomize request order as in LegacyLogSystem?
 		vector<Future<Void>> quorumResults;
+		vector<Future<Version>> allReplies;
 		int location = 0;
 		for(auto& it : tLogs) {
 			if(it->isLocal && it->logServers.size()) {
 				vector<Future<Void>> tLogCommitResults;
 				for(int loc=0; loc< it->logServers.size(); loc++) {
-					Future<Void> commitMessage = reportTLogCommitErrors(
-							it->logServers[loc]->get().interf().commit.getReply(
-								TLogCommitRequest( data.getArena(), prevVersion, version, knownCommittedVersion, data.getMessages(location), debugID ), TaskTLogCommitReply ),
-							getDebugID());
-					addActor.get().send(commitMessage);
-					tLogCommitResults.push_back(commitMessage);
+					allReplies.push_back( it->logServers[loc]->get().interf().commit.getReply( TLogCommitRequest( data.getArena(), prevVersion, version, knownCommittedVersion, minKnownCommittedVersion, data.getMessages(location), debugID ), TaskTLogCommitReply ) );
+					Future<Void> commitSuccess = success(allReplies.back());
+					addActor.get().send(commitSuccess);
+					tLogCommitResults.push_back(commitSuccess);
 					location++;
 				}
 				quorumResults.push_back( quorum( tLogCommitResults, tLogCommitResults.size() - it->tLogWriteAntiQuorum ) );
 			}
 		}
 
-		return waitForAll(quorumResults);
+		return minVersionWhenReady( waitForAll(quorumResults), allReplies);
 	}
 
 	Reference<IPeekCursor> peekAll( UID dbgid, Version begin, Version end, Tag tag, bool parallelGetMore, bool throwIfDead ) {

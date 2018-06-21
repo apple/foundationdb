@@ -127,7 +127,7 @@ struct VerUpdateRef {
 	VerUpdateRef( Arena& to, const VerUpdateRef& from ) : version(from.version), mutations( to, from.mutations ), isPrivateData( from.isPrivateData ) {}
 	int expectedSize() const { return mutations.expectedSize(); }
 
-	template <class Ar> 
+	template <class Ar>
 	void serialize( Ar& ar ) {
 		ar & version & mutations & isPrivateData;
 	}
@@ -139,10 +139,11 @@ struct TLogPeekReply {
 	Version end;
 	Optional<Version> popped;
 	Version maxKnownVersion;
+	Version minKnownCommittedVersion;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & messages & end & popped & maxKnownVersion;
+		ar & arena & messages & end & popped & maxKnownVersion & minKnownCommittedVersion;
 	}
 };
 
@@ -198,19 +199,19 @@ struct TagMessagesRef {
 
 struct TLogCommitRequest {
 	Arena arena;
-	Version prevVersion, version, knownCommittedVersion;
+	Version prevVersion, version, knownCommittedVersion, minKnownCommittedVersion;
 
 	StringRef messages;// Each message prefixed by a 4-byte length
 
-	ReplyPromise<Void> reply;
+	ReplyPromise<Version> reply;
 	Optional<UID> debugID;
 
 	TLogCommitRequest() {}
-	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, StringRef messages, Optional<UID> debugID ) 
-		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), messages(messages), debugID(debugID) {}
-	template <class Ar> 
+	TLogCommitRequest( const Arena& a, Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, StringRef messages, Optional<UID> debugID )
+		: arena(a), prevVersion(prevVersion), version(version), knownCommittedVersion(knownCommittedVersion), minKnownCommittedVersion(minKnownCommittedVersion), messages(messages), debugID(debugID) {}
+	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & prevVersion & version & knownCommittedVersion & messages & reply & arena & debugID;
+		ar & prevVersion & version & knownCommittedVersion & minKnownCommittedVersion & messages & reply & arena & debugID;
 	}
 };
 

@@ -79,6 +79,7 @@ struct LogRouterData {
 	NotifiedVersion version;
 	NotifiedVersion minPopped;
 	Version startVersion;
+	Version minKnownCommittedVersion;
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	Tag routerTag;
 	bool allowPops;
@@ -101,7 +102,7 @@ struct LogRouterData {
 		return newTagData;
 	}
 
-	LogRouterData(UID dbgid, InitializeLogRouterRequest req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(req.startVersion-1), startVersion(req.startVersion), allowPops(false) {
+	LogRouterData(UID dbgid, InitializeLogRouterRequest req) : dbgid(dbgid), routerTag(req.routerTag), logSystem(new AsyncVar<Reference<ILogSystem>>()), version(req.startVersion-1), minPopped(req.startVersion-1), startVersion(req.startVersion), allowPops(false), minKnownCommittedVersion(0) {
 		//setup just enough of a logSet to be able to call getPushLocations
 		logSet.logServers.resize(req.tLogLocalities.size());
 		logSet.tLogPolicy = req.tLogPolicy;
@@ -162,7 +163,7 @@ void commitMessages( LogRouterData* self, Version version, const std::vector<Tag
 				}
 			}
 		}
-		
+
 		msgSize -= msg.message.size();
 	}
 	self->messageBlocks.push_back( std::make_pair(version, block) );
@@ -192,6 +193,8 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 				}
 			}
 		}
+
+		self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, r->getMinKnownCommittedVersion());
 
 		state Version ver = 0;
 		state std::vector<TagsAndMessage> messages;
@@ -306,6 +309,7 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 
 	TLogPeekReply reply;
 	reply.maxKnownVersion = self->version.get();
+	reply.minKnownCommittedVersion = self->minKnownCommittedVersion;
 	reply.messages = messages.toStringRef();
 	reply.popped = self->minPopped.get() >= self->startVersion ? self->minPopped.get() : 0;
 	reply.end = endVersion;
@@ -340,10 +344,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 	}
 
 	if(self->logSystem->get() && self->allowPops) {
-		//The knownCommittedVersion might not be committed on the primary logs, so subtracting max_read_transaction_life_versions will ensure it is committed.
-		//We then need to subtract max_read_transaction_life_versions again ensure we do not pop below the knownCommittedVersion of the primary logs.
-		//FIXME: if we get the true knownCommittedVersion when peeking from the primary logs we only need to subtract max_read_transaction_life_versions once.
-		self->logSystem->get()->pop(minKnownCommittedVersion - 2*SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS, self->routerTag);
+		self->logSystem->get()->pop(std::min(minKnownCommittedVersion, self->minKnownCommittedVersion), self->routerTag);
 	}
 	req.reply.send(Void());
 	self->minPopped.set(std::max(minPopped, self->minPopped.get()));
