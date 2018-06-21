@@ -1941,7 +1941,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 }
 
 ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *self ) {
-	double lastLogTime = 0;
+	state double lastLogTime = 0;
 	loop {
 		self->versionDifferenceUpdated = false;
 		if(self->db.serverInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED && self->db.config.usableRegions == 1) {
