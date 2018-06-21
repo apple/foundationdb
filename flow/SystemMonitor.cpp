@@ -60,6 +60,7 @@ SystemStatistics customSystemMonitor(std::string eventName, StatisticsState *sta
 				.detail("UptimeSeconds", now() - machineState.monitorStartTime)
 				.detail("Memory", currentStats.processMemory)
 				.detail("ResidentMemory", currentStats.processResidentMemory)
+				.detail("UnusedAllocatedMemory", getTotalUnusedAllocatedMemory())
 				.detail("MbpsSent", ((netData.bytesSent - statState->networkState.bytesSent) * 8e-6) / currentStats.elapsed)
 				.detail("MbpsReceived", ((netData.bytesReceived - statState->networkState.bytesReceived) * 8e-6) / currentStats.elapsed)
 				.detail("DiskTotalBytes", currentStats.processDiskTotalBytes)

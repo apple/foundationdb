@@ -788,6 +788,9 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 
 				metric = parseDouble(extractAttribute(event, "Memory"));
 				memoryObj["used_bytes"] = metric;
+
+				metric = parseDouble(extractAttribute(event, "UnusedAllocatedMemory"));
+				memoryObj["unused_allocated_memory"] = metric;
 			}
 
 			if (programStarts.count(address)) {

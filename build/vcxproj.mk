@@ -25,7 +25,7 @@ CLEAN_TARGETS += GENNAME()_clean
 
 GENNAME()_ALL_SOURCES := $(addprefix GENDIR/,GENSOURCES)
 
-GENNAME()_BUILD_SOURCES := $(patsubst %.actor.cpp,%.actor.g.cpp,$(filter-out %.h %.hpp,$(GENNAME()_ALL_SOURCES)))
+GENNAME()_BUILD_SOURCES := $(patsubst %.actor.cpp,${OBJDIR}/%.actor.g.cpp,$(filter-out %.h %.hpp,$(GENNAME()_ALL_SOURCES)))
 GENNAME()_GENERATED_SOURCES := $(patsubst %.actor.h,%.actor.g.h,$(patsubst %.actor.cpp,${OBJDIR}/%.actor.g.cpp,$(filter %.actor.h %.actor.cpp,$(GENNAME()_ALL_SOURCES))))
 GENERATED_SOURCES += $(GENNAME()_GENERATED_SOURCES)
 
@@ -49,7 +49,7 @@ VPATH += $(addprefix :,$(patsubst -L%,%,$(filter -L%,$(GENNAME()_LDFLAGS))))
 
 IGNORE := $(shell echo $(VPATH))
 
-GENNAME()_OBJECTS := $(addprefix $(OBJDIR)/,$(GENNAME()_BUILD_SOURCES:=.o))
+GENNAME()_OBJECTS := $(addprefix $(OBJDIR)/,$(filter-out $(OBJDIR)/%,$(GENNAME()_BUILD_SOURCES:=.o))) $(filter $(OBJDIR)/%,$(GENNAME()_BUILD_SOURCES:=.o))
 GENNAME()_DEPS := $(addprefix $(DEPSDIR)/,$(GENNAME()_BUILD_SOURCES:=.d))
 
 .PHONY: GENNAME()_clean GENNAME
@@ -72,20 +72,29 @@ GENDIR/%.actor.g.h: GENDIR/%.actor.h $(ACTORCOMPILER)
 # or .cpp files. We have no mechanism to detect dependencies on
 # generated headers before compilation.
 
-define run-gplusplus-GENNAME() =
-@mkdir -p $(DEPSDIR)/$(<D) && \
-mkdir -p $(OBJDIR)/$(<D) && \
-$(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@ && \
-cp $(DEPSDIR)/$<.d.tmp $(DEPSDIR)/$<.d && \
-sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' -e '/^$$/ d' -e 's/$$/ :/' < $(DEPSDIR)/$<.d.tmp >> $(DEPSDIR)/$<.d && \
-rm $(DEPSDIR)/$<.d.tmp
-endef
-
 $(OBJDIR)/GENDIR/%.cpp.o: GENDIR/%.cpp $(ALL_MAKEFILES) | $(filter %.h,$(GENERATED_SOURCES))
-	${run-gplusplus-GENNAME()}
+	@echo "Compiling      $(<:${OBJDIR}/%=%)"
+ifeq ($(VERBOSE),1)
+	@echo $(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@
+endif
+	@mkdir -p $(DEPSDIR)/$(<D) && \
+	mkdir -p $(OBJDIR)/$(<D) && \
+	$(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@ && \
+	cp $(DEPSDIR)/$<.d.tmp $(DEPSDIR)/$<.d && \
+	sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' -e '/^$$/ d' -e 's/$$/ :/' < $(DEPSDIR)/$<.d.tmp >> $(DEPSDIR)/$<.d && \
+	rm $(DEPSDIR)/$<.d.tmp
 
 $(OBJDIR)/GENDIR/%.cpp.o: $(OBJDIR)/GENDIR/%.cpp $(ALL_MAKEFILES) | $(filter %.h,$(GENERATED_SOURCES))
-	${run-gplusplus-GENNAME()}
+	@echo "Compiling      $(<:${OBJDIR}/%=%)"
+ifeq ($(VERBOSE),1)
+	@echo $(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@
+endif
+	@mkdir -p $(DEPSDIR)/$(<D) && \
+	mkdir -p $(OBJDIR)/$(<D) && \
+	$(CCACHE_CXX) $(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS) -MMD -MT $@ -MF $(DEPSDIR)/$<.d.tmp -c $< -o $@ && \
+	cp $(DEPSDIR)/$<.d.tmp $(DEPSDIR)/$<.d && \
+	sed -e 's/#.*//' -e 's/^[^:]*: *//' -e 's/ *\\$$//' -e '/^$$/ d' -e 's/$$/ :/' < $(DEPSDIR)/$<.d.tmp >> $(DEPSDIR)/$<.d && \
+	rm $(DEPSDIR)/$<.d.tmp
 
 $(OBJDIR)/GENDIR/%.c.o: GENDIR/%.c $(ALL_MAKEFILES) | $(filter %.h,$(GENERATED_SOURCES))
 	@echo "Compiling      $<"
