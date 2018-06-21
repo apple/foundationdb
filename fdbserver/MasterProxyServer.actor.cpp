@@ -821,7 +821,7 @@ ACTOR Future<Void> commitBatch(
 
 	self->logSystem->pop(msg.popTo, txsTag);
 
-	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)	
+	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMinCommittedVersion(UID(), commitVersion);
 
@@ -839,7 +839,7 @@ ACTOR Future<Void> commitBatch(
 	if( commitVersion > self->committedVersion.get() ) {
 		self->locked = lockedAfter;
 		self->committedVersion.set(commitVersion);
-	} 
+	}
 
 	if (forceRecovery) {
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", self->dbgid).detail("Stage", "ProxyShutdown");
@@ -1183,7 +1183,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	state Future<Void> lastCommitComplete = Void();
 
 	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> onError = actorCollection(addActor.getFuture());
+	state Future<Void> onError = transformError( actorCollection(addActor.getFuture()), broken_promise(), master_tlog_failed() );
 	state double lastCommit = 0;
 	state std::set<Sequence> txnSequences;
 	state Sequence maxSequence = std::numeric_limits<Sequence>::max();
