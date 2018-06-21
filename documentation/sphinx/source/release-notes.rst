@@ -5,10 +5,16 @@ Release Notes
 5.2.5
 =====
 
+Features
+--------
+
+* Added knobs and blob Backup URL parameters for operations/sec limits by operation type. `(PR #513) https://github.com/apple/foundationdb/pull/513`_
+
 Fixes
 -----
 
 * Don't disable certificate checks by default. `(PR #511) https://github.com/apple/foundationdb/pull/511`_
+
 
 5.2.4
 =====
