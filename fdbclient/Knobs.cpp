@@ -164,6 +164,11 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_MAX_SEND_BYTES_PER_SECOND,      1e9 );
 	init( BLOBSTORE_MAX_RECV_BYTES_PER_SECOND,      1e9 );
 
+	init( BLOBSTORE_LIST_REQUESTS_PER_SECOND,        25 );
+	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
+	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
+	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     100 );
+
 	// Client Status Info
 	init(CSI_SAMPLING_PROBABILITY, -1.0);
 	init(CSI_SIZE_LIMIT, std::numeric_limits<int64_t>::max());
