@@ -314,6 +314,8 @@ struct ILogSystem {
 		// Returns the maximum version known to have been pushed (not necessarily durably) into the log system (0 is always a possible result!)
 		virtual Version getMaxKnownVersion() { return 0; }
 
+		virtual Version getMinKnownCommittedVersion() = 0;
+
 		virtual void addref() = 0;
 
 		virtual void delref() = 0;
@@ -358,6 +360,7 @@ struct ILogSystem {
 		virtual bool isExhausted();
 		virtual LogMessageVersion version();
 		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
 
 		virtual void addref() {
 			ReferenceCounted<ServerPeekCursor>::addref();
@@ -411,6 +414,7 @@ struct ILogSystem {
 		virtual bool isExhausted();
 		virtual LogMessageVersion version();
 		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
 
 		virtual void addref() {
 			ReferenceCounted<MergedPeekCursor>::addref();
@@ -455,6 +459,7 @@ struct ILogSystem {
 		virtual bool isExhausted();
 		virtual LogMessageVersion version();
 		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
 
 		virtual void addref() {
 			ReferenceCounted<SetPeekCursor>::addref();
@@ -488,6 +493,7 @@ struct ILogSystem {
 		virtual bool isExhausted();
 		virtual LogMessageVersion version();
 		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
 
 		virtual void addref() {
 			ReferenceCounted<MultiCursor>::addref();
@@ -516,7 +522,7 @@ struct ILogSystem {
 		// Never returns normally, but throws an error if the subsystem stops working
 
 	//Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
-	virtual Future<Void> push( Version prevVersion, Version version, Version knownCommittedVersion, struct LogPushData& data, Optional<UID> debugID = Optional<UID>() ) = 0;
+	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, Optional<UID> debugID = Optional<UID>() ) = 0;
 		// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered earlier)
 		// Puts the given messages into the bundle, each with the given tags, and with message versions (version, 0) - (version, N)
 		// Changes the version number of the bundle to be version (unblocking the next push)
@@ -535,7 +541,7 @@ struct ILogSystem {
 		// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is correspondingly less expensive)
 
 	virtual Reference<IPeekCursor> peekLogRouter( UID dbgid, Version begin, Tag tag ) = 0;
-		// Same contract as peek(), but can only peek from the logs elected in the same generation. 
+		// Same contract as peek(), but can only peek from the logs elected in the same generation.
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
 	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;

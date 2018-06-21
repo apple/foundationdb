@@ -175,7 +175,8 @@ struct ProxyCommitData {
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
 	IKeyValueStore* txnStateStore;
-	NotifiedVersion committedVersion;   // Provided that this recovery has succeeded or will succeed, this version is fully committed (durable)
+	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is fully committed (durable)
+	Version minKnownCommittedVersion; // No version smaller than this one will be used as the known committed version during recovery 
 	Version version;  // The version at which txnStateStore is up to date
 	Promise<Void> validState;  // Set once txnStateStore and version are valid
 	double lastVersionTime;
@@ -223,9 +224,9 @@ struct ProxyCommitData {
 	}
 
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
-		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master), 
+		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
 			logAdapter(NULL), txnStateStore(NULL),
-			committedVersion(recoveryTransactionVersion), version(0), 
+			committedVersion(recoveryTransactionVersion), version(0), minKnownCommittedVersion(0),
 			lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
 			localCommitBatchesStarted(0), locked(false), firstProxy(firstProxy),
@@ -794,8 +795,7 @@ ACTOR Future<Void> commitBatch(
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMaxCommittedVersion(UID(), commitVersion);
 
-	Future<Void> loggingComplete = self->logSystem->push( prevVersion, commitVersion, self->committedVersion.get(), toCommit, debugID ) 
-		|| self->committedVersion.whenAtLeast( commitVersion+1 );
+	Future<Version> loggingComplete = self->logSystem->push( prevVersion, commitVersion, self->committedVersion.get(), self->minKnownCommittedVersion, toCommit, debugID );
 
 	if (!forceRecovery) {
 		ASSERT(self->latestLocalCommitBatchLogging.get() == localBatchNumber-1);
@@ -803,7 +803,20 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
-	Void _ = wait(loggingComplete);
+
+	try {
+		choose {
+			when(Version ver = wait(loggingComplete)) {
+				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, ver);
+			}
+			when(Void _ = wait(self->committedVersion.whenAtLeast( commitVersion+1 ))) {}
+		}
+	} catch(Error &e) {
+		if(e.code() == error_code_broken_promise) {
+			throw master_tlog_failed();
+		}
+		throw;
+	}
 	Void _ = wait(yield());
 
 	self->logSystem->pop(msg.popTo, txsTag);
