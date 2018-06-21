@@ -244,7 +244,6 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR,         10.0 );
 
 	// Master Server
-	init( MASTER_LOGGING_DELAY,                                  1.0 );
 	// masterCommitter() in the master server will allow lower priority tasks (e.g. DataDistibution)
 	//  by delay()ing for this amount of time between accepted batches of TransactionRequests.
 	init( COMMIT_SLEEP_TIME,								  0.0001 ); if( randomize && BUGGIFY ) COMMIT_SLEEP_TIME = 0;
@@ -263,6 +262,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( LAST_LIMITED_RATIO,                                    0.6 );
 
 	//Cluster Controller
+	init( CLUSTER_CONTROLLER_LOGGING_DELAY,                      5.0 );
 	init( MASTER_FAILURE_REACTION_TIME,                          0.4 ); if( randomize && BUGGIFY ) MASTER_FAILURE_REACTION_TIME = 10.0;
 	init( MASTER_FAILURE_SLOPE_DURING_RECOVERY,                  0.1 );
 	init( WORKER_COORDINATION_PING_DELAY,                         60 );
