@@ -62,7 +62,10 @@
                      ]
                   },
                   "data_version":12341234,
-                  "data_version_lag":12341234,
+                  "data_lag": {
+                     "seconds":5.0,
+                     "versions":12341234
+                  },
                   "id":"eb84471d68c12d1d26f692a50000003f",
                   "finished_queries":{  
                      "hz":0.0,

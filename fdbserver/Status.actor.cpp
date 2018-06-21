@@ -530,9 +530,21 @@ struct RolesInfo {
 			Version version = parseInt64(extractAttribute(metrics, "Version"));
 			obj["data_version"] = version;
 
+			int64_t versionLag = parseInt64(extractAttribute(metrics, "VersionLag"));
 			if(maxTLogVersion > 0) {
-				obj["data_version_lag"] = std::max<Version>(0, maxTLogVersion - version);
+				// It's possible that the storage server hasn't talked to the logs recently, in which case it may not be aware of how far behind it is.
+				// To account for that, we also compute the version difference between each storage server and the tlog with the largest version.
+				//
+				// Because this data is only logged periodically, this difference will likely be an overestimate for the lag. We subtract off the logging interval
+				// in order to make this estimate a bounded underestimate instead.
+				versionLag = std::max<int64_t>(versionLag, maxTLogVersion - version - SERVER_KNOBS->STORAGE_LOGGING_DELAY * SERVER_KNOBS->VERSIONS_PER_SECOND);
 			}
+
+			StatusObject dataLag;
+			dataLag["versions"] = versionLag;
+			dataLag["seconds"] = versionLag / (double)SERVER_KNOBS->VERSIONS_PER_SECOND;
+
+			obj["data_lag"] = dataLag;
 
 		} catch (Error& e) {
 			if(e.code() != error_code_attribute_not_found)
