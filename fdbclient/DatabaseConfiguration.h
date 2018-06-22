@@ -159,6 +159,7 @@ struct DatabaseConfiguration {
 	KeyValueStoreType storageServerStoreType;
 
 	// Remote TLogs
+	int32_t desiredLogRouterCount;
 	int32_t remoteDesiredTLogCount;
 	int32_t remoteTLogReplicationFactor;
 	IRepPolicyRef remoteTLogPolicy;

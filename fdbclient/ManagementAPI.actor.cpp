@@ -65,14 +65,14 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs" || key == "usable_regions") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "log_routers" || key == "satellite_logs" || key == "usable_regions") && isInteger(value) ) {
 			out[p+key] = value;
 		}
 
 		if( key == "regions" ) {
 			json_spirit::mValue mv;
 			json_spirit::read_string( value, mv );
-			
+
 			StatusObject regionObj;
 			regionObj["regions"] = mv;
 			out[p+key] = BinaryWriter::toValue(regionObj, IncludeVersion()).toString();

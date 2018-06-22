@@ -459,7 +459,6 @@ public:
 
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
-		
 
 		auto remoteLogs = getWorkersForTlogs( req.configuration, req.configuration.getRemoteTLogReplicationFactor(), req.configuration.getDesiredRemoteLogs(), req.configuration.getRemoteTLogPolicy(), id_used, false, remoteDC );
 		for(int i = 0; i < remoteLogs.size(); i++) {
@@ -895,13 +894,15 @@ public:
 
 		if(oldRemoteTLogFit < newRemoteTLogFit) return false;
 
+		int oldRouterCount = oldTLogFit.count * std::max<int>(1, db.config.desiredLogRouterCount / std::max(1,oldTLogFit.count));
+		int newRouterCount = newTLogFit.count * std::max<int>(1, db.config.desiredLogRouterCount / std::max(1,newTLogFit.count));
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter);
-		RoleFitness newLogRoutersFit((db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newTLogFit.count, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
+		RoleFitness newLogRoutersFit((db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newRouterCount, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
 
-		if(oldLogRoutersFit.count < oldTLogFit.count) {
+		if(oldLogRoutersFit.count < oldRouterCount) {
 			oldLogRoutersFit.worstFit = ProcessClass::NeverAssign;
 		}
-		if(newLogRoutersFit.count < newTLogFit.count) {
+		if(newLogRoutersFit.count < newRouterCount) {
 			newLogRoutersFit.worstFit = ProcessClass::NeverAssign;
 		}
 

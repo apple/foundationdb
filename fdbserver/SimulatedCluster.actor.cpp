@@ -863,6 +863,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				ASSERT(false);  // Programmer forgot to adjust cases.
 			}
 
+			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
 		}
 
