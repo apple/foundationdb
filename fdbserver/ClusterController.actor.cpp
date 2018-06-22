@@ -439,6 +439,11 @@ public:
 			return false;
 		}
 
+		bool betterCount (RoleFitness const& r) const {
+			if(count > r.count) return true;
+			return worstFit < r.worstFit;
+		}
+
 		bool operator == (RoleFitness const& r) const { return worstFit == r.worstFit && bestFit == r.bestFit && count == r.count; }
 	};
 
@@ -459,7 +464,6 @@ public:
 
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
-		
 
 		auto remoteLogs = getWorkersForTlogs( req.configuration, req.configuration.getRemoteTLogReplicationFactor(), req.configuration.getDesiredRemoteLogs(), req.configuration.getRemoteTLogPolicy(), id_used, false, remoteDC );
 		for(int i = 0; i < remoteLogs.size(); i++) {
@@ -471,9 +475,13 @@ public:
 			result.logRouters.push_back(logRouters[i].first);
 		}
 
-		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
-			( ( RoleFitness(remoteLogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ) ||
-			  ( RoleFitness(logRouters, ProcessClass::LogRouter) > RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.logRouterCount) ) ) ) {
+		if(!remoteStartTime.present()) {
+			remoteStartTime = now();
+		}
+
+		if( now() - remoteStartTime.get() < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY &&
+			( ( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()).betterCount(RoleFitness(remoteLogs, ProcessClass::TLog)) ) ||
+			  ( RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.logRouterCount).betterCount(RoleFitness(logRouters, ProcessClass::LogRouter)) ) ) ) {
 			throw operation_failed();
 		}
 
@@ -562,10 +570,10 @@ public:
 		}
 
 		if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
-			( RoleFitness(tlogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
-			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(satelliteLogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId)) ) ||
-			  RoleFitness(proxies, ProcessClass::Proxy) > RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies()) ||
-			  RoleFitness(resolvers, ProcessClass::Resolver) > RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers()) ) ) {
+			( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
+			  ( region.satelliteTLogReplicationFactor > 0 && RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredSatelliteLogs(dcId)).betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog)) ) ||
+			  RoleFitness(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, req.configuration.getDesiredProxies()).betterCount(RoleFitness(proxies, ProcessClass::Proxy)) ||
+			  RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS, req.configuration.getDesiredResolvers()).betterCount(RoleFitness(resolvers, ProcessClass::Resolver)) ) ) {
 			return operation_failed();
 		}
 
@@ -593,7 +601,7 @@ public:
 				}
 				throw no_more_servers();
 			} catch( Error& e ) {
-				if (e.code() != error_code_no_more_servers || regions[1].priority < 0 || now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) {
+				if (e.code() != error_code_no_more_servers || regions[1].priority < 0 || now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
@@ -703,8 +711,8 @@ public:
 				.detail("DesiredResolvers", req.configuration.getDesiredResolvers()).detail("ActualResolvers", result.resolvers.size());
 
 			if( now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY &&
-				( RoleFitness(tlogs, ProcessClass::TLog) > RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()) ||
-				bestFitness > RoleFitness(std::min(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS), std::max(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS), req.configuration.getDesiredProxies()+req.configuration.getDesiredResolvers()) ) ) {
+				( RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs()).betterCount(RoleFitness(tlogs, ProcessClass::TLog)) ||
+				  RoleFitness(std::min(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS), std::max(SERVER_KNOBS->EXPECTED_PROXY_FITNESS, SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS), req.configuration.getDesiredProxies()+req.configuration.getDesiredResolvers()).betterCount(bestFitness) ) ) {
 				throw operation_failed();
 			}
 
@@ -895,13 +903,15 @@ public:
 
 		if(oldRemoteTLogFit < newRemoteTLogFit) return false;
 
+		int oldRouterCount = oldTLogFit.count * std::max<int>(1, db.config.desiredLogRouterCount / std::max(1,oldTLogFit.count));
+		int newRouterCount = newTLogFit.count * std::max<int>(1, db.config.desiredLogRouterCount / std::max(1,newTLogFit.count));
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter);
-		RoleFitness newLogRoutersFit((db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newTLogFit.count, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
+		RoleFitness newLogRoutersFit((db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForRoleInDatacenter( *remoteDC.begin(), ProcessClass::LogRouter, newRouterCount, db.config, id_used, Optional<WorkerFitnessInfo>(), true ) : log_routers, ProcessClass::LogRouter);
 
-		if(oldLogRoutersFit.count < oldTLogFit.count) {
+		if(oldLogRoutersFit.count < oldRouterCount) {
 			oldLogRoutersFit.worstFit = ProcessClass::NeverAssign;
 		}
-		if(newLogRoutersFit.count < newTLogFit.count) {
+		if(newLogRoutersFit.count < newRouterCount) {
 			newLogRoutersFit.worstFit = ProcessClass::NeverAssign;
 		}
 
@@ -958,6 +968,7 @@ public:
 	DBInfo db;
 	Database cx;
 	double startTime;
+	Optional<double> remoteStartTime;
 	Version datacenterVersionDifference;
 	bool versionDifferenceUpdated;
 
@@ -1481,7 +1492,7 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 			req.reply.send( self->findRemoteWorkersForConfiguration( req ) );
 			return Void();
 		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers && now() - self->startTime >= SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) {
+			if (e.code() == error_code_no_more_servers && self->remoteStartTime.present() && now() - self->remoteStartTime.get() >= SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
 				self->outstandingRemoteRecruitmentRequests.push_back( req );
 				TraceEvent(SevWarn, "RecruitRemoteFromConfigurationNotAvailable", self->id).error(e);
 				return Void();
