@@ -154,7 +154,7 @@ clean: $(CLEAN_TARGETS) docpreview_clean
 	@rm -rf $(DEPSDIR)
 	@rm -rf lib/
 	@rm -rf bin/coverage.*.xml
-	@rm -f */*.g.cpp */*/*/g.cpp */*.g.h */*/*.g.h
+	@find . -name "*.g.cpp" -exec rm -f {} \; -or -name "*.g.h" -exec rm -f {} \;
 
 targets:
 	@echo "Available targets:"
