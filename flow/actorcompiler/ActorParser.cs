@@ -874,13 +874,13 @@ namespace actorcompiler
                     case "\r\n": LineCount++; break;
                     case "\n": LineCount++; break;
                 }
-                if (tokens[i].Value.StartsWith("/*")) LineCount += tokens[i].Value.Count(c=>c=='\n');
                 if (BraceDepth < 0) throw new Error(LineCount, "Mismatched braces");
                 if (ParenDepth < 0) throw new Error(LineCount, "Mismatched parenthesis");
                 tokens[i].Position = i;
                 tokens[i].SourceLine = LineCount;
                 tokens[i].BraceDepth = BraceDepth;
                 tokens[i].ParenDepth = ParenDepth;
+                if (tokens[i].Value.StartsWith("/*")) LineCount += tokens[i].Value.Count(c=>c=='\n');
                 switch (tokens[i].Value)
                 {
                     case "{": BraceDepth++; if (BraceDepth==1) lastBrace = tokens[i]; break;

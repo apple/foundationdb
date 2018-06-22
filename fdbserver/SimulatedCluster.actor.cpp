@@ -119,6 +119,7 @@ T simulate( const T& in ) {
 static void simInitTLS(Reference<TLSOptions> tlsOptions) {
 	tlsOptions->set_cert_data( certBytes );
 	tlsOptions->set_key_data( certBytes );
+	tlsOptions->set_verify_peers(std::vector<std::string>(1, "Check.Valid=0"));
 	tlsOptions->register_network();
 }
 
