@@ -440,10 +440,8 @@ public:
 		}
 
 		bool betterCount (RoleFitness const& r) const {
-			if(count != r.count) return count > r.count;
-			if (worstFit != r.worstFit) return worstFit < r.worstFit;
-			if (bestFit != r.bestFit) return bestFit < r.bestFit;
-			return false;
+			if(count > r.count) return true;
+			return worstFit < r.worstFit;
 		}
 
 		bool operator == (RoleFitness const& r) const { return worstFit == r.worstFit && bestFit == r.bestFit && count == r.count; }
