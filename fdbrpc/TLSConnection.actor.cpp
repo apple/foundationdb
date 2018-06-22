@@ -325,7 +325,7 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 		if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verifyPeerString))
 			set_verify_peers({ verifyPeerString });
 		else
-			set_verify_peers({ std::string("Check.Valid=0")});
+			set_verify_peers({ std::string("Check.Valid=1")});
 	}
 	if (!ca_set) {
 		std::string caFile;
