@@ -57,6 +57,10 @@ BlobStoreEndpoint::BlobKnobs::BlobKnobs() {
 	request_timeout = CLIENT_KNOBS->BLOBSTORE_REQUEST_TIMEOUT;
 	requests_per_second = CLIENT_KNOBS->BLOBSTORE_REQUESTS_PER_SECOND;
 	concurrent_requests = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_REQUESTS;
+	list_requests_per_second = CLIENT_KNOBS->BLOBSTORE_LIST_REQUESTS_PER_SECOND;
+	write_requests_per_second = CLIENT_KNOBS->BLOBSTORE_WRITE_REQUESTS_PER_SECOND;
+	read_requests_per_second = CLIENT_KNOBS->BLOBSTORE_READ_REQUESTS_PER_SECOND;
+	delete_requests_per_second = CLIENT_KNOBS->BLOBSTORE_DELETE_REQUESTS_PER_SECOND;
 	multipart_max_part_size = CLIENT_KNOBS->BLOBSTORE_MULTIPART_MAX_PART_SIZE;
 	multipart_min_part_size = CLIENT_KNOBS->BLOBSTORE_MULTIPART_MIN_PART_SIZE;
 	concurrent_uploads = CLIENT_KNOBS->BLOBSTORE_CONCURRENT_UPLOADS;
@@ -79,6 +83,10 @@ bool BlobStoreEndpoint::BlobKnobs::set(StringRef name, int value) {
 	TRY_PARAM(request_tries, rt);
 	TRY_PARAM(request_timeout, rto);
 	TRY_PARAM(requests_per_second, rps);
+	TRY_PARAM(list_requests_per_second, lrps);
+	TRY_PARAM(write_requests_per_second, wrps);
+	TRY_PARAM(read_requests_per_second, rrps);
+	TRY_PARAM(delete_requests_per_second, drps);
 	TRY_PARAM(concurrent_requests, cr);
 	TRY_PARAM(multipart_max_part_size, maxps);
 	TRY_PARAM(multipart_min_part_size, minps);
@@ -107,6 +115,10 @@ std::string BlobStoreEndpoint::BlobKnobs::getURLParameters() const {
 	_CHECK_PARAM(request_tries, rt);
 	_CHECK_PARAM(request_timeout, rto);
 	_CHECK_PARAM(requests_per_second, rps);
+	_CHECK_PARAM(list_requests_per_second, lrps);
+	_CHECK_PARAM(write_requests_per_second, wrps);
+	_CHECK_PARAM(read_requests_per_second, rrps);
+	_CHECK_PARAM(delete_requests_per_second, drps);
 	_CHECK_PARAM(concurrent_requests, cr);
 	_CHECK_PARAM(multipart_max_part_size, maxps);
 	_CHECK_PARAM(multipart_min_part_size, minps);
@@ -195,6 +207,8 @@ std::string BlobStoreEndpoint::getResourceURL(std::string resource) {
 }
 
 ACTOR Future<bool> objectExists_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
+	Void _ = wait(b->requestRateRead->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 
@@ -207,6 +221,8 @@ Future<bool> BlobStoreEndpoint::objectExists(std::string const &bucket, std::str
 }
 
 ACTOR Future<Void> deleteObject_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
+	Void _ = wait(b->requestRateDelete->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(b->doRequest("DELETE", resource, headers, NULL, 0, {200, 204, 404}));
@@ -273,9 +289,10 @@ Future<Void> BlobStoreEndpoint::deleteRecursively(std::string const &bucket, std
 }
 
 ACTOR Future<Void> createBucket_impl(Reference<BlobStoreEndpoint> b, std::string bucket) {
+	Void _ = wait(b->requestRateWrite->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket;
 	HTTP::Headers headers;
-
 	Reference<HTTP::Response> r = wait(b->doRequest("PUT", resource, headers, NULL, 0, {200, 409}));
 	return Void();
 }
@@ -285,6 +302,8 @@ Future<Void> BlobStoreEndpoint::createBucket(std::string const &bucket) {
 }
 
 ACTOR Future<int64_t> objectSize_impl(Reference<BlobStoreEndpoint> b, std::string bucket, std::string object) {
+	Void _ = wait(b->requestRateRead->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 
@@ -789,6 +808,8 @@ void BlobStoreEndpoint::setAuthHeaders(std::string const &verb, std::string cons
 }
 
 ACTOR Future<std::string> readEntireFile_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object) {
+	Void _ = wait(bstore->requestRateRead->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(bstore->doRequest("GET", resource, headers, NULL, 0, {200, 404}));
@@ -805,6 +826,7 @@ ACTOR Future<Void> writeEntireFileFromBuffer_impl(Reference<BlobStoreEndpoint> b
 	if(contentLen > bstore->knobs.multipart_max_part_size)
 		throw file_too_large();
 
+	Void _ = wait(bstore->requestRateWrite->getAllowance(1));
 	Void _ = wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
@@ -856,6 +878,8 @@ Future<Void> BlobStoreEndpoint::writeEntireFileFromBuffer(std::string const &buc
 ACTOR Future<int> readObject_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, void *data, int length, int64_t offset) {
 	if(length <= 0)
 		return 0;
+	Void _ = wait(bstore->requestRateRead->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object;
 	HTTP::Headers headers;
 	headers["Range"] = format("bytes=%lld-%lld", offset, offset + length - 1);
@@ -874,6 +898,8 @@ Future<int> BlobStoreEndpoint::readObject(std::string const &bucket, std::string
 }
 
 ACTOR static Future<std::string> beginMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object) {
+	Void _ = wait(bstore->requestRateWrite->getAllowance(1));
+
 	std::string resource = std::string("/") + bucket + "/" + object + "?uploads";
 	HTTP::Headers headers;
 	Reference<HTTP::Response> r = wait(bstore->doRequest("POST", resource, headers, NULL, 0, {200}));
@@ -892,6 +918,7 @@ Future<std::string> BlobStoreEndpoint::beginMultiPartUpload(std::string const &b
 }
 
 ACTOR Future<std::string> uploadPart_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, unsigned int partNumber, UnsentPacketQueue *pContent, int contentLen, std::string contentMD5) {
+	Void _ = wait(bstore->requestRateWrite->getAllowance(1));
 	Void _ = wait(bstore->concurrentUploads.take());
 	state FlowLock::Releaser uploadReleaser(bstore->concurrentUploads, 1);
 
@@ -921,6 +948,7 @@ Future<std::string> BlobStoreEndpoint::uploadPart(std::string const &bucket, std
 
 ACTOR Future<Void> finishMultiPartUpload_impl(Reference<BlobStoreEndpoint> bstore, std::string bucket, std::string object, std::string uploadID, BlobStoreEndpoint::MultiPartSetT parts) {
 	state UnsentPacketQueue part_list();  // NonCopyable state var so must be declared at top of actor
+	Void _ = wait(bstore->requestRateWrite->getAllowance(1));
 
 	std::string manifest = "<CompleteMultipartUpload>";
 	for(auto &p : parts)
