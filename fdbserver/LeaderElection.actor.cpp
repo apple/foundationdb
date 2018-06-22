@@ -82,7 +82,10 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 	state bool iAmLeader = false;
 	state UID prevChangeID;
 
-	if( asyncPriorityInfo->get().processClassFitness > ProcessClass::UnsetFit || asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad || asyncPriorityInfo->get().isExcluded ) {
+
+	if(asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessBad || asyncPriorityInfo->get().dcFitness == ClusterControllerPriorityInfo::FitnessRemote || asyncPriorityInfo->get().isExcluded) {
+		Void _ = wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) );
+	} else if( asyncPriorityInfo->get().processClassFitness > ProcessClass::UnsetFit ) {
 		Void _ = wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	}
 
