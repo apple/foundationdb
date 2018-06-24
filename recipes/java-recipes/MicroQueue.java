@@ -47,14 +47,14 @@ public class MicroQueue {
 		// Remove from the top of the queue.
 		return tcx.run(new Function<Transaction,Void>(){
 			public Void apply(Transaction tr){
-                final KeyValue item = firstItem(tr);
-                if(item == null){
-                    return null;
-                }
+				final KeyValue item = firstItem(tr);
+				if(item == null){
+					return null;
+				}
 
 				tr.clear(item.getKey());
-                // Return the old value.
-                return Tuple.fromBytes(item.getValue()).get(0);
+				// Return the old value.
+				return Tuple.fromBytes(item.getValue()).get(0);
 			}
 		});
 
