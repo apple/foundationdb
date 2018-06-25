@@ -975,6 +975,7 @@ namespace oldTLog {
 			} else {
 				sequenceData.send(reply.end);
 			}
+			reply.begin = req.begin;
 		}
 
 		req.reply.send( reply );

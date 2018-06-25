@@ -1007,6 +1007,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			} else {
 				sequenceData.send(rep.end);
 			}
+			rep.begin = req.begin;
 		}
 
 		req.reply.send( rep );
@@ -1068,6 +1069,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		} else {
 			sequenceData.send(reply.end);
 		}
+		reply.begin = req.begin;
 	}
 
 	req.reply.send( reply );
