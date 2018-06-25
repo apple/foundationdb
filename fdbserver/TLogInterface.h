@@ -140,10 +140,11 @@ struct TLogPeekReply {
 	Optional<Version> popped;
 	Version maxKnownVersion;
 	Version minKnownCommittedVersion;
+	Optional<Version> begin;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & arena & messages & end & popped & maxKnownVersion & minKnownCommittedVersion;
+		ar & arena & messages & end & popped & maxKnownVersion & minKnownCommittedVersion & begin;
 	}
 };
 
