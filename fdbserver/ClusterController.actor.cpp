@@ -601,7 +601,11 @@ public:
 				}
 				throw no_more_servers();
 			} catch( Error& e ) {
-				if (e.code() != error_code_no_more_servers || regions[1].priority < 0 || now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
+				if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
+					throw operation_failed();
+				}
+
+				if (e.code() != error_code_no_more_servers || regions[1].priority < 0) {
 					throw;
 				}
 				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
