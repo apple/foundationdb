@@ -17,7 +17,7 @@
     catch(err) {
     }
 //-->
-var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":10,"i7":9,"i8":10,"i9":10,"i10":10,"i11":10};
+var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":9,"i5":9,"i6":10,"i7":10,"i8":10,"i9":10,"i10":9,"i11":10,"i12":10,"i13":10,"i14":10};
 var tabs = {65535:["t0","All Methods"],1:["t1","Static Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -116,7 +116,7 @@ extends java.lang.Object</pre>
    This call is required before using any other part of the API. The call allows
    an error to be thrown at this point to prevent client code from accessing a later library
    with incorrect assumptions from the current version. The API version documented here is version
-   <code>510</code>.<br><br>
+   <code>520</code>.<br><br>
   FoundationDB encapsulates multiple versions of its interface by requiring
    the client to explicitly specify the version of the API it uses. The purpose
    of this design is to allow you to upgrade the server, client libraries, or
@@ -196,6 +196,25 @@ extends java.lang.Object</pre>
 </td>
 </tr>
 <tr id="i3" class="rowColor">
+<td class="colFirst"><code>int</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#getAPIVersion--">getAPIVersion</a></span>()</code>
+<div class="block">Returns the API version that was selected by the <a href="../../../com/apple/foundationdb/FDB.html#selectAPIVersion-int-"><code>selectAPIVersion()</code></a>
+  call.</div>
+</td>
+</tr>
+<tr id="i4" class="altColor">
+<td class="colFirst"><code>static <a href="../../../com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#instance--">instance</a></span>()</code>
+<div class="block">Return the instance of the FDB API singleton.</div>
+</td>
+</tr>
+<tr id="i5" class="rowColor">
+<td class="colFirst"><code>static boolean</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#isAPIVersionSelected--">isAPIVersionSelected</a></span>()</code>
+<div class="block">Determines if the API version has already been selected.</div>
+</td>
+</tr>
+<tr id="i6" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#open--">open</a></span>()</code>
 <div class="block">Initializes networking, connects with the
@@ -203,14 +222,14 @@ extends java.lang.Object</pre>
   and opens the database.</div>
 </td>
 </tr>
-<tr id="i4" class="altColor">
+<tr id="i7" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#open-java.lang.String-">open</a></span>(java.lang.String&nbsp;clusterFilePath)</code>
 <div class="block">Initializes networking, connects to the cluster specified by <code>clusterFilePath</code>
   and opens the database.</div>
 </td>
 </tr>
-<tr id="i5" class="rowColor">
+<tr id="i8" class="altColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/Database.html" title="interface in com.apple.foundationdb">Database</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#open-java.lang.String-java.util.concurrent.Executor-">open</a></span>(java.lang.String&nbsp;clusterFilePath,
     java.util.concurrent.Executor&nbsp;e)</code>
@@ -218,38 +237,38 @@ extends java.lang.Object</pre>
   and opens the database.</div>
 </td>
 </tr>
-<tr id="i6" class="altColor">
+<tr id="i9" class="rowColor">
 <td class="colFirst"><code><a href="../../../com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#options--">options</a></span>()</code>
 <div class="block">Returns a set of options that can be set on a the FoundationDB API.</div>
 </td>
 </tr>
-<tr id="i7" class="rowColor">
+<tr id="i10" class="altColor">
 <td class="colFirst"><code>static <a href="../../../com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#selectAPIVersion-int-">selectAPIVersion</a></span>(int&nbsp;version)</code>
 <div class="block">Select the version for the client API.</div>
 </td>
 </tr>
-<tr id="i8" class="altColor">
+<tr id="i11" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#setUnclosedWarning-boolean-">setUnclosedWarning</a></span>(boolean&nbsp;warnOnUnclosed)</code>
 <div class="block">Enables or disables the stderr warning that is printed whenever an object with FoundationDB
   native resources is garbage collected without being closed.</div>
 </td>
 </tr>
-<tr id="i9" class="rowColor">
+<tr id="i12" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#startNetwork--">startNetwork</a></span>()</code>
 <div class="block">Initializes networking.</div>
 </td>
 </tr>
-<tr id="i10" class="altColor">
+<tr id="i13" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#startNetwork-java.util.concurrent.Executor-">startNetwork</a></span>(java.util.concurrent.Executor&nbsp;e)</code>
 <div class="block">Initializes networking.</div>
 </td>
 </tr>
-<tr id="i11" class="rowColor">
+<tr id="i14" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/FDB.html#stopNetwork--">stopNetwork</a></span>()</code>
 <div class="block">Stops the FoundationDB networking engine.</div>
@@ -312,6 +331,44 @@ extends java.lang.Object</pre>
 </dl>
 </li>
 </ul>
+<a name="isAPIVersionSelected--">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>isAPIVersionSelected</h4>
+<pre>public static&nbsp;boolean&nbsp;isAPIVersionSelected()</pre>
+<div class="block">Determines if the API version has already been selected. That is, this
+  will return <code>true</code> if the user has already called
+  <a href="../../../com/apple/foundationdb/FDB.html#selectAPIVersion-int-"><code>selectAPIVersion()</code></a> and that call
+  has completed successfully.</div>
+<dl>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd><code>true</code> if an API version has been selected and <code>false</code> otherwise</dd>
+</dl>
+</li>
+</ul>
+<a name="instance--">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>instance</h4>
+<pre>public static&nbsp;<a href="../../../com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a>&nbsp;instance()
+                    throws <a href="../../../com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></pre>
+<div class="block">Return the instance of the FDB API singleton. This method will always return
+  a non-<code>null</code> value for the singleton, but if the
+  <a href="../../../com/apple/foundationdb/FDB.html#selectAPIVersion-int-"><code>selectAPIVersion()</code></a> method has not yet been
+  called, it will throw an <a href="../../../com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb"><code>FDBException</code></a> indicating that an API
+  version has not yet been set.</div>
+<dl>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd>the FoundationDB API object</dd>
+<dt><span class="throwsLabel">Throws:</span></dt>
+<dd><code><a href="../../../com/apple/foundationdb/FDBException.html" title="class in com.apple.foundationdb">FDBException</a></code> - if <a href="../../../com/apple/foundationdb/FDB.html#selectAPIVersion-int-"><code>selectAPIVersion()</code></a> has not been called</dd>
+</dl>
+</li>
+</ul>
 <a name="selectAPIVersion-int-">
 <!--   -->
 </a>
@@ -353,6 +410,23 @@ extends java.lang.Object</pre>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>warnOnUnclosed</code> - Whether the warning should be printed for unclosed objects</dd>
+</dl>
+</li>
+</ul>
+<a name="getAPIVersion--">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>getAPIVersion</h4>
+<pre>public&nbsp;int&nbsp;getAPIVersion()</pre>
+<div class="block">Returns the API version that was selected by the <a href="../../../com/apple/foundationdb/FDB.html#selectAPIVersion-int-"><code>selectAPIVersion()</code></a>
+  call. This can be used to guard different parts of client code against different versions
+  of the FoundationDB API to allow for libraries using FoundationDB to be compatible across
+  several versions.</div>
+<dl>
+<dt><span class="returnLabel">Returns:</span></dt>
+<dd>the FoundationDB API version that has been loaded</dd>
 </dl>
 </li>
 </ul>

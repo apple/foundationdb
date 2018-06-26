@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Configuration &#8212; FoundationDB 5.1</title>
+    <title>Configuration &#8212; FoundationDB 5.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.7',
+        VERSION:     '5.2.5',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -50,7 +50,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -242,7 +242,7 @@
 <ul class="simple">
 <li>a majority of the current coordinators are available;</li>
 <li>all of the new coordinators are available; and</li>
-<li>client and server cluster files are writable.</li>
+<li>client and server cluster files and their parent directories are writable.</li>
 </ul>
 <p><code class="docutils literal"><span class="pre">fdbcli</span></code> supports a <code class="docutils literal"><span class="pre">coordinators</span></code> command to specify the new list of coordinators:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span>user@host$ fdbcli
@@ -749,8 +749,8 @@ Disk identifier: 0xe5169faa
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
-      Last updated on Apr 26, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jun 26, 2018.<br/>
     </p>
   </div>
 </footer>

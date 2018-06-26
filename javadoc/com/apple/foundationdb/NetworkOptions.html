@@ -17,7 +17,7 @@
     catch(err) {
     }
 //-->
-var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":42,"i7":10,"i8":10,"i9":10,"i10":10,"i11":10,"i12":10,"i13":10,"i14":42,"i15":10,"i16":10,"i17":10,"i18":10,"i19":10,"i20":10,"i21":10,"i22":10,"i23":10,"i24":10};
+var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":42,"i7":10,"i8":10,"i9":10,"i10":10,"i11":10,"i12":10,"i13":10,"i14":42,"i15":10,"i16":10,"i17":10,"i18":10,"i19":10,"i20":10,"i21":10,"i22":10,"i23":10,"i24":10,"i25":10,"i26":10,"i27":10};
 var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"],32:["t6","Deprecated Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
@@ -233,59 +233,77 @@ extends java.lang.Object</pre>
 </tr>
 <tr id="i15" class="rowColor">
 <td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSCaBytes-byte:A-">setTLSCaBytes</a></span>(byte[]&nbsp;value)</code>
+<div class="block">Set the ca bundle.</div>
+</td>
+</tr>
+<tr id="i16" class="altColor">
+<td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSCaPath-java.lang.String-">setTLSCaPath</a></span>(java.lang.String&nbsp;value)</code>
+<div class="block">Set the file from which to load the certificate authority bundle.</div>
+</td>
+</tr>
+<tr id="i17" class="rowColor">
+<td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSCertBytes-byte:A-">setTLSCertBytes</a></span>(byte[]&nbsp;value)</code>
 <div class="block">Set the certificate chain.</div>
 </td>
 </tr>
-<tr id="i16" class="altColor">
+<tr id="i18" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSCertPath-java.lang.String-">setTLSCertPath</a></span>(java.lang.String&nbsp;value)</code>
 <div class="block">Set the file from which to load the certificate chain.</div>
 </td>
 </tr>
-<tr id="i17" class="rowColor">
+<tr id="i19" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSKeyBytes-byte:A-">setTLSKeyBytes</a></span>(byte[]&nbsp;value)</code>
 <div class="block">Set the private key corresponding to your own certificate.</div>
 </td>
 </tr>
-<tr id="i18" class="altColor">
+<tr id="i20" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSKeyPath-java.lang.String-">setTLSKeyPath</a></span>(java.lang.String&nbsp;value)</code>
 <div class="block">Set the file from which to load the private key corresponding to your own certificate.</div>
 </td>
 </tr>
-<tr id="i19" class="rowColor">
+<tr id="i21" class="rowColor">
+<td class="colFirst"><code>void</code></td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSPassword-java.lang.String-">setTLSPassword</a></span>(java.lang.String&nbsp;value)</code>
+<div class="block">Set the passphrase for encrypted private key.</div>
+</td>
+</tr>
+<tr id="i22" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSPlugin-java.lang.String-">setTLSPlugin</a></span>(java.lang.String&nbsp;value)</code>
 <div class="block">Set the TLS plugin to load.</div>
 </td>
 </tr>
-<tr id="i20" class="altColor">
+<tr id="i23" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTLSVerifyPeers-byte:A-">setTLSVerifyPeers</a></span>(byte[]&nbsp;value)</code>
 <div class="block">Set the peer certificate field verification criteria.</div>
 </td>
 </tr>
-<tr id="i21" class="rowColor">
+<tr id="i24" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTraceEnable-java.lang.String-">setTraceEnable</a></span>(java.lang.String&nbsp;value)</code>
 <div class="block">Enables trace output to a file in a directory of the clients choosing.</div>
 </td>
 </tr>
-<tr id="i22" class="altColor">
+<tr id="i25" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTraceLogGroup-java.lang.String-">setTraceLogGroup</a></span>(java.lang.String&nbsp;value)</code>
 <div class="block">Sets the 'logGroup' attribute with the specified value for all events in the trace output files.</div>
 </td>
 </tr>
-<tr id="i23" class="rowColor">
+<tr id="i26" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTraceMaxLogsSize-long-">setTraceMaxLogsSize</a></span>(long&nbsp;value)</code>
 <div class="block">Sets the maximum size of all the trace output files put together.</div>
 </td>
 </tr>
-<tr id="i24" class="altColor">
+<tr id="i27" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/NetworkOptions.html#setTraceRollSize-long-">setTraceRollSize</a></span>(long&nbsp;value)</code>
 <div class="block">Sets the maximum size in bytes of a single trace output file.</div>
@@ -541,6 +559,48 @@ public&nbsp;void&nbsp;setClusterFile(java.lang.String&nbsp;value)</pre>
 <dl>
 <dt><span class="paramLabel">Parameters:</span></dt>
 <dd><code>value</code> - probability expressed as a percentage between 0 and 100</dd>
+</dl>
+</li>
+</ul>
+<a name="setTLSCaBytes-byte:A-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setTLSCaBytes</h4>
+<pre>public&nbsp;void&nbsp;setTLSCaBytes(byte[]&nbsp;value)</pre>
+<div class="block">Set the ca bundle.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>value</code> - ca bundle</dd>
+</dl>
+</li>
+</ul>
+<a name="setTLSCaPath-java.lang.String-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setTLSCaPath</h4>
+<pre>public&nbsp;void&nbsp;setTLSCaPath(java.lang.String&nbsp;value)</pre>
+<div class="block">Set the file from which to load the certificate authority bundle.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>value</code> - file path</dd>
+</dl>
+</li>
+</ul>
+<a name="setTLSPassword-java.lang.String-">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setTLSPassword</h4>
+<pre>public&nbsp;void&nbsp;setTLSPassword(java.lang.String&nbsp;value)</pre>
+<div class="block">Set the passphrase for encrypted private key. Password should be set before setting the key for the password to be used.</div>
+<dl>
+<dt><span class="paramLabel">Parameters:</span></dt>
+<dd><code>value</code> - key passphrase</dd>
 </dl>
 </li>
 </ul>

@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Transport Layer Security &#8212; FoundationDB 5.1</title>
+    <title>Transport Layer Security &#8212; FoundationDB 5.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.7',
+        VERSION:     '5.2.5',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,6 +31,8 @@
     <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Earlier Release Notes" href="earlier-release-notes.html" />
+    <link rel="prev" title="Moving a Cluster to New Machines" href="moving-a-cluster.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
@@ -50,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -91,6 +93,8 @@
 <li><a class="reference internal" href="#plugin-default-location">Plugin default location</a></li>
 <li><a class="reference internal" href="#certificate-file-default-location">Certificate file default location</a></li>
 <li><a class="reference internal" href="#default-peer-verification">Default Peer Verification</a></li>
+<li><a class="reference internal" href="#default-password">Default Password</a></li>
+<li><a class="reference internal" href="#ca-file-default-location">CA file default location</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
@@ -125,6 +129,14 @@
             
               
                 
+  <li>
+    <a href="moving-a-cluster.html" title="Previous Chapter: Moving a Cluster to New Machines"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Moving a Clus...</span>
+    </a>
+  </li>
+  <li>
+    <a href="earlier-release-notes.html" title="Next Chapter: Earlier Release Notes"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Earlier Release Notes &raquo;</span>
+    </a>
+  </li>
               
             
             
@@ -162,6 +174,8 @@
 <li><a class="reference internal" href="#plugin-default-location">Plugin default location</a></li>
 <li><a class="reference internal" href="#certificate-file-default-location">Certificate file default location</a></li>
 <li><a class="reference internal" href="#default-peer-verification">Default Peer Verification</a></li>
+<li><a class="reference internal" href="#default-password">Default Password</a></li>
+<li><a class="reference internal" href="#ca-file-default-location">CA file default location</a></li>
 </ul>
 </li>
 <li><a class="reference internal" href="#parameters-and-client-bindings">Parameters and client bindings</a></li>
@@ -267,6 +281,18 @@ key, used by the plugin</td>
 <td>The byte-string for the verification of peer
 certificates and sessions, used by the plugin</td>
 </tr>
+<tr class="row-even"><td><code class="docutils literal"><span class="pre">tls_password</span></code></td>
+<td><code class="docutils literal"><span class="pre">TLS_password</span></code></td>
+<td><code class="docutils literal"><span class="pre">FDB_TLS_PASSWORD</span></code></td>
+<td>The byte-string representing the passcode for
+unencrypting the private key</td>
+</tr>
+<tr class="row-odd"><td><code class="docutils literal"><span class="pre">tls_ca_file</span></code></td>
+<td><code class="docutils literal"><span class="pre">TLS_ca_path</span></code></td>
+<td><code class="docutils literal"><span class="pre">FDB_TLS_CA_FILE</span></code></td>
+<td>Path to the file containing the CA certificates
+to trust</td>
+</tr>
 </tbody>
 </table>
 <p>The value for each setting can be specified in more than one way.  The actual valued used is determined in the following order:</p>
@@ -276,7 +302,7 @@ certificates and sessions, used by the plugin</td>
 <li>The default value</li>
 </ol>
 <p>As with all other command-line options to <code class="docutils literal"><span class="pre">fdbserver</span></code>, the TLS settings can be specified in the <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">[fdbserver] section of the configuration file</span></a>.</p>
-<p>The settings for certificate file, key file, and peer verification are interpreted by the loaded plugin.</p>
+<p>The settings for certificate file, key file, peer verification, password and CA file are interpreted by the loaded plugin.</p>
 <div class="section" id="default-values">
 <h3>Default Values</h3>
 <div class="section" id="plugin-default-location">
@@ -284,9 +310,9 @@ certificates and sessions, used by the plugin</td>
 <p>Similarly, if a value is not specified for the parameter <code class="docutils literal"><span class="pre">tls_plugin</span></code>, the file will be specified by the environment variable <code class="docutils literal"><span class="pre">FDB_TLS_PLUGIN</span></code> or, if this variable is not set, the system-dependent location:</p>
 <blockquote>
 <div><ul class="simple">
-<li>Linux: <code class="docutils literal"><span class="pre">/usr/lib/foundationdb/plugins/FDBLibTLS.so</span></code></li>
-<li>macOS: <code class="docutils literal"><span class="pre">/usr/local/foundationdb/plugins/FDBLibTLS.dylib</span></code></li>
-<li>Windows: <code class="docutils literal"><span class="pre">C:\Program</span> <span class="pre">Files\foundationdb\plugins\FDBLibTLS.dll</span></code></li>
+<li>Linux: <code class="docutils literal"><span class="pre">/usr/lib/foundationdb/plugins/fdb-libressl-plugin.so</span></code></li>
+<li>macOS: <code class="docutils literal"><span class="pre">/usr/local/foundationdb/plugins/fdb-libressl-plugin.dylib</span></code></li>
+<li>Windows: <code class="docutils literal"><span class="pre">C:\Program</span> <span class="pre">Files\foundationdb\plugins\fdb-libressl-plugin.dll</span></code></li>
 </ul>
 </div></blockquote>
 <p>On Windows, this location will be relative to the chosen installation location. The environment variable <code class="docutils literal"><span class="pre">FOUNDATIONDB_INSTALL_PATH</span></code> will be used in place of <code class="docutils literal"><span class="pre">C:\Program</span> <span class="pre">Files\foundationdb\</span></code> to determine this location.</p>
@@ -304,7 +330,15 @@ certificates and sessions, used by the plugin</td>
 </div>
 <div class="section" id="default-peer-verification">
 <h4>Default Peer Verification</h4>
-<p>The default peer verification is the empty string.</p>
+<p>The default peer verification is <code class="docutils literal"><span class="pre">Check.Valid=0</span></code>.</p>
+</div>
+<div class="section" id="default-password">
+<h4>Default Password</h4>
+<p>There is no default password. If no password is specified, the plugin assumes that private key is unencrypted.</p>
+</div>
+<div class="section" id="ca-file-default-location">
+<h4>CA file default location</h4>
+<p>If a value is not specified, the plugin searches for certs in the default openssl certs location.</p>
 </div>
 </div>
 <div class="section" id="parameters-and-client-bindings">
@@ -328,7 +362,7 @@ certificates and sessions, used by the plugin</td>
 <span id="tls-certificate-file"></span><h4>The certificate file</h4>
 <p>A file must be supplied that contains an ordered list of certificates. The first certificate is the process&#8217; own certificate. Each following certificate must sign the one preceding it.</p>
 <p>All but the last certificate are provided to peers during TLS handshake as the certificate chain.</p>
-<p>The last certificate in the list is the trusted certificate. All processes that want to communicate must have the same trusted certificate.</p>
+<p>The last certificate in the list is the trusted certificate.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">If the certificate list contains only one certificate, that certificate <em>must</em> be self-signed and will be used as both the certificate chain and the trusted certificate.</p>
@@ -348,6 +382,7 @@ certificates and sessions, used by the plugin</td>
 <span class="o">-----</span><span class="n">END</span> <span class="n">PRIVATE</span> <span class="n">KEY</span><span class="o">-----</span>
 </pre></div>
 </div>
+<p>It can optionally be encrypted by the password provided to tls_password.</p>
 </div>
 </div>
 <div class="section" id="certificate-creation">
@@ -365,7 +400,7 @@ certificates and sessions, used by the plugin</td>
 <p>A FoundationDB server or client will only communicate with peers that present a certificate chain that meets the verification requirements. By default, the only requirement is that the provided certificate chain ends in a certificate signed by the local trusted certificate.</p>
 <div class="section" id="certificate-field-verification">
 <span id="tls-verify-peers"></span><h3>Certificate field verification</h3>
-<p>With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient.</p>
+<p>With a peer verification string, FoundationDB servers and clients can adjust what is required of the certificate chain presented by a peer. These options can make the certificate requirements more rigorous or more lenient. You can specify multiple verification strings by providing additional tls_verify_peers command line arguments or concatenating them with <code class="docutils literal"><span class="pre">|</span></code>. All <code class="docutils literal"><span class="pre">,</span></code> or <code class="docutils literal"><span class="pre">|</span></code> in the verify peers fields should be escaped with <code class="docutils literal"><span class="pre">\</span></code>.</p>
 <div class="section" id="turning-down-the-validation">
 <h4>Turning down the validation</h4>
 <p>If the default checking of the certificate chain is too stringent, the verification string can contain settings to weaken what certificates are accepted.</p>
@@ -447,6 +482,7 @@ to proceed.</td>
 </tr>
 </tbody>
 </table>
+<p>Additionally, the verification can be restricted to certificates signed by a given root CA with the field <code class="docutils literal"><span class="pre">Root.CN</span></code>. This allows you to have different requirements for different root chains.</p>
 <p>The value of a condition must be specified in a form derived from a subset of <a class="reference external" href="http://www.ietf.org/rfc/rfc4514.txt">RFC 4514</a>. Specifically, the &#8220;raw&#8221; notation (a value starting with the <code class="docutils literal"><span class="pre">#</span></code> character) is not accepted. Other escaping mechanisms, including specifying characters by hex notation, are allowed. The specified field&#8217;s value must exactly match the value in the peer&#8217;s certificate.</p>
 <p>By default, the fields of a peer certificate&#8217;s DNs are not examined.</p>
 </div>
@@ -487,8 +523,8 @@ to proceed.</td>
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
-      Last updated on Apr 26, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jun 26, 2018.<br/>
     </p>
   </div>
 </footer>

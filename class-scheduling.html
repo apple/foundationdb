@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Class Scheduling &#8212; FoundationDB 5.1</title>
+    <title>Class Scheduling &#8212; FoundationDB 5.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.7',
+        VERSION:     '5.2.5',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -97,7 +97,6 @@
 <li><a class="reference internal" href="#seats-are-limited">Seats are limited!</a></li>
 <li><a class="reference internal" href="#concurrency-and-consistency">Concurrency and consistency</a></li>
 <li><a class="reference internal" href="#idempotence">Idempotence</a></li>
-<li><a class="reference internal" href="#dropping-with-limited-seats">Dropping with limited seats</a></li>
 <li><a class="reference internal" href="#more-features">More features?!</a></li>
 <li><a class="reference internal" href="#composing-transactions">Composing transactions</a></li>
 <li><a class="reference internal" href="#are-we-done">Are we done?</a></li>
@@ -165,7 +164,6 @@
 <li><a class="reference internal" href="#seats-are-limited">Seats are limited!</a></li>
 <li><a class="reference internal" href="#concurrency-and-consistency">Concurrency and consistency</a></li>
 <li><a class="reference internal" href="#idempotence">Idempotence</a></li>
-<li><a class="reference internal" href="#dropping-with-limited-seats">Dropping with limited seats</a></li>
 <li><a class="reference internal" href="#more-features">More features?!</a></li>
 <li><a class="reference internal" href="#composing-transactions">Composing transactions</a></li>
 <li><a class="reference internal" href="#are-we-done">Are we done?</a></li>
@@ -203,7 +201,7 @@
 </pre></div>
 </div>
 <p>Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">510</span><span class="p">)</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">520</span><span class="p">)</span>
 </pre></div>
 </div>
 <p>Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a>.</p>
@@ -211,20 +209,20 @@
 </pre></div>
 </div>
 <p>We are ready to use the database. In Python, using the <code class="docutils literal"><span class="pre">[]</span></code> operator on the db object is a convenient syntax for performing a read or write on the database. First, let&#8217;s simply write a key-value pair:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">db</span><span class="p">[</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;world&#39;</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">db</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;world&#39;</span>
 </pre></div>
 </div>
 <p>When this command returns without exception, the modification is durably stored in FoundationDB! Under the covers, this function creates a transaction with a single modification. We&#8217;ll see later how to do multiple operations in a single transaction. For now, let&#8217;s read back the data:</p>
-<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span> <span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="n">db</span><span class="p">[</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span>
+<div class="highlight-default"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="nb">print</span> <span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="n">db</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span>
 <span class="go">hello world</span>
 </pre></div>
 </div>
 <p>If this is all working, it looks like we are ready to start building a real application. For reference, here&#8217;s the full code for &#8220;hello world&#8221;:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">fdb</span>
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">510</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">520</span><span class="p">)</span>
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
-<span class="n">db</span><span class="p">[</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="s1">&#39;world&#39;</span>
-<span class="nb">print</span> <span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="n">db</span><span class="p">[</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span>
+<span class="n">db</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">b</span><span class="s1">&#39;world&#39;</span>
+<span class="nb">print</span> <span class="s1">&#39;hello&#39;</span><span class="p">,</span> <span class="n">db</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;hello&#39;</span><span class="p">]</span>
 </pre></div>
 </div>
 </div>
@@ -258,7 +256,7 @@
 <p>FoundationDB includes a few tools that make it easy to model data using this approach. Let&#8217;s begin by
 opening a <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">directory</span></a> in the database:</p>
 <div class="highlight-default"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">fdb</span>
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">510</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">520</span><span class="p">)</span>
 
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 <span class="n">scheduling</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">directory</span><span class="o">.</span><span class="n">create_or_open</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="p">(</span><span class="s1">&#39;scheduling&#39;</span><span class="p">,))</span>
@@ -334,7 +332,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
     <span class="k">return</span> <span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">k</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">range</span><span class="p">(())]]</span>
 </pre></div>
 </div>
-<p>In general, the <code class="xref py py-meth docutils literal"><span class="pre">Subspace.range()</span></code> method returns a Python <code class="docutils literal"><span class="pre">slice</span></code> representing all the key-value pairs starting with the specified tuple. In this case, we want all classes, so we call <code class="xref py py-meth docutils literal"><span class="pre">course.range()</span></code> with the empty tuple <code class="docutils literal"><span class="pre">()</span></code>. FoundationDB&#8217;s <code class="docutils literal"><span class="pre">tr[slice]</span></code> function returns an iterable list of key-values in the range specified by the slice. We unpack the key <code class="docutils literal"><span class="pre">k</span></code> and value <code class="docutils literal"><span class="pre">v</span></code> in a comprehension. To extract the class name itself, we unpack the key into a tuple using the <a class="reference internal" href="api-python.html#module-fdb.tuple" title="fdb.tuple"><code class="xref py py-mod docutils literal"><span class="pre">fdb.tuple</span></code></a> module and take its third part. (The first and second parts are the prefixes for the <code class="docutils literal"><span class="pre">scheduling</span></code> and <code class="docutils literal"><span class="pre">course</span></code> subspaces, respectively.)</p>
+<p>In general, the <code class="xref py py-meth docutils literal"><span class="pre">Subspace.range()</span></code> method returns a Python <code class="docutils literal"><span class="pre">slice</span></code> representing all the key-value pairs starting with the specified tuple. In this case, we want all classes, so we call <code class="xref py py-meth docutils literal"><span class="pre">course.range()</span></code> with the empty tuple <code class="docutils literal"><span class="pre">()</span></code>. FoundationDB&#8217;s <code class="docutils literal"><span class="pre">tr[slice]</span></code> function returns an iterable list of key-values in the range specified by the slice. We unpack the key <code class="docutils literal"><span class="pre">k</span></code> and value <code class="docutils literal"><span class="pre">v</span></code> in a comprehension. To extract the class name itself, we unpack the key into a tuple using the <code class="xref py py-meth docutils literal"><span class="pre">Subspace.unpack()</span></code> method and take the first field. (The first and second parts of the tuple, the <code class="docutils literal"><span class="pre">scheduling</span></code> and <code class="docutils literal"><span class="pre">course</span></code> subspace prefixes, are removed by the <code class="docutils literal"><span class="pre">unpack</span></code> hence the reason we take the first field of the tuple.)</p>
 </div>
 <div class="section" id="signing-up-for-a-class">
 <h3>Signing up for a class</h3>
@@ -385,6 +383,16 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 </pre></div>
 </div>
 <p>We now have to check that we aren&#8217;t already signed up, since we don&#8217;t want a double sign up to decrease the number of seats twice. Then we look up how many seats are left to make sure there is a seat remaining so we don&#8217;t push the counter into the negative. If there is a seat remaining, we decrement the counter.</p>
+<p>Similarly, the <code class="docutils literal"><span class="pre">drop</span></code> function is modified as follows:</p>
+<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
+<span class="k">def</span> <span class="nf">drop</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
+    <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
+<span class="hll">    <span class="k">if</span> <span class="ow">not</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># not taking this class</span>
+</span><span class="hll">    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,))</span>
+</span>    <span class="k">del</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span>
+</pre></div>
+</div>
+<p>Once again we check to see if the student is signed up and if not, we can just return as we don&#8217;t want to incorrectly increase the number of seats. We then adjust the number of seats by one by taking the current value, incrementing it by one, and then storing back.</p>
 </div>
 <div class="section" id="concurrency-and-consistency">
 <h3>Concurrency and consistency</h3>
@@ -395,19 +403,6 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <div class="section" id="idempotence">
 <h3>Idempotence</h3>
 <p>Occasionally, a transaction might be retried even after it succeeds (for example, if the client loses contact with the cluster at just the wrong moment). This can cause problems if transactions are not written to be idempotent, i.e. to have the same effect if committed twice as if committed once. There are generic design patterns for <a class="reference internal" href="developer-guide.html#developer-guide-unknown-results"><span class="std std-ref">making any transaction idempotent</span></a>, but many transactions are naturally idempotent. For example, all of the transactions in this tutorial are idempotent.</p>
-</div>
-<div class="section" id="dropping-with-limited-seats">
-<h3>Dropping with limited seats</h3>
-<p>Let&#8217;s finish up the limited seats feature by modifying the drop function:</p>
-<div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
-<span class="k">def</span> <span class="nf">drop</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">):</span>
-    <span class="n">rec</span> <span class="o">=</span> <span class="n">attends</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">s</span><span class="p">,</span> <span class="n">c</span><span class="p">))</span>
-<span class="hll">    <span class="k">if</span> <span class="ow">not</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span><span class="o">.</span><span class="n">present</span><span class="p">():</span> <span class="k">return</span>  <span class="c1"># not taking this class</span>
-</span><span class="hll">    <span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))]</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">fdb</span><span class="o">.</span><span class="n">tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">tr</span><span class="p">[</span><span class="n">course</span><span class="o">.</span><span class="n">pack</span><span class="p">((</span><span class="n">c</span><span class="p">,))])[</span><span class="mi">0</span><span class="p">]</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,))</span>
-</span>    <span class="k">del</span> <span class="n">tr</span><span class="p">[</span><span class="n">rec</span><span class="p">]</span>
-</pre></div>
-</div>
-<p>This case is easier than signup because there are no constraints we can hit. We just need to make sure the student is in the class and to &#8220;give back&#8221; one seat when the student drops.</p>
 </div>
 <div class="section" id="more-features">
 <h3>More features?!</h3>
@@ -469,7 +464,7 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
 <span class="kn">import</span> <span class="nn">fdb</span>
 <span class="kn">import</span> <span class="nn">fdb.tuple</span>
 
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">510</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">520</span><span class="p">)</span>
 
 
 <span class="c1">####################################</span>
@@ -621,8 +616,8 @@ opening a <a class="reference internal" href="developer-guide.html#developer-gui
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
-      Last updated on Apr 26, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jun 26, 2018.<br/>
     </p>
   </div>
 </footer>

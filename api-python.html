@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Python API &#8212; FoundationDB 5.1</title>
+    <title>Python API &#8212; FoundationDB 5.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.7',
+        VERSION:     '5.2.5',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -222,7 +222,7 @@
 <h1>Python API</h1>
 <div class="section" id="installation">
 <h2>Installation</h2>
-<p>The FoundationDB Python API is compatible with Python 2.7 - 3.4. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed.</p>
+<p>The FoundationDB Python API is compatible with Python 2.7 - 3.6. You will need to have a Python version within this range on your system before the FoundationDB Python API can be installed.</p>
 <p>On macOS, the FoundationDB Python API is installed as part of the FoundationDB installation (see <a class="reference internal" href="api-general.html#installing-client-binaries"><span class="std std-ref">Installing FoundationDB client binaries</span></a>). On Ubuntu or RHEL/CentOS, you will need to install the FoundationDB Python API manually.</p>
 <p>You can download the FoundationDB Python API source directly from <a class="reference internal" href="downloads.html"><span class="doc">Downloads</span></a>.</p>
 <div class="admonition note">
@@ -237,7 +237,7 @@
 <dl class="function">
 <dt id="fdb.api_version">
 <code class="descclassname">fdb.</code><code class="descname">api_version</code><span class="sig-paren">(</span><em>version</em><span class="sig-paren">)</span></dt>
-<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 510.</p>
+<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 520.</p>
 </dd></dl>
 
 <div class="admonition note">
@@ -252,13 +252,13 @@
 <p class="first admonition-title">Warning</p>
 <p class="last">When using the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>, setting an API version that is not supported by a particular client library will prevent that client from being used to connect to the cluster. In particular, you should not advance the API version of your application after upgrading your client until the cluster has also been upgraded.</p>
 </div>
-<p>For API changes between version 13 and 510 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
+<p>For API changes between version 13 and 520 (for the purpose of porting older programs), see <a class="reference internal" href="release-notes.html"><span class="doc">Release Notes</span></a>.</p>
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
 <p>After importing the <code class="docutils literal"><span class="pre">fdb</span></code> module and selecting an API version, you probably want to open a <a class="reference internal" href="#fdb.Database" title="fdb.Database"><code class="xref py py-class docutils literal"><span class="pre">Database</span></code></a>. The simplest way of doing this is using <a class="reference internal" href="#fdb.open" title="fdb.open"><code class="xref py py-func docutils literal"><span class="pre">open()</span></code></a>:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">fdb</span>
-<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">510</span><span class="p">)</span>
+<span class="n">fdb</span><span class="o">.</span><span class="n">api_version</span><span class="p">(</span><span class="mi">520</span><span class="p">)</span>
 <span class="n">db</span> <span class="o">=</span> <span class="n">fdb</span><span class="o">.</span><span class="n">open</span><span class="p">()</span>
 </pre></div>
 </div>
@@ -665,8 +665,8 @@ value of the key is also retrieved, using network bandwidth.</p>
 <p>For example:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
 <span class="k">def</span> <span class="nf">simple_function</span><span class="p">(</span><span class="n">tr</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
-    <span class="n">tr</span><span class="p">[</span><span class="s1">&#39;foo&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">x</span>
-    <span class="n">tr</span><span class="p">[</span><span class="s1">&#39;bar&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">y</span>
+    <span class="n">tr</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;foo&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">x</span>
+    <span class="n">tr</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;bar&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">y</span>
 </pre></div>
 </div>
 <p>The <code class="docutils literal"><span class="pre">&#64;fdb.transactional</span></code> decorator makes <code class="docutils literal"><span class="pre">simple_function</span></code> a transactional function.  All functions using this decorator must have an argument <strong>named</strong> <code class="docutils literal"><span class="pre">tr</span></code>.  This specially named argument is passed a transaction that the function can use to do reads and writes.</p>
@@ -1094,7 +1094,7 @@ both the caching and the increased network bandwidth.</p>
 <span class="target" id="api-python-snapshot-ryw"></span><dl class="method">
 <dt id="fdb.Transaction.options.set_snapshot_ryw_disable">
 <code class="descclassname">Transaction.options.</code><code class="descname">set_snapshot_ryw_disable</code><span class="sig-paren">(</span><span class="sig-paren">)</span></dt>
-<dd><p>If this option is set more times in this transction than the enable option, snapshot reads will <em>not</em> see the effects of prior writes in the same transaction.</p>
+<dd><p>If this option is set more times in this transaction than the enable option, snapshot reads will <em>not</em> see the effects of prior writes in the same transaction.</p>
 </dd></dl>
 
 <dl class="method">
@@ -1263,7 +1263,7 @@ both the caching and the increased network bandwidth.</p>
 <dd><p>Returns <code class="docutils literal"><span class="pre">False</span></code> if the key used to request this value was not present in the database. For example:</p>
 <div class="highlight-python"><div class="highlight"><pre><span></span><span class="nd">@fdb.transactional</span>
 <span class="k">def</span> <span class="nf">foo</span><span class="p">(</span><span class="n">tr</span><span class="p">):</span>
-    <span class="n">val</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="s1">&#39;foo&#39;</span><span class="p">]</span>
+    <span class="n">val</span> <span class="o">=</span> <span class="n">tr</span><span class="p">[</span><span class="sa">b</span><span class="s1">&#39;foo&#39;</span><span class="p">]</span>
     <span class="k">if</span> <span class="n">val</span><span class="o">.</span><span class="n">present</span><span class="p">():</span>
         <span class="k">print</span> <span class="s1">&#39;Got value: </span><span class="si">%s</span><span class="s1">&#39;</span> <span class="o">%</span> <span class="n">val</span>
     <span class="k">else</span><span class="p">:</span>
@@ -1530,7 +1530,7 @@ semantically meaningful. Strings are sorted on their byte representation when en
 differ from the default sort when non-ASCII characters are included within the string), and UUIDs are sorted
 based on their big-endian byte representation. Single-precision floating point numbers are sorted before all
 double-precision floating point numbers, and for floating point numbers, -NaN is sorted before -Infinity which
-is sorted before finite numbers which are sorted before Infinity which is sorted before NaN. Different represetations
+is sorted before finite numbers which are sorted before Infinity which is sorted before NaN. Different representations
 of NaN are not treated as equal.</p>
 <p>Additionally, the tuple serialization contract is such that after they are serialized, the byte-string representations
 of <code class="docutils literal"><span class="pre">tuple1</span></code> and <code class="docutils literal"><span class="pre">tuple2</span></code> will sort in a manner that is consistent with this function. In particular, this function
@@ -1962,8 +1962,8 @@ this subspace and the passed tuple.</p>
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
-      Last updated on Apr 26, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jun 26, 2018.<br/>
     </p>
   </div>
 </footer>

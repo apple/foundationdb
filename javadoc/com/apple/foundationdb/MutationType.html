@@ -147,56 +147,61 @@ extends java.lang.Enum&lt;<a href="../../../com/apple/foundationdb/MutationType.
 </td>
 </tr>
 <tr class="altColor">
+<td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#APPEND_IF_FITS">APPEND_IF_FITS</a></span></code>
+<div class="block">Appends <code>param</code> to the end of the existing value already in the database at the given key (or creates the key and sets the value to <code>param</code> if the key is empty).</div>
+</td>
+</tr>
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#BIT_AND">BIT_AND</a></span></code>
 <div class="block">Performs a bitwise <code>and</code> operation.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#BIT_OR">BIT_OR</a></span></code>
 <div class="block">Performs a bitwise <code>or</code> operation.</div>
 </td>
 </tr>
-<tr class="altColor">
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#BIT_XOR">BIT_XOR</a></span></code>
 <div class="block">Performs a bitwise <code>xor</code> operation.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#BYTE_MAX">BYTE_MAX</a></span></code>
 <div class="block">Performs lexicographic comparison of byte strings.</div>
 </td>
 </tr>
-<tr class="altColor">
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#BYTE_MIN">BYTE_MIN</a></span></code>
 <div class="block">Performs lexicographic comparison of byte strings.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#MAX">MAX</a></span></code>
 <div class="block">Performs a little-endian comparison of byte strings.</div>
 </td>
 </tr>
-<tr class="altColor">
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#MIN">MIN</a></span></code>
 <div class="block">Performs a little-endian comparison of byte strings.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#OR">OR</a></span></code>
 <div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
 </td>
 </tr>
-<tr class="altColor">
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#SET_VERSIONSTAMPED_KEY">SET_VERSIONSTAMPED_KEY</a></span></code>
 <div class="block">Transforms <code>key</code> using a versionstamp for the transaction.</div>
 </td>
 </tr>
-<tr class="rowColor">
+<tr class="altColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#SET_VERSIONSTAMPED_VALUE">SET_VERSIONSTAMPED_VALUE</a></span></code>
 <div class="block">Transforms <code>param</code> using a versionstamp for the transaction.</div>
 </td>
 </tr>
-<tr class="altColor">
+<tr class="rowColor">
 <td class="colOne"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/MutationType.html#XOR">XOR</a></span></code>
 <div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
 </td>
@@ -340,6 +345,16 @@ public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.h
 <div class="block">Performs a bitwise <code>xor</code> operation.  If the existing value in the database is not present or shorter than <code>param</code>, it is first extended to the length of <code>param</code> with zero bytes.  If <code>param</code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code>param</code>.</div>
 </li>
 </ul>
+<a name="APPEND_IF_FITS">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>APPEND_IF_FITS</h4>
+<pre>public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a> APPEND_IF_FITS</pre>
+<div class="block">Appends <code>param</code> to the end of the existing value already in the database at the given key (or creates the key and sets the value to <code>param</code> if the key is empty). This will only append the value if the final concatenated value size is less than or equal to the maximum value size (i.e., if it fits). WARNING: No error is surfaced back to the user if the final value is too large because the mutation will not be applied until after the transaction has been committed. Therefore, it is only safe to use this mutation type if one can guarantee that one will keep the total value size under the maximum size.</div>
+</li>
+</ul>
 <a name="MAX">
 <!--   -->
 </a>
@@ -367,7 +382,7 @@ public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.h
 <li class="blockList">
 <h4>SET_VERSIONSTAMPED_KEY</h4>
 <pre>public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a> SET_VERSIONSTAMPED_KEY</pre>
-<div class="block">Transforms <code>key</code> using a versionstamp for the transaction. Sets the transformed key in the database to <code>param</code>. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.</div>
+<div class="block">Transforms <code>key</code> using a versionstamp for the transaction. Sets the transformed key in the database to <code>param</code>. The key is transformed by removing the final four bytes from the key and reading those as a little-Endian 32-bit integer to get a position <code>pos</code>. The 10 bytes of the key from <code>pos</code> to <code>pos + 10</code> are replaced with the versionstamp of the transaction used. The first byte of the key is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the offset was computed from only the final two bytes rather than the final four bytes.</div>
 </li>
 </ul>
 <a name="SET_VERSIONSTAMPED_VALUE">
@@ -377,7 +392,7 @@ public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.h
 <li class="blockList">
 <h4>SET_VERSIONSTAMPED_VALUE</h4>
 <pre>public static final&nbsp;<a href="../../../com/apple/foundationdb/MutationType.html" title="enum in com.apple.foundationdb">MutationType</a> SET_VERSIONSTAMPED_VALUE</pre>
-<div class="block">Transforms <code>param</code> using a versionstamp for the transaction. Sets <code>key</code> in the database to the transformed parameter. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time versionstamped values are not compatible with the Tuple layer.</div>
+<div class="block">Transforms <code>param</code> using a versionstamp for the transaction. Sets the <code>key</code> given to the transformed <code>param</code>. The parameter is transformed by removing the final four bytes from <code>param</code> and reading those as a little-Endian 32-bit integer to get a position <code>pos</code>. The 10 bytes of the parameter from <code>pos</code> to <code>pos + 10</code> are replaced with the versionstamp of the transaction used. The first byte of the parameter is position 0. A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database (serialized in big-Endian order). The last 2 bytes are monotonic in the serialization order for transactions. WARNING: At this time, versionstamps are compatible with the Tuple layer only in the Java and Python bindings. Also, note that prior to API version 520, the versionstamp was always placed at the beginning of the parameter rather than computing an offset.</div>
 </li>
 </ul>
 <a name="BYTE_MIN">

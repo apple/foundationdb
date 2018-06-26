@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Administration &#8212; FoundationDB 5.1</title>
+    <title>Administration &#8212; FoundationDB 5.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.7',
+        VERSION:     '5.2.5',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,6 +31,8 @@
     <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Moving a Cluster to New Machines" href="moving-a-cluster.html" />
+    <link rel="prev" title="Time-Series Data" href="time-series.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
@@ -50,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -121,16 +123,9 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#version-specific-notes-on-upgrading">Version-specific notes on upgrading</a><ul>
-<li><a class="reference internal" href="#upgrading-from-5-1-x">Upgrading from 5.1.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-5-0-x">Upgrading from 5.0.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-6-x">Upgrading from 4.6.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-5-x">Upgrading from 4.5.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-4-x">Upgrading from 4.4.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-3-x">Upgrading from 4.3.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-2-x">Upgrading from 4.2.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-1-x">Upgrading from 4.1.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-0-x">Upgrading from 4.0.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-3-x">Upgrading from 3.x</a></li>
+<li><a class="reference internal" href="#upgrading-from-5-2-x">Upgrading from 5.2.x</a></li>
+<li><a class="reference internal" href="#upgrading-from-4-4-x-5-1-x">Upgrading from 4.4.x - 5.1.x</a></li>
+<li><a class="reference internal" href="#upgrading-from-3-0-x-4-3-x">Upgrading from 3.0.x - 4.3.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-older-versions">Upgrading from Older Versions</a></li>
 </ul>
 </li>
@@ -144,6 +139,14 @@
             
               
                 
+  <li>
+    <a href="time-series.html" title="Previous Chapter: Time-Series Data"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Time-Series Data</span>
+    </a>
+  </li>
+  <li>
+    <a href="moving-a-cluster.html" title="Next Chapter: Moving a Cluster to New Machines"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Moving a Clus... &raquo;</span>
+    </a>
+  </li>
               
             
             
@@ -211,16 +214,9 @@
 </ul>
 </li>
 <li><a class="reference internal" href="#version-specific-notes-on-upgrading">Version-specific notes on upgrading</a><ul>
-<li><a class="reference internal" href="#upgrading-from-5-1-x">Upgrading from 5.1.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-5-0-x">Upgrading from 5.0.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-6-x">Upgrading from 4.6.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-5-x">Upgrading from 4.5.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-4-x">Upgrading from 4.4.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-3-x">Upgrading from 4.3.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-2-x">Upgrading from 4.2.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-1-x">Upgrading from 4.1.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-4-0-x">Upgrading from 4.0.x</a></li>
-<li><a class="reference internal" href="#upgrading-from-3-x">Upgrading from 3.x</a></li>
+<li><a class="reference internal" href="#upgrading-from-5-2-x">Upgrading from 5.2.x</a></li>
+<li><a class="reference internal" href="#upgrading-from-4-4-x-5-1-x">Upgrading from 4.4.x - 5.1.x</a></li>
+<li><a class="reference internal" href="#upgrading-from-3-0-x-4-3-x">Upgrading from 3.0.x - 4.3.x</a></li>
 <li><a class="reference internal" href="#upgrading-from-older-versions">Upgrading from Older Versions</a></li>
 </ul>
 </li>
@@ -435,42 +431,47 @@ Using cluster file `/etc/foundationdb/fdb.cluster&#39;.
 The database is available.
 
 Welcome to the fdbcli. For help, type `help&#39;.
+fdb&gt; status
+
+Configuration:
+  Redundancy mode        - triple
+  Storage engine         - ssd-2
+  Coordinators           - 5
+  Desired Proxies        - 5
+  Desired Logs           - 8
+
+Cluster:
+  FoundationDB processes - 272
+  Machines               - 16
+  Memory availability    - 14.5 GB per process on machine with least available
+  Retransmissions rate   - 20 Hz
+  Fault Tolerance        - 2 machines
+  Server time            - 03/19/18 08:51:52
+
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 3.298 TB
+  Disk space used        - 15.243 TB
+
+Operating space:
+  Storage server         - 1656.2 GB free on most full server
+  Log server             - 1794.7 GB free on most full server
+
+Workload:
+  Read rate              - 55990 Hz
+  Write rate             - 14946 Hz
+  Transactions started   - 6321 Hz
+  Transactions committed - 1132 Hz
+  Conflict rate          - 0 Hz
+
+Backup and DR:
+  Running backups        - 1
+  Running DRs            - 1 as primary
+
+Client time: 03/19/18 08:51:51
 </pre></div>
 </div>
-<p>fdb&gt; status</p>
-<dl class="docutils">
-<dt>Configuration:</dt>
-<dd>Redundancy mode        - triple
-Storage engine         - ssd-2
-Coordinators           - 5
-Desired Proxies        - 5
-Desired Logs           - 8</dd>
-<dt>Cluster:</dt>
-<dd>FoundationDB processes - 272
-Machines               - 16
-Memory availability    - 14.5 GB per process on machine with least available
-Retransmissions rate   - 20 Hz
-Fault Tolerance        - 2 machines
-Server time            - 03/19/18 08:51:52</dd>
-<dt>Data:</dt>
-<dd>Replication health     - Healthy
-Moving data            - 0.000 GB
-Sum of key-value sizes - 3.298 TB
-Disk space used        - 15.243 TB</dd>
-<dt>Operating space:</dt>
-<dd>Storage server         - 1656.2 GB free on most full server
-Log server             - 1794.7 GB free on most full server</dd>
-<dt>Workload:</dt>
-<dd>Read rate              - 55990 Hz
-Write rate             - 14946 Hz
-Transactions started   - 6321 Hz
-Transactions committed - 1132 Hz
-Conflict rate          - 0 Hz</dd>
-<dt>Backup and DR:</dt>
-<dd>Running backups        - 1
-Running DRs            - 1 as primary</dd>
-</dl>
-<p>Client time: 03/19/18 08:51:51</p>
 <p>The summary fields are interpreted as follows:</p>
 <table border="1" class="docutils">
 <colgroup>
@@ -587,129 +588,136 @@ The database is available.
 
 Welcome to the fdbcli. For help, type `help&#39;.
 fdb&gt; status details
+
+
+Configuration:
+  Redundancy mode        - triple
+  Storage engine         - ssd-2
+  Coordinators           - 5
+
+Cluster:
+  FoundationDB processes - 85
+  Machines               - 5
+  Memory availability    - 7.4 GB per process on machine with least available
+  Retransmissions rate   - 5 Hz
+  Fault Tolerance        - 2 machines
+  Server time            - 03/19/18 08:59:37
+
+Data:
+  Replication health     - Healthy
+  Moving data            - 0.000 GB
+  Sum of key-value sizes - 87.068 GB
+  Disk space used        - 327.819 GB
+
+Operating space:
+  Storage server         - 888.2 GB free on most full server
+  Log server             - 897.3 GB free on most full server
+
+Workload:
+  Read rate              - 117 Hz
+  Write rate             - 0 Hz
+  Transactions started   - 43 Hz
+  Transactions committed - 1 Hz
+  Conflict rate          - 0 Hz
+
+Process performance details:
+  10.0.4.1:4500     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4501     (  1% cpu;  2% machine; 0.010 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4502     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4503     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4504     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4505     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4506     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4507     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4508     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4509     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4510     (  1% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4511     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4512     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.1:4513     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.1:4514     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4515     ( 12% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.1:4516     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.3 GB / 7.4 GB RAM  )
+  10.0.4.2:4500     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4501     ( 15% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4502     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4503     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4504     (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4505     ( 18% cpu;  3% machine; 0.124 Gbps; 18% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4506     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4507     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4508     (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4509     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4510     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4511     (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4512     (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.2:4513     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.2:4514     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4515     ( 11% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.2:4516     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4500     ( 14% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 3.0 GB / 7.4 GB RAM  )
+  10.0.4.3:4501     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.3:4502     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.3:4503     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4504     (  7% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4505     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4506     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4507     (  2% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4508     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4509     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4510     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4511     (  2% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4512     (  2% cpu;  3% machine; 0.284 Gbps;  3% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.3:4513     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.3:4514     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.3:4515     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.3:4516     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
+  10.0.4.4:4500     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4501     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4502     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4503     (  2% cpu;  4% machine; 0.065 Gbps; 16% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4504     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.4:4505     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4506     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4507     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4508     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4509     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4510     ( 24% cpu;  4% machine; 0.065 Gbps; 15% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4511     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
+  10.0.4.4:4512     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.4:4513     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.4:4514     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4515     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.4:4516     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4500     (  6% cpu;  2% machine; 0.076 Gbps;  7% disk IO; 3.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4501     (  2% cpu;  2% machine; 0.076 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4502     (  1% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4503     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4504     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4505     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4506     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4507     (  2% cpu;  2% machine; 0.076 Gbps;  6% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4508     ( 31% cpu;  2% machine; 0.076 Gbps;  8% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4509     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4510     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
+  10.0.4.5:4511     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4512     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4513     (  0% cpu;  2% machine; 0.076 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
+  10.0.4.5:4514     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4515     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
+  10.0.4.5:4516     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
+
+Coordination servers:
+  10.0.4.1:4500  (reachable)
+  10.0.4.2:4500  (reachable)
+  10.0.4.3:4500  (reachable)
+  10.0.4.4:4500  (reachable)
+  10.0.4.5:4500  (reachable)
+
+Client time: 03/19/18 08:59:37
 </pre></div>
 </div>
-<dl class="docutils">
-<dt>Configuration:</dt>
-<dd>Redundancy mode        - triple
-Storage engine         - ssd-2
-Coordinators           - 5</dd>
-<dt>Cluster:</dt>
-<dd>FoundationDB processes - 85
-Machines               - 5
-Memory availability    - 7.4 GB per process on machine with least available
-Retransmissions rate   - 5 Hz
-Fault Tolerance        - 2 machines
-Server time            - 03/19/18 08:59:37</dd>
-<dt>Data:</dt>
-<dd>Replication health     - Healthy
-Moving data            - 0.000 GB
-Sum of key-value sizes - 87.068 GB
-Disk space used        - 327.819 GB</dd>
-<dt>Operating space:</dt>
-<dd>Storage server         - 888.2 GB free on most full server
-Log server             - 897.3 GB free on most full server</dd>
-<dt>Workload:</dt>
-<dd>Read rate              - 117 Hz
-Write rate             - 0 Hz
-Transactions started   - 43 Hz
-Transactions committed - 1 Hz
-Conflict rate          - 0 Hz</dd>
-<dt>Process performance details:</dt>
-<dd>10.0.4.1:4500     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
-10.0.4.1:4501     (  1% cpu;  2% machine; 0.010 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.1:4502     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.1:4503     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.1:4504     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.1:4505     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.1:4506     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.1:4507     (  2% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.1:4508     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.1:4509     (  2% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.1:4510     (  1% cpu;  2% machine; 0.010 Gbps;  1% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.1:4511     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.1:4512     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.1:4513     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.1:4514     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-10.0.4.1:4515     ( 12% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-10.0.4.1:4516     (  0% cpu;  2% machine; 0.010 Gbps;  0% disk IO; 0.3 GB / 7.4 GB RAM  )
-10.0.4.2:4500     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
-10.0.4.2:4501     ( 15% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4502     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4503     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4504     (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4505     ( 18% cpu;  3% machine; 0.124 Gbps; 18% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4506     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4507     (  2% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4508     (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4509     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4510     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4511     (  2% cpu;  3% machine; 0.124 Gbps;  1% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4512     (  2% cpu;  3% machine; 0.124 Gbps; 19% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.2:4513     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.2:4514     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-10.0.4.2:4515     ( 11% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-10.0.4.2:4516     (  0% cpu;  3% machine; 0.124 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )
-10.0.4.3:4500     ( 14% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 3.0 GB / 7.4 GB RAM  )
-10.0.4.3:4501     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
-10.0.4.3:4502     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
-10.0.4.3:4503     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.3:4504     (  7% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.3:4505     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.3:4506     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.3:4507     (  2% cpu;  3% machine; 0.284 Gbps; 26% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.3:4508     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.3:4509     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.3:4510     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.3:4511     (  2% cpu;  3% machine; 0.284 Gbps; 12% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.3:4512     (  2% cpu;  3% machine; 0.284 Gbps;  3% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.3:4513     (  2% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.3:4514     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
-10.0.4.3:4515     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
-10.0.4.3:4516     (  0% cpu;  3% machine; 0.284 Gbps;  0% disk IO; 0.1 GB / 7.4 GB RAM  )
-10.0.4.4:4500     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 3.2 GB / 7.4 GB RAM  )
-10.0.4.4:4501     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4502     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4503     (  2% cpu;  4% machine; 0.065 Gbps; 16% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4504     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.4:4505     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4506     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4507     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4508     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4509     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4510     ( 24% cpu;  4% machine; 0.065 Gbps; 15% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4511     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.8 GB / 7.4 GB RAM  )
-10.0.4.4:4512     (  2% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.4:4513     (  0% cpu;  4% machine; 0.065 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.4:4514     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
-10.0.4.4:4515     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.2 GB / 7.4 GB RAM  )
-10.0.4.4:4516     (  0% cpu;  4% machine; 0.065 Gbps;  1% disk IO; 0.6 GB / 7.4 GB RAM  )
-10.0.4.5:4500     (  6% cpu;  2% machine; 0.076 Gbps;  7% disk IO; 3.2 GB / 7.4 GB RAM  )
-10.0.4.5:4501     (  2% cpu;  2% machine; 0.076 Gbps; 19% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4502     (  1% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4503     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4504     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.5:4505     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.5:4506     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4507     (  2% cpu;  2% machine; 0.076 Gbps;  6% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4508     ( 31% cpu;  2% machine; 0.076 Gbps;  8% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.5:4509     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4510     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.7 GB / 7.4 GB RAM  )
-10.0.4.5:4511     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4512     (  2% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4513     (  0% cpu;  2% machine; 0.076 Gbps;  3% disk IO; 2.6 GB / 7.4 GB RAM  )
-10.0.4.5:4514     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-10.0.4.5:4515     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.2 GB / 7.4 GB RAM  )
-10.0.4.5:4516     (  0% cpu;  2% machine; 0.076 Gbps;  0% disk IO; 0.6 GB / 7.4 GB RAM  )</dd>
-<dt>Coordination servers:</dt>
-<dd>10.0.4.1:4500  (reachable)
-10.0.4.2:4500  (reachable)
-10.0.4.3:4500  (reachable)
-10.0.4.4:4500  (reachable)
-10.0.4.5:4500  (reachable)</dd>
-</dl>
-<p>Client time: 03/19/18 08:59:37
-Several details about individual FoundationDB processes are displayed in a list format in parenthesis after the IP address and port:</p>
+<p>Several details about individual FoundationDB processes are displayed in a list format in parenthesis after the IP address and port:</p>
 <table border="1" class="docutils">
 <colgroup>
 <col width="8%" />
@@ -853,13 +861,13 @@ Several details about individual FoundationDB processes are displayed in a list 
 <h3>Perform the upgrade</h3>
 <p>For <strong>Ubuntu</strong>, perform the upgrade using the dpkg command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo dpkg -i foundationdb-clients_5.1.7-1_amd64.deb \
-foundationdb-server_5.1.7-1_amd64.deb
+user&#64;host$ sudo dpkg -i foundationdb-clients_5.2.5-1_amd64.deb \
+foundationdb-server_5.2.5-1_amd64.deb
 </pre>
 <p>For <strong>RHEL/CentOS</strong>, perform the upgrade using the rpm command:</p>
 <pre class="literal-block">
-user&#64;host$ sudo rpm -Uvh foundationdb-clients-5.1.7-1.el7.x86_64.rpm \
-foundationdb-server-5.1.7-1.el7.x86_64.rpm
+user&#64;host$ sudo rpm -Uvh foundationdb-clients-5.2.5-1.el7.x86_64.rpm \
+foundationdb-server-5.2.5-1.el7.x86_64.rpm
 </pre>
 <p>The <code class="docutils literal"><span class="pre">foundationdb-clients</span></code> package also installs the <a class="reference internal" href="api-python.html"><span class="doc">Python</span></a> and <a class="reference internal" href="api-c.html"><span class="doc">C</span></a> APIs. If your clients use <a class="reference internal" href="api-ruby.html"><span class="doc">Ruby</span></a>, <a class="reference external" href="javadoc/index.html">Java</a>, or <a class="reference external" href="https://godoc.org/github.com/apple/foundationdb/bindings/go/src/fdb">Go</a>, follow the instructions in the corresponding language documentation to install the APIs.</p>
 </div>
@@ -874,49 +882,21 @@ foundationdb-server-5.1.7-1.el7.x86_64.rpm
 </div>
 <div class="section" id="version-specific-notes-on-upgrading">
 <span id="version-specific-upgrading"></span><h2>Version-specific notes on upgrading</h2>
-<div class="section" id="upgrading-from-5-1-x">
-<h3>Upgrading from 5.1.x</h3>
-<p>Upgrades from 5.0.x will keep all your old data and configuration settings. 5.1 has a new backup format so backups will need to be restarted after upgrading.</p>
+<div class="section" id="upgrading-from-5-2-x">
+<h3>Upgrading from 5.2.x</h3>
+<p>Upgrades from 5.2.x will keep all your old data and configuration settings.</p>
 </div>
-<div class="section" id="upgrading-from-5-0-x">
-<h3>Upgrading from 5.0.x</h3>
-<p>Upgrades from 5.0.x will keep all your old data and configuration settings.</p>
+<div class="section" id="upgrading-from-4-4-x-5-1-x">
+<h3>Upgrading from 4.4.x - 5.1.x</h3>
+<p>Upgrades from versions between 4.4.x and 5.1.x will keep all your old data and configuration settings. Backups that are running will automatically be aborted and must be restarted.</p>
 </div>
-<div class="section" id="upgrading-from-4-6-x">
-<h3>Upgrading from 4.6.x</h3>
-<p>Upgrades from 4.6.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-4-5-x">
-<h3>Upgrading from 4.5.x</h3>
-<p>Upgrades from 4.5.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-4-4-x">
-<h3>Upgrading from 4.4.x</h3>
-<p>Upgrades from 4.4.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-4-3-x">
-<h3>Upgrading from 4.3.x</h3>
-<p>Backup and DR must be stopped before upgrading. Upgrades from 4.3.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-4-2-x">
-<h3>Upgrading from 4.2.x</h3>
-<p>Backup and DR must be stopped before upgrading. Upgrades from 4.2.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-4-1-x">
-<h3>Upgrading from 4.1.x</h3>
-<p>Backup and DR must be stopped before upgrading. Upgrades from 4.1.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-4-0-x">
-<h3>Upgrading from 4.0.x</h3>
-<p>Backup and DR must be stopped before upgrading. Upgrades from 4.0.x will keep all your old data and configuration settings.</p>
-</div>
-<div class="section" id="upgrading-from-3-x">
-<h3>Upgrading from 3.x</h3>
-<p>To upgrade from versions prior to 4.0, you should first upgrade to 4.0 and then to the current version.</p>
+<div class="section" id="upgrading-from-3-0-x-4-3-x">
+<h3>Upgrading from 3.0.x - 4.3.x</h3>
+<p>Backup and DR must be stopped before upgrading. Upgrades from versions between 3.0.x and 4.3.x will keep all your old data and configuration settings.</p>
 </div>
 <div class="section" id="upgrading-from-older-versions">
 <span id="id6"></span><h3>Upgrading from Older Versions</h3>
-<p>Upgrades from versions older than 3.0.0 are no longer supported. To upgrade from an older version, first upgrade to 4.0.x, then upgrade to the desired version.</p>
+<p>Upgrades from versions older than 3.0.0 are no longer supported.</p>
 </div>
 </div>
 </div>
@@ -940,8 +920,8 @@ foundationdb-server-5.1.7-1.el7.x86_64.rpm
       
     </p>
     <p>
-        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors..<br/>
-      Last updated on Apr 26, 2018.<br/>
+        &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
+      Last updated on Jun 26, 2018.<br/>
     </p>
   </div>
 </footer>

@@ -30,7 +30,7 @@ Open a Python interactive interpreter and import the FoundationDB API module::
 
 Before using the API, we need to specify the API version. This allows programs to maintain compatibility even if the API is modified in future versions::
 
-    >>> fdb.api_version(510)
+    >>> fdb.api_version(520)
 
 Next, we open a FoundationDB database.  The API will connect to the FoundationDB cluster indicated by the :ref:`default cluster file <default-cluster-file>`. ::
 
@@ -38,20 +38,20 @@ Next, we open a FoundationDB database.  The API will connect to the FoundationDB
 
 We are ready to use the database. In Python, using the ``[]`` operator on the db object is a convenient syntax for performing a read or write on the database. First, let's simply write a key-value pair:
 
-    >>> db['hello'] = 'world'
+    >>> db[b'hello'] = b'world'
 
 When this command returns without exception, the modification is durably stored in FoundationDB! Under the covers, this function creates a transaction with a single modification. We'll see later how to do multiple operations in a single transaction. For now, let's read back the data::
 
-    >>> print 'hello', db['hello']
+    >>> print 'hello', db[b'hello']
     hello world
 
 If this is all working, it looks like we are ready to start building a real application. For reference, here's the full code for "hello world"::
 
     import fdb
-    fdb.api_version(510)
+    fdb.api_version(520)
     db = fdb.open()
-    db['hello'] = 'world'
-    print 'hello', db['hello']
+    db[b'hello'] = b'world'
+    print 'hello', db[b'hello']
 
 Class scheduling application
 ============================
@@ -91,7 +91,7 @@ FoundationDB includes a few tools that make it easy to model data using this app
 opening a :ref:`directory <developer-guide-directories>` in the database::
 
     import fdb
-    fdb.api_version(510)
+    fdb.api_version(520)
 
     db = fdb.open()
     scheduling = fdb.directory.create_or_open(db, ('scheduling',))
@@ -170,7 +170,7 @@ Before students can do anything else, they need to be able to retrieve a list of
     def available_classes(tr):
         return [course.unpack(k)[0] for k, v in tr[course.range(())]]
 
-In general, the :meth:`Subspace.range` method returns a Python ``slice`` representing all the key-value pairs starting with the specified tuple. In this case, we want all classes, so we call :meth:`course.range` with the empty tuple ``()``. FoundationDB's ``tr[slice]`` function returns an iterable list of key-values in the range specified by the slice. We unpack the key ``k`` and value ``v`` in a comprehension. To extract the class name itself, we unpack the key into a tuple using the :py:mod:`fdb.tuple` module and take its third part. (The first and second parts are the prefixes for the ``scheduling`` and ``course`` subspaces, respectively.)
+In general, the :meth:`Subspace.range` method returns a Python ``slice`` representing all the key-value pairs starting with the specified tuple. In this case, we want all classes, so we call :meth:`course.range` with the empty tuple ``()``. FoundationDB's ``tr[slice]`` function returns an iterable list of key-values in the range specified by the slice. We unpack the key ``k`` and value ``v`` in a comprehension. To extract the class name itself, we unpack the key into a tuple using the :meth:`Subspace.unpack` method and take the first field. (The first and second parts of the tuple, the ``scheduling`` and ``course`` subspace prefixes, are removed by the ``unpack`` hence the reason we take the first field of the tuple.)
 
 Signing up for a class
 ----------------------
@@ -232,6 +232,19 @@ This is easy -- we simply add a condition to check that the value is non-zero. L
 
 We now have to check that we aren't already signed up, since we don't want a double sign up to decrease the number of seats twice. Then we look up how many seats are left to make sure there is a seat remaining so we don't push the counter into the negative. If there is a seat remaining, we decrement the counter.
 
+Similarly, the ``drop`` function is modified as follows:
+
+.. code-block:: python
+    :emphasize-lines: 4,5
+
+    @fdb.transactional
+    def drop(tr, s, c):
+        rec = attends.pack((s, c))
+        if not tr[rec].present(): return  # not taking this class
+        tr[course.pack((c,))] = fdb.tuple.pack((fdb.tuple.unpack(tr[course.pack((c,))])[0] + 1,))
+        del tr[rec]
+
+Once again we check to see if the student is signed up and if not, we can just return as we don't want to incorrectly increase the number of seats. We then adjust the number of seats by one by taking the current value, incrementing it by one, and then storing back.
 
 Concurrency and consistency
 ---------------------------
@@ -246,23 +259,6 @@ Idempotence
 -----------
 
 Occasionally, a transaction might be retried even after it succeeds (for example, if the client loses contact with the cluster at just the wrong moment). This can cause problems if transactions are not written to be idempotent, i.e. to have the same effect if committed twice as if committed once. There are generic design patterns for :ref:`making any transaction idempotent <developer-guide-unknown-results>`, but many transactions are naturally idempotent. For example, all of the transactions in this tutorial are idempotent.
-
-Dropping with limited seats
----------------------------
-
-Let's finish up the limited seats feature by modifying the drop function:
-
-.. code-block:: python
-    :emphasize-lines: 4,5
-
-    @fdb.transactional
-    def drop(tr, s, c):
-        rec = attends.pack((s, c))
-        if not tr[rec].present(): return  # not taking this class
-        tr[course.pack((c,))] = fdb.tuple.pack((fdb.tuple.unpack(tr[course.pack((c,))])[0] + 1,))
-        del tr[rec]
-
-This case is easier than signup because there are no constraints we can hit. We just need to make sure the student is in the class and to "give back" one seat when the student drops.
 
 More features?!
 ---------------
@@ -336,7 +332,7 @@ Here's the code for the scheduling tutorial::
     import fdb
     import fdb.tuple
 
-    fdb.api_version(510)
+    fdb.api_version(520)
 
 
     ####################################
