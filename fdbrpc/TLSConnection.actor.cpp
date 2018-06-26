@@ -28,6 +28,9 @@
 #include "Platform.h"
 #include <memory>
 
+// Name of specialized TLS Plugin
+const char* tlsPluginName = "fdb-libressl-plugin";
+
 // Must not throw an exception from this function!
 static int send_func(void* ctx, const uint8_t* buf, int len) {
 	TLSConnection* conn = (TLSConnection*)ctx;
@@ -368,14 +371,13 @@ static void TLSConnectionLogFunc( const char* event, void* uid_ptr, bool is_erro
 }
 
 void TLSOptions::init_plugin() {
-	std::string plugin_path = platform::getDefaultPluginPath("fdb-libressl-plugin");
 
-	TraceEvent("TLSConnectionLoadingPlugin").detail("PluginPath", plugin_path);
+	TraceEvent("TLSConnectionLoadingPlugin").detail("Plugin", tlsPluginName);
 
-	plugin = loadPlugin<ITLSPlugin>( plugin_path.c_str() );
+	plugin = loadPlugin<ITLSPlugin>( tlsPluginName );
 
 	if ( !plugin ) {
-		TraceEvent(SevError, "TLSConnectionPluginInitError").detail("Plugin", plugin_path).GetLastError();
+		TraceEvent(SevError, "TLSConnectionPluginInitError").detail("Plugin", tlsPluginName).GetLastError();
 		throw tls_error();
 	}
 

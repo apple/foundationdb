@@ -33,7 +33,7 @@ case $1 in
 		fi
 		;;
 	    *)
-\		$CC $OPTIONS
+		$CC $OPTIONS
 		;;
 	esac
 

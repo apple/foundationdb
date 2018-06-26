@@ -164,5 +164,4 @@ ifdef TLS_DISABLED
 else
 	@echo "TLS:            Enabled"
 endif
-	@echo "fdbcli CFLAGS:  $(fdbcli_CFLAGS)"
 	@echo ""
