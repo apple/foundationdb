@@ -50,4 +50,5 @@ The latest changes are detailed in :doc:`release-notes`. The documentation has t
    design-recipes
    api-reference
    tutorials
+   administration
    earlier-release-notes

@@ -93,7 +93,7 @@ LocationInfo::~LocationInfo() {
 		for( auto const& alternative : getAlternatives() )
 			handles.push_back( alternative.v.getVersion.getEndpoint().token ); // must match above choice of UID
 		std::sort( handles.begin(), handles.end() );
-		ASSERT( handles.size() );
+		ASSERT_ABORT( handles.size() );
 
 		auto it = cx->ssid_locationInfo.find( handles );
 		if( it != cx->ssid_locationInfo.end() )
@@ -549,7 +549,7 @@ DatabaseContext::~DatabaseContext() {
 	monitorMasterProxiesInfoChange.cancel();
 	for(auto it = ssid_locationInfo.begin(); it != ssid_locationInfo.end(); it = ssid_locationInfo.erase(it))
 		it->second->notifyContextDestroyed();
-	ASSERT( ssid_locationInfo.empty() );
+	ASSERT_ABORT( ssid_locationInfo.empty() );
 	locationCache.insert( allKeys, Reference<LocationInfo>() );
 }
 
@@ -2456,11 +2456,6 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 }
 
 Future<Void> Transaction::commitMutations() {
-	cx->transactionsCommitStarted++;
-
-	if(options.readOnly)
-		return transaction_read_only();
-
 	try {
 		//if this is a read-only transaction return immediately
 		if( !tr.transaction.write_conflict_ranges.size() && !tr.transaction.mutations.size() ) {
@@ -2470,6 +2465,11 @@ Future<Void> Transaction::commitMutations() {
 			versionstampPromise.sendError(no_commit_version());
 			return Void();
 		}
+
+		cx->transactionsCommitStarted++;
+
+		if(options.readOnly)
+			return transaction_read_only();
 
 		cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());

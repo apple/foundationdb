@@ -285,7 +285,20 @@ bool FDBLibTLSPolicy::set_verify_peers(int count, const uint8_t* verify_peers[],
 
 	for (int i = 0; i < count; i++) {
 		try {
-			Reference<FDBLibTLSVerify> verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(std::string((const char*)verify_peers[i], verify_peers_len[i])));
+			std::string verifyString((const char*)verify_peers[i], verify_peers_len[i]);
+			int start = 0;
+			while(start < verifyString.size()) {
+				int split = verifyString.find('|', start);
+				if(split == std::string::npos) {
+					break;
+				}
+				if(split == start || verifyString[split-1] != '\\') {
+					Reference<FDBLibTLSVerify> verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(verifyString.substr(start,split-start)));
+					verify_rules.push_back(verify);
+					start = split+1;
+				}
+			}
+			Reference<FDBLibTLSVerify> verify = Reference<FDBLibTLSVerify>(new FDBLibTLSVerify(verifyString.substr(start)));
 			verify_rules.push_back(verify);
 		} catch ( const std::runtime_error& e ) {
 			verify_rules.clear();
