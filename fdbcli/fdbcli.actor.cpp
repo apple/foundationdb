@@ -884,6 +884,12 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("logs", intVal))
 					outputString += format("\n  Desired Logs           - %d", intVal);
+
+				if (statusObjConfig.get("remote_logs", intVal))
+					outputString += format("\n  Desired Remote Logs    - %d", intVal);
+
+				if (statusObjConfig.get("log_routers", intVal))
+					outputString += format("\n  Desired Log Routers    - %d", intVal);
 			}
 			catch (std::runtime_error& e) {
 				outputString = outputStringCache;

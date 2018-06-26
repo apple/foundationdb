@@ -119,6 +119,7 @@ T simulate( const T& in ) {
 static void simInitTLS(Reference<TLSOptions> tlsOptions) {
 	tlsOptions->set_cert_data( certBytes );
 	tlsOptions->set_key_data( certBytes );
+	tlsOptions->set_verify_peers(std::vector<std::string>(1, "Check.Valid=0"));
 	tlsOptions->register_network();
 }
 
@@ -863,6 +864,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				ASSERT(false);  // Programmer forgot to adjust cases.
 			}
 
+			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
 		}
 

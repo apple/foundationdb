@@ -81,19 +81,18 @@ The following is a simple implementation of the basic pattern:
 
         // Remove the top element from the queue.
         public static Object dequeue(TransactionContext tcx){
-            final KeyValue item = firstItem(tcx);
-            if(item == null){
-                return null;
-            }
-
             // Remove from the top of the queue.
-            tcx.run((Transaction tr) -> {
+            return tcx.run((Transaction tr) -> {
+                final KeyValue item = firstItem(tr);
+                if(item == null){
+                    return null;
+                }
+
                 tr.clear(item.getKey());
-                return null;
+                // Return the old value.
+                return Tuple.fromBytes(item.getValue()).get(0);
             });
 
-            // Return the old value.
-            return Tuple.fromBytes(item.getValue()).get(0);
         }
 
         // Add an element to the queue.

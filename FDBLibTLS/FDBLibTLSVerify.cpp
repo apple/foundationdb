@@ -136,7 +136,7 @@ static std::pair<std::string, std::string> splitPair(std::string const& input, c
 static int abbrevToNID(std::string const& sn) {
 	int nid = NID_undef;
 
-	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU")
+	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU" || sn == "UID" || sn == "DC")
 		nid = OBJ_sn2nid(sn.c_str());
 	if (nid == NID_undef)
 		throw std::runtime_error("abbrevToNID");
