@@ -288,13 +288,13 @@ ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
 
 	if(g_network->isSimulated()) {
 		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
-		g_simulator.hasRemoteReplication = false;
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "remote_none" ) );
+		g_simulator.usableRegions = 1;
+		ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
 		if (g_network->isSimulated() && g_simulator.extraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
 			Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
-			ConfigurationResult::Type _ = wait(changeConfig(extraDB, "remote_none"));
+			ConfigurationResult::Type _ = wait(changeConfig(extraDB, "usable_regions=1"));
 		}
 	}
 

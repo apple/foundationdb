@@ -186,7 +186,7 @@ The following format informally describes the JSON containing the status data. T
                   "name": <  "incorrect_cluster_file_contents"
                            | ...
                           >,
-                  "description": "Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally."
+                  "description": "Cluster file contents do not match current cluster connection string. Verify the cluster file and its parent directory are writable and that the cluster file has not been overwritten externally."
               }
           ],
           "reasons": [
@@ -218,6 +218,7 @@ The following format informally describes the JSON containing the status data. T
           "memory": {
             "available_bytes": 0, //an estimate of the process' fair share of the memory available to fdbservers
             "limit_bytes": 0, // memory limit per process
+            "unused_allocated_bytes": 0,
             "used_bytes": 0
           },
           "messages": [

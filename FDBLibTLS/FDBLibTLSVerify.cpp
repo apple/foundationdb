@@ -69,6 +69,7 @@ static std::string de4514(std::string const& input, int start, int& out_end) {
 			case '<':
 			case '=':
 			case '>':
+			case '|':
 			case '\\':
 				output += input[p+1];
 				p += 2;

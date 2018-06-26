@@ -293,7 +293,7 @@ public:
 				allHistoryCopy = allHistory;
 				hist = &allHistoryCopy;
 			}
-			
+
 			while(hist->size() && v > hist->back().first ) {
 				logSystem->pop( v, hist->back().second );
 				hist->pop_back();
@@ -452,7 +452,7 @@ public:
 			shuttingDown(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), watchBytes(0),
 			logProtocol(0), counters(this), tag(invalidTag), maxQueryQueue(0), thisServerID(ssi.id()),
 			readQueueSizeMetric(LiteralStringRef("StorageServer.ReadQueueSize")),
-			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false), 
+			behind(false), byteSampleClears(false, LiteralStringRef("\xff\xff\xff")), noRecentUpdates(false),
 			lastUpdate(now()), poppedAllAfter(std::numeric_limits<Version>::max())
 	{
 		version.initMetric(LiteralStringRef("StorageServer.Version"), counters.cc.id);
@@ -814,7 +814,7 @@ ACTOR Future<Void> watchValue_impl( StorageServer* data, WatchValueRequest req )
 ACTOR Future<Void> watchValueQ( StorageServer* data, WatchValueRequest req ) {
 	state Future<Void> watch = watchValue_impl( data, req );
 	state double startTime = now();
-	
+
 	loop {
 		double timeoutDelay = -1;
 		if(data->noRecentUpdates.get()) {
@@ -855,7 +855,7 @@ ACTOR Future<Void> getShardState_impl( StorageServer* data, GetShardStateRequest
 		}
 
 		if( !onChange.size() ) {
-			req.reply.send(data->version.get());
+			req.reply.send(std::make_pair(data->version.get(), data->durableVersion.get()));
 			return Void();
 		}
 
@@ -1808,6 +1808,9 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 		state int debug_nextRetryToLog = 1;
 		state bool isTooOld = false;
 
+		//FIXME: The client cache does not notice when servers are added to a team. To read from a local storage server we must refresh the cache manually.
+		data->cx->invalidateCache(keys);
+
 		loop {
 			try {
 				TEST(true);		// Fetching keys for transferred shard
@@ -2323,12 +2326,11 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of memory
 		// This is often referred to as the storage server e-brake (emergency brake)
 		state double waitStartT = 0;
-		while ( data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES && data->durableVersion.get() < data->desiredOldestVersion.get() )
-		{
-			if (now() - waitStartT >= .1) {
+		while ( data->queueSize() >= SERVER_KNOBS->STORAGE_HARD_LIMIT_BYTES && data->durableVersion.get() < data->desiredOldestVersion.get() ) {
+			if (now() - waitStartT >= 1) {
 				TraceEvent(SevWarn, "StorageServerUpdateLag", data->thisServerID)
 					.detail("Version", data->version.get())
-					.detail("DurableVersion", data->durableVersion.get()).suppressFor(1.0);
+					.detail("DurableVersion", data->durableVersion.get());
 				waitStartT = now();
 			}
 
@@ -2342,7 +2344,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 
 		state Reference<ILogSystem::IPeekCursor> cursor = data->logCursor;
 		//TraceEvent("SSUpdatePeeking", data->thisServerID).detail("MyVer", data->version.get()).detail("Epoch", data->updateEpoch).detail("Seq", data->updateSequence);
-		
+
 		loop {
 			Void _ = wait( cursor->getMore() );
 			if(!cursor->isExhausted()) {
@@ -3179,7 +3181,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			when (GetShardStateRequest req = waitNext(ssi.getShardState.getFuture()) ) {
 				if (req.mode == GetShardStateRequest::NO_WAIT ) {
 					if( self->isReadable( req.keys ) )
-						req.reply.send(self->version.get());
+						req.reply.send(std::make_pair(self->version.get(),self->durableVersion.get()));
 					else
 						req.reply.sendError(wrong_shard_server());
 				} else {
@@ -3290,7 +3292,7 @@ ACTOR Future<Void> replaceInterface( StorageServer* self, StorageServerInterface
 					tr.addReadConflictRange(singleKeyRange(tagLocalityListKeyFor(ssi.locality.dcId())));
 
 					tr.set(serverListKeyFor(ssi.id()), serverListValue(ssi));
-					
+
 					if(rep.newLocality) {
 						tr.addReadConflictRange(tagLocalityListKeys);
 						tr.set( tagLocalityListKeyFor(ssi.locality.dcId()), tagLocalityListValue(rep.newTag.get().locality) );

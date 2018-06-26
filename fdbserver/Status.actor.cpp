@@ -679,6 +679,9 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 
 				metric = parseDouble(event.getValue("Memory"));
 				memoryObj["used_bytes"] = metric;
+
+				metric = parseDouble(event.getValue("UnusedAllocatedMemory"));
+				memoryObj["unused_allocated_memory"] = metric;
 			}
 
 			if (programStarts.count(address)) {
@@ -959,8 +962,9 @@ ACTOR static Future<StatusObject> latencyProbeFetcher(Database cx, StatusArray *
 	return statusObj;
 }
 
-ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database cx, StatusArray *messages, std::set<std::string> *status_incomplete_reasons){
+ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> loadConfiguration(Database cx, StatusArray *messages, std::set<std::string> *status_incomplete_reasons){
 	state Optional<DatabaseConfiguration> result;
+	state Optional<bool> fullReplication;
 	state Transaction tr(cx);
 	state Future<Void> getConfTimeout = delay(5.0);
 
@@ -981,7 +985,34 @@ ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database 
 					result = configuration;
 				}
 				when(Void _ = wait(getConfTimeout)) {
-					messages->push_back(makeMessage("unreadable_configuration", "Unable to read database configuration."));
+					if(!result.present()) {
+						messages->push_back(makeMessage("unreadable_configuration", "Unable to read database configuration."));
+					} else {
+						messages->push_back(makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
+					}
+					break;
+				}
+			}
+
+			ASSERT(result.present());
+			state std::vector<Future<Optional<Value>>> replicasFutures;
+			for(auto& region : result.get().regions) {
+				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
+			}
+
+			choose {
+				when( Void _ = wait( waitForAll(replicasFutures) ) ) {
+					int unreplicated = 0;
+					for(int i = 0; i < result.get().regions.size(); i++) {
+						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
+							unreplicated++;
+						}
+					}
+
+					fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
+				}
+				when(Void _ = wait(getConfTimeout)) {
+					messages->push_back(makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 				}
 			}
 			break;
@@ -990,7 +1021,7 @@ ACTOR static Future<Optional<DatabaseConfiguration>> loadConfiguration(Database 
 			Void _ = wait(tr.onError(e));
 		}
 	}
-	return result;
+	return std::make_pair(result, fullReplication);
 }
 
 static StatusObject configurationFetcher(Optional<DatabaseConfiguration> conf, ServerCoordinators coordinators, std::set<std::string> *incomplete_reasons) {
@@ -1174,17 +1205,35 @@ ACTOR static Future<vector<std::pair<TLogInterface, TraceEventFields>>> getTLogs
 	return results;
 }
 
-static std::set<StringRef> getTLogEligibleMachines(vector<std::pair<WorkerInterface, ProcessClass>> workers, DatabaseConfiguration configuration) {
-	std::set<StringRef> tlogEligibleMachines;
+static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, ProcessClass>> workers, DatabaseConfiguration configuration) {
+	std::set<StringRef> allMachines;
+	std::map<Key,std::set<StringRef>> dcId_machine;
 	for(auto worker : workers) {
 		if(worker.second.machineClassFitness(ProcessClass::TLog) < ProcessClass::NeverAssign
 			&& !configuration.isExcludedServer(worker.first.address()))
 		{
-			tlogEligibleMachines.insert(worker.first.locality.zoneId().get());
+			allMachines.insert(worker.first.locality.zoneId().get());
+			if(worker.first.locality.dcId().present()) {
+				dcId_machine[worker.first.locality.dcId().get()].insert(worker.first.locality.zoneId().get());
+			}
 		}
 	}
 
-	return tlogEligibleMachines;
+	if(configuration.regions.size() == 0) {
+		return allMachines.size() - std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize);
+	} 
+	int extraTlogEligibleMachines = std::numeric_limits<int>::max();
+	for(auto& region : configuration.regions) {
+		extraTlogEligibleMachines = std::min<int>( extraTlogEligibleMachines, dcId_machine[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) ) );
+		if(region.satelliteTLogReplicationFactor > 0) {
+			int totalSatelliteEligible = 0;
+			for(auto& sat : region.satellites) {
+				totalSatelliteEligible += dcId_machine[sat.dcId].size();
+			}
+			extraTlogEligibleMachines = std::min<int>( extraTlogEligibleMachines, totalSatelliteEligible - region.satelliteTLogReplicationFactor );
+		}
+	}
+	return extraTlogEligibleMachines;
 }
 
 ACTOR static Future<StatusObject> workloadStatusFetcher(Reference<AsyncVar<struct ServerDBInfo>> db, vector<std::pair<WorkerInterface, ProcessClass>> workers, std::pair<WorkerInterface, ProcessClass> mWorker, 
@@ -1356,11 +1405,19 @@ static StatusArray oldTlogFetcher(int* oldLogFaultTolerance, Reference<AsyncVar<
 					}
 				}
 				maxFaultTolerance = std::max(maxFaultTolerance, it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs);
-				//FIXME: add information for remote and satellites
-				if(i==0) {
+				if(it.tLogs[i].isLocal && it.tLogs[i].locality == tagLocalitySatellite) {
+					statusObj["satellite_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
+					statusObj["satellite_log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
+					statusObj["satellite_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
+				}
+				else if(it.tLogs[i].isLocal) {
 					statusObj["log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
 					statusObj["log_write_anti_quorum"] = it.tLogs[i].tLogWriteAntiQuorum;
 					statusObj["log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - it.tLogs[i].tLogWriteAntiQuorum - failedLogs;
+				}
+				else {
+					statusObj["remote_log_replication_factor"] = it.tLogs[i].tLogReplicationFactor;
+					statusObj["remote_log_fault_tolerance"] = it.tLogs[i].tLogReplicationFactor - 1 - failedLogs;
 				}
 			}
 			*oldLogFaultTolerance = std::min(*oldLogFaultTolerance, maxFaultTolerance);
@@ -1378,7 +1435,7 @@ static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configurat
 static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<std::pair<WorkerInterface, ProcessClass>>& workers, int numTLogEligibleMachines, int minReplicasRemaining) {
 */
 
-static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<std::pair<WorkerInterface, ProcessClass>>& workers, int numTLogEligibleMachines, int minReplicasRemaining) {
+static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configuration, ServerCoordinators coordinators, std::vector<std::pair<WorkerInterface, ProcessClass>>& workers, int extraTlogEligibleMachines, int minReplicasRemaining) {
 	StatusObject statusObj;
 
 	// without losing data
@@ -1419,13 +1476,13 @@ static StatusObject faultToleranceStatusFetcher(DatabaseConfiguration configurat
 	statusObj["max_machine_failures_without_losing_data"] = std::max(machineFailuresWithoutLosingData, 0);
 
 	// without losing availablity
-	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(numTLogEligibleMachines - configuration.minMachinesRequiredPerDatacenter(), machineFailuresWithoutLosingData), 0);
+	statusObj["max_machine_failures_without_losing_availability"] = std::max(std::min(extraTlogEligibleMachines, machineFailuresWithoutLosingData), 0);
 	return statusObj;
 }
 
 static std::string getIssueDescription(std::string name) {
 	if(name == "incorrect_cluster_file_contents") {
-		return "Cluster file contents do not match current cluster connection string. Verify cluster file is writable and has not been overwritten externally.";
+		return "Cluster file contents do not match current cluster connection string. Verify the cluster file and its parent directory are writable and that the cluster file has not been overwritten externally.";
 	}
 
 	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which is currently the only possible message
@@ -1587,7 +1644,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		ClientVersionMap clientVersionMap,
 		std::map<NetworkAddress, std::string> traceLogGroupMap,
 		ServerCoordinators coordinators,
-		std::vector<NetworkAddress> incompatibleConnections )
+		std::vector<NetworkAddress> incompatibleConnections,
+		Version datacenterVersionDifference )
 {
 	// since we no longer offer multi-database support, all databases must be named DB
 	state std::string dbName = "DB";
@@ -1667,11 +1725,17 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		statusObj["protocol_version"] = format("%llx", currentProtocolVersion);
 
-		state Optional<DatabaseConfiguration> configuration = Optional<DatabaseConfiguration>();
+		state Optional<DatabaseConfiguration> configuration;
+		state Optional<bool> fullReplication;
 
 		if(!(recoveryStateStatus.count("name") && recoveryStateStatus["name"] == RecoveryStatus::names[RecoveryStatus::configuration_missing])) {
-			Optional<DatabaseConfiguration> _configuration = wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
-			configuration = _configuration;
+			std::pair<Optional<DatabaseConfiguration>,Optional<bool>> loadResults = wait(loadConfiguration(cx, &messages, &status_incomplete_reasons));
+			configuration = loadResults.first;
+			fullReplication = loadResults.second;
+		}
+
+		if(fullReplication.present()) {
+			statusObj["full_replication"] = fullReplication.get();
 		}
 
 		statusObj["machines"] = machineStatusFetcher(mMetrics, workers, configuration, &status_incomplete_reasons);
@@ -1708,8 +1772,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 
 			if(configuration.present()) {
-				std::set<StringRef> tlogEligibleMachines = getTLogEligibleMachines(workers, configuration.get());
-				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, tlogEligibleMachines.size(), minReplicasRemaining);
+				int extraTlogEligibleMachines = getExtraTLogEligibleMachines(workers, configuration.get());
+				statusObj["fault_tolerance"] = faultToleranceStatusFetcher(configuration.get(), coordinators, workers, extraTlogEligibleMachines, minReplicasRemaining);
 			}
 
 			StatusObject configObj = configurationFetcher(configuration, coordinators, &status_incomplete_reasons);
@@ -1771,6 +1835,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			incompatibleConnectionsArray.push_back(it.toString());
 		}
 		statusObj["incompatible_connections"] = incompatibleConnectionsArray;
+		statusObj["datacenter_version_difference"] = datacenterVersionDifference;
 
 		if (!recoveryStateStatus.empty())
 			statusObj["recovery_state"] = recoveryStateStatus;

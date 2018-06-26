@@ -175,7 +175,8 @@ struct ProxyCommitData {
 	LogSystemDiskQueueAdapter* logAdapter;
 	Reference<ILogSystem> logSystem;
 	IKeyValueStore* txnStateStore;
-	NotifiedVersion committedVersion;   // Provided that this recovery has succeeded or will succeed, this version is fully committed (durable)
+	NotifiedVersion committedVersion; // Provided that this recovery has succeeded or will succeed, this version is fully committed (durable)
+	Version minKnownCommittedVersion; // No version smaller than this one will be used as the known committed version during recovery 
 	Version version;  // The version at which txnStateStore is up to date
 	Promise<Void> validState;  // Set once txnStateStore and version are valid
 	double lastVersionTime;
@@ -223,9 +224,9 @@ struct ProxyCommitData {
 	}
 
 	ProxyCommitData(UID dbgid, MasterInterface master, RequestStream<GetReadVersionRequest> getConsistentReadVersion, Version recoveryTransactionVersion, RequestStream<CommitTransactionRequest> commit, Reference<AsyncVar<ServerDBInfo>> db, bool firstProxy)
-		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master), 
+		: dbgid(dbgid), stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount), master(master),
 			logAdapter(NULL), txnStateStore(NULL),
-			committedVersion(recoveryTransactionVersion), version(0), 
+			committedVersion(recoveryTransactionVersion), version(0), minKnownCommittedVersion(0),
 			lastVersionTime(0), commitVersionRequestNumber(1), mostRecentProcessedRequestNumber(0),
 			getConsistentReadVersion(getConsistentReadVersion), commit(commit), lastCoalesceTime(0),
 			localCommitBatchesStarted(0), locked(false), firstProxy(firstProxy),
@@ -794,8 +795,7 @@ ACTOR Future<Void> commitBatch(
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMaxCommittedVersion(UID(), commitVersion);
 
-	Future<Void> loggingComplete = self->logSystem->push( prevVersion, commitVersion, self->committedVersion.get(), toCommit, debugID ) 
-		|| self->committedVersion.whenAtLeast( commitVersion+1 );
+	Future<Version> loggingComplete = self->logSystem->push( prevVersion, commitVersion, self->committedVersion.get(), self->minKnownCommittedVersion, toCommit, debugID );
 
 	if (!forceRecovery) {
 		ASSERT(self->latestLocalCommitBatchLogging.get() == localBatchNumber-1);
@@ -803,12 +803,25 @@ ACTOR Future<Void> commitBatch(
 	}
 
 	/////// Phase 4: Logging (network bound; pipelined up to MAX_READ_TRANSACTION_LIFE_VERSIONS (limited by loop above))
-	Void _ = wait(loggingComplete);
+
+	try {
+		choose {
+			when(Version ver = wait(loggingComplete)) {
+				self->minKnownCommittedVersion = std::max(self->minKnownCommittedVersion, ver);
+			}
+			when(Void _ = wait(self->committedVersion.whenAtLeast( commitVersion+1 ))) {}
+		}
+	} catch(Error &e) {
+		if(e.code() == error_code_broken_promise) {
+			throw master_tlog_failed();
+		}
+		throw;
+	}
 	Void _ = wait(yield());
 
 	self->logSystem->pop(msg.popTo, txsTag);
 
-	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)	
+	/////// Phase 5: Replies (CPU bound; no particular order required, though ordered execution would be best for latency)
 	if ( prevVersion && commitVersion - prevVersion < SERVER_KNOBS->MAX_VERSIONS_IN_FLIGHT/2 )
 		debug_advanceMinCommittedVersion(UID(), commitVersion);
 
@@ -826,7 +839,7 @@ ACTOR Future<Void> commitBatch(
 	if( commitVersion > self->committedVersion.get() ) {
 		self->locked = lockedAfter;
 		self->committedVersion.set(commitVersion);
-	} 
+	}
 
 	if (forceRecovery) {
 		TraceEvent(SevWarn, "RestartingTxnSubsystem", self->dbgid).detail("Stage", "ProxyShutdown");
@@ -1170,7 +1183,7 @@ ACTOR Future<Void> masterProxyServerCore(
 	state Future<Void> lastCommitComplete = Void();
 
 	state PromiseStream<Future<Void>> addActor;
-	state Future<Void> onError = actorCollection(addActor.getFuture());
+	state Future<Void> onError = transformError( actorCollection(addActor.getFuture()), broken_promise(), master_tlog_failed() );
 	state double lastCommit = 0;
 	state std::set<Sequence> txnSequences;
 	state Sequence maxSequence = std::numeric_limits<Sequence>::max();
@@ -1196,10 +1209,10 @@ ACTOR Future<Void> masterProxyServerCore(
 	for(auto r = rs.begin(); r != rs.end(); ++r)
 		r->value().push_back(std::make_pair<Version,int>(0,0));
 
-	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get());
+	commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
 	commitData.logAdapter = new LogSystemDiskQueueAdapter(commitData.logSystem, txsTag, false);
 	commitData.txnStateStore = keyValueStoreLogSystem(commitData.logAdapter, proxy.id(), 2e9, true, true);
-	onError = onError || commitData.logSystem->onError();
+
 	// ((SERVER_MEM_LIMIT * COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR) is only a approximate formula for limiting the memory used.
 	// COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR is an estimate based on experiments and not an accurate one.
 	state int64_t commitBatchesMemoryLimit = std::min(SERVER_KNOBS->COMMIT_BATCHES_MEM_BYTES_HARD_LIMIT, static_cast<int64_t>((SERVER_KNOBS->SERVER_MEM_LIMIT * SERVER_KNOBS->COMMIT_BATCHES_MEM_FRACTION_OF_TOTAL) / SERVER_KNOBS->COMMIT_BATCHES_MEM_TO_TOTAL_MEM_SCALE_FACTOR));
@@ -1220,7 +1233,7 @@ ACTOR Future<Void> masterProxyServerCore(
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
 			if(db->get().master.id() == master.id() && db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION) {
-				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get());
+				commitData.logSystem = ILogSystem::fromServerDBInfo(proxy.id(), db->get(), false, addActor);
 				for(auto it : commitData.tag_popped) {
 					commitData.logSystem->pop(it.second, it.first);
 				}

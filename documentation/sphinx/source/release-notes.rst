@@ -16,7 +16,7 @@ Performance
 
 * Transaction logs do not copy mutations from previous generations of transaction logs. `(PR #339) <https://github.com/apple/foundationdb/pull/339>`_
 * Load balancing temporarily avoids communicating with storage servers that have fallen behind.
-* Avoid assigning storage servers responsiblity for keys they do not have.
+* Avoid assigning storage servers responsibility for keys they do not have.
 
 Fixes
 -----
@@ -24,6 +24,11 @@ Fixes
 * Not all endpoint failures were reported to the failure monitor.
 * Watches registered on a lagging storage server would take a long time to trigger.
 * The cluster controller would not start a new generation until it recovered its files from disk.
+
+Status
+------
+
+* The replication factor in status JSON is stored under "redundancy_mode" instead of "redundancy":"factor". `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
 
 Other Changes
 -------------

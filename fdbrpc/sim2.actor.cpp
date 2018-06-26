@@ -1092,16 +1092,22 @@ public:
 			bool tooManyDead = false;
 			bool notEnoughLeft = false;
 			bool primaryTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false) : primaryProcessesDead.validate(tLogPolicy);
+			if(usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
+				primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
+			}
 
 			if(!primaryDcId.present()) {
 				tooManyDead = primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
 				notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy);
 			} else {
 				bool remoteTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo, remoteProcessesDead, tLogPolicy, remoteLocalitiesLeft, tLogWriteAntiQuorum, false) : remoteProcessesDead.validate(tLogPolicy);
-				
+				if(usableRegions > 1 && remoteTLogPolicy && !remoteTLogsDead) {
+					remoteTLogsDead = remoteProcessesDead.validate(remoteTLogPolicy);
+				}
+
 				if(!hasSatelliteReplication) {
 					notEnoughLeft = ( !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) ) && ( !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy) );
-					if(hasRemoteReplication) {
+					if(usableRegions > 1) {
 						tooManyDead = primaryTLogsDead || remoteTLogsDead || ( primaryProcessesDead.validate(storagePolicy) && remoteProcessesDead.validate(storagePolicy) );
 					} else {
 						tooManyDead = primaryTLogsDead || remoteTLogsDead || primaryProcessesDead.validate(storagePolicy) || remoteProcessesDead.validate(storagePolicy);
@@ -1111,7 +1117,7 @@ public:
 					bool remoteSatelliteTLogsDead = satelliteTLogWriteAntiQuorum ? !validateAllCombinations(badCombo, remoteSatelliteProcessesDead, satelliteTLogPolicy, remoteSatelliteLocalitiesLeft, satelliteTLogWriteAntiQuorum, false) : remoteSatelliteProcessesDead.validate(satelliteTLogPolicy);
 
 					notEnoughLeft = ( !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) || !primarySatelliteProcessesLeft.validate(satelliteTLogPolicy) ) && ( !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy) || !remoteSatelliteProcessesLeft.validate(satelliteTLogPolicy) );
-					if(hasRemoteReplication) {
+					if(usableRegions > 1) {
 						tooManyDead = ( primaryTLogsDead && primarySatelliteTLogsDead ) || ( remoteTLogsDead && remoteSatelliteTLogsDead ) || ( primaryProcessesDead.validate(storagePolicy) && remoteProcessesDead.validate(storagePolicy) );
 					} else {
 						tooManyDead = ( primaryTLogsDead && primarySatelliteTLogsDead ) || ( remoteTLogsDead && remoteSatelliteTLogsDead ) || primaryProcessesDead.validate(storagePolicy) || remoteProcessesDead.validate(storagePolicy);

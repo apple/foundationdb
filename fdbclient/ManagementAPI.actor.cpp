@@ -65,7 +65,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		std::string key = mode.substr(0, pos);
 		std::string value = mode.substr(pos+1);
 
-		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs") && isInteger(value) ) {
+		if( (key == "logs" || key == "proxies" || key == "resolvers" || key == "remote_logs" || key == "satellite_logs" || key == "usable_regions") && isInteger(value) ) {
 			out[p+key] = value;
 		}
 
@@ -133,8 +133,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	} else
 		redundancySpecified = false;
 	if (redundancySpecified) {
-		out[p+"storage_replicas"] =
-			out[p+"storage_quorum"] = redundancy;
+		out[p+"storage_replicas"] = redundancy;
 		out[p+"log_replicas"] = log_replicas;
 		out[p+"log_anti_quorum"] = "0";
 
@@ -151,7 +150,7 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 	std::string remote_redundancy, remote_log_replicas;
 	IRepPolicyRef remoteTLogPolicy;
 	bool remoteRedundancySpecified = true;
-	if (mode == "remote_none") {
+	if (mode == "remote_default") {
 		remote_redundancy="0";
 		remote_log_replicas="0";
 		remoteTLogPolicy = IRepPolicyRef();
@@ -242,7 +241,6 @@ bool isCompleteConfiguration( std::map<std::string, std::string> const& options 
 
 	return 	options.count( p+"log_replicas" ) == 1 &&
 			options.count( p+"log_anti_quorum" ) == 1 &&
-			options.count( p+"storage_quorum" ) == 1 &&
 			options.count( p+"storage_replicas" ) == 1 &&
 			options.count( p+"log_engine" ) == 1 &&
 			options.count( p+"storage_engine" ) == 1;
@@ -1185,42 +1183,40 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration( Database cx ) {
 }
 
 ACTOR Future<Void> waitForFullReplication( Database cx ) {
+	state ReadYourWritesTransaction tr(cx);
 	loop {
-		state ReadYourWritesTransaction tr(cx);
-		loop {
-			try {
-				tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
-				tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
-				tr.setOption( FDBTransactionOptions::LOCK_AWARE );
+		try {
+			tr.setOption( FDBTransactionOptions::READ_SYSTEM_KEYS );
+			tr.setOption( FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE );
+			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 
-				Standalone<RangeResultRef> confResults = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
-				ASSERT( !confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY );
-				state DatabaseConfiguration config;
-				config.fromKeyValues((VectorRef<KeyValueRef>) confResults);
+			Standalone<RangeResultRef> confResults = wait( tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY) );
+			ASSERT( !confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY );
+			state DatabaseConfiguration config;
+			config.fromKeyValues((VectorRef<KeyValueRef>) confResults);
 			
-				state std::vector<Future<Optional<Value>>> replicasFutures;
-				for(auto& region : config.regions) {
-					replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
-				}
-				Void _ = wait( waitForAll(replicasFutures) );
-
-				state std::vector<Future<Void>> watchFutures;
-				for(int i = 0; i < config.regions.size(); i++) {
-					if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize ) {
-						watchFutures.push_back(tr.watch(datacenterReplicasKeyFor(config.regions[i].dcId)));
-					}
-				}
-
-				if( !watchFutures.size() || (config.remoteTLogReplicationFactor == 0 && watchFutures.size() < config.regions.size())) {
-					return Void();
-				}
-
-				Void _ = wait( tr.commit() );
-				Void _ = wait( waitForAny(watchFutures) );
-				break;
-			} catch (Error& e) {
-				Void _ = wait( tr.onError(e) );
+			state std::vector<Future<Optional<Value>>> replicasFutures;
+			for(auto& region : config.regions) {
+				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
+			Void _ = wait( waitForAll(replicasFutures) );
+
+			state std::vector<Future<Void>> watchFutures;
+			for(int i = 0; i < config.regions.size(); i++) {
+				if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < config.storageTeamSize ) {
+					watchFutures.push_back(tr.watch(datacenterReplicasKeyFor(config.regions[i].dcId)));
+				}
+			}
+
+			if( !watchFutures.size() || (config.usableRegions == 1 && watchFutures.size() < config.regions.size())) {
+				return Void();
+			}
+
+			Void _ = wait( tr.commit() );
+			Void _ = wait( waitForAny(watchFutures) );
+			tr.reset();
+		} catch (Error& e) {
+			Void _ = wait( tr.onError(e) );
 		}
 	}
 }

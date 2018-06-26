@@ -98,13 +98,12 @@ struct InitializeLogRouterRequest {
 	Version startVersion;
 	std::vector<LocalityData> tLogLocalities;
 	IRepPolicyRef tLogPolicy;
-	int32_t hasBestPolicy;
 	int8_t locality;
 	ReplyPromise<struct TLogInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & recoveryCount & routerTag & startVersion & tLogLocalities & tLogPolicy & hasBestPolicy & locality & reply;
+		ar & recoveryCount & routerTag & startVersion & tLogLocalities & tLogPolicy & locality & reply;
 	}
 };
 

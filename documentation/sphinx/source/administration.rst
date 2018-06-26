@@ -10,6 +10,7 @@ Administration
    :titlesonly:
 
    moving-a-cluster
+   tls
    
 This document covers the administration of an existing FoundationDB cluster. We recommend you read this document before setting up a cluster for performance testing or production use.
 
@@ -633,59 +634,24 @@ You can now remove old client library versions from your clients. This is only t
 Version-specific notes on upgrading
 ===================================
 
-Upgrading from 5.1.x
+Upgrading from 5.2.x
 --------------------
 
-Upgrades from 5.0.x will keep all your old data and configuration settings. 5.1 has a new backup format so backups will need to be restarted after upgrading.
+Upgrades from 5.2.x will keep all your old data and configuration settings. 
 
-Upgrading from 5.0.x
---------------------
+Upgrading from 4.4.x - 5.1.x
+----------------------------
 
-Upgrades from 5.0.x will keep all your old data and configuration settings.
+Upgrades from versions between 4.4.x and 5.1.x will keep all your old data and configuration settings. Backups that are running will automatically be aborted and must be restarted. 
 
-Upgrading from 4.6.x
---------------------
+Upgrading from 3.0.x - 4.3.x
+----------------------------
 
-Upgrades from 4.6.x will keep all your old data and configuration settings.
-
-Upgrading from 4.5.x
---------------------
-
-Upgrades from 4.5.x will keep all your old data and configuration settings.
-
-Upgrading from 4.4.x
---------------------
-
-Upgrades from 4.4.x will keep all your old data and configuration settings.
-
-Upgrading from 4.3.x
---------------------
-
-Backup and DR must be stopped before upgrading. Upgrades from 4.3.x will keep all your old data and configuration settings.
-
-Upgrading from 4.2.x
---------------------
-
-Backup and DR must be stopped before upgrading. Upgrades from 4.2.x will keep all your old data and configuration settings.
-
-Upgrading from 4.1.x
---------------------
-
-Backup and DR must be stopped before upgrading. Upgrades from 4.1.x will keep all your old data and configuration settings.
-
-Upgrading from 4.0.x
---------------------
-
-Backup and DR must be stopped before upgrading. Upgrades from 4.0.x will keep all your old data and configuration settings.
-
-Upgrading from 3.x
---------------------
-
-To upgrade from versions prior to 4.0, you should first upgrade to 4.0 and then to the current version.
+Backup and DR must be stopped before upgrading. Upgrades from versions between 3.0.x and 4.3.x will keep all your old data and configuration settings.
 
 .. _upgrading-from-older-versions:
 
 Upgrading from Older Versions
 -----------------------------
 
-Upgrades from versions older than 3.0.0 are no longer supported. To upgrade from an older version, first upgrade to 4.0.x, then upgrade to the desired version.
+Upgrades from versions older than 3.0.0 are no longer supported.

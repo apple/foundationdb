@@ -132,6 +132,18 @@ Future<T> transformErrors( Future<T> f, Error err ) {
 	}
 }
 
+ACTOR template <class T>
+Future<T> transformError( Future<T> f, Error inErr, Error outErr ) {
+	try {
+		T t = wait( f );
+		return t;
+	} catch( Error &e ) {
+		if( e.code() == inErr.code() )
+			throw outErr;
+		throw e;
+	}
+}
+
 // Note that the RequestStream<T> version of forwardPromise doesn't exist, because what to do with errors?
 
 ACTOR template <class T>
@@ -196,14 +208,14 @@ Future<T> timeoutError( Future<T> what, double time, int taskID = TaskDefaultDel
 }
 
 ACTOR template <class T>
-Future<T> delayed( Future<T> what, double time = 0.0 ) {
+Future<T> delayed( Future<T> what, double time = 0.0, int taskID = TaskDefaultDelay  ) {
 	try {
 		state T t = wait( what );
-		Void _ = wait( delay(time) );
+		Void _ = wait( delay( time, taskID ) );
 		return t;
 	} catch( Error &e ) {
 		state Error err = e;
-		Void _ = wait( delay(time) );
+		Void _ = wait( delay( time, taskID ) );
 		throw err;
 	}
 }
@@ -739,6 +751,13 @@ Future<Void> delayedAsyncVar( Reference<AsyncVar<T>> in, Reference<AsyncVar<T>> 
 	}
 }
 
+ACTOR template <class T> 
+Future<Void> setAfter( Reference<AsyncVar<T>> var, double time, T val ) {
+	Void _ = wait( delay( time ) );
+	var->set( val );
+	return Void();
+}
+
 Future<bool> allTrue( const std::vector<Future<bool>>& all );
 Future<Void> anyTrue( std::vector<Reference<AsyncVar<bool>>> const& input, Reference<AsyncVar<bool>> const& output );
 Future<Void> cancelOnly( std::vector<Future<Void>> const& futures );
@@ -863,7 +882,7 @@ Future<Void> quorum(std::vector<Future<T>> const& results, int n) {
 
 ACTOR template <class T>
 Future<Void> smartQuorum( std::vector<Future<T>> results, int required, double extraSeconds, int taskID = TaskDefaultDelay ) {
-	if (results.empty()) return Void();
+	if (results.empty() && required == 0) return Void();
 	Void _ = wait(quorum(results, required));
 	choose {
 		when (Void _ = wait(quorum(results, (int)results.size()))) {return Void();}

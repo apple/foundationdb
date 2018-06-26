@@ -60,11 +60,10 @@ public:
 	int64_t MAX_QUEUE_COMMIT_BYTES;
 
 	// Versions
+	int VERSIONS_PER_SECOND;
 	int MAX_VERSIONS_IN_FLIGHT;
 	int MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-
-	int VERSIONS_PER_SECOND;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 
 	// Data distribution queue
@@ -96,6 +95,7 @@ public:
 	double METRIC_DELAY;
 	double ALL_DATA_REMOVED_DELAY;
 	double INITIAL_FAILURE_REACTION_DELAY;
+	double CHECK_TEAM_DELAY;
 	double LOG_ON_COMPLETION_DELAY;
 	int BEST_TEAM_MAX_TEAM_TRIES;
 	int BEST_TEAM_OPTION_COUNT;
@@ -194,6 +194,8 @@ public:
 	int64_t MIN_BALANCE_DIFFERENCE;
 	double SECONDS_BEFORE_NO_FAILURE_DELAY;
 	int64_t MAX_TXS_SEND_MEMORY;
+	int64_t MAX_RECOVERY_VERSIONS;
+	double MAX_RECOVERY_TIME;
 
 	// Resolver
 	int64_t SAMPLE_OFFSET_PER_KEY;
@@ -214,6 +216,8 @@ public:
 	double WORKER_FAILURE_TIME;
 	double CHECK_BETTER_MASTER_INTERVAL;
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
+	double VERSION_LAG_METRIC_INTERVAL;
+	int64_t MAX_VERSION_DIFFERENCE;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)
@@ -253,6 +257,7 @@ public:
 	int64_t TARGET_BYTES_PER_TLOG;
 	double SPRING_BYTES_TLOG;
 	int64_t TLOG_SPILL_THRESHOLD;
+	int64_t TLOG_HARD_LIMIT_BYTES;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

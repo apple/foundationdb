@@ -226,8 +226,8 @@ Future<Void> dataDistributionQueue(
 	PromiseStream<Promise<int64_t>> const& getAverageShardBytes,
 	MasterInterface const& mi,
 	int const& teamSize,
-	int const& durableStorageQuorum,
-	double* const& lastLimited );
+	double* const& lastLimited,
+	Version const& recoveryVersion);
 
 //Holds the permitted size and IO Bounds for a shard
 struct ShardSizeBounds {
