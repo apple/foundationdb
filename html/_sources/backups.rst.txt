@@ -48,7 +48,7 @@ There are 5 command line tools for working with Backup and DR operations:
     The backup agent is a daemon that actually executes the work of the backup and restore jobs.  Any number of backup agents pointed at the same database will cooperate to perform  backups and restores. The Backup URL specified for a backup or restore must be accessible by all ``backup_agent`` processes.
 
 ``fdbdr``
-    This command line tool is used to control (but not execute) DR jobs - backups from one database to anothher.  It can ``start``, ``abort`` a DR job, or ``switch`` the DR direction.  It can also get the ``status`` of a running DR job.  
+    This command line tool is used to control (but not execute) DR jobs - backups from one database to another.  It can ``start``, ``abort`` a DR job, or ``switch`` the DR direction.  It can also get the ``status`` of a running DR job.  
 
 ``dr_agent``
     The database backup agent is a daemon that actually executes the work of the DR jobs, writing snapshot and log data to the destination database.  Any number of agents pointed at the same databases will cooperate to perform the backup.
@@ -101,6 +101,8 @@ Blob store Backup URLs can have optional parameters at the end which set various
 
 Here is a complete list of valid parameters:
 
+ *secure_connection* (or *sc*) - Set 1 for secure connection and 0 for unsecure connection. Defaults to secure connection.
+
  *connect_tries* (or *ct*) - Number of times to try to connect for each request.
 
  *request_tries* (or *rt*) - Number of times to try each request until a parseable HTTP response other than 429 is received.
@@ -150,6 +152,26 @@ The Blob Credential File format is JSON with the following schema:
     }
   }
 
+SSL Support
+===========
+
+By default, backup will communicate over https. To configure https, the following environment variables are used:
+
+============================ ====================================================
+Environment Variable         Purpose
+============================ ====================================================
+``FDB_TLS_PLUGIN``           Path to the file to be loaded as the TLS plugin
+``FDB_TLS_CERTIFICATE_FILE`` Path to the file from which the local certificates
+                             can be loaded, used by the plugin
+``FDB_TLS_KEY_FILE``         Path to the file from which to load the private
+                             key, used by the plugin
+``FDB_TLS_PASSWORD``         The byte-string representing the passcode for
+                             unencrypting the private key
+``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
+                             to trust. Specify to override the default openssl
+                             location.
+============================ ====================================================
+
 
 ``fdbbackup`` command line tool
 ===============================
@@ -193,7 +215,7 @@ The ``start`` subcommand is used to start a backup.  If there is already a backu
   Perform the backup continuously rather than terminating once a restorable backup is achieved.  Database mutations within the backup's target key ranges will be continuously written to the backup as well as repeated inconsistent snapshots at the configured snapshot rate.
 
 ``-s <DURATION>`` or ``--snapshot_interval <DURATION>``  
-  Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continous mode.  The default is 864000 which is 10 days.
+  Specifies the duration, in seconds, of the inconsistent snapshots written to the backup in continuous mode.  The default is 864000 which is 10 days.
 
 ``-w``
   Wait for the backup to complete with behavior identical to that of the :ref:`wait command <backup-wait>`.
@@ -222,7 +244,7 @@ The ``abort`` subcommand is used to abort a backup that is currently in progress
 ``discontinue``
 ---------------
 
-The ``discontinue`` subcommand is only available for backups that were started with the continuous (``-z``) option. Its effect is to discontinue the continous backup. Note that the subcommand does *not* abort the backup; it simply allows the backup to complete as a noncontinuous backup would.
+The ``discontinue`` subcommand is only available for backups that were started with the continuous (``-z``) option. Its effect is to discontinue the continuous backup. Note that the subcommand does *not* abort the backup; it simply allows the backup to complete as a noncontinuous backup would.
 
 ::
 
@@ -287,7 +309,7 @@ The expiration CUTOFF must be specified by one of the two following arguments:
   ``--expire_before_version <VERSION>``
     Specifies the cutoff by a database commit version.
 
-Optionally, the user can specify a minimum RESTORABILITY guarauntee with one of the following options.
+Optionally, the user can specify a minimum RESTORABILITY guarantee with one of the following options.
 
   ``--restorable_after_timestamp <DATETIME>``
     Specifies that the backup must be restorable to DATETIME and later.  Requires a cluster file and will use version/timestamp metadata in the database to convert DATETIME to a database commit version.  DATETIME must be in the form "YYYY-MM-DD.HH:MI:SS" in UTC.
@@ -371,7 +393,7 @@ The ``start`` command will start a new restore on the specified (or default) tag
   Required.  Specifies the Backup URL for the source backup data to restore to the database.  The source data must be accessible by the ``backup_agent`` processes for the cluster.
 
 ``-w``
-  Wait for the the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.
+  Wait for the restore to reach a final state (such as complete) before exiting.  Prints a progress update every few seconds.  Behavior is identical to that of the wait command.
 
 ``-k <KEYS>``
   Specify list of key ranges from the backup to restore to the database
@@ -443,7 +465,7 @@ The ``fdbdr`` command line tool is used to manage DR tasks.
 
     user@host$ fdbdr [-h] <SUBCOMMAND> [<SUBCOMMAND_OPTIONS>] -d <CLUSTER_FILE> -s <CLUSTER_FILE> [-v]
 
-The following arguments are used by mutiple subcommands:
+The following arguments are used by multiple subcommands:
 
 ``-h``
   Get help on the ``fdbdr`` command.
@@ -452,7 +474,7 @@ The following arguments are used by mutiple subcommands:
   Get the version of FoundationDB in use.
 
 ``-d <CLUSTER_FILE>``
-  Specify the path to the ``fdb.cluster`` file for the destination cluster of the DR operaiton.
+  Specify the path to the ``fdb.cluster`` file for the destination cluster of the DR operation.
 
 ``-s <CLUSTER_FILE>``
   Specify the path to the ``fdb.cluster`` file for the source cluster of the DR operation.
@@ -515,7 +537,7 @@ Unlike ``backup_agent``, ``dr_agent`` is not started automatically in a default 
   Get the version of FoundationDB in use.
 
 ``-d <CLUSTER_FILE>``
-  Specify the path to the ``fdb.cluster`` file for the destination cluster of the DR operaiton.
+  Specify the path to the ``fdb.cluster`` file for the destination cluster of the DR operation.
 
 ``-s <CLUSTER_FILE>``
   Specify the path to the ``fdb.cluster`` file for the source cluster of the DR operation.

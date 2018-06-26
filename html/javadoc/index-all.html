@@ -392,7 +392,7 @@
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#createCluster--">createCluster()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
 <div class="block">Connects to the cluster specified by the
-  <a href="./com/apple/foundationdb//administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.</div>
+  <a href="./com/apple/foundationdb//foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#createCluster-java.lang.String-">createCluster(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
@@ -703,6 +703,11 @@
 <dd>
 <div class="block">Collects the results of many asynchronous processes into one asynchronous output.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#getAPIVersion--">getAPIVersion()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
+<dd>
+<div class="block">Returns the API version that was selected by the <a href="com/apple/foundationdb/FDB.html#selectAPIVersion-int-"><code>selectAPIVersion()</code></a>
+  call.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Tuple.html#getBigInteger-int-">getBigInteger(int)</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Tuple.html" title="class in com.apple.foundationdb.tuple">Tuple</a></dt>
 <dd>
 <div class="block">Gets an indexed item as a <code>BigInteger</code>.</div>
@@ -975,6 +980,14 @@
 <div class="block">Creates an incomplete <code>Versionstamp</code> instance with the default user
   version.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#instance--">instance()</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
+<dd>
+<div class="block">Return the instance of the FDB API singleton.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#isAPIVersionSelected--">isAPIVersionSelected()</a></span> - Static method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
+<dd>
+<div class="block">Determines if the API version has already been selected.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/tuple/Versionstamp.html#isComplete--">isComplete()</a></span> - Method in class com.apple.foundationdb.tuple.<a href="com/apple/foundationdb/tuple/Versionstamp.html" title="class in com.apple.foundationdb.tuple">Versionstamp</a></dt>
 <dd>
 <div class="block">Whether this <code>Versionstamp</code>'s transaction version is
@@ -1201,7 +1214,7 @@
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#open--">open()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
 <dd>
 <div class="block">Initializes networking, connects with the
-  <a href="./com/apple/foundationdb//administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
+  <a href="./com/apple/foundationdb//foundationdb/administration.html#default-cluster-file" target="_blank">default fdb.cluster file</a>,
   and opens the database.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/FDB.html#open-java.lang.String-">open(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/FDB.html" title="class in com.apple.foundationdb">FDB</a></dt>
@@ -1518,22 +1531,14 @@
 <dd>
 <div class="block">The transaction, if not self-conflicting, may be committed a second time after commit succeeds, in the event of a fault.</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setCheckWritesEnable--">setCheckWritesEnable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
-<dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setClusterFile-java.lang.String-">setClusterFile(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>
 <div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
-</dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setCommitOnFirstProxy--">setCommitOnFirstProxy()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
-<dd>
-<div class="block">Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/DatabaseOptions.html#setDatacenterId-java.lang.String-">setDatacenterId(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/DatabaseOptions.html" title="class in com.apple.foundationdb">DatabaseOptions</a></dt>
 <dd>
 <div class="block">Specify the datacenter ID that was passed to fdbserver processes running in the same datacenter as this client, for better location-aware load balancing.</div>
 </dd>
-<dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDebugDump--">setDebugDump()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
-<dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDebugRetryLogging-java.lang.String-">setDebugRetryLogging(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setDisableClientStatisticsLogging--">setDisableClientStatisticsLogging()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
@@ -1551,7 +1556,9 @@
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDurabilityDatacenter--">setDurabilityDatacenter()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDurabilityDevNullIsWebScale--">setDurabilityDevNullIsWebScale()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
-<dd>&nbsp;</dd>
+<dd>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setDurabilityRisky--">setDurabilityRisky()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>&nbsp;</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setEnableSlowTaskProfiling--">setEnableSlowTaskProfiling()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
@@ -1616,7 +1623,7 @@
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setReadAheadDisable--">setReadAheadDisable()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
-<div class="block">Disables read-ahead caching for range reads.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span></div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/TransactionOptions.html#setReadLockAware--">setReadLockAware()</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/TransactionOptions.html" title="class in com.apple.foundationdb">TransactionOptions</a></dt>
 <dd>
@@ -1650,6 +1657,14 @@
 <dd>
 <div class="block">Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled.</div>
 </dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTLSCaBytes-byte:A-">setTLSCaBytes(byte[])</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
+<dd>
+<div class="block">Set the ca bundle.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTLSCaPath-java.lang.String-">setTLSCaPath(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
+<dd>
+<div class="block">Set the file from which to load the certificate authority bundle.</div>
+</dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTLSCertBytes-byte:A-">setTLSCertBytes(byte[])</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>
 <div class="block">Set the certificate chain.</div>
@@ -1665,6 +1680,10 @@
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTLSKeyPath-java.lang.String-">setTLSKeyPath(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>
 <div class="block">Set the file from which to load the private key corresponding to your own certificate.</div>
+</dd>
+<dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTLSPassword-java.lang.String-">setTLSPassword(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
+<dd>
+<div class="block">Set the passphrase for encrypted private key.</div>
 </dd>
 <dt><span class="memberNameLink"><a href="com/apple/foundationdb/NetworkOptions.html#setTLSPlugin-java.lang.String-">setTLSPlugin(String)</a></span> - Method in class com.apple.foundationdb.<a href="com/apple/foundationdb/NetworkOptions.html" title="class in com.apple.foundationdb">NetworkOptions</a></dt>
 <dd>

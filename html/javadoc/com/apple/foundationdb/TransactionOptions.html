@@ -17,8 +17,8 @@
     catch(err) {
     }
 //-->
-var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":10,"i7":10,"i8":10,"i9":10,"i10":10,"i11":10,"i12":10,"i13":10,"i14":10,"i15":10,"i16":10,"i17":10,"i18":10,"i19":10,"i20":10,"i21":10,"i22":10,"i23":10,"i24":10,"i25":10,"i26":10,"i27":10};
-var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"]};
+var methods = {"i0":10,"i1":10,"i2":10,"i3":10,"i4":10,"i5":10,"i6":10,"i7":42,"i8":10,"i9":10,"i10":10,"i11":10,"i12":10,"i13":10,"i14":10,"i15":42,"i16":10,"i17":10,"i18":10,"i19":10,"i20":10,"i21":10,"i22":10,"i23":10,"i24":10};
+var tabs = {65535:["t0","All Methods"],2:["t2","Instance Methods"],8:["t4","Concrete Methods"],32:["t6","Deprecated Methods"]};
 var altColor = "altColor";
 var rowColor = "rowColor";
 var tableTab = "tableTab";
@@ -140,7 +140,7 @@ extends java.lang.Object</pre>
 </a>
 <h3>Method Summary</h3>
 <table class="memberSummary" border="0" cellpadding="3" cellspacing="0" summary="Method Summary table, listing methods, and an explanation">
-<caption><span id="t0" class="activeTableTab"><span>All Methods</span><span class="tabEnd">&nbsp;</span></span><span id="t2" class="tableTab"><span><a href="javascript:show(2);">Instance Methods</a></span><span class="tabEnd">&nbsp;</span></span><span id="t4" class="tableTab"><span><a href="javascript:show(8);">Concrete Methods</a></span><span class="tabEnd">&nbsp;</span></span></caption>
+<caption><span id="t0" class="activeTableTab"><span>All Methods</span><span class="tabEnd">&nbsp;</span></span><span id="t2" class="tableTab"><span><a href="javascript:show(2);">Instance Methods</a></span><span class="tabEnd">&nbsp;</span></span><span id="t4" class="tableTab"><span><a href="javascript:show(8);">Concrete Methods</a></span><span class="tabEnd">&nbsp;</span></span><span id="t6" class="tableTab"><span><a href="javascript:show(32);">Deprecated Methods</a></span><span class="tabEnd">&nbsp;</span></span></caption>
 <tr>
 <th class="colFirst" scope="col">Modifier and Type</th>
 <th class="colLast" scope="col">Method and Description</th>
@@ -175,125 +175,113 @@ extends java.lang.Object</pre>
 </tr>
 <tr id="i5" class="rowColor">
 <td class="colFirst"><code>void</code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setCheckWritesEnable--">setCheckWritesEnable</a></span>()</code>&nbsp;</td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setDebugRetryLogging-java.lang.String-">setDebugRetryLogging</a></span>(java.lang.String&nbsp;value)</code>&nbsp;</td>
 </tr>
 <tr id="i6" class="altColor">
 <td class="colFirst"><code>void</code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setCommitOnFirstProxy--">setCommitOnFirstProxy</a></span>()</code>
-<div class="block">Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'.</div>
-</td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setDurabilityDatacenter--">setDurabilityDatacenter</a></span>()</code>&nbsp;</td>
 </tr>
 <tr id="i7" class="rowColor">
 <td class="colFirst"><code>void</code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setDebugDump--">setDebugDump</a></span>()</code>&nbsp;</td>
+<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setDurabilityDevNullIsWebScale--">setDurabilityDevNullIsWebScale</a></span>()</code>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
+</td>
 </tr>
 <tr id="i8" class="altColor">
 <td class="colFirst"><code>void</code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setDebugRetryLogging-java.lang.String-">setDebugRetryLogging</a></span>(java.lang.String&nbsp;value)</code>&nbsp;</td>
-</tr>
-<tr id="i9" class="rowColor">
-<td class="colFirst"><code>void</code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setDurabilityDatacenter--">setDurabilityDatacenter</a></span>()</code>&nbsp;</td>
-</tr>
-<tr id="i10" class="altColor">
-<td class="colFirst"><code>void</code></td>
-<td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setDurabilityDevNullIsWebScale--">setDurabilityDevNullIsWebScale</a></span>()</code>&nbsp;</td>
-</tr>
-<tr id="i11" class="rowColor">
-<td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setDurabilityRisky--">setDurabilityRisky</a></span>()</code>&nbsp;</td>
 </tr>
-<tr id="i12" class="altColor">
+<tr id="i9" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setInitializeNewDatabase--">setInitializeNewDatabase</a></span>()</code>
 <div class="block">This is a write-only transaction which sets the initial configuration.</div>
 </td>
 </tr>
-<tr id="i13" class="rowColor">
+<tr id="i10" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setLockAware--">setLockAware</a></span>()</code>
 <div class="block">The transaction can read and write to locked databases, and is resposible for checking that it took the lock.</div>
 </td>
 </tr>
-<tr id="i14" class="altColor">
+<tr id="i11" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setMaxRetryDelay-long-">setMaxRetryDelay</a></span>(long&nbsp;value)</code>
 <div class="block">Set the maximum amount of backoff delay incurred in the call to onError if the error is retryable.</div>
 </td>
 </tr>
-<tr id="i15" class="rowColor">
+<tr id="i12" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setNextWriteNoWriteConflictRange--">setNextWriteNoWriteConflictRange</a></span>()</code>
 <div class="block">The next write performed on this transaction will not generate a write conflict range.</div>
 </td>
 </tr>
-<tr id="i16" class="altColor">
+<tr id="i13" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setPriorityBatch--">setPriorityBatch</a></span>()</code>
 <div class="block">Specifies that this transaction should be treated as low priority and that default priority transactions should be processed first.</div>
 </td>
 </tr>
-<tr id="i17" class="rowColor">
+<tr id="i14" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setPrioritySystemImmediate--">setPrioritySystemImmediate</a></span>()</code>
 <div class="block">Specifies that this transaction should be treated as highest priority and that lower priority transactions should block behind this one.</div>
 </td>
 </tr>
-<tr id="i18" class="altColor">
+<tr id="i15" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setReadAheadDisable--">setReadAheadDisable</a></span>()</code>
-<div class="block">Disables read-ahead caching for range reads.</div>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
 </td>
 </tr>
-<tr id="i19" class="rowColor">
+<tr id="i16" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setReadLockAware--">setReadLockAware</a></span>()</code>
 <div class="block">The transaction can read from locked databases.</div>
 </td>
 </tr>
-<tr id="i20" class="altColor">
+<tr id="i17" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setReadSystemKeys--">setReadSystemKeys</a></span>()</code>
 <div class="block">Allows this transaction to read system keys (those that start with the byte 0xFF).</div>
 </td>
 </tr>
-<tr id="i21" class="rowColor">
+<tr id="i18" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setReadYourWritesDisable--">setReadYourWritesDisable</a></span>()</code>
 <div class="block">Reads performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction's read version.</div>
 </td>
 </tr>
-<tr id="i22" class="altColor">
+<tr id="i19" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setRetryLimit-long-">setRetryLimit</a></span>(long&nbsp;value)</code>
 <div class="block">Set a maximum number of retries after which additional calls to onError will throw the most recently seen error code.</div>
 </td>
 </tr>
-<tr id="i23" class="rowColor">
+<tr id="i20" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setSnapshotRywDisable--">setSnapshotRywDisable</a></span>()</code>
 <div class="block">Snapshot read operations will not see the results of writes done in the same transaction.</div>
 </td>
 </tr>
-<tr id="i24" class="altColor">
+<tr id="i21" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setSnapshotRywEnable--">setSnapshotRywEnable</a></span>()</code>
 <div class="block">Snapshot read operations will see the results of writes done in the same transaction.</div>
 </td>
 </tr>
-<tr id="i25" class="rowColor">
+<tr id="i22" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setTimeout-long-">setTimeout</a></span>(long&nbsp;value)</code>
 <div class="block">Set a timeout in milliseconds which, when elapsed, will cause the transaction automatically to be cancelled.</div>
 </td>
 </tr>
-<tr id="i26" class="altColor">
+<tr id="i23" class="rowColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setTransactionLoggingEnable-java.lang.String-">setTransactionLoggingEnable</a></span>(java.lang.String&nbsp;value)</code>
 <div class="block">Enables tracing for this transaction and logs results to the client trace logs.</div>
 </td>
 </tr>
-<tr id="i27" class="rowColor">
+<tr id="i24" class="altColor">
 <td class="colFirst"><code>void</code></td>
 <td class="colLast"><code><span class="memberNameLink"><a href="../../../com/apple/foundationdb/TransactionOptions.html#setUsedDuringCommitProtectionDisable--">setUsedDuringCommitProtectionDisable</a></span>()</code>
 <div class="block">By default, operations that are performed on a transaction while it is being committed will not only fail themselves, but they will attempt to fail other in-flight operations (such as the commit) as well.</div>
@@ -368,16 +356,6 @@ extends java.lang.Object</pre>
 <div class="block">The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not conflict with this transaction. Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on.</div>
 </li>
 </ul>
-<a name="setCommitOnFirstProxy--">
-<!--   -->
-</a>
-<ul class="blockList">
-<li class="blockList">
-<h4>setCommitOnFirstProxy</h4>
-<pre>public&nbsp;void&nbsp;setCommitOnFirstProxy()</pre>
-<div class="block">Committing this transaction will bypass the normal load balancing across proxies and go directly to the specifically nominated 'first proxy'.</div>
-</li>
-</ul>
 <a name="setReadYourWritesDisable--">
 <!--   -->
 </a>
@@ -394,8 +372,22 @@ extends java.lang.Object</pre>
 <ul class="blockList">
 <li class="blockList">
 <h4>setReadAheadDisable</h4>
-<pre>public&nbsp;void&nbsp;setReadAheadDisable()</pre>
-<div class="block">Disables read-ahead caching for range reads. Under normal operation, a transaction will read extra rows from the database into cache if range reads are used to page through a series of data one row at a time (i.e. if a range read with a one row limit is followed by another one row range read starting immediately after the result of the first).</div>
+<pre>@Deprecated
+public&nbsp;void&nbsp;setReadAheadDisable()</pre>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
+<div class="block">Deprecated.</div>
+</li>
+</ul>
+<a name="setDurabilityDevNullIsWebScale--">
+<!--   -->
+</a>
+<ul class="blockList">
+<li class="blockList">
+<h4>setDurabilityDevNullIsWebScale</h4>
+<pre>@Deprecated
+public&nbsp;void&nbsp;setDurabilityDevNullIsWebScale()</pre>
+<div class="block"><span class="deprecatedLabel">Deprecated.</span>&nbsp;</div>
+<div class="block">Deprecated.</div>
 </li>
 </ul>
 <a name="setPrioritySystemImmediate--">
@@ -563,15 +555,6 @@ extends java.lang.Object</pre>
 <pre>public&nbsp;void&nbsp;setCausalReadDisable()</pre>
 </li>
 </ul>
-<a name="setCheckWritesEnable--">
-<!--   -->
-</a>
-<ul class="blockList">
-<li class="blockList">
-<h4>setCheckWritesEnable</h4>
-<pre>public&nbsp;void&nbsp;setCheckWritesEnable()</pre>
-</li>
-</ul>
 <a name="setDurabilityDatacenter--">
 <!--   -->
 </a>
@@ -588,24 +571,6 @@ extends java.lang.Object</pre>
 <li class="blockList">
 <h4>setDurabilityRisky</h4>
 <pre>public&nbsp;void&nbsp;setDurabilityRisky()</pre>
-</li>
-</ul>
-<a name="setDurabilityDevNullIsWebScale--">
-<!--   -->
-</a>
-<ul class="blockList">
-<li class="blockList">
-<h4>setDurabilityDevNullIsWebScale</h4>
-<pre>public&nbsp;void&nbsp;setDurabilityDevNullIsWebScale()</pre>
-</li>
-</ul>
-<a name="setDebugDump--">
-<!--   -->
-</a>
-<ul class="blockList">
-<li class="blockList">
-<h4>setDebugDump</h4>
-<pre>public&nbsp;void&nbsp;setDebugDump()</pre>
 </li>
 </ul>
 <a name="setDebugRetryLogging-java.lang.String-">
