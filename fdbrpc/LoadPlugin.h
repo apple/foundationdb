@@ -25,7 +25,7 @@ extern "C" void *get_plugin(const char *plugin_type_name_and_version);
 
 template <class T>
 Reference<T> loadPlugin( std::string const& plugin_name ) {
-#ifdef __TLS_DISABLED__
+#ifdef TLS_DISABLED
 	return Reference<T>( NULL );
 #else
 	return (plugin_name.empty()) ? Reference<T>( NULL ) : Reference<T>( (T*)get_plugin( T::get_plugin_type_name_and_version() ) );

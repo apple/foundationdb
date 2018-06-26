@@ -83,7 +83,7 @@ struct TLSOptions : ReferenceCounted<TLSOptions> {
 	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE, OPT_TLS_PASSWORD };
 	enum PolicyType { POLICY_VERIFY_PEERS = 1, POLICY_NO_VERIFY_PEERS };
 	TLSOptions() : certs_set(false), key_set(false), verify_peers_set(false), ca_set(false) {
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 		init_plugin( );
 #endif
 	}

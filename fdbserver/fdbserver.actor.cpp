@@ -151,7 +151,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_SECONDS,     "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,   "--io_trust_warn_only",        SO_NONE },
 
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
 
@@ -629,7 +629,7 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
 		   "                 and cluster_controller).\n");
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 	printf(TLS_HELP);
 #endif
 	printf("  -v, --version  Print version information and exit.\n");
@@ -1195,7 +1195,7 @@ int main(int argc, char* argv[]) {
 				case OPT_IO_TRUST_WARN_ONLY:
 					fileIoWarnOnly = true;
 					break;
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
 					break;
 				case TLSOptions::OPT_TLS_CERTIFICATES:
@@ -1473,7 +1473,7 @@ int main(int argc, char* argv[]) {
 
 			openTraceFile(publicAddress, rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 			if ( tlsCertPath.size() )
 				tlsOptions->set_cert_file( tlsCertPath );
 			if (tlsCAPath.size())

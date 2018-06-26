@@ -24,7 +24,7 @@ fdbserver_CFLAGS := $(fdbclient_CFLAGS)
 fdbserver_LDFLAGS := $(fdbrpc_LDFLAGS)
 fdbserver_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
 
-ifndef __TLS_DISABLED__
+ifndef TLS_DISABLED
 fdbserver_LIBS += lib/libFDBLibTLS.a /usr/local/lib/libtls.a /usr/local/lib/libssl.a /usr/local/lib/libcrypto.a
 endif
 

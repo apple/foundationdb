@@ -159,4 +159,10 @@ info:
 	@echo "User:           ($(USERID)) $(USER)"
 	@echo "Java Version:   ($(JAVAVERMAJOR).$(JAVAVERMINOR)) $(JAVAVER)"
 	@echo "Platform:       $(PLATFORM)"
+ifdef TLS_DISABLED
+	@echo "TLS:            Disabled"
+else
+	@echo "TLS:            Enabled"
+endif
+	@echo "fdbcli CFLAGS:  $(fdbcli_CFLAGS)"
 	@echo ""

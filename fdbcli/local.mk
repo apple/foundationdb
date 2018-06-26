@@ -25,7 +25,7 @@ fdbcli_LDFLAGS := $(fdbrpc_LDFLAGS)
 fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a -ldl
 fdbcli_STATIC_LIBS :=
 
-ifndef __TLS_DISABLED__
+ifndef TLS_DISABLED
 fdbcli_LIBS += lib/libFDBLibTLS.a /usr/local/lib/libtls.a /usr/local/lib/libssl.a /usr/local/lib/libcrypto.a
 endif
 

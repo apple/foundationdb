@@ -870,7 +870,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	FlowTransport::createInstance(transportId);
 	Net2FileSystem::newFileSystem();
 
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 	tlsOptions->register_network();
 #endif
 }

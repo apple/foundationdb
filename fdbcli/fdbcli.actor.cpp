@@ -72,7 +72,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_VERSION,         "--version",        SO_NONE },
 	{ OPT_VERSION,         "-v",               SO_NONE },
 
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
 #endif
 
@@ -402,7 +402,7 @@ static void printProgramUsage(const char* name) {
 		   "                 and then exits.\n"
 		   "  --no-status    Disables the initial status check done when starting\n"
 		   "                 the CLI.\n"
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 		   TLS_HELP
 #endif
 		   "  -v, --version  Print FoundationDB CLI version information and exit.\n"
@@ -2145,7 +2145,7 @@ struct CLIOptions {
 				initialStatusCheck = false;
 				break;
 
-#ifndef __TLS_DISABLED__
+#ifndef TLS_DISABLED
 			// TLS Options
 			case TLSOptions::OPT_TLS_PLUGIN:
 				break;

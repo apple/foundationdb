@@ -25,8 +25,8 @@ fdbrpc_BUILD_SOURCES += fdbrpc/libeio/eio.c
 fdbrpc_CFLAGS := -I$(BOOSTDIR) -I. -Ifdbrpc -Ifdbrpc/libeio -DUSE_UCONTEXT
 fdbrpc_LDFLAGS :=
 
-ifdef __TLS_DISABLED__
-fdbrpc_CFLAGS += -D__TLS_DISABLED__
+ifdef TLS_DISABLED
+fdbrpc_CFLAGS += -DTLS_DISABLED
 endif
 
 ifeq ($(PLATFORM),osx)
