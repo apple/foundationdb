@@ -240,13 +240,17 @@ std::string abspath(std::string const& filename) {
 	return std::string(r);
 }
 
-std::string parentDirectory(std::string const& filename) {
+std::string parentDirectory(std::string filename) {
 	size_t sep = filename.find_last_of( CANONICAL_PATH_SEPARATOR );
 	if (sep == std::string::npos) {
 		return "";
 	}
 
-	return filename.substr(0, sep);
+	while(filename.size() && (filename.back() == '/' || filename.back() == CANONICAL_PATH_SEPARATOR)) {
+		filename = filename.substr(0, filename.size()-1);
+	}
+
+	return filename.substr(0, sep+1);
 }
 
 int mkdir(std::string const& directory) {
@@ -944,7 +948,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 
 			if(exists) {
 				log_msg(SevInfo, "Watching parent directory of symlink %s (%d)\n", subpath.c_str(), wd);
-				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+				additional_watch_wds[wd].insert(subpath.substr(parent.size()));
 			}
 			else {
 				/* If the subpath has appeared since we set the watch, we should cancel it and resume traversing the path */
@@ -955,7 +959,7 @@ std::unordered_map<int, std::unordered_set<std::string>> set_watches(std::string
 				}
 
 				log_msg(SevInfo, "Watching parent directory of missing directory %s (%d)\n", subpath.c_str(), wd);
-				additional_watch_wds[wd].insert(subpath.substr(parent.size()+1));
+				additional_watch_wds[wd].insert(subpath.substr(parent.size()));
 				break;
 			}
 
@@ -1043,7 +1047,7 @@ int main(int argc, char** argv) {
 
 	// Will always succeed given an absolute path
 	std::string confdir = parentDirectory(confpath);
-	std::string conffile = confpath.substr(confdir.size()+1);
+	std::string conffile = confpath.substr(confdir.size());
 
 #ifdef __linux__
 	// Setup inotify

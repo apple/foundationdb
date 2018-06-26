@@ -1633,7 +1633,7 @@ void atomicReplace( std::string const& path, std::string const& content ) {
 	try {
 		INJECT_FAULT( io_error, "atomicReplace" );
 
-		std::string tempfilename = parentDirectory(path) + CANONICAL_PATH_SEPARATOR + g_random->randomUniqueID().toString() + ".tmp";
+		std::string tempfilename = joinPath(parentDirectory(path), g_random->randomUniqueID().toString() + ".tmp");
 		f = fopen( tempfilename.c_str(), "wt" );
 		if(!f)
 			throw io_error();
@@ -1812,7 +1812,12 @@ std::string parentDirectory( std::string const& filename ) {
 			.GetLastError();
 		throw platform_error();
 	}
-	return abs.substr(0, sep);
+
+	while (abs.size() && (abs.back() == '/' || abs.back() == CANONICAL_PATH_SEPARATOR)) {
+		abs = abs.substr(0, abs.size()-1);
+	}
+
+	return abs.substr(0, sep+1);
 }
 
 std::string getUserHomeDirectory() {
