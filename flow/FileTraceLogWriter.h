@@ -26,7 +26,7 @@
 #include "FastRef.h"
 #include "Trace.h"
 
-class FileTraceLogWriter : public TraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
+class FileTraceLogWriter : public ITraceLogWriter, ReferenceCounted<FileTraceLogWriter> {
 private:
 	std::string directory;
 	std::string processName;

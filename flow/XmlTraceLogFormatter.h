@@ -28,7 +28,7 @@
 #include "FastRef.h"
 #include "Trace.h"
 
-struct XmlTraceLogFormatter : public TraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
+struct XmlTraceLogFormatter : public ITraceLogFormatter, ReferenceCounted<XmlTraceLogFormatter> {
 	void addref();
 	void delref();
 

@@ -108,7 +108,7 @@ ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > 
 		WorkerEvents results;
 
 		for (int i = 0; i < eventTraces.size(); i++) {
-			ErrorOr<TraceEventFields> v = eventTraces[i].get();
+			const ErrorOr<TraceEventFields>& v = eventTraces[i].get();
 			if (v.isError()){
 				failed.insert(workers[i].first.address().toString());
 				results[workers[i].first.address()] = TraceEventFields();
@@ -233,7 +233,7 @@ static StatusObject getLocalityInfo(const LocalityData& locality) {
 	return localityObj;
 }
 
-static StatusObject getError(TraceEventFields errorFields) {
+static StatusObject getError(const TraceEventFields& errorFields) {
 	StatusObject statusObj;
 	try {
 		if (errorFields.size()) {
@@ -292,7 +292,7 @@ static StatusObject machineStatusFetcher(WorkerEvents mMetrics, vector<std::pair
 		}
 
 		StatusObject statusObj;  // Represents the status for a machine
-		TraceEventFields event = it->second;
+		const TraceEventFields& event = it->second;
 
 		try {
 			std::string address = toIPString(it->first.ip);
@@ -496,7 +496,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 		if (traceFileErrorsItr->second.size()){
 			try {
 				// Have event fields, parse it and turn it into a message object describing the trace file opening error
-				TraceEventFields event = traceFileErrorsItr->second;
+				const TraceEventFields& event = traceFileErrorsItr->second;
 				std::string fileName = event.getValue("Filename");
 				StatusObject msgObj = makeMessage("file_open_error", format("Could not open file '%s' (%s).", fileName.c_str(), event.getValue("Error").c_str()).c_str());
 				msgObj["file_name"] = fileName;

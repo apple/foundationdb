@@ -48,7 +48,7 @@
 #include <fcntl.h>
 
 FileTraceLogWriter::FileTraceLogWriter(std::string directory, std::string processName, std::string basename, std::string extension, uint64_t maxLogsSize, std::function<void()> onError)
-	: directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize), traceFileFD(0), index(0), onError(onError) {}
+	: directory(directory), processName(processName), basename(basename), extension(extension), maxLogsSize(maxLogsSize), traceFileFD(-1), index(0), onError(onError) {}
 
 void FileTraceLogWriter::addref() {
 	ReferenceCounted<FileTraceLogWriter>::addref();
@@ -110,7 +110,7 @@ void FileTraceLogWriter::open() {
 }
 
 void FileTraceLogWriter::close() {
-	if (traceFileFD) {
+	if (traceFileFD >= 0) {
 		while ( __close(traceFileFD) ) threadSleep(0.1);
 	}
 }

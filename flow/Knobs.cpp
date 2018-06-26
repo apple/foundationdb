@@ -117,7 +117,7 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
 	init( TRACE_SYNC_ENABLED,                                    0 );
 	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
-	init( TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
+	init( TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
 	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
 	init( TRACE_EVENT_MAX_SIZE,                               4000 );
 	init( TRACE_LOG_MAX_PREOPEN_BUFFER,                    1000000 );

@@ -116,8 +116,8 @@ static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
 struct TraceLog {
 
 private:
-	Reference<TraceLogWriter> logWriter;
-	Reference<TraceLogFormatter> formatter;
+	Reference<ITraceLogWriter> logWriter;
+	Reference<ITraceLogFormatter> formatter;
 	std::vector<TraceEventFields> eventBuffer;
 	int loggedLength;
 	int bufferLength;
@@ -185,13 +185,13 @@ public:
 	Reference<BarrierList> barriers;
 
 	struct WriterThread : IThreadPoolReceiver {
-		WriterThread( Reference<BarrierList> barriers, Reference<TraceLogWriter> logWriter, Reference<TraceLogFormatter> formatter ) 
+		WriterThread( Reference<BarrierList> barriers, Reference<ITraceLogWriter> logWriter, Reference<ITraceLogFormatter> formatter ) 
 			: barriers(barriers), logWriter(logWriter), formatter(formatter) {}
 
 		virtual void init() {}
 
-		Reference<TraceLogWriter> logWriter;
-		Reference<TraceLogFormatter> formatter;
+		Reference<ITraceLogWriter> logWriter;
+		Reference<ITraceLogFormatter> formatter;
 		Reference<BarrierList> barriers;
 
 		struct Open : TypedAction<WriterThread,Open> {
@@ -256,7 +256,7 @@ public:
 		this->localAddress = na;
 
 		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), g_random->randomAlphaNumeric(6).c_str());
-		logWriter = Reference<TraceLogWriter>(new FileTraceLogWriter(directory, processName, basename, formatter->getExtension(), maxLogsSize, [this](){ barriers->triggerAll(); }));
+		logWriter = Reference<ITraceLogWriter>(new FileTraceLogWriter(directory, processName, basename, formatter->getExtension(), maxLogsSize, [this](){ barriers->triggerAll(); }));
 
 		if ( g_network->isSimulated() )
 			writer = Reference<IThreadPool>(new DummyThreadPool());
@@ -445,7 +445,7 @@ void LatestEventCache::clear() {
 	latest[getAddressIndex()].clear();
 }
 
-void LatestEventCache::set( std::string tag, TraceEventFields contents ) {
+void LatestEventCache::set( std::string tag, const TraceEventFields& contents ) {
 	latest[getAddressIndex()][tag] = contents;
 }
 
@@ -475,7 +475,7 @@ std::vector<TraceEventFields> LatestEventCache::getAllUnsafe() {
 	return all;
 }
 
-void LatestEventCache::setLatestError( TraceEventFields contents ) {
+void LatestEventCache::setLatestError( const TraceEventFields& contents ) {
 	if(TraceEvent::isNetworkThread()) { // The latest event cache doesn't track errors that happen on other threads
 		latestErrors[getAddressIndex()] = contents;
 	}
@@ -656,74 +656,75 @@ TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
 	return *this;
 }
 
-TraceEvent& TraceEvent::detailImpl( std::string key, std::string value, bool writeEventMetricField) {
+TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField) {
 	if (enabled) {
 		if( value.size() > 495 ) {
 			value = value.substr(0, 495) + "...";
 		}
+		
+		if(writeEventMetricField) {
+			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
+		}
 
-		fields.addField(key, value);
+		fields.addField(std::move(key), std::move(value));
 
 		if(fields.sizeBytes() > FLOW_KNOBS->TRACE_EVENT_MAX_SIZE) {
 			TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", fields.toString().substr(300));	
 			enabled = false;
-		}
-		else if(writeEventMetricField) {
-			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
 		}
 	}
 	return *this;
 }
 
 TraceEvent& TraceEvent::detail( std::string key, std::string value ) {
-	return detailImpl(key, value);
+	return detailImpl(std::move(key), std::move(value));
 }
 TraceEvent& TraceEvent::detail( std::string key, double value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), value);
-	return detailfNoMetric( key, "%g", value );
+	return detailfNoMetric( std::move(key), "%g", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( key, "%d", value );
+	return detailfNoMetric( std::move(key), "%d", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, unsigned value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( key, "%u", value );
+	return detailfNoMetric( std::move(key), "%u", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( key, "%ld", value );
+	return detailfNoMetric( std::move(key), "%ld", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long unsigned int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( key, "%lu", value );
+	return detailfNoMetric( std::move(key), "%lu", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long long int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( key, "%lld", value );
+	return detailfNoMetric( std::move(key), "%lld", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long long unsigned int value ) {
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
-	return detailfNoMetric( key, "%llu", value );
+	return detailfNoMetric( std::move(key), "%llu", value );
 }
-TraceEvent& TraceEvent::detail( std::string key, NetworkAddress const& value ) {
-	return detailImpl( key, value.toString() );
+TraceEvent& TraceEvent::detail( std::string key, const NetworkAddress& value ) {
+	return detailImpl( std::move(key), value.toString() );
 }
-TraceEvent& TraceEvent::detail( std::string key, UID const& value ) {
-	return detailf( key, "%016llx", value.first() );  // SOMEDAY: Log entire value?  We also do this explicitly in some "lists" in various individual TraceEvent calls
+TraceEvent& TraceEvent::detail( std::string key, const UID& value ) {
+	return detailf( std::move(key), "%016llx", value.first() );  // SOMEDAY: Log entire value?  We also do this explicitly in some "lists" in various individual TraceEvent calls
 }
 TraceEvent& TraceEvent::detailext( std::string key, StringRef const& value ) {
-	return detailImpl(key, value.printable());
+	return detailImpl(std::move(key), value.printable());
 }
-TraceEvent& TraceEvent::detailext( std::string key, Optional<Standalone<StringRef>> const& value ) {
-	return detailImpl(key, (value.present()) ? value.get().printable() : "[not set]");
+TraceEvent& TraceEvent::detailext( std::string key, const Optional<Standalone<StringRef>>& value ) {
+	return detailImpl(std::move(key), (value.present()) ? value.get().printable() : "[not set]");
 }
 TraceEvent& TraceEvent::detailf( std::string key, const char* valueFormat, ... ) {
 	if (enabled) {
@@ -734,11 +735,11 @@ TraceEvent& TraceEvent::detailf( std::string key, const char* valueFormat, ... )
 		va_end(args);
 
 		ASSERT(result >= 0);
-		detailImpl(key, value);
+		detailImpl(std::move(key), std::move(value));
 	}
 	return *this;
 }
-TraceEvent& TraceEvent::detailfNoMetric( std::string key, const char* valueFormat, ... ) {
+TraceEvent& TraceEvent::detailfNoMetric( std::string&& key, const char* valueFormat, ... ) {
 	if (enabled) {
 		va_list args;
 		va_start(args, valueFormat);
@@ -747,7 +748,7 @@ TraceEvent& TraceEvent::detailfNoMetric( std::string key, const char* valueForma
 		va_end(args);
 
 		ASSERT(result >= 0);
-		detailImpl(key, value, false); // Do NOT write this detail to the event metric, caller of detailfNoMetric should do that itself with the appropriate value type
+		detailImpl(std::move(key), std::move(value), false); // Do NOT write this detail to the event metric, caller of detailfNoMetric should do that itself with the appropriate value type
 	}
 	return *this;
 }
@@ -807,9 +808,9 @@ unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
   return TraceEvent::eventCounts[sev/10];
 }
 
-TraceEvent& TraceEvent::backtrace(std::string prefix) {
+TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
 	if (this->severity == SevError) return *this; // We'll backtrace this later in ~TraceEvent
-	return detail((prefix + "Backtrace").c_str(), platform::get_backtrace());
+	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
 TraceEvent::~TraceEvent() {
@@ -824,7 +825,7 @@ TraceEvent::~TraceEvent() {
 					return;
 				}
 				else {
-					traceEventThrottlerCache->addAndExpire(StringRef((uint8_t *)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY);
+					traceEventThrottlerCache->addAndExpire(StringRef((uint8_t *)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY);
 				}
 			} // End of Throttler
 
@@ -954,15 +955,20 @@ TraceBatch::BuggifyInfo::BuggifyInfo(double time, int activated, int line, std::
 	fields.addField("Time", format("%.6f", time));
 	fields.addField("Type", "BuggifySection");
 	fields.addField("Activated", format("%d", activated));
-	fields.addField("File", file);
+	fields.addField("File", std::move(file));
 	fields.addField("Line", format("%d", line));
 }
 
 TraceEventFields::TraceEventFields() : bytes(0) {}
 
-void TraceEventFields::addField(std::string key, std::string value) {
+void TraceEventFields::addField(const std::string& key, const std::string& value) {
 	bytes += key.size() + value.size();
 	fields.push_back(std::make_pair(key, value));
+}
+
+void TraceEventFields::addField(std::string&& key, std::string&& value) {
+	bytes += key.size() + value.size();
+	fields.push_back(std::make_pair(std::move(key), std::move(value)));
 }
 
 size_t TraceEventFields::size() const {

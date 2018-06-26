@@ -65,7 +65,8 @@ public:
 	FieldIterator begin() const;
 	FieldIterator end() const;
 
-	void addField(std::string key, std::string value);
+	void addField(const std::string& key, const std::string& value);
+	void addField(std::string&& key, std::string&& value);
 
 	const Field &operator[] (int index) const;
 	bool tryGetValue(std::string key, std::string &outValue) const;
@@ -147,7 +148,7 @@ struct TraceEvent {
 	static void setNetworkThread();
 	static bool isNetworkThread();
 
-	TraceEvent& error(class Error const& e, bool includeCancelled=false);
+	TraceEvent& error(const class Error& e, bool includeCancelled=false);
 
 	TraceEvent& detail( std::string key, std::string value );
 	TraceEvent& detail( std::string key, double value );
@@ -157,18 +158,18 @@ struct TraceEvent {
 	TraceEvent& detail( std::string key, long long unsigned int value );
 	TraceEvent& detail( std::string key, int value );
 	TraceEvent& detail( std::string key, unsigned value );
-	TraceEvent& detail( std::string key, struct NetworkAddress const& value );
+	TraceEvent& detail( std::string key, const struct NetworkAddress& value );
 	TraceEvent& detailf( std::string key, const char* valueFormat, ... );
-	TraceEvent& detailext( std::string key, StringRef const& value );
-	TraceEvent& detailext( std::string key, Optional<Standalone<StringRef>> const& value );
+	TraceEvent& detailext( std::string key, const StringRef& value );
+	TraceEvent& detailext( std::string key, const Optional<Standalone<StringRef>>& value );
 private:
 	// Private version of detailf that does NOT write to the eventMetric.  This is to be used by other detail methods
 	// which can write field metrics of a more appropriate type than string but use detailf() to add to the TraceEvent.
-	TraceEvent& detailfNoMetric( std::string key, const char* valueFormat, ... );
-	TraceEvent& detailImpl( std::string key, std::string value, bool writeEventMetricField=true );
+	TraceEvent& detailfNoMetric( std::string&& key, const char* valueFormat, ... );
+	TraceEvent& detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField=true );
 public:
-	TraceEvent& detail( std::string key, UID const& value );
-	TraceEvent& backtrace(std::string prefix = "");
+	TraceEvent& detail( std::string key, const UID& value );
+	TraceEvent& backtrace(const std::string& prefix = "");
 	TraceEvent& trackLatest( const char* trackingKey );
 	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
 	TraceEvent& suppressFor( double duration, bool logSuppressedEventCount=true );
@@ -198,7 +199,7 @@ private:
 	bool init( Severity, struct TraceInterval& );
 };
 
-struct TraceLogWriter {
+struct ITraceLogWriter {
 	virtual void open() = 0;
 	virtual void roll() = 0;
 	virtual void close() = 0;
@@ -209,7 +210,7 @@ struct TraceLogWriter {
 	virtual void delref() = 0;
 };
 
-struct TraceLogFormatter {
+struct ITraceLogFormatter {
 	virtual const char* getExtension() = 0;
 	virtual const char* getHeader() = 0; // Called when starting a new file
 	virtual const char* getFooter() = 0; // Called when ending a file
@@ -233,7 +234,7 @@ struct TraceInterval {
 
 struct LatestEventCache {
 public:
-	void set( std::string tag, TraceEventFields fields );
+	void set( std::string tag, const TraceEventFields& fields );
 	TraceEventFields get( std::string tag );
 	std::vector<TraceEventFields> getAll();
 	std::vector<TraceEventFields> getAllUnsafe();
@@ -242,7 +243,7 @@ public:
 	void clear();
 
 	// Latest error tracking only tracks errors when called from the main thread. Other errors are silently ignored.
-	void setLatestError( TraceEventFields contents );
+	void setLatestError( const TraceEventFields& contents );
 	TraceEventFields getLatestError();
 private:
 	std::map<NetworkAddress, std::map<std::string, TraceEventFields>> latest;
