@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>Moving a Cluster to New Machines &#8212; FoundationDB 5.1</title>
+    <title>Moving a Cluster to New Machines &#8212; FoundationDB 5.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.5',
+        VERSION:     '5.2.5',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -31,6 +31,8 @@
     <script type="text/javascript" src="_static/bootstrap-3.3.4/js/bootstrap.min.js"></script>
     <script type="text/javascript" src="_static/bootstrap-sphinx.js"></script>
     <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Transport Layer Security" href="tls.html" />
+    <link rel="prev" title="Administration" href="administration.html" />
 <meta charset='utf-8'>
 <meta http-equiv='X-UA-Compatible' content='IE=edge,chrome=1'>
 <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1'>
@@ -50,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -93,6 +95,14 @@
             
               
                 
+  <li>
+    <a href="administration.html" title="Previous Chapter: Administration"><span class="glyphicon glyphicon-chevron-left visible-sm"></span><span class="hidden-sm hidden-tablet">&laquo; Administration</span>
+    </a>
+  </li>
+  <li>
+    <a href="tls.html" title="Next Chapter: Transport Layer Security"><span class="glyphicon glyphicon-chevron-right visible-sm"></span><span class="hidden-sm hidden-tablet">Transport Lay... &raquo;</span>
+    </a>
+  </li>
               
             
             
@@ -166,7 +176,7 @@ Recipe</p>
 </pre></div>
 </div>
 </li>
-<li><p class="first">Run <code class="docutils literal"><span class="pre">coordinators</span> <span class="pre">auto</span></code> in <code class="docutils literal"><span class="pre">fdbcli</span></code> to move coordination state to the new machines. Please note that this will cause the fdb.cluster file to be updated with the addresses of the new machines. Any currently connected clients will be notified and (assuming they have appropriate file system permissions) will update their own copy of the cluster file. As long as the original machines are still running, any clients that connect to them will be automatically forwarded to the new cluster coordinators. However, if you have a client that has not yet connected or only connects intermittently, you will need to copy the new cluster file from one of the new machines to the client machine.</p>
+<li><p class="first">Run <code class="docutils literal"><span class="pre">coordinators</span> <span class="pre">auto</span></code> in <code class="docutils literal"><span class="pre">fdbcli</span></code> to move coordination state to the new machines. Please note that this will cause the fdb.cluster file to be updated with the addresses of the new machines. Any currently connected clients will be notified and (assuming they have appropriate file system <a class="reference internal" href="administration.html#cluster-file-permissions"><span class="std std-ref">permissions</span></a>) will update their own copy of the cluster file. As long as the original machines are still running, any clients that connect to them will be automatically forwarded to the new cluster coordinators. However, if you have a client that has not yet connected or only connects intermittently, you will need to copy the new cluster file from one of the new machines to the client machine.</p>
 </li>
 <li><p class="first">The <code class="docutils literal"><span class="pre">status</span> <span class="pre">details</span></code> command in the fdbcli will now show only the new processes (both as workers and coordinators), and you can safely shut down the older machines.</p>
 </li>
@@ -194,7 +204,7 @@ Recipe</p>
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 18, 2018.<br/>
+      Last updated on Jun 26, 2018.<br/>
     </p>
   </div>
 </footer>

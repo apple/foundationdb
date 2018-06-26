@@ -5,7 +5,7 @@
   <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
     
-    <title>C API &#8212; FoundationDB 5.1</title>
+    <title>C API &#8212; FoundationDB 5.2</title>
     
     <link rel="stylesheet" href="_static/basic.css" type="text/css" />
     <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
@@ -16,7 +16,7 @@
     <script type="text/javascript">
       var DOCUMENTATION_OPTIONS = {
         URL_ROOT:    './',
-        VERSION:     '5.1.5',
+        VERSION:     '5.2.5',
         COLLAPSE_INDEX: false,
         FILE_SUFFIX: '.html',
         HAS_SOURCE:  true,
@@ -52,7 +52,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>5.1</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>5.2</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -203,8 +203,8 @@
 </div>
 <div class="section" id="api-versioning">
 <h2>API versioning</h2>
-<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="xref c c-macro docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 510.</p>
-<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 510</span>
+<p>Prior to including <code class="docutils literal"><span class="pre">fdb_c.h</span></code>, you must define the <code class="xref c c-macro docutils literal"><span class="pre">FDB_API_VERSION</span></code> macro. This, together with the <a class="reference internal" href="#c.fdb_select_api_version" title="fdb_select_api_version"><code class="xref c c-func docutils literal"><span class="pre">fdb_select_api_version()</span></code></a> function, allows programs written against an older version of the API to compile and run with newer versions of the C library. The current version of the FoundationDB C API is 520.</p>
+<div class="highlight-c"><div class="highlight"><pre><span></span><span class="cp">#define FDB_API_VERSION 520</span>
 <span class="cp">#include</span> <span class="cpf">&lt;foundationdb/fdb_c.h&gt;</span><span class="cp"></span>
 </pre></div>
 </div>
@@ -236,7 +236,7 @@
 <p class="last">Language bindings which themselves expose API versioning will usually pass the version requested by the application.</p>
 </dd>
 <dt><code class="xref c c-data docutils literal"><span class="pre">header_version</span></code></dt>
-<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 510). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
+<dd>The version of the ABI (application binary interface) that the calling code expects to find in the shared library. If you are using an FFI, this <em>must</em> correspond to the version of the API you are using as a reference (currently 520). For example, the number of arguments that a function takes may be affected by this value, and an incorrect value is unlikely to yield success.</dd>
 </dl>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
@@ -1045,7 +1045,7 @@ const char* <code class="descname">fdb_get_error</code><span class="sig-paren">(
     </p>
     <p>
         &copy; Copyright 2013-2018 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Apr 18, 2018.<br/>
+      Last updated on Jun 26, 2018.<br/>
     </p>
   </div>
 </footer>
