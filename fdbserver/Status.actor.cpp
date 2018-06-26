@@ -529,7 +529,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 		state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo = machineMemoryUsage.insert(std::make_pair(workerItr->first.locality.machineId(), MachineMemoryInfo())).first;
 		try {
 			ASSERT(pMetrics.count(workerItr->first.address()));
-			TraceEventFields processMetrics = pMetrics[workerItr->first.address()];
+			const TraceEventFields& processMetrics = pMetrics[workerItr->first.address()];
 
 			if(memInfo->second.valid()) {
 				if(processMetrics.size() > 0) {
@@ -595,7 +595,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 			processMap[printable(workerItr->first.locality.processId())] = StatusObject();
 
 			NetworkAddress address = workerItr->first.address();
-			TraceEventFields event = pMetrics[workerItr->first.address()];
+			const TraceEventFields& event = pMetrics[workerItr->first.address()];
 			statusObj["address"] = address.toString();
 			StatusObject memoryObj;
 
