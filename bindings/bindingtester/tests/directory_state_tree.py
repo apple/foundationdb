@@ -3,13 +3,14 @@ import sys
 class TreeNodeState:
     def __init__(self, dir_id, is_directory, is_subspace, has_known_prefix, root, is_partition):
         self.dir_id = dir_id
-        self.root = root
         self.is_directory = is_directory
         self.is_subspace = is_subspace
         self.has_known_prefix = has_known_prefix
+        self.root = root
+        self.is_partition = is_partition
+
         self.children = {}
         self.deleted = False
-        self.is_partition = is_partition
 
 class Pointer:
     def __init__(self, obj):
@@ -21,13 +22,15 @@ class Pointer:
     def set(self, obj):
         self.obj = obj
 
-# Represents an element of the directory hierarchy, which could have multiple states 
+# Represents an element of the directory hierarchy. As a result of various operations (e.g. moves) that
+# may or may not have succeeded, a node can represent multiple possible states.
 class DirectoryStateTreeNode:
     # A cache of directory layers. We mustn't have multiple entries for the same layer
     layers = {}
 
-    # This is the directory that gets used if the chosen directory is invalid
-    # We must assume any operation could also have been applied to it
+    # Because our operations may be applied to the default directory in the case that
+    # the current directory failed to open/create, we compute the result of each operation
+    # as if it was performed on the current directory and the default directory.
     default_directory = None
 
     # Used for debugging

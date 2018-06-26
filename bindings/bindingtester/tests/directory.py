@@ -400,9 +400,10 @@ def generate_path(min_length=0):
 
 
 def generate_prefix(require_unique=False, is_partition=False, min_length=1):
+    fixed_prefix = 'abcdefg'
     if not require_unique and min_length == 0 and random.random() < 0.8:
         return None
-    elif require_unique or is_partition or min_length > len('abcdefg') or random.random() < 0.5:
+    elif require_unique or is_partition or min_length > len(fixed_prefix) or random.random() < 0.5:
         if require_unique:
             min_length = max(min_length, 16)
 
@@ -416,6 +417,6 @@ def generate_prefix(require_unique=False, is_partition=False, min_length=1):
         else:
             return ''.join(chr(random.randrange(ord('\x02'), ord('\x14'))) for i in range(0, length))
     else:
-        prefix = 'abcdefg'
+        prefix = fixed_prefix 
         generated = prefix[0:random.randrange(min_length, len(prefix))]
         return generated
