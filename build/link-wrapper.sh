@@ -19,7 +19,6 @@ case $1 in
 	fi
 
 	OPTIONS=$( eval echo "$OPTIONS $LDFLAGS \$$2_LDFLAGS \$$2_OBJECTS \$$2_LIBS \$$2_STATIC_LIBS_REAL -o $3" )
-	echo "OPTIONS: $OPTIONS"
 
 	if echo $OPTIONS | grep -q -- -static-libstdc\+\+ ; then
 	    OPTIONS=$( echo $OPTIONS | sed -e s,-static-libstdc\+\+,, -e s,\$,\ `$CC -print-file-name=libstdc++.a`\ -lm, )
@@ -34,8 +33,7 @@ case $1 in
 		fi
 		;;
 	    *)
-		echo "Command: $CC $OPTIONS"
-		$CC $OPTIONS
+\		$CC $OPTIONS
 		;;
 	esac
 

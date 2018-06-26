@@ -2224,9 +2224,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	}
 
 	// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
-	printf("Setting network thread\n");
 	TraceEvent::setNetworkThread();
-	printf("Set network thread\n");
 
 	try {
 		cluster = Cluster::createCluster(ccf->getFilename().c_str(), -1);
