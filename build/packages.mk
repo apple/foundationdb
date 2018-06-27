@@ -120,8 +120,8 @@ ifeq ($(PLATFORM),linux)
 	@mkdir -p packages
 	@rm -f packages/foundationdb-server-*.rpm packages/foundationdb-clients-*.rpm
 	@packaging/rpm/buildrpms.sh $(VERSION) $(PKGRELEASE)
-	
-  packages: DEB RPM JAVA_RELEASE FDBTESTS FDBHEADERS FDBTLS
+
+  packages: DEB RPM JAVA_RELEASE FDBTESTS FDBHEADERS
 
   packages_clean: DEB_clean RPM_clean JAVA_RELEASE_clean FDBHEADERS_clean
 
