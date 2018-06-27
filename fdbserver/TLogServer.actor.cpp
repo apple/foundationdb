@@ -1203,10 +1203,12 @@ ACTOR Future<Void> tLogCommit(
 		TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(logData, req.version, req.arena, req.messages, self->bytesInput);
 
+		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
+
 		// Log the changes to the persistent queue, to be committed by commitQueue()
 		TLogQueueEntryRef qe;
 		qe.version = req.version;
-		qe.knownCommittedVersion = req.knownCommittedVersion;
+		qe.knownCommittedVersion = logData->knownCommittedVersion;
 		qe.messages = req.messages;
 		qe.id = logData->logId;
 		self->persistentQueue->push( qe, logData );
@@ -1218,7 +1220,6 @@ ACTOR Future<Void> tLogCommit(
 
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		self->prevVersion = logData->version.get();
-		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 		logData->version.set( req.version );
 
 		if(req.debugID.present())
@@ -1505,6 +1506,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					if(endVersion.present() && ver > endVersion.get()) {
 						return Void();
 					}
+
+					if(poppedIsKnownCommitted) {
+						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+					}
+
 					commitMessages(logData, ver, messages, self->bytesInput);
 
 					// Log the changes to the persistent queue, to be committed by commitQueue()
@@ -1523,9 +1529,6 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 					//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 					self->prevVersion = logData->version.get();
-					if(poppedIsKnownCommitted) {
-						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
-					}
 					logData->version.set( ver );
 				}
 				lastVer = ver;
@@ -1538,6 +1541,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						if(endVersion.present() && ver > endVersion.get()) {
 							return Void();
 						}
+
+						if(poppedIsKnownCommitted) {
+							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+						}
+
 						// Log the changes to the persistent queue, to be committed by commitQueue()
 						TLogQueueEntryRef qe;
 						qe.version = ver;
@@ -1554,9 +1562,6 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 						//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 						self->prevVersion = logData->version.get();
-						if(poppedIsKnownCommitted) {
-							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
-						}
 						logData->version.set( ver );
 					}
 					break;
