@@ -2148,6 +2148,7 @@ struct CLIOptions {
 #ifndef TLS_DISABLED
 			// TLS Options
 			case TLSOptions::OPT_TLS_PLUGIN:
+				args.OptionArg();
 				break;
 			case TLSOptions::OPT_TLS_CERTIFICATES:
 				tlsCertPath = args.OptionArg();

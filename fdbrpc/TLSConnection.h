@@ -127,6 +127,7 @@ private:
 	Reference<TLSOptions> options;
 };
 
+#define TLS_PLUGIN_FLAG "--tls_plugin"
 #define TLS_CERTIFICATE_FILE_FLAG "--tls_certificate_file"
 #define TLS_KEY_FILE_FLAG "--tls_key_file"
 #define TLS_VERIFY_PEERS_FLAG "--tls_verify_peers"
@@ -134,6 +135,7 @@ private:
 #define TLS_PASSWORD_FLAG "--tls_password"
 
 #define TLS_OPTION_FLAGS \
+	{ TLSOptions::OPT_TLS_PLUGIN,       TLS_PLUGIN_FLAG,           SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_KEY,          TLS_KEY_FILE_FLAG,         SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG,     SO_REQ_SEP }, \

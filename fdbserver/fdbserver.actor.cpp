@@ -1197,6 +1197,7 @@ int main(int argc, char* argv[]) {
 					break;
 #ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
+					args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args.OptionArg();
