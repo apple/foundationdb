@@ -208,6 +208,7 @@ int main(int argc, char **argv)
 		FDBLibTLSVerifyTest("CN=\\61\\62\\63", true, true, {{NID_commonName, "abc"}}, {}, {}),
 		FDBLibTLSVerifyTest("CN=a\\62c", true, true, {{NID_commonName, "abc"}}, {}, {}),
 		FDBLibTLSVerifyTest("CN=a\\01c", true, true, {{NID_commonName, "a\001c"}}, {}, {}),
+		FDBLibTLSVerifyTest("S.subjectAltName=XYZCorp", true, true, {{NID_subject_alt_name, "XYZCorp"}}, {}, {}),
 
 		// Invalid cases.
 		FDBLibTLSVerifyTest("Check.Invalid=0"),
