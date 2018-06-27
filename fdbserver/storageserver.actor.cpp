@@ -3183,8 +3183,8 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 				if( self->db->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
 					self->logSystem = ILogSystem::fromServerDBInfo( self->thisServerID, self->db->get() );
 					if (self->logSystem) {
-						if(self->db->get().logSystemConfig.previousEpochEndVersion.present()) {
-							self->poppedAllAfter = self->db->get().logSystemConfig.previousEpochEndVersion.get();
+						if(self->db->get().logSystemConfig.recoveredAt.present()) {
+							self->poppedAllAfter = self->db->get().logSystemConfig.recoveredAt.get();
 						}
 						self->logCursor = self->logSystem->peekSingle( self->thisServerID, self->version.get() + 1, self->tag, self->history );
 						self->popVersion( self->durableVersion.get() + 1, true );

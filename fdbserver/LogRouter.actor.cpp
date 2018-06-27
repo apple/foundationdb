@@ -37,17 +37,17 @@ struct LogRouterData {
 	struct TagData : NonCopyable, public ReferenceCounted<TagData> {
 		std::deque<std::pair<Version, LengthPrefixedStringRef>> version_messages;
 		Version popped;
-		Version knownCommittedVersion;
+		Version durableKnownCommittedVersion;
 		Tag tag;
 
-		TagData( Tag tag, Version popped, Version knownCommittedVersion ) : tag(tag), popped(popped), knownCommittedVersion(knownCommittedVersion) {}
+		TagData( Tag tag, Version popped, Version durableKnownCommittedVersion ) : tag(tag), popped(popped), durableKnownCommittedVersion(durableKnownCommittedVersion) {}
 
-		TagData(TagData&& r) noexcept(true) : version_messages(std::move(r.version_messages)), tag(r.tag), popped(r.popped), knownCommittedVersion(r.knownCommittedVersion) {}
+		TagData(TagData&& r) noexcept(true) : version_messages(std::move(r.version_messages)), tag(r.tag), popped(r.popped), durableKnownCommittedVersion(r.durableKnownCommittedVersion) {}
 		void operator= (TagData&& r) noexcept(true) {
 			version_messages = std::move(r.version_messages);
 			tag = r.tag;
 			popped = r.popped;
-			knownCommittedVersion = r.knownCommittedVersion;
+			durableKnownCommittedVersion = r.durableKnownCommittedVersion;
 		}
 
 		// Erase messages not needed to update *from* versions >= before (thus, messages with toversion <= before)
@@ -322,10 +322,10 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 	auto tagData = self->getTagData(req.tag);
 	if (!tagData) {
-		tagData = self->createTagData(req.tag, req.to, req.knownCommittedVersion);
+		tagData = self->createTagData(req.tag, req.to, req.durableKnownCommittedVersion);
 	} else if (req.to > tagData->popped) {
 		tagData->popped = req.to;
-		tagData->knownCommittedVersion = req.knownCommittedVersion;
+		tagData->durableKnownCommittedVersion = req.durableKnownCommittedVersion;
 		Void _ = wait(tagData->eraseMessagesBefore( req.to, self, TaskTLogPop ));
 	}
 
@@ -334,7 +334,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 	for( auto it : self->tag_data ) {
 		if(it) {
 			minPopped = std::min( it->popped, minPopped );
-			minKnownCommittedVersion = std::min( it->knownCommittedVersion, minKnownCommittedVersion );
+			minKnownCommittedVersion = std::min( it->durableKnownCommittedVersion, minKnownCommittedVersion );
 		}
 	}
 
