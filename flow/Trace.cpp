@@ -606,10 +606,22 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 
 	this->type = type;
 	this->severity = severity;
-	tmpEventMetric = new DynamicEventMetric(MetricNameRef());
 
-	if (isEnabled(type, severity)) {
-		enabled = true;
+	enabled = isEnabled(type, severity);
+
+	// Backstop to throttle very spammy trace events
+	if (enabled && g_network && !g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
+		if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t*)type, strlen(type)))) {
+			enabled = false;
+			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
+		}
+		else {
+			traceEventThrottlerCache->addAndExpire(StringRef((uint8_t*)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY);
+		}
+	}
+
+	if(enabled) {
+		tmpEventMetric = new DynamicEventMetric(MetricNameRef());
 
 		double time;
 		if(g_trace_clock == TRACE_CLOCK_NOW) {
@@ -632,8 +644,9 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 			NetworkAddress local = g_network->getLocalAddress();
 			detailf("Machine", "%d.%d.%d.%d:%d", (local.ip>>24)&0xff, (local.ip>>16)&0xff, (local.ip>>8)&0xff, local.ip&0xff, local.port);
 		}
-	} else
-		enabled = false;
+	} else {
+		tmpEventMetric = nullptr;
+	}
 
 	return enabled;
 }
@@ -816,19 +829,6 @@ TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
 TraceEvent::~TraceEvent() {
 	try {
 		if (enabled) {
-			// TRACE_EVENT_THROTTLER
-			if (g_network && !g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
-				if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t *)type, strlen(type)))) {
-					TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
-					// Throttle Msg
-					delete tmpEventMetric;
-					return;
-				}
-				else {
-					traceEventThrottlerCache->addAndExpire(StringRef((uint8_t *)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY);
-				}
-			} // End of Throttler
-
 			if (this->severity == SevError) {
 				severity = SevInfo;
 				backtrace();
