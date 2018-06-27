@@ -1170,7 +1170,6 @@ ACTOR Future<Void> tLogCommit(
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
 	}
 
-	logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	Void _ = wait( logData->version.whenAtLeast( req.prevVersion ) );
@@ -1204,10 +1203,12 @@ ACTOR Future<Void> tLogCommit(
 		TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(logData, req.version, req.arena, req.messages, self->bytesInput);
 
+		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
+
 		// Log the changes to the persistent queue, to be committed by commitQueue()
 		TLogQueueEntryRef qe;
 		qe.version = req.version;
-		qe.knownCommittedVersion = req.knownCommittedVersion;
+		qe.knownCommittedVersion = logData->knownCommittedVersion;
 		qe.messages = req.messages;
 		qe.id = logData->logId;
 		self->persistentQueue->push( qe, logData );
@@ -1466,9 +1467,6 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 		loop {
 			choose {
 				when(Void _ = wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
-					if(poppedIsKnownCommitted) {
-						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
-					}
 					break;
 				}
 				when( Void _ = wait( dbInfoChange ) ) {
@@ -1508,6 +1506,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					if(endVersion.present() && ver > endVersion.get()) {
 						return Void();
 					}
+
+					if(poppedIsKnownCommitted) {
+						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+					}
+
 					commitMessages(logData, ver, messages, self->bytesInput);
 
 					// Log the changes to the persistent queue, to be committed by commitQueue()
@@ -1538,6 +1541,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						if(endVersion.present() && ver > endVersion.get()) {
 							return Void();
 						}
+
+						if(poppedIsKnownCommitted) {
+							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+						}
+
 						// Log the changes to the persistent queue, to be committed by commitQueue()
 						TLogQueueEntryRef qe;
 						qe.version = ver;
