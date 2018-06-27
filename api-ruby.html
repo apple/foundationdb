@@ -113,13 +113,13 @@
 <li><a class="reference internal" href="#future-objects">Future objects</a></li>
 <li><a class="reference internal" href="#streaming-modes">Streaming modes</a></li>
 <li><a class="reference internal" href="#errors">Errors</a></li>
-<li><a class="reference internal" href="#tuple-layer">Tuple layer</a></li>
+<li><a class="reference internal" href="#module-FDB::Tuple">Tuple layer</a></li>
 <li><a class="reference internal" href="#subspaces">Subspaces</a></li>
 <li><a class="reference internal" href="#directories">Directories</a><ul>
 <li><a class="reference internal" href="#directorysubspace">DirectorySubspace</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#locality-information">Locality information</a></li>
+<li><a class="reference internal" href="#module-FDB::Locality">Locality information</a></li>
 </ul>
 </li>
 </ul>
@@ -195,13 +195,13 @@
 <li><a class="reference internal" href="#future-objects">Future objects</a></li>
 <li><a class="reference internal" href="#streaming-modes">Streaming modes</a></li>
 <li><a class="reference internal" href="#errors">Errors</a></li>
-<li><a class="reference internal" href="#tuple-layer">Tuple layer</a></li>
+<li><a class="reference internal" href="#module-FDB::Tuple">Tuple layer</a></li>
 <li><a class="reference internal" href="#subspaces">Subspaces</a></li>
 <li><a class="reference internal" href="#directories">Directories</a><ul>
 <li><a class="reference internal" href="#directorysubspace">DirectorySubspace</a></li>
 </ul>
 </li>
-<li><a class="reference internal" href="#locality-information">Locality information</a></li>
+<li><a class="reference internal" href="#module-FDB::Locality">Locality information</a></li>
 </ul>
 </li>
 </ul>
@@ -210,7 +210,7 @@
       </div>
     <div class="col-md-9 content">
       
-  <div class="section" id="ruby-api">
+  <span class="target" id="module-FDB"></span><div class="section" id="ruby-api">
 <h1>Ruby API</h1>
 <div class="section" id="installation">
 <h2>Installation</h2>
@@ -228,6 +228,12 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <div class="section" id="api-versioning">
 <h2>API versioning</h2>
 <p>When you require the <code class="docutils literal"><span class="pre">FDB</span></code> gem, it exposes only one useful method:</p>
+<dl class="function">
+<dt id="FDB.api_version">
+<code class="descclassname">FDB.</code><code class="descname">api_version</code><span class="sig-paren">(</span><em>version</em><span class="sig-paren">)</span></dt>
+<dd><p>Specifies the version of the API that the application uses. This allows future versions of FoundationDB to make API changes without breaking existing programs.  The current version of the API is 520.</p>
+</dd></dl>
+
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">You must call <code class="docutils literal"><span class="pre">FDB.api_version(...)</span></code> before using any other part of the API.  Once you have done so, the rest of the API will become available in the <code class="docutils literal"><span class="pre">FDB</span></code> module.</p>
@@ -244,72 +250,608 @@ must be installed. If you upgrade a language binding to a new version, you may n
 </div>
 <div class="section" id="opening-a-database">
 <h2>Opening a database</h2>
-<p>After requiring the <code class="docutils literal"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a href="#id49"><span class="problematic" id="id50">:class:`Database`</span></a>. The simplest way of doing this is using <a href="#id51"><span class="problematic" id="id52">:func:`open`</span></a>:</p>
+<p>After requiring the <code class="docutils literal"><span class="pre">FDB</span></code> gem and selecting an API version, you probably want to open a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a>. The simplest way of doing this is using <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">open</span></code></a>:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="nb">require</span> <span class="s1">&#39;fdb&#39;</span>
 <span class="no">FDB</span><span class="o">.</span><span class="n">api_version</span> <span class="mi">520</span>
 <span class="n">db</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">.</span><span class="n">open</span>
 </pre></div>
 </div>
+<dl class="function">
+<dt id="FDB.open">
+<code class="descclassname">FDB.</code><code class="descname">open</code><span class="sig-paren">(</span><em>cluster_file=nil</em>, <em>db_name=&quot;DB&quot;</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Database" title="FDB::Database">Database</a></dt>
+<dd><p>Initializes the FoundationDB API, connects to the cluster specified by the <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster file</span></a>, and opens the database with the specified name. This function is often called without any parameters, using only the defaults. If no cluster file is passed, FoundationDB automatically <a class="reference internal" href="administration.html#specifying-a-cluster-file"><span class="std std-ref">determines a cluster file</span></a> with which to connect to a cluster.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">In this release, db_name must be &#8220;DB&#8221;.</p>
+</div>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last"><code class="docutils literal"><span class="pre">fdb.open</span></code> combines the effect of <a class="reference internal" href="#FDB.init" title="FDB.init"><code class="xref rb rb-func docutils literal"><span class="pre">init</span></code></a>, <a class="reference internal" href="#FDB.create_cluster" title="FDB.create_cluster"><code class="xref rb rb-func docutils literal"><span class="pre">create_cluster</span></code></a>, and <a class="reference internal" href="#FDB::Cluster.open_database" title="FDB::Cluster.open_database"><code class="xref rb rb-meth docutils literal"><span class="pre">Cluster.open_database</span></code></a>.</p>
+</div>
+</dd></dl>
+
+<dl class="function">
+<dt id="FDB.init">
+<code class="descclassname">FDB.</code><code class="descname">init</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Initializes the FoundationDB API, creating a thread for the FoundationDB client and initializing the client&#8217;s networking engine. <a class="reference internal" href="#FDB.init" title="FDB.init"><code class="xref rb rb-func docutils literal"><span class="pre">init</span></code></a> can only be called once. If called subsequently or after <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">open</span></code></a>, it will raise a <code class="docutils literal"><span class="pre">client_invalid_operation</span></code> error.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="FDB.create_cluster">
+<code class="descclassname">FDB.</code><code class="descname">create_cluster</code><span class="sig-paren">(</span><em>cluster_file=nil</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Cluster" title="FDB::Cluster">Cluster</a></dt>
+<dd><p>Connects to the cluster specified by <a class="reference internal" href="administration.html#foundationdb-cluster-file"><span class="std std-ref">cluster_file</span></a>, or by a <a class="reference internal" href="administration.html#default-cluster-file"><span class="std std-ref">default cluster file</span></a> if <code class="docutils literal"><span class="pre">cluster_file</span></code> is <code class="docutils literal"><span class="pre">nil</span></code>.</p>
+</dd></dl>
+
+<dl class="global">
+<dt id="options">
+<code class="descclassname">FDB.</code><code class="descname">options</code></dt>
+<dd><p>A singleton providing options which affect the entire FoundationDB client. Note that network options can also be <a class="reference internal" href="api-general.html#network-options-using-environment-variables"><span class="std std-ref">set using environment variables</span></a>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">It is an error to set these options after the first call to <a class="reference internal" href="#FDB.open" title="FDB.open"><code class="xref rb rb-func docutils literal"><span class="pre">FDB.open</span></code></a> or <a class="reference internal" href="#FDB.init" title="FDB.init"><code class="xref rb rb-func docutils literal"><span class="pre">FDB.init</span></code></a> anywhere in your application.</p>
+</div>
+<dl class="method">
+<dt id="FDB::FDB.options.set_trace_enable">
+<code class="descclassname">FDB.options.</code><code class="descname">set_trace_enable</code><span class="sig-paren">(</span><em>output_directory</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Enables trace file generation on this FoundationDB client. Trace files will be generated in the specified output directory. If the directory is specified as <code class="docutils literal"><span class="pre">nil</span></code>, then the output directory will be the current working directory.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">The specified output directory must be unique to this client. In the present release, trace logging does not allow two clients to share a directory.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_trace_max_logs_size">
+<code class="descclassname">FDB.options.</code><code class="descname">set_trace_max_logs_size</code><span class="sig-paren">(</span><em>bytes</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the maximum size in bytes for the sum of this FoundationDB client&#8217;s trace output files in a single log directory.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_trace_roll_size">
+<code class="descclassname">FDB.options.</code><code class="descname">set_trace_roll_size</code><span class="sig-paren">(</span><em>bytes</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><blockquote>
+<div>Sets the maximum size in bytes of a single trace output file for this FoundationDB client.</div></blockquote>
+<p>Disables the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a> and instead uses the local client directly. Must be set before setting up the network.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_callbacks_on_external_threads">
+<code class="descclassname">FDB.options.</code><code class="descname">set_callbacks_on_external_threads</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>If set, callbacks from <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">external client libraries</span></a> can be called from threads created by the FoundationDB client library. Otherwise, callbacks will be called from either the thread used to add the callback or the network thread. Setting this option can improve performance when connected using an external client, but may not be safe to use in all environments. Must be set before setting up the network. WARNING: This feature is considered experimental at this time.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_external_client_library">
+<code class="descclassname">FDB.options.</code><code class="descname">set_external_client_library</code><span class="sig-paren">(</span><em>path_to_lib</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Adds an external client library for use by the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>. Must be set before setting up the network.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_external_client_directory">
+<code class="descclassname">FDB.options.</code><code class="descname">set_external_client_directory</code><span class="sig-paren">(</span><em>path_to_lib_directory</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Searches the specified path for dynamic libraries and adds them to the list of client libraries for use by the <a class="reference internal" href="api-general.html#multi-version-client-api"><span class="std std-ref">multi-version client API</span></a>. Must be set before setting up the network.</p>
+</dd></dl>
+
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">The following options are only used when connecting to a <a class="reference internal" href="tls.html"><span class="doc">TLS-enabled cluster</span></a>.</p>
+</div>
+<dl class="method">
+<dt id="FDB::FDB.options.set_tls_plugin">
+<code class="descclassname">FDB.options.</code><code class="descname">set_tls_plugin</code><span class="sig-paren">(</span><em>plugin_path_or_name</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the <a class="reference internal" href="tls.html#configuring-tls-plugin"><span class="std std-ref">TLS plugin</span></a> to load. This option, if used, must be set before any other TLS options.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_tls_cert_path">
+<code class="descclassname">FDB.options.</code><code class="descname">set_tls_cert_path</code><span class="sig-paren">(</span><em>path_to_file</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the path for the file from which the <a class="reference internal" href="tls.html#tls-certificate-file"><span class="std std-ref">certificate chain</span></a> will be loaded.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_tls_key_path">
+<code class="descclassname">FDB.options.</code><code class="descname">set_tls_key_path</code><span class="sig-paren">(</span><em>path_to_file</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the path for the file from which to load the <a class="reference internal" href="tls.html#tls-key-file"><span class="std std-ref">private key</span></a> corresponding to your own certificate.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_tls_verify_peers">
+<code class="descclassname">FDB.options.</code><code class="descname">set_tls_verify_peers</code><span class="sig-paren">(</span><em>criteria</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the <a class="reference internal" href="tls.html#tls-verify-peers"><span class="std std-ref">peer certificate field verification criteria</span></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_tls_cert_bytes">
+<code class="descclassname">FDB.options.</code><code class="descname">set_tls_cert_bytes</code><span class="sig-paren">(</span><em>bytes</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the certificate chain.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_tls_key_bytes">
+<code class="descclassname">FDB.options.</code><code class="descname">set_tls_key_bytes</code><span class="sig-paren">(</span><em>bytes</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the private key corresponding to your own certificate.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::FDB.options.set_disable_multi_version_client_api">
+<code class="descclassname">FDB.options.</code><code class="descname">set_disable_multi_version_client_api</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd></dd></dl>
+
+</dd></dl>
+
 </div>
 <div class="section" id="cluster-objects">
 <h2>Cluster objects</h2>
+<dl class="class">
+<dt id="FDB::Cluster">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Cluster</code></dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="FDB::Cluster.open_database">
+<code class="descclassname">Cluster.</code><code class="descname">open_database</code><span class="sig-paren">(</span><em>name=&quot;DB&quot;</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Database" title="FDB::Database">Database</a></dt>
+<dd><p>Opens a database with the given name.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">In this release, name <strong>must</strong> be &#8220;DB&#8221;.</p>
 </div>
-<div class="cluster section" id="keys-and-values">
+</dd></dl>
+
+</div>
+<div class="section" id="keys-and-values">
 <span id="api-ruby-keys"></span><h2>Keys and values</h2>
 <p>Keys and values in FoundationDB are simple byte strings.</p>
 <p>To encode other data types, see <a class="reference internal" href="data-modeling.html#encoding-data-types"><span class="std std-ref">Encoding data types</span></a> and the <a class="reference internal" href="#api-ruby-tuple-layer"><span class="std std-ref">tuple layer</span></a>.</p>
 <div class="section" id="as-foundationdb-key-and-as-foundationdb-value">
 <h3><code class="docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="docutils literal"><span class="pre">as_foundationdb_value</span></code></h3>
-<p>In some cases, you may have objects that are used to <em>represent</em> specific keys or values (for example, see <a href="#id137"><span class="problematic" id="id138">|subspace|</span></a>). As a convenience, the language binding API can work seamlessly with such objects if they implement the <a href="#id139"><span class="problematic" id="id140">|as-foundationdb-key|</span></a> or <a href="#id141"><span class="problematic" id="id142">|as-foundationdb-value|</span></a> methods, respectively. API methods that accept a key will alternately accept an object that implements the <a href="#id143"><span class="problematic" id="id144">|as-foundationdb-key|</span></a> method. Likewise, API methods accepting a value will also accept an object that implements the <a href="#id145"><span class="problematic" id="id146">|as-foundationdb-value|</span></a> method.</p>
+<p>In some cases, you may have objects that are used to <em>represent</em> specific keys or values (for example, see <a class="reference internal" href="#FDB::Subspace" title="FDB::Subspace"><code class="xref rb rb-class docutils literal"><span class="pre">Subspace</span></code></a>). As a convenience, the language binding API can work seamlessly with such objects if they implement the <code class="xref rb rb-meth docutils literal"><span class="pre">as_foundationdb_key</span></code> or <code class="xref rb rb-meth docutils literal"><span class="pre">as_foundationdb_value</span></code> methods, respectively. API methods that accept a key will alternately accept an object that implements the <code class="xref rb rb-meth docutils literal"><span class="pre">as_foundationdb_key</span></code> method. Likewise, API methods accepting a value will also accept an object that implements the <code class="xref rb rb-meth docutils literal"><span class="pre">as_foundationdb_value</span></code> method.</p>
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last"><a href="#id147"><span class="problematic" id="id148">|as-foundationdb-key|</span></a> and <a href="#id149"><span class="problematic" id="id150">|as-foundationdb-value|</span></a> are not intended to implement serialization protocols for object storage. Use these functions only when your object represents a specific key or value.</p>
+<p class="last"><code class="xref rb rb-meth docutils literal"><span class="pre">as_foundationdb_key</span></code> and <code class="xref rb rb-meth docutils literal"><span class="pre">as_foundationdb_value</span></code> are not intended to implement serialization protocols for object storage. Use these functions only when your object represents a specific key or value.</p>
 </div>
 </div>
 </div>
 <div class="section" id="keyvalue-objects">
 <h2>KeyValue objects</h2>
-<p class="keyvalue">Represents a single key-value pair in the database. This is a simple value type; mutating it won&#8217;t affect your <a href="#id53"><span class="problematic" id="id54">:class:`Transaction`</span></a> or <a href="#id55"><span class="problematic" id="id56">:class:`Database`</span></a>.</p>
+<dl class="class">
+<dt id="FDB::KeyValue">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">KeyValue</code></dt>
+<dd><p>Represents a single key-value pair in the database. This is a simple value type; mutating it won&#8217;t affect your <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a> or <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a>.</p>
+<dl class="attr_reader">
+<dt id="FDB::KeyValue#key">
+<em class="property">attribute [R] </em><code class="descname">key</code></dt>
+<dd></dd></dl>
+
+<dl class="attr_reader">
+<dt id="FDB::KeyValue#value">
+<em class="property">attribute [R] </em><code class="descname">value</code></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
 </div>
 <div class="section" id="key-selectors">
 <h2>Key selectors</h2>
-<p>FoundationDB&#8217;s lexicographically ordered data model permits finding keys based on their order (for example, finding the first key in the database greater than a given key). Key selectors represent a description of a key in the database that could be resolved to an actual key by <a href="#id153"><span class="problematic" id="id154">|get-key-func|</span></a> or used directly as the beginning or end of a range in <a href="#id155"><span class="problematic" id="id156">|get-range-func|</span></a>.</p>
+<p>FoundationDB&#8217;s lexicographically ordered data model permits finding keys based on their order (for example, finding the first key in the database greater than a given key). Key selectors represent a description of a key in the database that could be resolved to an actual key by <a class="reference internal" href="#FDB::Transaction.get_key" title="FDB::Transaction.get_key"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_key</span></code></a> or used directly as the beginning or end of a range in <a class="reference internal" href="#FDB::Transaction.get_range" title="FDB::Transaction.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range</span></code></a>.</p>
 <p>For more about how key selectors work, see <a class="reference internal" href="developer-guide.html#key-selectors"><span class="std std-ref">Key selectors</span></a>.</p>
-<p class="keyselector-key or-equal offset">Creates a key selector with the given reference key, equality flag, and offset. It is usually more convenient to obtain a key selector with one of the following methods:</p>
-<blockquote class="keyselector-key or-equal offset">
-<div></div></blockquote>
+<dl class="class">
+<dt id="FDB::KeySelector">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">KeySelector</code><span class="sig-paren">(</span><em>key</em>, <em>or_equal</em>, <em>offset</em><span class="sig-paren">)</span></dt>
+<dd><p>Creates a key selector with the given reference key, equality flag, and offset. It is usually more convenient to obtain a key selector with one of the following methods:</p>
+<blockquote>
+<div><dl class="classmethod">
+<dt id="FDB::KeySelector.last_less_than">
+<em class="property">classmethod KeySelector.</em><code class="descname">last_less_than</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector">KeySelector</a></dt>
+<dd><p>Returns a key selector referencing the last (greatest) key in the database less than the specified key.</p>
+</dd></dl>
+
+<dl class="classmethod">
+<dt id="FDB::KeySelector.last_less_or_equal">
+<em class="property">classmethod KeySelector.</em><code class="descname">last_less_or_equal</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector">KeySelector</a></dt>
+<dd><p>Returns a key selector referencing the last (greatest) key less than, or equal to, the specified key.</p>
+</dd></dl>
+
+<dl class="classmethod">
+<dt id="FDB::KeySelector.first_greater_than">
+<em class="property">classmethod KeySelector.</em><code class="descname">first_greater_than</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector">KeySelector</a></dt>
+<dd><p>Returns a key selector referencing the first (least) key greater than the specified key.</p>
+</dd></dl>
+
+<dl class="classmethod">
+<dt id="FDB::KeySelector.first_greater_or_equal">
+<em class="property">classmethod KeySelector.</em><code class="descname">first_greater_or_equal</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector">KeySelector</a></dt>
+<dd><p>Returns a key selector referencing the first key greater than, or equal to, the specified key.</p>
+</dd></dl>
+
+</div></blockquote>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::KeySelector.+">
+<code class="descclassname">KeySelector.</code><code class="descname">+</code><span class="sig-paren">(</span><em>offset</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector">KeySelector</a></dt>
+<dd><p>Adding an integer <code class="docutils literal"><span class="pre">offset</span></code> to a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a> returns a new key selector referencing a key <code class="docutils literal"><span class="pre">offset</span></code> keys after the original <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>.  FoundationDB does not efficiently resolve key selectors with large offsets, so <a class="reference internal" href="known-limitations.html#dont-use-key-selectors-for-paging"><span class="std std-ref">Key selectors with large offsets are slow</span></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::KeySelector.-">
+<code class="descclassname">KeySelector.</code><code class="descname">-</code><span class="sig-paren">(</span><em>offset</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector">KeySelector</a></dt>
+<dd><p>Subtracting an integer <code class="docutils literal"><span class="pre">offset</span></code> from a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a> returns a new key selector referencing a key <code class="docutils literal"><span class="pre">offset</span></code> keys before the original <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>.  FoundationDB does not efficiently resolve key selectors with large offsets, so <a class="reference internal" href="known-limitations.html#dont-use-key-selectors-for-paging"><span class="std std-ref">Key selectors with large offsets are slow</span></a>.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="database-objects">
 <h2>Database objects</h2>
-<p class="database">A <code class="docutils literal"><span class="pre">Database</span></code> represents a FoundationDB database &#8212; a mutable, lexicographically ordered mapping from binary keys to binary values. Although <code class="docutils literal"><span class="pre">Database</span></code> provides convenience methods for reading and writing, modifications to a database are usually via transactions, which are usually created and committed automatically by <a href="#id151"><span class="problematic" id="id152">|database-auto|</span></a>.</p>
+<dl class="class">
+<dt id="FDB::Database">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Database</code></dt>
+<dd></dd></dl>
+
+<p>A <code class="docutils literal"><span class="pre">Database</span></code> represents a FoundationDB database &#8212; a mutable, lexicographically ordered mapping from binary keys to binary values. Although <code class="docutils literal"><span class="pre">Database</span></code> provides convenience methods for reading and writing, modifications to a database are usually via transactions, which are usually created and committed automatically by <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a>.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">The convenience methods provided by <code class="docutils literal"><span class="pre">Database</span></code> have the same signature as the corresponding methods of <code class="docutils literal"><span class="pre">Transaction</span></code>. However, most of the <code class="docutils literal"><span class="pre">Database</span></code> methods are fully synchronous. (An exception is the methods for watches.) As a result, the <code class="docutils literal"><span class="pre">Database</span></code> methods do not support the use of <a class="reference internal" href="developer-guide.html#developer-guide-programming-with-futures"><span class="std std-ref">implicit parallelism with futures</span></a>.</p>
 </div>
+<dl class="method">
+<dt id="FDB::Database.transact">
+<code class="descclassname">Database.</code><code class="descname">transact</code><em class="property"> {|tr| block } </em></dt>
+<dd><p>Executes the provided block with a new transaction, commits the transaction, and retries the block as necessary in response to retryable database errors such as transaction conflicts. This is the recommended way to do operations transactionally.</p>
+<p>This method, along with <a class="reference internal" href="#FDB::Transaction.transact" title="FDB::Transaction.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.transact</span></code></a>, makes it easy to write a transactional functions which accept either a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> or a <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a> as a parameter. See <a class="reference internal" href="#transact"><span class="std std-ref">The transact method</span></a> for explanation and examples.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">In some failure scenarios, it is possible that your transaction will be executed twice. See <a class="reference internal" href="developer-guide.html#developer-guide-unknown-results"><span class="std std-ref">Transactions with unknown results</span></a> for more information.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.create_transaction">
+<code class="descclassname">Database.</code><code class="descname">create_transaction</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction">Transaction</a></dt>
+<dd><p>Starts a new transaction on the database.  Consider using <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a> instead, since it will automatically provide you with appropriate commit and retry behavior.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.get">
+<code class="descclassname">Database.</code><code class="descname">get</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; String or nil</dt>
+<dd><p>Returns the value associated with the specified key in the database (or <code class="docutils literal"><span class="pre">nil</span></code> if the key does not exist). This read is fully synchronous.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.[]">
+<code class="descclassname">Database.</code><code class="descname">[]</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; String or nil</dt>
+<dd><p>Alias of <a class="reference internal" href="#FDB::Database.get" title="FDB::Database.get"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.get</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.get_key">
+<code class="descclassname">Database.</code><code class="descname">get_key</code><span class="sig-paren">(</span><em>key_selector</em><span class="sig-paren">)</span> &#x2192; String</dt>
+<dd><p>Returns the key referenced by the specified <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>. This read is fully synchronous.</p>
+<p>The key is cached, providing a potential performance benefit. However, the
+value of the key is also retrieved, using network bandwidth.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.get_range">
+<code class="descclassname">Database.</code><code class="descname">get_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; Array</dt>
+<dd><p>Returns all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code> and their associated values as an <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code> of <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> objects. Note the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range. This read is fully synchronous.</p>
+<p>Each of <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> may be a key (<code class="xref rb rb-class docutils literal"><span class="pre">String</span></code> or <a class="reference internal" href="#FDB::Key" title="FDB::Key"><code class="xref rb rb-class docutils literal"><span class="pre">Key</span></code></a>) or a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>. Note that in the case of a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>, the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range still applies.</p>
+<p>The <code class="docutils literal"><span class="pre">options</span></code> hash accepts the following optional parameters:</p>
+<blockquote>
+<div><dl class="docutils">
+<dt><code class="docutils literal"><span class="pre">:limit</span></code></dt>
+<dd>Only the first <code class="docutils literal"><span class="pre">limit</span></code> keys (and their values) in the range will be returned.</dd>
+<dt><code class="docutils literal"><span class="pre">:reverse</span></code></dt>
+<dd><p class="first">If <code class="docutils literal"><span class="pre">true</span></code>, then the keys in the range will be returned in reverse order.</p>
+<p class="last">If <code class="docutils literal"><span class="pre">:limit</span></code> is also specified, the <em>last</em> <code class="docutils literal"><span class="pre">limit</span></code> keys in the range will be returned in reverse order.</p>
+</dd>
+<dt><code class="docutils literal"><span class="pre">:streaming_mode</span></code></dt>
+<dd>A valid <a class="reference internal" href="#ruby-streaming-mode"><span class="std std-ref">streaming mode</span></a>, which provides a hint to FoundationDB about how to retrieve the specified range. This option should generally not be specified, allowing FoundationDB to retrieve the full range very efficiently.</dd>
+</dl>
+</div></blockquote>
+</dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descclassname">Database.</code><code class="descname">get_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em>, <em>options={}</em><span class="sig-paren">)</span><em class="property">{|kv| block }</em> &#x2192; nil</dt>
+<dd><p>If given a block, <a class="reference internal" href="#FDB::Database.get_range" title="FDB::Database.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.get_range</span></code></a> yields each <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> in the range that would otherwise have been returned to <code class="docutils literal"><span class="pre">block</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.get_range_start_with">
+<code class="descclassname">Database.</code><code class="descname">get_range_start_with</code><span class="sig-paren">(</span><em>prefix</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; Array</dt>
+<dd><p>Returns all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">k.start_with?</span> <span class="pre">prefix</span></code>, and their associated values, as an <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code> of <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> objects. The <code class="docutils literal"><span class="pre">options</span></code> hash accepts the same values as <a class="reference internal" href="#FDB::Database.get_range" title="FDB::Database.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.get_range</span></code></a>. This read is fully synchronous.</p>
+</dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descclassname">Database.</code><code class="descname">get_range_start_with</code><span class="sig-paren">(</span><em>prefix</em>, <em>options={}</em><span class="sig-paren">)</span><em class="property">{|kv| block }</em> &#x2192; nil</dt>
+<dd><p>If given a block, <a class="reference internal" href="#FDB::Database.get_range_start_with" title="FDB::Database.get_range_start_with"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.get_range_start_with</span></code></a> yields each <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> in the range that would otherwise have been returned to <code class="docutils literal"><span class="pre">block</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.set">
+<code class="descclassname">Database.</code><code class="descname">set</code><span class="sig-paren">(</span><em>key</em>, <em>value</em><span class="sig-paren">)</span> &#x2192; value</dt>
+<dd><p>Associates the given <code class="docutils literal"><span class="pre">key</span></code> and <code class="docutils literal"><span class="pre">value</span></code>. Overwrites any prior value associated with <code class="docutils literal"><span class="pre">key</span></code>. Returns the same value that was passed in. This change will be committed immediately, and is fully synchronous.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.[]=">
+<code class="descclassname">Database.</code><code class="descname">[]=</code><span class="sig-paren">(</span><em>key</em>, <em>value</em><span class="sig-paren">)</span> &#x2192; value</dt>
+<dd><p>Alias of <a class="reference internal" href="#FDB::Database.set" title="FDB::Database.set"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.set</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.clear">
+<code class="descclassname">Database.</code><code class="descname">clear</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Removes the specified <code class="docutils literal"><span class="pre">key</span></code> (and any associated value), if it exists. This change will be committed immediately, and is fully synchronous.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.clear_range">
+<code class="descclassname">Database.</code><code class="descname">clear_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Removes all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code>, and their associated values. This change will be committed immediately, and is fully synchronous.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.clear_range_start_with">
+<code class="descclassname">Database.</code><code class="descname">clear_range_start_with</code><span class="sig-paren">(</span><em>prefix</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Removes all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">k.start_with?</span> <span class="pre">prefix</span></code>, and their associated values. This change will be committed immediately, and is fully synchronous.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.get_and_watch">
+<code class="descclassname">Database.</code><code class="descname">get_and_watch</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; [value, FutureNil]</dt>
+<dd><p>Returns an array <code class="docutils literal"><span class="pre">[value,</span> <span class="pre">watch]</span></code>, where <code class="docutils literal"><span class="pre">value</span></code> is the value associated with <code class="docutils literal"><span class="pre">key</span></code> or <code class="docutils literal"><span class="pre">nil</span></code> if the key does not exist, and <code class="docutils literal"><span class="pre">watch</span></code> is a <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a> that will become ready after <code class="docutils literal"><span class="pre">value</span></code> changes.</p>
+<p>See <a class="reference internal" href="#FDB::Transaction.watch" title="FDB::Transaction.watch"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.watch</span></code></a> for a general description of watches and their limitations.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.set_and_watch">
+<code class="descclassname">Database.</code><code class="descname">set_and_watch</code><span class="sig-paren">(</span><em>key</em>, <em>value</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil">FutureNil</a></dt>
+<dd><p>Sets <code class="docutils literal"><span class="pre">key</span></code> to <code class="docutils literal"><span class="pre">value</span></code> and returns a <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a> that will become ready after a subsequent change to <code class="docutils literal"><span class="pre">value</span></code>.</p>
+<p>See <a class="reference internal" href="#FDB::Transaction.watch" title="FDB::Transaction.watch"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.watch</span></code></a> for a general description of watches and their limitations.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.clear_and_watch">
+<code class="descclassname">Database.</code><code class="descname">clear_and_watch</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil">FutureNil</a></dt>
+<dd><p>Removes <code class="docutils literal"><span class="pre">key</span></code> (and any associated value) if it exists and returns a <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a> that will become ready after the value is subsequently set.</p>
+<p>See <a class="reference internal" href="#FDB::Transaction.watch" title="FDB::Transaction.watch"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.watch</span></code></a> for a general description of watches and their limitations.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.add">
+<code class="descclassname">Database.</code><code class="descname">add</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.bit_and">
+<code class="descclassname">Database.</code><code class="descname">bit_and</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.bit_or">
+<code class="descclassname">Database.</code><code class="descname">bit_or</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd></dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.bit_xor">
+<code class="descclassname">Database.</code><code class="descname">bit_xor</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>These atomic operations behave exactly like the <a class="reference internal" href="#api-ruby-transaction-atomic-operations"><span class="std std-ref">associated operations</span></a> on <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a> objects except that the change will immediately be committed, and is fully synchronous.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Note that since some atomic operations are not idempotent, the implicit use of <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a> could interact with a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">commit_unknown_result</span></a> exception in unpredictable ways. For more information, see <a class="reference internal" href="developer-guide.html#developer-guide-unknown-results"><span class="std std-ref">Transactions with unknown results</span></a>.</p>
+</div>
+</dd></dl>
+
 <div class="section" id="database-options">
 <h3>Database options</h3>
 <p>Database options alter the behavior of FoundationDB databases.</p>
+<dl class="method">
+<dt id="FDB::Database.options.set_location_cache_size">
+<code class="descclassname">Database.options.</code><code class="descname">set_location_cache_size</code><span class="sig-paren">(</span><em>size</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the size of the client location cache. Raising this value can boost performance in very large databases where clients access data in a near-random pattern. This value must be an integer in the range [0, 2<sup>31</sup>-1]. Defaults to 100000.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_max_watches">
+<code class="descclassname">Database.options.</code><code class="descname">set_max_watches</code><span class="sig-paren">(</span><em>max_watches</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the maximum number of watches allowed to be outstanding on a database connection. Increasing this number could result in increased resource usage. Reducing this number will not cancel any outstanding watches. Defaults to 10000 and cannot be larger than 1000000.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_machine_id">
+<code class="descclassname">Database.options.</code><code class="descname">set_machine_id</code><span class="sig-paren">(</span><em>id</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Specify the machine ID of a server to be preferentially used for database operations. ID must be a string of up to 16 hexadecimal digits that was used to configure <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">fdbserver processes</span></a>. Load balancing uses this option for location-awareness, attempting to send database operations first to servers on a specified machine, then a specified datacenter, then returning to its default algorithm.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Database.options.set_datacenter_id">
+<code class="descclassname">Database.options.</code><code class="descname">set_datacenter_id</code><span class="sig-paren">(</span><em>id</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Specify the datacenter ID to be preferentially used for database operations. ID must be a string of up to 16 hexadecimal digits that was used to configure <a class="reference internal" href="configuration.html#foundationdb-conf-fdbserver"><span class="std std-ref">fdbserver processes</span></a>. Load balancing uses this option for location-awareness, attempting to send database operations first to servers on a specified machine, then a specified datacenter, then returning to its default algorithm.</p>
+</dd></dl>
+
 </div>
 </div>
 <div class="section" id="transaction-objects">
 <h2>Transaction objects</h2>
-<p class="transaction">A <code class="docutils literal"><span class="pre">Transaction</span></code> object represents a FoundationDB database transaction.  All operations on FoundationDB take place, explicitly or implicitly, through a <code class="docutils literal"><span class="pre">Transaction</span></code>.</p>
+<dl class="class">
+<dt id="FDB::Transaction">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Transaction</code></dt>
+<dd></dd></dl>
+
+<p>A <code class="docutils literal"><span class="pre">Transaction</span></code> object represents a FoundationDB database transaction.  All operations on FoundationDB take place, explicitly or implicitly, through a <code class="docutils literal"><span class="pre">Transaction</span></code>.</p>
 <p>In FoundationDB, a transaction is a mutable snapshot of a database. All read and write operations on a transaction see and modify an otherwise-unchanging version of the database and only change the underlying database if and when the transaction is committed. Read operations do see the effects of previous write operations on the same transaction. Committing a transaction usually succeeds in the absence of <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflicts</span></a>.</p>
 <p>Transactions group operations into a unit with the properties of <em>atomicity</em>, <em>isolation</em>, and <em>durability</em>. Transactions also provide the ability to maintain an application&#8217;s invariants or integrity constraints, supporting the property of <em>consistency</em>. Together these properties are known as <a class="reference internal" href="developer-guide.html#acid"><span class="std std-ref">ACID</span></a>.</p>
 <p>Transactions are also causally consistent: once a transaction has been successfully committed, all subsequently created transactions will see the modifications made by it.</p>
-<p>The most convenient way to create and use transactions is using the <a href="#id57"><span class="problematic" id="id58">:meth:`Database.transact`</span></a> method.</p>
-<p>Keys and values in FoundationDB are byte strings.  FoundationDB will accept Ruby strings with any encoding, but will always return strings with <code class="docutils literal"><span class="pre">ASCII-8BIT</span></code> encoding (also known as <code class="docutils literal"><span class="pre">BINARY</span></code>).  To encode other data types, see the <a href="#id59"><span class="problematic" id="id60">:mod:`FDB::Tuple`</span></a> module and <a class="reference internal" href="data-modeling.html#encoding-data-types"><span class="std std-ref">Encoding data types</span></a>.</p>
+<p>The most convenient way to create and use transactions is using the <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a> method.</p>
+<p>Keys and values in FoundationDB are byte strings.  FoundationDB will accept Ruby strings with any encoding, but will always return strings with <code class="docutils literal"><span class="pre">ASCII-8BIT</span></code> encoding (also known as <code class="docutils literal"><span class="pre">BINARY</span></code>).  To encode other data types, see the <a class="reference internal" href="#module-FDB::Tuple"><code class="xref rb rb-mod docutils literal"><span class="pre">FDB::Tuple</span></code></a> module and <a class="reference internal" href="data-modeling.html#encoding-data-types"><span class="std std-ref">Encoding data types</span></a>.</p>
 <div class="section" id="attributes">
 <h3>Attributes</h3>
+<dl class="global">
+<dt id="db">
+<code class="descclassname">Transaction.</code><code class="descname">db</code></dt>
+<dd><p>The <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> that this transaction is interacting with.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="reading-data">
 <h3>Reading data</h3>
+<dl class="method">
+<dt id="FDB::Transaction.get">
+<code class="descclassname">Transaction.</code><code class="descname">get</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Value" title="FDB::Value">Value</a></dt>
+<dd><p>Returns the value associated with the specified key in the database (which may be <code class="docutils literal"><span class="pre">nil</span></code> if the key does not exist).</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.[]">
+<code class="descclassname">Transaction.</code><code class="descname">[]</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span></dt>
+<dd><p>Alias of <a class="reference internal" href="#FDB::Transaction.get" title="FDB::Transaction.get"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.get_key">
+<code class="descclassname">Transaction.</code><code class="descname">get_key</code><span class="sig-paren">(</span><em>key_selector</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Key" title="FDB::Key">Key</a></dt>
+<dd><p>Returns the key referenced by the specified <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>.</p>
+<p>By default, the key is cached for the duration of the transaction, providing
+a potential performance benefit. However, the value of the key is also retrieved,
+using network bandwidth. Invoking <a class="reference internal" href="#FDB::Transaction.options.set_read_your_writes_disable" title="FDB::Transaction.options.set_read_your_writes_disable"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_read_your_writes_disable</span></code></a> will avoid
+both the caching and the increased network bandwidth.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.get_range">
+<code class="descclassname">Transaction.</code><code class="descname">get_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; an_enumerable</dt>
+<dd><p>Returns all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code> and their associated values as an enumerable of <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> objects. Note the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range.</p>
+<p>Like a <a class="reference internal" href="#api-ruby-future"><span class="std std-ref">Future</span></a> object, the returned enumerable issues asynchronous read operations to fetch data in the range, and may block while enumerating its values if the read has not completed. Data will be fetched in one more more efficient batches (depending on the value of the <code class="docutils literal"><span class="pre">:streaming_mode</span></code> parameter).</p>
+<p>Each of <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> may be a key (<code class="xref rb rb-class docutils literal"><span class="pre">String</span></code> or <a class="reference internal" href="#FDB::Key" title="FDB::Key"><code class="xref rb rb-class docutils literal"><span class="pre">Key</span></code></a>) or a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>. Note that in the case of a <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>, the exclusion of <code class="docutils literal"><span class="pre">end</span></code> from the range still applies.</p>
+<p>The <code class="docutils literal"><span class="pre">options</span></code> hash accepts the following optional parameters:</p>
+<blockquote>
+<div><dl class="docutils">
+<dt><code class="docutils literal"><span class="pre">:limit</span></code></dt>
+<dd>Only the first <code class="docutils literal"><span class="pre">limit</span></code> keys (and their values) in the range will be returned.</dd>
+<dt><code class="docutils literal"><span class="pre">:reverse</span></code></dt>
+<dd><p class="first">If true, then the keys in the range will be returned in reverse order.</p>
+<p class="last">If <code class="docutils literal"><span class="pre">:limit</span></code> is also specified, the <em>last</em> <code class="docutils literal"><span class="pre">limit</span></code> keys in the range will be returned in reverse order.</p>
+</dd>
+<dt><code class="docutils literal"><span class="pre">:streaming_mode</span></code></dt>
+<dd>A valid <a class="reference internal" href="#ruby-streaming-mode"><span class="std std-ref">streaming mode</span></a>, which provides a hint to FoundationDB about how the returned enumerable is likely to be used.  The default is <code class="docutils literal"><span class="pre">:iterator</span></code>.</dd>
+</dl>
+</div></blockquote>
+</dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descclassname">Transaction.</code><code class="descname">get_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em>, <em>options={}</em><span class="sig-paren">)</span><em class="property">{|kv| block }</em> &#x2192; nil</dt>
+<dd><p>If given a block, <a class="reference internal" href="#FDB::Transaction.get_range" title="FDB::Transaction.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range</span></code></a> yields each <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> in the range that would otherwise have been returned to <code class="docutils literal"><span class="pre">block</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.get_range_start_with">
+<code class="descclassname">Transaction.</code><code class="descname">get_range_start_with</code><span class="sig-paren">(</span><em>prefix</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; an_enumerable</dt>
+<dd><p>Returns all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">k.start_with?</span> <span class="pre">prefix</span></code>, and their associated values, as an enumerable of <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> objects (see <a class="reference internal" href="#FDB::Transaction.get_range" title="FDB::Transaction.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range</span></code></a> for a description of the returned enumerable).</p>
+<p>The <code class="docutils literal"><span class="pre">options</span></code> hash accepts the same values as <a class="reference internal" href="#FDB::Transaction.get_range" title="FDB::Transaction.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descclassname">Transaction.</code><code class="descname">get_range_start_with</code><span class="sig-paren">(</span><em>prefix</em>, <em>options={}</em><span class="sig-paren">)</span><em class="property">{|kv| block }</em> &#x2192; nil</dt>
+<dd><p>If given a block, <a class="reference internal" href="#FDB::Transaction.get_range_start_with" title="FDB::Transaction.get_range_start_with"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range_start_with</span></code></a> yields each <a class="reference internal" href="#FDB::KeyValue" title="FDB::KeyValue"><code class="xref rb rb-class docutils literal"><span class="pre">KeyValue</span></code></a> in the range that would otherwise have been returned to <code class="docutils literal"><span class="pre">block</span></code>.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="snapshot-reads">
 <h3>Snapshot reads</h3>
+<dl class="global">
+<dt id="snapshot">
+<code class="descclassname">Transaction.</code><code class="descname">snapshot</code></dt>
+<dd><p>Snapshot reads selectively relax FoundationDB&#8217;s isolation property, reducing <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but making it harder to reason about concurrency.</p>
+<p>By default, FoundationDB transactions guarantee <a class="reference internal" href="developer-guide.html#acid"><span class="std std-ref">serializable isolation</span></a>, resulting in a state that is <em>as if</em> transactions were executed one at a time, even if they were executed concurrently. Serializability has little performance cost when there are few <a class="reference internal" href="developer-guide.html#developer-guide-transaction-conflicts"><span class="std std-ref">conflicts</span></a> but can be expensive when there are many. FoundationDB therefore also permits individual reads within a transaction to be done as snapshot reads.</p>
+<p>Snapshot reads differ from ordinary (serializable) reads by permitting the values they read to be modified by concurrent transactions, whereas serializable reads cause conflicts in that case. Like serializable reads, snapshot reads see the effects of prior writes in the same transaction. For more information on the use of snapshot reads, see <a class="reference internal" href="developer-guide.html#snapshot-isolation"><span class="std std-ref">Snapshot reads</span></a>.</p>
+<p>Snapshot reads also interact with transaction commit a little differently than normal reads. If a snapshot read is outstanding when transaction commit is called that read will immediately return an error. (Normally, transaction commit will wait until outstanding reads return before committing.)</p>
+</dd></dl>
+
+<dl class="global">
+<dt>
+<code class="descclassname">Transaction.snapshot.</code><code class="descname">db</code></dt>
+<dd><p>The <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> that this transaction is interacting with.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.snapshot.get">
+<code class="descclassname">Transaction.snapshot.</code><code class="descname">get</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Value" title="FDB::Value">Value</a></dt>
+<dd><p>Like <a class="reference internal" href="#FDB::Transaction.get" title="FDB::Transaction.get"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get</span></code></a>, but as a snapshot read.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.snapshot.[]">
+<code class="descclassname">Transaction.snapshot.</code><code class="descname">[]</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Value" title="FDB::Value">Value</a></dt>
+<dd><p>Alias of <a class="reference internal" href="#FDB::Transaction.snapshot.get" title="FDB::Transaction.snapshot.get"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.snapshot.get</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.snapshot.get_key">
+<code class="descclassname">Transaction.snapshot.</code><code class="descname">get_key</code><span class="sig-paren">(</span><em>key_selector</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Key" title="FDB::Key">Key</a></dt>
+<dd><p>Like <a class="reference internal" href="#FDB::Transaction.get_key" title="FDB::Transaction.get_key"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_key</span></code></a>, but as a snapshot read.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.snapshot.get_range">
+<code class="descclassname">Transaction.snapshot.</code><code class="descname">get_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; an_enumerable</dt>
+<dd><p>Like <a class="reference internal" href="#FDB::Transaction.get_range" title="FDB::Transaction.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range</span></code></a>, but as a snapshot read.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.snapshot.get_range_start_with">
+<code class="descclassname">Transaction.snapshot.</code><code class="descname">get_range_start_with</code><span class="sig-paren">(</span><em>prefix</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; an_enumerable</dt>
+<dd><p>Like <a class="reference internal" href="#FDB::Transaction.get_range_start_with" title="FDB::Transaction.get_range_start_with"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range_start_with</span></code></a>, but as a snapshot read.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.snapshot.get_read_version">
+<code class="descclassname">Transaction.snapshot.</code><code class="descname">get_read_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Version" title="FDB::Version">Version</a></dt>
+<dd><p>Identical to <a class="reference internal" href="#FDB::Transaction.get_read_version" title="FDB::Transaction.get_read_version"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_read_version</span></code></a> (since snapshot and serializable reads use the same read version).</p>
+</dd></dl>
+
 </div>
 <div class="section" id="writing-data">
 <h3>Writing data</h3>
+<dl class="method">
+<dt id="FDB::Transaction.set">
+<code class="descclassname">Transaction.</code><code class="descname">set</code><span class="sig-paren">(</span><em>key</em>, <em>value</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Associates the given <code class="docutils literal"><span class="pre">key</span></code> and <code class="docutils literal"><span class="pre">value</span></code>.  Overwrites any prior value associated with <code class="docutils literal"><span class="pre">key</span></code>. Returns immediately, having modified the snapshot represented by this <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.[]=">
+<code class="descclassname">Transaction.</code><code class="descname">[]=</code><span class="sig-paren">(</span><em>key</em>, <em>value</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Alias of <a class="reference internal" href="#FDB::Transaction.set" title="FDB::Transaction.set"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.set</span></code></a>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Although the above method returns nil, assignments in Ruby evaluate to the value assigned, so the expression <code class="docutils literal"><span class="pre">tr[key]</span> <span class="pre">=</span> <span class="pre">value</span></code> will return <code class="docutils literal"><span class="pre">value</span></code>.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.clear">
+<code class="descclassname">Transaction.</code><code class="descname">clear</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Removes the specified key (and any associated value), if it exists. Returns immediately, having modified the snapshot represented by this <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.clear_range">
+<code class="descclassname">Transaction.</code><code class="descname">clear_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Removes all keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code>, and their associated values. Returns immediately, having modified the snapshot represented by this <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Unlike in the case of <a class="reference internal" href="#FDB::Transaction.get_range" title="FDB::Transaction.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range</span></code></a>, <code class="docutils literal"><span class="pre">begin</span></code> and <code class="docutils literal"><span class="pre">end</span></code> must be keys (<code class="xref rb rb-class docutils literal"><span class="pre">String</span></code> or <a class="reference internal" href="#FDB::Key" title="FDB::Key"><code class="xref rb rb-class docutils literal"><span class="pre">Key</span></code></a>), not <a class="reference internal" href="#FDB::KeySelector" title="FDB::KeySelector"><code class="xref rb rb-class docutils literal"><span class="pre">KeySelector</span></code></a>s.  (Resolving arbitrary key selectors would prevent this method from returning immediately, introducing concurrency issues.)</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.clear_range_start_with">
+<code class="descclassname">Transaction.</code><code class="descname">clear_range_start_with</code><span class="sig-paren">(</span><em>prefix</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Removes all the keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">k.start_with?</span> <span class="pre">prefix</span></code>, and their associated values. Returns immediately, having modified the snapshot represented by this <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="atomic-operations">
 <span id="api-ruby-transaction-atomic-operations"></span><h3>Atomic operations</h3>
@@ -328,12 +870,151 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <span class="n">tr</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="s1">&#39;key&#39;</span><span class="p">,</span> <span class="o">[</span><span class="mi">1</span><span class="o">].</span><span class="n">pack</span><span class="p">(</span><span class="s1">&#39;q&lt;&#39;</span><span class="p">))</span>
 </pre></div>
 </div>
+<dl class="method">
+<dt id="FDB::Transaction.add">
+<code class="descclassname">Transaction.</code><code class="descname">add</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Performs an addition of little-endian integers. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes.  If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<p>The integers to be added must be stored in a little-endian representation. They can be signed in two&#8217;s complement representation or unsigned. You can add to an integer at a known offset in the value by prepending the appropriate number of zero bytes to <code class="docutils literal"><span class="pre">param</span></code> and padding with zero bytes to match the length of the value. However, this offset technique requires that you know the addition will not cause the integer field within the value to overflow.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.bit_and">
+<code class="descclassname">Transaction.</code><code class="descname">bit_and</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Performs a bitwise &#8220;and&#8221; operation. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored in the database. If the existing value in the database is  shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.bit_or">
+<code class="descclassname">Transaction.</code><code class="descname">bit_or</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Performs a bitwise &#8220;or&#8221; operation. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.bit_xor">
+<code class="descclassname">Transaction.</code><code class="descname">bit_xor</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Performs a bitwise &#8220;xor&#8221; operation. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.max">
+<code class="descclassname">Transaction.</code><code class="descname">max</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the value in the database to the larger of the existing value and <code class="docutils literal"><span class="pre">param</span></code>. If the existing value in the database is not present or shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<p>Both the existing value and <code class="docutils literal"><span class="pre">param</span></code> are treated as unsigned integers. (This differs from the behavior of atomic addition.)</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.byte_max">
+<code class="descclassname">Transaction.</code><code class="descname">byte_max</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored. Otherwise the larger of the two values is then stored in the database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.min">
+<code class="descclassname">Transaction.</code><code class="descname">min</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Sets the value in the database to the smaller of the existing value and <code class="docutils literal"><span class="pre">param</span></code>. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored in the database. If the existing value in the database is shorter than <code class="docutils literal"><span class="pre">param</span></code>, it is first extended to the length of <code class="docutils literal"><span class="pre">param</span></code> with zero bytes. If <code class="docutils literal"><span class="pre">param</span></code> is shorter than the existing value in the database, the existing value is truncated to match the length of <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<p>Both the existing value and <code class="docutils literal"><span class="pre">param</span></code> are treated as unsigned integers. (This differs from the behavior of atomic addition.)</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.byte_min">
+<code class="descclassname">Transaction.</code><code class="descname">byte_min</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Performs lexicographic comparison of byte strings. If the existing value in the database is not present, then <code class="docutils literal"><span class="pre">param</span></code> is stored. Otherwise the smaller of the two values is then stored in the database.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.set_versionstamped_key">
+<code class="descclassname">Transaction.</code><code class="descname">set_versionstamped_key</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Transforms <code class="docutils literal"><span class="pre">key</span></code> using a versionstamp for the transaction. This key must be at least 12 bytes long. The final 2 bytes will be interpreted as a 16-bit little-endian integer denoting an index into the key at which to perform the transformation, and then trimmed off the key. The 10 bytes in the key beginning at the index will be overwritten with the versionstamp. If the index plus 10 bytes points past the end of the key, the result will be an error. Sets the transformed key in the database to <code class="docutils literal"><span class="pre">param</span></code>.</p>
+<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
+<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
+<p>This operation is not compatible with <a class="reference internal" href="#FDB::Transaction.options.set_read_your_writes_disable" title="FDB::Transaction.options.set_read_your_writes_disable"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_read_your_writes_disable</span></code></a> and will generate an error if used with it.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">At this time, versionstamped keys are not compatible with the Tuple layer except in Java and Python. Note that this implies versionstamped keys may not be used with the Subspace and Directory layers except in those languages.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.set_versionstamped_value">
+<code class="descclassname">Transaction.</code><code class="descname">set_versionstamped_value</code><span class="sig-paren">(</span><em>key</em>, <em>param</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Transforms <code class="docutils literal"><span class="pre">param</span></code> using a versionstamp for the transaction. This parameter must be at least 10 bytes long, and the first 10 bytes will be overwritten with the versionstamp. Sets <code class="docutils literal"><span class="pre">key</span></code> in the database to the transformed parameter.</p>
+<p>A versionstamp is a 10 byte, unique, monotonically (but not sequentially) increasing value for each committed transaction. The first 8 bytes are the committed version of the database. The last 2 bytes are monotonic in the serialization order for transactions.</p>
+<p>A transaction is not permitted to read any transformed key or value previously set within that transaction, and an attempt to do so will result in an error.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">At this time, versionstamped values are not compatible with the Tuple layer.</p>
+</div>
+</dd></dl>
+
 </div>
 <div class="section" id="committing">
 <h3>Committing</h3>
+<dl class="method">
+<dt id="FDB::Transaction.transact">
+<code class="descclassname">Transaction.</code><code class="descname">transact</code><em class="property"> {|tr| block } </em></dt>
+<dd><p>Yields <code class="docutils literal"><span class="pre">self</span></code> to the given block.</p>
+<p>This method, along with <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a>, makes it easy to write transactional functions which accept either a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> or a <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a> as a parameter. See <a class="reference internal" href="#transact"><span class="std std-ref">The transact method</span></a> for explanation and examples.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.commit">
+<code class="descclassname">Transaction.</code><code class="descname">commit</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil">FutureNil</a></dt>
+<dd><p>Attempt to commit the changes made in the transaction to the database. Returns a <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a>, representing the asynchronous result of the commit. You <strong>must</strong> call the <code class="xref rb rb-meth docutils literal"><span class="pre">wait()</span></code> method on the returned <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a>, which will raise an exception if the commit failed.</p>
+<p>As with other client/server databases, in some failure scenarios a client may be unable to determine whether a transaction succeeded. In these cases, <a class="reference internal" href="#FDB::Transaction.commit" title="FDB::Transaction.commit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.commit</span></code></a> will raise a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">commit_unknown_result</span></a> exception. The <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> function treats this exception as retryable, so retry loops that don&#8217;t check for <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">commit_unknown_result</span></a> could execute the transaction twice. In these cases, you must consider the idempotence of the transaction. For more information, see <a class="reference internal" href="developer-guide.html#developer-guide-unknown-results"><span class="std std-ref">Transactions with unknown results</span></a>.</p>
+<p>Normally, commit will wait for outstanding reads to return. However, if those reads were snapshot reads or the transaction option for disabling &#8220;read-your-writes&#8221; has been invoked, any outstanding reads will immediately return errors.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Consider using <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a>, which not only calls <a class="reference internal" href="#FDB::Database.create_transaction" title="FDB::Database.create_transaction"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.create_transaction</span></code></a> and <a class="reference internal" href="#FDB::Transaction.commit" title="FDB::Transaction.commit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.commit</span></code></a> for you, but also implements the required error handling and retry logic for transactions.</p>
+</div>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">If any operation is performed on a transaction after a commit has been issued but before it has returned, both the commit and the operation will raise a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">used_during_commit</span></a> exception. In this case, all subsequent operations on this transaction will raise this error until <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">reset</span></code></a> is called.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.on_error">
+<code class="descclassname">Transaction.</code><code class="descname">on_error</code><span class="sig-paren">(</span><em>exception</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil">FutureNil</a></dt>
+<dd><p>Determine whether an exception raised by a <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a> method is retryable. Returns a <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a>. You <strong>must</strong> call the <code class="xref rb rb-meth docutils literal"><span class="pre">wait()</span></code> method on the <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a>, which will return after a delay if the exception was retryable, or re-raise the exception if it was not.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Consider using <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a>, which calls this method for you.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.reset">
+<code class="descclassname">Transaction.</code><code class="descname">reset</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Rollback a transaction, completely resetting it to its initial state. This is logically equivalent to destroying the transaction and creating a new one.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.cancel">
+<code class="descclassname">Transaction.</code><code class="descname">cancel</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Cancels the transaction. All pending or future uses of the transaction will raise a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">transaction_cancelled</span></a> exception. The transaction can be used again after it is <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">reset</span></code></a>.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">Be careful if you are using <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.reset</span></code></a> and <a class="reference internal" href="#FDB::Transaction.cancel" title="FDB::Transaction.cancel"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.cancel</span></code></a> concurrently with the same transaction. Since they negate each other&#8217;s effects, a race condition between these calls will leave the transaction in an unknown state.</p>
+</div>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">If your program attempts to cancel a transaction after <a class="reference internal" href="#FDB::Transaction.commit" title="FDB::Transaction.commit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.commit</span></code></a> has been called but before it returns, unpredictable behavior will result. While it is guaranteed that the transaction will eventually end up in a cancelled state, the commit may or may not occur. Moreover, even if the call to <a class="reference internal" href="#FDB::Transaction.commit" title="FDB::Transaction.commit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.commit</span></code></a> appears to raise a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">transaction_cancelled</span></a> exception,  the commit may have occurred or may occur in the future. This can make it more difficult to reason about the order in which transactions occur.</p>
+</div>
+</dd></dl>
+
 </div>
 <div class="section" id="watches">
 <h3>Watches</h3>
+<dl class="method">
+<dt id="FDB::Transaction.watch">
+<code class="descclassname">Transaction.</code><code class="descname">watch</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil">FutureNil</a></dt>
+<dd><p>Creates a watch and returns a <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a> that will become ready when the watch reports a change to the value of the specified key.</p>
+<p>A watch&#8217;s behavior is relative to the transaction that created it. A watch will report a change in relation to the key&#8217;s value as readable by that transaction. The initial value used for comparison is either that of the transaction&#8217;s read version or the value as modified by the transaction itself prior to the creation of the watch. If the value changes and then changes back to its initial value, the watch might not report the change.</p>
+<p>Until the transaction that created it has been committed, a watch will not report changes made by <em>other</em> transactions. In contrast, a watch will immediately report changes made by the transaction itself. Watches cannot be created if the transaction has set <a class="reference internal" href="#FDB::Transaction.options.set_read_your_writes_disable" title="FDB::Transaction.options.set_read_your_writes_disable"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.options.set_read_your_writes_disable</span></code></a>, and an attempt to do so will raise an <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">watches_disabled</span></a> exception.</p>
+<p>If the transaction used to create a watch encounters an exception during commit, then the watch will be set with that exception. A transaction whose <a class="reference internal" href="developer-guide.html#developer-guide-unknown-results"><span class="std std-ref">commit result is unknown</span></a> will set all of its watches with the <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">commit_unknown_result</span></a> exception. If an uncommitted transaction is reset or destroyed, then any watches it created will be set with the <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">transaction_cancelled</span></a> exception.</p>
+<p>By default, each database connection can have no more than 10,000 watches that have not yet reported a change. When this number is exceeded, an attempt to create a watch will raise a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">too_many_watches</span></a> exception. This limit can be changed using <a class="reference internal" href="#FDB::Database.options.set_max_watches" title="FDB::Database.options.set_max_watches"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.options.set_max_watches</span></code></a>. Because a watch outlives the transaction that creates it, any watch that is no longer needed should be cancelled by calling <a class="reference internal" href="#FDB::Future.cancel" title="FDB::Future.cancel"><code class="xref rb rb-meth docutils literal"><span class="pre">Future.cancel</span></code></a> on its returned future.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="conflict-ranges">
 <h3>Conflict ranges</h3>
@@ -342,20 +1023,175 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <p class="last">Most applications will use the serializable isolation that transactions provide by default and will not need to manipulate conflict ranges.</p>
 </div>
 <p>The following make it possible to add <a class="reference internal" href="developer-guide.html#conflict-ranges"><span class="std std-ref">conflict ranges</span></a> to a transaction.</p>
+<dl class="method">
+<dt id="FDB::Transaction.add_read_conflict_range">
+<code class="descclassname">Transaction.</code><code class="descname">add_read_conflict_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Adds a range of keys to the transaction&#8217;s read conflict ranges as if you had read the range. As a result, other transactions that write a key in this range could cause the transaction to fail with a conflict.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.add_read_conflict_key">
+<code class="descclassname">Transaction.</code><code class="descname">add_read_conflict_key</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Adds a key to the transaction&#8217;s read conflict ranges as if you had read the key. As a result, other transactions that concurrently write this key could cause the transaction to fail with a conflict.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.add_write_conflict_range">
+<code class="descclassname">Transaction.</code><code class="descname">add_write_conflict_range</code><span class="sig-paren">(</span><em>begin</em>, <em>end</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Adds a range of keys to the transaction&#8217;s write conflict ranges as if you had cleared the range. As a result, other transactions that concurrently read a key in this range could fail with a conflict.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.add_write_conflict_key">
+<code class="descclassname">Transaction.</code><code class="descname">add_write_conflict_key</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Adds a key to the transaction&#8217;s write conflict ranges as if you had written the key. As a result, other transactions that concurrently read this key could fail with a conflict.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="versions">
 <h3>Versions</h3>
 <p>Most applications should use the read version that FoundationDB determines automatically during the transaction&#8217;s first read, and ignore all of these methods.</p>
+<dl class="method">
+<dt id="FDB::Transaction.set_read_version">
+<code class="descclassname">Transaction.</code><code class="descname">set_read_version</code><span class="sig-paren">(</span><em>version</em><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p><em>Infrequently used</em>. Sets the database version that the transaction will read from the database.  The database cannot guarantee causal consistency if this method is used (the transaction&#8217;s reads will be causally consistent only if the provided read version has that property).</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.get_read_version">
+<code class="descclassname">Transaction.</code><code class="descname">get_read_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Version" title="FDB::Version">Version</a></dt>
+<dd><p><em>Infrequently used</em>. Returns the transaction&#8217;s read version.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.get_committed_version">
+<code class="descclassname">Transaction.</code><code class="descname">get_committed_version</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Integer</dt>
+<dd><p><em>Infrequently used</em>. Gets the version number at which a successful commit modified the database. This must be called only after the successful (non-error) completion of a call to <a class="reference internal" href="#FDB::Transaction.commit" title="FDB::Transaction.commit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.commit</span></code></a> on this Transaction, or the behavior is undefined. Read-only transactions do not modify the database when committed and will have a committed version of -1. Keep in mind that a transaction which reads keys and then sets them to their current values may be optimized to a read-only transaction.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.get_verionstamp">
+<code class="descclassname">Transaction.</code><code class="descname">get_verionstamp</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; String</dt>
+<dd><p><em>Infrequently used</em>. Returns a future which will contain the versionstamp which was used by any versionstamp operations in this transaction. This function must be called before a call to <a class="reference internal" href="#FDB::Transaction.commit" title="FDB::Transaction.commit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.commit</span></code></a> on this Transaction. The future will be ready only after the successful completion of a call to <a class="reference internal" href="#FDB::Transaction.commit" title="FDB::Transaction.commit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.commit</span></code></a> on this Transaction. Read-only transactions do not modify the database when committed and will result in the future completing with an error. Keep in mind that a transaction which reads keys and then sets them to their current values may be optimized to a read-only transaction.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="transaction-options">
 <h3>Transaction options</h3>
 <p>Transaction options alter the behavior of FoundationDB transactions. FoundationDB defaults to extremely safe transaction behavior, and we have worked hard to make the performance excellent with the default setting, so you should not often need to use transaction options.</p>
+<span class="target" id="api-ruby-snapshot-ryw"></span><dl class="method">
+<dt id="FDB::Transaction.options.set_snapshot_ryw_disable">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_snapshot_ryw_disable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>If this option is set more times in this transaction than the enable option, snapshot reads will <em>not</em> see the effects of prior writes in the same transaction.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_snapshot_ryw_enable">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_snapshot_ryw_enable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>If this option is set an equal or more times in this transaction than the disable option, snapshot reads <em>will</em> see the effects of prior writes in the same transaction.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_priority_batch">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_priority_batch</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>This transaction should be treated as low priority (other transactions should be processed first).  Useful for doing potentially saturating batch work without interfering with the latency of other operations.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_priority_system_immediate">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_priority_system_immediate</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>This transaction should be treated as extremely high priority, taking priority over other transactions and bypassing controls on transaction queuing.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">This is intended for the use of internal database functions and low-level tools; use by applications may result in severe database performance or availability problems.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_causal_read_risky">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_causal_read_risky</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>This transaction does not require the strict causal consistency guarantee that FoundationDB provides by default.  The read version of the transaction will be a committed version, and usually will be the latest committed, but it might be an older version in the event of a fault or network partition.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_causal_write_risky">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_causal_write_risky</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>The application either knows that this transaction will be self-conflicting (at least one read overlaps at least one set or clear), or is willing to accept a small risk that the transaction could be committed a second time after its commit apparently succeeds.  This option provides a small performance benefit.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_next_write_no_write_conflict_range">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_next_write_no_write_conflict_range</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>The next write performed on this transaction will not generate a write conflict range. As a result, other transactions which read the key(s) being modified by the next write will not necessarily conflict with this transaction.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">Care needs to be taken when using this option on a transaction that is shared between multiple threads. When setting this option, write conflict ranges will be disabled on the next write operation, regardless of what thread it is on.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_read_your_writes_disable">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_read_your_writes_disable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>When this option is invoked, a read performed by a transaction will not see any prior mutations that occured in that transaction, instead seeing the value which was in the database at the transaction&#8217;s read version. This option may provide a small performance benefit for the client, but also disables a number of client-side optimizations which are beneficial for transactions which tend to read and write the same keys within a single transaction.</p>
+<div class="admonition note">
+<p class="first admonition-title">Note</p>
+<p class="last">It is an error to set this option after performing any reads or writes on the transaction.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_read_ahead_disable">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_read_ahead_disable</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Disables read-ahead caching for range reads. Under normal operation, a transaction will read extra rows from the database into cache if range reads are used to page through a series of data one row at a time (i.e. if a range read with a one row limit is followed by another one row range read starting immediately after the result of the first).</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_access_system_keys">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_access_system_keys</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Allows this transaction to read and modify system keys (those that start with the byte <code class="docutils literal"><span class="pre">0xFF</span></code>).</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">Writing into system keys will likely break your database. Further, even for readers, the format of data in the system keys may change from version to version in FoundationDB.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_read_system_keys">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_read_system_keys</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Allows this transaction to read system keys (those that start with the byte <code class="docutils literal"><span class="pre">0xFF</span></code>).</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">The format of data in the system keys may change from version to version in FoundationDB.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_retry_limit">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_retry_limit</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set a maximum number of retries after which additional calls to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> will throw the most recently seen error code. (By default, a transaction permits an unlimited number of retries.) Valid parameter values are [-1, INT_MAX]. If set to -1, the transaction returns to the default of unlimited retries.</p>
+<p>Like all transaction options, the retry limit must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. This behavior allows the user to make the retry limit dynamic.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_max_retry_delay">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_max_retry_delay</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set the maximum backoff delay incurred in the call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> if the error is retryable.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Transaction.options.set_timeout">
+<code class="descclassname">Transaction.options.</code><code class="descname">set_timeout</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Set a timeout duration in milliseconds after which the transaction automatically to be cancelled. The time is measured from transaction creation (or the most call to <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">reset</span></code></a>, if any). Valid parameter values are [0, INT_MAX]. If set to 0, all timeouts will be disabled. Once a transaction has timed out, all pending or future uses of the transaction will raise a <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">transaction_timed_out</span></a> exception. The transaction can be used again after it is <a class="reference internal" href="#FDB::Transaction.reset" title="FDB::Transaction.reset"><code class="xref rb rb-meth docutils literal"><span class="pre">reset</span></code></a>.</p>
+<p>Timeouts employ transaction cancellation, so you should note the issues raised by <a class="reference internal" href="#FDB::Transaction.cancel" title="FDB::Transaction.cancel"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.cancel</span></code></a> when using timeouts.</p>
+<p>Like all transaction options, a timeout must be reset after a call to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. This behavior allows the user to make the timeout dynamic. Note that resetting this option resets only the timeout <em>duration</em>, not the starting point from which the time is measured.</p>
+</dd></dl>
+
 </div>
 </div>
 <div class="section" id="the-transact-method">
 <span id="transact"></span><h2>The transact method</h2>
-<p>When performing a database transaction, any read operation, as well as the commit itself, may fail with one of a number of errors. If the error is a retryable error, the transaction needs to be restarted from the beginning. Committing a transaction is also an asynchronous operation, and the returned <a href="#id63"><span class="problematic" id="id64">:class:`FutureNil`</span></a> object needs to be waited on to ensure that no errors occurred.</p>
-<p>The methods <a href="#id65"><span class="problematic" id="id66">:meth:`Database.transact`</span></a> and <a href="#id67"><span class="problematic" id="id68">:meth:`Transaction.transact`</span></a> are convenient wrappers that allow much of this complexity to be handled automatically. A call like</p>
+<p>When performing a database transaction, any read operation, as well as the commit itself, may fail with one of a number of errors. If the error is a retryable error, the transaction needs to be restarted from the beginning. Committing a transaction is also an asynchronous operation, and the returned <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a> object needs to be waited on to ensure that no errors occurred.</p>
+<p>The methods <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a> and <a class="reference internal" href="#FDB::Transaction.transact" title="FDB::Transaction.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.transact</span></code></a> are convenient wrappers that allow much of this complexity to be handled automatically. A call like</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">db</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
     <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;A&#39;</span>
     <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;b&#39;</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;B&#39;</span>
@@ -380,9 +1216,9 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <p>The first form is considerably easier to read, and ensures that the transaction is correctly committed (and retried, when necessary).</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Be careful when using control flow constructs within the block passed to <a href="#id69"><span class="problematic" id="id70">:meth:`transact`</span></a>. <code class="docutils literal"><span class="pre">return</span></code> or <code class="docutils literal"><span class="pre">break</span></code> will exit the retry loop <em>without committing</em> the transaction. Use <code class="docutils literal"><span class="pre">next</span></code> to exit the block and commit the transaction.</p>
+<p class="last">Be careful when using control flow constructs within the block passed to <code class="xref rb rb-meth docutils literal"><span class="pre">transact</span></code>. <code class="docutils literal"><span class="pre">return</span></code> or <code class="docutils literal"><span class="pre">break</span></code> will exit the retry loop <em>without committing</em> the transaction. Use <code class="docutils literal"><span class="pre">next</span></code> to exit the block and commit the transaction.</p>
 </div>
-<p>The <a href="#id71"><span class="problematic" id="id72">:meth:`Transaction.transact`</span></a> method, which logically does nothing, makes it easy to write functions that operate on either a <a href="#id73"><span class="problematic" id="id74">:class:`Database`</span></a> or <a href="#id75"><span class="problematic" id="id76">:class:`Transaction`</span></a>. Consider the following method:</p>
+<p>The <a class="reference internal" href="#FDB::Transaction.transact" title="FDB::Transaction.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.transact</span></code></a> method, which logically does nothing, makes it easy to write functions that operate on either a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> or <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>. Consider the following method:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">increment</span><span class="p">(</span><span class="n">db_or_tr</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span>
     <span class="n">db_or_tr</span><span class="o">.</span><span class="n">transact</span> <span class="k">do</span> <span class="o">|</span><span class="n">tr</span><span class="o">|</span>
         <span class="n">tr</span><span class="o">[</span><span class="n">key</span><span class="o">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">tr</span><span class="o">[</span><span class="n">key</span><span class="o">].</span><span class="n">to_i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">to_s</span>
@@ -390,7 +1226,7 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <span class="k">end</span>
 </pre></div>
 </div>
-<p>This method can be called with a <a href="#id77"><span class="problematic" id="id78">:class:`Database`</span></a>, and it will do its job atomically:</p>
+<p>This method can be called with a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a>, and it will do its job atomically:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">increment</span><span class="p">(</span><span class="n">db</span><span class="p">,</span> <span class="s1">&#39;number&#39;</span><span class="p">)</span>
 </pre></div>
 </div>
@@ -417,36 +1253,166 @@ must be installed. If you upgrade a language binding to a new version, you may n
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="k">if</span> <span class="n">tr</span><span class="o">[</span><span class="s1">&#39;a&#39;</span><span class="o">].</span><span class="n">nil?</span>
 </pre></div>
 </div>
-<p>All future objects are a subclass of the <a href="#id79"><span class="problematic" id="id80">:class:`Future`</span></a> type.</p>
-<p>Asynchronous methods return one of the following subclasses of <a href="#id81"><span class="problematic" id="id82">:class:`Future`</span></a>:</p>
-<p class="key value">Both types are future <a href="#id83"><span class="problematic" id="id84">:class:`String`</span></a> objects. Objects of these types respond to the same methods as objects of type <a href="#id85"><span class="problematic" id="id86">:class:`String`</span></a>, and may be passed to any method that expects a <a href="#id87"><span class="problematic" id="id88">:class:`String`</span></a>.</p>
-<p class="key">An implementation quirk of <a href="#id89"><span class="problematic" id="id90">:class:`Value`</span></a> is that it will never evaluate to <code class="docutils literal"><span class="pre">false</span></code>, even if its value is <code class="docutils literal"><span class="pre">nil</span></code>. It is important to use <code class="docutils literal"><span class="pre">if</span> <span class="pre">value.nil?</span></code> rather than <code class="docutils literal"><span class="pre">if</span> <span class="pre">~value</span></code> when checking to see if a key was not present in the database.</p>
-<p class="version">This type is a future <a href="#id91"><span class="problematic" id="id92">:class:`Integer`</span></a> object. Objects of this type respond to the same methods as objects of type <a href="#id93"><span class="problematic" id="id94">:class:`Integer`</span></a>, and may be passed to any method that expects a <a href="#id95"><span class="problematic" id="id96">:class:`Integer`</span></a>.</p>
-<p class="futurearray">This type is a future <a href="#id97"><span class="problematic" id="id98">:class:`Array`</span></a> object. Objects of this type respond to the same methods as objects of type <a href="#id99"><span class="problematic" id="id100">:class:`Array`</span></a>, and may be passed to any method that expects a <a href="#id101"><span class="problematic" id="id102">:class:`Array`</span></a>.</p>
-<p class="futurenil">This type is a future returned from asynchronous methods that logically have no return value.</p>
+<p>All future objects are a subclass of the <a class="reference internal" href="#FDB::Future" title="FDB::Future"><code class="xref rb rb-class docutils literal"><span class="pre">Future</span></code></a> type.</p>
+<dl class="class">
+<dt id="FDB::Future">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Future</code></dt>
+<dd><dl class="method">
+<dt id="FDB::Future.ready?">
+<code class="descname">ready?</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; bool</dt>
+<dd><p>Immediately returns true if the future object is ready, false otherwise.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Future.block_until_ready">
+<code class="descname">block_until_ready</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Blocks until the future object is ready.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Future.on_ready">
+<code class="descname">on_ready</code><em class="property"> {|future| block } </em> &#x2192; nil</dt>
+<dd><p>Yields <code class="docutils literal"><span class="pre">self</span></code> to the given block when the future object is ready. If the future object is ready at the time <a class="reference internal" href="#FDB::Future.on_ready" title="FDB::Future.on_ready"><code class="xref rb rb-meth docutils literal"><span class="pre">on_ready</span></code></a> is called, the block may be called immediately in the current thread (although this behavior is not guaranteed). Otherwise, the call may be delayed and take place on the thread with which the client was initialized. Therefore, the block is responsible for any needed thread synchronization (and/or for posting work to your application&#8217;s event loop, thread pool, etc., as may be required by your application&#8217;s architecture).</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">There are a number of requirements and constraints to be aware of when using callbacks with FoundationDB. Please read <a class="reference internal" href="developer-guide.html#developer-guide-programming-with-futures"><span class="std std-ref">Programming with futures</span></a>.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Future.cancel">
+<code class="descname">cancel</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>Cancels a <a class="reference internal" href="#FDB::Future" title="FDB::Future"><code class="xref rb rb-class docutils literal"><span class="pre">Future</span></code></a> and its associated asynchronous operation. If called before the future is ready, attempts to access its value will raise an <a class="reference internal" href="api-error-codes.html#developer-guide-error-codes"><span class="std std-ref">operation_cancelled</span></a> exception. Cancelling a future which is already ready has no effect. Note that even if a future is not ready, its associated asynchronous operation may have succesfully completed and be unable to be cancelled.</p>
+</dd></dl>
+
+<dl class="classmethod">
+<dt id="FDB::Future.wait_for_any">
+<em class="property">classmethod Future.</em><code class="descname">wait_for_any</code><span class="sig-paren">(</span><em>*futures</em><span class="sig-paren">)</span> &#x2192; Fixnum</dt>
+<dd><p>Does not return until at least one of the given future objects is ready. Returns the index in the parameter list of a ready future object.</p>
+</dd></dl>
+
+</dd></dl>
+
+<p>Asynchronous methods return one of the following subclasses of <a class="reference internal" href="#FDB::Future" title="FDB::Future"><code class="xref rb rb-class docutils literal"><span class="pre">Future</span></code></a>:</p>
+<dl class="class">
+<dt id="FDB::Value">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Value</code></dt>
+<dd></dd></dl>
+
+<dl class="class">
+<dt id="FDB::Key">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Key</code></dt>
+<dd><p>Both types are future <code class="xref rb rb-class docutils literal"><span class="pre">String</span></code> objects. Objects of these types respond to the same methods as objects of type <code class="xref rb rb-class docutils literal"><span class="pre">String</span></code>, and may be passed to any method that expects a <code class="xref rb rb-class docutils literal"><span class="pre">String</span></code>.</p>
+<p>An implementation quirk of <a class="reference internal" href="#FDB::Value" title="FDB::Value"><code class="xref rb rb-class docutils literal"><span class="pre">Value</span></code></a> is that it will never evaluate to <code class="docutils literal"><span class="pre">false</span></code>, even if its value is <code class="docutils literal"><span class="pre">nil</span></code>. It is important to use <code class="docutils literal"><span class="pre">if</span> <span class="pre">value.nil?</span></code> rather than <code class="docutils literal"><span class="pre">if</span> <span class="pre">~value</span></code> when checking to see if a key was not present in the database.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="FDB::Version">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Version</code></dt>
+<dd><p>This type is a future <code class="xref rb rb-class docutils literal"><span class="pre">Integer</span></code> object. Objects of this type respond to the same methods as objects of type <code class="xref rb rb-class docutils literal"><span class="pre">Integer</span></code>, and may be passed to any method that expects a <code class="xref rb rb-class docutils literal"><span class="pre">Integer</span></code>.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="FDB::FutureArray">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">FutureArray</code></dt>
+<dd><p>This type is a future <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code> object. Objects of this type respond to the same methods as objects of type <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code>, and may be passed to any method that expects a <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code>.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="FDB::FutureNil">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">FutureNil</code></dt>
+<dd><p>This type is a future returned from asynchronous methods that logically have no return value.</p>
+<dl class="method">
+<dt id="FDB::FutureNil.wait">
+<code class="descname">wait</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; nil</dt>
+<dd><p>For a <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a> object returned by <a class="reference internal" href="#FDB::Transaction.commit" title="FDB::Transaction.commit"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.commit</span></code></a> or <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>, you must call <a class="reference internal" href="#FDB::FutureNil.wait" title="FDB::FutureNil.wait"><code class="xref rb rb-meth docutils literal"><span class="pre">FutureNil.wait</span></code></a>, which will return <code class="docutils literal"><span class="pre">nil</span></code> if the operation succeeds or raise an <a class="reference internal" href="#FDB::Error" title="FDB::Error"><code class="xref rb rb-exc docutils literal"><span class="pre">FDB::Error</span></code></a> if an error occurred. Failure to call <a class="reference internal" href="#FDB::FutureNil.wait" title="FDB::FutureNil.wait"><code class="xref rb rb-meth docutils literal"><span class="pre">FutureNil.wait</span></code></a> on a returned <a class="reference internal" href="#FDB::FutureNil" title="FDB::FutureNil"><code class="xref rb rb-class docutils literal"><span class="pre">FutureNil</span></code></a> object means that any potential errors raised by the asynchronous operation that returned the object <em>will not be seen</em>, and represents a significant error in your code.</p>
+</dd></dl>
+
+</dd></dl>
+
 </div>
 <div class="section" id="streaming-modes">
 <span id="ruby-streaming-mode"></span><h2>Streaming modes</h2>
-<p>When using <a href="#id161"><span class="problematic" id="id162">|get-range-func|</span></a> and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn&#8217;t necessarily mean that the client will consume all of the data in the range - sometimes the client doesn&#8217;t know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.</p>
+<p>When using <a class="reference internal" href="#FDB::Transaction.get_range" title="FDB::Transaction.get_range"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.get_range</span></code></a> and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn&#8217;t necessarily mean that the client will consume all of the data in the range - sometimes the client doesn&#8217;t know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.</p>
 <p>Streaming modes permit the API client to customize this performance tradeoff by providing extra information about how the iterator will be used.</p>
 <p>The following streaming modes are available:</p>
+<dl class="const">
+<dt>
+<code class="descname">:iterator</code></dt>
+<dd><p><em>The default.</em>  The client doesn&#8217;t know how much of the range it is likely to used and wants different performance concerns to be balanced.</p>
+<p>Only a small portion of data is transferred to the client initially (in order to minimize costs if the client doesn&#8217;t read the entire range), and as the caller iterates over more items in the range larger batches will be transferred in order to maximize throughput.</p>
+</dd></dl>
+
+<dl class="const">
+<dt>
+<code class="descname">:want_all</code></dt>
+<dd><p>The client intends to consume the entire range and would like it all transferred as early as possible.</p>
+</dd></dl>
+
+<dl class="const">
+<dt>
+<code class="descname">:small</code></dt>
+<dd><p><em>Infrequently used</em>. Transfer data in batches small enough to not be much more expensive than reading individual rows, to minimize cost if iteration stops early.</p>
+</dd></dl>
+
+<dl class="const">
+<dt>
+<code class="descname">:medium</code></dt>
+<dd><p><em>Infrequently used</em>. Transfer data in batches sized in between <code class="docutils literal"><span class="pre">:small</span></code> and <code class="docutils literal"><span class="pre">:large</span></code>.</p>
+</dd></dl>
+
+<dl class="const">
+<dt>
+<code class="descname">:large</code></dt>
+<dd><p><em>Infrequently used</em>. Transfer data in batches large enough to be, in a high-concurrency environment, nearly as efficient as possible.  If the client stops iteration early, some disk and network bandwidth may be wasted.  The batch size may still be too small to allow a single client to get high throughput from the database, so if that is what you need consider <code class="docutils literal"><span class="pre">:serial</span></code>.</p>
+</dd></dl>
+
+<dl class="const">
+<dt>
+<code class="descname">:serial</code></dt>
+<dd><p>Transfer data in batches large enough that an individual client can get reasonable read bandwidth from the database.  If the client stops iteration early, considerable disk and network bandwidth may be wasted.</p>
+</dd></dl>
+
+<dl class="const">
+<dt>
+<code class="descname">:exact</code></dt>
+<dd><p><em>Infrequently used</em>. The client has passed a specific row limit and wants that many rows delivered in a single batch.  This is not particularly useful in Ruby because enumerable functionality makes batches of data transparent, so use <code class="docutils literal"><span class="pre">:want_all</span></code> instead.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="errors">
 <h2>Errors</h2>
-<p>Errors in the FoundationDB API are raised as exceptions of type <a href="#id103"><span class="problematic" id="id104">:class:`FDB::Error`</span></a>. These errors may be displayed for diagnostic purposes, but generally should be passed to <a href="#id105"><span class="problematic" id="id106">:meth:`Transaction.on_error`</span></a>. When using <a href="#id107"><span class="problematic" id="id108">:meth:`Database.transact`</span></a>, appropriate errors will be retried automatically.</p>
+<p>Errors in the FoundationDB API are raised as exceptions of type <a class="reference internal" href="#FDB::Error" title="FDB::Error"><code class="xref rb rb-class docutils literal"><span class="pre">FDB::Error</span></code></a>. These errors may be displayed for diagnostic purposes, but generally should be passed to <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a>. When using <a class="reference internal" href="#FDB::Database.transact" title="FDB::Database.transact"><code class="xref rb rb-meth docutils literal"><span class="pre">Database.transact</span></code></a>, appropriate errors will be retried automatically.</p>
+<dl class="class">
+<dt id="FDB::Error">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Error</code></dt>
+<dd><dl class="attr_reader">
+<dt id="FDB::Error#code">
+<em class="property">attribute [R] </em><code class="descname">code</code></dt>
+<dd><p>A <code class="xref rb rb-class docutils literal"><span class="pre">Fixnum</span></code> associated with the error type.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Error#description">
+<code class="descname">description</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; String</dt>
+<dd><p>Returns a somewhat human-readable description of the error.</p>
+</dd></dl>
+
+</dd></dl>
+
 <div class="admonition warning">
 <p class="first admonition-title">Warning</p>
-<p class="last">You should only use the <a href="#id109"><span class="problematic" id="id110">:attr:`code`</span></a> attribute for programmatic comparisons, as the description of the error may change at any time. Whenever possible, use the <a href="#id111"><span class="problematic" id="id112">:meth:`Transaction.on_error`</span></a> method to handle <a href="#id113"><span class="problematic" id="id114">:class:`FDB::Error`</span></a> exceptions.</p>
+<p class="last">You should only use the <code class="xref rb rb-attr docutils literal"><span class="pre">code</span></code> attribute for programmatic comparisons, as the description of the error may change at any time. Whenever possible, use the <a class="reference internal" href="#FDB::Transaction.on_error" title="FDB::Transaction.on_error"><code class="xref rb rb-meth docutils literal"><span class="pre">Transaction.on_error</span></code></a> method to handle <a class="reference internal" href="#FDB::Error" title="FDB::Error"><code class="xref rb rb-class docutils literal"><span class="pre">FDB::Error</span></code></a> exceptions.</p>
 </div>
 </div>
-<div class="section" id="tuple-layer">
-<span id="api-ruby-tuple-layer"></span><h2>Tuple layer</h2>
+<div class="section" id="module-FDB::Tuple">
+<span id="tuple-layer"></span><span id="api-ruby-tuple-layer"></span><h2>Tuple layer</h2>
 <p>The FoundationDB API comes with a built-in layer for encoding tuples into keys usable by FoundationDB. The encoded key maintains the same sort order as the original tuple: sorted first by the first element, then by the second element, etc. This makes the tuple layer ideal for building a variety of higher-level data models.</p>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
 <p class="last">For general guidance on tuple usage, see the discussion in the document on <a class="reference internal" href="data-modeling.html#data-modeling-tuples"><span class="std std-ref">Data Modeling</span></a>.</p>
 </div>
-<p>In the FoundationDB Ruby API, a tuple is an <a href="#id115"><span class="problematic" id="id116">:class:`Enumerable`</span></a> of elements of the following data types:</p>
+<p>In the FoundationDB Ruby API, a tuple is an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code> of elements of the following data types:</p>
 <table border="1" class="docutils">
 <colgroup>
 <col width="12%" />
@@ -485,7 +1451,7 @@ either <code class="docutils literal"><span class="pre">Encoding::ASCII_8BIT</sp
 <td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">FDB::Tuple::SingleFloat</span></code> where
 <code class="docutils literal"><span class="pre">v.value.kind_of?</span> <span class="pre">Float</span></code> and <code class="docutils literal"><span class="pre">v.value</span></code> fits inside an IEEE 754 32-bit
 floating-point number.</td>
-<td><a href="#id117"><span class="problematic" id="id118">:class:`FDB::Tuple::SingleFloat`</span></a></td>
+<td><code class="xref rb rb-class docutils literal"><span class="pre">FDB::Tuple::SingleFloat</span></code></td>
 </tr>
 <tr class="row-odd"><td>Floating point number
 (double-precision)</td>
@@ -500,7 +1466,7 @@ floating-point number.</td>
 <td>Any value <code class="docutils literal"><span class="pre">v</span></code> where <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">FDB::Tuple::UUID</span></code> where
 <code class="docutils literal"><span class="pre">v.data.kind_of?</span> <span class="pre">String</span></code> and <code class="docutils literal"><span class="pre">v.data.encoding</span></code> is <code class="docutils literal"><span class="pre">Encoding::BINARY</span></code>
 and <code class="docutils literal"><span class="pre">v.data.length</span> <span class="pre">==</span> <span class="pre">16</span></code></td>
-<td><a href="#id119"><span class="problematic" id="id120">:class:`FDB::Tuple::UUID`</span></a></td>
+<td><code class="xref rb rb-class docutils literal"><span class="pre">FDB::Tuple::UUID</span></code></td>
 </tr>
 <tr class="row-even"><td>Array</td>
 <td>Any value <code class="docutils literal"><span class="pre">v</span></code> such that <code class="docutils literal"><span class="pre">v.kind_of?</span> <span class="pre">Array</span></code> and each element within
@@ -510,25 +1476,101 @@ and <code class="docutils literal"><span class="pre">v.data.length</span> <span 
 </tbody>
 </table>
 <p>Note that as Ruby does not have native support for single-precision floating point values and UUIDs, tuple elements
-of those types are returned instead as <a href="#id121"><span class="problematic" id="id122">:class:`FDB::Tuple::SingleFloat`</span></a> and <a href="#id123"><span class="problematic" id="id124">:class:`FDB::Tuple::UUID`</span></a> instances.
+of those types are returned instead as <code class="xref rb rb-class docutils literal"><span class="pre">FDB::Tuple::SingleFloat</span></code> and <code class="xref rb rb-class docutils literal"><span class="pre">FDB::Tuple::UUID</span></code> instances.
 These are simple classes that just wrap their underlying values, and they are not intended to offer all of the methods
 that a more fully-featured library for handling floating point values or UUIDs might offer. Most applications
 should use their library of choice for handling these values and then convert to the appropriate tuple-type
 when serializing for storage into the key-value store.</p>
 <p>A single tuple element is ordered first by its type, and then by its value.</p>
-<p>If <code class="docutils literal"><span class="pre">T</span></code> is an <a href="#id125"><span class="problematic" id="id126">:class:`Enumerable`</span></a> meeting these criteria, then conceptually:</p>
+<p>If <code class="docutils literal"><span class="pre">T</span></code> is an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code> meeting these criteria, then conceptually:</p>
 <div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">T</span> <span class="o">==</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">T</span><span class="p">))</span>
 </pre></div>
 </div>
 <div class="admonition note">
 <p class="first admonition-title">Note</p>
-<p class="last">Unpacking a tuple always returns an <a href="#id127"><span class="problematic" id="id128">:class:`Array`</span></a> of elements in a canonical representation, so packing and then unpacking a tuple may result in an equivalent but not identical representation.</p>
+<p class="last">Unpacking a tuple always returns an <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code> of elements in a canonical representation, so packing and then unpacking a tuple may result in an equivalent but not identical representation.</p>
 </div>
-<p class="fdb-tuple-singlefloat-value">Wrapper around a single-precision floating point value. The <code class="docutils literal"><span class="pre">value</span></code> parameter should be a <code class="docutils literal"><span class="pre">Float</span></code> that
+<dl class="function">
+<dt id="FDB::Tuple.pack">
+<code class="descclassname">FDB::Tuple.</code><code class="descname">pack</code><span class="sig-paren">(</span><em>tuple</em><span class="sig-paren">)</span> &#x2192; String</dt>
+<dd><p>Returns a key encoding the given tuple.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="FDB::Tuple.unpack">
+<code class="descclassname">FDB::Tuple.</code><code class="descname">unpack</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; Array</dt>
+<dd><p>Returns the tuple encoded by the given key. Each element in the <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code> will either be <code class="docutils literal"><span class="pre">nil</span></code>, a <code class="xref rb rb-class docutils literal"><span class="pre">String</span></code> (with encoding <code class="docutils literal"><span class="pre">Encoding::ASCII_8BIT</span></code> for byte strings or <code class="docutils literal"><span class="pre">Encoding::UTF_8</span></code> for unicode strings), or a <code class="xref rb rb-class docutils literal"><span class="pre">Fixnum</span></code> or <code class="xref rb rb-class docutils literal"><span class="pre">Bignum</span></code> for integers, depending on the magnitude.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="FDB::Tuple.range">
+<code class="descclassname">FDB::Tuple.</code><code class="descname">range</code><span class="sig-paren">(</span><em>tuple</em><span class="sig-paren">)</span> &#x2192; Array</dt>
+<dd><p>Returns the range containing all keys that encode tuples strictly starting with <code class="docutils literal"><span class="pre">tuple</span></code> (that is, all tuples of greater length than tuple of which tuple is a prefix).</p>
+<p>The range will be returned as an <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code> of two elements, and may be used with any FoundationDB methods that require a range:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">r</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Tuple</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="n">T</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span> <span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span> <span class="p">{</span> <span class="o">|</span><span class="n">kv</span><span class="o">|</span> <span class="o">...</span> <span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="class">
+<dt>
+<code class="descname">FDB::Tuple::SingleFloat(value)</code></dt>
+<dd><p>Wrapper around a single-precision floating point value. The <code class="docutils literal"><span class="pre">value</span></code> parameter should be a <code class="docutils literal"><span class="pre">Float</span></code> that
 can be encoded as an IEEE 754 floating point number. If the float does not fit within a IEEE 754 floating point
 integer, there may be a loss of precision.</p>
-<p class="fdb-tuple-uuid-data">Wrapper around a 128-bit UUID. The <code class="docutils literal"><span class="pre">data</span></code> parameter should be a byte string of length 16 and is taken to
+</dd></dl>
+
+<dl class="attr_reader">
+<dt>
+<code class="descname">FDB::Tuple::SingleFloat.value</code></dt>
+<dd><p>The underlying value of the <code class="docutils literal"><span class="pre">SingleFloat</span></code> object. This should have type <code class="docutils literal"><span class="pre">Float</span></code>.</p>
+</dd></dl>
+
+<dl class="function">
+<dt>
+<code class="descname">FDB::Tuple::SingleFloat.&lt;=&gt; -&gt; Fixnum</code></dt>
+<dd><p>Comparison method for <code class="docutils literal"><span class="pre">SingleFloat</span></code> objects. This will compare the values based on their float value. This
+will sort the values in a manner consistent with the way items are sorted as keys in the database, which can
+be different from standard float comparison in that -0.0 is considered to be strictly less than 0.0 and NaN
+values are sorted based on their byte representation rather than being considered incomparable.</p>
+</dd></dl>
+
+<dl class="function">
+<dt>
+<code class="descname">FDB::Tuple::SingleFloat.to_s -&gt; String</code></dt>
+<dd><p>Creates a string representation of the <code class="docutils literal"><span class="pre">SingleFloat</span></code>. This will just return the string representation of the underlying
+value.</p>
+</dd></dl>
+
+<dl class="class">
+<dt>
+<code class="descname">FDB::Tuple::UUID(data)</code></dt>
+<dd><p>Wrapper around a 128-bit UUID. The <code class="docutils literal"><span class="pre">data</span></code> parameter should be a byte string of length 16 and is taken to
 be the big-endian byte representation of the UUID. If <code class="docutils literal"><span class="pre">data</span></code> is not of length 16, an exception is thrown.</p>
+</dd></dl>
+
+<dl class="attr_reader">
+<dt>
+<code class="descname">FDB::Tuple::UUID.data</code></dt>
+<dd><p>The UUID data as a byte array of length 16. This is stored in big-endian order.</p>
+</dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descname">FDB::Tuple::UUID.&lt;=&gt; -&gt; Fixnum</code></dt>
+<dd><p>Comparison method for <code class="docutils literal"><span class="pre">UUID</span></code> objects. It will compare the UUID representations as unsigned byte arrays.
+This is the same order the database uses when comparing serialized UUIDs when they are used as part
+of a key.</p>
+</dd></dl>
+
+<dl class="method">
+<dt>
+<code class="descname">FDB::Tuple::UUID.to_s -&gt; String</code></dt>
+<dd><p>Creates a string representation of the <code class="docutils literal"><span class="pre">UUID</span></code>. This will be a string of length 32 containing the hex representation
+of the UUID bytes.</p>
+</dd></dl>
+
 </div>
 <div class="section" id="subspaces">
 <span id="api-ruby-subspaces"></span><h2>Subspaces</h2>
@@ -538,7 +1580,74 @@ be the big-endian byte representation of the UUID. If <code class="docutils lite
 <p class="first admonition-title">Note</p>
 <p class="last">For general guidance on subspace usage, see the discussion in the <a class="reference internal" href="developer-guide.html#developer-guide-sub-keyspaces"><span class="std std-ref">Developer Guide</span></a>.</p>
 </div>
-<p class="subspace-prefix-tuple raw-prefix">Creates a subspace with the specified prefix tuple. If the raw prefix byte string is specified, then it will be prepended to all packed keys. Likewise, the raw prefix will be removed from all unpacked keys.</p>
+<dl class="class">
+<dt id="FDB::Subspace">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">Subspace</code><span class="sig-paren">(</span><em>prefix_tuple=</em>, <span class="optional">[</span><span class="optional">]</span><em>raw_prefix=''</em><span class="sig-paren">)</span></dt>
+<dd><p>Creates a subspace with the specified prefix tuple. If the raw prefix byte string is specified, then it will be prepended to all packed keys. Likewise, the raw prefix will be removed from all unpacked keys.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Subspace.key">
+<code class="descclassname">Subspace.</code><code class="descname">key</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; String</dt>
+<dd><p>Returns the key encoding the prefix used for the subspace. This is equivalent to packing the empty tuple.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Subspace.pack">
+<code class="descclassname">Subspace.</code><code class="descname">pack</code><span class="sig-paren">(</span><em>tuple</em><span class="sig-paren">)</span> &#x2192; String</dt>
+<dd><p>Returns the key encoding the specified tuple in the subspace. For example, if you have a subspace with prefix tuple <code class="docutils literal"><span class="pre">('users')</span></code> and you use it to pack the tuple <code class="docutils literal"><span class="pre">('Smith')</span></code>, the result is the same as if you packed the tuple <code class="docutils literal"><span class="pre">('users',</span> <span class="pre">'Smith')</span></code> with the <a class="reference internal" href="#api-ruby-tuple-layer"><span class="std std-ref">tuple layer</span></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Subspace.unpack">
+<code class="descclassname">Subspace.</code><code class="descname">unpack</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; Array</dt>
+<dd><p>Returns the tuple encoded by the given key, with the subspace&#8217;s prefix tuple and raw prefix removed.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Subspace.range">
+<code class="descclassname">Subspace.</code><code class="descname">range</code><span class="sig-paren">(</span><em>tuple=</em><span class="optional">[</span><span class="optional">]</span><span class="sig-paren">)</span> &#x2192; Array</dt>
+<dd><p>Returns a range representing all keys in the subspace that encode tuples strictly starting with the specifed tuple.</p>
+<p>The range will be returned as an <code class="xref rb rb-class docutils literal"><span class="pre">Array</span></code> of two elements, and may be used with any FoundationDB methods that require a range:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">r</span> <span class="o">=</span> <span class="n">subspace</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;A&#39;</span><span class="p">,</span> <span class="mi">2</span><span class="o">]</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">.</span><span class="n">get_range</span><span class="p">(</span><span class="n">r</span><span class="o">[</span><span class="mi">0</span><span class="o">]</span><span class="p">,</span> <span class="n">r</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span> <span class="p">{</span> <span class="o">|</span><span class="n">kv</span><span class="o">|</span> <span class="o">...</span> <span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Subspace.contains?">
+<code class="descclassname">Subspace.</code><code class="descname">contains?</code><span class="sig-paren">(</span><em>key</em><span class="sig-paren">)</span> &#x2192; bool</dt>
+<dd><p>Returns true if <code class="docutils literal"><span class="pre">key</span></code> starts with <a class="reference internal" href="#FDB::Subspace.key" title="FDB::Subspace.key"><code class="xref rb rb-meth docutils literal"><span class="pre">Subspace.key</span></code></a>, indicating that the subspace logically contains <code class="docutils literal"><span class="pre">key</span></code>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Subspace.as_foundationdb_key">
+<code class="descclassname">Subspace.</code><code class="descname">as_foundationdb_key</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; String</dt>
+<dd><p>Returns the key encoding the prefix used for the subspace, like <a class="reference internal" href="#FDB::Subspace.key" title="FDB::Subspace.key"><code class="xref rb rb-meth docutils literal"><span class="pre">Subspace.key</span></code></a>. This method serves to support the <a class="reference internal" href="#api-ruby-keys"><span class="std std-ref">as_foundationdb_key()</span></a> convenience interface.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Subspace.subspace">
+<code class="descclassname">Subspace.</code><code class="descname">subspace</code><span class="sig-paren">(</span><em>tuple</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Subspace" title="FDB::Subspace">Subspace</a></dt>
+<dd><p>Returns a new subspace which is equivalent to this subspace with its prefix tuple extended by the specified tuple.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::Subspace.[]">
+<code class="descclassname">Subspace.</code><code class="descname">[]</code><span class="sig-paren">(</span><em>item</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::Subspace" title="FDB::Subspace">Subspace</a></dt>
+<dd><p>Shorthand for Subspace.subspace([item]). This function can be combined with the <a class="reference internal" href="#FDB::Subspace.as_foundationdb_key" title="FDB::Subspace.as_foundationdb_key"><code class="xref rb rb-meth docutils literal"><span class="pre">Subspace.as_foundationdb_key()</span></code></a> convenience to turn this:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">s</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;x&#39;</span><span class="o">]</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">[</span><span class="n">s</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;foo&#39;</span><span class="p">,</span> <span class="s1">&#39;bar&#39;</span><span class="p">,</span> <span class="mi">1</span><span class="o">]</span><span class="p">)</span><span class="o">]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+</pre></div>
+</div>
+<p>into this:</p>
+<div class="highlight-ruby"><div class="highlight"><pre><span></span><span class="n">s</span> <span class="o">=</span> <span class="no">FDB</span><span class="o">::</span><span class="no">Subspace</span><span class="o">.</span><span class="n">new</span><span class="p">(</span><span class="o">[</span><span class="s1">&#39;x&#39;</span><span class="o">]</span><span class="p">)</span>
+<span class="n">tr</span><span class="o">[</span><span class="n">s</span><span class="o">[</span><span class="s1">&#39;foo&#39;</span><span class="o">][</span><span class="s1">&#39;bar&#39;</span><span class="o">][</span><span class="mi">1</span><span class="o">]]</span> <span class="o">=</span> <span class="s1">&#39;&#39;</span>
+</pre></div>
+</div>
+</dd></dl>
+
 </div>
 <div class="section" id="directories">
 <span id="api-ruby-directories"></span><h2>Directories</h2>
@@ -547,17 +1656,131 @@ be the big-endian byte representation of the UUID. If <code class="docutils lite
 <p class="first admonition-title">Note</p>
 <p class="last">For general guidance on directory usage, see the discussion in the <a class="reference internal" href="developer-guide.html#developer-guide-directories"><span class="std std-ref">Developer Guide</span></a>.</p>
 </div>
-<p>Directories are identified by hierarchical paths analogous to the paths in a Unix-like file system. A path is represented as <a href="#id211"><span class="problematic" id="id212">|dir-path-type|</span></a> of strings. Each directory has an associated subspace used to store its content. The directory layer maps each path to a short prefix used for the corresponding subspace. In effect, directories provide a level of indirection for access to subspaces.</p>
+<p>Directories are identified by hierarchical paths analogous to the paths in a Unix-like file system. A path is represented as an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code> of strings. Each directory has an associated subspace used to store its content. The directory layer maps each path to a short prefix used for the corresponding subspace. In effect, directories provide a level of indirection for access to subspaces.</p>
 <p>Except where noted, directory methods interpret the provided path(s) relative to the path of the directory object. When opening a directory, a byte string <code class="docutils literal"><span class="pre">layer</span></code> option may be specified as a metadata identifier.</p>
-<p class="directorylayer-node-subspace-subspace-new xfe content-subspace-subspace-new allow-manual-prefixes-false">Each instance defines a new root directory. The subspaces <code class="docutils literal"><span class="pre">node_subspace</span></code> and <code class="docutils literal"><span class="pre">content_subspace</span></code> control where the directory metadata and contents, respectively, are stored. The default root directory has a <code class="docutils literal"><span class="pre">node_subspace</span></code> with raw prefix <code class="docutils literal"><span class="pre">\xFE</span></code> and a <code class="docutils literal"><span class="pre">content_subspace</span></code> with no prefix. Specifying more restrictive values for <code class="docutils literal"><span class="pre">node_subspace</span></code> and <code class="docutils literal"><span class="pre">content_subspace</span></code> will allow using the directory layer alongside other content in a database. If <code class="docutils literal"><span class="pre">allow_manual_prefixes</span></code> is false, attempts to create a directory with a manual prefix under the directory layer will raise an exception. The default root directory does not allow manual prefixes.</p>
+<dl class="global">
+<dt>
+<code class="descname">FDB::directory</code></dt>
+<dd><p>The default instance of <a class="reference internal" href="#FDB::DirectoryLayer" title="FDB::DirectoryLayer"><code class="xref rb rb-class docutils literal"><span class="pre">DirectoryLayer</span></code></a>.</p>
+</dd></dl>
+
+<dl class="class">
+<dt id="FDB::DirectoryLayer">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">DirectoryLayer</code><span class="sig-paren">(</span><em>node_subspace=Subspace.new(</em>, <span class="optional">[</span><span class="optional">]</span><em>&quot;\xFE&quot;)</em>, <em>content_subspace=Subspace.new</em>, <em>allow_manual_prefixes=false</em><span class="sig-paren">)</span></dt>
+<dd><p>Each instance defines a new root directory. The subspaces <code class="docutils literal"><span class="pre">node_subspace</span></code> and <code class="docutils literal"><span class="pre">content_subspace</span></code> control where the directory metadata and contents, respectively, are stored. The default root directory has a <code class="docutils literal"><span class="pre">node_subspace</span></code> with raw prefix <code class="docutils literal"><span class="pre">\xFE</span></code> and a <code class="docutils literal"><span class="pre">content_subspace</span></code> with no prefix. Specifying more restrictive values for <code class="docutils literal"><span class="pre">node_subspace</span></code> and <code class="docutils literal"><span class="pre">content_subspace</span></code> will allow using the directory layer alongside other content in a database. If <code class="docutils literal"><span class="pre">allow_manual_prefixes</span></code> is false, attempts to create a directory with a manual prefix under the directory layer will raise an exception. The default root directory does not allow manual prefixes.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.create_or_open">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">create_or_open</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>path</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace">DirectorySubspace</a></dt>
+<dd><p>Opens the directory with <code class="docutils literal"><span class="pre">path</span></code> specified as an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code> of strings. <code class="docutils literal"><span class="pre">path</span></code> can also be a string, in which case it will be automatically wrapped in an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code>. All string values in a path will be converted to unicode. If the directory does not exist, it is created (creating parent directories if necessary).</p>
+<p>If the byte string <code class="docutils literal"><span class="pre">:layer</span></code> is specified in <code class="docutils literal"><span class="pre">options</span></code> and the directory is new, it is recorded as the layer; if <code class="docutils literal"><span class="pre">:layer</span></code> is specified and the directory already exists, it is compared against the layer specified when the directory was created, and the method will raise an exception if they differ.</p>
+<p>Returns the directory and its contents as a <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace"><code class="xref rb rb-class docutils literal"><span class="pre">DirectorySubspace</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.open">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">open</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>path</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace">DirectorySubspace</a></dt>
+<dd><p>Opens the directory with <code class="docutils literal"><span class="pre">path</span></code> specified as an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code> of strings. <code class="docutils literal"><span class="pre">path</span></code> can also be a string, in which case it will be automatically wrapped in an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code>. All string values in a path will be converted to unicode. The method will raise an exception if the directory does not exist.</p>
+<p>If the byte string <code class="docutils literal"><span class="pre">:layer</span></code> is specified in <code class="docutils literal"><span class="pre">options</span></code>, it is compared against the layer specified when the directory was created, and the method will raise an exception if they differ.</p>
+<p>Returns the directory and its contents as a <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace"><code class="xref rb rb-class docutils literal"><span class="pre">DirectorySubspace</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.create">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">create</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>path</em>, <em>options={}</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace">DirectorySubspace</a></dt>
+<dd><p>Creates a directory with <code class="docutils literal"><span class="pre">path</span></code> specified as an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code> of strings. <code class="docutils literal"><span class="pre">path</span></code> can also be a string, in which case it will be automatically wrapped in an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code>. All string values in a path will be converted to unicode. Parent directories are created if necessary. The method will raise an exception if the given directory already exists.</p>
+<p>If the byte string <code class="docutils literal"><span class="pre">:prefix</span></code> is specified in <code class="docutils literal"><span class="pre">options</span></code>, the directory is created with the given physical prefix; otherwise a prefix is allocated automatically.</p>
+<p>If the byte string <code class="docutils literal"><span class="pre">:layer</span></code> is specified in <code class="docutils literal"><span class="pre">options</span></code>, it is recorded with the directory and will be checked by future calls to open.</p>
+<p>Returns the directory and its contents as a <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace"><code class="xref rb rb-class docutils literal"><span class="pre">DirectorySubspace</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.move">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">move</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>old_path</em>, <em>new_path</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace">DirectorySubspace</a></dt>
+<dd><p>Moves the directory at <code class="docutils literal"><span class="pre">old_path</span></code> to <code class="docutils literal"><span class="pre">new_path</span></code>. There is no effect on the physical prefix of the given directory or on clients that already have the directory open. The method will raise an exception if a directory does not exist at <code class="docutils literal"><span class="pre">old_path</span></code>, a directory already exists at <code class="docutils literal"><span class="pre">new_path</span></code>, or the parent directory of <code class="docutils literal"><span class="pre">new_path</span></code> does not exist.</p>
+<p>Returns the directory at its new location as a <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace"><code class="xref rb rb-class docutils literal"><span class="pre">DirectorySubspace</span></code></a>.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.remove">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">remove</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>path</em><span class="sig-paren">)</span> &#x2192; bool</dt>
+<dd><p>Removes the directory at <code class="docutils literal"><span class="pre">path</span></code>, its contents, and all subdirectories. The method will raise an exception if the directory does not exist.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">Clients that have already opened the directory might still insert data into its contents after removal.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.remove_if_exists">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">remove_if_exists</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>path</em><span class="sig-paren">)</span> &#x2192; bool</dt>
+<dd><p>Checks if the directory at <code class="docutils literal"><span class="pre">path</span></code> exists and, if so, removes the directory, its contents, and all subdirectories. Returns <code class="docutils literal"><span class="pre">true</span></code> if the directory existed and <code class="docutils literal"><span class="pre">false</span></code> otherwise.</p>
+<div class="admonition warning">
+<p class="first admonition-title">Warning</p>
+<p class="last">Clients that have already opened the directory might still insert data into its contents after removal.</p>
+</div>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.list">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">list</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>path=</em><span class="optional">[</span><span class="optional">]</span><span class="sig-paren">)</span> &#x2192; Enumerable</dt>
+<dd><p>Returns an <code class="xref rb rb-class docutils literal"><span class="pre">Enumerable</span></code> of names of the immediate subdirectories of the directory at <code class="docutils literal"><span class="pre">path</span></code>. Each name is a unicode string representing the last component of a subdirectory&#8217;s path.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.exists?">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">exists?</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>path</em><span class="sig-paren">)</span> &#x2192; bool</dt>
+<dd><p>Returns <code class="docutils literal"><span class="pre">true</span></code> if the directory at <code class="docutils literal"><span class="pre">path</span></code> exists and <code class="docutils literal"><span class="pre">false</span></code> otherwise.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.layer">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">layer</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; String</dt>
+<dd><p>Returns the layer specified when the directory was created.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectoryLayer.path">
+<code class="descclassname">DirectoryLayer.</code><code class="descname">path</code><span class="sig-paren">(</span><span class="sig-paren">)</span> &#x2192; Enumerable</dt>
+<dd><p>Returns the path with which the directory was opened.</p>
+</dd></dl>
+
 <div class="section" id="directorysubspace">
 <span id="api-ruby-directory-subspace"></span><h3>DirectorySubspace</h3>
-<p class="directorysubspace">A directory subspace represents a specific directory and its contents. It stores the <code class="docutils literal"><span class="pre">path</span></code> with which it was opened and supports all <a href="#id229"><span class="problematic" id="id230">|directory-layer|</span></a> methods for operating on itself and its subdirectories. It also implements all <a href="#id231"><span class="problematic" id="id232">|subspace|</span></a> methods for working with the contents of that directory.</p>
+<dl class="class">
+<dt id="FDB::DirectorySubspace">
+<em class="property">class </em><code class="descclassname">FDB::</code><code class="descname">DirectorySubspace</code></dt>
+<dd><p>A directory subspace represents a specific directory and its contents. It stores the <code class="docutils literal"><span class="pre">path</span></code> with which it was opened and supports all <a class="reference internal" href="#FDB::DirectoryLayer" title="FDB::DirectoryLayer"><code class="xref rb rb-class docutils literal"><span class="pre">DirectoryLayer</span></code></a> methods for operating on itself and its subdirectories. It also implements all <a class="reference internal" href="#FDB::Subspace" title="FDB::Subspace"><code class="xref rb rb-class docutils literal"><span class="pre">Subspace</span></code></a> methods for working with the contents of that directory.</p>
+</dd></dl>
+
+<dl class="method">
+<dt id="FDB::DirectorySubspace.move_to">
+<code class="descclassname">DirectorySubspace.</code><code class="descname">move_to</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>new_absolute_path</em><span class="sig-paren">)</span> &#x2192; <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace">DirectorySubspace</a></dt>
+<dd><p>Moves this directory to <code class="docutils literal"><span class="pre">new_path</span></code>, interpreting <code class="docutils literal"><span class="pre">new_path</span></code> absolutely. There is no effect on the physical prefix of the given directory or on clients that already have the directory open. The method will raise an exception if a directory already exists at <code class="docutils literal"><span class="pre">new_path</span></code> or the parent directory of <code class="docutils literal"><span class="pre">new_path</span></code> does not exist.</p>
+<p>Returns the directory at its new location as a <a class="reference internal" href="#FDB::DirectorySubspace" title="FDB::DirectorySubspace"><code class="xref rb rb-class docutils literal"><span class="pre">DirectorySubspace</span></code></a>.</p>
+</dd></dl>
+
 </div>
 </div>
-<div class="section" id="locality-information">
-<h2>Locality information</h2>
+<div class="section" id="module-FDB::Locality">
+<span id="locality-information"></span><h2>Locality information</h2>
 <p>The FoundationDB API comes with a set of functions for discovering the storage locations of keys within your cluster. This information can be useful for advanced users who wish to take into account the location of keys in the design of applications or processes.</p>
+<dl class="function">
+<dt id="FDB::Locality.get_boundary_keys">
+<code class="descclassname">FDB::Locality.</code><code class="descname">get_boundary_keys</code><span class="sig-paren">(</span><em>db_or_tr</em>, <em>begin</em>, <em>end</em><span class="sig-paren">)</span> &#x2192; Enumerator</dt>
+<dd><p>Returns a <code class="xref rb rb-class docutils literal"><span class="pre">Enumerator</span></code> of keys <code class="docutils literal"><span class="pre">k</span></code> such that <code class="docutils literal"><span class="pre">begin</span> <span class="pre">&lt;=</span> <span class="pre">k</span> <span class="pre">&lt;</span> <span class="pre">end</span></code> and <code class="docutils literal"><span class="pre">k</span></code> is located at the start of a contiguous range stored on a single server.</p>
+<p>The first parameter to this function may be either a <a class="reference internal" href="#FDB::Database" title="FDB::Database"><code class="xref rb rb-class docutils literal"><span class="pre">Database</span></code></a> or a <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>. If it is passed a <a class="reference internal" href="#FDB::Transaction" title="FDB::Transaction"><code class="xref rb rb-class docutils literal"><span class="pre">Transaction</span></code></a>, the transaction will not be committed, reset, or modified in any way, nor will its transaction options (such as retry limit) be applied within the function. However, if the database is unavailable prior to the function call, any timeout set on the transaction will still trigger.</p>
+<p>Like a <a class="reference internal" href="#api-ruby-future"><span class="std std-ref">Future</span></a> object, the returned <code class="xref rb rb-class docutils literal"><span class="pre">Enumerator</span></code> issues asynchronous read operations to fetch data in the range, and may block while enumerating its values if the read has not completed.</p>
+<p>This method is not transactional. It will return an answer no older than the Transaction or Database object it is passed, but the returned boundaries are an estimate and may not represent the exact boundary locations at any database version.</p>
+</dd></dl>
+
+<dl class="function">
+<dt id="FDB::Locality.get_addresses_for_key">
+<code class="descclassname">FDB::Locality.</code><code class="descname">get_addresses_for_key</code><span class="sig-paren">(</span><em>tr</em>, <em>key</em><span class="sig-paren">)</span> &#x2192; Array</dt>
+<dd><p>Returns a list of public network addresses as strings, one for each of the storage servers responsible for storing <code class="docutils literal"><span class="pre">key</span></code> and its associated value.</p>
+</dd></dl>
+
 </div>
 </div>
 
