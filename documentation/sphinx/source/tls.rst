@@ -9,7 +9,7 @@ Introduction
 
 Transport Layer Security (TLS) and its predecessor, Secure Sockets Layer (SSL), are protocols designed to provide communication security over public networks. Users exchange a symmetric session key that is used to encrypt data exchanged between the parties.
 
-By default, a FoundationDB cluster uses *unencrypted* connections among client and server processes. This document describes the `Transport Layer Security <http://en.wikipedia.org/wiki/Transport_Layer_Security>`_ (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is provided in FoundationDB via a plugin-based architecture. This document will describe the basic TLS capabilities of FoundationDB and document the default plugin, which is based on `LibreSSL <https://www.libressl.org/>`_. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster's machines must all enable TLS in order for TLS to be used.
+By default, a FoundationDB cluster uses *unencrypted* connections among client and server processes. This document describes the `Transport Layer Security <http://en.wikipedia.org/wiki/Transport_Layer_Security>`_ (TLS) capabilities of FoundationDB, which enable security and authentication through a public/private key infrastructure. TLS is available within each FoundationDB binary. This document will describe the basic TLS capabilities of FoundationDB and document its implementation, which is based on `LibreSSL <https://www.libressl.org/>`_. TLS-enabled servers will only communicate with other TLS-enabled servers and TLS-enabled clients. Therefore, a cluster's machines must all enable TLS in order for TLS to be used.
 
 
 Setting Up FoundationDB to use TLS
@@ -42,23 +42,22 @@ Enabling TLS on an existing (non-TLS) cluster cannot be accomplished without dow
 
 3) Restart the cluster and the clients.
 
-.. _configuring-tls-plugin:
+.. _configuring-tls:
 
-Configuring the TLS Plugin
+Configuring TLS
 ==========================
 
-The location and operation of the TLS plugin are configured through four settings. These settings can be provided as command-line options, client options, or environment variables, and are named as follows:
+The operation of TLS is configured through five settings. These settings can be provided as command-line options, client options, or environment variables, and are named as follows:
 
 ======================== ==================== ============================ ==================================================
 Command-line Option      Client Option        Environment Variable         Purpose
 ======================== ==================== ============================ ==================================================
-``tls_plugin``           ``TLS_plugin``       ``FDB_TLS_PLUGIN``           Path to the file to be loaded as the TLS plugin
 ``tls_certificate_file`` ``TLS_cert_path``    ``FDB_TLS_CERTIFICATE_FILE`` Path to the file from which the local certificates
-                                                                           can be loaded, used by the plugin
+                                                                           can be loaded
 ``tls_key_file``         ``TLS_key_path``     ``FDB_TLS_KEY_FILE``         Path to the file from which to load the private
-                                                                           key, used by the plugin
+                                                                           key
 ``tls_verify_peers``     ``TLS_verify_peers`` ``FDB_TLS_VERIFY_PEERS``     The byte-string for the verification of peer
-                                                                           certificates and sessions, used by the plugin
+                                                                           certificates and sessions
 ``tls_password``         ``TLS_password``     ``FDB_TLS_PASSWORD``         The byte-string representing the passcode for
                                                                            unencrypting the private key
 ``tls_ca_file``          ``TLS_ca_path``      ``FDB_TLS_CA_FILE``          Path to the file containing the CA certificates
@@ -73,21 +72,10 @@ The value for each setting can be specified in more than one way.  The actual va
 
 As with all other command-line options to ``fdbserver``, the TLS settings can be specified in the :ref:`[fdbserver] section of the configuration file <foundationdb-conf-fdbserver>`.
 
-The settings for certificate file, key file, peer verification, password and CA file are interpreted by the loaded plugin.
+The settings for certificate file, key file, peer verification, password and CA file are interpreted by the TLS.
 
 Default Values
 --------------
-
-Plugin default location
-^^^^^^^^^^^^^^^^^^^^^^^
-
-Similarly, if a value is not specified for the parameter ``tls_plugin``, the file will be specified by the environment variable ``FDB_TLS_PLUGIN`` or, if this variable is not set, the system-dependent location:
-
-  * Linux: ``/usr/lib/foundationdb/plugins/fdb-libressl-plugin.so``
-  * macOS: ``/usr/local/foundationdb/plugins/fdb-libressl-plugin.dylib``
-  * Windows: ``C:\Program Files\foundationdb\plugins\fdb-libressl-plugin.dll``
-
-On Windows, this location will be relative to the chosen installation location. The environment variable ``FOUNDATIONDB_INSTALL_PATH`` will be used in place of ``C:\Program Files\foundationdb\`` to determine this location.
 
 Certificate file default location
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -106,31 +94,29 @@ The default peer verification is ``Check.Valid=0``.
 Default Password
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-There is no default password. If no password is specified, the plugin assumes that private key is unencrypted.
+There is no default password. If no password is specified, TLS assumes that private key is unencrypted.
 
 CA file default location
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If a value is not specified, the plugin searches for certs in the default openssl certs location.
+If a value is not specified, TLS searches for certs in the default openssl certs location.
 
 Parameters and client bindings
 ------------------------------
 
-When loading a TLS plugin from a non-default location when using a client binding, the ``TLS_PLUGIN`` network option must be specified before any other TLS option. Because a loaded TLS plugin is allowed to reject the values specified in the other options, the plugin load operation will be forced by specifying one of the other options, if it not already specified.
-
-The default LibreSSL-based plugin
+The default LibreSSL-based implementation
 =================================
 
-FoundationDB offers a TLS plugin based on the LibreSSL library. By default, it will be loaded automatically when participating in a TLS-enabled cluster.
+FoundationDB offers TLS based on the LibreSSL library. By default, it will be loaded automatically when participating in a TLS-enabled cluster.
 
-For the plugin to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and potentially the certificates with which is was signed. When a process begins to communicate with a FoundationDB server process, the peer's certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.
+For TLS to operate, each process (both server and client) must have an X509 certificate, its corresponding private key, and potentially the certificates with which is was signed. When a process begins to communicate with a FoundationDB server process, the peer's certificate is checked to see if it is trusted and the fields of the peer certificate are verified. Peers must share the same root trusted certificate, and they must both present certificates whose signing chain includes this root certificate.
 
 If the local certificate and chain is invalid, a FoundationDB server process bound to a TLS address will not start. In the case of invalid certificates on a client, the client will be able to start but will be unable to connect any TLS-enabled cluster.
 
 Formats
 -------
 
-The LibreSSL plugin can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.
+The LibreSSL TLS can read certificates and their private keys in base64-encoded DER-formatted X.509 format (which is known as PEM). A PEM file can contain both certificates and a private key or the two can be stored in separate files.
 
 Required files
 --------------
