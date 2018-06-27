@@ -1170,7 +1170,6 @@ ACTOR Future<Void> tLogCommit(
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
 	}
 
-	logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	Void _ = wait( logData->version.whenAtLeast( req.prevVersion ) );
@@ -1219,6 +1218,7 @@ ACTOR Future<Void> tLogCommit(
 
 		// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 		self->prevVersion = logData->version.get();
+		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 		logData->version.set( req.version );
 
 		if(req.debugID.present())
@@ -1466,9 +1466,6 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 		loop {
 			choose {
 				when(Void _ = wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
-					if(poppedIsKnownCommitted) {
-						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
-					}
 					break;
 				}
 				when( Void _ = wait( dbInfoChange ) ) {
@@ -1526,6 +1523,9 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 					//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 					self->prevVersion = logData->version.get();
+					if(poppedIsKnownCommitted) {
+						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+					}
 					logData->version.set( ver );
 				}
 				lastVer = ver;
@@ -1554,6 +1554,9 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						// Notifies the commitQueue actor to commit persistentQueue, and also unblocks tLogPeekMessages actors
 						//FIXME: could we just use the ver and lastVer variables, or replace them with this?
 						self->prevVersion = logData->version.get();
+						if(poppedIsKnownCommitted) {
+							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+						}
 						logData->version.set( ver );
 					}
 					break;
