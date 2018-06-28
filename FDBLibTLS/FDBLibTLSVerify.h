@@ -29,6 +29,25 @@
 
 #include <map>
 #include <string>
+#include <utility>
+
+enum class MatchType {
+	EXACT,
+	PREFIX,
+	SUFFIX,
+};
+
+struct Criteria {
+	Criteria( const std::string& s ) : criteria(s), match_type(MatchType::EXACT) {}
+	Criteria( const std::string& s, MatchType mt ) : criteria(s), match_type(mt) {}
+
+	std::string criteria;
+	MatchType match_type;
+
+	bool operator==(const Criteria& c) const {
+		return criteria == c.criteria && match_type == c.match_type;
+	}
+};
 
 struct FDBLibTLSVerify: ReferenceCounted<FDBLibTLSVerify> {
 	FDBLibTLSVerify(std::string verify);
@@ -42,9 +61,9 @@ struct FDBLibTLSVerify: ReferenceCounted<FDBLibTLSVerify> {
 	bool verify_cert;
 	bool verify_time;
 
-	std::map<int, std::string> subject_criteria;
-	std::map<int, std::string> issuer_criteria;
-	std::map<int, std::string> root_criteria;
+	std::map< int, Criteria > subject_criteria;
+	std::map< int, Criteria > issuer_criteria;
+	std::map< int, Criteria > root_criteria;
 };
 
 #endif /* FDB_LIBTLS_VERIFY_H */

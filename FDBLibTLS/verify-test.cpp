@@ -35,7 +35,7 @@
 struct FDBLibTLSVerifyTest {
 	FDBLibTLSVerifyTest(std::string input):
 		input(input), valid(false), verify_cert(true), verify_time(true), subject_criteria({}), issuer_criteria({}), root_criteria({}) {};
-	FDBLibTLSVerifyTest(std::string input, bool verify_cert, bool verify_time, std::map<int, std::string> subject, std::map<int, std::string> issuer, std::map<int, std::string> root):
+	FDBLibTLSVerifyTest(std::string input, bool verify_cert, bool verify_time, std::map<int, Criteria> subject, std::map<int, Criteria> issuer, std::map<int, Criteria> root):
 		input(input), valid(true), verify_cert(verify_cert), verify_time(verify_time), subject_criteria(subject), issuer_criteria(issuer), root_criteria(root) {};
 	~FDBLibTLSVerifyTest() {};
 
@@ -47,9 +47,9 @@ struct FDBLibTLSVerifyTest {
 	bool verify_cert;
 	bool verify_time;
 
-	std::map<int, std::string> subject_criteria;
-	std::map<int, std::string> issuer_criteria;
-	std::map<int, std::string> root_criteria;
+	std::map<int, Criteria> subject_criteria;
+	std::map<int, Criteria> issuer_criteria;
+	std::map<int, Criteria> root_criteria;
 };
 
 static std::string printable( std::string const& val ) {
@@ -71,10 +71,10 @@ static std::string printable( std::string const& val ) {
 	return s;
 }
 
-static std::string criteriaToString(std::map<int, std::string> const& criteria) {
+static std::string criteriaToString(std::map<int, Criteria> const& criteria) {
 	std::string s;
 	for (auto &pair: criteria) {
-		s += "{" + std::to_string(pair.first) + ":" + printable(pair.second) + "}";
+		s += "{" + std::to_string(pair.first) + ":" + printable(pair.second.criteria) + "}";
 	}
 	return "{" + s + "}";
 }
@@ -180,6 +180,10 @@ int main(int argc, char **argv)
 {
 	int failed = 0;
 
+#define EXACT(x) Criteria(x, MatchType::EXACT)
+#define PREFIX(x) Criteria(x, MatchType::PREFIX)
+#define SUFFIX(x) Criteria(x, MatchType::SUFFIX)
+
 	std::vector<FDBLibTLSVerifyTest> tests = {
 		FDBLibTLSVerifyTest("", true, true, {}, {}, {}),
 		FDBLibTLSVerifyTest("Check.Valid=1", true, true, {}, {}, {}),
@@ -189,26 +193,28 @@ int main(int argc, char **argv)
 		FDBLibTLSVerifyTest("Check.Valid=1,Check.Unexpired=0", true, false, {}, {}, {}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,Check.Valid=0", false, false, {}, {}, {}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,I.C=US,C=US,S.O=XYZCorp\\, LLC", true, false,
-			{{NID_countryName, "US"}, {NID_organizationName, "XYZCorp, LLC"}}, {{NID_countryName, "US"}}, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp, LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,I.C=US,C=US,S.O=XYZCorp\\= LLC", true, false,
-			{{NID_countryName, "US"}, {NID_organizationName, "XYZCorp= LLC"}}, {{NID_countryName, "US"}}, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp= LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,R.C=US,C=US,S.O=XYZCorp\\= LLC", true, false,
-			{{NID_countryName, "US"}, {NID_organizationName, "XYZCorp= LLC"}}, {}, {{NID_countryName, "US"}}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp= LLC")}}, {}, {{NID_countryName, EXACT("US")}}),
 		FDBLibTLSVerifyTest("Check.Unexpired=0,I.C=US,C=US,S.O=XYZCorp=LLC", true, false,
-			{{NID_countryName, "US"}, {NID_organizationName, "XYZCorp=LLC"}}, {{NID_countryName, "US"}}, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp=LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("I.C=US,C=US,Check.Unexpired=0,S.O=XYZCorp=LLC", true, false,
-			{{NID_countryName, "US"}, {NID_organizationName, "XYZCorp=LLC"}}, {{NID_countryName, "US"}}, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp=LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("I.C=US,C=US,S.O=XYZCorp\\, LLC", true, true,
-			{{NID_countryName, "US"}, {NID_organizationName, "XYZCorp, LLC"}}, {{NID_countryName, "US"}}, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp, LLC")}}, {{NID_countryName, EXACT("US")}}, {}),
 		FDBLibTLSVerifyTest("I.C=US,C=US,S.O=XYZCorp\\, LLC,R.CN=abc", true, true,
-			{{NID_countryName, "US"}, {NID_organizationName, "XYZCorp, LLC"}},
-			{{NID_countryName, "US"}},
-			{{NID_commonName, "abc"}}),
-		FDBLibTLSVerifyTest("C=\\,S=abc", true, true, {{NID_countryName, ",S=abc"}}, {}, {}),
-		FDBLibTLSVerifyTest("CN=\\61\\62\\63", true, true, {{NID_commonName, "abc"}}, {}, {}),
-		FDBLibTLSVerifyTest("CN=a\\62c", true, true, {{NID_commonName, "abc"}}, {}, {}),
-		FDBLibTLSVerifyTest("CN=a\\01c", true, true, {{NID_commonName, "a\001c"}}, {}, {}),
-		FDBLibTLSVerifyTest("S.subjectAltName=XYZCorp", true, true, {{NID_subject_alt_name, "XYZCorp"}}, {}, {}),
+			{{NID_countryName, EXACT("US")}, {NID_organizationName, EXACT("XYZCorp, LLC")}},
+			{{NID_countryName, EXACT("US")}},
+			{{NID_commonName, EXACT("abc")}}),
+		FDBLibTLSVerifyTest("C=\\,S=abc", true, true, {{NID_countryName, EXACT(",S=abc")}}, {}, {}),
+		FDBLibTLSVerifyTest("CN=\\61\\62\\63", true, true, {{NID_commonName, EXACT("abc")}}, {}, {}),
+		FDBLibTLSVerifyTest("CN=a\\62c", true, true, {{NID_commonName, EXACT("abc")}}, {}, {}),
+		FDBLibTLSVerifyTest("CN=a\\01c", true, true, {{NID_commonName, EXACT("a\001c")}}, {}, {}),
+		FDBLibTLSVerifyTest("S.subjectAltName=XYZCorp", true, true, {{NID_subject_alt_name, EXACT("XYZCorp")}}, {}, {}),
+		FDBLibTLSVerifyTest("S.O>=XYZ", true, true, {{NID_organizationName, PREFIX("XYZ")}}, {}, {}),
+		FDBLibTLSVerifyTest("S.O<=LLC", true, true, {{NID_organizationName, SUFFIX("LLC")}}, {}, {}),
 
 		// Invalid cases.
 		FDBLibTLSVerifyTest("Check.Invalid=0"),
@@ -220,6 +226,10 @@ int main(int argc, char **argv)
 		FDBLibTLSVerifyTest("GN=abc"),
 		FDBLibTLSVerifyTest("CN=abc,Check.Expired=1"),
 	};
+
+#undef EXACT
+#undef PREFIX
+#undef SUFFIX
 
 	for (auto &test: tests)
 		failed |= test.run();

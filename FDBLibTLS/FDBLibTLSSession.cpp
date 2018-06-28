@@ -100,7 +100,7 @@ FDBLibTLSSession::~FDBLibTLSSession() {
 	tls_free(tls_sctx);
 }
 
-bool match_criteria(X509_NAME *name, int nid, const char *value, size_t len) {
+bool match_criteria(X509_NAME *name, int nid, const char *value, size_t len, MatchType mt) {
 	unsigned char *name_entry_utf8 = NULL, *criteria_utf8 = NULL;
 	int name_entry_utf8_len, criteria_utf8_len;
 	ASN1_STRING *criteria = NULL;
@@ -127,9 +127,19 @@ bool match_criteria(X509_NAME *name, int nid, const char *value, size_t len) {
 		goto err;
 	if ((name_entry_utf8_len = ASN1_STRING_to_UTF8(&name_entry_utf8, name_entry->value)) < 1)
 		goto err;
-	if (criteria_utf8_len == name_entry_utf8_len &&
-	    memcmp(criteria_utf8, name_entry_utf8, criteria_utf8_len) == 0)
-		rc = true;
+	if (mt == MatchType::EXACT) {
+		if (criteria_utf8_len == name_entry_utf8_len &&
+				memcmp(criteria_utf8, name_entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
+	} else if (mt == MatchType::PREFIX) {
+		if (criteria_utf8_len <= name_entry_utf8_len &&
+				memcmp(criteria_utf8, name_entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
+	} else if (mt == MatchType::SUFFIX) {
+		if (criteria_utf8_len <= name_entry_utf8_len &&
+				memcmp(criteria_utf8, name_entry_utf8 + (name_entry_utf8_len - criteria_utf8_len), criteria_utf8_len) == 0)
+			rc = true;
+	}
 
  err:
 	ASN1_STRING_free(criteria);
@@ -177,7 +187,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 		goto err;
 	}
 	for (auto &pair: verify->subject_criteria) {
-		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
+		if (!match_criteria(subject, pair.first, pair.second.criteria.c_str(), pair.second.criteria.size(), pair.second.match_type)) {
 			reason = "FDBLibTLSCertSubjectMatchFailure";
 			goto err;
 		}
@@ -189,7 +199,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 		goto err;
 	}
 	for (auto &pair: verify->issuer_criteria) {
-		if (!match_criteria(issuer, pair.first, pair.second.c_str(), pair.second.size())) {
+		if (!match_criteria(issuer, pair.first, pair.second.criteria.c_str(), pair.second.criteria.size(), pair.second.match_type)) {
 			reason = "FDBLibTLSCertIssuerMatchFailure";
 			goto err;
 		}
@@ -201,7 +211,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 		goto err;
 	}
 	for (auto &pair: verify->root_criteria) {
-		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
+		if (!match_criteria(subject, pair.first, pair.second.criteria.c_str(), pair.second.criteria.size(), pair.second.match_type)) {
 			reason = "FDBLibTLSRootSubjectMatchFailure";
 			goto err;
 		}

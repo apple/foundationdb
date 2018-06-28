@@ -161,13 +161,18 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 		if (eq == input.npos)
 			throw std::runtime_error("parse_verify");
 
-		std::string term = input.substr(s, eq - s);
+		MatchType mt = MatchType::EXACT;
+		if (input[eq-1] == '>') mt = MatchType::PREFIX;
+		if (input[eq-1] == '<') mt = MatchType::SUFFIX;
+		std::string term = input.substr(s, eq - s - (mt == MatchType::EXACT ? 0 : 1));
 
 		if (term.find("Check.") == 0) {
 			if (eq + 2 > input.size())
 				throw std::runtime_error("parse_verify");
 			if (eq + 2 != input.size() && input[eq + 2] != ',')
 				throw std::runtime_error("parse_verify");
+			if (mt != MatchType::EXACT)
+				throw std::runtime_error("parse_verify: cannot prefix match Check");
 
 			bool* flag;
 
@@ -187,7 +192,7 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 
 			s = eq + 3;
 		} else {
-			std::map<int, std::string>* criteria = &subject_criteria;
+			std::map< int, Criteria >* criteria = &subject_criteria;
 
 			if (term.find('.') != term.npos) {
 				auto scoped = splitPair(term, '.');
@@ -210,7 +215,7 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 			if (remain == eq + 1)
 				throw std::runtime_error("parse_verify");
 
-			criteria->insert(std::make_pair(abbrevToNID(term), unesc));
+			criteria->insert(std::make_pair(abbrevToNID(term), Criteria(unesc, mt)));
 
 			if (remain != input.size() && input[remain] != ',')
 				throw std::runtime_error("parse_verify");

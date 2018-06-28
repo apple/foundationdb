@@ -489,7 +489,7 @@ int FDBLibTLSPluginTest::client_server_test(const struct client_server_test* cst
 	return 0;
 }
 
-static void logf(const char* event, void* uid, int is_error, ...) {
+static void logf(const char* event, void* uid, bool is_error, ...) {
 	va_list args;
 
 	std::string log_type ("INFO");
@@ -1048,6 +1048,32 @@ const struct client_server_test client_server_tests[] = {
 		.server_path = "test-server-1.pem",
 		.server_password = NULL,
 		.server_verify = {""},
+	},
+
+	// Prefix and Suffix Matching
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = true,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"O>=Apple Inc.,OU>=FDB"},
+		.servername = NULL,
+		.server_success = true,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O<=Limited,OU<=Team"},
+	},
+	{
+		.ca_path = "test-ca-1.pem",
+		.client_success = false,
+		.client_path = "test-client-2.pem",
+		.client_password = NULL,
+		.client_verify = {"O<=Apple Inc.,OU<=FDB"},
+		.servername = NULL,
+		.server_success = false,
+		.server_path = "test-server-1.pem",
+		.server_password = NULL,
+		.server_verify = {"O>=Limited,OU>=Team"},
 	},
 };
 
