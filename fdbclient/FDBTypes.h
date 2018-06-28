@@ -602,7 +602,7 @@ static bool addressExcluded( std::set<AddressExclusion> const& exclusions, Netwo
 struct ClusterControllerPriorityInfo {
 	enum DCFitness { FitnessPrimary, FitnessRemote, FitnessPreferred, FitnessUnknown, FitnessBad }; //cannot be larger than 7 because of leader election mask
 
-	static DCFitness calculateDCFitness(Optional<Key> dcId, vector<Optional<Key>> dcPriority) {
+	static DCFitness calculateDCFitness(Optional<Key> const& dcId, vector<Optional<Key>> const& dcPriority) {
 		if(!dcPriority.size()) {
 			return FitnessUnknown;
 		} else if(dcPriority.size() == 1) {
