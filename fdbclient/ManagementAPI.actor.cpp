@@ -123,6 +123,10 @@ std::map<std::string, std::string> configForToken( std::string const& mode ) {
 		tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid",
 			IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))
 		));
+	} else if(mode == "three_datacenter_fallback") {
+		redundancy="4";
+		log_replicas="4";
+		storagePolicy = tLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid", IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))));
 	} else if(mode == "three_data_hall") {
 		redundancy="3";
 		log_replicas="4";
@@ -337,6 +341,9 @@ ConfigureAutoResult parseConfig( StatusObject const& status ) {
 		log_replication = 3;
 	} else if( result.old_replication == "three_datacenter" ) {
 		storage_replication = 6;
+		log_replication = 4;
+	} else if( result.old_replication == "three_datacenter_fallback" ) {
+		storage_replication = 4;
 		log_replication = 4;
 	} else
 		return ConfigureAutoResult();
