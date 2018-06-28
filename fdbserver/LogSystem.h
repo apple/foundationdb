@@ -76,7 +76,8 @@ public:
 	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags) {
 		satelliteTagLocations.clear();
 		satelliteTagLocations.resize(std::max(logRouterTags,oldLogRouterTags) + 1);
-		
+
+		std::map<int,int> server_usedBest;
 		std::set<std::pair<int,int>> used_servers;
 		for(int i = 0; i < tLogLocalities.size(); i++) {
 			used_servers.insert(std::make_pair(0,i));
@@ -109,6 +110,16 @@ public:
 					for(auto& entry : resultEntries) {
 						resultPairs.push_back(*serverMap->getObject(entry));
 					}
+					int firstBestUsed = server_usedBest[resultPairs[0].second];
+					for(int i = 1; i < resultPairs.size(); i++) {
+						int thisBestUsed = server_usedBest[resultPairs[i].second];
+						if(thisBestUsed < firstBestUsed) {
+							std::swap(resultPairs[0], resultPairs[i]);
+							firstBestUsed = thisBestUsed;
+						}
+					}
+					server_usedBest[resultPairs[0].second]++;
+
 					for(auto& res : resultPairs) {
 						satelliteTagLocations[team].push_back(res.second);
 						used_servers.erase(res);
@@ -126,20 +137,31 @@ public:
 	}
 
 	void checkSatelliteTagLocations() {
+		std::vector<int> usedBest;
 		std::vector<int> used;
+		usedBest.resize(tLogLocalities.size());
 		used.resize(tLogLocalities.size());
 		for(auto team : satelliteTagLocations) {
+			usedBest[team[0]]++;
 			for(auto loc : team) {
 				used[loc]++;
 			}
 		}
+
+		int minUsedBest = satelliteTagLocations.size();
+		int maxUsedBest = 0;
+		for(auto i : usedBest) {
+			minUsedBest = std::min(minUsedBest, i);
+			maxUsedBest = std::max(maxUsedBest, i);
+		}
+
 		int minUsed = satelliteTagLocations.size();
 		int maxUsed = 0;
 		for(auto i : used) {
 			minUsed = std::min(minUsed, i);
 			maxUsed = std::max(maxUsed, i);
 		}
-		TraceEvent(maxUsed - minUsed > 1 ? (g_network->isSimulated() ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed);
+		TraceEvent(((maxUsed - minUsed > 1) || (maxUsedBest - minUsedBest > 1)) ? (g_network->isSimulated() ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed).detail("MinUsedBest", minUsedBest).detail("MaxUsedBest", maxUsedBest);
 	}
 
 	int bestLocationFor( Tag tag ) {

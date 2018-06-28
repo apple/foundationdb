@@ -601,7 +601,7 @@ public:
 				}
 				throw no_more_servers();
 			} catch( Error& e ) {
-				if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
+				if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY && (!clusterControllerDcId.present() || regions[1].dcId != clusterControllerDcId.get())) {
 					throw operation_failed();
 				}
 
@@ -967,7 +967,7 @@ public:
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
-	Future<Void> betterMasterExistsChecker;
+	Future<Void> outstandingRequestChecker;
 
 	DBInfo db;
 	Database cx;
@@ -977,7 +977,7 @@ public:
 	bool versionDifferenceUpdated;
 
 	explicit ClusterControllerData( ClusterControllerFullInterface ccInterface )
-		: id(ccInterface.id()), ac(false), betterMasterExistsChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
+		: id(ccInterface.id()), ac(false), outstandingRequestChecker(Void()), gotProcessClasses(false), gotFullyRecoveredConfig(false), startTime(now()), datacenterVersionDifference(0), versionDifferenceUpdated(false)
 	{
 		auto serverInfo = db.serverInfo->get();
 		serverInfo.id = g_random->randomUniqueID();
@@ -1229,8 +1229,14 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 	}
 }
 
-ACTOR Future<Void> doCheckOutstandingMasterRequests( ClusterControllerData* self ) {
-	Void _ = wait( delay(SERVER_KNOBS->CHECK_BETTER_MASTER_INTERVAL) );
+ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
+	Void _ = wait( delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL) );
+
+	checkOutstandingRecruitmentRequests( self );
+	checkOutstandingRemoteRecruitmentRequests( self );
+	checkOutstandingStorageRequests( self );
+
+	self->checkRecoveryStalled();
 	if (self->betterMasterExists()) {
 		if (!self->db.forceMasterFailure.isSet()) {
 			self->db.forceMasterFailure.send( Void() );
@@ -1240,20 +1246,11 @@ ACTOR Future<Void> doCheckOutstandingMasterRequests( ClusterControllerData* self
 	return Void();
 }
 
-void checkOutstandingMasterRequests( ClusterControllerData* self ) {
-	self->checkRecoveryStalled();
-
-	if( !self->betterMasterExistsChecker.isReady() )
+void checkOutstandingRequests( ClusterControllerData* self ) {
+	if( !self->outstandingRequestChecker.isReady() )
 		return;
 
-	self->betterMasterExistsChecker = doCheckOutstandingMasterRequests(self);
-}
-
-void checkOutstandingRequests( ClusterControllerData* self ) {
-	checkOutstandingRecruitmentRequests( self );
-	checkOutstandingRemoteRecruitmentRequests( self );
-	checkOutstandingStorageRequests( self );
-	checkOutstandingMasterRequests( self );
+	self->outstandingRequestChecker = doCheckOutstandingRequests(self);
 }
 
 ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID ) {
@@ -1267,7 +1264,7 @@ ACTOR Future<Void> rebootAndCheck( ClusterControllerData* cluster, Optional<Stan
 	if(watcher != cluster->id_worker.end()) {
 		watcher->second.reboots--;
 		if( watcher->second.reboots < 2 )
-			checkOutstandingMasterRequests( cluster );
+			checkOutstandingRequests( cluster );
 	}
 
 	return Void();
@@ -1590,7 +1587,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 		self->db.serverInfo->set( dbInfo );
 	}
 
-	checkOutstandingMasterRequests(self);
+	checkOutstandingRequests(self);
 }
 
 void registerWorker( RegisterWorkerRequest req, ClusterControllerData *self ) {
