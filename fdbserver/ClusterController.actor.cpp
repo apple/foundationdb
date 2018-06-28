@@ -601,7 +601,7 @@ public:
 				}
 				throw no_more_servers();
 			} catch( Error& e ) {
-				if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
+				if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY && (!clusterControllerDcId.present() || regions[1].dcId != clusterControllerDcId.get())) {
 					throw operation_failed();
 				}
 
