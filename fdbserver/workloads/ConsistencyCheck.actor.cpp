@@ -376,13 +376,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 		for ( ; i < shards.size(); i++)
 		{
 			// skip serverList shards
-			if (!shards[i].first.begin.startsWith(keyServersPrefix)) {
-				break;
-			}
 
-			state Key endKey = shards[i].first.end.startsWith(keyServersPrefix) ? shards[i].first.end.removePrefix(keyServersPrefix) : allKeys.end;
-
-			while(beginKey < endKey)
+			while(beginKey < shards[i].first.end)
 			{
 				try
 				{
@@ -443,7 +438,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 
 					auto keyValueResponse = keyValueFutures[firstValidStorageServer].get().get();
-					Standalone<RangeResultRef> currentLocations = krmDecodeRanges( keyServersPrefix, KeyRangeRef(beginKey, endKey), RangeResultRef( keyValueResponse.data, keyValueResponse.more) );
+					Standalone<RangeResultRef> currentLocations = krmDecodeRanges( keyServersPrefix, KeyRangeRef(beginKey, shards[i].first.end), RangeResultRef( keyValueResponse.data, keyValueResponse.more) );
 
 					//Push all but the last item, which will be pushed as the first item next iteration
 					keyLocations.append_deep(keyLocations.arena(), currentLocations.begin(), currentLocations.size() - 1);
@@ -626,7 +621,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}*/
 
 			//In a quiescent database, check that the team size is the same as the desired team size
-			if(self->firstClient && self->performQuiescentChecks && sourceStorageServers.size() != configuration.storageTeamSize)
+			if(self->firstClient && self->performQuiescentChecks && sourceStorageServers.size() != configuration.usableRegions*configuration.storageTeamSize)
 			{
 				TraceEvent("ConsistencyCheck_InvalidTeamSize").detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("TeamSize", sourceStorageServers.size()).detail("DesiredTeamSize", configuration.storageTeamSize);
 				self->testFailure("Invalid team size");
