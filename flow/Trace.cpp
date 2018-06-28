@@ -35,6 +35,12 @@
 #include "TDMetric.actor.h"
 #include "MetricSample.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#undef max
+#undef min
+#endif
+
 class DummyThreadPool : public IThreadPool, ReferenceCounted<DummyThreadPool> {
 public:
 	~DummyThreadPool() {}
@@ -853,8 +859,6 @@ TraceEvent::~TraceEvent() {
 		}
 	} catch( Error &e ) {
 		TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
-		delete tmpEventMetric;
-		throw;
 	}
 	delete tmpEventMetric;
 }
