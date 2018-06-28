@@ -259,6 +259,7 @@ public:
 
 		this->directory = directory;
 		this->processName = processName;
+		this->logGroup = logGroup;
 		this->localAddress = na;
 
 		basename = format("%s/%s.%s.%s", directory.c_str(), processName.c_str(), timestamp.c_str(), g_random->randomAlphaNumeric(6).c_str());
@@ -287,6 +288,10 @@ public:
 			eventBuffer.clear();
 		}
 
+		for(TraceEventFields &fields : eventBuffer) {
+			annotateEvent(fields);
+		}
+
 		opened = true;
 		if(preopenOverflowCount > 0) {
 			TraceEvent(SevWarn, "TraceLogPreopenOverflow").detail("OverflowEventCount", preopenOverflowCount);
@@ -294,18 +299,25 @@ public:
 		}
 	}
 
-	void writeEvent( TraceEventFields fields, std::string trackLatestKey, bool trackError ) {
+	void annotateEvent( TraceEventFields &fields ) {
 		if(localAddress.present()) {
 			fields.addField("Machine", format("%d.%d.%d.%d:%d", (localAddress.get().ip>>24)&0xff, (localAddress.get().ip>>16)&0xff, (localAddress.get().ip>>8)&0xff, localAddress.get().ip&0xff, localAddress.get().port));
 		}
 
 		fields.addField("LogGroup", logGroup);
+	}
+
+	void writeEvent( TraceEventFields fields, std::string trackLatestKey, bool trackError ) {
+		MutexHolder hold(mutex);
+
+		if(opened) {
+			annotateEvent(fields);
+		}
 
 		if(!trackLatestKey.empty()) {
 			fields.addField("TrackLatestType", "Original");
 		}
 
-		MutexHolder hold(mutex);
 		if(!isOpen() && (preopenOverflowCount > 0 || bufferLength + fields.sizeBytes() > FLOW_KNOBS->TRACE_LOG_MAX_PREOPEN_BUFFER)) {
 			++preopenOverflowCount;
 			return;
