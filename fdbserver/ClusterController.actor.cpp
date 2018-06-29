@@ -1948,56 +1948,63 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData *self) {
 	//do not change the cluster controller until all the processes have had a chance to register
 	Void _ = wait( delay(SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) );
 	loop {
-		bool updateCCFirst = false;
-		if(self->desiredDcIds.get().present()) {
+		state Future<Void> onChange = self->desiredDcIds.onChange();
+		if(!self->desiredDcIds.get().present()) {
+			self->changingDcIds.set(std::make_pair(false,self->desiredDcIds.get()));
+		} else {
 			auto& worker = self->id_worker[self->clusterControllerProcessId];
 			uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness( worker.interf.locality.dcId(), self->desiredDcIds.get().get() );
-			updateCCFirst = worker.priorityInfo.dcFitness > newFitness;
-			self->changingDcIds.set(std::make_pair(updateCCFirst,self->desiredDcIds.get()));
-			if( !updateCCFirst ) {
-				for ( auto& it : self->id_worker ) {
-					uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness( it.second.interf.locality.dcId(), self->changingDcIds.get().second.get() );
-					if ( it.first != self->clusterControllerProcessId && it.second.priorityInfo.dcFitness != fitness ) {
-						it.second.priorityInfo.dcFitness = fitness;
-						if(!it.second.reply.isSet()) {
-							it.second.reply.send( RegisterWorkerReply( it.second.processClass, it.second.priorityInfo ) );
-						}
-					}
-				}
-			} else if ( worker.priorityInfo.dcFitness != newFitness ) {
+			self->changingDcIds.set(std::make_pair(worker.priorityInfo.dcFitness > newFitness,self->desiredDcIds.get()));
+
+			if ( worker.priorityInfo.dcFitness > newFitness ) {
 				worker.priorityInfo.dcFitness = newFitness;
 				if(!worker.reply.isSet()) {
 					worker.reply.send( RegisterWorkerReply( worker.processClass, worker.priorityInfo ) );
 				}
-			}
-		} else {
-			self->changingDcIds.set(std::make_pair(updateCCFirst,self->desiredDcIds.get()));
-		}
-
-		Void _ = wait(self->desiredDcIds.onChange());
-	}
-}
-
-ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
-	state Future<Void> changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
-	loop {
-		choose {
-			when( Void _ = wait(self->changingDcIds.onChange()) ) { changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY); }
-			when( Void _ = wait(changeDelay) ) {
-				changeDelay = Never();
-				self->changedDcIds.set(self->changingDcIds.get());
-				if(self->changedDcIds.get().second.present()) {
-					if( self->changedDcIds.get().first ) {
-						for ( auto& it : self->id_worker ) {
-							uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness( it.second.interf.locality.dcId(), self->changedDcIds.get().second.get() );
+			} else {
+				state int currentFit = ProcessClass::BestFit;
+				while(currentFit <= ProcessClass::NeverAssign) {
+					bool updated = false;
+					for ( auto& it : self->id_worker ) {
+						if( ( !it.second.priorityInfo.isExcluded && it.second.priorityInfo.processClassFitness == currentFit ) || currentFit == ProcessClass::NeverAssign ) {
+							uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness( it.second.interf.locality.dcId(), self->changingDcIds.get().second.get() );
 							if ( it.first != self->clusterControllerProcessId && it.second.priorityInfo.dcFitness != fitness ) {
+								updated = true;
 								it.second.priorityInfo.dcFitness = fitness;
 								if(!it.second.reply.isSet()) {
 									it.second.reply.send( RegisterWorkerReply( it.second.processClass, it.second.priorityInfo ) );
 								}
 							}
 						}
-					} else {
+					}
+					if(updated && currentFit < ProcessClass::NeverAssign) {
+						Void _ = wait( delay(SERVER_KNOBS->CC_CLASS_DELAY) );
+					}
+					currentFit++;
+				}
+			}
+		}
+
+		Void _ = wait(onChange);
+	}
+}
+
+ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
+	state Future<Void> changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
+	state Future<Void> onChange = self->changingDcIds.onChange();
+	loop {
+		choose {
+			when( Void _ = wait(onChange) ) {
+				changeDelay = delay(SERVER_KNOBS->CC_CHANGE_DELAY);
+				onChange = self->changingDcIds.onChange();
+			}
+			when( Void _ = wait(changeDelay) ) {
+				changeDelay = Never();
+				onChange = self->changingDcIds.onChange();
+
+				self->changedDcIds.set(self->changingDcIds.get());
+				if(self->changedDcIds.get().second.present()) {
+					if( !self->changedDcIds.get().first ) {
 						auto& worker = self->id_worker[self->clusterControllerProcessId];
 						uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness( worker.interf.locality.dcId(), self->changedDcIds.get().second.get() );
 						if( worker.priorityInfo.dcFitness != newFitness ) {
@@ -2005,6 +2012,27 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 							if(!worker.reply.isSet()) {
 								worker.reply.send( RegisterWorkerReply( worker.processClass, worker.priorityInfo ) );
 							}
+						}
+					} else {
+						state int currentFit = ProcessClass::BestFit;
+						while(currentFit <= ProcessClass::NeverAssign) {
+							bool updated = false;
+							for ( auto& it : self->id_worker ) {
+								if( ( !it.second.priorityInfo.isExcluded && it.second.priorityInfo.processClassFitness == currentFit ) || currentFit == ProcessClass::NeverAssign ) {
+									uint8_t fitness = ClusterControllerPriorityInfo::calculateDCFitness( it.second.interf.locality.dcId(), self->changedDcIds.get().second.get() );
+									if ( it.first != self->clusterControllerProcessId && it.second.priorityInfo.dcFitness != fitness ) {
+										updated = true;
+										it.second.priorityInfo.dcFitness = fitness;
+										if(!it.second.reply.isSet()) {
+											it.second.reply.send( RegisterWorkerReply( it.second.processClass, it.second.priorityInfo ) );
+										}
+									}
+								}
+							}
+							if(updated && currentFit < ProcessClass::NeverAssign) {
+								Void _ = wait( delay(SERVER_KNOBS->CC_CLASS_DELAY) );
+							}
+							currentFit++;
 						}
 					}
 				}
