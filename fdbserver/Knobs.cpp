@@ -341,7 +341,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	//Storage Server
 	init( STORAGE_LOGGING_DELAY,                                 5.0 );
 	init( STORAGE_SERVER_POLL_METRICS_DELAY,                     1.0 );
-	init( FUTURE_VERSION_DELAY,                                  1.0 ); if( randomize && BUGGIFY ) FUTURE_VERSION_DELAY = 0.001;
+	init( FUTURE_VERSION_DELAY,                                  1.0 );
 	init( STORAGE_LIMIT_BYTES,                                500000 );
 	init( BUGGIFY_LIMIT_BYTES,                                  1000 );
 	init( FETCH_BLOCK_BYTES,                                     2e6 );
