@@ -1617,9 +1617,15 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		if(region.satelliteTLogReplicationFactor > 0) {
 			logSystem->tLogs.push_back( Reference<LogSet>( new LogSet() ) );
-			logSystem->tLogs[1]->tLogWriteAntiQuorum = region.satelliteTLogWriteAntiQuorum;
-			logSystem->tLogs[1]->tLogReplicationFactor = region.satelliteTLogReplicationFactor;
-			logSystem->tLogs[1]->tLogPolicy = region.satelliteTLogPolicy;
+			if(recr.satelliteFallback) {
+				logSystem->tLogs[1]->tLogWriteAntiQuorum = region.satelliteTLogWriteAntiQuorumFallback;
+				logSystem->tLogs[1]->tLogReplicationFactor = region.satelliteTLogReplicationFactorFallback;
+				logSystem->tLogs[1]->tLogPolicy = region.satelliteTLogPolicyFallback;
+			} else {
+				logSystem->tLogs[1]->tLogWriteAntiQuorum = region.satelliteTLogWriteAntiQuorum;
+				logSystem->tLogs[1]->tLogReplicationFactor = region.satelliteTLogReplicationFactor;
+				logSystem->tLogs[1]->tLogPolicy = region.satelliteTLogPolicy;
+			}
 			logSystem->tLogs[1]->isLocal = true;
 			logSystem->tLogs[1]->locality = tagLocalitySatellite;
 			logSystem->tLogs[1]->startVersion = oldLogSystem->knownCommittedVersion + 1;
