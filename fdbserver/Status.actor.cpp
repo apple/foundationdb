@@ -1237,6 +1237,7 @@ static int getExtraTLogEligibleMachines(vector<std::pair<WorkerInterface, Proces
 	int extraTlogEligibleMachines = std::numeric_limits<int>::max();
 	for(auto& region : configuration.regions) {
 		extraTlogEligibleMachines = std::min<int>( extraTlogEligibleMachines, dcId_machine[region.dcId].size() - std::max(configuration.remoteTLogReplicationFactor, std::max(configuration.tLogReplicationFactor, configuration.storageTeamSize) ) );
+		//FIXME: does not take into account fallback satellite policies
 		if(region.satelliteTLogReplicationFactor > 0) {
 			int totalSatelliteEligible = 0;
 			for(auto& sat : region.satellites) {

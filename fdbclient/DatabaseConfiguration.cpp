@@ -102,11 +102,19 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 					info.satelliteTLogUsableDcs = 2;
 					info.satelliteTLogWriteAntiQuorum = 0;
 					info.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid", IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))));
+					info.satelliteTLogReplicationFactorFallback = 2;
+					info.satelliteTLogUsableDcsFallback = 1;
+					info.satelliteTLogWriteAntiQuorumFallback = 0;
+					info.satelliteTLogPolicyFallback = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
 				} else if(satelliteReplication == "two_satellite_fast") {
 					info.satelliteTLogReplicationFactor = 4;
 					info.satelliteTLogUsableDcs = 2;
 					info.satelliteTLogWriteAntiQuorum = 2;
 					info.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(2, "dcid", IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())))));
+					info.satelliteTLogReplicationFactorFallback = 2;
+					info.satelliteTLogUsableDcsFallback = 1;
+					info.satelliteTLogWriteAntiQuorumFallback = 0;
+					info.satelliteTLogPolicyFallback = IRepPolicyRef(new PolicyAcross(2, "zoneid", IRepPolicyRef(new PolicyOne())));
 				} else {
 					throw invalid_option();
 				}
@@ -114,6 +122,9 @@ void parse( std::vector<RegionInfo>* regions, ValueRef const& v ) {
 			dc.tryGet("satellite_log_replicas", info.satelliteTLogReplicationFactor);
 			dc.tryGet("satellite_usable_dcs", info.satelliteTLogUsableDcs);
 			dc.tryGet("satellite_anti_quorum", info.satelliteTLogWriteAntiQuorum);
+			dc.tryGet("satellite_log_replicas_fallback", info.satelliteTLogReplicationFactorFallback);
+			dc.tryGet("satellite_usable_dcs_fallback", info.satelliteTLogUsableDcsFallback);
+			dc.tryGet("satellite_anti_quorum_fallback", info.satelliteTLogWriteAntiQuorumFallback);
 			regions->push_back(info);
 		}
 		std::sort(regions->begin(), regions->end(), RegionInfo::sort_by_priority() );
@@ -136,6 +147,9 @@ void DatabaseConfiguration::setDefaultReplicationPolicy() {
 	for(auto& r : regions) {
 		if(r.satelliteTLogReplicationFactor > 0 && !r.satelliteTLogPolicy) {
 			r.satelliteTLogPolicy = IRepPolicyRef(new PolicyAcross(r.satelliteTLogReplicationFactor, "zoneid", IRepPolicyRef(new PolicyOne())));
+		}
+		if(r.satelliteTLogReplicationFactorFallback > 0 && !r.satelliteTLogPolicyFallback) {
+			r.satelliteTLogPolicyFallback = IRepPolicyRef(new PolicyAcross(r.satelliteTLogReplicationFactorFallback, "zoneid", IRepPolicyRef(new PolicyOne())));
 		}
 	}
 }
@@ -172,7 +186,8 @@ bool DatabaseConfiguration::isValid() const {
 			r.satelliteTLogReplicationFactor >= 0 &&
 			r.satelliteTLogWriteAntiQuorum >= 0 &&
 			r.satelliteTLogUsableDcs >= 1 &&
-			( r.satelliteTLogReplicationFactor == 0 || ( r.satelliteTLogPolicy && r.satellites.size() ) ) ) ) {
+			( r.satelliteTLogReplicationFactor == 0 || ( r.satelliteTLogPolicy && r.satellites.size() ) ) &&
+			( r.satelliteTLogUsableDcsFallback == 0 || ( r.satelliteTLogReplicationFactor > 0 && r.satelliteTLogReplicationFactorFallback > 0 ) ) ) ) {
 			return false;
 		}
 		dcIds.insert(r.dcId);
@@ -252,21 +267,25 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 				dcObj["priority"] = r.priority;
 				dcArr.push_back(dcObj);
 
-				if(r.satelliteTLogReplicationFactor == 1 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0) {
+				if(r.satelliteTLogReplicationFactor == 1 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
 					regionObj["satellite_redundancy_mode"] = "one_satellite_single";
-				} else if(r.satelliteTLogReplicationFactor == 2 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0) {
+				} else if(r.satelliteTLogReplicationFactor == 2 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
 					regionObj["satellite_redundancy_mode"] = "one_satellite_double";
-				} else if(r.satelliteTLogReplicationFactor == 3 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0) {
+				} else if(r.satelliteTLogReplicationFactor == 3 && r.satelliteTLogUsableDcs == 1 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 0) {
 					regionObj["satellite_redundancy_mode"] = "one_satellite_triple";
-				} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 0) {
+				} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 0 && r.satelliteTLogUsableDcsFallback == 1 && r.satelliteTLogReplicationFactorFallback == 2 && r.satelliteTLogWriteAntiQuorumFallback == 0) {
 					regionObj["satellite_redundancy_mode"] = "two_satellite_safe";
-				} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 2) {
+				} else if(r.satelliteTLogReplicationFactor == 4 && r.satelliteTLogUsableDcs == 2 && r.satelliteTLogWriteAntiQuorum == 2 && r.satelliteTLogUsableDcsFallback == 1 && r.satelliteTLogReplicationFactorFallback == 2 && r.satelliteTLogWriteAntiQuorumFallback == 0) {
 					regionObj["satellite_redundancy_mode"] = "two_satellite_fast";
 				} else if(r.satelliteTLogReplicationFactor != 0) {
 					regionObj["satellite_log_replicas"] = r.satelliteTLogReplicationFactor;
 					regionObj["satellite_usable_dcs"] = r.satelliteTLogUsableDcs;
 					regionObj["satellite_anti_quorum"] = r.satelliteTLogWriteAntiQuorum;
 					if(r.satelliteTLogPolicy) regionObj["satellite_log_policy"] = r.satelliteTLogPolicy->info();
+					regionObj["satellite_log_replicas_fallback"] = r.satelliteTLogReplicationFactorFallback;
+					regionObj["satellite_usable_dcs_fallback"] = r.satelliteTLogUsableDcsFallback;
+					regionObj["satellite_anti_quorum_fallback"] = r.satelliteTLogWriteAntiQuorumFallback;
+					if(r.satelliteTLogPolicyFallback) regionObj["satellite_log_policy_fallback"] = r.satelliteTLogPolicyFallback->info();
 				}
 
 				if( r.satelliteDesiredTLogCount != -1 ) {

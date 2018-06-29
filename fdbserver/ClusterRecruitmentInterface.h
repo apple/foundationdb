@@ -89,10 +89,13 @@ struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> storageServers;
 	vector<WorkerInterface> oldLogRouters;
 	Optional<Key> dcId;
+	bool satelliteFallback;
+
+	RecruitFromConfigurationReply() : satelliteFallback(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & oldLogRouters & dcId;
+		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & oldLogRouters & dcId & satelliteFallback;
 	}
 };
 

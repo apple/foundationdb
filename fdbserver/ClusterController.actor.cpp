@@ -339,6 +339,43 @@ public:
 		return results;
 	}
 
+	//FIXME: This logic will fallback unnecessarily when usable dcs > 1 because it does not check all combinations of potential satellite locations
+	std::vector<std::pair<WorkerInterface, ProcessClass>> getWorkersForSatelliteLogs( const DatabaseConfiguration& conf, const RegionInfo& region, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool& satelliteFallback, bool checkStable = false ) {
+		int startDC = 0;
+		loop {
+			if(startDC > 0 && startDC >= region.satellites.size() + 1 - (satelliteFallback ? region.satelliteTLogUsableDcsFallback : region.satelliteTLogUsableDcs)) {
+				if(satelliteFallback || region.satelliteTLogUsableDcsFallback == 0) {
+					throw no_more_servers();
+				} else {
+					if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
+						throw operation_failed();
+					}
+					satelliteFallback = true;
+					startDC = 0;
+				}
+			}
+
+			try {
+				std::set<Optional<Key>> satelliteDCs;
+				for(int s = startDC; s < std::min<int>(startDC + (satelliteFallback ? region.satelliteTLogUsableDcsFallback : region.satelliteTLogUsableDcs), region.satellites.size()); s++) {
+					satelliteDCs.insert(region.satellites[s].dcId);
+				}
+
+				if(satelliteFallback) {
+					return getWorkersForTlogs( conf, region.satelliteTLogReplicationFactorFallback, conf.getDesiredSatelliteLogs(region.dcId)*region.satelliteTLogUsableDcsFallback/region.satelliteTLogUsableDcs, region.satelliteTLogPolicyFallback, id_used, checkStable, satelliteDCs );
+				} else {
+					return getWorkersForTlogs( conf, region.satelliteTLogReplicationFactor, conf.getDesiredSatelliteLogs(region.dcId), region.satelliteTLogPolicy, id_used, checkStable, satelliteDCs );
+				}
+			} catch (Error &e) {
+				if(e.code() != error_code_no_more_servers) {
+					throw;
+				}
+			}
+
+			startDC++;
+		}
+	}
+
 	WorkerFitnessInfo getWorkerForRoleInDatacenter(Optional<Standalone<StringRef>> const& dcId, ProcessClass::ClusterRole role, ProcessClass::Fitness unacceptableFitness, DatabaseConfiguration const& conf, std::map< Optional<Standalone<StringRef>>, int>& id_used, bool checkStable = false ) {
 		std::map<std::pair<ProcessClass::Fitness,int>, vector<std::pair<WorkerInterface, ProcessClass>>> fitness_workers;
 
@@ -445,6 +482,8 @@ public:
 		}
 
 		bool operator == (RoleFitness const& r) const { return worstFit == r.worstFit && bestFit == r.bestFit && count == r.count; }
+
+		std::string toString() const { return format("%d %d &d", bestFit, worstFit, count); }
 	};
 
 	std::set<Optional<Standalone<StringRef>>> getDatacenters( DatabaseConfiguration const& conf, bool checkStable = false ) {
@@ -495,11 +534,11 @@ public:
 		id_used[clusterControllerProcessId]++;
 
 		ASSERT(dcId.present());
-		
+
 		std::set<Optional<Key>> primaryDC;
 		primaryDC.insert(dcId);
 		result.dcId = dcId;
-		
+
 		RegionInfo region;
 		for(auto& r : req.configuration.regions) {
 			if(r.dcId == dcId.get()) {
@@ -507,14 +546,14 @@ public:
 				break;
 			}
 		}
-		
+
 		if(req.recruitSeedServers) {
 			auto primaryStorageServers = getWorkersForSeedServers( req.configuration, req.configuration.storagePolicy, dcId );
 			for(int i = 0; i < primaryStorageServers.size(); i++) {
 				result.storageServers.push_back(primaryStorageServers[i].first);
 			}
 		}
-			
+
 		auto tlogs = getWorkersForTlogs( req.configuration, req.configuration.tLogReplicationFactor, req.configuration.getDesiredLogs(), req.configuration.tLogPolicy, id_used, false, primaryDC );
 		for(int i = 0; i < tlogs.size(); i++) {
 			result.tLogs.push_back(tlogs[i].first);
@@ -522,31 +561,9 @@ public:
 
 		std::vector<std::pair<WorkerInterface, ProcessClass>> satelliteLogs;
 		if(region.satelliteTLogReplicationFactor > 0) {
-			int startDC = 0;
-			loop {
-				if(startDC > 0 && startDC >= region.satellites.size() + 1 - region.satelliteTLogUsableDcs) {
-					throw no_more_servers();
-				}
-
-				try {
-					std::set<Optional<Key>> satelliteDCs;
-					for(int s = startDC; s < std::min<int>(startDC + region.satelliteTLogUsableDcs, region.satellites.size()); s++) {
-						satelliteDCs.insert(region.satellites[s].dcId);
-					}
-
-					satelliteLogs = getWorkersForTlogs( req.configuration, region.satelliteTLogReplicationFactor, req.configuration.getDesiredSatelliteLogs(dcId), region.satelliteTLogPolicy, id_used, false, satelliteDCs );
-
-					for(int i = 0; i < satelliteLogs.size(); i++) {
-						result.satelliteTLogs.push_back(satelliteLogs[i].first);
-					}
-					break;
-				} catch (Error &e) {
-					if(e.code() != error_code_no_more_servers) {
-						throw;
-					}
-				}
-
-				startDC++;
+			satelliteLogs = getWorkersForSatelliteLogs( req.configuration, region, id_used, result.satelliteFallback );
+			for(int i = 0; i < satelliteLogs.size(); i++) {
+				result.satelliteTLogs.push_back(satelliteLogs[i].first);
 			}
 		}
 
@@ -728,22 +745,19 @@ public:
 		if(desiredDcIds.get().present() && desiredDcIds.get().get().size() == 2 && desiredDcIds.get().get()[0].get() == regions[0].dcId && desiredDcIds.get().get()[1].get() == regions[1].dcId) {
 			return;
 		}
-		
+
 		try {
 			std::map< Optional<Standalone<StringRef>>, int> id_used;
 			getWorkerForRoleInDatacenter(regions[0].dcId, ProcessClass::ClusterController, ProcessClass::ExcludeFit, db.config, id_used, true);
 			getWorkerForRoleInDatacenter(regions[0].dcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, true);
-			
+
 			std::set<Optional<Key>> primaryDC;
 			primaryDC.insert(regions[0].dcId);
 			getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true, primaryDC);
-			
+
 			if(regions[0].satelliteTLogReplicationFactor > 0) {
-				std::set<Optional<Key>> satelliteDCs;
-				for(auto &s : regions[0].satellites) {
-					satelliteDCs.insert(s.dcId);
-				}
-				getWorkersForTlogs(db.config, regions[0].satelliteTLogReplicationFactor, db.config.getDesiredSatelliteLogs(regions[0].dcId), regions[0].satelliteTLogPolicy, id_used, true, satelliteDCs);
+				bool satelliteFallback = false;
+				getWorkersForSatelliteLogs(db.config, regions[0], id_used, satelliteFallback, true);
 			}
 
 			getWorkerForRoleInDatacenter( regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, true );
@@ -868,7 +882,6 @@ public:
 			return true;
 
 		std::set<Optional<Key>> primaryDC;
-		std::set<Optional<Key>> satelliteDCs;
 		std::set<Optional<Key>> remoteDC;
 
 		RegionInfo region;
@@ -883,12 +896,6 @@ public:
 					region = r;
 				}
 			}
-
-			if(region.satelliteTLogReplicationFactor > 0) {
-				for(auto &s : region.satellites) {
-					satelliteDCs.insert(s.dcId);
-				}
-			}
 		}
 
 		// Check tLog fitness
@@ -897,10 +904,23 @@ public:
 
 		if(oldTLogFit < newTLogFit) return false;
 
-		RoleFitness oldSatelliteTLogFit(satellite_tlogs, ProcessClass::TLog);
-		RoleFitness newSatelliteTLogFit(region.satelliteTLogReplicationFactor > 0 ? getWorkersForTlogs(db.config, region.satelliteTLogReplicationFactor, db.config.getDesiredSatelliteLogs(clusterControllerDcId), region.satelliteTLogPolicy, id_used, true, satelliteDCs) : satellite_tlogs, ProcessClass::TLog);
+		bool oldSatelliteFallback = false;
+		for(auto& logSet : dbi.logSystemConfig.tLogs) {
+			if(logSet.isLocal && logSet.locality == tagLocalitySatellite) {
+				oldSatelliteFallback = logSet.tLogPolicy->info() != region.satelliteTLogPolicy->info();
+				ASSERT(!oldSatelliteFallback || logSet.tLogPolicy->info() == region.satelliteTLogPolicyFallback->info());
+				break;
+			}
+		}
 
-		if(oldSatelliteTLogFit < newSatelliteTLogFit) return false;
+		RoleFitness oldSatelliteTLogFit(satellite_tlogs, ProcessClass::TLog);
+		bool newSatelliteFallback = false;
+		RoleFitness newSatelliteTLogFit(region.satelliteTLogReplicationFactor > 0 ? getWorkersForSatelliteLogs(db.config, region, id_used, newSatelliteFallback, true) : satellite_tlogs, ProcessClass::TLog);
+
+		if(oldSatelliteTLogFit < newSatelliteTLogFit)
+			return false;
+		if(!oldSatelliteFallback && newSatelliteFallback)
+			return false;
 
 		RoleFitness oldRemoteTLogFit(remote_tlogs, ProcessClass::TLog);
 		RoleFitness newRemoteTLogFit((db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::REMOTE_RECOVERED) ? getWorkersForTlogs(db.config, db.config.getRemoteTLogReplicationFactor(), db.config.getDesiredRemoteLogs(), db.config.getRemoteTLogPolicy(), id_used, true, remoteDC) : remote_tlogs, ProcessClass::TLog);
@@ -936,14 +956,14 @@ public:
 
 		if(oldInFit.betterFitness(newInFit)) return false;
 
-		if(oldTLogFit > newTLogFit || oldInFit > newInFit || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
+		if(oldTLogFit > newTLogFit || oldInFit > newInFit || (oldSatelliteFallback && !newSatelliteFallback) || oldSatelliteTLogFit > newSatelliteTLogFit || oldRemoteTLogFit > newRemoteTLogFit || oldLogRoutersFit > newLogRoutersFit) {
 			TraceEvent("BetterMasterExists", id).detail("OldMasterFit", oldMasterFit).detail("NewMasterFit", mworker.fitness)
-				.detail("OldTLogFitC", oldTLogFit.count).detail("NewTLogFitC", newTLogFit.count)
-				.detail("OldTLogWorstFitT", oldTLogFit.worstFit).detail("NewTLogWorstFitT", newTLogFit.worstFit)
-				.detail("OldTLogBestFitT", oldTLogFit.bestFit).detail("NewTLogBestFitT", newTLogFit.bestFit)
-				.detail("OldInFitW", oldInFit.worstFit).detail("NewInFitW", newInFit.worstFit)
-				.detail("OldInFitB", oldInFit.bestFit).detail("NewInFitB", newInFit.bestFit)
-				.detail("OldInFitC", oldInFit.count).detail("NewInFitC", newInFit.count);
+				.detail("OldTLogFit", oldTLogFit.toString()).detail("NewTLogFit", newTLogFit.toString())
+				.detail("OldInFit", oldInFit.toString()).detail("NewInFit", newInFit.toString())
+				.detail("OldSatelliteFit", oldSatelliteTLogFit.toString()).detail("NewSatelliteFit", newSatelliteTLogFit.toString())
+				.detail("OldRemoteFit", oldRemoteTLogFit.toString()).detail("NewRemoteFit", newRemoteTLogFit.toString())
+				.detail("OldRouterFit", oldLogRoutersFit.toString()).detail("NewRouterFit", newLogRoutersFit.toString())
+				.detail("OldSatelliteFallback", oldSatelliteFallback).detail("NewSatelliteFallback", newSatelliteFallback);
 			return true;
 		}
 
@@ -1230,17 +1250,23 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 }
 
 ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
-	Void _ = wait( delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL) );
+	try {
+		Void _ = wait( delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL) );
 
-	checkOutstandingRecruitmentRequests( self );
-	checkOutstandingRemoteRecruitmentRequests( self );
-	checkOutstandingStorageRequests( self );
+		checkOutstandingRecruitmentRequests( self );
+		checkOutstandingRemoteRecruitmentRequests( self );
+		checkOutstandingStorageRequests( self );
 
-	self->checkRecoveryStalled();
-	if (self->betterMasterExists()) {
-		if (!self->db.forceMasterFailure.isSet()) {
-			self->db.forceMasterFailure.send( Void() );
-			TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
+		self->checkRecoveryStalled();
+		if (self->betterMasterExists()) {
+			if (!self->db.forceMasterFailure.isSet()) {
+				self->db.forceMasterFailure.send( Void() );
+				TraceEvent("MasterRegistrationKill", self->id).detail("MasterId", self->db.serverInfo->get().master.id());
+			}
+		}
+	} catch( Error &e ) {
+		if(e.code() != error_code_operation_failed && e.code() != error_code_no_more_servers) {
+			TraceEvent(SevError, "CheckOutstandingError").error(e);
 		}
 	}
 	return Void();
