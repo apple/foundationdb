@@ -369,14 +369,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 	ACTOR Future<bool> getKeyLocations(Database cx, vector<pair<KeyRange, vector<StorageServerInterface>>> shards, ConsistencyCheckWorkload *self, Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise)
 	{
 		state Standalone<VectorRef<KeyValueRef>> keyLocations;
-		state Key beginKey = allKeys.begin;
+		state Key beginKey = allKeys.begin.withPrefix(keyServersPrefix);
+		state Key endKey = allKeys.end.withPrefix(keyServersPrefix);
 		state int i = 0;
 
 		//If the responses are too big, we may use multiple requests to get the key locations.  Each request begins where the last left off
 		for ( ; i < shards.size(); i++)
 		{
-			// skip serverList shards
-
 			while(beginKey < shards[i].first.end)
 			{
 				try
@@ -384,9 +383,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 					Version version = wait(self->getVersion(cx, self));
 
 					GetKeyValuesRequest req;
-					Key prefixBegin = beginKey.withPrefix(keyServersPrefix);
-					req.begin = firstGreaterOrEqual(prefixBegin);
-					req.end = firstGreaterOrEqual(keyServersEnd);
+					req.begin = firstGreaterOrEqual(beginKey);
+					req.end = firstGreaterOrEqual(std::min<KeyRef>(shards[i].first.end, endKey));
 					req.limit = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
 					req.limitBytes = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
 					req.version = version;
@@ -438,17 +436,21 @@ struct ConsistencyCheckWorkload : TestWorkload
 					}
 
 					auto keyValueResponse = keyValueFutures[firstValidStorageServer].get().get();
-					Standalone<RangeResultRef> currentLocations = krmDecodeRanges( keyServersPrefix, KeyRangeRef(beginKey, shards[i].first.end), RangeResultRef( keyValueResponse.data, keyValueResponse.more) );
+					Standalone<RangeResultRef> currentLocations = krmDecodeRanges( keyServersPrefix, KeyRangeRef(beginKey.removePrefix(keyServersPrefix), std::min<KeyRef>(shards[i].first.end, endKey).removePrefix(keyServersPrefix)), RangeResultRef( keyValueResponse.data, keyValueResponse.more) );
 
 					//Push all but the last item, which will be pushed as the first item next iteration
 					keyLocations.append_deep(keyLocations.arena(), currentLocations.begin(), currentLocations.size() - 1);
 
 					//Next iteration should pick up where we left off
 					ASSERT(currentLocations.size() > 1);
-					beginKey = currentLocations.end()[-1].key;
+					if(!keyValueResponse.more) {
+						beginKey = shards[i].first.end;
+					} else {
+						beginKey = keyValueResponse.data.end()[-1].key;
+					}
 
 					//If this is the last iteration, then push the allKeys.end KV pair
-					if(beginKey == allKeys.end)
+					if(beginKey >= endKey)
 						keyLocations.push_back_deep(keyLocations.arena(), currentLocations.end()[-1]);
 				}
 				catch(Error &e)
