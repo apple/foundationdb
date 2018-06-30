@@ -101,7 +101,7 @@ The default behavior when the certificate or key file is not specified is to loo
 Default Peer Verification
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default peer verification is ``Check.Valid=0``.
+The default peer verification is ``Check.Valid=1``.
 
 Default Password
 ^^^^^^^^^^^^^^^^^^^^^^^^^
