@@ -437,8 +437,13 @@ struct ConsistencyCheckWorkload : TestWorkload
 					auto keyValueResponse = keyValueFutures[firstValidStorageServer].get().get();
 					Standalone<RangeResultRef> currentLocations = krmDecodeRanges( keyServersPrefix, KeyRangeRef(beginKey.removePrefix(keyServersPrefix), std::min<KeyRef>(shards[i].first.end, endKey).removePrefix(keyServersPrefix)), RangeResultRef( keyValueResponse.data, keyValueResponse.more) );
 
-					//Push all but the last item, which will be pushed as the first item next iteration
-					keyLocations.append_deep(keyLocations.arena(), currentLocations.begin(), currentLocations.size() - 1);
+					if(keyValueResponse.data.size() && beginKey == keyValueResponse.data[0].key) {
+						keyLocations.push_back_deep(keyLocations.arena(), currentLocations[0]);
+					}
+
+					if(currentLocations.size() > 2) {
+						keyLocations.append_deep(keyLocations.arena(), &currentLocations[1], currentLocations.size() - 2);
+					}
 
 					//Next iteration should pick up where we left off
 					ASSERT(currentLocations.size() > 1);
@@ -967,7 +972,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				//Min and max shard sizes have a 3 * shardBounds.permittedError.bytes cushion for error since shard sizes are not precise
 				//Shard splits ignore the first key in a shard, so its size shouldn't be considered when checking the upper bound
 				//0xff shards are not checked
-				if( canSplit && self->performQuiescentChecks && !range.begin.startsWith(keyServersPrefix) &&
+				if( canSplit && sampledKeys > 5 && self->performQuiescentChecks && !range.begin.startsWith(keyServersPrefix) &&
 					(sampledBytes < shardBounds.min.bytes - 3 * shardBounds.permittedError.bytes || sampledBytes - firstKeySampledBytes > shardBounds.max.bytes + 3 * shardBounds.permittedError.bytes))
 				{
 					TraceEvent("ConsistencyCheck_InvalidShardSize").detail("Min", shardBounds.min.bytes).detail("Max", shardBounds.max.bytes).detail("Size", shardBytes)
