@@ -23,6 +23,7 @@
 #include <vector>
 
 #include <string.h>
+#include <boost/lexical_cast.hpp>
 
 #include <openssl/objects.h>
 
@@ -74,12 +75,12 @@ static std::string printable( std::string const& val ) {
 static std::string criteriaToString(std::map<int, Criteria> const& criteria) {
 	std::string s;
 	for (auto &pair: criteria) {
-		s += "{" + std::to_string(pair.first) + ":" + printable(pair.second.criteria) + "}";
+		s += "{" + std::to_string(pair.first) + ":(" + printable(pair.second.criteria) + ", " + boost::lexical_cast<std::string>((int)pair.second.match_type) + ", " + boost::lexical_cast<std::string>((int)pair.second.location) + ")}";
 	}
 	return "{" + s + "}";
 }
 
-static void logf(const char* event, void* uid, int is_error, ...) {
+static void logf(const char* event, void* uid, bool is_error, ...) {
 }
 
 int FDBLibTLSVerifyTest::run() {
@@ -180,9 +181,9 @@ int main(int argc, char **argv)
 {
 	int failed = 0;
 
-#define EXACT(x) Criteria(x, MatchType::EXACT)
-#define PREFIX(x) Criteria(x, MatchType::PREFIX)
-#define SUFFIX(x) Criteria(x, MatchType::SUFFIX)
+#define EXACT(x) Criteria(x, MatchType::EXACT, X509Location::NAME)
+#define PREFIX(x) Criteria(x, MatchType::PREFIX, X509Location::NAME)
+#define SUFFIX(x) Criteria(x, MatchType::SUFFIX, X509Location::NAME)
 
 	std::vector<FDBLibTLSVerifyTest> tests = {
 		FDBLibTLSVerifyTest("", true, true, {}, {}, {}),
@@ -212,7 +213,7 @@ int main(int argc, char **argv)
 		FDBLibTLSVerifyTest("CN=\\61\\62\\63", true, true, {{NID_commonName, EXACT("abc")}}, {}, {}),
 		FDBLibTLSVerifyTest("CN=a\\62c", true, true, {{NID_commonName, EXACT("abc")}}, {}, {}),
 		FDBLibTLSVerifyTest("CN=a\\01c", true, true, {{NID_commonName, EXACT("a\001c")}}, {}, {}),
-		FDBLibTLSVerifyTest("S.subjectAltName=XYZCorp", true, true, {{NID_subject_alt_name, EXACT("XYZCorp")}}, {}, {}),
+		FDBLibTLSVerifyTest("S.subjectAltName=XYZCorp", true, true, {{NID_subject_alt_name, {"XYZCorp", MatchType::EXACT, X509Location::EXTENSION}}}, {}, {}),
 		FDBLibTLSVerifyTest("S.O>=XYZ", true, true, {{NID_organizationName, PREFIX("XYZ")}}, {}, {}),
 		FDBLibTLSVerifyTest("S.O<=LLC", true, true, {{NID_organizationName, SUFFIX("LLC")}}, {}, {}),
 

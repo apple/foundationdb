@@ -31,21 +31,37 @@
 #include <string>
 #include <utility>
 
+typedef int NID;
+
 enum class MatchType {
 	EXACT,
 	PREFIX,
 	SUFFIX,
 };
 
+enum class X509Location {
+	// This NID is located within a X509_NAME
+	NAME,
+	// This NID is an X509 extension, and should be parsed accordingly
+	EXTENSION,
+};
+
 struct Criteria {
-	Criteria( const std::string& s ) : criteria(s), match_type(MatchType::EXACT) {}
-	Criteria( const std::string& s, MatchType mt ) : criteria(s), match_type(mt) {}
+	Criteria( const std::string& s )
+		: criteria(s), match_type(MatchType::EXACT), location(X509Location::NAME) {}
+	Criteria( const std::string& s, MatchType mt )
+		: criteria(s), match_type(mt), location(X509Location::NAME) {}
+	Criteria( const std::string& s, X509Location loc)
+		: criteria(s), match_type(MatchType::EXACT), location(loc) {}
+	Criteria( const std::string& s, MatchType mt, X509Location loc)
+		: criteria(s), match_type(mt), location(loc) {}
 
 	std::string criteria;
 	MatchType match_type;
+	X509Location location;
 
 	bool operator==(const Criteria& c) const {
-		return criteria == c.criteria && match_type == c.match_type;
+		return criteria == c.criteria && match_type == c.match_type && location == c.location;
 	}
 };
 
@@ -61,9 +77,9 @@ struct FDBLibTLSVerify: ReferenceCounted<FDBLibTLSVerify> {
 	bool verify_cert;
 	bool verify_time;
 
-	std::map< int, Criteria > subject_criteria;
-	std::map< int, Criteria > issuer_criteria;
-	std::map< int, Criteria > root_criteria;
+	std::map< NID, Criteria > subject_criteria;
+	std::map< NID, Criteria > issuer_criteria;
+	std::map< NID, Criteria > root_criteria;
 };
 
 #endif /* FDB_LIBTLS_VERIFY_H */

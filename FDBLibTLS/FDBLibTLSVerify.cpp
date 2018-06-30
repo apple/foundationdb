@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <cstring>
 
 static int hexValue(char c) {
 	static char const digits[] = "0123456789ABCDEF";
@@ -133,8 +134,8 @@ static std::pair<std::string, std::string> splitPair(std::string const& input, c
 	return std::make_pair(input.substr(0, p), input.substr(p+1, input.size()));
 }
 
-static int abbrevToNID(std::string const& sn) {
-	int nid = NID_undef;
+static NID abbrevToNID(std::string const& sn) {
+	NID nid = NID_undef;
 
 	if (sn == "C" || sn == "CN" || sn == "L" || sn == "ST" || sn == "O" || sn == "OU" || sn == "UID" || sn == "DC" || sn == "subjectAltName")
 		nid = OBJ_sn2nid(sn.c_str());
@@ -142,6 +143,19 @@ static int abbrevToNID(std::string const& sn) {
 		throw std::runtime_error("abbrevToNID");
 
 	return nid;
+}
+
+static X509Location locationForNID(NID nid) {
+	const char* name = OBJ_nid2ln(nid);
+	if (name == NULL) {
+		throw std::runtime_error("locationForNID");
+	}
+	if (strncmp(name, "X509v3", 6) == 0) {
+		return X509Location::EXTENSION;
+	} else {
+		// It probably isn't true that all other NIDs live in the NAME, but it is for now...
+		return X509Location::NAME;
+	}
 }
 
 FDBLibTLSVerify::FDBLibTLSVerify(std::string verify_config):
@@ -215,7 +229,9 @@ void FDBLibTLSVerify::parse_verify(std::string input) {
 			if (remain == eq + 1)
 				throw std::runtime_error("parse_verify");
 
-			criteria->insert(std::make_pair(abbrevToNID(term), Criteria(unesc, mt)));
+			NID termNID = abbrevToNID(term);
+			const X509Location loc = locationForNID(termNID);
+			criteria->insert(std::make_pair(termNID, Criteria(unesc, mt, loc)));
 
 			if (remain != input.size() && input[remain] != ',')
 				throw std::runtime_error("parse_verify");
