@@ -38,6 +38,7 @@
 #include <sstream>
 #include <cstring>
 #include <algorithm>
+#include <stdexcept>
 
 #include <sys/types.h>
 #include <time.h>
@@ -2427,6 +2428,21 @@ std::string get_backtrace() { return std::string(); }
 std::string format_backtrace(void **addresses, int numAddresses) { return std::string(); }
 void* getImageOffset() { return NULL; }
 }; // namespace platform
+#endif
+
+#ifdef __APPLE__
+void* aligned_alloc(size_t alignment, size_t size) {
+	// posix_memalign requires alignment to be an integer multiple of sizeof(void *)
+	if(alignment < sizeof(void *)) {
+		alignment = sizeof(void *);
+	}
+	void* ptr = nullptr;
+	// Check for failure in case of out of memory or size is not a multiple of sizeof(void *)
+	if(posix_memalign(&ptr, alignment, size) != 0) {
+		throw std::bad_alloc();
+	}
+	return ptr;
+}
 #endif
 
 bool isLibraryLoaded(const char* lib_path) {

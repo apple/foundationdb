@@ -494,11 +494,7 @@ inline static void* aligned_alloc(size_t alignment, size_t size) { return memali
 #endif
 #elif defined(__APPLE__)
 #include <cstdlib>
-inline static void* aligned_alloc(size_t alignment, size_t size) {
-	void* ptr = nullptr;
-	posix_memalign(&ptr, alignment, size);
-	return ptr;
-}
+void * aligned_alloc(size_t alignment, size_t size);
 inline static void aligned_free(void* ptr) { free(ptr); }
 #endif
 
