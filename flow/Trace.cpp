@@ -118,6 +118,8 @@ SuppressionMap suppressedEvents;
 
 static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
+static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
+static int TRACE_EVENT_MAX_SIZE = 4000;
 
 struct TraceLog {
 
@@ -318,7 +320,7 @@ public:
 			fields.addField("TrackLatestType", "Original");
 		}
 
-		if(!isOpen() && (preopenOverflowCount > 0 || bufferLength + fields.sizeBytes() > FLOW_KNOBS->TRACE_LOG_MAX_PREOPEN_BUFFER)) {
+		if(!isOpen() && (preopenOverflowCount > 0 || bufferLength + fields.sizeBytes() > TRACE_LOG_MAX_PREOPEN_BUFFER)) {
 			++preopenOverflowCount;
 			return;
 		}
@@ -560,7 +562,7 @@ bool traceFileIsOpen() {
 
 bool TraceEvent::isEnabled( const char* type, Severity severity ) {
 	//if (!g_traceLog.isOpen()) return false;
-	if( severity < FLOW_KNOBS->MIN_TRACE_SEVERITY) return false;
+	if(g_network && severity < FLOW_KNOBS->MIN_TRACE_SEVERITY) return false;
 	StringRef s( (const uint8_t*)type, strlen(type) );
 	return !suppress.count(s);
 }
@@ -692,15 +694,15 @@ TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool
 		if( value.size() > 495 ) {
 			value = value.substr(0, 495) + "...";
 		}
-		
+
 		if(writeEventMetricField) {
 			tmpEventMetric->setField(key.c_str(), Standalone<StringRef>(StringRef(value)));
 		}
 
 		fields.addField(std::move(key), std::move(value));
 
-		if(fields.sizeBytes() > FLOW_KNOBS->TRACE_EVENT_MAX_SIZE) {
-			TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", fields.toString().substr(300));	
+		if(fields.sizeBytes() > TRACE_EVENT_MAX_SIZE) {
+			TraceEvent(SevError, "TraceEventOverflow").detail("TraceFirstBytes", fields.toString().substr(300));
 			enabled = false;
 		}
 	}
