@@ -1371,6 +1371,20 @@ ACTOR Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> tr, U
 	return Void();
 }
 
+ACTOR Future<Void> forceRecovery (Reference<ClusterConnectionFile> clusterFile) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+
+	loop{
+		choose {
+			when( Void _ = wait( clusterInterface->get().present() ? brokenPromiseToNever( clusterInterface->get().get().forceRecovery.getReply( ForceRecoveryRequest() ) ) : Never() ) ) {
+				return Void();
+			}
+			when( Void _ = wait(clusterInterface->onChange()) ) {}
+		}
+	}
+}
+
 TEST_CASE("ManagementAPI/AutoQuorumChange/checkLocality") {
 	Void _ = wait(Future<Void>(Void()));
 

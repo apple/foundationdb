@@ -584,7 +584,7 @@ struct ILogSystem {
 	static Reference<ILogSystem> fromOldLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const& );
 		// Constructs a new ILogSystem implementation from the old log data within a ServerDBInfo/LogSystemConfig.  Might return a null reference if there isn't a fully recovered log system available.
 
-	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality);
+	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery);
 		// Constructs a new ILogSystem implementation based on the given oldState and rejoining log servers
 		// Ensures that any calls to push or confirmEpochLive in the current epoch but strictly later than change_epoch will not return
 		// Whenever changes in the set of available log servers require restarting recovery with a different end sequence, outLogSystem will be changed to a new ILogSystem
