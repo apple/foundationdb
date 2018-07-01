@@ -404,7 +404,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 
 				// for each range
 				for(int i = 0; i < keyServers.size() - 1; i++) {
-					ShardInfo info( keyServers[i].key );
+					DDShardInfo info( keyServers[i].key );
 					decodeKeyServersValue( keyServers[i].value, src, dest );
 					if(remoteDcIds.size()) {
 						auto srcIter = team_cache.find(src);
@@ -471,7 +471,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 	}
 
 	// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
-	result->shards.push_back( ShardInfo(allKeys.end) );
+	result->shards.push_back( DDShardInfo(allKeys.end) );
 
 	return result;
 }
