@@ -32,7 +32,7 @@ extensions = [
     'sphinx.ext.ifconfig',
     'brokenrole',
     'relativelink',
-    'rubydomain'
+    'sphinxcontrib.rubydomain'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
