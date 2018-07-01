@@ -494,7 +494,21 @@ inline static void* aligned_alloc(size_t alignment, size_t size) { return memali
 #endif
 #elif defined(__APPLE__)
 #include <cstdlib>
-void * aligned_alloc(size_t alignment, size_t size);
+inline static void* aligned_alloc(size_t alignment, size_t size) {
+	// Linux's aligned_alloc() requires alignment to be a power of 2.  While posix_memalign()
+	// also requires this, in addition it requires alignment to be a multiple of sizeof(void *).
+	// Rather than add this requirement to the platform::aligned_alloc() interface we will simply
+	// upgrade powers of 2 which are less than sizeof(void *) to be exactly sizeof(void *).  Non
+	// powers of 2 of any size will fail as they would on other platforms.  This change does not
+	// break the platform::aligned_alloc() contract as all addresses which are aligned to 
+	// sizeof(void *) are also aligned to any power of 2 less than sizeof(void *).
+	if(alignment != 0 && alignment < sizeof(void *) && (alignment & (alignment - 1)) == 0) {
+		alignment = sizeof(void *);
+	}
+	void* ptr = nullptr;
+	posix_memalign(&ptr, alignment, size);
+	return ptr;
+}
 inline static void aligned_free(void* ptr) { free(ptr); }
 #endif
 
