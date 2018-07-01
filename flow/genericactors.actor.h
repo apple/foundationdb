@@ -132,6 +132,18 @@ Future<T> transformErrors( Future<T> f, Error err ) {
 	}
 }
 
+ACTOR template <class T>
+Future<T> transformError( Future<T> f, Error inErr, Error outErr ) {
+	try {
+		T t = wait( f );
+		return t;
+	} catch( Error &e ) {
+		if( e.code() == inErr.code() )
+			throw outErr;
+		throw e;
+	}
+}
+
 // Note that the RequestStream<T> version of forwardPromise doesn't exist, because what to do with errors?
 
 ACTOR template <class T>

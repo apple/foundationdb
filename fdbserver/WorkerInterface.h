@@ -227,7 +227,7 @@ struct SetMetricsLogRateRequest {
 struct EventLogRequest {
 	bool getLastError;
 	Standalone<StringRef> eventName;
-	ReplyPromise< Standalone<StringRef> > reply;
+	ReplyPromise< TraceEventFields > reply;
 
 	EventLogRequest() : getLastError(true) {}
 	explicit EventLogRequest( Standalone<StringRef> eventName ) : eventName( eventName ), getLastError( false ) {}

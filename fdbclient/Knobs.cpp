@@ -35,8 +35,8 @@ ClientKnobs::ClientKnobs(bool randomize) {
 
 	init( SYSTEM_MONITOR_INTERVAL,                 5.0 );
 
-	init( FAILURE_MAX_DELAY,                      10.0 ); if( randomize && BUGGIFY ) FAILURE_MAX_DELAY = 5.0;
-	init( FAILURE_MIN_DELAY,                       5.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 2.0;
+	init( FAILURE_MAX_DELAY,                       5.0 );
+	init( FAILURE_MIN_DELAY,                       4.0 ); if( randomize && BUGGIFY ) FAILURE_MIN_DELAY = 1.0;
 	init( FAILURE_TIMEOUT_DELAY,     FAILURE_MIN_DELAY );
 	init( CLIENT_FAILURE_TIMEOUT_DELAY, FAILURE_MIN_DELAY );
 
@@ -167,6 +167,11 @@ ClientKnobs::ClientKnobs(bool randomize) {
 	init( BLOBSTORE_REQUESTS_PER_SECOND,            200 );
 	init( BLOBSTORE_MAX_SEND_BYTES_PER_SECOND,      1e9 );
 	init( BLOBSTORE_MAX_RECV_BYTES_PER_SECOND,      1e9 );
+
+	init( BLOBSTORE_LIST_REQUESTS_PER_SECOND,        25 );
+	init( BLOBSTORE_WRITE_REQUESTS_PER_SECOND,       50 );
+	init( BLOBSTORE_READ_REQUESTS_PER_SECOND,       100 );
+	init( BLOBSTORE_DELETE_REQUESTS_PER_SECOND,     200 );
 
 	// Client Status Info
 	init(CSI_SAMPLING_PROBABILITY, -1.0);

@@ -62,7 +62,10 @@
                      ]
                   },
                   "data_version":12341234,
-                  "data_version_lag":12341234,
+                  "data_lag": {
+                     "seconds":5.0,
+                     "versions":12341234
+                  },
                   "id":"eb84471d68c12d1d26f692a50000003f",
                   "finished_queries":{  
                      "hz":0.0,
@@ -362,6 +365,7 @@
          "remote_redundancy_mode":"remote_single",
          "remote_log_replicas":3,
          "remote_logs":5,
+         "log_routers":10,
          "usable_regions":1,
          "storage_replicas":1,
          "resolvers":1,

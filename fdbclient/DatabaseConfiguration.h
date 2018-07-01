@@ -55,9 +55,15 @@ struct RegionInfo {
 	int32_t satelliteTLogWriteAntiQuorum;
 	int32_t satelliteTLogUsableDcs;
 
+	IRepPolicyRef satelliteTLogPolicyFallback;
+	int32_t satelliteTLogReplicationFactorFallback;
+	int32_t satelliteTLogWriteAntiQuorumFallback;
+	int32_t satelliteTLogUsableDcsFallback;
+
 	std::vector<SatelliteInfo> satellites;
 
-	RegionInfo() : priority(0), satelliteDesiredTLogCount(-1), satelliteTLogReplicationFactor(0), satelliteTLogWriteAntiQuorum(0), satelliteTLogUsableDcs(1) {}
+	RegionInfo() : priority(0), satelliteDesiredTLogCount(-1), satelliteTLogReplicationFactor(0), satelliteTLogWriteAntiQuorum(0), satelliteTLogUsableDcs(1),
+		satelliteTLogReplicationFactorFallback(0), satelliteTLogWriteAntiQuorumFallback(0), satelliteTLogUsableDcsFallback(0) {}
 
 	struct sort_by_priority {
 		bool operator ()(RegionInfo const&a, RegionInfo const& b) const { return a.priority > b.priority; }
@@ -65,7 +71,8 @@ struct RegionInfo {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		ar & dcId & priority & satelliteTLogPolicy & satelliteDesiredTLogCount & satelliteTLogReplicationFactor & satelliteTLogWriteAntiQuorum & satelliteTLogUsableDcs & satellites;
+		ar & dcId & priority & satelliteTLogPolicy & satelliteDesiredTLogCount & satelliteTLogReplicationFactor & satelliteTLogWriteAntiQuorum & satelliteTLogUsableDcs &
+			satelliteTLogPolicyFallback & satelliteTLogReplicationFactorFallback & satelliteTLogWriteAntiQuorumFallback & satelliteTLogUsableDcsFallback & satellites;
 	}
 };
 
@@ -115,12 +122,12 @@ struct DatabaseConfiguration {
 		}
 		return minRequired;
 	}
-	int32_t minMachinesRequiredPerDatacenter() const { 
+	int32_t minMachinesRequiredPerDatacenter() const {
 		int minRequired = std::max( remoteTLogReplicationFactor, std::max(tLogReplicationFactor, storageTeamSize) );
 		for(auto& r : regions) {
 			minRequired = std::max( minRequired, r.satelliteTLogReplicationFactor/std::max(1, r.satelliteTLogUsableDcs) );
 		}
-		return minRequired; 
+		return minRequired;
 	}
 
 	//Killing an entire datacenter counts as killing one machine in modes that support it
@@ -128,6 +135,9 @@ struct DatabaseConfiguration {
 		int worstSatellite = regions.size() ? std::numeric_limits<int>::max() : 0;
 		for(auto& r : regions) {
 			worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactor - r.satelliteTLogWriteAntiQuorum);
+			if(r.satelliteTLogUsableDcsFallback > 0) {
+				worstSatellite = std::min(worstSatellite, r.satelliteTLogReplicationFactorFallback - r.satelliteTLogWriteAntiQuorumFallback);
+			}
 		}
 		if(usableRegions > 1 && worstSatellite > 0) {
 			return 1 + std::min(std::max(tLogReplicationFactor - 1 - tLogWriteAntiQuorum, worstSatellite - 1), storageTeamSize - 1);
@@ -159,6 +169,7 @@ struct DatabaseConfiguration {
 	KeyValueStoreType storageServerStoreType;
 
 	// Remote TLogs
+	int32_t desiredLogRouterCount;
 	int32_t remoteDesiredTLogCount;
 	int32_t remoteTLogReplicationFactor;
 	IRepPolicyRef remoteTLogPolicy;

@@ -76,7 +76,8 @@ public:
 	void populateSatelliteTagLocations(int logRouterTags, int oldLogRouterTags) {
 		satelliteTagLocations.clear();
 		satelliteTagLocations.resize(std::max(logRouterTags,oldLogRouterTags) + 1);
-		
+
+		std::map<int,int> server_usedBest;
 		std::set<std::pair<int,int>> used_servers;
 		for(int i = 0; i < tLogLocalities.size(); i++) {
 			used_servers.insert(std::make_pair(0,i));
@@ -109,6 +110,16 @@ public:
 					for(auto& entry : resultEntries) {
 						resultPairs.push_back(*serverMap->getObject(entry));
 					}
+					int firstBestUsed = server_usedBest[resultPairs[0].second];
+					for(int i = 1; i < resultPairs.size(); i++) {
+						int thisBestUsed = server_usedBest[resultPairs[i].second];
+						if(thisBestUsed < firstBestUsed) {
+							std::swap(resultPairs[0], resultPairs[i]);
+							firstBestUsed = thisBestUsed;
+						}
+					}
+					server_usedBest[resultPairs[0].second]++;
+
 					for(auto& res : resultPairs) {
 						satelliteTagLocations[team].push_back(res.second);
 						used_servers.erase(res);
@@ -126,20 +137,31 @@ public:
 	}
 
 	void checkSatelliteTagLocations() {
+		std::vector<int> usedBest;
 		std::vector<int> used;
+		usedBest.resize(tLogLocalities.size());
 		used.resize(tLogLocalities.size());
 		for(auto team : satelliteTagLocations) {
+			usedBest[team[0]]++;
 			for(auto loc : team) {
 				used[loc]++;
 			}
 		}
+
+		int minUsedBest = satelliteTagLocations.size();
+		int maxUsedBest = 0;
+		for(auto i : usedBest) {
+			minUsedBest = std::min(minUsedBest, i);
+			maxUsedBest = std::max(maxUsedBest, i);
+		}
+
 		int minUsed = satelliteTagLocations.size();
 		int maxUsed = 0;
 		for(auto i : used) {
 			minUsed = std::min(minUsed, i);
 			maxUsed = std::max(maxUsed, i);
 		}
-		TraceEvent(maxUsed - minUsed > 1 ? (g_network->isSimulated() ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed);
+		TraceEvent(((maxUsed - minUsed > 1) || (maxUsedBest - minUsedBest > 1)) ? (g_network->isSimulated() ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed).detail("MinUsedBest", minUsedBest).detail("MaxUsedBest", maxUsedBest);
 	}
 
 	int bestLocationFor( Tag tag ) {
@@ -314,6 +336,8 @@ struct ILogSystem {
 		// Returns the maximum version known to have been pushed (not necessarily durably) into the log system (0 is always a possible result!)
 		virtual Version getMaxKnownVersion() { return 0; }
 
+		virtual Version getMinKnownCommittedVersion() = 0;
+
 		virtual void addref() = 0;
 
 		virtual void delref() = 0;
@@ -358,6 +382,7 @@ struct ILogSystem {
 		virtual bool isExhausted();
 		virtual LogMessageVersion version();
 		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
 
 		virtual void addref() {
 			ReferenceCounted<ServerPeekCursor>::addref();
@@ -411,6 +436,7 @@ struct ILogSystem {
 		virtual bool isExhausted();
 		virtual LogMessageVersion version();
 		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
 
 		virtual void addref() {
 			ReferenceCounted<MergedPeekCursor>::addref();
@@ -455,6 +481,7 @@ struct ILogSystem {
 		virtual bool isExhausted();
 		virtual LogMessageVersion version();
 		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
 
 		virtual void addref() {
 			ReferenceCounted<SetPeekCursor>::addref();
@@ -488,6 +515,7 @@ struct ILogSystem {
 		virtual bool isExhausted();
 		virtual LogMessageVersion version();
 		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
 
 		virtual void addref() {
 			ReferenceCounted<MultiCursor>::addref();
@@ -516,7 +544,7 @@ struct ILogSystem {
 		// Never returns normally, but throws an error if the subsystem stops working
 
 	//Future<Void> push( UID bundle, int64_t seq, VectorRef<TaggedMessageRef> messages );
-	virtual Future<Void> push( Version prevVersion, Version version, Version knownCommittedVersion, struct LogPushData& data, Optional<UID> debugID = Optional<UID>() ) = 0;
+	virtual Future<Version> push( Version prevVersion, Version version, Version knownCommittedVersion, Version minKnownCommittedVersion, struct LogPushData& data, Optional<UID> debugID = Optional<UID>() ) = 0;
 		// Waits for the version number of the bundle (in this epoch) to be prevVersion (i.e. for all pushes ordered earlier)
 		// Puts the given messages into the bundle, each with the given tags, and with message versions (version, 0) - (version, N)
 		// Changes the version number of the bundle to be version (unblocking the next push)
@@ -535,7 +563,7 @@ struct ILogSystem {
 		// Same contract as peek(), but blocks until the preferred log server(s) for the given tag are available (and is correspondingly less expensive)
 
 	virtual Reference<IPeekCursor> peekLogRouter( UID dbgid, Version begin, Tag tag ) = 0;
-		// Same contract as peek(), but can only peek from the logs elected in the same generation. 
+		// Same contract as peek(), but can only peek from the logs elected in the same generation.
 		// If the preferred log server is down, a different log from the same generation will merge results locally before sending them to the log router.
 
 	virtual void pop( Version upTo, Tag tag, Version knownCommittedVersion = 0, int8_t popLocality = tagLocalityInvalid ) = 0;
@@ -548,8 +576,8 @@ struct ILogSystem {
 	virtual Future<Void> endEpoch() = 0;
 		// Ends the current epoch without starting a new one
 
-	static Reference<ILogSystem> fromServerDBInfo( UID const& dbgid, struct ServerDBInfo const& db, bool usePreviousEpochEnd = false, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() );
-	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const&, bool excludeRemote = false, bool usePreviousEpochEnd = false, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() );
+	static Reference<ILogSystem> fromServerDBInfo( UID const& dbgid, struct ServerDBInfo const& db, bool useRecoveredAt = false, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() );
+	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, struct LocalityData const&, struct LogSystemConfig const&, bool excludeRemote = false, bool useRecoveredAt = false, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() );
 		// Constructs a new ILogSystem implementation from the given ServerDBInfo/LogSystemConfig.  Might return a null reference if there isn't a fully recovered log system available.
 		// The caller can peek() the returned log system and can push() if it has version numbers reserved for it and prevVersions
 

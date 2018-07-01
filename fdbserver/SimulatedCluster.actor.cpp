@@ -119,6 +119,7 @@ T simulate( const T& in ) {
 static void simInitTLS(Reference<TLSOptions> tlsOptions) {
 	tlsOptions->set_cert_data( certBytes );
 	tlsOptions->set_key_data( certBytes );
+	tlsOptions->set_verify_peers(std::vector<std::string>(1, "Check.Valid=0"));
 	tlsOptions->register_network();
 }
 
@@ -864,6 +865,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				ASSERT(false);  // Programmer forgot to adjust cases.
 			}
 
+			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
 		}
 
@@ -935,25 +937,16 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.remoteTLogPolicy = simconfig.db.getRemoteTLogPolicy();
 	g_simulator.usableRegions = simconfig.db.usableRegions;
 
-	if(simconfig.db.regions.size() == 2) {
-		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
-		g_simulator.remoteDcId = simconfig.db.regions[1].dcId;
-		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
-		ASSERT((!simconfig.db.regions[0].satelliteTLogPolicy && !simconfig.db.regions[1].satelliteTLogPolicy) || simconfig.db.regions[0].satelliteTLogPolicy->info() == simconfig.db.regions[1].satelliteTLogPolicy->info());
-		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
-		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
-
-		for(auto s : simconfig.db.regions[0].satellites) {
-			g_simulator.primarySatelliteDcIds.push_back(s.dcId);
-		}
-		for(auto s : simconfig.db.regions[1].satellites) {
-			g_simulator.remoteSatelliteDcIds.push_back(s.dcId);
-		}
-	} else if(simconfig.db.regions.size() == 1) {
+	if(simconfig.db.regions.size() > 0) {
 		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
 		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
-		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
-		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
+		if(simconfig.db.regions[0].satelliteTLogUsableDcsFallback > 0) {
+			g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicyFallback;
+			g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorumFallback;
+		} else {
+			g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
+			g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
+		}
 
 		for(auto s : simconfig.db.regions[0].satellites) {
 			g_simulator.primarySatelliteDcIds.push_back(s.dcId);
@@ -962,7 +955,16 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		g_simulator.hasSatelliteReplication = false;
 		g_simulator.satelliteTLogWriteAntiQuorum = 0;
 	}
-		
+
+	if(simconfig.db.regions.size() == 2) {
+		g_simulator.remoteDcId = simconfig.db.regions[1].dcId;
+		ASSERT((!simconfig.db.regions[0].satelliteTLogPolicy && !simconfig.db.regions[1].satelliteTLogPolicy) || simconfig.db.regions[0].satelliteTLogPolicy->info() == simconfig.db.regions[1].satelliteTLogPolicy->info());
+
+		for(auto s : simconfig.db.regions[1].satellites) {
+			g_simulator.remoteSatelliteDcIds.push_back(s.dcId);
+		}
+	}
+
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
 	TraceEvent("SimulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));

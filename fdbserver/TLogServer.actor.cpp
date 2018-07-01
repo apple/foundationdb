@@ -360,7 +360,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	VersionMetricHandle persistentDataVersion, persistentDataDurableVersion;  // The last version number in the portion of the log (written|durable) to persistentData
 	NotifiedVersion version, queueCommittedVersion;
 	Version queueCommittingVersion;
-	Version knownCommittedVersion, durableKnownCommittedVersion;
+	Version knownCommittedVersion, durableKnownCommittedVersion, minKnownCommittedVersion;
 
 	Deque<std::pair<Version, Standalone<VectorRef<uint8_t>>>> messageBlocks;
 	std::vector<std::vector<Reference<TagData>>> tag_data; //tag.locality | tag.id
@@ -409,7 +409,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 
 	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID),
-			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0),
+			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
 			logRouterPopToVersion(0), locality(tagLocalityInvalid)
@@ -990,6 +990,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	if(poppedVer > req.begin) {
 		TLogPeekReply rep;
 		rep.maxKnownVersion = logData->version.get();
+		rep.minKnownCommittedVersion = logData->minKnownCommittedVersion;
 		rep.popped = poppedVer;
 		rep.end = poppedVer;
 
@@ -1006,6 +1007,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 			} else {
 				sequenceData.send(rep.end);
 			}
+			rep.begin = req.begin;
 		}
 
 		req.reply.send( rep );
@@ -1048,6 +1050,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 
 	TLogPeekReply reply;
 	reply.maxKnownVersion = logData->version.get();
+	reply.minKnownCommittedVersion = logData->minKnownCommittedVersion;
 	reply.messages = messages.toStringRef();
 	reply.end = endVersion;
 
@@ -1066,6 +1069,7 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 		} else {
 			sequenceData.send(reply.end);
 		}
+		reply.begin = req.begin;
 	}
 
 	req.reply.send( reply );
@@ -1166,7 +1170,7 @@ ACTOR Future<Void> tLogCommit(
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.BeforeWaitForVersion");
 	}
 
-	logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
+	logData->minKnownCommittedVersion = std::max(logData->minKnownCommittedVersion, req.minKnownCommittedVersion);
 
 	Void _ = wait( logData->version.whenAtLeast( req.prevVersion ) );
 
@@ -1199,10 +1203,12 @@ ACTOR Future<Void> tLogCommit(
 		TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(logData, req.version, req.arena, req.messages, self->bytesInput);
 
+		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
+
 		// Log the changes to the persistent queue, to be committed by commitQueue()
 		TLogQueueEntryRef qe;
 		qe.version = req.version;
-		qe.knownCommittedVersion = req.knownCommittedVersion;
+		qe.knownCommittedVersion = logData->knownCommittedVersion;
 		qe.messages = req.messages;
 		qe.id = logData->logId;
 		self->persistentQueue->push( qe, logData );
@@ -1232,7 +1238,7 @@ ACTOR Future<Void> tLogCommit(
 	if(req.debugID.present())
 		g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.After");
 
-	req.reply.send( Void() );
+	req.reply.send( logData->durableKnownCommittedVersion );
 	return Void();
 }
 
@@ -1452,7 +1458,7 @@ void removeLog( TLogData* self, Reference<LogData> logData ) {
 	}
 }
 
-ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted ) {
+ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, std::vector<Tag> tags, Version beginVersion, Optional<Version> endVersion, bool poppedIsKnownCommitted, bool parallelGetMore ) {
 	state Future<Void> dbInfoChange = Void();
 	state Reference<ILogSystem::IPeekCursor> r;
 	state Version tagAt = beginVersion;
@@ -1462,14 +1468,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 		loop {
 			choose {
 				when(Void _ = wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
-					if(poppedIsKnownCommitted) {
-						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
-					}
 					break;
 				}
 				when( Void _ = wait( dbInfoChange ) ) {
 					if( logData->logSystem->get() ) {
-						r = logData->logSystem->get()->peek( logData->logId, tagAt, tags );
+						r = logData->logSystem->get()->peek( logData->logId, tagAt, tags, parallelGetMore );
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
@@ -1504,6 +1507,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 					if(endVersion.present() && ver > endVersion.get()) {
 						return Void();
 					}
+
+					if(poppedIsKnownCommitted) {
+						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+					}
+
 					commitMessages(logData, ver, messages, self->bytesInput);
 
 					// Log the changes to the persistent queue, to be committed by commitQueue()
@@ -1534,6 +1542,11 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						if(endVersion.present() && ver > endVersion.get()) {
 							return Void();
 						}
+
+						if(poppedIsKnownCommitted) {
+							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+						}
+
 						// Log the changes to the persistent queue, to be committed by commitQueue()
 						TLogQueueEntryRef qe;
 						qe.version = ver;
@@ -1591,7 +1604,7 @@ ACTOR Future<Void> tLogCore( TLogData* self, Reference<LogData> logData, TLogInt
 	if(!logData->isPrimary) {
 		std::vector<Tag> tags;
 		tags.push_back(logData->remoteTag);
-		logData->addActor.send( pullAsyncData(self, logData, tags, logData->unrecoveredBefore, Optional<Version>(), true) );
+		logData->addActor.send( pullAsyncData(self, logData, tags, logData->unrecoveredBefore, Optional<Version>(), true, false) );
 	}
 
 	try {
@@ -1949,10 +1962,10 @@ ACTOR Future<Void> tLogStart( TLogData* self, InitializeTLogRequest req, Localit
 					logData->logRouterPopToVersion = req.recoverAt;
 					std::vector<Tag> tags;
 					tags.push_back(logData->remoteTag);
-					Void _ = wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true) || logData->removed);
+					Void _ = wait(pullAsyncData(self, logData, tags, logData->unrecoveredBefore, req.recoverAt, true, false) || logData->removed);
 				} else if(!req.recoverTags.empty()) {
 					ASSERT(logData->unrecoveredBefore > req.knownCommittedVersion);
-					Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false) || logData->removed);
+					Void _ = wait(pullAsyncData(self, logData, req.recoverTags, req.knownCommittedVersion + 1, req.recoverAt, false, true) || logData->removed);
 				}
 			}
 

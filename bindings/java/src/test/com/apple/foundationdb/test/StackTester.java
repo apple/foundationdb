@@ -284,7 +284,10 @@ public class StackTester {
 				FDBException err = new FDBException("Fake testing error", filteredError ? 1020 : errorCode);
 
 				try {
-					inst.setTransaction(inst.tr.onError(err).join());
+					Transaction tr = inst.tr.onError(err).join();
+					if(!inst.setTransaction(tr)) {
+						tr.close();
+					}
 				}
 				catch(Throwable t) {
 					inst.context.newTransaction(); // Other bindings allow reuse of non-retryable transactions, so we need to emulate that behavior.
