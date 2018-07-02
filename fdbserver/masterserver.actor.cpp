@@ -777,7 +777,12 @@ ACTOR Future<Void> recoverFrom( Reference<MasterData> self, Reference<ILogSystem
 					self->configuration.applyMutation( m );
 
 				initialConfChanges->clear();
-				initialConfChanges->push_back(req);
+				if(self->originalConfiguration.isValid() && self->configuration.usableRegions != self->originalConfiguration.usableRegions) {
+					TraceEvent(SevWarnAlways, "CannotChangeUsableRegions", self->dbgid);
+					self->configuration = self->originalConfiguration;
+				} else {
+					initialConfChanges->push_back(req);
+				}
 
 				if(self->configuration != oldConf) { //confChange does not trigger when including servers
 					recruitments = recruitEverything( self, seedServers, oldLogSystem, initialConfChanges );
