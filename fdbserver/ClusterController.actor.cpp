@@ -348,7 +348,7 @@ public:
 				if(satelliteFallback || region.satelliteTLogUsableDcsFallback == 0) {
 					throw no_more_servers();
 				} else {
-					if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
+					if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) {
 						throw operation_failed();
 					}
 					satelliteFallback = true;
