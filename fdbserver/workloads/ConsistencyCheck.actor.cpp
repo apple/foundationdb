@@ -376,7 +376,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		//If the responses are too big, we may use multiple requests to get the key locations.  Each request begins where the last left off
 		for ( ; i < shards.size(); i++)
 		{
-			while(beginKey < shards[i].first.end)
+			while(beginKey < std::min<KeyRef>(shards[i].first.end, endKey))
 			{
 				try
 				{
