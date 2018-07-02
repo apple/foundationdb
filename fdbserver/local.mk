@@ -22,7 +22,7 @@
 
 fdbserver_CFLAGS := $(fdbclient_CFLAGS) -I fdbserver/workloads
 fdbserver_LDFLAGS := $(fdbrpc_LDFLAGS)
-fdbserver_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
+fdbserver_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a $(TLS_LIBS)
 
 ifeq ($(PLATFORM),linux)
   fdbserver_LIBS += -ldl -lpthread -lrt

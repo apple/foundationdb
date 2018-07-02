@@ -529,6 +529,17 @@ void* loadFunction(void* lib, const char* func_name);
 #define EXTERNC
 #endif // __cplusplus
 
+/*
+ * Multiply Defined Symbol (support for weak function declaration).
+ */
+#ifndef MULTIPLY_DEFINED_SYMBOL
+#if defined(_MSC_VER)
+#define MULTIPLY_DEFINED_SYMBOL
+#else
+#define MULTIPLY_DEFINED_SYMBOL __attribute__((weak))
+#endif
+#endif
+
 // Logs a critical error message and exits the program
 EXTERNC void criticalError(int exitCode, const char *type, const char *message);
 EXTERNC void flushAndExit(int exitCode);

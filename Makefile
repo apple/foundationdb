@@ -87,6 +87,13 @@ CFLAGS += -g
 
 # valgrind-compatibile builds are enabled by uncommenting lines in valgind.mk
 
+ifdef TLS_DISABLED
+CFLAGS += -DTLS_DISABLED
+TLS_LIBS :=
+else
+TLS_LIBS := lib/libFDBLibTLS.a $(shell gcc --print-file-name=libtls.a) $(shell gcc --print-file-name=libssl.a) $(shell gcc --print-file-name=libcrypto.a)
+endif
+
 CXXFLAGS += -Wno-deprecated
 LDFLAGS :=
 LIBS :=
