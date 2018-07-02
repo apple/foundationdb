@@ -1959,6 +1959,7 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData *self) {
 			uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness( worker.interf.locality.dcId(), self->desiredDcIds.get().get() );
 			self->changingDcIds.set(std::make_pair(worker.priorityInfo.dcFitness > newFitness,self->desiredDcIds.get()));
 
+			TraceEvent("UpdateChangingDatacenter", self->id).detail("OldFitness", worker.priorityInfo.dcFitness).detail("NewFitness", newFitness);
 			if ( worker.priorityInfo.dcFitness > newFitness ) {
 				worker.priorityInfo.dcFitness = newFitness;
 				if(!worker.reply.isSet()) {
@@ -2007,6 +2008,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 
 				self->changedDcIds.set(self->changingDcIds.get());
 				if(self->changedDcIds.get().second.present()) {
+					TraceEvent("UpdateChangedDatacenter", self->id).detail("CCFirst", self->changedDcIds.get().first);
 					if( !self->changedDcIds.get().first ) {
 						auto& worker = self->id_worker[self->clusterControllerProcessId];
 						uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness( worker.interf.locality.dcId(), self->changedDcIds.get().second.get() );
