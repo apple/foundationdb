@@ -82,9 +82,12 @@ struct TLSListener : IListener, ReferenceCounted<TLSListener> {
 struct TLSOptions : ReferenceCounted<TLSOptions> {
 	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE, OPT_TLS_PASSWORD };
 	enum PolicyType { POLICY_VERIFY_PEERS = 1, POLICY_NO_VERIFY_PEERS };
-	TLSOptions() : certs_set(false), key_set(false), verify_peers_set(false), ca_set(false) {}
+	TLSOptions() : certs_set(false), key_set(false), verify_peers_set(false), ca_set(false) {
+#ifndef TLS_DISABLED
+		init_plugin( );
+#endif
+	}
 
-	void set_plugin_name_or_path( std::string const& plugin_name_or_path );
 	void set_cert_file( std::string const& cert_file );
 	void set_cert_data( std::string const& cert_data );
 	void set_ca_file(std::string const& ca_file);
@@ -101,7 +104,7 @@ struct TLSOptions : ReferenceCounted<TLSOptions> {
 	bool enabled();
 
 private:
-	void init_plugin( std::string const& plugin_path = "" );
+	void init_plugin( );
 
 	Reference<ITLSPlugin> plugin;
 	Reference<ITLSPolicy> policyVerifyPeersSet;
@@ -132,7 +135,7 @@ private:
 #define TLS_PASSWORD_FLAG "--tls_password"
 
 #define TLS_OPTION_FLAGS \
-	{ TLSOptions::OPT_TLS_PLUGIN,       TLS_PLUGIN_FLAG,           SO_OPT }, \
+	{ TLSOptions::OPT_TLS_PLUGIN,       TLS_PLUGIN_FLAG,           SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_CERTIFICATES, TLS_CERTIFICATE_FILE_FLAG, SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_KEY,          TLS_KEY_FILE_FLAG,         SO_REQ_SEP }, \
 	{ TLSOptions::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG,     SO_REQ_SEP }, \
@@ -140,11 +143,6 @@ private:
 	{ TLSOptions::OPT_TLS_CA_FILE,      TLS_CA_FILE_FLAG,          SO_REQ_SEP },
 
 #define TLS_HELP \
-	"  " TLS_PLUGIN_FLAG " PLUGIN\n" \
-	"                 The name/path of a FoundationDB TLS plugin to be loaded.\n" \
-	"                 PLUGIN will be opened using dlopen (or LoadLibrary on\n" \
-	"                 Windows) and will be located using the search order\n" \
-	"                 of dlopen or LoadLibrary on your platform.\n" \
 	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n" \
 	"                 The path of a file containing the TLS certificate and CA\n" \
 	"                 chain.\n"											\
