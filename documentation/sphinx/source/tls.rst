@@ -101,7 +101,7 @@ The default behavior when the certificate or key file is not specified is to loo
 Default Peer Verification
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The default peer verification is ``Check.Valid=0``.
+The default peer verification is ``Check.Valid=1``.
 
 Default Password
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -210,18 +210,20 @@ Setting                Result
 Adding verification requirements
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Requirements can be placed on the fields of the Issuer and Subject DNs in the peer's own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of ``field=value``. Only certain fields from a DN can be matched against.
+Requirements can be placed on the fields of the Issuer and Subject DNs in the peer's own certificate. These requirements take the form of a comma-separated list of conditions. Each condition takes the form of ``field[<>]?=value``. Only certain fields from a DN can be matched against.
 
-======  ===================
-Field   Well known name
-======  ===================
-``CN``  Common Name
-``C``   County
-``L``   Locality
-``ST``  State
-``O``   Organization
-``OU``  Organizational Unit
-======  ===================
+=======  ===================
+Field    Well known name
+=======  ===================
+``CN``   Common Name
+``C``    County
+``L``    Locality
+``ST``   State
+``O``    Organization
+``OU``   Organizational Unit
+``UID``  Unique Identifier
+``DC``   Domain Component
+=======  ===================
 
 The field of each condition may optionally have a DN prefix, which is otherwise considered to be for the Subject DN.
 
@@ -230,6 +232,7 @@ Prefix                        DN
 ============================= ========
 ``S.``, ``Subject.``, or none Subject
 ``I.``, or ``Issuer.``        Issuer
+``R.``, or ``Root.``          Root
 ============================= ========
 
 Additionally, the verification can be restricted to certificates signed by a given root CA with the field ``Root.CN``. This allows you to have different requirements for different root chains.
@@ -238,16 +241,78 @@ The value of a condition must be specified in a form derived from a subset of `R
 
 By default, the fields of a peer certificate's DNs are not examined.
 
+In addition to DNs, restrictions can be placed against X509 extensions. They are specified in the same fashion as DN requirements.  The supported extensions are:
+
+==================  ========================
+Field               Well known name
+==================  ========================
+``subjectAltName``  Subject Alternative Name
+==================  ========================
+
+Within a subject alternative name requirement, the value specified is required to have the form ``prefix:value``, where the prefix specifies the type of value being matched against.  The following prefixes are supported.
+
+======  ===========================
+Prefix  Well known name
+======  ===========================
+DNS     Domain Name
+URI     Uniform Resource Identifier
+IP      IP Address
+EMAIL   Email Address
+======  ============================
+
+The following operators are supported:
+
+=========  ============
+Operator   Match Type
+=========  ============
+``=``      Exact Match
+``>=``     Prefix Match
+``<=``     Suffix Match
+=========  ============
+
 Verification Examples
 ^^^^^^^^^^^^^^^^^^^^^
 
-A verification string can be of the form::
+Let's consider a certificate, whose abridged contents is::
 
-  Check.Unexpired=0,I.C=US,C=US,S.O=XYZCorp\, LLC
+    Certificate:
+        Data:
+            Version: 3 (0x2)
+            Serial Number: 12938646789571341173 (0xb38f4eb406a5eb75)
+        Signature Algorithm: sha1WithRSAEncryption
+            Issuer: C=US, ST=California, L=Cupertino, O=Apple Inc., OU=FDB Team
+            Subject: C=US, ST=California, L=Cupertino, O=Apple Inc., OU=FDB Team
+            X509v3 extensions:
+                X509v3 Subject Alternative Name: 
+                    DNS:test.foundationdb.org
+                    DNS:prod.foundationdb.com
 
-This verification string would:
+A verification string of::
+
+  Check.Unexpired=0,I.C=US,C=US,S.O=Apple Inc.
+
+Would pass, and:
 
 * Skip the check on all peer certificates that the certificate is not yet expired
-* Require that the Issuer have a Country field of ``US``
-* Require that the Subject have a Country field of ``US``
-* Require that the Subject have a Organization field of ``XYZCorp, LLC``
+* Require that the Issuer has a Country field of ``US``
+* Require that the Subject has a Country field of ``US``
+* Require that the Subject has a Organization field of ``Apple Inc.``
+
+A verification string of::
+
+  S.OU>=FDB,S.OU<=Team,S.subjectAltName=DNS:test.foundationdb.org
+
+Would pass, and:
+
+* Require that the Subject has an Organization field that starts with ``FDB``
+* Require that the Subject has an Organization field that ends with ``Team``
+* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS with a value of ``test.foundationdb.org``.
+
+A verification string of::
+
+  S.subjectAltName>=DNS:prod.,S.subjectAltName<=DNS:.org
+
+Would pass, and:
+
+* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that begins with the value ``prod.``.
+* Require that the Subject has a Subject Alternative Name extension, which has one or more members of type DNS that ends with the value ``.com``.
