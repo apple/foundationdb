@@ -41,10 +41,10 @@ struct DDMetricsWorkload : TestWorkload {
 		WorkerInterface masterWorker = wait(getMasterWorker(cx, self->dbInfo));
 
 		TraceEvent("GetHighPriorityReliocationsInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
-		Standalone<StringRef> md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/MovingData" ) ) ), 1.0 ) );
 		int relocations;
-		sscanf(extractAttribute(md.toString(), "HighPriorityRelocations").c_str(), "%d", &relocations);
+		sscanf(md.getValue("HighPriorityRelocations").c_str(), "%d", &relocations);
 		return relocations;
 	}
 

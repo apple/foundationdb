@@ -119,6 +119,7 @@ T simulate( const T& in ) {
 static void simInitTLS(Reference<TLSOptions> tlsOptions) {
 	tlsOptions->set_cert_data( certBytes );
 	tlsOptions->set_key_data( certBytes );
+	tlsOptions->set_verify_peers(std::vector<std::string>(1, "Check.Valid=0"));
 	tlsOptions->register_network();
 }
 
@@ -724,11 +725,9 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		int replication_factor = g_random->randomInt(storage_servers, generateFearless ? 4 : 5);
 		int anti_quorum = g_random->randomInt(0, replication_factor);
 		// Go through buildConfiguration, as it sets tLogPolicy/storagePolicy.
-		set_config(format("storage_replicas:=%d storage_quorum:=%d "
-		                  "log_replicas:=%d log_anti_quorum:=%1 "
+		set_config(format("storage_replicas:=%d log_replicas:=%d log_anti_quorum:=%d "
 		                  "replica_datacenters:=1 min_replica_datacenters:=1",
-		                  storage_servers, storage_servers,
-		                  replication_factor, anti_quorum));
+		                  storage_servers, replication_factor, anti_quorum));
 		break;
 	}
 	case 1: {
@@ -761,28 +760,32 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 
 	if(generateFearless || (datacenters == 2 && g_random->random01() < 0.5)) {
 		StatusObject primaryObj;
-		primaryObj["id"] = "0";
-		primaryObj["priority"] = 0;
+		StatusObject primaryDcObj;
+		primaryDcObj["id"] = "0";
+		primaryDcObj["priority"] = 2;
+		StatusArray primaryDcArr;
+		primaryDcArr.push_back(primaryDcObj);
 
 		StatusObject remoteObj;
-		remoteObj["id"] = "1";
-		remoteObj["priority"] = 1;
+		StatusObject remoteDcObj;
+		remoteDcObj["id"] = "1";
+		remoteDcObj["priority"] = 1;
+		StatusArray remoteDcArr;
+		remoteDcArr.push_back(remoteDcObj);
 
 		bool needsRemote = generateFearless;
 		if(generateFearless) {
 			StatusObject primarySatelliteObj;
 			primarySatelliteObj["id"] = "2";
 			primarySatelliteObj["priority"] = 1;
-			StatusArray primarySatellitesArr;
-			primarySatellitesArr.push_back(primarySatelliteObj);
-			primaryObj["satellites"] = primarySatellitesArr;
+			primarySatelliteObj["satellite"] = 1;
+			primaryDcArr.push_back(primarySatelliteObj);
 
 			StatusObject remoteSatelliteObj;
 			remoteSatelliteObj["id"] = "3";
 			remoteSatelliteObj["priority"] = 1;
-			StatusArray remoteSatellitesArr;
-			remoteSatellitesArr.push_back(remoteSatelliteObj);
-			remoteObj["satellites"] = remoteSatellitesArr;
+			remoteSatelliteObj["satellite"] = 1;
+			remoteDcArr.push_back(remoteSatelliteObj);
 
 			int satellite_replication_type = g_random->randomInt(0,5);
 			switch (satellite_replication_type) {
@@ -822,7 +825,15 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				primaryObj["satellite_logs"] = logs;
 				remoteObj["satellite_logs"] = logs;
 			}
-			
+
+			if (g_random->random01() < 0.5) {
+				TEST( true );  // Simulated cluster using one region
+				needsRemote = false;
+			} else {
+				TEST( true );  // Simulated cluster using two regions
+				db.usableRegions = 2;
+			}
+
 			int remote_replication_type = g_random->randomInt(0,5);
 			switch (remote_replication_type) {
 			case 0: {
@@ -831,8 +842,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				break;
 			}
 			case 1: {
-				needsRemote = false;
-				TEST( true );  // Simulated cluster using no remote redundancy mode
+				TEST( true );  // Simulated cluster using default remote redundancy mode
 				break;
 			}
 			case 2: {
@@ -854,8 +864,12 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				ASSERT(false);  // Programmer forgot to adjust cases.
 			}
 
+			if (g_random->random01() < 0.25) db.desiredLogRouterCount = g_random->randomInt(1,7);
 			if (g_random->random01() < 0.25) db.remoteDesiredTLogCount = g_random->randomInt(1,7);
 		}
+
+		primaryObj["datacenters"] = primaryDcArr;
+		remoteObj["datacenters"] = remoteDcArr;
 
 		StatusArray regionArr;
 		regionArr.push_back(primaryObj);
@@ -865,8 +879,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 
 		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
 	}
-	
-	if(generateFearless && minimumReplication > 1) { 
+
+	if(generateFearless && minimumReplication > 1) {
 		//low latency tests in fearless configurations need 4 machines per datacenter (3 for triple replication, 1 that is down during failures).
 		machine_count = 16;
 	} else if(generateFearless) {
@@ -919,28 +933,19 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 	g_simulator.storagePolicy = simconfig.db.storagePolicy;
 	g_simulator.tLogPolicy = simconfig.db.tLogPolicy;
 	g_simulator.tLogWriteAntiQuorum = simconfig.db.tLogWriteAntiQuorum;
-	g_simulator.hasRemoteReplication = simconfig.db.remoteTLogReplicationFactor > 0;
-	g_simulator.remoteTLogPolicy = simconfig.db.remoteTLogPolicy;
+	g_simulator.remoteTLogPolicy = simconfig.db.getRemoteTLogPolicy();
+	g_simulator.usableRegions = simconfig.db.usableRegions;
 
-	if(simconfig.db.regions.size() == 2) {
-		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
-		g_simulator.remoteDcId = simconfig.db.regions[1].dcId;
-		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
-		ASSERT((!simconfig.db.regions[0].satelliteTLogPolicy && !simconfig.db.regions[1].satelliteTLogPolicy) || simconfig.db.regions[0].satelliteTLogPolicy->info() == simconfig.db.regions[1].satelliteTLogPolicy->info());
-		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
-		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
-
-		for(auto s : simconfig.db.regions[0].satellites) {
-			g_simulator.primarySatelliteDcIds.push_back(s.dcId);
-		}
-		for(auto s : simconfig.db.regions[1].satellites) {
-			g_simulator.remoteSatelliteDcIds.push_back(s.dcId);
-		}
-	} else if(simconfig.db.regions.size() == 1) {
+	if(simconfig.db.regions.size() > 0) {
 		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
 		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
-		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
-		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
+		if(simconfig.db.regions[0].satelliteTLogUsableDcsFallback > 0) {
+			g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicyFallback;
+			g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorumFallback;
+		} else {
+			g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
+			g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
+		}
 
 		for(auto s : simconfig.db.regions[0].satellites) {
 			g_simulator.primarySatelliteDcIds.push_back(s.dcId);
@@ -949,9 +954,17 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		g_simulator.hasSatelliteReplication = false;
 		g_simulator.satelliteTLogWriteAntiQuorum = 0;
 	}
-		
+
+	if(simconfig.db.regions.size() == 2) {
+		g_simulator.remoteDcId = simconfig.db.regions[1].dcId;
+		ASSERT((!simconfig.db.regions[0].satelliteTLogPolicy && !simconfig.db.regions[1].satelliteTLogPolicy) || simconfig.db.regions[0].satelliteTLogPolicy->info() == simconfig.db.regions[1].satelliteTLogPolicy->info());
+
+		for(auto s : simconfig.db.regions[1].satellites) {
+			g_simulator.remoteSatelliteDcIds.push_back(s.dcId);
+		}
+	}
+
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
-	ASSERT(!g_simulator.hasRemoteReplication || g_simulator.remoteTLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
 	TraceEvent("SimulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
 

@@ -66,9 +66,9 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::ResolutionClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::TesterClass:
@@ -83,9 +83,9 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::ResolutionClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::TesterClass:
@@ -100,7 +100,7 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::TransactionClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::TesterClass:
@@ -115,9 +115,9 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::ResolutionClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::TransactionClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::TesterClass:
@@ -128,15 +128,17 @@ ProcessClass::Fitness ProcessClass::machineClassFitness( ClusterRole role ) cons
 	case ProcessClass::ClusterController:
 		switch( _class ) {
 		case ProcessClass::ClusterControllerClass:
-			return ProcessClass::BestFit;	
+			return ProcessClass::BestFit;
 		case ProcessClass::StatelessClass:
 			return ProcessClass::GoodFit;
 		case ProcessClass::MasterClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::ResolutionClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
 		case ProcessClass::ProxyClass:
-			return ProcessClass::BestOtherFit;
+			return ProcessClass::OkayFit;
+		case ProcessClass::LogRouterClass:
+			return ProcessClass::OkayFit;
 		case ProcessClass::UnsetClass:
 			return ProcessClass::UnsetFit;
 		case ProcessClass::TesterClass:

@@ -60,11 +60,10 @@ public:
 	int64_t MAX_QUEUE_COMMIT_BYTES;
 
 	// Versions
+	int VERSIONS_PER_SECOND;
 	int MAX_VERSIONS_IN_FLIGHT;
 	int MAX_READ_TRANSACTION_LIFE_VERSIONS;
 	int MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-
-	int VERSIONS_PER_SECOND;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 
 	// Data distribution queue
@@ -189,12 +188,13 @@ public:
 	double PROXY_SPIN_DELAY;
 
 	// Master Server
-	double MASTER_LOGGING_DELAY;
 	double COMMIT_SLEEP_TIME;
 	double MIN_BALANCE_TIME;
 	int64_t MIN_BALANCE_DIFFERENCE;
 	double SECONDS_BEFORE_NO_FAILURE_DELAY;
 	int64_t MAX_TXS_SEND_MEMORY;
+	int64_t MAX_RECOVERY_VERSIONS;
+	double MAX_RECOVERY_TIME;
 
 	// Resolver
 	int64_t SAMPLE_OFFSET_PER_KEY;
@@ -203,6 +203,7 @@ public:
 	int64_t RESOLVER_STATE_MEMORY_LIMIT;
 
 	//Cluster Controller
+	double CLUSTER_CONTROLLER_LOGGING_DELAY;
 	double MASTER_FAILURE_REACTION_TIME;
 	double MASTER_FAILURE_SLOPE_DURING_RECOVERY;
 	int WORKER_COORDINATION_PING_DELAY;
@@ -210,11 +211,15 @@ public:
 	double SHUTDOWN_TIMEOUT;
 	double MASTER_SPIN_DELAY;
 	double CC_CHANGE_DELAY;
+	double CC_CLASS_DELAY;
 	double WAIT_FOR_GOOD_RECRUITMENT_DELAY;
+	double WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY;
 	double ATTEMPT_RECRUITMENT_DELAY;
 	double WORKER_FAILURE_TIME;
-	double CHECK_BETTER_MASTER_INTERVAL;
+	double CHECK_OUTSTANDING_INTERVAL;
 	double INCOMPATIBLE_PEERS_LOGGING_INTERVAL;
+	double VERSION_LAG_METRIC_INTERVAL;
+	int64_t MAX_VERSION_DIFFERENCE;
 
 	// Knobs used to select the best policy (via monte carlo)
 	int POLICY_RATING_TESTS;	// number of tests per policy (in order to compare)
@@ -254,6 +259,7 @@ public:
 	int64_t TARGET_BYTES_PER_TLOG;
 	double SPRING_BYTES_TLOG;
 	int64_t TLOG_SPILL_THRESHOLD;
+	int64_t TLOG_HARD_LIMIT_BYTES;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

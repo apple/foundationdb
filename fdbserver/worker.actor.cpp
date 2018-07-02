@@ -811,11 +811,11 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				}
 			}
 			when( EventLogRequest req = waitNext(interf.eventLogRequest.getFuture()) ) {
-				Standalone<StringRef> e;
+				TraceEventFields e;
 				if( req.getLastError )
-					e = StringRef( latestEventCache.getLatestError() );
+					e = latestEventCache.getLatestError();
 				else
-					e = StringRef( latestEventCache.get( req.eventName.toString() ) );
+					e = latestEventCache.get( req.eventName.toString() );
 				req.reply.send(e);
 			}
 			when( TraceBatchDumpRequest req = waitNext(interf.traceBatchDumpRequest.getFuture()) ) {

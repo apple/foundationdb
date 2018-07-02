@@ -68,6 +68,10 @@ bool validationIsEnabled();
 
 extern Optional<uint64_t> parse_with_suffix(std::string toparse, std::string default_unit = "");
 extern std::string format(const char* form, ...);
+
+// On success, returns the number of characters written. On failure, returns a negative number.
+extern int vsformat(std::string &outputString, const char* form, va_list args);
+
 extern Standalone<StringRef> strinc(StringRef const& str);
 extern StringRef strinc(StringRef const& str, Arena& arena);
 extern Standalone<StringRef> addVersionStampAtEnd(StringRef const& str);

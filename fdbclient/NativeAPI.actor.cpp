@@ -40,6 +40,7 @@
 #include "flow/Knobs.h"
 #include "fdbclient/Knobs.h"
 #include "fdbrpc/Net2FileSystem.h"
+#include "fdbrpc/simulator.h"
 
 #include <iterator>
 
@@ -3014,7 +3015,7 @@ void Transaction::checkDeferredError() { cx->checkDeferredError(); }
 
 Reference<TransactionLogInfo> Transaction::createTrLogInfoProbabilistically(const Database &cx) {
 	double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
-	if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability)
+	if (((networkOptions.logClientInfo.present() && networkOptions.logClientInfo.get()) || BUGGIFY) && g_random->random01() < clientSamplingProbability && (!g_network->isSimulated() || !g_simulator.speedUpSimulation))
 		return Reference<TransactionLogInfo>(new TransactionLogInfo());
 	else
 		return Reference<TransactionLogInfo>();

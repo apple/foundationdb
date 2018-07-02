@@ -61,10 +61,10 @@ extern "C" {
 #endif
 
     /* Pointers to these opaque types represent objects in the FDB API */
-    typedef struct future FDBFuture;
-    typedef struct cluster FDBCluster;
-    typedef struct database FDBDatabase;
-    typedef struct transaction FDBTransaction;
+    typedef struct FDB_future FDBFuture;
+    typedef struct FDB_cluster FDBCluster;
+    typedef struct FDB_database FDBDatabase;
+    typedef struct FDB_transaction FDBTransaction;
 
     typedef int fdb_error_t;
     typedef int fdb_bool_t;

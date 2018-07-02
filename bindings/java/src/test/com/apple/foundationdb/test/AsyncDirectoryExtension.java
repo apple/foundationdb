@@ -170,7 +170,10 @@ class AsyncDirectoryExtension {
 			.thenAccept(children -> inst.push(Tuple.fromItems(children).pack()));
 		}
 		else if(op == DirectoryOperation.DIRECTORY_EXISTS) {
-			return inst.popParam()
+			// In Java, DirectoryLayer.exists can return true without doing any reads.
+			// Other bindings will always do a read, so we get a read version now to be compatible with that behavior.
+			return inst.readTcx.readAsync(tr -> tr.getReadVersion())
+			.thenComposeAsync(v -> inst.popParam())
 			.thenComposeAsync(count -> DirectoryUtil.popPaths(inst, StackUtils.getInt(count)))
 			.thenComposeAsync(path -> {
 				if(path.size() == 0)

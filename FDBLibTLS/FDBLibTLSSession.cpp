@@ -24,6 +24,7 @@
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <openssl/x509_vfy.h>
 
 #include <exception>
@@ -100,43 +101,127 @@ FDBLibTLSSession::~FDBLibTLSSession() {
 	tls_free(tls_sctx);
 }
 
-bool match_criteria(X509_NAME *name, int nid, const char *value, size_t len) {
-	unsigned char *name_entry_utf8 = NULL, *criteria_utf8 = NULL;
-	int name_entry_utf8_len, criteria_utf8_len;
-	ASN1_STRING *criteria = NULL;
-	X509_NAME_ENTRY *name_entry;
-	BIO *bio;
+bool match_criteria_entry(const std::string& criteria, ASN1_STRING* entry, MatchType mt) {
 	bool rc = false;
-	int idx;
+	ASN1_STRING* asn_criteria = NULL;
+	unsigned char* criteria_utf8 = NULL;
+	int criteria_utf8_len = 0;
+	unsigned char* entry_utf8 = NULL;
+	int entry_utf8_len = 0;
 
-	if ((criteria = ASN1_IA5STRING_new()) == NULL)
+	if ((asn_criteria = ASN1_IA5STRING_new()) == NULL)
 		goto err;
-	if (ASN1_STRING_set(criteria, value, len) != 1)
+	if (ASN1_STRING_set(asn_criteria, criteria.c_str(), criteria.size()) != 1)
 		goto err;
+	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, asn_criteria)) < 1)
+		goto err;
+	if ((entry_utf8_len = ASN1_STRING_to_UTF8(&entry_utf8, entry)) < 1)
+		goto err;
+	if (mt == MatchType::EXACT) {
+		if (criteria_utf8_len == entry_utf8_len &&
+		    memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
+	} else if (mt == MatchType::PREFIX) {
+		if (criteria_utf8_len <= entry_utf8_len &&
+		    memcmp(criteria_utf8, entry_utf8, criteria_utf8_len) == 0)
+			rc = true;
+	} else if (mt == MatchType::SUFFIX) {
+		if (criteria_utf8_len <= entry_utf8_len &&
+		    memcmp(criteria_utf8, entry_utf8 + (entry_utf8_len - criteria_utf8_len), criteria_utf8_len) == 0)
+			rc = true;
+	}
+
+	err:
+	ASN1_STRING_free(asn_criteria);
+	free(criteria_utf8);
+	free(entry_utf8);
+	return rc;
+}
+
+bool match_name_criteria(X509_NAME *name, NID nid, const std::string& criteria, MatchType mt) {
+	X509_NAME_ENTRY *name_entry;
+	int idx;
 
 	// If name does not exist, or has multiple of this RDN, refuse to proceed.
 	if ((idx = X509_NAME_get_index_by_NID(name, nid, -1)) < 0)
-		goto err;
+		return false;
 	if (X509_NAME_get_index_by_NID(name, nid, idx) != -1)
-		goto err;
+		return false;
 	if ((name_entry = X509_NAME_get_entry(name, idx)) == NULL)
-		goto err;
+		return false;
 
-	// Convert both to UTF8 and compare.
-	if ((criteria_utf8_len = ASN1_STRING_to_UTF8(&criteria_utf8, criteria)) < 1)
-		goto err;
-	if ((name_entry_utf8_len = ASN1_STRING_to_UTF8(&name_entry_utf8, name_entry->value)) < 1)
-		goto err;
-	if (criteria_utf8_len == name_entry_utf8_len &&
-	    memcmp(criteria_utf8, name_entry_utf8, criteria_utf8_len) == 0)
-		rc = true;
+	return match_criteria_entry(criteria, name_entry->value, mt);
+}
 
- err:
-	ASN1_STRING_free(criteria);
-	free(criteria_utf8);
-	free(name_entry_utf8);
-
+bool match_extension_criteria(X509 *cert, NID nid, const std::string& value, MatchType mt) {
+	if (nid != NID_subject_alt_name && nid != NID_issuer_alt_name) {
+		// I have no idea how other extensions work.
+		return false;
+	}
+	auto pos = value.find(':');
+	if (pos == value.npos) {
+		return false;
+	}
+	std::string value_gen = value.substr(0, pos);
+	std::string value_val = value.substr(pos+1, value.npos);
+	STACK_OF(GENERAL_NAME)* sans = reinterpret_cast<STACK_OF(GENERAL_NAME)*>(X509_get_ext_d2i(cert, nid, NULL, NULL));
+	if (sans == NULL) {
+		return false;
+	}
+	int num_sans = sk_GENERAL_NAME_num( sans );
+	bool match_found = false;
+	bool rc = false;
+	for( int i = 0; i < num_sans && !rc; ++i ) {
+		GENERAL_NAME* altname = sk_GENERAL_NAME_value( sans, i );
+		std::string matchable;
+		switch (altname->type) {
+		case GEN_OTHERNAME:
+			break;
+		case GEN_EMAIL:
+			if (value_gen == "EMAIL" &&
+			    match_criteria_entry( value_val, altname->d.rfc822Name, mt)) {
+				rc = true;
+				break;
+			}
+		case GEN_DNS:
+			if (value_gen == "DNS" &&
+			    match_criteria_entry( value_val, altname->d.dNSName, mt )) {
+				rc = true;
+				break;
+			}
+		case GEN_X400:
+		case GEN_DIRNAME:
+		case GEN_EDIPARTY:
+			break;
+		case GEN_URI:
+			if (value_gen == "URI" &&
+			    match_criteria_entry( value_val, altname->d.uniformResourceIdentifier, mt )) {
+				rc = true;
+				break;
+			}
+		case GEN_IPADD:
+			if (value_gen == "IP" &&
+			    match_criteria_entry( value_val, altname->d.iPAddress, mt )) {
+				rc = true;
+				break;
+			}
+		case GEN_RID:
+			break;
+		}
+	}
+	sk_GENERAL_NAME_pop_free(sans, GENERAL_NAME_free);
 	return rc;
+}
+
+bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& criteria, MatchType mt, X509Location loc) {
+	switch(loc) {
+	case X509Location::NAME: {
+		return match_name_criteria(subject, nid, criteria, mt);
+	}
+	case X509Location::EXTENSION: {
+		return match_extension_criteria(cert, nid, criteria, mt);
+	}
+	}
 }
 
 std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
@@ -144,6 +229,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 	X509_NAME *subject, *issuer;
 	BIO *bio = NULL;
 	bool rc = false;
+	X509* cert = NULL;
 	// if returning false, give a reason string
 	std::string reason = "";
 
@@ -172,36 +258,38 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 	}
 
 	// Check subject criteria.
-	if ((subject = X509_get_subject_name(sk_X509_value(store_ctx->chain, 0))) == NULL) {
+	cert = sk_X509_value(store_ctx->chain, 0);
+	if ((subject = X509_get_subject_name(cert)) == NULL) {
 		reason = "FDBLibTLSCertSubjectError";
 		goto err;
 	}
 	for (auto &pair: verify->subject_criteria) {
-		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
+		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "FDBLibTLSCertSubjectMatchFailure";
 			goto err;
 		}
 	}
 
 	// Check issuer criteria.
-	if ((issuer = X509_get_issuer_name(sk_X509_value(store_ctx->chain, 0))) == NULL) {
+	if ((issuer = X509_get_issuer_name(cert)) == NULL) {
 		reason = "FDBLibTLSCertIssuerError";
 		goto err;
 	}
 	for (auto &pair: verify->issuer_criteria) {
-		if (!match_criteria(issuer, pair.first, pair.second.c_str(), pair.second.size())) {
+		if (!match_criteria(cert, issuer, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "FDBLibTLSCertIssuerMatchFailure";
 			goto err;
 		}
 	}
 
 	// Check root criteria - this is the subject of the final certificate in the stack.
-	if ((subject = X509_get_subject_name(sk_X509_value(store_ctx->chain, sk_X509_num(store_ctx->chain) - 1))) == NULL) {
+	cert = sk_X509_value(store_ctx->chain, sk_X509_num(store_ctx->chain) - 1);
+	if ((subject = X509_get_subject_name(cert)) == NULL) {
 		reason = "FDBLibTLSRootSubjectError";
 		goto err;
 	}
 	for (auto &pair: verify->root_criteria) {
-		if (!match_criteria(subject, pair.first, pair.second.c_str(), pair.second.size())) {
+		if (!match_criteria(cert, subject, pair.first, pair.second.criteria, pair.second.match_type, pair.second.location)) {
 			reason = "FDBLibTLSRootSubjectMatchFailure";
 			goto err;
 		}

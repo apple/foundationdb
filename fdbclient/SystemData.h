@@ -86,6 +86,8 @@ const Value datacenterReplicasValue( int const& );
 Optional<Value> decodeDatacenterReplicasKey( KeyRef const& );
 int decodeDatacenterReplicasValue( ValueRef const& );
 
+extern const KeyRef primaryDatacenterKey;
+
 //    "\xff/serverList/[[serverID]]" := "[[StorageServerInterface]]"
 // Storage servers are listed here when they are recruited - always before assigning them keys
 // Storage servers removed from here are never replaced.  The same fdbserver, if re-recruited, will always

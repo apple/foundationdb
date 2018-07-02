@@ -41,20 +41,20 @@ struct CoreTLogSet {
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	IRepPolicyRef tLogPolicy;
 	bool isLocal;
-	int32_t hasBestPolicy;
 	int8_t locality;
 	Version startVersion;
+	std::vector<std::vector<int>> satelliteTagLocations;
 
-	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
+	CoreTLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityUpgraded), startVersion(invalidVersion) {}
 
 	bool operator == (CoreTLogSet const& rhs) const { 
-		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal && hasBestPolicy == rhs.hasBestPolicy &&
+		return tLogs == rhs.tLogs && tLogWriteAntiQuorum == rhs.tLogWriteAntiQuorum && tLogReplicationFactor == rhs.tLogReplicationFactor && isLocal == rhs.isLocal && satelliteTagLocations == rhs.satelliteTagLocations &&
 			locality == rhs.locality && startVersion == rhs.startVersion && ((!tLogPolicy && !rhs.tLogPolicy) || (tLogPolicy && rhs.tLogPolicy && (tLogPolicy->info() == rhs.tLogPolicy->info()))); 
 	}
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		ar & tLogs & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & hasBestPolicy & locality & startVersion;
+		ar & tLogs & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & locality & startVersion & satelliteTagLocations;
 	}
 };
 
@@ -110,7 +110,7 @@ struct DBCoreState {
 	template <class Archive>
 	void serialize(Archive& ar) {
 		//FIXME: remove when we no longer need to test upgrades from 4.X releases
-		if(ar.protocolVersion() < 0x0FDB00A460010001LL) {
+		if(g_network->isSimulated() && ar.protocolVersion() < 0x0FDB00A460010001LL) {
 			TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0).detail("RandomUnseed", 0);
 			flushAndExit(0);
 		}

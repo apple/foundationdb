@@ -888,6 +888,12 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 
 				if (statusObjConfig.get("logs", intVal))
 					outputString += format("\n  Desired Logs           - %d", intVal);
+
+				if (statusObjConfig.get("remote_logs", intVal))
+					outputString += format("\n  Desired Remote Logs    - %d", intVal);
+
+				if (statusObjConfig.get("log_routers", intVal))
+					outputString += format("\n  Desired Log Routers    - %d", intVal);
 			}
 			catch (std::runtime_error& e) {
 				outputString = outputStringCache;
@@ -2583,7 +2589,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					if (tokens.size() == 1) {
 						Standalone<RangeResultRef> kvs = wait( makeInterruptable( tr->getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces"), LiteralStringRef("\xff\xff\xff")), 1) ) );
 						for( auto it : kvs ) {
-							address_interface[it.key] = it.value;
+							auto ip_port = it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls")) : it.key;
+							address_interface[ip_port] = it.value;
 						}
 					}
 					if (tokens.size() == 1 || tokencmp(tokens[1], "list")) {
@@ -2719,7 +2726,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						                             LiteralStringRef("\xff\xff\xff")),
 						                 1)));
 						for (const auto& pair : kvs) {
-							printf("%s\n", printable(pair.key).c_str());
+							auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+							printf("%s\n", printable(ip_port).c_str());
 						}
 						continue;
 					}
@@ -2751,7 +2759,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 							state std::vector<Key> all_profiler_addresses;
 							state std::vector<Future<ErrorOr<Void>>> all_profiler_responses;
 							for (const auto& pair : kvs) {
-								interfaces.emplace(pair.key, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
+								auto ip_port = pair.key.endsWith(LiteralStringRef(":tls")) ? pair.key.removeSuffix(LiteralStringRef(":tls")) : pair.key;
+								interfaces.emplace(ip_port, BinaryReader::fromStringRef<ClientWorkerInterface>(pair.value, IncludeVersion()));
 							}
 							if (tokens.size() == 6 && tokencmp(tokens[5], "all")) {
 								for (const auto& pair : interfaces) {

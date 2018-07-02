@@ -94,7 +94,7 @@ TLSConnection::TLSConnection( Reference<IConnection> const& conn, Reference<ITLS
 		// If session is NULL, we're trusting policy->create_session
 		// to have used its provided logging function to have logged
 		// the error
-		throw internal_error();
+		throw tls_error();
 	}
 	handshook = handshake(this);
 }
@@ -321,7 +321,7 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 		if (platform::getEnvironmentVar("FDB_TLS_VERIFY_PEERS", verifyPeerString))
 			set_verify_peers({ verifyPeerString });
 		else
-			set_verify_peers({ std::string("Check.Valid=0")});
+			set_verify_peers({ std::string("Check.Valid=1")});
 	}
 	if (!ca_set) {
 		std::string caFile;
