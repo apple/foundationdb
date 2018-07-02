@@ -1814,7 +1814,7 @@ std::string parentDirectory( std::string const& filename ) {
 	}
 
 	while (abs.size() && (abs.back() == '/' || abs.back() == CANONICAL_PATH_SEPARATOR)) {
-		abs = abs.substr(0, abs.size()-1);
+		abs.resize(abs.size() - 1);
 	}
 
 	return abs.substr(0, sep+1);

@@ -247,7 +247,7 @@ std::string parentDirectory(std::string filename) {
 	}
 
 	while(filename.size() && (filename.back() == '/' || filename.back() == CANONICAL_PATH_SEPARATOR)) {
-		filename = filename.substr(0, filename.size()-1);
+		filename.resize(filename.size() - 1);
 	}
 
 	return filename.substr(0, sep+1);
