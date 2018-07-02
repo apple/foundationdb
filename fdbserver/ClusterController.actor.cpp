@@ -90,11 +90,12 @@ public:
 		Promise<Void> forceMasterFailure;
 		int64_t masterRegistrationCount;
 		bool recoveryStalled;
+		bool forceRecovery;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
 
-		DBInfo() : masterRegistrationCount(0), recoveryStalled(false),
+		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
 			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo( LiteralStringRef("DB") ) ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskDefaultEndpoint, true ) )  // SOMEDAY: Locality!
@@ -1051,6 +1052,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			}
 			RecruitMasterRequest rmq;
 			rmq.lifetime = db->serverInfo->get().masterLifetime;
+			rmq.forceRecovery = db->forceRecovery;
 
 			cluster->masterProcessId = masterWorker.worker.first.locality.processId();
 			ErrorOr<MasterInterface> newMaster = wait( masterWorker.worker.first.master.tryGetReply( rmq ) );
@@ -1066,6 +1068,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 
 				db->masterRegistrationCount = 0;
 				db->recoveryStalled = false;
+				db->forceRecovery = false;
 				db->forceMasterFailure = Promise<Void>();
 
 				auto dbInfo = ServerDBInfo( LiteralStringRef("DB") );
@@ -2178,6 +2181,15 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 				}
 			}
 			req.reply.send(workers);
+		}
+		when( ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() ) ) {
+			if(self.db.masterRegistrationCount == 0) {
+				if (!self.db.forceMasterFailure.isSet()) {
+					self.db.forceRecovery = true;
+					self.db.forceMasterFailure.send( Void() );
+				}
+			}
+			req.reply.send(Void());
 		}
 		when( Void _ = wait( coordinationPingDelay ) ) {
 			CoordinationPingMessage message(self.id, step++);

@@ -1125,13 +1125,15 @@ ACTOR static Future<Void> readRequestServer(
 						if(locality != rep.tag.locality) {
 							uint16_t tagId = 0;
 							std::vector<uint16_t> usedTags;
-							for( auto& kv : commitData->txnStateStore->readRange(serverTagKeys).get() ) {
+							auto tagKeys = commitData->txnStateStore->readRange(serverTagKeys).get();
+							for( auto& kv : tagKeys ) {
 								Tag t = decodeServerTagValue( kv.value );
 								if(t.locality == locality) {
 									usedTags.push_back(t.id);
 								}
 							}
-							for( auto& kv : commitData->txnStateStore->readRange(serverTagHistoryKeys).get() ) {
+							auto historyKeys = commitData->txnStateStore->readRange(serverTagHistoryKeys).get();
+							for( auto& kv : historyKeys ) {
 								Tag t = decodeServerTagValue( kv.value );
 								if(t.locality == locality) {
 									usedTags.push_back(t.id);
@@ -1152,7 +1154,8 @@ ACTOR static Future<Void> readRequestServer(
 					} else {
 						rep.newLocality = true;
 						int8_t maxTagLocality = 0;
-						for( auto& kv : commitData->txnStateStore->readRange(tagLocalityListKeys).get() ) {
+						auto localityKeys = commitData->txnStateStore->readRange(tagLocalityListKeys).get();
+						for( auto& kv : localityKeys ) {
 							maxTagLocality = std::max(maxTagLocality, decodeTagLocalityListValue( kv.value ));
 						}
 						rep.newTag = Tag(maxTagLocality+1,0);

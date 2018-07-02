@@ -111,12 +111,13 @@ struct InitializeLogRouterRequest {
 struct RecruitMasterRequest {
 	Arena arena;
 	LifetimeToken lifetime;
+	bool forceRecovery;
 	ReplyPromise< struct MasterInterface> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & lifetime & reply & arena;
+		ar & lifetime & forceRecovery & reply & arena;
 	}
 };
 
@@ -306,7 +307,7 @@ Future<Void> storageServer(
 				Reference<AsyncVar<ServerDBInfo>> const& db,
 				std::string const& folder,
 				Promise<Void> const& recovered);  // changes pssi->id() to be the recovered ID
-Future<Void> masterServer( MasterInterface const& mi, Reference<AsyncVar<ServerDBInfo>> const& db, class ServerCoordinators const&, LifetimeToken const& lifetime );
+Future<Void> masterServer( MasterInterface const& mi, Reference<AsyncVar<ServerDBInfo>> const& db, class ServerCoordinators const&, LifetimeToken const& lifetime, bool const& forceRecovery );
 Future<Void> masterProxyServer(MasterProxyInterface const& proxy, InitializeMasterProxyRequest const& req, Reference<AsyncVar<ServerDBInfo>> const& db);
 Future<Void> tLog( class IKeyValueStore* const& persistentData, class IDiskQueue* const& persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& db, LocalityData const& locality, PromiseStream<InitializeTLogRequest> const& tlogRequests, UID const& tlogId, bool const& restoreFromDisk, Promise<Void> const& oldLog, Promise<Void> const& recovered );  // changes tli->id() to be the recovered ID
 Future<Void> debugQueryServer( DebugQueryRequest const& req );

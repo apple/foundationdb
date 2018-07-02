@@ -2633,6 +2633,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "force_recovery_with_data_loss")) {
+					if(tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					}
+					Void _ = wait( makeInterruptable( forceRecovery( ccf ) ) );
+					continue;
+				}
+
 				if (tokencmp(tokens[0], "profile")) {
 					if (tokens.size() == 1) {
 						printf("ERROR: Usage: profile <client|list|flow>\n");
