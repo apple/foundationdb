@@ -1174,6 +1174,86 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			throw internal_error();
 		}
 
+		if(forceRecovery) {
+			DBCoreState modifiedState = prevState;
+
+			int8_t primaryLocality = -1;
+			for(auto& coreSet : modifiedState.tLogs) {
+				if(coreSet.isLocal && coreSet.locality >= 0) {
+					primaryLocality = coreSet.locality;
+					break;
+				}
+			}
+
+			if(primaryLocality >= 0) {
+				bool foundRemote = false;
+				int8_t remoteLocality = -1;
+				bool remoteIsLocal = false;
+				auto copiedLogs = modifiedState.tLogs;
+				for(auto& coreSet : copiedLogs) {
+					if(coreSet.locality != primaryLocality && coreSet.locality >= 0) {
+						foundRemote = true;
+						remoteLocality = coreSet.locality;
+						remoteIsLocal = coreSet.isLocal;
+						modifiedState.tLogs.clear();
+						modifiedState.tLogs.push_back(coreSet);
+						modifiedState.tLogs[0].isLocal = true;
+						modifiedState.logRouterTags = 0;
+						break;
+					}
+				}
+
+				ASSERT( !remoteIsLocal );
+
+				while( !foundRemote && modifiedState.oldTLogData.size() ) {
+					for(auto& coreSet : modifiedState.oldTLogData[0].tLogs) {
+						if(coreSet.locality != primaryLocality && coreSet.locality >= tagLocalitySpecial) {
+							foundRemote = true;
+							remoteLocality = coreSet.locality;
+							remoteIsLocal = coreSet.isLocal;
+							if(coreSet.isLocal) {
+								modifiedState.tLogs = modifiedState.oldTLogData[0].tLogs;
+								modifiedState.logRouterTags = modifiedState.oldTLogData[0].logRouterTags;
+							} else {
+								modifiedState.tLogs.clear();
+								modifiedState.tLogs.push_back(coreSet);
+								modifiedState.tLogs[0].isLocal = true;
+								modifiedState.logRouterTags = 0;
+							}
+							break;
+						}
+					}
+					modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin());
+				}
+
+				if(foundRemote) {
+					for(int i = 0; i < modifiedState.oldTLogData.size() && !remoteIsLocal; i++) {
+						bool found = false;
+						auto copiedLogs = modifiedState.oldTLogData[i].tLogs;
+						for(auto& coreSet : copiedLogs) {
+							if(coreSet.locality == remoteLocality || coreSet.locality == tagLocalitySpecial) {
+								found = true;
+								remoteIsLocal = coreSet.isLocal;
+								if(!coreSet.isLocal) {
+									modifiedState.oldTLogData[i].tLogs.clear();
+									modifiedState.oldTLogData[i].tLogs.push_back(coreSet);
+									modifiedState.oldTLogData[i].tLogs[0].isLocal = true;
+									modifiedState.oldTLogData[i].logRouterTags = 0;
+									modifiedState.oldTLogData[i].epochEnd = ( i == 0 ? modifiedState.tLogs[0].startVersion : modifiedState.oldTLogData[i-1].tLogs[0].startVersion );
+								}
+								break;
+							}
+						}
+						if(!found) {
+							modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin()+i);
+							i--;
+						}
+					}
+					prevState = modifiedState;
+				}
+			}
+		}
+
 		TEST( true );	// Master recovery from pre-existing database
 
 		// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their TLogInterfaces
@@ -1281,7 +1361,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			Version maxEnd = 0;
 			std::vector<Future<Void>> changes;
 			for(int log = 0; log < logServers.size(); log++) {
-				if(!logServers[log]->isLocal && !forceRecovery) {
+				if(!logServers[log]->isLocal) {
 					continue;
 				}
 				auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, lockResults[log], logFailed[log], lastEnd);
