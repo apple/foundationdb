@@ -62,7 +62,7 @@ using std::max;
 using std::make_pair;
 
 NetworkOptions networkOptions;
-Reference<TLSOptions> tlsOptions = Reference<TLSOptions>( new TLSOptions );
+Reference<TLSOptions> tlsOptions;
 
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
@@ -870,6 +870,8 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	g_network = newNet2(NetworkAddress(), false, useMetrics || networkOptions.traceDirectory.present());
 	FlowTransport::createInstance(transportId);
 	Net2FileSystem::newFileSystem();
+
+	tlsOptions = Reference<TLSOptions>( new TLSOptions );
 
 #ifndef TLS_DISABLED
 	tlsOptions->register_network();
