@@ -437,7 +437,6 @@ public:
 		// and constructing PathEntry objects which would unnecessarily churn through memory in Arena for storing
 		// coalesced prefixes.
 		int pathLen;
-		Arena arena;
 
 		bool valid() const {
 			return pathLen != 0 && pathBack().valid();

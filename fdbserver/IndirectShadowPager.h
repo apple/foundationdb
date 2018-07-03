@@ -39,7 +39,8 @@ class IndirectShadowPager;
 class IndirectShadowPage : public IPage, ReferenceCounted<IndirectShadowPage> {
 public:
 	IndirectShadowPage();
-	IndirectShadowPage(uint8_t *data);
+	IndirectShadowPage(uint8_t *data, Reference<IAsyncFile> file, PhysicalPageID pageID)
+	 : file(file), physicalPageID(pageID), fastAllocated(false), data(data) {}
 	virtual ~IndirectShadowPage();
 
 	virtual void addref() const {
@@ -59,8 +60,10 @@ public:
 	static const int PAGE_OVERHEAD_BYTES;
 
 private:
+	Reference<IAsyncFile> file;
+	PhysicalPageID physicalPageID;
+	bool fastAllocated;
 	uint8_t *data;
-	bool allocated;
 };
 
 class IndirectShadowPagerSnapshot : public IPagerSnapshot, ReferenceCounted<IndirectShadowPagerSnapshot> {
@@ -131,6 +134,8 @@ public:
 class IndirectShadowPager : public IPager {
 public:
 	IndirectShadowPager(std::string basename);
+	virtual ~IndirectShadowPager() {
+	}
 
 	virtual Reference<IPage> newPageBuffer();
 	virtual int getUsablePageSize();
@@ -172,7 +177,16 @@ public:
 	Future<Void> vacuuming;
 	Version oldestVersion;
 
-	std::map<PhysicalPageID, std::pair<int, Promise<Void>>> readCounts;
+	struct BusyPage {
+		BusyPage() : readerCount(0) {}
+		int readerCount;
+		Promise<Void> onUnused;
+		Future<Reference<IPage>> read;
+	};
+
+	typedef std::map<PhysicalPageID, BusyPage> BusyPageMapT;
+	BusyPageMapT busyPages;
+
 	SignalableActorCollection operations;
 	SignalableActorCollection writeActors;
 	Future<Void> committing;

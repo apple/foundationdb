@@ -3291,6 +3291,9 @@ ACTOR Future<Void> storageServer( IKeyValueStore* persistentData, StorageServerI
 	self.folder = folder;
 
 	try {
+		Void _ = wait( self.storage.init() );
+		Void _ = wait( self.storage.commit() );
+
 		if (seedTag == invalidTag) {
 			std::pair<Version, Tag> verAndTag = wait( addStorageServer(self.cx, ssi) ); // Might throw recruitment_failed in case of simultaneous master failure
 			self.tag = verAndTag.second;

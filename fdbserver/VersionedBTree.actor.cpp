@@ -1469,6 +1469,8 @@ Future<T> catchError(Promise<Void> error, Future<T> f) {
 class KeyValueStoreRedwoodUnversioned : public IKeyValueStore {
 public:
 	KeyValueStoreRedwoodUnversioned(std::string filePrefix, UID logID) : m_filePrefix(filePrefix) {
+		// TODO: These implementation-specific things should really be passed in as arguments, and this class should 
+		// be an IKeyValueStore implementation that wraps IVersionedStore.
 		m_pager = new IndirectShadowPager(filePrefix);
 		m_tree = new VersionedBTree(m_pager, filePrefix, m_pager->getUsablePageSize());
 		m_init = catchError(m_error, init_impl(this));
@@ -1486,6 +1488,7 @@ public:
 	}
 
 	ACTOR void shutdown(KeyValueStoreRedwoodUnversioned *self, bool dispose) {
+		TraceEvent(SevInfo, "RedwoodShutdown").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
 		self->m_init.cancel();
 		delete self->m_tree;
 		Future<Void> closedFuture = self->m_pager->onClosed();
@@ -1495,6 +1498,7 @@ public:
 			self->m_pager->close();
 		Void _ = wait(closedFuture);
 		self->m_closed.send(Void());
+		TraceEvent(SevInfo, "RedwoodShutdownComplete").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
 		delete self;
 	}
 
