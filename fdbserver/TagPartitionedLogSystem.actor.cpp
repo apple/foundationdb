@@ -1201,7 +1201,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSet->tLogWriteAntiQuorum = coreSet.tLogWriteAntiQuorum;
 			logSet->tLogPolicy = coreSet.tLogPolicy;
 			logSet->tLogLocalities = coreSet.tLogLocalities;
-			logSet->isLocal = coreSet.isLocal;
+			logSet->isLocal = coreSet.isLocal || forceRecovery;
 			logSet->locality = coreSet.locality;
 			logSet->startVersion = coreSet.startVersion;
 			logSet->satelliteTagLocations = coreSet.satelliteTagLocations;
@@ -1281,7 +1281,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			Version maxEnd = 0;
 			std::vector<Future<Void>> changes;
 			for(int log = 0; log < logServers.size(); log++) {
-				if(!logServers[log]->isLocal && !forceRecovery) {
+				if(!logServers[log]->isLocal) {
 					continue;
 				}
 				auto versions = TagPartitionedLogSystem::getDurableVersion(dbgid, lockResults[log], logFailed[log], lastEnd);
