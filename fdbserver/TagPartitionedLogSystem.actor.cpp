@@ -1174,6 +1174,33 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			throw internal_error();
 		}
 
+		if(forceRecovery) {
+			DBCoreState modifiedState = prevState;
+			bool foundRemote = false;
+			for(auto& coreSet : modifiedState.tLogs) {
+				if(!coreSet.isLocal) {
+					foundRemote = true;
+					break;
+				}
+			}
+			while( !foundRemote && modifiedState.oldTLogData.size() ) {
+				for(auto& coreSet : modifiedState.oldTLogData[0].tLogs) {
+					if(!coreSet.isLocal) {
+						foundRemote = true;
+						break;
+					}
+				}
+				if(foundRemote) {
+					modifiedState.tLogs = modifiedState.oldTLogData[0].tLogs;
+					modifiedState.logRouterTags = modifiedState.oldTLogData[0].logRouterTags;
+				}
+				modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin());
+			}
+			if(foundRemote) {
+				prevState = modifiedState;
+			}
+		}
+
 		TEST( true );	// Master recovery from pre-existing database
 
 		// trackRejoins listens for rejoin requests from the tLogs that we are recovering from, to learn their TLogInterfaces
