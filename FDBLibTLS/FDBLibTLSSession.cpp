@@ -222,6 +222,8 @@ bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& 
 		return match_extension_criteria(cert, nid, criteria, mt);
 	}
 	}
+	// Should never be reachable.
+	return false;
 }
 
 std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
