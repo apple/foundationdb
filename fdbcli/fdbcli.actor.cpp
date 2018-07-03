@@ -515,6 +515,7 @@ void initHelp() {
 
 	hiddenCommands.insert("expensive_data_check");
 	hiddenCommands.insert("datadistribution");
+	hiddenCommands.insert("force_recovery_with_data_loss");
 }
 
 void printVersion() {
