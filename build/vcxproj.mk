@@ -40,7 +40,9 @@ GENNAME()_CFLAGS := -I GENDIR -I ${OBJDIR}/GENDIR ${GENNAME()_CFLAGS}
 ifeq ($(GENNAME()_STATIC_LIBS),)
   GENNAME()_STATIC_LIBS_REAL :=
 else
-  GENNAME()_STATIC_LIBS_REAL := -Wl,-Bstatic $(GENNAME()_STATIC_LIBS) -Wl,-Bdynamic
+# MacOS doesn't recognize -Wl,-Bstatic, but is happy with -Bstatic
+# gcc will handle both, so we prefer the non -Wl version
+  GENNAME()_STATIC_LIBS_REAL := -Bstatic $(GENNAME()_STATIC_LIBS) -Bdynamic
 endif
 
 # If we have any -L directives in our LDFLAGS, we need to add those
@@ -126,6 +128,6 @@ GENNAME()_clean:
 	@rm -rf $(DEPSDIR)/GENDIR
 	@rm -rf $(OBJDIR)/GENDIR
 
-GENTARGET: $(GENNAME()_OBJECTS) $(GENNAME()_LIBS) $(GENNAME()_STATIC_LIBS) $(ALL_MAKEFILES) build/link-wrapper.sh build/link-validate.sh
+GENTARGET: $(GENNAME()_OBJECTS) $(GENNAME()_LIBS) $(ALL_MAKEFILES) build/link-wrapper.sh build/link-validate.sh
 	@mkdir -p GENOUTDIR
 	@./build/link-wrapper.sh GENCONFIGTYPE GENNAME $@ $(TARGET_LIBC_VERSION)
