@@ -1498,6 +1498,9 @@ public:
 			self->m_pager->close();
 		Void _ = wait(closedFuture);
 		self->m_closed.send(Void());
+		if(self->m_error.canBeSet()) {
+			self->m_error.sendError(operation_cancelled());
+		}
 		TraceEvent(SevInfo, "RedwoodShutdownComplete").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
 		delete self;
 	}

@@ -432,6 +432,7 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 	return Void();
 }
 
+/*
 TEST_CASE("fdbserver/memorypager/simple") {
 	state IPager *pager = new MemoryPager();
 
@@ -443,5 +444,6 @@ TEST_CASE("fdbserver/memorypager/simple") {
 	Void _ = wait(closedFuture);
 	return Void();
 }
+*/
 
 const PhysicalPageID MemoryPager::INVALID_PAGE = nullptr;
