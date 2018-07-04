@@ -277,7 +277,7 @@ public:
 			if (logServerSet->size() < required) {
 				TraceEvent(SevWarn,"GWFTADTooFew", id).detail("Fitness", fitness).detail("Processes", logServerSet->size()).detail("Required", required).detail("TLogPolicy", policy->info()).detail("DesiredLogs", desired);
 			}
-			else if (logServerSet->size() <= desired) {
+			else if (logServerSet->size() == required || logServerSet->size() <= desired) {
 				if (logServerSet->validate(policy)) {
 					for (auto& object : logServerMap->getObjects()) {
 						results.push_back(*object);
@@ -754,8 +754,7 @@ public:
 
 			std::set<Optional<Key>> primaryDC;
 			primaryDC.insert(regions[0].dcId);
-			getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true, primaryDC);
-
+			getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.getDesiredLogs(), db.config.tLogPolicy, id_used, true, primaryDC);
 			if(regions[0].satelliteTLogReplicationFactor > 0) {
 				bool satelliteFallback = false;
 				getWorkersForSatelliteLogs(db.config, regions[0], id_used, satelliteFallback, true);
@@ -901,7 +900,7 @@ public:
 
 		// Check tLog fitness
 		RoleFitness oldTLogFit(tlogs, ProcessClass::TLog);
-		RoleFitness newTLogFit(getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.desiredTLogCount, db.config.tLogPolicy, id_used, true, primaryDC), ProcessClass::TLog);
+		RoleFitness newTLogFit(getWorkersForTlogs(db.config, db.config.tLogReplicationFactor, db.config.getDesiredLogs(), db.config.tLogPolicy, id_used, true, primaryDC), ProcessClass::TLog);
 
 		if(oldTLogFit < newTLogFit) return false;
 
@@ -1542,7 +1541,7 @@ void clusterRegisterMaster( ClusterControllerData* self, RegisterMasterRequest c
 	req.reply.send( Void() );
 
 	TraceEvent("MasterRegistrationReceived", self->id).detail("DbName", printable(req.dbName)).detail("MasterId", req.id).detail("Master", req.mi.toString()).detail("Tlogs", describe(req.logSystemConfig.tLogs)).detail("Resolvers", req.resolvers.size())
-		.detail("RecoveryState", (int)req.recoveryState).detail("RegistrationCount", req.registrationCount).detail("Proxies", req.proxies.size()).detail("RecoveryCount", req.recoveryCount);
+		.detail("RecoveryState", (int)req.recoveryState).detail("RegistrationCount", req.registrationCount).detail("Proxies", req.proxies.size()).detail("RecoveryCount", req.recoveryCount).detail("Stalled", req.recoveryStalled);
 
 	//make sure the request comes from an active database
 	auto db = &self->db;
