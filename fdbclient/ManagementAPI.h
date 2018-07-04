@@ -35,6 +35,7 @@ standard API and some knowledge of the contents of the system key space.
 #include "Status.h"
 #include "ReadYourWrites.h"
 #include "DatabaseConfiguration.h"
+#include "MonitorLeader.h"
 
 // ConfigurationResult enumerates normal outcomes of changeConfig() and various error
 // conditions specific to it.  changeConfig may also throw an Error to report other problems.
@@ -160,6 +161,8 @@ Future<Void> checkDatabaseLock( Transaction* const& tr, UID const& id );
 Future<Void> checkDatabaseLock( Reference<ReadYourWritesTransaction> const& tr, UID const& id );
 
 Future<int> setDDMode( Database const& cx, int const& mode );
+
+Future<Void> forceRecovery (Reference<ClusterConnectionFile> const& clusterFile);
 
 // Gets the cluster connection string
 Future<std::vector<NetworkAddress>> getCoordinators( Database const& cx );

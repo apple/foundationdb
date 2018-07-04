@@ -90,11 +90,12 @@ public:
 		Promise<Void> forceMasterFailure;
 		int64_t masterRegistrationCount;
 		bool recoveryStalled;
+		bool forceRecovery;
 		DatabaseConfiguration config;   // Asynchronously updated via master registration
 		DatabaseConfiguration fullyRecoveredConfig;
 		Database db;
 
-		DBInfo() : masterRegistrationCount(0), recoveryStalled(false),
+		DBInfo() : masterRegistrationCount(0), recoveryStalled(false), forceRecovery(false),
 			clientInfo( new AsyncVar<ClientDBInfo>( ClientDBInfo() ) ),
 			serverInfo( new AsyncVar<ServerDBInfo>( ServerDBInfo( LiteralStringRef("DB") ) ) ),
 			db( DatabaseContext::create( clientInfo, Future<Void>(), LocalityData(), true, TaskDefaultEndpoint, true ) )  // SOMEDAY: Locality!
@@ -347,7 +348,7 @@ public:
 				if(satelliteFallback || region.satelliteTLogUsableDcsFallback == 0) {
 					throw no_more_servers();
 				} else {
-					if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
+					if(now() - startTime < SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) {
 						throw operation_failed();
 					}
 					satelliteFallback = true;
@@ -1051,6 +1052,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 			}
 			RecruitMasterRequest rmq;
 			rmq.lifetime = db->serverInfo->get().masterLifetime;
+			rmq.forceRecovery = db->forceRecovery;
 
 			cluster->masterProcessId = masterWorker.worker.first.locality.processId();
 			ErrorOr<MasterInterface> newMaster = wait( masterWorker.worker.first.master.tryGetReply( rmq ) );
@@ -1066,6 +1068,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 
 				db->masterRegistrationCount = 0;
 				db->recoveryStalled = false;
+				db->forceRecovery = false;
 				db->forceMasterFailure = Promise<Void>();
 
 				auto dbInfo = ServerDBInfo( LiteralStringRef("DB") );
@@ -1956,6 +1959,7 @@ ACTOR Future<Void> updatedChangingDatacenters(ClusterControllerData *self) {
 			uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness( worker.interf.locality.dcId(), self->desiredDcIds.get().get() );
 			self->changingDcIds.set(std::make_pair(worker.priorityInfo.dcFitness > newFitness,self->desiredDcIds.get()));
 
+			TraceEvent("UpdateChangingDatacenter", self->id).detail("OldFitness", worker.priorityInfo.dcFitness).detail("NewFitness", newFitness);
 			if ( worker.priorityInfo.dcFitness > newFitness ) {
 				worker.priorityInfo.dcFitness = newFitness;
 				if(!worker.reply.isSet()) {
@@ -2004,6 +2008,7 @@ ACTOR Future<Void> updatedChangedDatacenters(ClusterControllerData *self) {
 
 				self->changedDcIds.set(self->changingDcIds.get());
 				if(self->changedDcIds.get().second.present()) {
+					TraceEvent("UpdateChangedDatacenter", self->id).detail("CCFirst", self->changedDcIds.get().first);
 					if( !self->changedDcIds.get().first ) {
 						auto& worker = self->id_worker[self->clusterControllerProcessId];
 						uint8_t newFitness = ClusterControllerPriorityInfo::calculateDCFitness( worker.interf.locality.dcId(), self->changedDcIds.get().second.get() );
@@ -2178,6 +2183,15 @@ ACTOR Future<Void> clusterControllerCore( ClusterControllerFullInterface interf,
 				}
 			}
 			req.reply.send(workers);
+		}
+		when( ForceRecoveryRequest req = waitNext( interf.clientInterface.forceRecovery.getFuture() ) ) {
+			if(self.db.masterRegistrationCount == 0) {
+				if (!self.db.forceMasterFailure.isSet()) {
+					self.db.forceRecovery = true;
+					self.db.forceMasterFailure.send( Void() );
+				}
+			}
+			req.reply.send(Void());
 		}
 		when( Void _ = wait( coordinationPingDelay ) ) {
 			CoordinationPingMessage message(self.id, step++);

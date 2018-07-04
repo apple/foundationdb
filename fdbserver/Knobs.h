@@ -60,10 +60,11 @@ public:
 	int64_t MAX_QUEUE_COMMIT_BYTES;
 
 	// Versions
-	int VERSIONS_PER_SECOND;
-	int MAX_VERSIONS_IN_FLIGHT;
-	int MAX_READ_TRANSACTION_LIFE_VERSIONS;
-	int MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+	int64_t VERSIONS_PER_SECOND;
+	int64_t MAX_VERSIONS_IN_FLIGHT;
+	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
+	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
+	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
 	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
 
 	// Data distribution queue

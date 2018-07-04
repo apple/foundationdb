@@ -116,8 +116,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return dbgid;
 	}
 
-	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality) {
-		return epochEnd( outLogSystem, dbgid, oldState, rejoins, locality );
+	static Future<Void> recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery) {
+		return epochEnd( outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery );
 	}
 
 	static Reference<ILogSystem> fromLogSystemConfig( UID const& dbgid, LocalityData const& locality, LogSystemConfig const& lsConf, bool excludeRemote, bool useRecoveredAt, Optional<PromiseStream<Future<Void>>> addActor ) {
@@ -1156,7 +1156,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		return Void();
 	}
 
-	ACTOR static Future<Void> epochEnd( Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem, UID dbgid, DBCoreState prevState, FutureStream<TLogRejoinRequest> rejoinRequests, LocalityData locality ) {
+	ACTOR static Future<Void> epochEnd( Reference<AsyncVar<Reference<ILogSystem>>> outLogSystem, UID dbgid, DBCoreState prevState, FutureStream<TLogRejoinRequest> rejoinRequests, LocalityData locality, bool forceRecovery ) {
 		// Stops a co-quorum of tlogs so that no further versions can be committed until the DBCoreState coordination state is changed
 		// Creates a new logSystem representing the (now frozen) epoch
 		// No other important side effects.
@@ -1172,6 +1172,86 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			outLogSystem->set(logSystem);
 			Void _ = wait( Future<Void>(Never()) );
 			throw internal_error();
+		}
+
+		if(forceRecovery) {
+			DBCoreState modifiedState = prevState;
+
+			int8_t primaryLocality = -1;
+			for(auto& coreSet : modifiedState.tLogs) {
+				if(coreSet.isLocal && coreSet.locality >= 0) {
+					primaryLocality = coreSet.locality;
+					break;
+				}
+			}
+
+			if(primaryLocality >= 0) {
+				bool foundRemote = false;
+				int8_t remoteLocality = -1;
+				bool remoteIsLocal = false;
+				auto copiedLogs = modifiedState.tLogs;
+				for(auto& coreSet : copiedLogs) {
+					if(coreSet.locality != primaryLocality && coreSet.locality >= 0) {
+						foundRemote = true;
+						remoteLocality = coreSet.locality;
+						remoteIsLocal = coreSet.isLocal;
+						modifiedState.tLogs.clear();
+						modifiedState.tLogs.push_back(coreSet);
+						modifiedState.tLogs[0].isLocal = true;
+						modifiedState.logRouterTags = 0;
+						break;
+					}
+				}
+
+				ASSERT( !remoteIsLocal );
+
+				while( !foundRemote && modifiedState.oldTLogData.size() ) {
+					for(auto& coreSet : modifiedState.oldTLogData[0].tLogs) {
+						if(coreSet.locality != primaryLocality && coreSet.locality >= tagLocalitySpecial) {
+							foundRemote = true;
+							remoteLocality = coreSet.locality;
+							remoteIsLocal = coreSet.isLocal;
+							if(coreSet.isLocal) {
+								modifiedState.tLogs = modifiedState.oldTLogData[0].tLogs;
+								modifiedState.logRouterTags = modifiedState.oldTLogData[0].logRouterTags;
+							} else {
+								modifiedState.tLogs.clear();
+								modifiedState.tLogs.push_back(coreSet);
+								modifiedState.tLogs[0].isLocal = true;
+								modifiedState.logRouterTags = 0;
+							}
+							break;
+						}
+					}
+					modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin());
+				}
+
+				if(foundRemote) {
+					for(int i = 0; i < modifiedState.oldTLogData.size() && !remoteIsLocal; i++) {
+						bool found = false;
+						auto copiedLogs = modifiedState.oldTLogData[i].tLogs;
+						for(auto& coreSet : copiedLogs) {
+							if(coreSet.locality == remoteLocality || coreSet.locality == tagLocalitySpecial) {
+								found = true;
+								remoteIsLocal = coreSet.isLocal;
+								if(!coreSet.isLocal) {
+									modifiedState.oldTLogData[i].tLogs.clear();
+									modifiedState.oldTLogData[i].tLogs.push_back(coreSet);
+									modifiedState.oldTLogData[i].tLogs[0].isLocal = true;
+									modifiedState.oldTLogData[i].logRouterTags = 0;
+									modifiedState.oldTLogData[i].epochEnd = ( i == 0 ? modifiedState.tLogs[0].startVersion : modifiedState.oldTLogData[i-1].tLogs[0].startVersion );
+								}
+								break;
+							}
+						}
+						if(!found) {
+							modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin()+i);
+							i--;
+						}
+					}
+					prevState = modifiedState;
+				}
+			}
 		}
 
 		TEST( true );	// Master recovery from pre-existing database
@@ -2044,8 +2124,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	};
 };
 
-Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality ) {
-	return TagPartitionedLogSystem::recoverAndEndEpoch( outLogSystem, dbgid, oldState, rejoins, locality );
+Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSystem>>> const& outLogSystem, UID const& dbgid, DBCoreState const& oldState, FutureStream<TLogRejoinRequest> const& rejoins, LocalityData const& locality, bool forceRecovery) {
+	return TagPartitionedLogSystem::recoverAndEndEpoch( outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery );
 }
 
 Reference<ILogSystem> ILogSystem::fromLogSystemConfig( UID const& dbgid, struct LocalityData const& locality, struct LogSystemConfig const& conf, bool excludeRemote, bool useRecoveredAt, Optional<PromiseStream<Future<Void>>> addActor ) {
