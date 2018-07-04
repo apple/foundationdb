@@ -65,6 +65,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	int expectedLogSets;
 	int logRouterTags;
 	UID recruitmentID;
+	int repopulateRegionAntiQuorum;
 	bool stopped;
 
 	// new members
@@ -87,7 +88,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	std::vector<OldLogData> oldLogData;
 	AsyncTrigger logSystemConfigChanged;
 
-	TagPartitionedLogSystem( UID dbgid, LocalityData locality, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() ) : dbgid(dbgid), locality(locality), addActor(addActor), popActors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(0), logRouterTags(0), expectedLogSets(0), hasRemoteServers(false), stopped(false) {}
+	TagPartitionedLogSystem( UID dbgid, LocalityData locality, Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>() ) : dbgid(dbgid), locality(locality), addActor(addActor), popActors(false), recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), logSystemType(0), logRouterTags(0), expectedLogSets(0), hasRemoteServers(false), stopped(false), repopulateRegionAntiQuorum(0) {}
 
 	virtual void stopRejoins() {
 		rejoins = Future<Void>();
@@ -279,7 +280,14 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		newState.oldTLogData.clear();
-		if(!recoveryComplete.isValid() || !recoveryComplete.isReady() || !remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady()) {
+		int recoveredCount = 0;
+		if(recoveryComplete.isValid() && recoveryComplete.isReady()) {
+			recoveredCount++;
+		}
+		if(remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isReady()) {
+			recoveredCount++;
+		}
+		if(recoveredCount < 2 - repopulateRegionAntiQuorum) {
 			newState.oldTLogData.resize(oldLogData.size());
 			for(int i = 0; i < oldLogData.size(); i++) {
 				for(auto &t : oldLogData[i].tLogs) {
@@ -308,20 +316,18 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 	}
 
 	virtual Future<Void> onCoreStateChanged() {
-		ASSERT(recoveryComplete.isValid() && remoteRecovery.isValid() );
-		if( recoveryComplete.isReady() && remoteRecovery.isReady() ) {
-			if( !remoteRecoveryComplete.isReady() ) {
-				return remoteRecoveryComplete;
-			}
-			return Never();
+		std::vector<Future<Void>> changes;
+		changes.push_back(Never());
+		if(recoveryComplete.isValid() && !recoveryComplete.isReady()) {
+			changes.push_back(recoveryComplete);
 		}
-		if( remoteRecovery.isReady() ) {
-			return recoveryComplete;
+		if(remoteRecovery.isValid() && !remoteRecovery.isReady()) {
+			changes.push_back(remoteRecovery);
 		}
-		if( recoveryComplete.isReady() ) {
-			return remoteRecovery;
+		if(remoteRecoveryComplete.isValid() && !remoteRecoveryComplete.isReady()) {
+			changes.push_back(remoteRecoveryComplete);
 		}
-		return recoveryComplete || remoteRecovery;
+		return waitForAny(changes);
 	}
 
 	virtual void coreStateWritten( DBCoreState const& newState ) {
@@ -1676,6 +1682,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		logSystem->logSystemType = 2;
 		logSystem->expectedLogSets = 1;
 		logSystem->recoveredAt = oldLogSystem->recoverAt;
+		logSystem->repopulateRegionAntiQuorum = configuration.repopulateRegionAntiQuorum;
 		logSystem->recruitmentID = g_random->randomUniqueID();
 		oldLogSystem->recruitmentID = logSystem->recruitmentID;
 
