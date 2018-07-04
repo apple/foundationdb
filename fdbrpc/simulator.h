@@ -149,7 +149,7 @@ public:
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses ) = 0;
 	virtual void rebootProcess( ProcessInfo* process, KillType kt ) = 0;
 	virtual void killInterface( NetworkAddress address, KillType ) = 0;
-	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool killIsSafe = false, bool forceKill = false, KillType* ktFinal = NULL) = 0;
+	virtual bool killMachine(Optional<Standalone<StringRef>> zoneId, KillType, bool forceKill = false, KillType* ktFinal = NULL) = 0;
 	virtual bool killDataCenter(Optional<Standalone<StringRef>> dcId, KillType kt, KillType* ktFinal = NULL) = 0;
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;

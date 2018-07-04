@@ -367,6 +367,7 @@
          "remote_logs":5,
          "log_routers":10,
          "usable_regions":1,
+         "repopulate_anti_quorum":1,
          "storage_replicas":1,
          "resolvers":1,
          "storage_replication_policy":"(zoneid^3x1)",

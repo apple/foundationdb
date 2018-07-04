@@ -1060,7 +1060,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		if(self->cstateUpdated.canBeSet()) {
 			self->cstateUpdated.send(Void());
 		}
-		
+
 		if( finalUpdate ) {
 			self->recoveryState = RecoveryState::REMOTE_RECOVERED;
 			TraceEvent("MasterRecoveryState", self->dbgid)
@@ -1068,7 +1068,7 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::remote_recovered])
 			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
 		}
-		
+
 		self->registrationTrigger.trigger();
 
 		if(allLogs && remoteRecovered.canBeSet()) {

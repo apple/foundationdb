@@ -283,19 +283,17 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 	}
 }
 
-ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
+ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	Void _ = wait( delay(time) );
 
 	if(g_network->isSimulated()) {
 		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
 		g_simulator.usableRegions = 1;
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
-		if (g_network->isSimulated() && g_simulator.extraDB) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
-			Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
-			ConfigurationResult::Type _ = wait(changeConfig(extraDB, "usable_regions=1"));
+		ConfigurationResult::Type _ = wait( changeConfig( cx, "repopulate_anti_quorum=1" ) );
+		while( dbInfo->get().recoveryState < RecoveryState::REMOTE_RECOVERED ) {
+			Void _ = wait( dbInfo->onChange() );
 		}
+		ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
 	}
 
 	return Void();
@@ -303,7 +301,7 @@ ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
 
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0 ) {
-	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100));
+	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100), dbInfo);
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 
