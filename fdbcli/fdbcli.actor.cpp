@@ -735,7 +735,7 @@ void printStatus(StatusObjectReader statusObj, StatusClient::StatusLevel level, 
 						std::string description;
 						if (recoveryState.get("name", name) &&
 							recoveryState.get("description", description) &&
-							name != "fully_recovered" && name != "remote_recovered")
+							name != "accepting_commits" && name != "all_logs_recruited" && name != "storage_recovered" && name != "fully_recovered")
 						{
 							fatalRecoveryState = true;
 

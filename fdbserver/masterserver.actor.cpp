@@ -1062,10 +1062,22 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		}
 
 		if( finalUpdate ) {
-			self->recoveryState = RecoveryState::REMOTE_RECOVERED;
+			self->recoveryState = RecoveryState::FULLY_RECOVERED;
 			TraceEvent("MasterRecoveryState", self->dbgid)
-			.detail("StatusCode", RecoveryStatus::remote_recovered)
-			.detail("Status", RecoveryStatus::names[RecoveryStatus::remote_recovered])
+			.detail("StatusCode", RecoveryStatus::fully_recovered)
+			.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
+			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		} else if( !newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED ) {
+			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
+			TraceEvent("MasterRecoveryState", self->dbgid)
+			.detail("StatusCode", RecoveryStatus::storage_recovered)
+			.detail("Status", RecoveryStatus::names[RecoveryStatus::storage_recovered])
+			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		} else if( allLogs && self->recoveryState < RecoveryState::ALL_LOGS_RECRUITED ) {
+			self->recoveryState = RecoveryState::ALL_LOGS_RECRUITED;
+			TraceEvent("MasterRecoveryState", self->dbgid)
+			.detail("StatusCode", RecoveryStatus::all_logs_recruited)
+			.detail("Status", RecoveryStatus::names[RecoveryStatus::all_logs_recruited])
 			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
 		}
 
@@ -1268,7 +1280,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 	TraceEvent(recoveryInterval.end(), self->dbgid).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
-	self->recoveryState = RecoveryState::FULLY_RECOVERED;
+	self->recoveryState = RecoveryState::ACCEPTING_COMMITS;
 	double recoveryDuration = now() - recoverStartTime;
 
 	TraceEvent((recoveryDuration > 4 && !g_network->isSimulated()) ? SevWarnAlways : SevInfo, "MasterRecoveryDuration", self->dbgid)
@@ -1276,8 +1288,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.trackLatest("MasterRecoveryDuration");
 
 	TraceEvent("MasterRecoveryState", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::fully_recovered)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
+		.detail("StatusCode", RecoveryStatus::accepting_commits)
+		.detail("Status", RecoveryStatus::names[RecoveryStatus::accepting_commits])
 		.detail("StoreType", self->configuration.storageServerStoreType)
 		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");
