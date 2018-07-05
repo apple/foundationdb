@@ -1955,7 +1955,6 @@ TEST_CASE("/redwood/performance/set") {
 	while(--versions) {
 		Version lastVer = wait(btree->getLatestVersion());
 		state Version version = lastVer + 1;
-		printf("Writing version %lld\n", version);
 		btree->setWriteVersion(version);
 		int changes = g_random->randomInt(0, maxChangesPerVersion);
 		while(changes--) {
@@ -1970,10 +1969,9 @@ TEST_CASE("/redwood/performance/set") {
 		}
 
 		if(g_random->random01() < .01) {
-			printf("Committing %lld\n", version);
 			Void _ = wait(btree->commit());
 			double elapsed = now() - startTime;
-			printf("Wrote (cumulative) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
+			printf("Committed (cumulative) %lld bytes in %d records in %f seconds, %.2f MB/s\n", kvBytes, records, elapsed, kvBytes / elapsed / 1e6);
 		}
 	}
 

@@ -213,6 +213,10 @@ private:
 	Future<Void> currentTruncate;
 	int64_t currentTruncateSize;
 
+	// Map of pointers which hold page buffers for pages which have been overwritten
+	// but at the time of write there were still readZeroCopy holders.
+	std::unordered_map<void *, int> orphanedPages;
+
 	Int64MetricHandle countFileCacheFinds;
 	Int64MetricHandle countFileCacheReads;
 	Int64MetricHandle countFileCacheWrites;
@@ -304,11 +308,24 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 		return false;
 	}
 
+	// Move this page's data into the orphanedPages set of the owner
+	void orphan() {
+		owner->orphanedPages[data] = zeroCopyRefCount;
+		zeroCopyRefCount = 0;
+		data = pageCache->pageSize == 4096 ? FastAllocator<4096>::allocate() : aligned_alloc(4096, pageCache->pageSize);
+	}
+
 	Future<Void> write( void const* data, int length, int offset ) {
-		ASSERT( !zeroCopyRefCount );  // overlapping zero-copy reads and writes are undefined behavior
+		// If zero-copy reads are in progress, allow whole page writes to a new page buffer so the effects
+		// are not seen by the prior readers who still hold zeroCopyRead pointers
+		bool fullPage = offset == 0 && length == pageCache->pageSize;
+		if(zeroCopyRefCount != 0) {
+			ASSERT(fullPage);
+			orphan();
+		}
 		setDirty();
 
-		if (valid || (offset == 0 && length == pageCache->pageSize)) {
+		if (valid || fullPage) {
 			valid = true;
 			memcpy( static_cast<uint8_t*>(this->data) + offset, data, length );
 			return yield();
@@ -457,7 +474,9 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	Future<Void> truncate() {
-		ASSERT( !zeroCopyRefCount );  // overlapping zero-copy reads and writes are undefined behavior
+		// Allow truncatation during zero copy reads but orphan the previous buffer
+		if( zeroCopyRefCount != 0)
+			orphan();
 		truncated = true;
 		return truncate_impl( this );
 	}
