@@ -231,7 +231,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (auto processInfo : getServers()) {
 			auto processNet = AddressExclusion(processInfo->address.ip, processInfo->address.port);
 			// Mark all of the unavailable as dead
-			if (!processInfo->isAvailable())
+			if (!processInfo->isAvailable() || processInfo->isCleared())
 				processesDead.push_back(processInfo);
 			// Save all processes not specified within set
 			else if (killAddrs.find(processNet) == killAddrs.end())
