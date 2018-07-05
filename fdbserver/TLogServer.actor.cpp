@@ -1272,7 +1272,7 @@ ACTOR Future<Void> rejoinMasters( TLogData* self, TLogInterface tli, DBRecoveryC
 		if(isPrimary) {
 			isDisplaced = isDisplaced && inf.recoveryCount >= recoveryCount && inf.recoveryState != RecoveryState::UNINITIALIZED;
 		} else {
-			isDisplaced = isDisplaced && ( ( inf.recoveryCount > recoveryCount && inf.recoveryState != RecoveryState::UNINITIALIZED ) || ( inf.recoveryCount == recoveryCount && inf.recoveryState == RecoveryState::REMOTE_RECOVERED ) );
+			isDisplaced = isDisplaced && ( ( inf.recoveryCount > recoveryCount && inf.recoveryState != RecoveryState::UNINITIALIZED ) || ( inf.recoveryCount == recoveryCount && inf.recoveryState == RecoveryState::FULLY_RECOVERED ) );
 		}
 		if(isDisplaced) {
 			for(auto& log : inf.logSystemConfig.tLogs) {
@@ -1383,7 +1383,7 @@ ACTOR Future<Void> serveTLogInterface( TLogData* self, TLogInterface tli, Refere
 		when( Void _ = wait( dbInfoChange ) ) {
 			dbInfoChange = self->dbInfo->onChange();
 			bool found = false;
-			if(self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED) {
+			if(self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
 				for(auto& logs : self->dbInfo->get().logSystemConfig.tLogs) {
 					if( std::count( logs.tLogs.begin(), logs.tLogs.end(), logData->logId ) ) {
 						found = true;
@@ -1871,7 +1871,7 @@ ACTOR Future<Void> updateLogSystem(TLogData* self, Reference<LogData> logData, L
 				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, false, true ));
 				found = true;
 			}
-			else if( self->dbInfo->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
+			else if( self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS ) {
 				logSystem->set(ILogSystem::fromLogSystemConfig( logData->logId, self->dbInfo->get().myLocality, self->dbInfo->get().logSystemConfig, true ));
 				found = true;
 			}

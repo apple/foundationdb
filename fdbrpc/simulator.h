@@ -34,7 +34,7 @@ enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
 class ISimulator : public INetwork {
 public:
-	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL) {}
+	ISimulator() : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false), allSwapsDisabled(false), backupAgents(WaitForType), drAgents(WaitForType), extraDB(NULL), allowLogSetKills(true) {}
 
 	// Order matters!
 	enum KillType { KillInstantly, InjectFaults, RebootAndDelete, RebootProcessAndDelete, Reboot, RebootProcess, None };
@@ -77,8 +77,8 @@ public:
 
 		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
-		bool isExcluded() const { return !excluded; }
-		bool isCleared() const { return !cleared; }
+		bool isExcluded() const { return excluded; }
+		bool isCleared() const { return cleared; }
 
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {
@@ -282,6 +282,7 @@ public:
 	Optional<Standalone<StringRef>> primaryDcId;
 	IRepPolicyRef remoteTLogPolicy;
 	int32_t usableRegions;
+	bool allowLogSetKills;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;
 	IRepPolicyRef satelliteTLogPolicy;
