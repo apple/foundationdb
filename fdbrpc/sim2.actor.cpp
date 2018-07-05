@@ -1266,7 +1266,7 @@ public:
 							processesDead.push_back(processInfo);
 							excluded++;
 						}
-						else if (!processInfo->isCleared()) {
+						else if (processInfo->isCleared()) {
 							processesDead.push_back(processInfo);
 							cleared++;
 						}

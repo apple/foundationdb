@@ -77,8 +77,8 @@ public:
 
 		bool isReliable() const { return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0; }
 		bool isAvailable() const { return !isExcluded() && isReliable(); }
-		bool isExcluded() const { return !excluded; }
-		bool isCleared() const { return !cleared; }
+		bool isExcluded() const { return excluded; }
+		bool isCleared() const { return cleared; }
 
 		// Returns true if the class represents an acceptable worker
 		bool isAvailableClass() const {
