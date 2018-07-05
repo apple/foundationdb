@@ -41,6 +41,7 @@ ifeq ($(PLATFORM),Linux)
   CXXFLAGS += -std=c++0x
 
   BOOSTDIR ?= /opt/boost_1_52_0
+  TLS_LIBDIR ?= /usr/local/lib
   DLEXT := so
   java_DLEXT := so
   TARGET_LIBC_VERSION ?= 2.11
@@ -56,6 +57,7 @@ else ifeq ($(PLATFORM),Darwin)
   .LIBPATTERNS := lib%.dylib lib%.a
 
   BOOSTDIR ?= $(HOME)/boost_1_52_0
+  TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
   java_DLEXT := jnilib
 else
@@ -90,14 +92,11 @@ CFLAGS += -g
 # Define the TLS compilation and link variables
 ifdef TLS_DISABLED
 CFLAGS += -DTLS_DISABLED
+FDB_TLS_LIB :=
 TLS_LIBS :=
 else
-TLS_LIBS := lib/libFDBLibTLS.a
-ifdef TLS_LIBDIR
+FDB_TLS_LIB := lib/libFDBLibTLS.a
 TLS_LIBS += $(addprefix $(TLS_LIBDIR)/,libtls.a libssl.a libcrypto.a)
-else
-TLS_LIBS += libtls.a libssl.a libcrypto.a
-endif
 endif
 
 CXXFLAGS += -Wno-deprecated
