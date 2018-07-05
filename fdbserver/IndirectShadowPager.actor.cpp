@@ -911,7 +911,7 @@ const PhysicalPageID PagerFile::INVALID_PAGE = std::numeric_limits<PhysicalPageI
 extern Future<Void> simplePagerTest(IPager* const& pager);
 
 TEST_CASE("fdbserver/indirectshadowpager/simple") {
-	state IPager *pager = new IndirectShadowPager("data/test");
+	state IPager *pager = new IndirectShadowPager("unittest_pageFile");
 
 	Void _ = wait(simplePagerTest(pager));
 

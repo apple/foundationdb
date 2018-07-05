@@ -1499,7 +1499,7 @@ public:
 		Void _ = wait(closedFuture);
 		self->m_closed.send(Void());
 		if(self->m_error.canBeSet()) {
-			self->m_error.sendError(operation_cancelled());
+			self->m_error.send(Never());
 		}
 		TraceEvent(SevInfo, "RedwoodShutdownComplete").detail("FilePrefix", self->m_filePrefix).detail("Dispose", dispose);
 		delete self;
@@ -1781,7 +1781,7 @@ ACTOR Future<int> verifyRandomRange(VersionedBTree *btree, Version v, std::map<s
 TEST_CASE("/redwood/correctness") {
 	state bool useDisk = true;
 
-	state std::string pagerFile = "testPager";
+	state std::string pagerFile = "unittest_pageFile";
 	state IPager *pager;
 	if(useDisk)
 		pager = new IndirectShadowPager(pagerFile);
@@ -1936,8 +1936,8 @@ TEST_CASE("/redwood/correctness") {
 }
 
 TEST_CASE("/redwood/performance/set") {
-	state IPager *pager = new IndirectShadowPager("pagerfile");
-	state VersionedBTree *btree = new VersionedBTree(pager, "pagerfile");
+	state IPager *pager = new IndirectShadowPager("unittest_pageFile");
+	state VersionedBTree *btree = new VersionedBTree(pager, "unittest_pageFile");
 	Void _ = wait(btree->init());
 
 	state int nodeCount = 100000;
