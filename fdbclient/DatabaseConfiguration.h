@@ -176,6 +176,7 @@ struct DatabaseConfiguration {
 
 	//Data centers
 	int32_t usableRegions;
+	int32_t repopulateRegionAntiQuorum;
 	std::vector<RegionInfo> regions;
 
 	// Excluded servers (no state should be here)

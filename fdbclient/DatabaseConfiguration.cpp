@@ -38,7 +38,7 @@ void DatabaseConfiguration::resetInternal() {
 	regions.clear();
 	tLogPolicy = storagePolicy = remoteTLogPolicy = IRepPolicyRef();
 	remoteDesiredTLogCount = -1;
-	remoteTLogReplicationFactor = 0;
+	remoteTLogReplicationFactor = repopulateRegionAntiQuorum = 0;
 }
 
 void parse( int* i, ValueRef const& v ) {
@@ -171,6 +171,8 @@ bool DatabaseConfiguration::isValid() const {
 		tLogPolicy &&
 		getDesiredRemoteLogs() >= 1 &&
 		remoteTLogReplicationFactor >= 0 &&
+		repopulateRegionAntiQuorum >= 0 &&
+		repopulateRegionAntiQuorum <= 1 &&
 		usableRegions >= 1 &&
 		usableRegions <= 2 &&
 		regions.size() <= 2 &&
@@ -328,6 +330,9 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		if( remoteDesiredTLogCount != -1 ) {
 			result["remote_logs"] = remoteDesiredTLogCount;
 		}
+		if( repopulateRegionAntiQuorum != 0 ) {
+			result["repopulate_anti_quorum"] = repopulateRegionAntiQuorum;
+		}
 		if( autoMasterProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_PROXIES ) {
 			result["auto_proxies"] = autoMasterProxyCount;
 		}
@@ -373,6 +378,7 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 	else if (ck == LiteralStringRef("remote_log_replicas")) parse(&remoteTLogReplicationFactor, value);
 	else if (ck == LiteralStringRef("remote_log_policy")) parseReplicationPolicy(&remoteTLogPolicy, value);
 	else if (ck == LiteralStringRef("usable_regions")) parse(&usableRegions, value);
+	else if (ck == LiteralStringRef("repopulate_anti_quorum")) parse(&repopulateRegionAntiQuorum, value);
 	else if (ck == LiteralStringRef("regions")) parse(&regions, value);
 	else return false;
 	return true;  // All of the above options currently require recovery to take effect
