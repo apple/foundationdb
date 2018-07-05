@@ -53,6 +53,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		kill1Timeout = getOption( options, LiteralStringRef("kill1Timeout"), 60.0 );
 		kill2Timeout = getOption( options, LiteralStringRef("kill2Timeout"), 6000.0 );
 		killProcesses = g_random->random01() < 0.5;
+		if(g_network->isSimulated()) {
+			g_simulator.allowLogSetKills = false;
+		}
 	}
 
 	virtual std::string description() { return "RemoveServersSafelyWorkload"; }
