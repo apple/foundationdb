@@ -24,7 +24,7 @@ ifeq ($(MCS),)
   MCS := /usr/bin/dmcs
 endif
 
-CFLAGS := -Werror -Wno-error=format -fPIC -DNO_INTELLISENSE -fvisibility=hidden -DNDEBUG=1 -Wreturn-type -fno-omit-frame-pointer
+CFLAGS := -Wno-error=format -fPIC -DNO_INTELLISENSE -fvisibility=hidden -DNDEBUG=1 -Wreturn-type -fno-omit-frame-pointer
 ifeq ($(RELEASE),true)
 	CFLAGS += -DFDB_CLEAN_BUILD
 endif

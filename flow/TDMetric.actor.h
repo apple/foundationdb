@@ -35,6 +35,7 @@
 #include "genericactors.actor.h"
 #include "CompressedInt.h"
 #include <algorithm>
+#include <cmath>
 #include <functional>
 
 struct MetricNameRef {
