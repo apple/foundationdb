@@ -249,8 +249,10 @@ ACTOR Future<Void> recover(IndirectShadowPager *pager) {
 		TraceEvent("PagerFinishedRecovery").detail("LatestVersion", pager->latestVersion).detail("OldestVersion", pager->oldestVersion);
 	}
 	catch(Error &e) {
-		TraceEvent(SevError, "PagerRecoveryFailed").error(e, true);
-		throw e;
+		if(e.code() != error_code_actor_cancelled) {
+			TraceEvent(SevError, "PagerRecoveryFailed").error(e, true);
+		}
+		throw;
 	}
 
 	return Void();
