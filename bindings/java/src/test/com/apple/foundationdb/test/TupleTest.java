@@ -29,7 +29,7 @@ public class TupleTest {
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(520);
+			FDB fdb = FDB.selectAPIVersion(600);
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
 			}

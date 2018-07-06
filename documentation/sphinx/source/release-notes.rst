@@ -30,6 +30,12 @@ Status
 
 * The replication factor in status JSON is stored under "redundancy_mode" instead of "redundancy":"factor". `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
 
+Bindings
+--------
+
+* API version updated to 600. There are no changes since API version 520.
+* Several cases where functions in go might previously cause a panic now return a non-``nil`` error. `(PR #532) <https://github.com/apple/foundationdb/pull/532>`_
+
 Other Changes
 -------------
 
