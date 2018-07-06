@@ -284,6 +284,9 @@
                "initializing_transaction_servers",
                "recovery_transaction",
                "writing_coordinated_state",
+               "accepting_commits",
+               "all_logs_recruited",
+               "storage_recovered",
                "fully_recovered"
             ]
          },

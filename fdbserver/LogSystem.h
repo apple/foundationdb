@@ -161,7 +161,18 @@ public:
 			minUsed = std::min(minUsed, i);
 			maxUsed = std::max(maxUsed, i);
 		}
-		TraceEvent(((maxUsed - minUsed > 1) || (maxUsedBest - minUsedBest > 1)) ? (g_network->isSimulated() ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed).detail("MinUsedBest", minUsedBest).detail("MaxUsedBest", maxUsedBest);
+
+		bool foundDuplicate = false;
+		std::set<Optional<Key>> zones;
+		for(auto& loc : tLogLocalities) {
+			if(zones.count(loc.zoneId())) {
+				foundDuplicate = true;
+				break;
+			}
+			zones.insert(loc.zoneId());
+		}
+
+		TraceEvent(((maxUsed - minUsed > 1) || (maxUsedBest - minUsedBest > 1)) ? (g_network->isSimulated() && !foundDuplicate ? SevError : SevWarnAlways) : SevInfo, "CheckSatelliteTagLocations").detail("MinUsed", minUsed).detail("MaxUsed", maxUsed).detail("MinUsedBest", minUsedBest).detail("MaxUsedBest", maxUsedBest).detail("DuplicateZones", foundDuplicate);
 	}
 
 	int bestLocationFor( Tag tag ) {
