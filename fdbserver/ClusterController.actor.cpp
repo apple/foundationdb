@@ -604,6 +604,11 @@ public:
 			if(regions[0].priority == regions[1].priority && clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get()) {
 				std::swap(regions[0], regions[1]);
 			}
+
+			if(clusterControllerDcId.present() && regions[1].dcId == clusterControllerDcId.get() && (!versionDifferenceUpdated || datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE)) {
+				std::swap(regions[0], regions[1]);
+			}
+
 			bool setPrimaryDesired = false;
 			try {
 				auto reply = findWorkersForConfiguration(req, regions[0].dcId);
@@ -2050,8 +2055,14 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 	loop {
 		self->versionDifferenceUpdated = false;
 		if(self->db.serverInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && self->db.config.usableRegions == 1) {
+			bool oldDifferenceTooLarge = !self->versionDifferenceUpdated || self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
 			self->versionDifferenceUpdated = true;
 			self->datacenterVersionDifference = 0;
+
+			if(oldDifferenceTooLarge) {
+				checkOutstandingRequests(self);
+			}
+
 			Void _ = wait(self->db.serverInfo->onChange());
 			continue;
 		}
@@ -2094,8 +2105,14 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 				break;
 			}
 
+			bool oldDifferenceTooLarge = !self->versionDifferenceUpdated || self->datacenterVersionDifference >= SERVER_KNOBS->MAX_VERSION_DIFFERENCE;
 			self->versionDifferenceUpdated = true;
 			self->datacenterVersionDifference = primaryMetrics.get().v - remoteMetrics.get().v;
+
+			if(oldDifferenceTooLarge && self->datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE) {
+				checkOutstandingRequests(self);
+			}
+
 			if(now() - lastLogTime > SERVER_KNOBS->CLUSTER_CONTROLLER_LOGGING_DELAY) {
 				lastLogTime = now();
 				TraceEvent("DatacenterVersionDifference", self->id).detail("Difference", self->datacenterVersionDifference);
