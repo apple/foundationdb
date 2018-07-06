@@ -650,6 +650,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 
 				if(bestOldSet == -1) {
+					if(oldLogData[i].logRouterTags == 0) {
+						TraceEvent("TLogPeekLocalNoLogRouterTags", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size()).detail("Idx", i);
+						throw worker_removed();
+					}
 					i++;
 					continue;
 				}
@@ -1323,7 +1327,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		lockResults.resize(logServers.size());
 		std::set<int8_t> lockedLocalities;
-		bool foundSpecial = false;
+		bool foundSpecial = prevState.logRouterTags == 0;
 		for( int i=0; i < logServers.size(); i++ ) {
 			if(logServers[i]->locality == tagLocalitySpecial || logServers[i]->locality == tagLocalityUpgraded) {
 				foundSpecial = true;
@@ -1337,7 +1341,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		for( auto& old : oldLogData ) {
-			if(foundSpecial) {
+			if(foundSpecial || old.logRouterTags == 0) {
 				break;
 			}
 			for( auto& log : old.tLogs ) {
