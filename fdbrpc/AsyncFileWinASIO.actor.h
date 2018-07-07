@@ -76,6 +76,14 @@ public:
 		// SOMEDAY: What is necessary to implement mustBeDurable on Windows?  Does DeleteFile take care of it?  DeleteFileTransacted?
 		return Void();
 	}
+	static Future<std::time_t> lastWriteTime( std::string filename ) {
+		// TODO(alexmiller): I have no idea about windows
+		struct _stat buf;
+		if (_stat( filename.c_str(), &buf ) != 0) {
+			throw io_error();
+		}
+		return buf->st_mtime;
+	}
 
 	virtual void addref() { ReferenceCounted<AsyncFileWinASIO>::addref(); }
 	virtual void delref() { ReferenceCounted<AsyncFileWinASIO>::delref(); }

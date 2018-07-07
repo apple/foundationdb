@@ -1756,6 +1756,11 @@ Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDura
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
 }
 
+Future< std::time_t > Sim2FileSystem::lastWriteTime( std::string filename ) {
+	// TODO(alexmiller): FIXME
+	return 0;
+}
+
 void Sim2FileSystem::newFileSystem()
 {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
