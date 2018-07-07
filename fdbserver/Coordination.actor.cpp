@@ -211,19 +211,31 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 	loop choose {
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
-			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader)
+			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
 				req.reply.send( currentNominee.get() );
-			else
+			} else {
 				notify.push_back( req.reply );
+				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
+					for(int i=0; i<notify.size(); i++)
+						notify[i].send( currentNominee.get() );
+					notify.clear();
+				}
+			}
 		}
 		when ( CandidacyRequest req = waitNext( interf.candidacy.getFuture() ) ) {
 			//TraceEvent("CandidacyRequest").detail("Nominee", req.myInfo.changeID );
 			availableCandidates.erase( LeaderInfo(req.prevChangeID) );
 			availableCandidates.insert( req.myInfo );
-			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader)
+			if (currentNominee.present() && currentNominee.get().changeID != req.knownLeader) {
 				req.reply.send( currentNominee.get() );
-			else
+			} else {
 				notify.push_back( req.reply );
+				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
+					for(int i=0; i<notify.size(); i++)
+						notify[i].send( currentNominee.get() );
+					notify.clear();
+				}
+			}
 		}
 		when (LeaderHeartbeatRequest req = waitNext( interf.leaderHeartbeat.getFuture() ) ) {
 			//TODO: use notify to only send a heartbeat once per interval
@@ -237,6 +249,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			newInfo.serializedInfo = req.conn.toString();
 			for(int i=0; i<notify.size(); i++)
 				notify[i].send( newInfo );
+			notify.clear();
 			req.reply.send( Void() );
 			return Void();
 		}
