@@ -27,6 +27,7 @@
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "MasterInterface.h"
+#include "RecoveryState.h"
 #include "TLogInterface.h"
 #include "WorkerInterface.h"
 #include "Knobs.h"
@@ -88,10 +89,13 @@ struct RecruitFromConfigurationReply {
 	vector<WorkerInterface> storageServers;
 	vector<WorkerInterface> oldLogRouters;
 	Optional<Key> dcId;
+	bool satelliteFallback;
+
+	RecruitFromConfigurationReply() : satelliteFallback(false) {}
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & oldLogRouters & dcId;
+		ar & tLogs & satelliteTLogs & proxies & resolvers & storageServers & oldLogRouters & dcId & satelliteFallback;
 	}
 };
 
@@ -200,8 +204,9 @@ struct RegisterMasterRequest {
 	int64_t registrationCount;
 	Optional<DatabaseConfiguration> configuration;
 	vector<UID> priorCommittedLogServers;
-	int recoveryState;
-	
+	RecoveryState recoveryState;
+	bool recoveryStalled;
+
 	ReplyPromise<Void> reply;
 
 	RegisterMasterRequest() {}
@@ -209,7 +214,7 @@ struct RegisterMasterRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & dbName & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & reply;
+		ar & dbName & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & recoveryStalled & reply;
 	}
 };
 

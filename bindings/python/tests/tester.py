@@ -91,7 +91,7 @@ class Stack:
                     else:
                         raw[i] = (raw[i][0], val)
                 except fdb.FDBError as e:
-                    # print('ERROR: %s' % repr(e))
+                    # print('ERROR: %r' % e)
                     raw[i] = (raw[i][0], fdb.tuple.pack((b'ERROR', str(e.code).encode('ascii'))))
 
         if count is None:
@@ -543,7 +543,7 @@ class Tester:
                 else:
                     raise Exception("Unknown op %s" % inst.op)
             except fdb.FDBError as e:
-                # print('ERROR: %s' % repr(e))
+                # print('ERROR: %r' % e)
                 inst.stack.push(idx, fdb.tuple.pack((b"ERROR", str(e.code).encode('ascii'))))
 
             # print("        to %s" % self.stack)

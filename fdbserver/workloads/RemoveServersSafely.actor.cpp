@@ -53,6 +53,9 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		kill1Timeout = getOption( options, LiteralStringRef("kill1Timeout"), 60.0 );
 		kill2Timeout = getOption( options, LiteralStringRef("kill2Timeout"), 6000.0 );
 		killProcesses = g_random->random01() < 0.5;
+		if(g_network->isSimulated()) {
+			g_simulator.allowLogSetKills = false;
+		}
 	}
 
 	virtual std::string description() { return "RemoveServersSafelyWorkload"; }
@@ -231,7 +234,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		for (auto processInfo : getServers()) {
 			auto processNet = AddressExclusion(processInfo->address.ip, processInfo->address.port);
 			// Mark all of the unavailable as dead
-			if (!processInfo->isAvailable())
+			if (!processInfo->isAvailable() || processInfo->isCleared())
 				processesDead.push_back(processInfo);
 			// Save all processes not specified within set
 			else if (killAddrs.find(processNet) == killAddrs.end())
@@ -373,7 +376,7 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 			}
 			TraceEvent("RemoveAndKill", functionId).detail("Step", removeViaClear ? "ClearMachines" : "KillMachines").detail("Addresses", describe(killAddrs)).detail("Processes", killProcArray.size()).detail("Zones", zoneIds.size()).detail("ClusterAvailable", g_simulator.isAvailable());
 			for (auto& zoneId : zoneIds) {
-				killedMachine = g_simulator.killMachine( zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly, removeViaClear);
+				killedMachine = g_simulator.killMachine( zoneId, removeViaClear ? ISimulator::RebootAndDelete : ISimulator::KillInstantly );
 				TraceEvent(killedMachine ? SevInfo : SevWarn, "RemoveAndKill").detail("Step", removeViaClear ? "Clear Machine" : "Kill Machine").detailext("ZoneId", zoneId).detail(removeViaClear ? "Cleared" : "Killed", killedMachine).detail("ClusterAvailable", g_simulator.isAvailable());
 			}
 		}

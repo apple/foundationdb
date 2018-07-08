@@ -404,7 +404,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 
 				// for each range
 				for(int i = 0; i < keyServers.size() - 1; i++) {
-					ShardInfo info( keyServers[i].key );
+					DDShardInfo info( keyServers[i].key );
 					decodeKeyServersValue( keyServers[i].value, src, dest );
 					if(remoteDcIds.size()) {
 						auto srcIter = team_cache.find(src);
@@ -471,7 +471,7 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 	}
 
 	// a dummy shard at the end with no keys or servers makes life easier for trackInitialShards()
-	result->shards.push_back( ShardInfo(allKeys.end) );
+	result->shards.push_back( DDShardInfo(allKeys.end) );
 
 	return result;
 }
@@ -484,7 +484,7 @@ Future<Void> storageServerTracker(
 	MoveKeysLock const& lock,
 	UID const& masterId,
 	std::map<UID, Reference<TCServerInfo>>* const& other_servers,
-	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& changes,
+	Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> const& changes,
 	Promise<Void> const& errorOut,
 	Version const& addedVersion);
 
@@ -513,7 +513,7 @@ struct DDTeamCollection {
 	PromiseStream<UID> removedServers;
 	std::set<UID> recruitingIds; // The IDs of the SS which are being recruited
 	std::set<NetworkAddress> recruitingLocalities;
-	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges;
+	Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> serverChanges;
 	Future<Void> initialFailureReactionDelay;
 	Future<Void> initializationDoneActor;
 	Promise<Void> serverTrackerErrorOut;
@@ -544,7 +544,7 @@ struct DDTeamCollection {
 		DatabaseConfiguration configuration,
 		std::vector<Optional<Key>> includedDCs,
 		Optional<std::vector<Optional<Key>>> otherTrackedDCs,
-		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > const& serverChanges,
+		Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> const& serverChanges,
 		Future<Void> readyToStart, Reference<AsyncVar<bool>> zeroHealthyTeams, bool primary,
 		Reference<AsyncVar<bool>> processingUnhealthy)
 		:cx(cx), masterId(masterId), lock(lock), output(output), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), doBuildTeams( true ), teamBuilder( Void() ),
@@ -553,7 +553,7 @@ struct DDTeamCollection {
 		 initializationDoneActor(logOnCompletion(readyToStart && initialFailureReactionDelay, this)), optimalTeamCount( 0 ), recruitingStream(0), restartRecruiting( SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY ),
 		 unhealthyServers(0), includedDCs(includedDCs), otherTrackedDCs(otherTrackedDCs), zeroHealthyTeams(zeroHealthyTeams), zeroOptimalTeams(true), primary(primary), processingUnhealthy(processingUnhealthy)
 	{
-		if(!primary || configuration.remoteTLogReplicationFactor <= 0) {
+		if(!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", masterId)
 				.detail( "State", "Inactive" )
 				.trackLatest( format("%s/DDTrackerStarting", printable(cx->dbName).c_str() ).c_str() );
@@ -579,7 +579,7 @@ struct DDTeamCollection {
 		Void _ = wait(signal);
 		Void _ = wait(delay(SERVER_KNOBS->LOG_ON_COMPLETION_DELAY, TaskDataDistribution));
 
-		if(!self->primary || self->configuration.remoteTLogReplicationFactor <= 0) {
+		if(!self->primary || self->configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", self->masterId)
 				.detail( "State", "Active" )
 				.trackLatest( format("%s/DDTrackerStarting", printable(self->cx->dbName).c_str() ).c_str() );
@@ -1578,7 +1578,7 @@ ACTOR Future<Void> storageServerTracker(
 	MoveKeysLock lock,
 	UID masterId,
 	std::map<UID, Reference<TCServerInfo>>* other_servers,
-	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > changes,
+	Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> changes,
 	Promise<Void> errorOut,
 	Version addedVersion)
 {
@@ -1593,7 +1593,9 @@ ACTOR Future<Void> storageServerTracker(
 	state Future<KeyValueStoreType> storeTracker = keyValueStoreTypeTracker( self, server );
 	state bool hasWrongStoreTypeOrDC = false;
 
-	changes.send( std::make_pair(server->id, server->lastKnownInterface) );
+	if(changes.present()) {
+		changes.get().send( std::make_pair(server->id, server->lastKnownInterface) );
+	}
 
 	try {
 		loop {
@@ -1680,7 +1682,9 @@ ACTOR Future<Void> storageServerTracker(
 				when( Void _ = wait( failureTracker ) ) {
 					// The server is failed AND all data has been removed from it, so permanently remove it.
 					TraceEvent("StatusMapChange", masterId).detail("ServerID", server->id).detail("Status", "Removing");
-					changes.send( std::make_pair(server->id, Optional<StorageServerInterface>()) );
+					if(changes.present()) {
+						changes.get().send( std::make_pair(server->id, Optional<StorageServerInterface>()) );
+					}
 
 					// Remove server from FF/serverList
 					Void _ = wait( removeStorageServer( cx, server->id, lock ) );
@@ -1699,7 +1703,9 @@ ACTOR Future<Void> storageServerTracker(
 					server->lastKnownInterface = newInterface.first;
 					server->lastKnownClass = newInterface.second;
 					interfaceChanged = server->onInterfaceChanged;
-					changes.send( std::make_pair(server->id, server->lastKnownInterface) );
+					if(changes.present()) {
+						changes.get().send( std::make_pair(server->id, server->lastKnownInterface) );
+					}
 					// We rely on the old failureTracker being actorCancelled since the old actor now has a pointer to an invalid location
 					status = ServerStatus( status.isFailed, status.isUndesired, server->lastKnownInterface.locality );
 
@@ -1918,7 +1924,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 	DatabaseConfiguration configuration,
 	std::vector<Optional<Key>> includedDCs,
 	Optional<std::vector<Optional<Key>>> otherTrackedDCs,
-	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
+	Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >> serverChanges,
 	Future<Void> readyToStart,
 	Reference<AsyncVar<bool>> zeroHealthyTeams,
 	bool primary,
@@ -2131,7 +2137,7 @@ ACTOR Future<Void> dataDistribution(
 				TraceEvent("DDInitTakingMoveKeysLock", mi.id());
 				state MoveKeysLock lock = wait( takeMoveKeysLock( cx, mi.id() ) );
 				TraceEvent("DDInitTookMoveKeysLock", mi.id());
-				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, mi.id(), lock, configuration.remoteTLogReplicationFactor > 0 ? remoteDcIds : std::vector<Optional<Key>>() ) );
+				state Reference<InitialDataDistribution> initData = wait( getInitialDataDistribution(cx, mi.id(), lock, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>() ) );
 				if(initData->shards.size() > 1) {
 					TraceEvent("DDInitGotInitialDD", mi.id()).detail("B", printable(initData->shards.end()[-2].key)).detail("E", printable(initData->shards.end()[-1].key)).detail("Src", describe(initData->shards.end()[-2].primarySrc)).detail("Dest", describe(initData->shards.end()[-2].primaryDest)).trackLatest("InitialDD");
 				} else {
@@ -2174,7 +2180,7 @@ ACTOR Future<Void> dataDistribution(
 			int storageTeamSize = configuration.storageTeamSize;
 
 			vector<Future<Void>> actors;
-			if (configuration.remoteTLogReplicationFactor > 0) {
+			if (configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
 				storageTeamSize = 2*configuration.storageTeamSize;
 
@@ -2192,7 +2198,7 @@ ACTOR Future<Void> dataDistribution(
 				shardsAffectedByTeamFailure->defineShard(keys);
 				std::vector<ShardsAffectedByTeamFailure::Team> teams;
 				teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[s].primarySrc, true));
-				if(configuration.remoteTLogReplicationFactor > 0) {
+				if(configuration.usableRegions > 1) {
 					teams.push_back(ShardsAffectedByTeamFailure::Team(initData->shards[s].remoteSrc, false));
 				}
 				shardsAffectedByTeamFailure->moveShard(keys, teams);
@@ -2205,10 +2211,10 @@ ACTOR Future<Void> dataDistribution(
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, configuration.durableStorageQuorum, lastLimited, recoveryCommitVersion ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[0], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, primaryDcId, configuration.remoteTLogReplicationFactor > 0 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
-			if (configuration.remoteTLogReplicationFactor > 0) {
-				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[1], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), serverChanges, readyToStart.getFuture() && remoteRecovered, zeroHealthyTeams[1], false, processingUnhealthy ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, lastLimited, recoveryCommitVersion ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[0], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
+			if (configuration.usableRegions > 1) {
+				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[1], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >>(), readyToStart.getFuture() && remoteRecovered, zeroHealthyTeams[1], false, processingUnhealthy ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
 			}
 
 			Void _ = wait( waitForAll( actors ) );

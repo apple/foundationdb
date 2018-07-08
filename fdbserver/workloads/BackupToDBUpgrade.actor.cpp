@@ -32,7 +32,6 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 	int backupRangesCount, backupRangeLengthMax;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	Database extraDB;
-	bool shareLogRange;
 
 	BackupToDBUpgradeWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		backupAfter = getOption(options, LiteralStringRef("backupAfter"), g_random->random01() * 10.0);
@@ -133,7 +132,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> checkData(Database cx, UID logUid, UID destUid, Key tag, DatabaseBackupAgent* backupAgent, bool shareLogRange) {
+	ACTOR static Future<Void> checkData(Database cx, UID logUid, UID destUid, Key tag, DatabaseBackupAgent* backupAgent) {
 		state Key backupAgentKey = uidPrefixKey(logRangesRange.begin, logUid);
 		state Key backupLogValuesKey = uidPrefixKey(backupLogKeys.begin, destUid);
 		state Key backupLatestVersionsPath = uidPrefixKey(backupLatestVersionsPrefix, destUid);
@@ -212,7 +211,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				}
 
 				Standalone<RangeResultRef> versions = wait(tr->getRange(KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
-				if (!shareLogRange || !versions.size()) {
+				if (!versions.size()) {
 					Standalone<RangeResultRef> logValues = wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 					// Error if the log/mutation keyspace for the backup tag is not empty
@@ -449,10 +448,10 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			int _ = wait(restoreAgent.waitBackup(cx, self->restoreTag));
 			Void _ = wait(restoreAgent.unlockBackup(cx, self->restoreTag));
-			Void _ = wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent, self->shareLogRange));
+			Void _ = wait(checkData(self->extraDB, logUid, logUid, self->backupTag, &backupAgent));
 
 			state UID restoreUid = wait(restoreAgent.getLogUid(cx, self->restoreTag));
-			Void _ = wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreAgent, self->shareLogRange));
+			Void _ = wait(checkData(cx, restoreUid, restoreUid, self->restoreTag, &restoreAgent));
 
 			TraceEvent("DRU_Complete").detail("BackupTag", printable(self->backupTag));
 

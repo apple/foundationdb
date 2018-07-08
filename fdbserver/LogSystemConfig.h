@@ -55,8 +55,6 @@ protected:
 	Optional<Interface> iface;
 };
 
-enum { HasBestPolicyNone = 0, HasBestPolicyId = 1 };
-
 struct TLogSet {
 	std::vector<OptionalInterface<TLogInterface>> tLogs;
 	std::vector<OptionalInterface<TLogInterface>> logRouters;
@@ -64,18 +62,18 @@ struct TLogSet {
 	std::vector< LocalityData > tLogLocalities; // Stores the localities of the log servers
 	IRepPolicyRef tLogPolicy;
 	bool isLocal;
-	int32_t hasBestPolicy;
 	int8_t locality;
 	Version startVersion;
+	std::vector<std::vector<int>> satelliteTagLocations;
 
-	TLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), hasBestPolicy(HasBestPolicyId), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
+	TLogSet() : tLogWriteAntiQuorum(0), tLogReplicationFactor(0), isLocal(true), locality(tagLocalityInvalid), startVersion(invalidVersion) {}
 
 	std::string toString() const {
-		return format("anti: %d replication: %d local: %d best: %d routers: %d tLogs: %s locality: %d", tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, hasBestPolicy, logRouters.size(), describe(tLogs).c_str(), locality);
+		return format("anti: %d replication: %d local: %d routers: %d tLogs: %s locality: %d", tLogWriteAntiQuorum, tLogReplicationFactor, isLocal, logRouters.size(), describe(tLogs).c_str(), locality);
 	}
 
 	bool operator == ( const TLogSet& rhs ) const {
-		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || hasBestPolicy != rhs.hasBestPolicy ||
+		if (tLogWriteAntiQuorum != rhs.tLogWriteAntiQuorum || tLogReplicationFactor != rhs.tLogReplicationFactor || isLocal != rhs.isLocal || satelliteTagLocations != rhs.satelliteTagLocations ||
 			startVersion != rhs.startVersion || tLogs.size() != rhs.tLogs.size() || locality != rhs.locality || logRouters.size() != rhs.logRouters.size()) {
 			return false;
 		}
@@ -96,7 +94,8 @@ struct TLogSet {
 	}
 
 	bool isEqualIds(TLogSet const& r) const {
-		if (tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor || isLocal != r.isLocal || hasBestPolicy != r.hasBestPolicy || startVersion != r.startVersion || tLogs.size() != r.tLogs.size() || locality != r.locality) {
+		if (tLogWriteAntiQuorum != r.tLogWriteAntiQuorum || tLogReplicationFactor != r.tLogReplicationFactor || isLocal != r.isLocal || satelliteTagLocations != r.satelliteTagLocations ||
+			startVersion != r.startVersion || tLogs.size() != r.tLogs.size() || locality != r.locality) {
 			return false;
 		}
 		if ((tLogPolicy && !r.tLogPolicy) || (!tLogPolicy && r.tLogPolicy) || (tLogPolicy && (tLogPolicy->info() != r.tLogPolicy->info()))) {
@@ -112,7 +111,7 @@ struct TLogSet {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & tLogs & logRouters & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & hasBestPolicy & locality & startVersion;
+		ar & tLogs & logRouters & tLogWriteAntiQuorum & tLogReplicationFactor & tLogPolicy & tLogLocalities & isLocal & locality & startVersion & satelliteTagLocations;
 	}
 };
 
@@ -157,11 +156,11 @@ struct LogSystemConfig {
 	int32_t expectedLogSets;
 	UID recruitmentID;
 	bool stopped;
-	Optional<Version> previousEpochEndVersion;
+	Optional<Version> recoveredAt;
 
 	LogSystemConfig() : logSystemType(0), logRouterTags(0), expectedLogSets(0), stopped(false) {}
 
-	std::string toString() const { 
+	std::string toString() const {
 		return format("type: %d oldGenerations: %d tags: %d %s", logSystemType, oldTLogs.size(), logRouterTags, describe(tLogs).c_str());
 	}
 
@@ -218,7 +217,7 @@ struct LogSystemConfig {
 	bool operator == ( const LogSystemConfig& rhs ) const { return isEqual(rhs); }
 
 	bool isEqual(LogSystemConfig const& r) const {
-		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID && stopped == r.stopped && previousEpochEndVersion == r.previousEpochEndVersion;
+		return logSystemType == r.logSystemType && tLogs == r.tLogs && oldTLogs == r.oldTLogs && expectedLogSets == r.expectedLogSets && logRouterTags == r.logRouterTags && recruitmentID == r.recruitmentID && stopped == r.stopped && recoveredAt == r.recoveredAt;
 	}
 
 	bool isEqualIds(LogSystemConfig const& r) const {
@@ -249,7 +248,7 @@ struct LogSystemConfig {
 
 	template <class Ar>
 	void serialize( Ar& ar ) {
-		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped & previousEpochEndVersion;
+		ar & logSystemType & tLogs & logRouterTags & oldTLogs & expectedLogSets & recruitmentID & stopped & recoveredAt;
 	}
 };
 

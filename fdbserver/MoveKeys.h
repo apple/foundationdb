@@ -56,7 +56,6 @@ Future<Void> moveKeys(
 	vector<UID> const& destinationTeam,
 	vector<UID> const& healthyDestinations,
 	MoveKeysLock const& lock,
-	int const& durableStorageQuorum,
 	Promise<Void> const& dataMovementComplete,
 	FlowLock* const& startMoveKeysParallelismLock,
 	FlowLock* const& finishMoveKeysParallelismLock,

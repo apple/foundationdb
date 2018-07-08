@@ -115,16 +115,16 @@ FlowKnobs::FlowKnobs(bool randomize, bool isSimulated) {
 	init( TRACE_RETRY_OPEN_INTERVAL,						  1.00 );
 	init( MIN_TRACE_SEVERITY,                 isSimulated ? 0 : 10 ); // Related to the trace severity in Trace.h
 	init( MAX_TRACE_SUPPRESSIONS,                              1e4 );
-	init( TRACE_FSYNC_ENABLED,                                   0 );
-	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,				   500 );
-	init( TRACE_EVENT_THROTLLER_SAMPLE_EXPIRY,				   1800.0 ); // 30 mins
-	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,					  20000 );
+	init( TRACE_SYNC_ENABLED,                                    0 );
+	init( TRACE_EVENT_METRIC_UNITS_PER_SAMPLE,                 500 );
+	init( TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY,              1800.0 ); // 30 mins
+	init( TRACE_EVENT_THROTTLER_MSG_LIMIT,                   20000 );
 
 	//TDMetrics
 	init( MAX_METRICS,                                         600 );
 	init( MAX_METRIC_SIZE,                                    2500 );
 	init( MAX_METRIC_LEVEL,                                     25 );
-	init( METRIC_LEVEL_DIVISOR,                             log(4) ); 
+	init( METRIC_LEVEL_DIVISOR,                             log(4) );
 	init( METRIC_LIMIT_START_QUEUE_SIZE,                        10 );  // The queue size at which to start restricting logging by disabling levels
 	init( METRIC_LIMIT_RESPONSE_FACTOR,                         10 );  // The additional queue size at which to disable logging of another level (higher == less restrictive)
 

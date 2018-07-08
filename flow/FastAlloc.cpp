@@ -417,6 +417,22 @@ void releaseAllThreadMagazines() {
 	FastAllocator<4096>::releaseThreadMagazines();
 }
 
+int64_t getTotalUnusedAllocatedMemory() {
+	int64_t unusedMemory = 0;
+
+	unusedMemory += FastAllocator<16>::getMemoryUnused();
+	unusedMemory += FastAllocator<32>::getMemoryUnused();
+	unusedMemory += FastAllocator<64>::getMemoryUnused();
+	unusedMemory += FastAllocator<128>::getMemoryUnused();
+	unusedMemory += FastAllocator<256>::getMemoryUnused();
+	unusedMemory += FastAllocator<512>::getMemoryUnused();
+	unusedMemory += FastAllocator<1024>::getMemoryUnused();
+	unusedMemory += FastAllocator<2048>::getMemoryUnused();
+	unusedMemory += FastAllocator<4096>::getMemoryUnused();
+
+	return unusedMemory;
+}
+
 template class FastAllocator<16>;
 template class FastAllocator<32>;
 template class FastAllocator<64>;

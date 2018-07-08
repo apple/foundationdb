@@ -22,7 +22,8 @@
 
 fdb_c_CFLAGS := $(fdbclient_CFLAGS)
 fdb_c_LDFLAGS := $(fdbrpc_LDFLAGS)
-fdb_c_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
+fdb_c_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a $(FDB_TLS_LIB)
+fdb_c_STATIC_LIBS := $(TLS_LIBS)
 fdb_c_tests_LIBS := -Llib -lfdb_c
 fdb_c_tests_HEADERS := -Ibindings/c
 

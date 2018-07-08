@@ -68,13 +68,13 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface masterWorker ) {
 	try {
 		TraceEvent("DataInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
-		Standalone<StringRef> md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/TotalDataInFlight" ) ) ), 1.0 ) );
 		int64_t dataInFlight;
-		sscanf(extractAttribute(md.toString(), "TotalBytes").c_str(), "%lld", &dataInFlight);
+		sscanf(md.getValue("TotalBytes").c_str(), "%lld", &dataInFlight);
 		return dataInFlight;
 	} catch( Error &e ) {
-		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract DataInFlight");
+		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract DataInFlight").error(e);
 		throw;
 	}
 
@@ -89,13 +89,13 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, Reference<AsyncVar<ServerDBI
 }
 
 //Computes the queue size for storage servers and tlogs using the bytesInput and bytesDurable attributes
-int64_t getQueueSize( Standalone<StringRef> md ) {
+int64_t getQueueSize( TraceEventFields md ) {
 	double inputRate, durableRate;
 	double inputRoughness, durableRoughness;
 	int64_t inputBytes, durableBytes;
 
-	sscanf(extractAttribute(md.toString(), "BytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
-	sscanf(extractAttribute(md.toString(), "BytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
+	sscanf(md.getValue("BytesInput").c_str(), "%lf %lf %lld", &inputRate, &inputRoughness, &inputBytes);
+	sscanf(md.getValue("BytesDurable").c_str(), "%lf %lf %lld", &durableRate, &durableRoughness, &durableBytes);
 
 	return inputBytes - durableBytes;
 }
@@ -110,7 +110,7 @@ ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<Serve
 		workersMap[worker.first.address()] = worker.first;
 	}
 
-	state std::vector<Future<Standalone<StringRef>>> messages;
+	state std::vector<Future<TraceEventFields>> messages;
 	state std::vector<TLogInterface> tlogs = dbInfo->get().logSystemConfig.allPresentLogs();
 	for(int i = 0; i < tlogs.size(); i++) {
 		auto itr = workersMap.find(tlogs[i].address());
@@ -182,7 +182,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 		workersMap[worker.first.address()] = worker.first;
 	}
 
-	state std::vector<Future<Standalone<StringRef>>> messages;
+	state std::vector<Future<TraceEventFields>> messages;
 	for(int i = 0; i < servers.size(); i++) {
 		auto itr = workersMap.find(servers[i].address());
 		if(itr == workersMap.end()) {
@@ -224,17 +224,17 @@ ACTOR Future<int64_t> getDataDistributionQueueSize( Database cx, WorkerInterface
 	try {
 		TraceEvent("DataDistributionQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
 
-		Standalone<StringRef> movingDataMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEventFields movingDataMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/MovingData") ) ), 1.0 ) );
 
-		TraceEvent("DataDistributionQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "GotString").detail("Result", printable(movingDataMessage)).detail("TrackLatest", printable( StringRef( cx->dbName.toString() + "/MovingData") ) );
+		TraceEvent("DataDistributionQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "GotString")/*.detail("Result", printable(movingDataMessage))*/.detail("TrackLatest", printable( StringRef( cx->dbName.toString() + "/MovingData") ) );
 
 		int64_t inQueue;
-		sscanf(extractAttribute(movingDataMessage.toString(), "InQueue").c_str(), "%lld", &inQueue);
+		sscanf(movingDataMessage.getValue("InQueue").c_str(), "%lld", &inQueue);
 
 		if(reportInFlight) {
 			int64_t inFlight;
-			sscanf(extractAttribute(movingDataMessage.toString(), "InFlight").c_str(), "%lld", &inFlight);
+			sscanf(movingDataMessage.getValue("InFlight").c_str(), "%lld", &inFlight);
 			inQueue += inFlight;
 		}
 
@@ -258,10 +258,10 @@ ACTOR Future<bool> getDataDistributionActive( Database cx, WorkerInterface maste
 	try {
 		TraceEvent("DataDistributionActive").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
 
-		Standalone<StringRef> activeMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEventFields activeMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/DDTrackerStarting") ) ), 1.0 ) );
 
-		return extractAttribute(activeMessage.toString(), "State") == "Active";
+		return activeMessage.getValue("State") == "Active";
 	} catch( Error &e ) {
 		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract DataDistributionActive");
 		throw;
@@ -273,29 +273,27 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 	try {
 		TraceEvent("StorageServersRecruiting").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
 
-		Standalone<StringRef> recruitingMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
+		TraceEventFields recruitingMessage = wait( timeoutError(masterWorker.eventLogRequest.getReply(
 			EventLogRequest( StringRef( cx->dbName.toString() + "/StorageServerRecruitment_" + dbInfo->get().master.id().toString()) ) ), 1.0 ) );
 
-		return extractAttribute(recruitingMessage.toString(), "State") == "Recruiting";
+		return recruitingMessage.getValue("State") == "Recruiting";
 	} catch( Error &e ) {
 		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract StorageServersRecruiting").detail("MasterID", dbInfo->get().master.id());
 		throw;
 	}
 }
 
-ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
+ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	Void _ = wait( delay(time) );
 
-	if(g_network->isSimulated()) {
+	if(g_network->isSimulated() && g_simulator.allowLogSetKills) {
 		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
-		g_simulator.hasRemoteReplication = false;
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "remote_none" ) );
-		if (g_network->isSimulated() && g_simulator.extraDB) {
-			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
-			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
-			Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
-			ConfigurationResult::Type _ = wait(changeConfig(extraDB, "remote_none"));
+		g_simulator.usableRegions = 1;
+		ConfigurationResult::Type _ = wait( changeConfig( cx, "repopulate_anti_quorum=1" ) );
+		while( dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
+			Void _ = wait( dbInfo->onChange() );
 		}
+		ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
 	}
 
 	return Void();
@@ -303,7 +301,7 @@ ACTOR Future<Void> reconfigureAfter(Database cx, double time) {
 
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0 ) {
-	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100));
+	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100), dbInfo);
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 

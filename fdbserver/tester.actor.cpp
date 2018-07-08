@@ -760,6 +760,7 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 
 	state double start = now();
 	state bool lastRun = false;
+	state bool reconfigure = true;
 	loop {
 		DistributedTestResults testResults = wait(runWorkload(cx, testers, database, spec));
 		if(testResults.ok() || lastRun) {
@@ -771,6 +772,11 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 		if(now() - start > softTimeLimit) {
 			spec.options[0].push_back_deep(spec.options.arena(), KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 			lastRun = true;
+		}
+		if(g_network->isSimulated() && reconfigure) {
+			reconfigure = false;
+			TraceEvent(SevWarnAlways, "RepopulatingDeadRegions");
+			ConfigurationResult::Type _ = wait( changeConfig( cx, "repopulate_anti_quorum=1" ) );
 		}
 	}
 }
