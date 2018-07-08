@@ -148,6 +148,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( FREE_SPACE_RATIO_CUTOFF,                               0.1 );
 	init( FREE_SPACE_RATIO_DD_CUTOFF,                            0.2 );
 	init( DESIRED_TEAMS_PER_SERVER,                                5 ); if( randomize && BUGGIFY ) DESIRED_TEAMS_PER_SERVER = 1;
+	init( MAX_TEAMS_PER_SERVER,           3*DESIRED_TEAMS_PER_SERVER );
 	init( DD_SHARD_SIZE_GRANULARITY,                         5000000 );
 	init( DD_SHARD_SIZE_GRANULARITY_SIM,                      500000 ); if( randomize && BUGGIFY ) DD_SHARD_SIZE_GRANULARITY_SIM = 0;
 	init( DD_MOVE_KEYS_PARALLELISM,                               20 ); if( randomize && BUGGIFY ) DD_MOVE_KEYS_PARALLELISM = 1;
@@ -252,7 +253,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MIN_BALANCE_DIFFERENCE,                              10000 );
 	init( SECONDS_BEFORE_NO_FAILURE_DELAY,                  8 * 3600 );
 	init( MAX_TXS_SEND_MEMORY,                                   1e7 ); if( randomize && BUGGIFY ) MAX_TXS_SEND_MEMORY = 1e5;
-	init( MAX_RECOVERY_VERSIONS,           200 * VERSIONS_PER_SECOND ); if( randomize && BUGGIFY ) MAX_RECOVERY_VERSIONS = VERSIONS_PER_SECOND;
+	init( MAX_RECOVERY_VERSIONS,           200 * VERSIONS_PER_SECOND );
 	init( MAX_RECOVERY_TIME,                                    20.0 ); if( randomize && BUGGIFY ) MAX_RECOVERY_TIME = 1.0;
 
 	// Resolver
