@@ -152,7 +152,9 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_IO_TRUST_SECONDS,     "--io_trust_seconds",          SO_REQ_SEP },
 	{ OPT_IO_TRUST_WARN_ONLY,   "--io_trust_warn_only",        SO_NONE },
 
+#ifndef TLS_DISABLED
 	TLS_OPTION_FLAGS
+#endif
 
 	SO_END_OF_OPTIONS
 };
@@ -628,7 +630,9 @@ static void printUsage( const char *name, bool devhelp ) {
 		   "                 Machine class (valid options are storage, transaction,\n"
 		   "                 resolution, proxy, master, test, unset, stateless, log, router,\n"
 		   "                 and cluster_controller).\n");
+#ifndef TLS_DISABLED
 	printf(TLS_HELP);
+#endif
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, -?, --help Display this help and exit.\n");
 	if( devhelp ) {
@@ -814,7 +818,7 @@ int main(int argc, char* argv[]) {
 
 		//Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
-		
+
 		std::string commandLine;
 		for (int a = 0; a<argc; a++) {
 			if (a) commandLine += ' ';
@@ -1192,15 +1196,9 @@ int main(int argc, char* argv[]) {
 				case OPT_IO_TRUST_WARN_ONLY:
 					fileIoWarnOnly = true;
 					break;
+#ifndef TLS_DISABLED
 				case TLSOptions::OPT_TLS_PLUGIN:
-					try {
-						const char* plugin_path = args.OptionArg();
-						tlsOptions->set_plugin_name_or_path( plugin_path ? plugin_path : "" );
-					} catch (Error& e) {
-						fprintf(stderr, "ERROR: cannot load TLS plugin `%s' (%s)\n", args.OptionArg(), e.what());
-						printHelpTeaser(argv[0]);
-						flushAndExit(FDB_EXIT_ERROR);
-					}
+					args.OptionArg();
 					break;
 				case TLSOptions::OPT_TLS_CERTIFICATES:
 					tlsCertPath = args.OptionArg();
@@ -1217,6 +1215,7 @@ int main(int argc, char* argv[]) {
 				case TLSOptions::OPT_TLS_VERIFY_PEERS:
 					tlsVerifyPeers.push_back(args.OptionArg());
 					break;
+#endif
 			}
 		}
 
@@ -1464,7 +1463,7 @@ int main(int argc, char* argv[]) {
 		// Initialize the thread pool
 		CoroThreadPool::init();
 		// Ordinarily, this is done when the network is run. However, network thread should be set before TraceEvents are logged. This thread will eventually run the network, so call it now.
-		TraceEvent::setNetworkThread(); 
+		TraceEvent::setNetworkThread();
 
 		if (role == Simulation || role == CreateTemplateDatabase) {
 			//startOldSimulator();
@@ -1476,6 +1475,7 @@ int main(int argc, char* argv[]) {
 
 			openTraceFile(publicAddress, rollsize, maxLogsSize, logFolder, "trace", logGroup);
 
+#ifndef TLS_DISABLED
 			if ( tlsCertPath.size() )
 				tlsOptions->set_cert_file( tlsCertPath );
 			if (tlsCAPath.size())
@@ -1490,7 +1490,7 @@ int main(int argc, char* argv[]) {
 				tlsOptions->set_verify_peers( tlsVerifyPeers );
 
 			tlsOptions->register_network();
-
+#endif
 			if (role == FDBD || role == NetworkTestServer) {
 				try {
 					listenError = FlowTransport::transport().bind(publicAddress, listenAddress);

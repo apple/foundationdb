@@ -325,7 +325,7 @@ ACTOR Future<StatusObject> clientStatusFetcher(Reference<ClusterConnectionFile> 
 		description += ClusterConnectionFile(f->getFilename()).getConnectionString().toString().c_str();
 		description += "\nThe current connection string is: ";
 		description += f->getConnectionString().toString().c_str();
-		description += "\nVerify cluster file is writable and has not been overwritten externally. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
+		description += "\nVerify the cluster file and its parent directory are writable and that the cluster file has not been overwritten externally. To change coordinators without manual intervention, the cluster file and its containing folder must be writable by all servers and clients. If a majority of the coordinators referenced by the old connection string are lost, the database will stop working until the correct cluster file is distributed to all processes.";
 		messages->push_back(makeMessage("incorrect_cluster_file_contents", description.c_str()));
 	}
 
@@ -377,8 +377,9 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 	try {
 		// Lots of the JSON reads in this code could throw, and that's OK, isAvailable and isHealthy will be
 		// at the states we want them to be in (currently)
+		std::string recoveryStateName = cluster.at("recovery_state.name").get_str();
 		isAvailable = client.at("coordinators.quorum_reachable").get_bool()
-			&& ( cluster.at("recovery_state.name") == "fully_recovered" || "remote_recovered" )
+			&& ( recoveryStateName == "accepting_commits" || recoveryStateName == "all_logs_recruited" || recoveryStateName == "storage_recovered" || recoveryStateName == "fully_recovered" )
 			&& cluster.at("database_available").get_bool();
 
 		if (isAvailable)

@@ -24,12 +24,11 @@ fdbcli_CFLAGS := $(fdbclient_CFLAGS)
 fdbcli_LDFLAGS := $(fdbrpc_LDFLAGS)
 
 ifeq ($(PLATFORM),freebsd)
-fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a
+fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a $(FDB_TLS_LIB)
 else
-fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a -ldl
+fdbcli_LIBS := lib/libfdbclient.a lib/libfdbrpc.a lib/libflow.a -ldl $(FDB_TLS_LIB)
 endif
-
-fdbcli_STATIC_LIBS :=
+fdbcli_STATIC_LIBS := $(TLS_LIBS)
 
 fdbcli_GENERATED_SOURCES += versions.h
 

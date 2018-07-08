@@ -111,12 +111,14 @@ ACTOR Future<Void> forwardError( PromiseStream<ErrorInfo> errors,
 }
 
 ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void() ) {
+	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr( store->getError() );
 	choose {
 		when (state ErrorOr<Void> e = wait( errorOr(actor) )) {
 			Void _ = wait(onClosed);
+			if(storeError.isReady()) throw storeError.getError();
 			if (e.isError()) throw e.getError(); else return e.get();
 		}
-		when (ErrorOr<Void> e = wait( actor.isReady() ? Never() : errorOr( store->getError() ) )) {
+		when (ErrorOr<Void> e = wait( storeError )) {
 			TraceEvent("WorkerTerminatingByIOError", id).error(e.getError(), true);
 			actor.cancel();
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be reported SevError.
@@ -144,7 +146,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			endRole(err.id, err.context, "Error", ok, err.error);
 
-			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout) throw err.error;
+			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout || err.error.code() == error_code_io_error) throw err.error;
 		}
 	}
 }
@@ -675,7 +677,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				DUMPTOKEN( recruited.getCommitVersion );
 
 				//printf("Recruited as masterServer\n");
-				Future<Void> masterProcess = masterServer( recruited, dbInfo, ServerCoordinators( connFile ), req.lifetime );
+				Future<Void> masterProcess = masterServer( recruited, dbInfo, ServerCoordinators( connFile ), req.lifetime, req.forceRecovery );
 				errorForwarders.add( zombie(recruited, forwardError( errors, "MasterServer", recruited.id(), masterProcess )) );
 				req.reply.send(recruited);
 			}
@@ -811,11 +813,11 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				}
 			}
 			when( EventLogRequest req = waitNext(interf.eventLogRequest.getFuture()) ) {
-				Standalone<StringRef> e;
+				TraceEventFields e;
 				if( req.getLastError )
-					e = StringRef( latestEventCache.getLatestError() );
+					e = latestEventCache.getLatestError();
 				else
-					e = StringRef( latestEventCache.get( req.eventName.toString() ) );
+					e = latestEventCache.get( req.eventName.toString() );
 				req.reply.send(e);
 			}
 			when( TraceBatchDumpRequest req = waitNext(interf.traceBatchDumpRequest.getFuture()) ) {

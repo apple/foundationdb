@@ -26,6 +26,7 @@
 ILogSystem::ServerPeekCursor::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>> const& interf, Tag tag, Version begin, Version end, bool returnIfBlocked, bool parallelGetMore )
 			: interf(interf), tag(tag), messageVersion(begin), end(end), hasMsg(false), rd(results.arena, results.messages, Unversioned()), randomID(g_random->randomUniqueID()), poppedVersion(0), returnIfBlocked(returnIfBlocked), sequence(0), parallelGetMore(parallelGetMore) {
 	this->results.maxKnownVersion = 0;
+	this->results.minKnownCommittedVersion = 0;
 	//TraceEvent("SPC_Starting", randomID).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).backtrace();
 }
 
@@ -34,6 +35,7 @@ ILogSystem::ServerPeekCursor::ServerPeekCursor( TLogPeekReply const& results, Lo
 {
 	//TraceEvent("SPC_Clone", randomID);
 	this->results.maxKnownVersion = 0;
+	this->results.minKnownCommittedVersion = 0;
 	if(hasMsg)
 		nextMessage();
 
@@ -141,6 +143,7 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 	}
 
 	loop {
+		state Version expectedBegin = self->messageVersion.version;
 		try {
 			while(self->futureResults.size() < SERVER_KNOBS->PARALLEL_GET_MORE_REQUESTS && self->interf->get().present()) {
 				self->futureResults.push_back( brokenPromiseToNever( self->interf->get().interf().peekMessages.getReply(TLogPeekRequest(self->messageVersion.version,self->tag,self->returnIfBlocked, std::make_pair(self->randomID, self->sequence++)), taskID) ) );
@@ -148,6 +151,10 @@ ACTOR Future<Void> serverPeekParallelGetMore( ILogSystem::ServerPeekCursor* self
 
 			choose {
 				when( TLogPeekReply res = wait( self->interf->get().present() ? self->futureResults.front() : Never() ) ) {
+					if(res.begin.get() != expectedBegin) {
+						throw timed_out();
+					}
+					expectedBegin = res.end;
 					self->futureResults.pop_front();
 					self->results = res;
 					if(res.popped.present())
@@ -253,6 +260,8 @@ bool ILogSystem::ServerPeekCursor::isExhausted() {
 }
 
 LogMessageVersion ILogSystem::ServerPeekCursor::version() { return messageVersion; } // Call only after nextMessage().  The sequence of the current message, or results.end if nextMessage() has returned false.
+
+Version ILogSystem::ServerPeekCursor::getMinKnownCommittedVersion() { return results.minKnownCommittedVersion; }
 
 Version ILogSystem::ServerPeekCursor::popped() { return poppedVersion; }
 
@@ -484,6 +493,10 @@ bool ILogSystem::MergedPeekCursor::isExhausted() {
 }
 
 LogMessageVersion ILogSystem::MergedPeekCursor::version() { return messageVersion; }
+
+Version ILogSystem::MergedPeekCursor::getMinKnownCommittedVersion() {
+	return serverCursors[currentCursor]->getMinKnownCommittedVersion();
+}
 
 Version ILogSystem::MergedPeekCursor::popped() {
 	Version poppedVersion = 0;
@@ -776,6 +789,10 @@ bool ILogSystem::SetPeekCursor::isExhausted() {
 
 LogMessageVersion ILogSystem::SetPeekCursor::version() { return messageVersion; }
 
+Version ILogSystem::SetPeekCursor::getMinKnownCommittedVersion() {
+	return serverCursors[currentSet][currentCursor]->getMinKnownCommittedVersion();
+}
+
 Version ILogSystem::SetPeekCursor::popped() {
 	Version poppedVersion = 0;
 	for (auto& cursors : serverCursors) {
@@ -856,6 +873,10 @@ bool ILogSystem::MultiCursor::isExhausted() {
 
 LogMessageVersion ILogSystem::MultiCursor::version() {
 	return cursors.back()->version();
+}
+
+Version ILogSystem::MultiCursor::getMinKnownCommittedVersion() {
+	return cursors.back()->getMinKnownCommittedVersion();
 }
 
 Version ILogSystem::MultiCursor::popped() {

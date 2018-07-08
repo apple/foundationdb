@@ -227,7 +227,10 @@ def transactional(*tr_args, **tr_kwargs):
         wfunc = func
         while getattr(wfunc, '__wrapped__', None):
             wfunc = wfunc.__wrapped__
-        index = inspect.getargspec(wfunc).args.index(parameter)
+        if hasattr(inspect, 'getfullargspec'):
+            index = inspect.getfullargspec(wfunc).args.index(parameter)
+        else:
+            index = inspect.getargspec(wfunc).args.index(parameter)
 
         if getattr(func, '_is_coroutine', False):
             @functools.wraps(func)

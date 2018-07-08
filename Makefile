@@ -43,6 +43,7 @@ ifeq ($(PLATFORM),Linux)
   CXXFLAGS += -std=c++0x
 
   BOOSTDIR ?= /opt/boost_1_52_0
+  TLS_LIBDIR ?= /usr/local/lib
   DLEXT := so
   java_DLEXT := so
   TARGET_LIBC_VERSION ?= 2.11
@@ -71,6 +72,7 @@ else ifeq ($(PLATFORM),Darwin)
   .LIBPATTERNS := lib%.dylib lib%.a
 
   BOOSTDIR ?= $(HOME)/boost_1_52_0
+  TLS_LIBDIR ?= /usr/local/lib
   DLEXT := dylib
   java_DLEXT := jnilib
 else
@@ -101,6 +103,16 @@ CFLAGS += -O2
 CFLAGS += -g
 
 # valgrind-compatibile builds are enabled by uncommenting lines in valgind.mk
+
+# Define the TLS compilation and link variables
+ifdef TLS_DISABLED
+CFLAGS += -DTLS_DISABLED
+FDB_TLS_LIB :=
+TLS_LIBS :=
+else
+FDB_TLS_LIB := lib/libFDBLibTLS.a
+TLS_LIBS += $(addprefix $(TLS_LIBDIR)/,libtls.a libssl.a libcrypto.a)
+endif
 
 CXXFLAGS += -Wno-deprecated
 LDFLAGS :=
@@ -169,6 +181,7 @@ clean: $(CLEAN_TARGETS) docpreview_clean
 	@rm -rf $(DEPSDIR)
 	@rm -rf lib/
 	@rm -rf bin/coverage.*.xml
+	@find . -name "*.g.cpp" -exec rm -f {} \; -or -name "*.g.h" -exec rm -f {} \;
 
 targets:
 	@echo "Available targets:"
