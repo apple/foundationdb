@@ -253,7 +253,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 	init( MIN_BALANCE_DIFFERENCE,                              10000 );
 	init( SECONDS_BEFORE_NO_FAILURE_DELAY,                  8 * 3600 );
 	init( MAX_TXS_SEND_MEMORY,                                   1e7 ); if( randomize && BUGGIFY ) MAX_TXS_SEND_MEMORY = 1e5;
-	init( MAX_RECOVERY_VERSIONS,           200 * VERSIONS_PER_SECOND ); if( randomize && BUGGIFY ) MAX_RECOVERY_VERSIONS = VERSIONS_PER_SECOND;
+	init( MAX_RECOVERY_VERSIONS,           200 * VERSIONS_PER_SECOND );
 	init( MAX_RECOVERY_TIME,                                    20.0 ); if( randomize && BUGGIFY ) MAX_RECOVERY_TIME = 1.0;
 
 	// Resolver
