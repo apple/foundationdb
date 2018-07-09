@@ -641,7 +641,9 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
 	self->allTags.clear();
-	self->allTags.push_back(txsTag);
+	if(self->lastEpochEnd > 0) {
+		self->allTags.push_back(txsTag);
+	}
 	for(auto& kv : rawTags) {
 		self->allTags.push_back(decodeServerTagValue( kv.value ));
 	}
