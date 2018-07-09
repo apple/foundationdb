@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#define FDB_API_VERSION 520
+#define FDB_API_VERSION 600
 
 #include "fdbclient/MultiVersionTransaction.h"
 #include "foundationdb/fdb_c.h"
