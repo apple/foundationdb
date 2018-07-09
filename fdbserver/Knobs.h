@@ -155,6 +155,7 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// Leader election
+	int MAX_NOTIFICATIONS;
 	double CANDIDATE_MIN_DELAY;
 	double CANDIDATE_MAX_DELAY;
 	double CANDIDATE_GROWTH_RATE;
