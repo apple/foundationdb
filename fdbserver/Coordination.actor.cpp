@@ -216,6 +216,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				notify.push_back( req.reply );
 				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
+					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( currentNominee.get() );
 					notify.clear();
@@ -231,6 +232,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				notify.push_back( req.reply );
 				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
+					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( currentNominee.get() );
 					notify.clear();
