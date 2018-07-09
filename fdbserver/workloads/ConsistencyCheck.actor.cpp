@@ -627,7 +627,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}*/
 
 			//In a quiescent database, check that the team size is the same as the desired team size
-			if(self->firstClient && self->performQuiescentChecks && sourceStorageServers.size() != configuration.usableRegions*configuration.storageTeamSize)
+			if(self->firstClient && self->performQuiescentChecks && sourceStorageServers.size() != configuration.storageTeamSize)
 			{
 				TraceEvent("ConsistencyCheck_InvalidTeamSize").detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end)).detail("teamSize", sourceStorageServers.size()).detail("desiredTeamSize", configuration.storageTeamSize);
 				self->testFailure("Invalid team size");
