@@ -268,10 +268,12 @@ struct Peer : NonCopyable {
 		// Throw away the current unsent list, dropping the reference count on each PacketBuffer that accounts for presence in the unsent list
 		unsent.discardAll();
 
-		// Compact reliable packets into a new unsent range
-		PacketBuffer* pb = unsent.getWriteBuffer();
-		pb = reliable.compact(pb, NULL);
-		unsent.setWriteBuffer(pb);
+		// If there are reliable packets, compact reliable packets into a new unsent range
+		if(!reliable.empty()) {
+			PacketBuffer* pb = unsent.getWriteBuffer();
+			pb = reliable.compact(pb, NULL);
+			unsent.setWriteBuffer(pb);
+		}
 	}
 
 	void onIncomingConnection( Reference<IConnection> conn, Future<Void> reader ) {
