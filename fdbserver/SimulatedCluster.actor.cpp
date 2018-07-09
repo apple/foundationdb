@@ -826,7 +826,8 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				remoteObj["satellite_logs"] = logs;
 			}
 
-			if (g_random->random01() < 0.5) {
+			//We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log routers will not be able to keep up.
+			if (g_random->random01() < 0.5 || SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND) {
 				TEST( true );  // Simulated cluster using one region
 				needsRemote = false;
 			} else {
