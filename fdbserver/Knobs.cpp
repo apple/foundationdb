@@ -209,6 +209,7 @@ ServerKnobs::ServerKnobs(bool randomize, ClientKnobs* clientKnobs) {
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
+	init( MAX_NOTIFICATIONS,                                  100000 );
 	init( CANDIDATE_MIN_DELAY,                                  0.05 );
 	init( CANDIDATE_MAX_DELAY,                                   1.0 );
 	init( CANDIDATE_GROWTH_RATE,                                 1.2 );
