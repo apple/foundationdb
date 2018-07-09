@@ -286,14 +286,16 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	Void _ = wait( delay(time) );
 
-	if(g_network->isSimulated() && g_simulator.allowLogSetKills && g_simulator.usableRegions > 1) {
-		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", "QuietDatabase");
+	if(g_network->isSimulated() && g_simulator.allowLogSetKills) {
+		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", "QuietDatabase").detail("Stage", "Repopulate");
 		g_simulator.usableRegions = 1;
 		ConfigurationResult::Type _ = wait( changeConfig( cx, "repopulate_anti_quorum=1" ) );
 		while( dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
 			Void _ = wait( dbInfo->onChange() );
 		}
+		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", "QuietDatabase").detail("Stage", "Usable_Regions");
 		ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
+		g_simulator.allowLogSetKills = false;
 	}
 
 	return Void();
