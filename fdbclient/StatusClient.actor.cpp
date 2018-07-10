@@ -377,8 +377,9 @@ StatusObject getClientDatabaseStatus(StatusObjectReader client, StatusObjectRead
 	try {
 		// Lots of the JSON reads in this code could throw, and that's OK, isAvailable and isHealthy will be
 		// at the states we want them to be in (currently)
+		std::string recoveryStateName = cluster.at("recovery_state.name").get_str();
 		isAvailable = client.at("coordinators.quorum_reachable").get_bool()
-			&& ( cluster.at("recovery_state.name") == "fully_recovered" || "remote_recovered" )
+			&& ( recoveryStateName == "accepting_commits" || recoveryStateName == "all_logs_recruited" || recoveryStateName == "storage_recovered" || recoveryStateName == "fully_recovered" )
 			&& cluster.at("database_available").get_bool();
 
 		if (isAvailable)

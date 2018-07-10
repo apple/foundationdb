@@ -25,7 +25,7 @@ sys.path[:0] = [os.path.join(os.path.dirname(__file__), '..', '..', 'bindings', 
 
 import util
 
-FDB_API_VERSION = 520
+FDB_API_VERSION = 600
 
 LOGGING = {
     'version': 1,

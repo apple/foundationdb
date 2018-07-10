@@ -3189,7 +3189,7 @@ ACTOR Future<Void> storageServerCore( StorageServer* self, StorageServerInterfac
 			when( Void _ = wait( dbInfoChange ) ) {
 				TEST( self->logSystem );  // shardServer dbInfo changed
 				dbInfoChange = self->db->onChange();
-				if( self->db->get().recoveryState >= RecoveryState::FULLY_RECOVERED ) {
+				if( self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS ) {
 					self->logSystem = ILogSystem::fromServerDBInfo( self->thisServerID, self->db->get() );
 					if (self->logSystem) {
 						if(self->db->get().logSystemConfig.recoveredAt.present()) {

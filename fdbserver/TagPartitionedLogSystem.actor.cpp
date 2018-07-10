@@ -650,6 +650,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 
 				if(bestOldSet == -1) {
+					if(oldLogData[i].logRouterTags == 0) {
+						TraceEvent("TLogPeekLocalNoLogRouterTags", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size()).detail("Idx", i);
+						throw worker_removed();
+					}
 					i++;
 					continue;
 				}
@@ -1191,9 +1195,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 
+			bool foundRemote = false;
+			int8_t remoteLocality = -1;
+			int modifiedLogSets = 0;
+			int removedLogSets = 0;
 			if(primaryLocality >= 0) {
-				bool foundRemote = false;
-				int8_t remoteLocality = -1;
 				bool remoteIsLocal = false;
 				auto copiedLogs = modifiedState.tLogs;
 				for(auto& coreSet : copiedLogs) {
@@ -1205,6 +1211,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						modifiedState.tLogs.push_back(coreSet);
 						modifiedState.tLogs[0].isLocal = true;
 						modifiedState.logRouterTags = 0;
+						modifiedLogSets++;
 						break;
 					}
 				}
@@ -1225,11 +1232,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 								modifiedState.tLogs.push_back(coreSet);
 								modifiedState.tLogs[0].isLocal = true;
 								modifiedState.logRouterTags = 0;
+								modifiedLogSets++;
 							}
 							break;
 						}
 					}
 					modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin());
+					removedLogSets++;
 				}
 
 				if(foundRemote) {
@@ -1246,18 +1255,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 									modifiedState.oldTLogData[i].tLogs[0].isLocal = true;
 									modifiedState.oldTLogData[i].logRouterTags = 0;
 									modifiedState.oldTLogData[i].epochEnd = ( i == 0 ? modifiedState.tLogs[0].startVersion : modifiedState.oldTLogData[i-1].tLogs[0].startVersion );
+									modifiedLogSets++;
 								}
 								break;
 							}
 						}
 						if(!found) {
 							modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin()+i);
+							removedLogSets++;
 							i--;
 						}
 					}
 					prevState = modifiedState;
 				}
 			}
+			TraceEvent(SevWarnAlways, "ForcedRecovery", dbgid).detail("PrimaryLocality", primaryLocality).detail("RemoteLocality", remoteLocality).detail("FoundRemote", foundRemote).detail("Modified", modifiedLogSets).detail("Removed", removedLogSets);
 		}
 
 		TEST( true );	// Master recovery from pre-existing database
@@ -1323,7 +1335,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		lockResults.resize(logServers.size());
 		std::set<int8_t> lockedLocalities;
-		bool foundSpecial = false;
+		bool foundSpecial = prevState.logRouterTags == 0;
 		for( int i=0; i < logServers.size(); i++ ) {
 			if(logServers[i]->locality == tagLocalitySpecial || logServers[i]->locality == tagLocalityUpgraded) {
 				foundSpecial = true;
@@ -1337,7 +1349,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		for( auto& old : oldLogData ) {
-			if(foundSpecial) {
+			if(foundSpecial || old.logRouterTags == 0) {
 				break;
 			}
 			for( auto& log : old.tLogs ) {
