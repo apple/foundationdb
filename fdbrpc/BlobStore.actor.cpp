@@ -575,6 +575,12 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			if(r && r->code == 401)
 				throw http_auth_failed();
 
+			if(err.present()) {
+				int code = err.get().code();
+				if(code == error_code_timed_out || code == error_code_connection_failed)
+					throw err.get();
+			}
+
 			throw http_request_failed();
 		}
 	}
