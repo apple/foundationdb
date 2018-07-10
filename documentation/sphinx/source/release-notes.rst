@@ -16,6 +16,7 @@ Features
 * Updated the SET_VERSIONSTAMPED_VALUE atomic operation to place the versionstamp at a specified offset in a value (if the API version is set to 520 or higher). `(Issue #148) <https://github.com/apple/foundationdb/issues/148>`_
 * tls_verify_peers splits input using the '|' character. [5.2.4] `(PR #468) https://github.com/apple/foundationdb/pull/468`_
 * Added knobs and blob Backup URL parameters for operations/sec limits by operation type. [5.2.5] `(PR #513) https://github.com/apple/foundationdb/pull/513`_
+* Improved backup error specificity regarding timeouts and active connection failures. [5.2.6] `(PR #547) <https://github.com/apple/foundationdb/pull/581>`_
 
 Performance
 -----------
@@ -34,7 +35,8 @@ Fixes
 * fdbcli kill command did not work when TLS was enabled. [5.2.4] `(PR #471) https://github.com/apple/foundationdb/pull/471`_
 * Don't disable certificate checks by default. [5.2.5] `(PR #511) https://github.com/apple/foundationdb/pull/511`_
 * A memory leak was fixed in connection closing. [5.2.6] `(PR #574) <https://github.com/apple/foundationdb/pull/574>`_
-* A memory leak was fixed in the coordinator's handling of disconnected clients. [5.2.6] `(PR #579) <https://github.com/apple/foundationdb/pulls/579>`_
+* A memory leak was fixed in the coordinator's handling of disconnected clients. [5.2.6] `(PR #579) <https://github.com/apple/foundationdb/pull/579>`_
+* Aligned memory allocation on MacOS was sometimes failing to allocate memory, causing a crash. [5.2.6] `(PR #547) <https://github.com/apple/foundationdb/pull/547>`_
 
 Status
 ------
