@@ -327,13 +327,13 @@ bool validatePage(Reference<const IPage> page, LogicalPageID pageID, Version ver
 
 	LogicalPageID readPageID = *(LogicalPageID*)page->begin();
 	if(readPageID != pageID) {
-		fprintf(stderr, "Invalid PageID detected: %lld (expected %lld)\n", readPageID, pageID);
+		fprintf(stderr, "Invalid PageID detected: %u (expected %u)\n", readPageID, pageID);
 		valid = false;
 	}
 
 	Version readVersion = *(Version*)(page->begin()+sizeof(LogicalPageID));
 	if(readVersion != version) {
-		fprintf(stderr, "Invalid Version detected on page %lld: %lld (expected %lld)\n", pageID, readVersion, version);
+		fprintf(stderr, "Invalid Version detected on page %u: %lld (expected %lld)\n", pageID, readVersion, version);
 		valid = false;
 	}
 
@@ -370,7 +370,7 @@ ACTOR Future<Void> simplePagerTest(IPager *pager) {
 	state Reference<IPage> page = pager->newPageBuffer();
 
 	Version latestVersion = wait(pager->getLatestVersion());
-	fprintf(stderr, "Got latest version: %d\n", latestVersion);
+	fprintf(stderr, "Got latest version: %lld\n", latestVersion);
 
 	state Version version = latestVersion+1;
 	state Version v1 = version;
