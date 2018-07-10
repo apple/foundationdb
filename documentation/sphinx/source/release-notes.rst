@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.0
+6.0.1
 =====
 
 Features
@@ -10,6 +10,9 @@ Features
 
 * Added support for asynchronous replication to a remote DC with processes in a single cluster. This improves on the asynchronous replication offered by fdbdr because servers can fetch data from the remote DC if all replicas have been lost in one DC.
 * Added support for synchronous replication of the transaction log to a remote DC. This remote DC does not need to contain any storage servers, meaning you need much fewer servers in this remote DC.
+* The TLS plugin is now statically linked into the client and server binaries and no longer requires a separate library. `(Issue #436) <https://github.com/apple/foundationdb/issues/436>`_
+* TLS peer verification now supports verifiying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
+* TLS peer verification now supports suffix matching by field. `(Issue #515) <https://github.com/apple/foundationdb/issues/515>`_
 
 Performance
 -----------
@@ -17,6 +20,8 @@ Performance
 * Transaction logs do not copy mutations from previous generations of transaction logs. `(PR #339) <https://github.com/apple/foundationdb/pull/339>`_
 * Load balancing temporarily avoids communicating with storage servers that have fallen behind.
 * Avoid assigning storage servers responsibility for keys they do not have.
+* Clients optimistically assume the first leader reply from a coordinator is correct. `(PR #425) <https://github.com/apple/foundationdb/pull/425>`_
+* Network connections are now closed after no interface needs the connection. [6.0.1] `(Issue #375) <https://github.com/apple/foundationdb/issues/375>`_
 
 Fixes
 -----
@@ -24,11 +29,15 @@ Fixes
 * Not all endpoint failures were reported to the failure monitor.
 * Watches registered on a lagging storage server would take a long time to trigger.
 * The cluster controller would not start a new generation until it recovered its files from disk.
+* Disk errors cause the server process to exit, preventing the process from being reused unless it can read its files from disk. `(PR #568) <https://github.com/apple/foundationdb/pull/568>`_
+
 
 Status
 ------
 
 * The replication factor in status JSON is stored under "redundancy_mode" instead of "redundancy":"factor". `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
+* Additional metrics for storage server lag as well as the number of watches and mutation count have been added and are exposed through status. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
+
 
 Bindings
 --------
@@ -40,10 +49,11 @@ Other Changes
 -------------
 
 * Does not support upgrades from any version older than 5.0.
-* Renamed the trace log attribute ``logGroup`` to ``LogGroup``.
+* Normalized the capitalization of trace event names and attributes. `(PR #455) <https://github.com/apple/foundationdb/pull/455>`_
 
 Earlier release notes
 ---------------------
+* :doc:`5.2 (API Version 520) </old-release-notes/release-notes-520>`
 * :doc:`5.1 (API Version 510) </old-release-notes/release-notes-510>`
 * :doc:`5.0 (API Version 500) </old-release-notes/release-notes-500>`
 * :doc:`4.6 (API Version 460) </old-release-notes/release-notes-460>`
