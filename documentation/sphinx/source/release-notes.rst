@@ -17,6 +17,7 @@ Performance
 * Transaction logs do not copy mutations from previous generations of transaction logs. `(PR #339) <https://github.com/apple/foundationdb/pull/339>`_
 * Load balancing temporarily avoids communicating with storage servers that have fallen behind.
 * Avoid assigning storage servers responsibility for keys they do not have.
+* Clients optimistically assume the first leader reply from a coordinator is correct. `(PR #425) <https://github.com/apple/foundationdb/pull/425>`_
 
 Fixes
 -----
@@ -24,6 +25,8 @@ Fixes
 * Not all endpoint failures were reported to the failure monitor.
 * Watches registered on a lagging storage server would take a long time to trigger.
 * The cluster controller would not start a new generation until it recovered its files from disk.
+* Disk errors cause the server process to exit, preventing the process from being reused unless it can read its files from disk. `(PR #568) <https://github.com/apple/foundationdb/pull/568>`_
+
 
 Status
 ------
@@ -40,7 +43,7 @@ Other Changes
 -------------
 
 * Does not support upgrades from any version older than 5.0.
-* Renamed the trace log attribute ``logGroup`` to ``LogGroup``.
+* Normalized the capitalization of trace event names and attributes. `(PR #455) <https://github.com/apple/foundationdb/pull/455>`_
 
 Earlier release notes
 ---------------------

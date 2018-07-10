@@ -139,11 +139,11 @@ struct ConsistencyCheckWorkload : TestWorkload
 
 	}
 
-	void testFailure(std::string message)
+	void testFailure(std::string message, bool isError = false)
 	{
 		success = false;
 
-		TraceEvent failEvent(failureIsError ? SevError : SevWarn, "TestFailure");
+		TraceEvent failEvent((failureIsError || isError) ? SevError : SevWarn, "TestFailure");
 		if(performQuiescentChecks)
 			failEvent.detail("Workload", "QuiescentCheck");
 		else
@@ -430,7 +430,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 						{
 							TraceEvent("ConsistencyCheck_InconsistentKeyServers").detail("StorageServer1", shards[i].second[firstValidStorageServer].id())
 								.detail("StorageServer2", shards[i].second[j].id());
-							self->testFailure("Key servers inconsistent");
+							self->testFailure("Key servers inconsistent", true);
 							return false;
 						}
 					}
@@ -834,7 +834,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 											.detail("ValueMismatchKey", printable(valueMismatchKey))
 											.detail("MatchingKVPairs", matchingKVPairs);
 
-										self->testFailure("Data inconsistent");
+										self->testFailure("Data inconsistent", true);
 										return false;
 									}
 								}
