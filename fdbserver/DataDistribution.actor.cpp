@@ -1077,21 +1077,28 @@ struct DDTeamCollection {
 		// If there are too few machines to even build teams or there are too few represented datacenters, build no new teams
 		if( uniqueMachines >= self->configuration.storageTeamSize ) {
 			desiredTeams = SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER*serverCount;
+			int maxTeams = SERVER_KNOBS->MAX_TEAMS_PER_SERVER*serverCount;
 
 			// Count only properly sized teams against the desired number of teams. This is to prevent "emergency" merged teams (see MoveKeys)
 			//  from overwhelming the team count (since we really did not want that team in the first place). These larger teams will not be
 			//  returned from getRandomTeam() (as used by bestTeam to find a new home for a shard).
 			// Also exclude teams who have members in the wrong configuration, since we don't want these teams either
 			int teamCount = 0;
+			int totalTeamCount = 0;
 			for(int i = 0; i < self->teams.size(); i++) {
 				if( self->teams[i]->getServerIDs().size() == self->configuration.storageTeamSize && !self->teams[i]->isWrongConfiguration() ) {
-					teamCount++;
+					if( self->teams[i]->isHealthy() ) {
+						teamCount++;
+					}
+					totalTeamCount++;
 				}
 			}
 
-			TraceEvent("BuildTeamsBegin", self->masterId).detail("DesiredTeams", desiredTeams).detail("UniqueMachines", uniqueMachines)
-				.detail("TeamSize", self->configuration.storageTeamSize).detail("Servers", serverCount)
-				.detail("CurrentTrackedTeams", self->teams.size()).detail("TeamCount", teamCount);
+			TraceEvent("BuildTeamsBegin", self->masterId).detail("DesiredTeams", desiredTeams).detail("MaxTeams", maxTeams)
+				.detail("UniqueMachines", uniqueMachines).detail("TeamSize", self->configuration.storageTeamSize).detail("Servers", serverCount)
+				.detail("CurrentTrackedTeams", self->teams.size()).detail("HealthyTeamCount", teamCount).detail("TotalTeamCount", totalTeamCount);
+
+			teamCount = std::max(teamCount, desiredTeams + totalTeamCount - maxTeams );
 
 			if( desiredTeams > teamCount ) {
 				std::set<UID> desiredServerSet;
@@ -1884,10 +1891,15 @@ ACTOR Future<Void> storageRecruiter( DDTeamCollection *self, Reference<AsyncVar<
 
 ACTOR Future<Void> updateReplicasKey(DDTeamCollection* self, Optional<Key> dcId) {
 	Void _ = wait(self->initialFailureReactionDelay);
-	Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
-	while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
-		TraceEvent("DDUpdatingStalled", self->masterId).detail("DcId", printable(dcId)).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
-		Void _ = wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
+	loop {
+		while(self->zeroHealthyTeams->get() || self->processingUnhealthy->get()) {
+			TraceEvent("DDUpdatingStalled", self->masterId).detail("DcId", printable(dcId)).detail("ZeroHealthy", self->zeroHealthyTeams->get()).detail("ProcessingUnhealthy", self->processingUnhealthy->get());
+			Void _ = wait(self->zeroHealthyTeams->onChange() || self->processingUnhealthy->onChange());
+		}
+		Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY, TaskLowPriority)); //After the team trackers wait on the initial failure reaction delay, they yield. We want to make sure every tracker has had the opportunity to send their relocations to the queue.
+		if(!self->zeroHealthyTeams->get() && !self->processingUnhealthy->get()) {
+			break;
+		}
 	}
 	TraceEvent("DDUpdatingReplicas", self->masterId).detail("DcId", printable(dcId)).detail("Replicas", self->configuration.storageTeamSize);
 	state Transaction tr(self->cx);

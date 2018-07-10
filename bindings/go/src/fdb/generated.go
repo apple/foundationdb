@@ -71,9 +71,9 @@ func (o NetworkOptions) SetTraceMaxLogsSize(param int64) error {
 	return o.setOpt(32, b)
 }
 
-// Sets the 'logGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'.
+// Sets the 'LogGroup' attribute with the specified value for all events in the trace output files. The default log group is 'default'.
 //
-// Parameter: value of the logGroup attribute
+// Parameter: value of the LogGroup attribute
 func (o NetworkOptions) SetTraceLogGroup(param string) error {
 	return o.setOpt(33, []byte(param))
 }
@@ -383,11 +383,6 @@ func (o TransactionOptions) SetUsedDuringCommitProtectionDisable() error {
 // The transaction can read from locked databases.
 func (o TransactionOptions) SetReadLockAware() error {
 	return o.setOpt(702, nil)
-}
-
-// No other transactions will be applied before this transaction within the same commit version.
-func (o TransactionOptions) SetFirstInBatch() error {
-	return o.setOpt(710, nil)
 }
 
 type StreamingMode int
