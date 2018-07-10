@@ -1006,6 +1006,10 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		}
 	}
 
+	if(g_simulator.usableRegions < 2 || !g_simulator.hasSatelliteReplication) {
+		g_simulator.allowLogSetKills = false;
+	}
+
 	ASSERT(g_simulator.storagePolicy && g_simulator.tLogPolicy);
 	ASSERT(!g_simulator.hasSatelliteReplication || g_simulator.satelliteTLogPolicy);
 	TraceEvent("SimulatorConfig").detail("ConfigString", printable(StringRef(startingConfigString)));
