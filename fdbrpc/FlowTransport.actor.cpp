@@ -226,9 +226,10 @@ struct Peer : NonCopyable {
 	bool outgoingConnectionIdle;  // We don't actually have a connection open and aren't trying to open one because we don't have anything to send
 	double lastConnectTime;
 	double reconnectionDelay;
+	int peerReferences;
 
 	explicit Peer( TransportData* transport, NetworkAddress const& destination )
-		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true)
+		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), peerReferences(-1)
 	{
 		connect = connectionKeeper(this);
 	}
@@ -305,6 +306,10 @@ struct Peer : NonCopyable {
 		state RequestStream< ReplyPromise<Void> > remotePing( Endpoint( peer->destination, WLTOKEN_PING_PACKET ) );
 
 		loop {
+			if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
+				throw connection_failed();
+			}
+
 			Void _ = wait( delayJittered( FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME ) );
 
 			// SOMEDAY: Stop monitoring and close the connection after a long period of inactivity with no reliable or onDisconnect requests outstanding
@@ -421,7 +426,7 @@ struct Peer : NonCopyable {
 				if (e.code() == error_code_actor_cancelled) throw;
 				// Try to recover, even from serious errors, by retrying
 
-				if(self->reliable.empty() && self->unsent.empty()) {
+				if(self->peerReferences <= 0 && self->reliable.empty() && self->unsent.empty()) {
 					self->connect.cancel();
 					self->transport->peers.erase(self->destination);
 					delete self;
@@ -807,6 +812,27 @@ void FlowTransport::loadedEndpoint( Endpoint& endpoint ) {
 	ASSERT( !(endpoint.token.first() & TOKEN_STREAM_FLAG) );  // Only reply promises are supposed to be unaddressed
 	ASSERT( g_currentDeliveryPeerAddress.isValid() );
 	endpoint.address = g_currentDeliveryPeerAddress;
+}
+
+void FlowTransport::addPeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
+	if (!receiver->isStream() || !endpoint.address.isValid()) return;
+	Peer* peer = self->getPeer(endpoint.address);
+	if(peer->peerReferences == -1) {
+		peer->peerReferences = 1;
+	} else {
+		peer->peerReferences++;
+	}
+}
+
+void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessageReceiver* receiver ) {
+	if (!receiver->isStream() || !endpoint.address.isValid()) return;
+	Peer* peer = self->getPeer(endpoint.address, false);
+	if(peer) {
+		peer->peerReferences--;
+		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
+			peer->incompatibleDataRead.trigger();
+		}
+	}
 }
 
 void FlowTransport::addEndpoint( Endpoint& endpoint, NetworkMessageReceiver* receiver, uint32_t taskID ) {
