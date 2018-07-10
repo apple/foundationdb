@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.0
+6.0.1
 =====
 
 Features
@@ -21,6 +21,7 @@ Performance
 * Load balancing temporarily avoids communicating with storage servers that have fallen behind.
 * Avoid assigning storage servers responsibility for keys they do not have.
 * Clients optimistically assume the first leader reply from a coordinator is correct. `(PR #425) <https://github.com/apple/foundationdb/pull/425>`_
+* Network connections are now closed after no interface needs the connection. [6.0.1] `(Issue #375) <https://github.com/apple/foundationdb/issues/375>`_
 
 Fixes
 -----
