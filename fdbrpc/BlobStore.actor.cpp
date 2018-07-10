@@ -460,6 +460,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 	loop {
 		state Optional<Error> err;
 		state Optional<NetworkAddress> remoteAddress;
+		state bool connectionEstablished = false;
 
 		try {
 			// Start connecting
@@ -481,6 +482,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 
 			// Finish connecting, do request
 			state BlobStoreEndpoint::ReusableConnection rconn = wait(timeoutError(frconn, bstore->knobs.connect_timeout));
+			connectionEstablished = true;
 
 			// Finish/update the request headers (which includes Date header)
 			// This must be done AFTER the connection is ready because if credentials are coming from disk they are refreshed
@@ -519,6 +521,7 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 		retryable = retryable && (thisTry < maxTries);
 
 		TraceEvent event(SevWarn, retryable ? "BlobStoreEndpointRequestFailedRetryable" : "BlobStoreEndpointRequestFailed");
+		event.detail("ConnectionEstablished", connectionEstablished);
 
 		if(remoteAddress.present())
 			event.detail("RemoteEndpoint", remoteAddress.get());
@@ -575,9 +578,18 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<BlobStoreEndpoi
 			if(r && r->code == 401)
 				throw http_auth_failed();
 
+			// Recognize and throw specific errors
 			if(err.present()) {
 				int code = err.get().code();
-				if(code == error_code_timed_out || code == error_code_connection_failed)
+
+				// If we get a timed_out error during the the connect() phase, we'll call that connection_failed despite the fact that
+				// there was technically never a 'connection' to begin with.  It differentiates between an active connection
+				// timing out vs a connection timing out, though not between an active connection failing vs connection attempt failing.
+				// TODO:  Add more error types?
+				if(code == error_code_timed_out && !connectionEstablished)
+					throw connection_failed();
+
+				if(code == error_code_timed_out || code == error_code_connection_failed || code == error_code_lookup_failed)
 					throw err.get();
 			}
 
