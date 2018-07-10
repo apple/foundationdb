@@ -829,6 +829,9 @@ void FlowTransport::removePeerReference( const Endpoint& endpoint, NetworkMessag
 	Peer* peer = self->getPeer(endpoint.address, false);
 	if(peer) {
 		peer->peerReferences--;
+		if(peer->peerReferences < 0) {
+			TraceEvent(SevError, "InvalidPeerReferences").detail("References", peer->peerReferences).detail("Address", endpoint.address).detail("Token", endpoint.token);
+		}
 		if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
 			peer->incompatibleDataRead.trigger();
 		}
