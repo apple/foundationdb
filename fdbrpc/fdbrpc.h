@@ -34,10 +34,15 @@ struct FlowReceiver : private NetworkMessageReceiver {
 	bool m_isLocalEndpoint;
 
 	FlowReceiver() : m_isLocalEndpoint(false) {}
-	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {}
+	FlowReceiver(Endpoint const& remoteEndpoint) : endpoint(remoteEndpoint), m_isLocalEndpoint(false) {
+		FlowTransport::transport().addPeerReference(endpoint, this);
+	}
 	~FlowReceiver() {
-		if (m_isLocalEndpoint)
+		if (m_isLocalEndpoint) {
 			FlowTransport::transport().removeEndpoint(endpoint, this);
+		} else {
+			FlowTransport::transport().removePeerReference(endpoint, this);
+		}
 	}
 
 	bool isLocalEndpoint() { return m_isLocalEndpoint; }

@@ -1741,6 +1741,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state StatusObject data_overlay;
 
 		statusObj["protocol_version"] = format("%llx", currentProtocolVersion);
+		statusObj["connection_string"] = coordinators.ccf->getConnectionString().toString();
 
 		state Optional<DatabaseConfiguration> configuration;
 		state Optional<bool> fullReplication;

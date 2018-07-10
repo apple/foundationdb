@@ -186,7 +186,7 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 			false_heartbeats.push_back( onEqual(hb, false) );
 		}
 
-		state Future<Void> rate = delay( SERVER_KNOBS->HEARTBEAT_FREQUENCY, TaskCoordinationReply ); // SOMEDAY: Move to server side?
+		state Future<Void> rate = delay( SERVER_KNOBS->HEARTBEAT_FREQUENCY, TaskCoordinationReply ) || asyncPriorityInfo->onChange(); // SOMEDAY: Move to server side?
 
 		choose {
 			when ( Void _ = wait( quorum( true_heartbeats, true_heartbeats.size()/2+1 ) ) ) {
@@ -194,7 +194,8 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 			} // We are still leader
 			when ( Void _ = wait( quorum( false_heartbeats, false_heartbeats.size()/2+1 ) ) ) {
 				TraceEvent("ReplacedAsLeader", myInfo.changeID);
-				break; } // We are definitely not leader
+				break;
+			} // We are definitely not leader
 			when ( Void _ = wait( delay(SERVER_KNOBS->POLLING_FREQUENCY) ) ) {
 				for(int i = 0; i < coordinators.leaderElectionServers.size(); ++i) {
 					if(true_heartbeats[i].isReady())
@@ -205,7 +206,9 @@ ACTOR Future<Void> tryBecomeLeaderInternal( ServerCoordinators coordinators, Val
 						TraceEvent("LeaderNoHeartbeat", myInfo.changeID).detail("Coordinator", coordinators.leaderElectionServers[i].candidacy.getEndpoint().address);
 				}
 				TraceEvent("ReleasingLeadership", myInfo.changeID);
-				break; } // Give up on being leader, because we apparently have poor communications
+				break;
+			} // Give up on being leader, because we apparently have poor communications
+			when ( Void _ = wait( asyncPriorityInfo->onChange() ) ) {}
 		}
 
 		Void _ = wait( rate );
