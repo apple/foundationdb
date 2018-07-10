@@ -47,7 +47,7 @@ void checksum(std::string const &file, uint8_t *page, int pageSize, LogicalPageI
 	sumOut->part2 = logical; 
 	hashlittle2(page, pageSize, &sumOut->part1, &sumOut->part2);
 
-	debug_printf("checksum %s logical %d physical %d size %d checksums page %s calculated %s data at %p %s\n", write ? "write" : "read", logical, physical, pageSize, write ? "NA" : pSumInPage->toString().c_str(), sumOut->toString().c_str(), page, StringRef(page, pageSize).toHexString().c_str());
+	//debug_printf("checksum %s logical %d physical %d size %d checksums page %s calculated %s data at %p %s\n", write ? "write" : "read", logical, physical, pageSize, write ? "NA" : pSumInPage->toString().c_str(), sumOut->toString().c_str(), page, StringRef(page, pageSize).toHexString().c_str());
 
 	// Verify if not in write mode
 	if(!write && sum != *pSumInPage) {
