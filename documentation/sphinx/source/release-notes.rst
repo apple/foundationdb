@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-5.2.5
+5.2.6
 =====
 
 Features
@@ -33,6 +33,8 @@ Fixes
 * A read-only transaction using the ``READ_LOCK_AWARE`` option would fail if committed. [5.2.3] `(PR #437) https://github.com/apple/foundationdb/pull/437`_
 * fdbcli kill command did not work when TLS was enabled. [5.2.4] `(PR #471) https://github.com/apple/foundationdb/pull/471`_
 * Don't disable certificate checks by default. [5.2.5] `(PR #511) https://github.com/apple/foundationdb/pull/511`_
+* A memory leak was fixed in connection closing. [5.2.6] `(PR #574) <https://github.com/apple/foundationdb/pull/574>`_
+* A memory leak was fixed in the coordinator's handling of disconnected clients. [5.2.6] `(PR #579) <https://github.com/apple/foundationdb/pulls/579>`_
 
 Status
 ------
