@@ -286,7 +286,9 @@ public:
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;
 	IRepPolicyRef satelliteTLogPolicy;
+	IRepPolicyRef satelliteTLogPolicyFallback;
 	int32_t satelliteTLogWriteAntiQuorum;
+	int32_t satelliteTLogWriteAntiQuorumFallback;
 	std::vector<Optional<Standalone<StringRef>>> primarySatelliteDcIds;
 	std::vector<Optional<Standalone<StringRef>>> remoteSatelliteDcIds;
 

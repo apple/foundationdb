@@ -706,7 +706,7 @@ StringRef StringRefOf(const char* s) {
 void SimulationConfig::generateNormalConfig(int minimumReplication) {
 	set_config("new");
 	bool generateFearless = g_random->random01() < 0.5;
-	datacenters = generateFearless ? 4 : g_random->randomInt( 1, 4 );
+	datacenters = generateFearless ? ( minimumReplication > 0 || g_random->random01() < 0.5 ? 4 : 6 ) : g_random->randomInt( 1, 4 );
 	if (g_random->random01() < 0.25) db.desiredTLogCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.masterProxyCount = g_random->randomInt(1,7);
 	if (g_random->random01() < 0.25) db.resolverCount = g_random->randomInt(1,7);
@@ -716,7 +716,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		set_config("memory");
 	}
 
-	int replication_type = std::max(minimumReplication, std::min(g_random->randomInt(0,6), 3));
+	int replication_type = std::max(minimumReplication, datacenters > 4 ? g_random->randomInt(1,3) : std::min(g_random->randomInt(0,6), 3));
 	switch (replication_type) {
 	case 0: {
 		TEST( true );  // Simulated cluster using custom redundancy mode
@@ -787,37 +787,76 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			remoteSatelliteObj["satellite"] = 1;
 			remoteDcArr.push_back(remoteSatelliteObj);
 
-			int satellite_replication_type = g_random->randomInt(0,5);
-			switch (satellite_replication_type) {
-			case 0: {
-				//FIXME: implement
-				TEST( true );  // Simulated cluster using custom satellite redundancy mode
-				break;
+			if(datacenters > 4) {
+				StatusObject primarySatelliteObjB;
+				primarySatelliteObjB["id"] = "4";
+				primarySatelliteObjB["priority"] = 1;
+				primarySatelliteObjB["satellite"] = 1;
+				primaryDcArr.push_back(primarySatelliteObjB);
+
+				StatusObject remoteSatelliteObjB;
+				remoteSatelliteObjB["id"] = "5";
+				remoteSatelliteObjB["priority"] = 1;
+				remoteSatelliteObjB["satellite"] = 1;
+				remoteDcArr.push_back(remoteSatelliteObjB);
 			}
-			case 1: {
-				TEST( true );  // Simulated cluster using no satellite redundancy mode
-				break;
-			}
-			case 2: {
-				TEST( true );  // Simulated cluster using single satellite redundancy mode
-				primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
-				remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
-				break;
-			}
-			case 3: {
-				TEST( true );  // Simulated cluster using double satellite redundancy mode
-				primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
-				remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
-				break;
-			}
-			case 4: {
-				TEST( true );  // Simulated cluster using triple satellite redundancy mode
-				primaryObj["satellite_redundancy_mode"] = "one_satellite_triple";
-				remoteObj["satellite_redundancy_mode"] = "one_satellite_triple";
-				break;
-			}
-			default:
-				ASSERT(false);  // Programmer forgot to adjust cases.
+
+			if(datacenters > 4) {
+				//FIXME: we cannot use one satellite replication with more than one satellite per region because canKillProcesses does not respect usable_dcs
+				int satellite_replication_type = g_random->randomInt(0,3);
+				switch (satellite_replication_type) {
+				case 0: {
+					TEST( true );  // Simulated cluster using no satellite redundancy mode
+					break;
+				}
+				case 1: {
+					TEST( true );  // Simulated cluster using two satellite fast redundancy mode
+					primaryObj["satellite_redundancy_mode"] = "two_satellite_fast";
+					remoteObj["satellite_redundancy_mode"] = "two_satellite_fast";
+					break;
+				}
+				case 2: {
+					TEST( true );  // Simulated cluster using two satellite safe redundancy mode
+					primaryObj["satellite_redundancy_mode"] = "two_satellite_safe";
+					remoteObj["satellite_redundancy_mode"] = "two_satellite_safe";
+					break;
+				}
+				default:
+					ASSERT(false);  // Programmer forgot to adjust cases.
+				}
+			} else {
+				int satellite_replication_type = g_random->randomInt(0,5);
+				switch (satellite_replication_type) {
+				case 0: {
+					//FIXME: implement
+					TEST( true );  // Simulated cluster using custom satellite redundancy mode
+					break;
+				}
+				case 1: {
+					TEST( true );  // Simulated cluster using no satellite redundancy mode
+					break;
+				}
+				case 2: {
+					TEST( true );  // Simulated cluster using single satellite redundancy mode
+					primaryObj["satellite_redundancy_mode"] = "one_satellite_single";
+					remoteObj["satellite_redundancy_mode"] = "one_satellite_single";
+					break;
+				}
+				case 3: {
+					TEST( true );  // Simulated cluster using double satellite redundancy mode
+					primaryObj["satellite_redundancy_mode"] = "one_satellite_double";
+					remoteObj["satellite_redundancy_mode"] = "one_satellite_double";
+					break;
+				}
+				case 4: {
+					TEST( true );  // Simulated cluster using triple satellite redundancy mode
+					primaryObj["satellite_redundancy_mode"] = "one_satellite_triple";
+					remoteObj["satellite_redundancy_mode"] = "one_satellite_triple";
+					break;
+				}
+				default:
+					ASSERT(false);  // Programmer forgot to adjust cases.
+				}
 			}
 
 			if (g_random->random01() < 0.25) {
@@ -827,7 +866,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 			}
 
 			//We cannot run with a remote DC when MAX_READ_TRANSACTION_LIFE_VERSIONS is too small, because the log routers will not be able to keep up.
-			if (g_random->random01() < 0.5 || SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND) {
+			if (g_random->random01() < 0.25 || SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS < SERVER_KNOBS->VERSIONS_PER_SECOND) {
 				TEST( true );  // Simulated cluster using one region
 				needsRemote = false;
 			} else {
@@ -835,7 +874,7 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 				db.usableRegions = 2;
 			}
 
-			int remote_replication_type = g_random->randomInt(0,5);
+			int remote_replication_type = g_random->randomInt(0, datacenters > 4 ? 4 : 5);
 			switch (remote_replication_type) {
 			case 0: {
 				//FIXME: implement
@@ -941,12 +980,14 @@ void setupSimulatedSystem( vector<Future<Void>> *systemActors, std::string baseF
 		g_simulator.primaryDcId = simconfig.db.regions[0].dcId;
 		g_simulator.hasSatelliteReplication = simconfig.db.regions[0].satelliteTLogReplicationFactor > 0;
 		if(simconfig.db.regions[0].satelliteTLogUsableDcsFallback > 0) {
-			g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicyFallback;
-			g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorumFallback;
+			g_simulator.satelliteTLogPolicyFallback = simconfig.db.regions[0].satelliteTLogPolicyFallback;
+			g_simulator.satelliteTLogWriteAntiQuorumFallback = simconfig.db.regions[0].satelliteTLogWriteAntiQuorumFallback;
 		} else {
-			g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
-			g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
+			g_simulator.satelliteTLogPolicyFallback = simconfig.db.regions[0].satelliteTLogPolicy;
+			g_simulator.satelliteTLogWriteAntiQuorumFallback = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
 		}
+		g_simulator.satelliteTLogPolicy = simconfig.db.regions[0].satelliteTLogPolicy;
+		g_simulator.satelliteTLogWriteAntiQuorum = simconfig.db.regions[0].satelliteTLogWriteAntiQuorum;
 
 		for(auto s : simconfig.db.regions[0].satellites) {
 			g_simulator.primarySatelliteDcIds.push_back(s.dcId);
