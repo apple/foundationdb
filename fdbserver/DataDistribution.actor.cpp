@@ -317,11 +317,16 @@ ACTOR Future<Void> storageServerFailureTracker(
 		if( status->isFailed )
 			restartRecruiting->trigger();
 
+		state double startTime = now();
 		choose {
 			when ( Void _ = wait( status->isFailed
 				? IFailureMonitor::failureMonitor().onStateEqual( server.waitFailure.getEndpoint(), FailureStatus(false) )
 				: waitFailureClient(server.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, 0, TaskDataDistribution) ) )
 			{
+				double elapsed = now() - startTime;
+				if(!status->isFailed && elapsed < SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME) {
+					Void _ = wait(delay(SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME - elapsed));
+				}
 				status->isFailed = !status->isFailed;
 				TraceEvent("StatusMapChange", masterId).detail("ServerID", server.id()).detail("Status", status->toString())
 					.detail("Available", IFailureMonitor::failureMonitor().getState(server.waitFailure.getEndpoint()).isAvailable());

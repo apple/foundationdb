@@ -153,8 +153,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->locality = tLogSet.locality;
 				logSet->startVersion = tLogSet.startVersion;
 				logSet->satelliteTagLocations = tLogSet.satelliteTagLocations;
-				logSet->updateLocalitySet();
 				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+				logSet->updateLocalitySet(logSet->tLogLocalities);
 			}
 		}
 
@@ -179,7 +179,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->locality = tLogData.locality;
 				logSet->startVersion = tLogData.startVersion;
 				logSet->satelliteTagLocations = tLogData.satelliteTagLocations;
-				//logSet.UpdateLocalitySet(); we do not update the locality set, since we never push to old logs
+				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+				logSet->updateLocalitySet(logSet->tLogLocalities);
 			}
 			logSystem->oldLogData[i].logRouterTags = lsConf.oldTLogs[i].logRouterTags;
 			logSystem->oldLogData[i].epochEnd = lsConf.oldTLogs[i].epochEnd;
@@ -214,7 +215,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->locality = tLogSet.locality;
 				logSet->startVersion = tLogSet.startVersion;
 				logSet->satelliteTagLocations = tLogSet.satelliteTagLocations;
-				//logSet->updateLocalitySet(); we do not update the locality set, since we never push to old logs
+				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+				logSet->updateLocalitySet(logSet->tLogLocalities);
 			}
 			logSystem->logRouterTags = lsConf.oldTLogs[0].logRouterTags;
 			//logSystem->epochEnd = lsConf.oldTLogs[0].epochEnd;
@@ -240,7 +242,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					logSet->locality = tLogSet.locality;
 					logSet->startVersion = tLogSet.startVersion;
 					logSet->satelliteTagLocations = tLogSet.satelliteTagLocations;
-					//logSet->updateLocalitySet(); we do not update the locality set, since we never push to old logs
+					filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+					logSet->updateLocalitySet(logSet->tLogLocalities);
 				}
 				logSystem->oldLogData[i-1].logRouterTags = lsConf.oldTLogs[i].logRouterTags;
 				logSystem->oldLogData[i-1].epochEnd = lsConf.oldTLogs[i].epochEnd;
@@ -1303,6 +1306,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSet->locality = coreSet.locality;
 			logSet->startVersion = coreSet.startVersion;
 			logSet->satelliteTagLocations = coreSet.satelliteTagLocations;
+			filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+			logSet->updateLocalitySet(logSet->tLogLocalities);
 			logFailed.push_back(failed);
 		}
 		oldLogData.resize(prevState.oldTLogData.size());
@@ -1327,6 +1332,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->locality = log.locality;
 				logSet->startVersion = log.startVersion;
 				logSet->satelliteTagLocations = log.satelliteTagLocations;
+				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+				logSet->updateLocalitySet(logSet->tLogLocalities);
 			}
 			oldData.epochEnd = old.epochEnd;
 			oldData.logRouterTags = old.logRouterTags;
@@ -1674,8 +1681,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSet->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(remoteTLogInitializationReplies[i].get()) ) );
 			logSet->tLogLocalities[i] = remoteWorkers.remoteTLogs[i].locality;
 		}
-		logSet->updateLocalitySet();
 		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+		logSet->updateLocalitySet(logSet->tLogLocalities);
 
 		std::vector<Future<Void>> recoveryComplete;
 		for( int i = 0; i < logSet->logServers.size(); i++)
