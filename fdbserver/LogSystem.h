@@ -329,7 +329,7 @@ struct ILogSystem {
 
 		// Returns the smallest possible message version which the current message (if any) or a subsequent message might have
 		// (If hasMessage(), this is therefore the message version of the current message)
-		virtual LogMessageVersion version() = 0;
+		virtual const LogMessageVersion& version() = 0;
 
 		//So far, the cursor has returned all messages which both satisfy the criteria passed to peek() to create the cursor AND have (popped(),0) <= message version number <= version()
 		//Other messages might have been skipped
@@ -382,7 +382,7 @@ struct ILogSystem {
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();
-		virtual LogMessageVersion version();
+		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 
@@ -409,13 +409,8 @@ struct ILogSystem {
 		bool hasNextMessage;
 		UID randomID;
 		int tLogReplicationFactor;
-		Arena messageArena;
 
-		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
-		bool collectTags;
-		std::vector<Tag> tags;
-
-		MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin, bool collectTags );
+		MergedPeekCursor( vector< Reference<ILogSystem::IPeekCursor> > const& serverCursors, Version begin );
 		MergedPeekCursor( std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> const& logServers, int bestServer, int readQuorum, Tag tag, Version begin, Version end, bool parallelGetMore, std::vector<LocalityData> const& tLogLocalities, IRepPolicyRef const tLogPolicy, int tLogReplicationFactor );
 		MergedPeekCursor( vector< Reference<IPeekCursor> > const& serverCursors, LogMessageVersion const& messageVersion, int bestServer, int readQuorum, Optional<LogMessageVersion> nextVersion, Reference<LogSet> logSet, int tLogReplicationFactor );
 
@@ -435,7 +430,7 @@ struct ILogSystem {
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();
-		virtual LogMessageVersion version();
+		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 
@@ -480,7 +475,7 @@ struct ILogSystem {
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();
-		virtual LogMessageVersion version();
+		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 
@@ -514,7 +509,7 @@ struct ILogSystem {
 		virtual Future<Void> onFailed();
 		virtual bool isActive();
 		virtual bool isExhausted();
-		virtual LogMessageVersion version();
+		virtual const LogMessageVersion& version();
 		virtual Version popped();
 		virtual Version getMinKnownCommittedVersion();
 
@@ -524,6 +519,66 @@ struct ILogSystem {
 
 		virtual void delref() {
 			ReferenceCounted<MultiCursor>::delref();
+		}
+	};
+
+	struct BufferedCursor : IPeekCursor, ReferenceCounted<BufferedCursor> {
+		struct BufferedMessage {
+			Arena arena;
+			StringRef message;
+			std::vector<Tag> tags;
+			LogMessageVersion version;
+
+			BufferedMessage() {}
+			BufferedMessage( Arena arena, StringRef message, const std::vector<Tag>& tags, const LogMessageVersion& version ) : arena(arena), message(message), tags(tags), version(version) {}
+
+			bool operator < (BufferedMessage const& r) const {
+				return version < r.version;
+			}
+
+			bool operator == (BufferedMessage const& r) const {
+				return version == r.version;
+			}
+		};
+
+		std::vector<Reference<IPeekCursor>> cursors;
+		std::vector<BufferedMessage> messages;
+		int messageIndex;
+		LogMessageVersion messageVersion;
+		Version end;
+		bool hasNextMessage;
+
+		//FIXME: collectTags is needed to support upgrades from 5.X to 6.0. Remove this code when we no longer support that upgrade.
+		bool collectTags;
+		std::vector<Tag> tags;
+		void combineMessages();
+
+		BufferedCursor( std::vector<Reference<IPeekCursor>> cursors, Version begin, Version end, bool collectTags );
+
+		virtual Reference<IPeekCursor> cloneNoMore();
+		virtual void setProtocolVersion( uint64_t version );
+		virtual Arena& arena();
+		virtual ArenaReader* reader();
+		virtual bool hasMessage();
+		virtual void nextMessage();
+		virtual StringRef getMessage();
+		virtual StringRef getMessageWithTags();
+		virtual const std::vector<Tag>& getTags();
+		virtual void advanceTo(LogMessageVersion n);
+		virtual Future<Void> getMore(int taskID = TaskTLogPeekReply);
+		virtual Future<Void> onFailed();
+		virtual bool isActive();
+		virtual bool isExhausted();
+		virtual const LogMessageVersion& version();
+		virtual Version popped();
+		virtual Version getMinKnownCommittedVersion();
+
+		virtual void addref() {
+			ReferenceCounted<BufferedCursor>::addref();
+		}
+
+		virtual void delref() {
+			ReferenceCounted<BufferedCursor>::delref();
 		}
 	};
 
@@ -557,7 +612,7 @@ struct ILogSystem {
 		// If pop was previously or concurrently called with upTo > begin, the cursor may not return all such messages.  In that case cursor->popped() will
 		// be greater than begin to reflect that.
 
-	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, std::vector<Tag> tags, bool parallelGetMore = false ) = 0;
+	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, std::vector<Tag> tags, bool parallelGetMore = false ) = 0;
 		// Same contract as peek(), but for a set of tags
 
 	virtual Reference<IPeekCursor> peekSingle( UID dbgid, Version begin, Tag tag, vector<pair<Version,Tag>> history = vector<pair<Version,Tag>>() ) = 0;
