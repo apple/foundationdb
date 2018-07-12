@@ -33,24 +33,6 @@
 #include <string>
 #include <vector>
 
-class TraceEventRefData;
-typedef Reference<TraceEventRefData>	TraceEventRef;
-
-class TraceEventRefData : public ReferenceCounted<TraceEventRefData> {
-public:
-	TraceEventRefData(const char* type);
-	TraceEventRefData(Severity sev, const char* type);
-	TraceEventRefData(const char* type, UID uid);
-	TraceEventRefData(Severity sev, const char* type, UID uid);
-	virtual ~TraceEventRefData();
-	virtual void addref() { ReferenceCounted<TraceEventRefData>::addref(); }
-	virtual void delref() { ReferenceCounted<TraceEventRefData>::delref(); }
-	TraceEvent&	trace() { return *traceEvent; }
-protected:
-	TraceEvent*	traceEvent;
-};
-
-
 struct FDBLibTLSPolicy: ITLSPolicy, ReferenceCounted<FDBLibTLSPolicy> {
 	FDBLibTLSPolicy(Reference<FDBLibTLSPlugin> plugin);
 	virtual ~FDBLibTLSPolicy();
@@ -70,9 +52,6 @@ struct FDBLibTLSPolicy: ITLSPolicy, ReferenceCounted<FDBLibTLSPolicy> {
 	virtual bool set_cert_data(const uint8_t* cert_data, int cert_len);
 	virtual bool set_key_data(const uint8_t* key_data, int key_len, const char* password);
 	virtual bool set_verify_peers(int count, const uint8_t* verify_peers[], int verify_peers_len[]);
-
-	TraceEventRef logf(const char* type);   // Assumes SevInfo severity
-	TraceEventRef logf(Severity, const char* type);
 
 	struct tls_config* tls_cfg;
 

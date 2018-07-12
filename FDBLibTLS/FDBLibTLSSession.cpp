@@ -57,37 +57,39 @@ static ssize_t tls_write_func(struct tls *ctx, const void *buf, size_t buflen, v
 	return (ssize_t)rv;
 }
 
-FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) :
+FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uidptr) :
 	tls_ctx(NULL), tls_sctx(NULL), is_client(is_client), policy(policy), send_func(send_func), send_ctx(send_ctx),
-	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false), uid(uid) {
+	recv_func(recv_func), recv_ctx(recv_ctx), handshake_completed(false) {
+	if (uidptr)
+		uid = * (UID*) uidptr;
 
 	if (is_client) {
 		if ((tls_ctx = tls_client()) == NULL) {
-			logf(SevError, "FDBLibTLSClientError");
+			TraceEvent(SevError, "FDBLibTLSClientError", uid);
 			throw std::runtime_error("FDBLibTLSClientError");
 		}
 		if (tls_configure(tls_ctx, policy->tls_cfg) == -1) {
-			logf(SevError, "FDBLibTLSConfigureError")->trace().detail("LibTLSErrorMessage", tls_error(tls_ctx));
+			TraceEvent(SevError, "FDBLibTLSConfigureError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 			tls_free(tls_ctx);
 			throw std::runtime_error("FDBLibTLSConfigureError");
 		}
 		if (tls_connect_cbs(tls_ctx, tls_read_func, tls_write_func, this, servername) == -1) {
-			logf(SevError, "FDBLibTLSConnectError")->trace().detail("LibTLSErrorMessage", tls_error(tls_ctx));
+			TraceEvent(SevError, "FDBLibTLSConnectError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 			tls_free(tls_ctx);
 			throw std::runtime_error("FDBLibTLSConnectError");
 		}
 	} else {
 		if ((tls_sctx = tls_server()) == NULL) {
-			logf(SevError, "FDBLibTLSServerError");
+			TraceEvent(SevError, "FDBLibTLSServerError", uid);
 			throw std::runtime_error("FDBLibTLSServerError");
 		}
 		if (tls_configure(tls_sctx, policy->tls_cfg) == -1) {
-			logf(SevError, "FDBLibTLSConfigureError")->trace().detail("LibTLSErrorMessage", tls_error(tls_ctx));
+			TraceEvent(SevError, "FDBLibTLSConfigureError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 			tls_free(tls_sctx);
 			throw std::runtime_error("FDBLibTLSConfigureError");
 		}
 		if (tls_accept_cbs(tls_sctx, &tls_ctx, tls_read_func, tls_write_func, this) == -1) {
-			logf(SevError, "FDBLibTLSAcceptError")->trace().detail("LibTLSErrorMessage", tls_error(tls_ctx));
+			TraceEvent(SevError, "FDBLibTLSAcceptError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx));
 			tls_free(tls_sctx);
 			throw std::runtime_error("FDBLibTLSAcceptError");
 		}
@@ -226,17 +228,6 @@ bool match_criteria(X509* cert, X509_NAME* subject, NID nid, const std::string& 
 	return false;
 }
 
-// Assumes SevInfo severity
-TraceEventRef FDBLibTLSSession::logf( const char* type) {
-	auto traceEvent = (uid) ? TraceEventRef(new TraceEventRefData(type, *(UID*) uid)) :  TraceEventRef(new TraceEventRefData(type));
-	traceEvent->trace().suppressFor(1.0, true);
-	return traceEvent;
-}
-
-TraceEventRef FDBLibTLSSession::logf( Severity severity, const char* type) {
-	return (uid) ? TraceEventRef(new TraceEventRefData(severity, type, *(UID*)uid)) : TraceEventRef(new TraceEventRefData(severity, type));
-}
-
 std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSVerify> verify, struct stack_st_X509 *certs) {
 	X509_STORE_CTX *store_ctx = NULL;
 	X509_NAME *subject, *issuer;
@@ -252,7 +243,7 @@ std::tuple<bool,std::string> FDBLibTLSSession::check_verify(Reference<FDBLibTLSV
 
 	// Verify the certificate.
 	if ((store_ctx = X509_STORE_CTX_new()) == NULL) {
-		logf(SevError, "FDBLibTLSOutOfMemory");
+		TraceEvent(SevError, "FDBLibTLSOutOfMemory", uid);
 		reason = "FDBLibTLSOutOfMemory";
 		goto err;
 	}
@@ -332,7 +323,7 @@ bool FDBLibTLSSession::verify_peer() {
 		return true;
 
 	if ((cert_pem = tls_peer_cert_chain_pem(tls_ctx, &cert_pem_len)) == NULL) {
-		logf(SevError, "FDBLibTLSNoCertError");
+		TraceEvent(SevError, "FDBLibTLSNoCertError", uid);
 		goto err;
 	}
 	if ((certs = policy->parse_cert_pem(cert_pem, cert_pem_len)) == NULL)
@@ -353,7 +344,7 @@ bool FDBLibTLSSession::verify_peer() {
 	if (!rc) {
 		// log the various failure reasons
 		for (std::string reason : verify_failure_reasons) {
-			logf(reason.c_str());
+			TraceEvent(reason.c_str(), uid);
 		}
 	}
 
@@ -377,27 +368,27 @@ int FDBLibTLSSession::handshake() {
 	case TLS_WANT_POLLOUT:
 		return WANT_WRITE;
 	default:
-		logf("FDBLibTLSHandshakeError")->trace().detail("LibcryptoErrorMessage", tls_error(tls_ctx));
+		TraceEvent("FDBLibTLSHandshakeError", uid).detail("LibcryptoErrorMessage", tls_error(tls_ctx)).suppressFor(1.0, true);
 		return FAILED;
 	}
 }
 
 int FDBLibTLSSession::read(uint8_t* data, int length) {
 	if (!handshake_completed) {
-		logf(SevError, "FDBLibTLSReadHandshakeError");
+		TraceEvent(SevError, "FDBLibTLSReadHandshakeError");
 		return FAILED;
 	}
 
 	ssize_t n = tls_read(tls_ctx, data, length);
 	if (n > 0) {
 		if (n > INT_MAX) {
-			logf(SevError, "FDBLibTLSReadOverflow");
+			TraceEvent(SevError, "FDBLibTLSReadOverflow");
 			return FAILED;
 		}
 		return (int)n;
 	}
 	if (n == 0) {
-		logf("FDBLibTLSReadEOF");
+		TraceEvent("FDBLibTLSReadEOF").suppressFor(1.0, true);
 		return FAILED;
 	}
 	if (n == TLS_WANT_POLLIN)
@@ -405,26 +396,26 @@ int FDBLibTLSSession::read(uint8_t* data, int length) {
 	if (n == TLS_WANT_POLLOUT)
 		return WANT_WRITE;
 
-	logf("FDBLibTLSReadError")->trace().detail("LibTLSErrorMessage", tls_error(tls_ctx));
+	TraceEvent("FDBLibTLSReadError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx)).suppressFor(1.0, true);
 	return FAILED;
 }
 
 int FDBLibTLSSession::write(const uint8_t* data, int length) {
 	if (!handshake_completed) {
-		logf(SevError, "FDBLibTLSWriteHandshakeError");
+		TraceEvent(SevError, "FDBLibTLSWriteHandshakeError", uid);
 		return FAILED;
 	}
 
 	ssize_t n = tls_write(tls_ctx, data, length);
 	if (n > 0) {
 		if (n > INT_MAX) {
-			logf(SevError, "FDBLibTLSWriteOverflow");
+			TraceEvent(SevError, "FDBLibTLSWriteOverflow", uid);
 			return FAILED;
 		}
 		return (int)n;
 	}
 	if (n == 0) {
-		logf("FDBLibTLSWriteEOF");
+		TraceEvent("FDBLibTLSWriteEOF", uid).suppressFor(1.0, true);
 		return FAILED;
 	}
 	if (n == TLS_WANT_POLLIN)
@@ -432,6 +423,6 @@ int FDBLibTLSSession::write(const uint8_t* data, int length) {
 	if (n == TLS_WANT_POLLOUT)
 		return WANT_WRITE;
 
-	logf("FDBLibTLSWriteError")->trace().detail("LibTLSErrorMessage", tls_error(tls_ctx));
+	TraceEvent("FDBLibTLSWriteError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx)).suppressFor(1.0, true);
 	return FAILED;
 }
