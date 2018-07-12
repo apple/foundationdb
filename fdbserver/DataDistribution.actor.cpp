@@ -451,11 +451,19 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 						}
 					} else {
 						info.primarySrc = src;
-						result->primaryTeams.insert( src );
+						auto srcIter = team_cache.find(src);
+						if(srcIter == team_cache.end()) {
+							result->primaryTeams.insert( src );
+							team_cache[src] = std::pair<vector<UID>, vector<UID>>();
+						}
 						if (dest.size()) {
 							info.hasDest = true;
 							info.primaryDest = dest;
-							result->primaryTeams.insert( dest );
+							auto destIter = team_cache.find(dest);
+							if(destIter == team_cache.end()) {
+								result->primaryTeams.insert( dest );
+								team_cache[dest] = std::pair<vector<UID>, vector<UID>>();
+							}
 						}
 					}
 					result->shards.push_back( info );

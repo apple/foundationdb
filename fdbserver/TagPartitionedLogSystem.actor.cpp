@@ -579,7 +579,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, std::vector<Tag> tags, bool parallelGetMore ) {
+	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, std::vector<Tag> tags, bool parallelGetMore ) {
 		if(tags.empty()) {
 			TraceEvent("TLogPeekNoTags", dbgid).detail("Begin", begin);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), invalidTag, begin, getPeekEnd(), false, false ) );
@@ -593,7 +593,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for(auto tag : tags) {
 			cursors.push_back(peek(dbgid, begin, tag, parallelGetMore));
 		}
-		return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(cursors, begin, tLogs.size() && tLogs[0]->locality == tagLocalityUpgraded) );
+		return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), tLogs[0]->locality == tagLocalityUpgraded) );
 	}
 
 	Reference<IPeekCursor> peekLocal( UID dbgid, Tag tag, Version begin, Version end ) {
