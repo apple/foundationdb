@@ -977,6 +977,8 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 		throw internal_error();
 	}
 
+	Void _ = wait(yield());
+
 	state Version targetVersion = std::min(self->end, self->messageVersion.version + SERVER_KNOBS->VERSIONS_PER_BATCH);
 	self->messages.clear();
 
