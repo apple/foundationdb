@@ -1275,6 +1275,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 	state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 
+	Void _ = wait( yield() );
 	TraceEvent("TeamTrackerStarting", self->masterId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
 
 	try {
