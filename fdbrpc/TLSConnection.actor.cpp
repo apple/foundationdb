@@ -343,33 +343,6 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 	return policy;
 }
 
-static void TLSConnectionLogFunc( const char* event, void* uid_ptr, int is_error, ... ) {
-	UID uid;
-
-	if ( uid_ptr )
-		uid = *(UID*)uid_ptr;
-
-	Severity s = SevInfo;
-	if ( is_error )
-		s = SevError;
-
-	auto t = TraceEvent( s, event, uid );
-
-	if ( !is_error ) {
-		// don't spam with too many reasons why client connections were rejected
-		t = t.suppressFor(1.0, true);
-	}
-
-	va_list ap;
-	char* field;
-
-	va_start( ap, is_error );
-	while ( (field = va_arg( ap, char* )) ) {
-		t.detail( field, va_arg( ap, char* ) );
-	}
-	va_end( ap );
-}
-
 void TLSOptions::init_plugin() {
 
 	TraceEvent("TLSConnectionLoadingPlugin").detail("Plugin", tlsPluginName);
@@ -381,14 +354,14 @@ void TLSOptions::init_plugin() {
 		throw tls_error();
 	}
 
-	policyVerifyPeersSet = Reference<ITLSPolicy>( plugin->create_policy( TLSConnectionLogFunc ) );
+	policyVerifyPeersSet = Reference<ITLSPolicy>( plugin->create_policy() );
 	if ( !policyVerifyPeersSet) {
 		// Hopefully create_policy logged something with the log func
 		TraceEvent(SevError, "TLSConnectionCreatePolicyVerifyPeersSetError");
 		throw tls_error();
 	}
 
-	policyVerifyPeersNotSet = Reference<ITLSPolicy>(plugin->create_policy(TLSConnectionLogFunc));
+	policyVerifyPeersNotSet = Reference<ITLSPolicy>(plugin->create_policy());
 	if (!policyVerifyPeersNotSet) {
 		// Hopefully create_policy logged something with the log func
 		TraceEvent(SevError, "TLSConnectionCreatePolicyVerifyPeersNotSetError");

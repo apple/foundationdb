@@ -47,6 +47,9 @@ struct FDBLibTLSSession : ITLSSession, ReferenceCounted<FDBLibTLSSession> {
 
 	Reference<FDBLibTLSPolicy> policy;
 
+	TraceEventRef logf(const char* type);   // Assumes SevInfo severity
+	TraceEventRef logf(Severity, const char* type);
+
 	bool is_client;
 
 	struct tls *tls_ctx;
