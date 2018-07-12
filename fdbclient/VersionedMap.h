@@ -515,10 +515,19 @@ public:
 		roots[newOldestVersion] = getRoot(newOldestVersion);
 
 		vector<Tree> toFree;
+		toFree.reserve(10000);
 		auto newBegin = roots.lower_bound(newOldestVersion);
-		for(auto root = roots.begin(); root != roots.end() && root != newBegin; ++root) {
-			if(root->second && root->second->isSoleOwner())
-				toFree.push_back(root->second);
+		Tree *lastRoot = nullptr;
+		for(auto root = roots.begin(); root != newBegin; ++root) {
+			if(root->second) {
+				if(lastRoot != nullptr && root->second == *lastRoot) {
+					(*lastRoot).clear();
+				}
+				if(root->second->isSoleOwner()) {
+					toFree.push_back(root->second);
+				}
+				lastRoot = &root->second;
+			}
 		}
 
 		roots.erase(roots.begin(), newBegin);
