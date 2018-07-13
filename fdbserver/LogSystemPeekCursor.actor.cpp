@@ -988,6 +988,7 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 		loaders.push_back(bufferedGetMoreLoader(self, cursor, targetVersion, taskID));
 	}
 	Void _ = wait( waitForAll(loaders) );
+	Void _ = wait(yield());
 
 	if(self->collectTags) {
 		std::sort(self->messages.begin(), self->messages.end());
@@ -1001,6 +1002,8 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 	if(self->collectTags) {
 		self->combineMessages();
 	}
+
+	Void _ = wait(yield());
 	return Void();
 }
 
