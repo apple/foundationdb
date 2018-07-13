@@ -28,6 +28,7 @@
 
 #include "FDBLibTLSPolicy.h"
 #include "FDBLibTLSVerify.h"
+#include "IRandom.h"
 
 #include <tls.h>
 

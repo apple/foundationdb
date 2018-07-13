@@ -28,7 +28,6 @@
 
 #include "FDBLibTLSPlugin.h"
 #include "FDBLibTLSVerify.h"
-#include "Trace.h"
 
 #include <string>
 #include <vector>

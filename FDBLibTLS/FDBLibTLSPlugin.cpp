@@ -22,6 +22,7 @@
 
 #include "FDBLibTLSPlugin.h"
 #include "FDBLibTLSPolicy.h"
+#include "Trace.h"
 
 #include <string.h>
 

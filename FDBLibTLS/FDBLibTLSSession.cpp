@@ -19,6 +19,7 @@
  */
 
 #include "FDBLibTLSSession.h"
+#include "Trace.h"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -368,7 +369,7 @@ int FDBLibTLSSession::handshake() {
 	case TLS_WANT_POLLOUT:
 		return WANT_WRITE;
 	default:
-		TraceEvent("FDBLibTLSHandshakeError", uid).detail("LibcryptoErrorMessage", tls_error(tls_ctx)).suppressFor(1.0, true);
+		TraceEvent("FDBLibTLSHandshakeError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx)).suppressFor(1.0, true);
 		return FAILED;
 	}
 }

@@ -20,6 +20,7 @@
 
 #include "FDBLibTLSPolicy.h"
 #include "FDBLibTLSSession.h"
+#include "Trace.h"
 
 #include <openssl/bio.h>
 #include <openssl/err.h>
