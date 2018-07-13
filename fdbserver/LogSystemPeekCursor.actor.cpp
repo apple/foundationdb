@@ -957,6 +957,7 @@ void ILogSystem::BufferedCursor::advanceTo(LogMessageVersion n) {
 
 ACTOR Future<Void> bufferedGetMoreLoader( ILogSystem::BufferedCursor* self, Reference<ILogSystem::IPeekCursor> cursor, Version maxVersion, int taskID ) {
 	loop {
+		Void _ = wait(yield());
 		if(cursor->version().version >= maxVersion) {
 			return Void();
 		}
@@ -976,8 +977,6 @@ ACTOR Future<Void> bufferedGetMore( ILogSystem::BufferedCursor* self, int taskID
 		Void _ = wait( Future<Void>(Never()));
 		throw internal_error();
 	}
-
-	Void _ = wait(yield());
 
 	state Version targetVersion = std::min(self->end, self->messageVersion.version + SERVER_KNOBS->VERSIONS_PER_BATCH);
 	self->messages.clear();
