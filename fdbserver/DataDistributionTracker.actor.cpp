@@ -555,10 +555,6 @@ ACTOR Future<Void> shardTracker(
 			Void _ = wait( delay(0, TaskDataDistribution) );
 		}
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "ShardTrackerError", self->masterId)
-			.detail("TrackerID", trackerID)
-			.detail("Keys", printable(keys))
-			.error(e);
 		if (e.code() != error_code_actor_cancelled)
 			self->output.sendError(e);		// Propagate failure to dataDistributionTracker
 		throw e;
