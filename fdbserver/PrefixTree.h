@@ -131,7 +131,9 @@ struct PrefixTree {
  * 
  *   Flag Bits
  *
- *   prefix borrow from left
+ *   prefix borrow from next
+ *      true -  borrow from the closest ancestor greater than this node
+ *      false - borrow from the closest ancestor less    than this node
  *   large lengths = use 2 byte ints instead of 1 byte for prefix, split, suffix, and value lengths
  *     (TODO: It might be better to just not use a suffix at all when large is lengths is set)
  *   left child present
@@ -158,7 +160,7 @@ struct PrefixTree {
  */
 		enum EFlags {
 			USE_LARGE_LENGTHS   = 1 << 0,
-			PREFIX_SOURCE_LEFT  = 1 << 1,
+			PREFIX_SOURCE_NEXT  = 1 << 1,
 			HAS_LEFT_CHILD      = 1 << 2,
 			HAS_RIGHT_CHILD     = 1 << 3,
 			HAS_SPLIT           = 1 << 4,
@@ -312,12 +314,12 @@ private:
 		const Node *node;
 		StringRef prefix;
 		Standalone<VectorRef<uint8_t>> prefixBuffer;
-		bool nodeTypeLeft;
+		bool nodeIsLeftChild;
 		int moves;  // number of consecutive moves in same direction
 
 		PathEntry(StringRef s = StringRef()) : node(nullptr), prefix(s) {
 		}
-		PathEntry(const Node *node, StringRef prefix, bool left, int moves) : node(node), prefix(prefix), nodeTypeLeft(left), moves(moves) {
+		PathEntry(const Node *node, StringRef prefix, bool leftChild, int moves) : node(node), prefix(prefix), nodeIsLeftChild(leftChild), moves(moves) {
 		}
 		PathEntry(const PathEntry &rhs) {
 			*this = rhs;
@@ -325,7 +327,7 @@ private:
 
 		PathEntry & operator= (const PathEntry &rhs) {
 			node = rhs.node;
-			nodeTypeLeft = rhs.nodeTypeLeft;
+			nodeIsLeftChild = rhs.nodeIsLeftChild;
 			moves = rhs.moves;
 			prefixBuffer = VectorRef<uint8_t>((uint8_t *)rhs.prefix.begin(), rhs.prefix.size());
 			prefix = StringRef(prefixBuffer.begin(), prefixBuffer.size());
@@ -334,7 +336,7 @@ private:
 
 		void init(const Node *_node, const PathEntry *prefixSource, bool left, int _moves) {
 			node = _node;
-			nodeTypeLeft = left;
+			nodeIsLeftChild = left;
 			moves = _moves;
 
 			int n = _node->getPrefixLen();
@@ -382,6 +384,7 @@ private:
 				return prefix.substr(0, size);
 			}
 
+			ASSERT(node != nullptr);
 			uint8_t *wptr = dst;
 			uint8_t *end = dst + size;
 
@@ -395,7 +398,9 @@ private:
 			wptr += b;
 
 			StringRef suffix = node->getSuffixString();
-			memcpy(wptr, suffix.begin(), std::min<int>(end - wptr, suffix.size()));
+			b = std::min<int>(end - wptr, suffix.size());
+			memcpy(wptr, suffix.begin(), b);
+			ASSERT(wptr + b == end);
 
 			return StringRef(dst, size);
 		}
@@ -413,25 +418,29 @@ public:
 		Cursor() : pathLen(0) {
 		}
 
-		Cursor(const Node *root, StringRef parentBoundary) {
-			init(root, parentBoundary);
+		Cursor(const Node *root, StringRef prevAncestor, StringRef nextAncestor) {
+			init(root, prevAncestor, nextAncestor);
 		}
 
+		static const int initialPathLen = 3;
 		// This is a separate function so that Cursors can be reused to search different PrefixTrees
 		// which avoids cursor destruction and creation which involves unnecessary memory churn.
-		void init(const Node *root, StringRef parentBoundary) {
-			ASSERT(!(root->flags & Node::PREFIX_SOURCE_LEFT));
+		// The root node is arbitrarily assumed to be a right child of prevAncestor which itself is a left child of nextAncestor
+		void init(const Node *root, StringRef prevAncestor, StringRef nextAncestor) {
 			path.resize(20);
-			path[0] = PathEntry(parentBoundary);
-			path[1] = PathEntry(root, parentBoundary.substr(0, root->getPrefixLen()), false, 1);
-			pathLen = 2;
+			path[0] = PathEntry(nextAncestor);
+			path[1] = PathEntry(prevAncestor);
+			StringRef rootPrefix = (root->flags & Node::PREFIX_SOURCE_NEXT ? nextAncestor : prevAncestor).substr(0, root->getPrefixLen());
+			path[2] = PathEntry(root, rootPrefix, false, 1);
+			pathLen = initialPathLen;
 		}
 
 		bool operator == (const Cursor &rhs) const {
 			return pathBack().node == rhs.pathBack().node;
 		}
 
-		StringRef parentBoundary;
+		StringRef leftParentBoundary;
+		StringRef rightParentBoundary;
 		std::vector<PathEntry> path;
 		// pathLen is the number of elements in path which are in use.  This is to prevent constantly destroying
 		// and constructing PathEntry objects which would unnecessarily churn through memory in Arena for storing
@@ -489,7 +498,7 @@ public:
 			if(pathLen == 0)
 				return false;
 
-			pathLen = 2;
+			pathLen = initialPathLen;
 
 			// TODO: Track position of difference and use prefix reuse bytes and prefix sources
 			// to skip comparison of some prefix bytes when possible
@@ -503,16 +512,17 @@ public:
 					return true;
 
 				if(cmp < 0) {
+					// Try to traverse left
 					const Node *left = p.node->getLeftChild();
 					if(left == nullptr) {
 						// If we're at the root, cursor should now be before the first element
-						if(pathLen == 2) {
+						if(pathLen == initialPathLen) {
 							return false;
 						}
 
-						if(p.nodeTypeLeft) {
+						if(p.nodeIsLeftChild) {
 							// If we only went left, cursor should now be before the first element
-							if((p.moves + 2) == pathLen) {
+							if((p.moves + initialPathLen) == pathLen) {
 								return false;
 							}
 
@@ -527,17 +537,18 @@ public:
 						return true;
 					}
 
-					int newMoves = p.nodeTypeLeft ? p.moves + 1 : 1;
-					const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_LEFT) ? &p : &p - newMoves;
+					int newMoves = p.nodeIsLeftChild ? p.moves + 1 : 1;
+					const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_NEXT) ? &p : &p - newMoves;
 					pushPath(left, borrowSource, true, newMoves);
 				}
 				else {
+					// Try to traverse right
 					if(right == nullptr) {
 						return true;
 					}
 
-					int newMoves = p.nodeTypeLeft ? 1 : p.moves + 1;
-					const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_LEFT) ? &p - newMoves : &p;
+					int newMoves = p.nodeIsLeftChild ? 1 : p.moves + 1;
+					const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_NEXT) ? &p - newMoves : &p;
 					pushPath(right, borrowSource, false, newMoves);
 				}
 			}
@@ -574,10 +585,15 @@ public:
 		std::string pathToString() const {
 			std::string s;
 			for(int i = 0; i < pathLen; ++i) {
-				s += format("(%d: %s, ", i, path[i].nodeTypeLeft ? "left" : "right");
+				s += format("(%d: ", i);
 				const Node *node = path[i].node;
 				if(node != nullptr) {
-					s += format("prefix='%s' split='%s' suffix='%s' value='%s') ", path[i].prefix.toHexString().c_str(), node->getSplitString().toHexString().c_str(), node->getSuffixString().toHexString().c_str(), node->getValueString().toHexString().c_str());
+					s += "childDir=";
+					s += (path[i].nodeIsLeftChild ? "left " : "right ");
+				}
+				s += format("prefix='%s'", path[i].prefix.toHexString().c_str());
+				if(node != nullptr) {
+					s += format(" split='%s' suffix='%s' value='%s'", node->getSplitString().toHexString().c_str(), node->getSuffixString().toHexString().c_str(), node->getValueString().toHexString().c_str());
 				}
 				else
 					s += ") ";
@@ -589,7 +605,7 @@ public:
 			if(pathLen == 0)
 				return false;
 
-			pathLen = 2;
+			pathLen = initialPathLen;
 
 			while(1) {
 				const PathEntry &p = pathBack();
@@ -599,8 +615,8 @@ public:
 					break;
 
 				// TODO:  This can be simpler since it only goes left
-				int newMoves = p.nodeTypeLeft ? p.moves + 1 : 1;
-				const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_LEFT) ? &p : &p - newMoves;
+				int newMoves = p.nodeIsLeftChild ? p.moves + 1 : 1;
+				const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_NEXT) ? &p : &p - newMoves;
 				pushPath(left, borrowSource, true, newMoves);
 			}
 
@@ -611,7 +627,7 @@ public:
 			if(pathLen == 0)
 				return false;
 
-			pathLen = 2;
+			pathLen = initialPathLen;
 
 			while(1) {
 				// TODO:  This can be simpler since it only goes right
@@ -622,8 +638,8 @@ public:
 					break;
 
 				// TODO:  This can be simpler since it only goes right
-				int newMoves = p.nodeTypeLeft ? 1 : p.moves + 1;
-				const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_LEFT) ? &p - newMoves : &p;
+				int newMoves = p.nodeIsLeftChild ? 1 : p.moves + 1;
+				const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_NEXT) ? &p - newMoves : &p;
 				pushPath(right, borrowSource, false, newMoves);
 			}
 
@@ -643,14 +659,14 @@ public:
 			// If we can't go right, then go upward to the parent of the last left child
 			if(right == nullptr) {
 				// If current node was a left child then pop one node and we're done
-				if(p.nodeTypeLeft) {
+				if(p.nodeIsLeftChild) {
 					popPath(1);
 					return true;
 				}
 
 				// Current node is a right child.
 				// If we are at the rightmost tree node return false and don't move.
-				if(p.moves + 1 == pathLen) {
+				if(p.moves + initialPathLen - 1 == pathLen) {
 					return false;
 				}
 
@@ -660,8 +676,9 @@ public:
 			}
 
 			// Go right
-			int newMoves = p.nodeTypeLeft ? 1 : p.moves + 1;
-			const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_LEFT) ? &p - newMoves : &p;
+			debug_printf("going right: %s\n", pathToString().c_str());
+			int newMoves = p.nodeIsLeftChild ? 1 : p.moves + 1;
+			const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_NEXT) ? &p - newMoves : &p;
 			pushPath(right, borrowSource, false, newMoves);
 
 			// Go left as far as possible
@@ -672,8 +689,9 @@ public:
 					return true;
 				}
 
-				int newMoves = p.nodeTypeLeft ? p.moves + 1 : 1;
-				const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_LEFT) ? &p : &p - newMoves;
+				debug_printf("going left: %s\n", pathToString().c_str());
+				int newMoves = p.nodeIsLeftChild ? p.moves + 1 : 1;
+				const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_NEXT) ? &p : &p - newMoves;
 				pushPath(left, borrowSource, true, newMoves);
 			}
 		}
@@ -691,9 +709,9 @@ public:
 			// If we can't go left, then go upward to the parent of the last right child
 			if(left == nullptr) {
 				// If current node was a right child
-				if(!p.nodeTypeLeft) {
+				if(!p.nodeIsLeftChild) {
 					// If we are at the root then don't move and return false.
-					if(pathLen == 2)
+					if(pathLen == initialPathLen)
 						return false;
 
 					// Otherwise, pop one node from the path and return true.
@@ -703,7 +721,7 @@ public:
 
 				// Current node is a left child.
 				// If we are at the leftmost tree node then return false and don't move.
-				if(p.moves + 2 == pathLen) {
+				if(p.moves + 3 == pathLen) {
 					return false;
 				}
 
@@ -713,8 +731,8 @@ public:
 			}
 
 			// Go left
-			int newMoves = p.nodeTypeLeft ? p.moves + 1 : 1;
-			const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_LEFT) ? &p : &p - newMoves;
+			int newMoves = p.nodeIsLeftChild ? p.moves + 1 : 1;
+			const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_NEXT) ? &p : &p - newMoves;
 			pushPath(left, borrowSource, true, newMoves);
 
 			// Go right as far as possible
@@ -725,16 +743,16 @@ public:
 					return true;
 				}
 
-				int newMoves = p.nodeTypeLeft ? 1 : p.moves + 1;
-				const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_LEFT) ? &p - newMoves : &p;
+				int newMoves = p.nodeIsLeftChild ? 1 : p.moves + 1;
+				const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_NEXT) ? &p - newMoves : &p;
 				pushPath(right, borrowSource, false, newMoves);
 			}
 		}
 
 	};
 
-	Cursor getCursor(StringRef boundary = StringRef()) const {
-		return (size != 0) ? Cursor(&root, boundary) : Cursor();
+	Cursor getCursor(StringRef prevAncestor, StringRef nextAncestor) const {
+		return (size != 0) ? Cursor(&root, prevAncestor, nextAncestor) : Cursor();
 	}
 
 	static std::string escapeForDOT(StringRef s) {
@@ -750,8 +768,8 @@ public:
 		return r + '"';
 	}
 
-	std::string toDOT(const StringRef &boundary) const {
-		auto c = getCursor(boundary);
+	std::string toDOT(StringRef prevAncestor, StringRef nextAncestor) const {
+		auto c = getCursor(prevAncestor, nextAncestor);
 		c.moveFirst();
 
 		std::string r;
@@ -763,7 +781,7 @@ public:
 			const Node *right = n->getRightChild();
 
 			std::string label = escapeForDOT(format("PrefixSource: %s\nPrefix: [%s]\nSplit: %s\nSuffix: %s",
-				n->flags & Node::PREFIX_SOURCE_LEFT ? "Left" : "Right",
+				n->flags & Node::PREFIX_SOURCE_NEXT ? "Left" : "Right",
 				c.pathBack().prefix.toString().c_str(),
 				n->getSplitString().toString().c_str(),
 				n->getSuffixString().toString().c_str()
@@ -782,22 +800,22 @@ public:
 	}
 
 	// Returns number of bytes written
-	int build(const Entry *begin, const Entry *end, const StringRef &boundary) {
+	int build(const Entry *begin, const Entry *end, StringRef prevAncestor, StringRef nextAncestor) {
 		// The boundary leading to the new page acts as the last time we branched right
 		if(begin == end) {
 			size = 0;
 		}
 		else {
-			size = sizeof(size) + build(root, begin, end, StringRef(), boundary);
+			size = sizeof(size) + build(root, begin, end, nextAncestor, prevAncestor);
 		}
 		return size;
 	}
 
-	int build(const EntriesT &entries, const StringRef &boundary) {
-		return build(&*entries.begin(), &*entries.end(), boundary);
+	int build(const EntriesT &entries, StringRef prevAncestor, StringRef nextAncestor) {
+		return build(&*entries.begin(), &*entries.end(), prevAncestor, nextAncestor);
 	}
 
-	static uint16_t build(Node &root, const Entry *begin, const Entry *end, const StringRef &lastLeft, const StringRef &lastRight) {
+	static uint16_t build(Node &root, const Entry *begin, const Entry *end, const StringRef &nextAncestor, const StringRef &prevAncestor) {
 		ASSERT(end != begin);
 
 		int count = end - begin;
@@ -810,14 +828,14 @@ public:
 		// Since key must be between lastLeft and lastRight, any common prefix they share must be shared by key
 		// so rather than comparing all of key to each one separately we can just compare lastLeft and lastRight
 		// to each other and then skip over the resulting length in key
-		int leftRightCommon = commonPrefixLength(lastLeft.begin(), lastRight.begin(), std::min(lastLeft.size(), lastRight.size()));
+		int leftRightCommon = commonPrefixLength(nextAncestor.begin(), prevAncestor.begin(), std::min(nextAncestor.size(), prevAncestor.size()));
 
 		// Pointer to remainder of key after the left/right common bytes
 		const uint8_t *keyExt = key.begin() + leftRightCommon;
 
 		// Find out how many bytes beyond leftRightCommon key has with each last left/right string separately
-		int extLeft = commonPrefixLength(keyExt, lastLeft.begin() + leftRightCommon, std::min(key.size(), lastLeft.size()) - leftRightCommon);
-		int extRight = commonPrefixLength(keyExt, lastRight.begin() + leftRightCommon, std::min(key.size(), lastRight.size()) - leftRightCommon);
+		int extLeft = commonPrefixLength(keyExt, nextAncestor.begin() + leftRightCommon, std::min(key.size(), nextAncestor.size()) - leftRightCommon);
+		int extRight = commonPrefixLength(keyExt, prevAncestor.begin() + leftRightCommon, std::min(key.size(), prevAncestor.size()) - leftRightCommon);
 
 		// Use the longer result
 		bool prefixSourceLeft = extLeft > extRight;
@@ -857,7 +875,7 @@ public:
 		root.flags = large ? Node::USE_LARGE_LENGTHS : 0;
 
 		if(prefixSourceLeft)
-			root.flags |= Node::PREFIX_SOURCE_LEFT;
+			root.flags |= Node::PREFIX_SOURCE_NEXT;
 
 		union {
 			uint8_t *p8;
@@ -912,7 +930,7 @@ public:
 		// Serialize left child
 		if(count > 1) {
 			root.flags |= Node::HAS_LEFT_CHILD;
-			int leftLen = build(*(Node *)(p8), begin, begin + mid, key, lastRight);
+			int leftLen = build(*(Node *)(p8), begin, begin + mid, key, prevAncestor);
 			*pLeftLen = leftLen;
 			p8 += leftLen;
 		}
@@ -932,7 +950,7 @@ public:
 		// Serialize right child
 		if(count > 2) {
 			root.flags |= Node::HAS_RIGHT_CHILD;
-			int rightLen = build(*(Node *)(p8), begin + mid + 1, end, lastLeft, key);
+			int rightLen = build(*(Node *)(p8), begin + mid + 1, end, nextAncestor, key);
 			p8 += rightLen;
 		}
 
