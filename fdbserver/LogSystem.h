@@ -590,6 +590,8 @@ struct ILogSystem {
 
 	virtual void toCoreState( DBCoreState& ) = 0;
 
+	virtual bool remoteStorageRecovered() = 0;
+
 	virtual Future<Void> onCoreStateChanged() = 0;
 		// Returns if and when the output of toCoreState() would change (for example, when older logs can be discarded from the state)
 
