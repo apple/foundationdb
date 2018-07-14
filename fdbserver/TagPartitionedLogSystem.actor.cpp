@@ -283,14 +283,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		newState.oldTLogData.clear();
-		int recoveredCount = 0;
-		if(recoveryComplete.isValid() && recoveryComplete.isReady()) {
-			recoveredCount++;
-		}
-		if(remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isReady()) {
-			recoveredCount++;
-		}
-		if(recoveredCount < 2 - repopulateRegionAntiQuorum) {
+		if(!recoveryComplete.isValid() || !recoveryComplete.isReady() || (repopulateRegionAntiQuorum == 0 && (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady()))) {
 			newState.oldTLogData.resize(oldLogData.size());
 			for(int i = 0; i < oldLogData.size(); i++) {
 				for(auto &t : oldLogData[i].tLogs) {
@@ -316,6 +309,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		newState.logSystemType = logSystemType;
+	}
+
+	virtual bool remoteStorageRecovered() {
+		return remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isReady();
 	}
 
 	virtual Future<Void> onCoreStateChanged() {
