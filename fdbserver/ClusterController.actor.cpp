@@ -780,7 +780,7 @@ public:
 	}
 
 	void checkRecoveryStalled() {
-		if(db.serverInfo->get().recoveryState < RecoveryState::RECOVERY_TRANSACTION && db.recoveryStalled ) {
+		if( (db.serverInfo->get().recoveryState == RecoveryState::RECRUITING || db.serverInfo->get().recoveryState == RecoveryState::ACCEPTING_COMMITS || db.serverInfo->get().recoveryState == RecoveryState::ALL_LOGS_RECRUITED) && db.recoveryStalled ) {
 			if(db.config.regions.size() > 1 && clusterControllerDcId.present()) {
 				auto regions = db.config.regions;
 				if(clusterControllerDcId.get() == regions[0].dcId) {
