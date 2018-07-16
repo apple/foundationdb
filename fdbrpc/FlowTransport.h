@@ -102,7 +102,7 @@ public:
 	// Makes PacketID "unreliable" (either the data or a connection close event will be delivered
 	//   eventually).  It can still be used safely to send a reply to a "reliable" request.
 
-	void sendUnreliable( ISerializeSource const& what, const Endpoint& destination );// { cancelReliable(sendReliable(what,destination)); }
+	void sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection = true );// { cancelReliable(sendReliable(what,destination)); }
 
 	int getEndpointCount();
 	// for tracing only
