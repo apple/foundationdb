@@ -64,11 +64,10 @@ struct client_server_test {
 };
 
 struct FDBLibTLSPluginTest {
-	FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin, ITLSLogFunc logf);
+	FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin);
 	~FDBLibTLSPluginTest();
 
 	Reference<ITLSPlugin> plugin;
-	ITLSLogFunc logf;
 
 	boost::circular_buffer<uint8_t> client_buffer;
 	boost::circular_buffer<uint8_t> server_buffer;
@@ -91,8 +90,8 @@ struct FDBLibTLSPluginTest {
 	int set_cert_data_test(void);
 };
 
-FDBLibTLSPluginTest::FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin, ITLSLogFunc logf) :
-	plugin(plugin), logf(logf)
+FDBLibTLSPluginTest::FDBLibTLSPluginTest(Reference<ITLSPlugin> plugin) :
+	plugin(plugin)
 {
 	circular_reset();
 	circular_self_test();
@@ -202,7 +201,7 @@ void FDBLibTLSPluginTest::circular_self_test()
 
 Reference<ITLSPolicy> FDBLibTLSPluginTest::create_policy(void)
 {
-	return Reference<ITLSPolicy>(plugin->create_policy((ITLSLogFunc)logf));
+	return Reference<ITLSPolicy>(plugin->create_policy());
 }
 
 static int client_send_func(void* ctx, const uint8_t* buf, int len) {
@@ -1164,7 +1163,7 @@ int main(int argc, char **argv)
 
 	Reference<ITLSPlugin> plugin = Reference<ITLSPlugin>((ITLSPlugin *)getPlugin(ITLSPlugin::get_plugin_type_name_and_version()));
 
-	FDBLibTLSPluginTest *pt = new FDBLibTLSPluginTest(plugin, (ITLSLogFunc)logf);
+	FDBLibTLSPluginTest *pt = new FDBLibTLSPluginTest(plugin);
 
 	int test_num = 1;
 	for (auto &cst: client_server_tests) {
