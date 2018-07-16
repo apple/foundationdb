@@ -1023,6 +1023,52 @@ public:
 		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
 	}
 
+	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const
+	{
+		if(!dcId.present()) {
+			return false;
+		}
+
+		std::vector<ProcessInfo*>	processesLeft, processesDead;
+		LocalityGroup primaryProcessesLeft, primaryProcessesDead;
+		std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
+
+		for (auto processInfo : getAllProcesses()) {
+			// Add non-test processes (ie. datahall is not be set for test processes)
+			if (processInfo->isAvailableClass() && processInfo->locality.dcId() == dcId) {
+				// Ignore excluded machines
+				if (processInfo->isExcluded())
+					processesDead.push_back(processInfo);
+				else if (processInfo->isCleared())
+					processesDead.push_back(processInfo);
+				// Mark all of the unavailable as dead
+				else if (!processInfo->isAvailable())
+					processesDead.push_back(processInfo);
+				else if (protectedAddresses.count(processInfo->address))
+					processesLeft.push_back(processInfo);
+				else
+					processesLeft.push_back(processInfo);
+			}
+		}
+
+		for (auto processInfo : processesLeft) {
+			primaryProcessesLeft.add(processInfo->locality);
+			primaryLocalitiesLeft.push_back(processInfo->locality);
+		}
+		for (auto processInfo : processesDead) {
+			primaryProcessesDead.add(processInfo->locality);
+			primaryLocalitiesDead.push_back(processInfo->locality);
+		}
+
+		std::vector<LocalityData> badCombo;
+		bool primaryTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false) : primaryProcessesDead.validate(tLogPolicy);
+		if(usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
+			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
+		}
+
+		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
+	}
+
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const
 	{

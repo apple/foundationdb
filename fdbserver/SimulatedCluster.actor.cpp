@@ -918,6 +918,16 @@ void SimulationConfig::generateNormalConfig(int minimumReplication) {
 		}
 
 		set_config("regions=" + json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none));
+
+		if(needsRemote) {
+			StatusArray disablePrimary = regionArr;
+			disablePrimary[0].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
+			g_simulator.disablePrimary = "regions=" + json_spirit::write_string(json_spirit::mValue(disablePrimary), json_spirit::Output_options::none);
+
+			StatusArray disableRemote = regionArr;
+			disableRemote[1].get_obj()["datacenters"].get_array()[0].get_obj()["priority"] = -1;
+			g_simulator.disableRemote = "regions=" + json_spirit::write_string(json_spirit::mValue(disableRemote), json_spirit::Output_options::none);
+		}
 	}
 
 	if(generateFearless && minimumReplication > 1) {

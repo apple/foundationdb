@@ -154,6 +154,7 @@ public:
 	//virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses, std::vector<ProcessInfo*> const& deadProcesses, KillType kt, KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
 
 	virtual void addRole(NetworkAddress const& address, std::string const& role) {
@@ -282,6 +283,8 @@ public:
 	Optional<Standalone<StringRef>> primaryDcId;
 	IRepPolicyRef remoteTLogPolicy;
 	int32_t usableRegions;
+	std::string disablePrimary;
+	std::string disableRemote;
 	bool allowLogSetKills;
 	Optional<Standalone<StringRef>> remoteDcId;
 	bool hasSatelliteReplication;

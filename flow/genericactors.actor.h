@@ -668,6 +668,11 @@ public:
 		this->value = v;
 		trigger.send(Void());
 	}
+	void trigger() {
+		Promise<Void> trigger;
+		this->nextChange.swap(trigger);
+		trigger.send(Void());
+	}
 
 private:
 	V value;
