@@ -1001,23 +1001,14 @@ public:
 	}
 	virtual bool isAvailable() const
 	{
-		std::vector<ProcessInfo*>	processesLeft, processesDead;
-
+		std::vector<ProcessInfo*> processesLeft, processesDead;
 		for (auto processInfo : getAllProcesses()) {
-			// Add non-test processes (ie. datahall is not be set for test processes)
 			if (processInfo->isAvailableClass()) {
-				// Ignore excluded machines
-				if (processInfo->isExcluded())
+				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					processesDead.push_back(processInfo);
-				else if (processInfo->isCleared())
-					processesDead.push_back(processInfo);
-				// Mark all of the unavailable as dead
-				else if (!processInfo->isAvailable())
-					processesDead.push_back(processInfo);
-				else if (protectedAddresses.count(processInfo->address))
+				} else {
 					processesLeft.push_back(processInfo);
-				else
-					processesLeft.push_back(processInfo);
+				}
 			}
 		}
 		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
@@ -1029,35 +1020,19 @@ public:
 			return false;
 		}
 
-		std::vector<ProcessInfo*>	processesLeft, processesDead;
 		LocalityGroup primaryProcessesLeft, primaryProcessesDead;
 		std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
 
 		for (auto processInfo : getAllProcesses()) {
-			// Add non-test processes (ie. datahall is not be set for test processes)
 			if (processInfo->isAvailableClass() && processInfo->locality.dcId() == dcId) {
-				// Ignore excluded machines
-				if (processInfo->isExcluded())
-					processesDead.push_back(processInfo);
-				else if (processInfo->isCleared())
-					processesDead.push_back(processInfo);
-				// Mark all of the unavailable as dead
-				else if (!processInfo->isAvailable())
-					processesDead.push_back(processInfo);
-				else if (protectedAddresses.count(processInfo->address))
-					processesLeft.push_back(processInfo);
-				else
-					processesLeft.push_back(processInfo);
+				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
+					primaryProcessesDead.add(processInfo->locality);
+					primaryLocalitiesDead.push_back(processInfo->locality);
+				} else {
+					primaryProcessesLeft.add(processInfo->locality);
+					primaryLocalitiesLeft.push_back(processInfo->locality);
+				}
 			}
-		}
-
-		for (auto processInfo : processesLeft) {
-			primaryProcessesLeft.add(processInfo->locality);
-			primaryLocalitiesLeft.push_back(processInfo->locality);
-		}
-		for (auto processInfo : processesDead) {
-			primaryProcessesDead.add(processInfo->locality);
-			primaryLocalitiesDead.push_back(processInfo->locality);
 		}
 
 		std::vector<LocalityData> badCombo;
@@ -1310,9 +1285,7 @@ public:
 			int	protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
 			for (auto processInfo : getAllProcesses()) {
-				// Add non-test processes (ie. datahall is not be set for test processes)
 				if (processInfo->isAvailableClass()) {
-					// Do not include any excluded machines
 					if (processInfo->isExcluded()) {
 						processesDead.push_back(processInfo);
 						excluded++;
@@ -1329,11 +1302,11 @@ public:
 						processesLeft.push_back(processInfo);
 						protectedWorker++;
 					}
-					else if (processInfo->locality.zoneId() != zoneId)
+					else if (processInfo->locality.zoneId() != zoneId) {
 						processesLeft.push_back(processInfo);
-					// Add processes from dead machines and datacenter machines to dead group
-					else
+					} else {
 						processesDead.push_back(processInfo);
+					}
 				}
 			}
 			if (!canKillProcesses(processesLeft, processesDead, kt, &kt)) {
@@ -1431,22 +1404,14 @@ public:
 		{
 			std::vector<ProcessInfo*>	processesLeft, processesDead;
 			for (auto processInfo : getAllProcesses()) {
-				// Add non-test processes (ie. datahall is not be set for test processes)
 				if (processInfo->isAvailableClass()) {
-					// Mark all of the unavailable as dead
-					if (processInfo->isExcluded())
+					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 						processesDead.push_back(processInfo);
-					else if (processInfo->isCleared())
-						processesDead.push_back(processInfo);
-					else if (!processInfo->isAvailable())
-						processesDead.push_back(processInfo);
-					else if (protectedAddresses.count(processInfo->address))
+					} else if (protectedAddresses.count(processInfo->address) || datacenterZones.find(processInfo->locality.zoneId()) == datacenterZones.end()) {
 						processesLeft.push_back(processInfo);
-					// Keep all not in the datacenter zones
-					else if (datacenterZones.find(processInfo->locality.zoneId()) == datacenterZones.end())
-						processesLeft.push_back(processInfo);
-					else
+					} else {
 						processesDead.push_back(processInfo);
+					}
 				}
 			}
 

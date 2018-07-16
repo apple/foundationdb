@@ -663,15 +663,15 @@ public:
 			setUnconditional(v);
 	}
 	void setUnconditional( V const& v ) {
-		Promise<Void> trigger;
-		this->nextChange.swap(trigger);
+		Promise<Void> t;
+		this->nextChange.swap(t);
 		this->value = v;
-		trigger.send(Void());
+		t.send(Void());
 	}
 	void trigger() {
-		Promise<Void> trigger;
-		this->nextChange.swap(trigger);
-		trigger.send(Void());
+		Promise<Void> t;
+		this->nextChange.swap(t);
+		t.send(Void());
 	}
 
 private:
@@ -688,7 +688,7 @@ public:
 		return v.onChange();
 	}
 	void trigger() {
-		v.setUnconditional(Void());
+		v.trigger();
 	}
 private:
 	AsyncVar<Void> v;
