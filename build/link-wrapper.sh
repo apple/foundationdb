@@ -40,11 +40,10 @@ case $1 in
 		fi
 		;;
 		freebsd)
-			CC=clang++
-			CFLAGS="-std=c++11 -stdlib=libc++ -msse4.2 -Wno-error=unused-command-line-argument -Wno-undefined-var-template -Wno-unknown-warning-option -Wno-varargs"
-			_LIBS="-lm -lc++ -lpthread -lexecinfo -ldevstat -lkvm"
-			OPTIONS="$CFLAGS $OPTIONS $_LIBS"
-			$CC $OPTIONS
+		if [ -z ${CC+x}  ] && type -p clang >/dev/null; then
+        	CC=clang
+		fi
+		$CC $OPTIONS
 		;;
 	    *)
 		$CC $OPTIONS
