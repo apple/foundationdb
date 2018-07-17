@@ -583,6 +583,16 @@ Reference<ITransaction> MultiVersionDatabase::createTransaction() {
 void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional<StringRef> value) {
 	MutexHolder holder(dbState->optionLock);
 
+
+	auto itr = FDBDatabaseOptions::optionInfo.find(option);
+	if(itr != FDBDatabaseOptions::optionInfo.end()) {
+		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name).detail("Value", printable(value));
+	}
+	else {
+		TraceEvent("UnknownDatabaseOption").detail("Option", option).detail("Value", printable(value));
+		throw invalid_option();
+	}
+
 	if(dbState->db) {
 		dbState->db->setOption(option, value);
 	}
@@ -730,6 +740,15 @@ ThreadFuture<Reference<IDatabase>> MultiVersionCluster::createDatabase(Standalon
 
 void MultiVersionCluster::setOption(FDBClusterOptions::Option option, Optional<StringRef> value) {
 	MutexHolder holder(clusterState->optionLock);
+
+	auto itr = FDBClusterOptions::optionInfo.find(option);
+	if(itr != FDBClusterOptions::optionInfo.end()) {
+		TraceEvent("SetClusterOption").detail("Option", itr->second.name).detail("Value", printable(value));
+	}
+	else {
+		TraceEvent("UnknownClusterOption").detail("Option", option).detail("Value", printable(value));
+		throw invalid_option();
+	}
 
 	if(clusterState->cluster) {
 		clusterState->cluster->setOption(option, value);
@@ -1049,6 +1068,15 @@ void MultiVersionApi::setNetworkOption(FDBNetworkOptions::Option option, Optiona
 }
 
 void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value) {
+	auto itr = FDBNetworkOptions::optionInfo.find(option);
+	if(itr != FDBNetworkOptions::optionInfo.end()) {
+		TraceEvent("SetNetworkOption").detail("Option", itr->second.name).detail("Value", printable(value));
+	}
+	else {
+		TraceEvent("UnknownNetworkOption").detail("Option", option).detail("Value", printable(value));
+		throw invalid_option();
+	}
+
 	if(option == FDBNetworkOptions::DISABLE_MULTI_VERSION_CLIENT_API) {
 		validateOption(value, false, true);
 		disableMultiVersionClientApi();
