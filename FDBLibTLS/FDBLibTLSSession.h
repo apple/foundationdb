@@ -28,6 +28,7 @@
 
 #include "FDBLibTLSPolicy.h"
 #include "FDBLibTLSVerify.h"
+#include "IRandom.h"
 
 #include <tls.h>
 
@@ -59,7 +60,7 @@ struct FDBLibTLSSession : ITLSSession, ReferenceCounted<FDBLibTLSSession> {
 
 	bool handshake_completed;
 
-	void* uid;
+	UID uid;
 };
 
 #endif /* FDB_LIBTLS_SESSION_H */
