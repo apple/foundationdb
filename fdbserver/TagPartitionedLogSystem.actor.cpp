@@ -153,8 +153,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->locality = tLogSet.locality;
 				logSet->startVersion = tLogSet.startVersion;
 				logSet->satelliteTagLocations = tLogSet.satelliteTagLocations;
-				logSet->updateLocalitySet();
 				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+				logSet->updateLocalitySet(logSet->tLogLocalities);
 			}
 		}
 
@@ -179,7 +179,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->locality = tLogData.locality;
 				logSet->startVersion = tLogData.startVersion;
 				logSet->satelliteTagLocations = tLogData.satelliteTagLocations;
-				//logSet.UpdateLocalitySet(); we do not update the locality set, since we never push to old logs
+				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+				logSet->updateLocalitySet(logSet->tLogLocalities);
 			}
 			logSystem->oldLogData[i].logRouterTags = lsConf.oldTLogs[i].logRouterTags;
 			logSystem->oldLogData[i].epochEnd = lsConf.oldTLogs[i].epochEnd;
@@ -214,7 +215,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->locality = tLogSet.locality;
 				logSet->startVersion = tLogSet.startVersion;
 				logSet->satelliteTagLocations = tLogSet.satelliteTagLocations;
-				//logSet->updateLocalitySet(); we do not update the locality set, since we never push to old logs
+				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+				logSet->updateLocalitySet(logSet->tLogLocalities);
 			}
 			logSystem->logRouterTags = lsConf.oldTLogs[0].logRouterTags;
 			//logSystem->epochEnd = lsConf.oldTLogs[0].epochEnd;
@@ -240,7 +242,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 					logSet->locality = tLogSet.locality;
 					logSet->startVersion = tLogSet.startVersion;
 					logSet->satelliteTagLocations = tLogSet.satelliteTagLocations;
-					//logSet->updateLocalitySet(); we do not update the locality set, since we never push to old logs
+					filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+					logSet->updateLocalitySet(logSet->tLogLocalities);
 				}
 				logSystem->oldLogData[i-1].logRouterTags = lsConf.oldTLogs[i].logRouterTags;
 				logSystem->oldLogData[i-1].epochEnd = lsConf.oldTLogs[i].epochEnd;
@@ -280,14 +283,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		newState.oldTLogData.clear();
-		int recoveredCount = 0;
-		if(recoveryComplete.isValid() && recoveryComplete.isReady()) {
-			recoveredCount++;
-		}
-		if(remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isReady()) {
-			recoveredCount++;
-		}
-		if(recoveredCount < 2 - repopulateRegionAntiQuorum) {
+		if(!recoveryComplete.isValid() || !recoveryComplete.isReady() || (repopulateRegionAntiQuorum == 0 && (!remoteRecoveryComplete.isValid() || !remoteRecoveryComplete.isReady()))) {
 			newState.oldTLogData.resize(oldLogData.size());
 			for(int i = 0; i < oldLogData.size(); i++) {
 				for(auto &t : oldLogData[i].tLogs) {
@@ -313,6 +309,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		newState.logSystemType = logSystemType;
+	}
+
+	virtual bool remoteStorageRecovered() {
+		return remoteRecoveryComplete.isValid() && remoteRecoveryComplete.isReady();
 	}
 
 	virtual Future<Void> onCoreStateChanged() {
@@ -576,7 +576,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 	}
 
-	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, std::vector<Tag> tags, bool parallelGetMore ) {
+	virtual Reference<IPeekCursor> peek( UID dbgid, Version begin, Optional<Version> end, std::vector<Tag> tags, bool parallelGetMore ) {
 		if(tags.empty()) {
 			TraceEvent("TLogPeekNoTags", dbgid).detail("Begin", begin);
 			return Reference<ILogSystem::ServerPeekCursor>( new ILogSystem::ServerPeekCursor( Reference<AsyncVar<OptionalInterface<TLogInterface>>>(), invalidTag, begin, getPeekEnd(), false, false ) );
@@ -590,7 +590,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		for(auto tag : tags) {
 			cursors.push_back(peek(dbgid, begin, tag, parallelGetMore));
 		}
-		return Reference<ILogSystem::MergedPeekCursor>( new ILogSystem::MergedPeekCursor(cursors, begin, tLogs.size() && tLogs[0]->locality == tagLocalityUpgraded) );
+		return Reference<ILogSystem::BufferedCursor>( new ILogSystem::BufferedCursor(cursors, begin, end.present() ? end.get() + 1 : getPeekEnd(), tLogs[0]->locality == tagLocalityUpgraded) );
 	}
 
 	Reference<IPeekCursor> peekLocal( UID dbgid, Tag tag, Version begin, Version end ) {
@@ -650,6 +650,10 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 
 				if(bestOldSet == -1) {
+					if(oldLogData[i].logRouterTags == 0) {
+						TraceEvent("TLogPeekLocalNoLogRouterTags", dbgid).detail("Tag", tag.toString()).detail("Begin", begin).detail("End", end).detail("LastBegin", lastBegin).detail("OldLogDataSize", oldLogData.size()).detail("Idx", i);
+						throw worker_removed();
+					}
 					i++;
 					continue;
 				}
@@ -1191,9 +1195,11 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				}
 			}
 
+			bool foundRemote = false;
+			int8_t remoteLocality = -1;
+			int modifiedLogSets = 0;
+			int removedLogSets = 0;
 			if(primaryLocality >= 0) {
-				bool foundRemote = false;
-				int8_t remoteLocality = -1;
 				bool remoteIsLocal = false;
 				auto copiedLogs = modifiedState.tLogs;
 				for(auto& coreSet : copiedLogs) {
@@ -1205,6 +1211,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 						modifiedState.tLogs.push_back(coreSet);
 						modifiedState.tLogs[0].isLocal = true;
 						modifiedState.logRouterTags = 0;
+						modifiedLogSets++;
 						break;
 					}
 				}
@@ -1225,11 +1232,13 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 								modifiedState.tLogs.push_back(coreSet);
 								modifiedState.tLogs[0].isLocal = true;
 								modifiedState.logRouterTags = 0;
+								modifiedLogSets++;
 							}
 							break;
 						}
 					}
 					modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin());
+					removedLogSets++;
 				}
 
 				if(foundRemote) {
@@ -1246,18 +1255,21 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 									modifiedState.oldTLogData[i].tLogs[0].isLocal = true;
 									modifiedState.oldTLogData[i].logRouterTags = 0;
 									modifiedState.oldTLogData[i].epochEnd = ( i == 0 ? modifiedState.tLogs[0].startVersion : modifiedState.oldTLogData[i-1].tLogs[0].startVersion );
+									modifiedLogSets++;
 								}
 								break;
 							}
 						}
 						if(!found) {
 							modifiedState.oldTLogData.erase(modifiedState.oldTLogData.begin()+i);
+							removedLogSets++;
 							i--;
 						}
 					}
 					prevState = modifiedState;
 				}
 			}
+			TraceEvent(SevWarnAlways, "ForcedRecovery", dbgid).detail("PrimaryLocality", primaryLocality).detail("RemoteLocality", remoteLocality).detail("FoundRemote", foundRemote).detail("Modified", modifiedLogSets).detail("Removed", removedLogSets);
 		}
 
 		TEST( true );	// Master recovery from pre-existing database
@@ -1291,6 +1303,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSet->locality = coreSet.locality;
 			logSet->startVersion = coreSet.startVersion;
 			logSet->satelliteTagLocations = coreSet.satelliteTagLocations;
+			filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+			logSet->updateLocalitySet(logSet->tLogLocalities);
 			logFailed.push_back(failed);
 		}
 		oldLogData.resize(prevState.oldTLogData.size());
@@ -1315,6 +1329,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				logSet->locality = log.locality;
 				logSet->startVersion = log.startVersion;
 				logSet->satelliteTagLocations = log.satelliteTagLocations;
+				filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+				logSet->updateLocalitySet(logSet->tLogLocalities);
 			}
 			oldData.epochEnd = old.epochEnd;
 			oldData.logRouterTags = old.logRouterTags;
@@ -1323,7 +1339,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 
 		lockResults.resize(logServers.size());
 		std::set<int8_t> lockedLocalities;
-		bool foundSpecial = false;
+		bool foundSpecial = prevState.logRouterTags == 0;
 		for( int i=0; i < logServers.size(); i++ ) {
 			if(logServers[i]->locality == tagLocalitySpecial || logServers[i]->locality == tagLocalityUpgraded) {
 				foundSpecial = true;
@@ -1337,7 +1353,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 		}
 
 		for( auto& old : oldLogData ) {
-			if(foundSpecial) {
+			if(foundSpecial || old.logRouterTags == 0) {
 				break;
 			}
 			for( auto& log : old.tLogs ) {
@@ -1662,8 +1678,8 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 			logSet->logServers[i] = Reference<AsyncVar<OptionalInterface<TLogInterface>>>( new AsyncVar<OptionalInterface<TLogInterface>>( OptionalInterface<TLogInterface>(remoteTLogInitializationReplies[i].get()) ) );
 			logSet->tLogLocalities[i] = remoteWorkers.remoteTLogs[i].locality;
 		}
-		logSet->updateLocalitySet();
 		filterLocalityDataForPolicy(logSet->tLogPolicy, &logSet->tLogLocalities);
+		logSet->updateLocalitySet(logSet->tLogLocalities);
 
 		std::vector<Future<Void>> recoveryComplete;
 		for( int i = 0; i < logSet->logServers.size(); i++)

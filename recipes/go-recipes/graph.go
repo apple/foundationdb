@@ -124,7 +124,7 @@ func (graph *Graph) get_in_neighbors(trtr fdb.Transactor, node int) ([]int, erro
 }
 
 func main() {
-	fdb.MustAPIVersion(520)
+	fdb.MustAPIVersion(600)
 
 	db := fdb.MustOpenDefault()
 

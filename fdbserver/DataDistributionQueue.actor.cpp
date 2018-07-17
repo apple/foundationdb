@@ -921,18 +921,12 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 					bestTeams.push_back(std::make_pair(bestTeam.get(), foundSource));
 					tciIndex++;
 				}
-				if (foundTeams) {
+				if (foundTeams && anyHealthy) {
 					break;
 				}
 				TEST(true); //did not find a healthy destination team on the first attempt
 				stuckCount++;
 				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).detail("Count", stuckCount).suppressFor(1.0);
-				if(stuckCount > 50 && g_network->isSimulated()) { //FIXME: known bug in simulation we are supressing
-					int unseed = noUnseed ? 0 : g_random->randomInt(0, 100001);
-					TraceEvent("ElapsedTime").detail("SimTime", now()).detail("RealTime", 0)
-						.detail("RandomUnseed", unseed);
-					flushAndExit(0);
-				}
 				Void _ = wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
 			}
 
@@ -976,7 +970,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			state Error error = success();
 			state Promise<Void> dataMovementComplete;
 			state Future<Void> doMoveKeys = moveKeys(self->cx, rd.keys, destIds, healthyIds, self->lock, dataMovementComplete, &self->startMoveKeysParallelismLock, &self->finishMoveKeysParallelismLock, self->recoveryVersion, self->teamCollections.size() > 1, relocateShardInterval.pairID );
-			state Future<Void> pollHealth = (!anyHealthy || signalledTransferComplete) ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
+			state Future<Void> pollHealth = signalledTransferComplete ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
 			try {
 				loop {
 					choose {

@@ -500,7 +500,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 		when ( CommitTransactionRequest req = waitNext( parent->provisionalProxies[0].commit.getFuture() ) ) {
 			req.reply.send(Never()); // don't reply (clients always get commit_unknown_result)
 			auto t = &req.transaction;
-			TraceEvent("PM_CTC", parent->dbgid).detail("Snapshot", t->read_snapshot).detail("Now", parent->lastEpochEnd);
 			if (t->read_snapshot == parent->lastEpochEnd && //< So no transactions can fall between the read snapshot and the recovery transaction this (might) be merged with
 				// vvv and also the changes we will make in the recovery transaction (most notably to lastEpochEndKey) BEFORE we merge initialConfChanges won't conflict
 				!std::any_of(t->read_conflict_ranges.begin(), t->read_conflict_ranges.end(), [](KeyRangeRef const& r){return r.contains(lastEpochEndKey);}))
@@ -641,7 +640,9 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
 	self->allTags.clear();
-	self->allTags.push_back(txsTag);
+	if(self->lastEpochEnd > 0) {
+		self->allTags.push_back(txsTag);
+	}
 	for(auto& kv : rawTags) {
 		self->allTags.push_back(decodeServerTagValue( kv.value ));
 	}
@@ -1081,12 +1082,16 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
 		}
 
+		if(newState.oldTLogData.size() && self->configuration.repopulateRegionAntiQuorum > 0 && self->logSystem->remoteStorageRecovered()) {
+			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid);
+			self->recruitmentStalled->set(true);
+		}
 		self->registrationTrigger.trigger();
 
 		if(allLogs && remoteRecovered.canBeSet()) {
 			remoteRecovered.send(Void());
 		}
-		
+
 		if( finalUpdate ) {
 			oldLogSystems->get()->stopRejoins();
 			rejoinRequests = rejoinRequestHandler(self);

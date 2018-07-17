@@ -83,6 +83,12 @@ public:
 	std::map<NetworkAddress, std::pair<uint64_t, double>>* getIncompatiblePeers();
 	// Returns the same of all peers that have attempted to connect, but have incompatible protocol versions
 
+	void addPeerReference( const Endpoint&, NetworkMessageReceiver* );
+	// Signal that a peer connection is being used, even if no messages are currently being sent to the peer
+
+	void removePeerReference( const Endpoint&, NetworkMessageReceiver* );
+	// Signal that a peer connection is no longer being used
+
 	void addEndpoint( Endpoint& endpoint, NetworkMessageReceiver*, uint32_t taskID );
 	// Sets endpoint to be a new local endpoint which delivers messages to the given receiver
 
@@ -102,7 +108,7 @@ public:
 	// Makes PacketID "unreliable" (either the data or a connection close event will be delivered
 	//   eventually).  It can still be used safely to send a reply to a "reliable" request.
 
-	void sendUnreliable( ISerializeSource const& what, const Endpoint& destination );// { cancelReliable(sendReliable(what,destination)); }
+	void sendUnreliable( ISerializeSource const& what, const Endpoint& destination, bool openConnection = true );// { cancelReliable(sendReliable(what,destination)); }
 
 	int getEndpointCount();
 	// for tracing only
