@@ -578,6 +578,7 @@ ACTOR static Future<Void> connectionReader(
 	state uint8_t* buffer_end = NULL;
 	state bool expectConnectPacket = true;
 	state bool compatible = false;
+	state bool incompatiblePeerCounted = false;
 	state NetworkAddress peerAddress;
 	state uint64_t peerProtocolVersion = 0;
 
@@ -664,8 +665,10 @@ ACTOR static Future<Void> connectionReader(
 							// Outgoing connection; port information should be what we expect
 							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) ).suppressFor(1.0);
 							peer->compatible = compatible;
-							if (!compatible)
+							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
+								incompatiblePeerCounted = true;
+							}
 							ASSERT( p->canonicalRemotePort == peerAddress.port );
 						} else {
 							if (p->canonicalRemotePort) {
@@ -673,8 +676,10 @@ ACTOR static Future<Void> connectionReader(
 							}
 							peer = transport->getPeer(peerAddress);
 							peer->compatible = compatible;
-							if (!compatible)
+							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
+								incompatiblePeerCounted = true;
+							}
 							onConnected.send( peer );
 							Void _ = wait( delay(0) );  // Check for cancellation
 						}
@@ -699,8 +704,8 @@ ACTOR static Future<Void> connectionReader(
 		}
 	}
 	catch (Error& e) {
-		if (peer && !peer->compatible) {
-			ASSERT(peer->transport->numIncompatibleConnections > 0);
+		if (incompatiblePeerCounted) {
+			ASSERT(peer && peer->transport->numIncompatibleConnections > 0);
 			peer->transport->numIncompatibleConnections--;
 		}
 		throw;
