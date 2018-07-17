@@ -603,7 +603,6 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 
 	if(bp.readerCount == 1) {
 		ASSERT(!bp.read.isValid());
-		debug_printf("PAGE %d: starting read\n", physicalPageID);
 		state int len = IndirectShadowPage::PAGE_BYTES;
 		state void *buf = nullptr;
 		bp.read = map(pager->dataFile->readZeroCopy(&buf, &len, (int64_t) physicalPageID * IndirectShadowPage::PAGE_BYTES),
@@ -617,7 +616,6 @@ ACTOR Future<Reference<const IPage>> getPageImpl(IndirectShadowPager *pager, Ref
 	Reference<IPage> p = wait(bp.read);
 
 	IndirectShadowPager::BusyPage &bp = i->second;
-	debug_printf("PAGE %d: read. readerCount %d\n", physicalPageID, bp.readerCount);
 
 	--bp.readerCount;
 	if(bp.readerCount == 0) {

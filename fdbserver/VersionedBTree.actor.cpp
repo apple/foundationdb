@@ -47,7 +47,7 @@ struct BTreePage {
 
 	std::string toString(StringRef lowerBoundKey, StringRef upperBoundKey) const {
 		std::string r;
-		r += format("BTreePage %p tree %p flags 0x%X count %d kvBytes %d", this, &tree, (int)flags, (int)count, (int)kvBytes);
+		r += format("BTreePage %p tree %p flags 0x%X count %d kvBytes %d\nlowerBoundKey='%s'\nupperBoundKey='%s'", this, &tree, (int)flags, (int)count, (int)kvBytes, lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
 		if(count > 0) {
 			PrefixTree::Cursor c = tree.getCursor(lowerBoundKey, upperBoundKey);
 			c.moveFirst();
@@ -88,7 +88,7 @@ static void writeEmptyPage(Reference<IPage> page, uint8_t newFlags, int pageSize
 typedef std::pair<Key, Reference<IPage>> BoundaryPagePairT;
 // Returns a std::vector of pairs of lower boundary key indices within kvPairs and encoded pages.
 template<typename Allocator>
-static std::vector<BoundaryPagePairT> buildPages(StringRef lowerBound, StringRef upperBound, const PrefixTree::EntriesT &entries, uint8_t newFlags, Allocator const &newPageFn, int pageSize) {
+static std::vector<BoundaryPagePairT> buildPages(bool minimalBoundaries, StringRef lowerBound, StringRef upperBound, const PrefixTree::EntriesT &entries, uint8_t newFlags, Allocator const &newPageFn, int pageSize) {
 	// Subtract space used for btree page and prefix tree headers to get prefix tree node space available/
 	pageSize -= (BTreePage::GetHeaderSize() + PrefixTree::GetHeaderSize());
 
@@ -101,15 +101,11 @@ static std::vector<BoundaryPagePairT> buildPages(StringRef lowerBound, StringRef
 
 	int start = 0;
 	int i = 0;
-	int lowestCommon = std::numeric_limits<int>::max();
 	const int iEnd = entries.size();
 	StringRef pageLowerBound = lowerBound;
 
 	while(i < iEnd) {
-		int common = commonPrefixLength(entries[i].key, (start == i) ? pageLowerBound : entries[i - 1].key);
-		if(common < lowestCommon)
-			lowestCommon = common;
-
+		int common = commonPrefixLength(entries[i].key, (i == 0) ? pageLowerBound : entries[i - 1].key);
 		int valueSize = entries[i].value.size();
 
 		// Calculate how many bytes will be added to each tracked metric
@@ -118,13 +114,13 @@ static std::vector<BoundaryPagePairT> buildPages(StringRef lowerBound, StringRef
 		int overheadAdd = PrefixTree::Node::getMaxOverhead(i, entries[i].key.size(), entries[i].value.size());
 		int addedTreeBytes = uniqueAdd + overheadAdd;
 
-		//debug_printf("Trying to add index %d of %lu  klen %d  vlen %d  common %d  overhead %d  key %s\n", i + 1, entries.size(), entries[i].key.size(), entries[i].value.size(), common, overheadAdd, entries[i].key.toHexString().c_str());
+		debug_printf("Trying to add index %d of %lu  klen %d  vlen %d  common %d  overhead %d  key %s\n", i + 1, entries.size(), entries[i].key.size(), entries[i].value.size(), common, overheadAdd, entries[i].key.toHexString().c_str());
 
 		// If adding the new item to the prefix tree will result in it being too large then write a page and start a new one
 		if((overheadBytes + uniqueBytes + overheadAdd + uniqueAdd) > pageSize) {
 			ASSERT(i != 0);
-			// TODO: Use minimal key boundaries
-			StringRef pageUpperBound = entries[i].key/*.substr(0, common + 1)*/;
+			StringRef pageUpperBound = minimalBoundaries ? entries[i].key.substr(0, common + 1) : entries[i].key;
+			debug_printf("Flushing page start=%d i=%d lower='%s' upper='%s'\n", start, i, pageLowerBound.toHexString().c_str(), pageUpperBound.toHexString().c_str());
 			Reference<IPage> page = newPageFn();
 			BTreePage *btpage = (BTreePage *)page->begin();
 			btpage->flags = newFlags;
@@ -151,6 +147,7 @@ static std::vector<BoundaryPagePairT> buildPages(StringRef lowerBound, StringRef
 
 	// Flush last page, if not empty
 	if(i > start) {
+		debug_printf("Flushing page start=%d i=%d lower='%s' upper='%s'\n", start, i, pageLowerBound.toHexString().c_str(), upperBound.toHexString().c_str());
 		Reference<IPage> page = newPageFn();
 		BTreePage *btpage = (BTreePage *)page->begin();
 		btpage->flags = newFlags;
@@ -393,7 +390,8 @@ public:
 
 private:
 	void writePage(LogicalPageID id, Reference<IPage> page, Version ver, StringRef pageLowerBound, StringRef pageUpperBound) {
-		debug_printf("\npage write: id=%d ver=%lld\nlowerBound='%s'\nupperBound='%s'\n%s\n", id, ver, pageLowerBound.toHexString().c_str(), pageUpperBound.toHexString().c_str(), ((const BTreePage *)page->begin())->toString(pageLowerBound, pageUpperBound).c_str());
+		debug_printf("page write: id=%d ver=%lld lower='%s' upper='%s'\n", id, ver, pageLowerBound.toHexString().c_str(), pageUpperBound.toHexString().c_str());
+		debug_printf("page write: %s\n", ((const BTreePage *)page->begin())->toString(pageLowerBound, pageUpperBound).c_str());
 		m_pager->writePage(id, page, ver);
 	}
 
@@ -562,7 +560,7 @@ private:
 				childEntries.push_back(KeyValueRef(pages[i].first, StringRef((unsigned char *)&logicalPageIDs[i], sizeof(uint32_t))));
 
 			int oldPages = pages.size();
-			pages = buildPages(beginKey, endKey, childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_pageSize);
+			pages = buildPages(false, beginKey, endKey, childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_pageSize);
 			// If there isn't a reduction in page count then we'll build new root levels forever.
 			ASSERT(pages.size() < oldPages);
 
@@ -586,8 +584,7 @@ private:
 
 	// Returns list of (version, list of (lower_bound, list of children) )
 	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, Key upperBoundKey) {
-		state std::string printPrefix = format("commit subtree root=%lld lower='%s' upper='%s'", root, printable(lowerBoundKey).c_str(), printable(upperBoundKey).c_str());
-		debug_printf("%s\n", printPrefix.c_str());
+		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", this, root, lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
 
 		// Decode the upper and lower bound keys for this subtree
 		// Note that these could be truncated to be the shortest usable boundaries between two pages but that
@@ -604,7 +601,7 @@ private:
 		// this subtree since changes would happen after the upper bound key as the mutated versions would
 		// necessarily be higher.
 		if(lowerBoundKVV.key == upperBoundKVV.key) {
-			debug_printf("%s no changes, lower and upper bound keys are the same.\n", printPrefix.c_str());
+			debug_printf("%p no changes, lower and upper bound keys are the same.\n", this);
 			return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 		}
 
@@ -616,7 +613,7 @@ private:
 		else {
 			// If the there are no mutations, we're done
 			if(iMutationBoundary == iMutationBoundaryEnd) {
-				debug_printf("%s no changes, mutation buffer start/end are the same\n", printPrefix.c_str());
+				debug_printf("%p no changes, mutation buffer start/end are the same\n", this);
 				return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 			}
 		}
@@ -629,13 +626,14 @@ private:
 		MutationBufferT::const_iterator iMutationBoundaryNext = iMutationBoundary;
 		++iMutationBoundaryNext;
 		if(iMutationBoundaryNext == iMutationBoundaryEnd && iMutationBoundary->second.noChanges()) {
-			debug_printf("%s no changes because sole mutation range was empty\n", printPrefix.c_str());
+			debug_printf("%p no changes because sole mutation range was empty\n", this);
 			return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 		}
 
 		Reference<const IPage> rawPage = wait(snapshot->getPhysicalPage(root));
 		state BTreePage *page = (BTreePage *) rawPage->begin();
-		debug_printf("commitSubtree: page read: id=%d ver=%lld\nlowerBound='%s'\nupperBound='%s'\n%s\n", root, snapshot->getVersion(), lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str(), page->toString(lowerBoundKey, upperBoundKey).c_str());
+		debug_printf("commitSubtree: page read: id=%d ver=%lld lower='%s' upper='%s'\n", root, snapshot->getVersion(), lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
+		debug_printf("commitSubtree: page read: id=%d %s\n", root, page->toString(lowerBoundKey, upperBoundKey).c_str());
 
 		PrefixTree::Cursor existingCursor = page->tree.getCursor(lowerBoundKey, upperBoundKey);
 		bool existingCursorValid = existingCursor.moveFirst();
@@ -660,7 +658,7 @@ private:
 
 			// Now, process each mutation range and merge changes with existing data.
 			while(iMutationBoundary != iMutationBoundaryEnd) {
-				debug_printf("%s New mutation boundary: '%s': %s\n", printPrefix.c_str(), printable(iMutationBoundary->first).c_str(), iMutationBoundary->second.toString().c_str());
+				debug_printf("%p New mutation boundary: '%s': %s\n", this, printable(iMutationBoundary->first).c_str(), iMutationBoundary->second.toString().c_str());
 
 				SingleKeyMutationsByVersion::const_iterator iMutations;
 
@@ -680,7 +678,7 @@ private:
 				// Output old versions of the mutation boundary key
 				while(existingCursorValid && existing.key == iMutationBoundary->first) {
 					merged.push_back(existing.pack());
-					debug_printf("%s: Added %s [existing, boundary start]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+					debug_printf("%p: Added %s [existing, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 					existingCursorValid = existingCursor.moveNext();
 					if(existingCursorValid)
@@ -697,7 +695,7 @@ private:
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
 						merged.push_back(iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack());
-						debug_printf("%s: Added %s [mutation, boundary start]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+						debug_printf("%p: Added %s [mutation, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 					}
 					else {
 						int bytesLeft = m.value.size();
@@ -709,7 +707,7 @@ private:
 							if(iMutations->first < minVersion || minVersion == invalidVersion)
 								minVersion = iMutations->first;
 							merged.push_back(kvv.pack());
-							debug_printf("%s: Added %s [mutation, boundary start]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+							debug_printf("%p: Added %s [mutation, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 							kvv.valueIndex += partSize;
 							bytesLeft -= partSize;
 						}
@@ -722,12 +720,12 @@ private:
 				// Advance to the next boundary because we need to know the end key for the current range.
 				++iMutationBoundary;
 
-				debug_printf("%s Mutation range end: '%s'\n", printPrefix.c_str(), printable(iMutationBoundary->first).c_str());
+				debug_printf("%p Mutation range end: '%s'\n", this, printable(iMutationBoundary->first).c_str());
 
 				// Write existing keys which are less than the next mutation boundary key, clearing if needed.
 				while(existingCursorValid && existing.key < iMutationBoundary->first) {
 					merged.push_back(existing.pack());
-					debug_printf("%s: Added %s [existing, middle]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+					debug_printf("%p: Added %s [existing, middle]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 					// Write a clear of this key if needed.  A clear is required if clearRangeVersion is set and the next key is different
 					// than this one.  Note that the next key might be the in our right sibling, we can use the page upperBound to get that.
@@ -743,7 +741,7 @@ private:
 						if(clearVersion < minVersion || minVersion == invalidVersion)
 							minVersion = clearVersion;
 						merged.push_back(KeyVersionValue(existing.key, clearVersion).pack());
-						debug_printf("%s: Added %s [existing, middle clear]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+						debug_printf("%p: Added %s [existing, middle clear]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 					}
 
 					if(existingCursorValid)
@@ -754,26 +752,26 @@ private:
 			// Write any remaining existing keys, which are not subject to clears as they are beyond the cleared range.
 			while(existingCursorValid) {
 				merged.push_back(existing.pack());
-				debug_printf("%s: Added %s [existing, tail]\n", printPrefix.c_str(), KeyVersionValue::unpack(merged.back()).toString().c_str());
+				debug_printf("%p: Added %s [existing, tail]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 				existingCursorValid = existingCursor.moveNext();
 				if(existingCursorValid)
 					existing = KeyVersionValue::unpack(existingCursor.getKV());
 			}
 
-			debug_printf("%s Done merging mutations into existing leaf contents\n", printPrefix.c_str());
+			debug_printf("%p Done merging mutations into existing leaf contents\n", this);
 
 			// No changes were actually made.  This could happen if there is a clear which does not cover an entire leaf but also does
 			// not which turns out to not match any existing data in the leaf.
 			if(minVersion == invalidVersion) {
-				debug_printf("%s No changes were made during mutation merge\n", printPrefix.c_str());
+				debug_printf("%p No changes were made during mutation merge\n", this);
 				return VersionedChildrenT({ {0,{{lowerBoundKey,root}}} });
 			}
 
 			// TODO: Make version and key splits based on contents of merged list
 
 			IPager *pager = self->m_pager;
-			std::vector<BoundaryPagePairT> pages = buildPages( lowerBoundKey, upperBoundKey, merged, BTreePage::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_pageSize);
+			std::vector<BoundaryPagePairT> pages = buildPages(true, lowerBoundKey, upperBoundKey, merged, BTreePage::IS_LEAF, [pager](){ return pager->newPageBuffer(); }, self->m_pageSize);
 
 			// If there isn't still just a single page of data then return the previous lower bound and page ID that lead to this page to be used for version 0
 			if(pages.size() != 1) {
@@ -794,13 +792,13 @@ private:
 			if(pages.size() == 1)
 				minVersion = 0;
 			// Write each page using its assigned page ID
-			debug_printf("%s Writing %lu replacement pages for %d at version %lld\n", printPrefix.c_str(), pages.size(), root, minVersion);
+			debug_printf("%p Writing %lu replacement pages for %d at version %lld\n", this, pages.size(), root, minVersion);
 			for(int i=0; i<pages.size(); i++)
 				self->writePage(logicalPages[i], pages[i].second, minVersion, pages[i].first, (i == pages.size() - 1) ? upperBoundKey : pages[i + 1].first);
 
 			// If this commitSubtree() is operating on the root, write new levels if needed until until we're returning a single page
 			if(root == self->m_root) {
-				debug_printf("%s Building new root\n", printPrefix.c_str());
+				debug_printf("%p Building new root\n", this);
 				self->buildNewRoot(minVersion, pages, logicalPages);
 			}
 
@@ -809,11 +807,11 @@ private:
 			for(int i=0; i<pages.size(); i++) {
 				// The lower bound of the first page is the lower bound of the subtree, not the first entry in the page
 				Key lowerBound = (i == 0) ? lowerBoundKey : pages[i].first;
-				debug_printf("%s Adding page to results: lowerBound=%s\n", printPrefix.c_str(), printable(lowerBound).c_str());
+				debug_printf("%p Adding page to results: %s => %d\n", this, lowerBound.toHexString().c_str(), logicalPages[i]);
 				results.back().second.push_back( {lowerBound, logicalPages[i]} );
 			}
 
-			debug_printf("%s DONE.\n", printPrefix.c_str());
+			debug_printf("%p DONE.\n", this);
 			return results;
 		}
 		else {
@@ -852,7 +850,7 @@ private:
 			}
 
 			if(!modified) {
-				debug_printf("%s not modified.\n", printPrefix.c_str());
+				debug_printf("%p not modified.\n", this);
 				return VersionedChildrenT({{0, {{lowerBoundKey, root}}}});
 			}
 
@@ -865,7 +863,7 @@ private:
 				PrefixTree::EntriesT childEntries;  // Logically std::vector<std::pair<std::string, LogicalPageID>> childEntries;
 
 				// For each Future<VersionedChildrenT>
-				debug_printf("%s creating replacement pages for id=%d at Version %lld\n", printPrefix.c_str(), root, version);
+				debug_printf("%p creating replacement pages for id=%d at Version %lld\n", this, root, version);
 
 				// If we're writing version 0, there is a chance that we don't have to write ourselves, if there are no changes
 				bool modified = version != 0;
@@ -874,11 +872,11 @@ private:
 					LogicalPageID pageID = childPageIDs[i];
 					const VersionedChildrenT &children = futureChildren[i].get();
 
-					debug_printf("%s  Versioned page set that replaced page %d: %lu versions\n", printPrefix.c_str(), pageID, children.size());
+					debug_printf("%p  Versioned page set that replaced page %d: %lu versions\n", this, pageID, children.size());
 					for(auto &versionedPageSet : children) {
-						debug_printf("%s    version: %lld\n", printPrefix.c_str(), versionedPageSet.first);
+						debug_printf("%p    version: %lld\n", this, versionedPageSet.first);
 						for(auto &boundaryPage : versionedPageSet.second) {
-							debug_printf("%s      '%s' -> %u\n", printPrefix.c_str(), printable(boundaryPage.first).c_str(), boundaryPage.second);
+							debug_printf("%p      '%s' -> %u\n", this, printable(boundaryPage.first).c_str(), boundaryPage.second);
 						}
 					}
 
@@ -887,41 +885,41 @@ private:
 
 					// If there are no versions before the one we found, just update nextVersion and continue.
 					if(cv == children.begin()) {
-						debug_printf("%s First version (%lld) in set is greater than current, setting nextVersion and continuing\n", printPrefix.c_str(), cv->first);
+						debug_printf("%p First version (%lld) in set is greater than current, setting nextVersion and continuing\n", this, cv->first);
 						nextVersion = std::min(nextVersion, cv->first);
-						debug_printf("%s   curr %lld next %lld\n", printPrefix.c_str(), version, nextVersion);
+						debug_printf("%p   curr %lld next %lld\n", this, version, nextVersion);
 						continue;
 					}
 
 					// If a version greater than the current version being written was found, update nextVersion
 					if(cv != children.end()) {
 						nextVersion = std::min(nextVersion, cv->first);
-						debug_printf("%s   curr %lld next %lld\n", printPrefix.c_str(), version, nextVersion);
+						debug_printf("%p   curr %lld next %lld\n", this, version, nextVersion);
 					}
 
 					// Go back one to the last version that was valid prior to or at the current version we are writing
 					--cv;
 
-					debug_printf("%s   Using children for version %lld from this set, building version %lld\n", printPrefix.c_str(), cv->first, version);
+					debug_printf("%p   Using children for version %lld from this set, building version %lld\n", this, cv->first, version);
 
 					// If page count isn't 1 then the root is definitely modified
 					modified = modified || cv->second.size() != 1;
 
 					// Add the children at this version to the child entries list for the current version being built.
 					for (auto &childPage : cv->second) {
-						debug_printf("%s  Adding child page '%s'\n", printPrefix.c_str(), printable(childPage.first).c_str());
+						debug_printf("%p  Adding child page '%s'\n", this, printable(childPage.first).c_str());
 						childEntries.push_back( KeyValueRef(childPage.first, StringRef((unsigned char *)&childPage.second, sizeof(uint32_t))));
 					}
 				}
 
-				debug_printf("%s Finished pass through futurechildren.  childEntries=%lu  version=%lld  nextVersion=%lld\n", printPrefix.c_str(), childEntries.size(), version, nextVersion);
+				debug_printf("%p Finished pass through futurechildren.  childEntries=%lu  version=%lld  nextVersion=%lld\n", this, childEntries.size(), version, nextVersion);
 
 				if(modified) {
 					// TODO: Track split points across iterations of this loop, so that they don't shift unnecessarily and
 					// cause unnecessary path copying
 
 					IPager *pager = self->m_pager;
-					std::vector<BoundaryPagePairT> pages = buildPages( lowerBoundKey, upperBoundKey, childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_pageSize);
+					std::vector<BoundaryPagePairT> pages = buildPages(false, lowerBoundKey, upperBoundKey, childEntries, 0, [pager](){ return pager->newPageBuffer(); }, self->m_pageSize);
 
 					// For each IPage of data, assign a logical pageID.
 					std::vector<LogicalPageID> logicalPages;
@@ -935,7 +933,7 @@ private:
 						logicalPages.push_back( self->m_pager->allocateLogicalPage() );
 
 					// Write each page using its assigned page ID
-					debug_printf("%s Writing %lu internal pages\n", printPrefix.c_str(), pages.size());
+					debug_printf("%p Writing %lu internal pages\n", this, pages.size());
 					for(int i=0; i<pages.size(); i++)
 						self->writePage( logicalPages[i], pages[i].second, version, pages[i].first, (i == pages.size() - 1) ? upperBoundKey : pages[i + 1].first );
 
@@ -950,12 +948,12 @@ private:
 						result.back().second.push_back( {pages[i].first, logicalPages[i]} );
 
 					if (result.size() > 1 && result.back().second == result.end()[-2].second) {
-						debug_printf("%s Output same as last version, popping it.\n", printPrefix.c_str());
+						debug_printf("%p Output same as last version, popping it.\n", this);
 						result.pop_back();
 					}
 				}
 				else {
-					debug_printf("%s Version 0 has no changes\n", printPrefix.c_str());
+					debug_printf("%p Version 0 has no changes\n", this);
 					result.push_back({0, {{lowerBoundKey, root}}});
 				}
 
@@ -964,7 +962,7 @@ private:
 				version = nextVersion;
 			}
 
-			debug_printf("%s DONE.\n", printPrefix.c_str());
+			debug_printf("%p DONE.\n", this);
 			return result;
 		}
 	}
@@ -1083,8 +1081,9 @@ private:
 			Key pageUpperBound;
 			Reference<const IPage> page;
 			BTreePage *btPage;
-			LogicalPageID pageNumber;    // This is really just for debugging
 			PrefixTree::Cursor cursor;
+			// For easier debugging
+			LogicalPageID pageNumber;
 		};
 
 		typedef std::vector<PageEntryLocation> TraversalPathT;
@@ -1093,7 +1092,9 @@ private:
 
 		ACTOR static Future<Void> pushPage(InternalCursor *self, Key lowerBound, Key upperBound, LogicalPageID id) {
 			Reference<const IPage> rawPage = wait(self->m_pages->getPhysicalPage(id));
-			debug_printf("InternalCursor: page read: id=%d ver=%lld\nlowerBound='%s'\nupperBound='%s'\n%s\n", id, self->m_pages->getVersion(), lowerBound.toHexString().c_str(), upperBound.toHexString().c_str(), ((const BTreePage *)rawPage->begin())->toString(lowerBound, upperBound).c_str());
+			debug_printf("InternalCursor: page read: id=%d ver=%lld lower='%s' upper='%s'\n", id, self->m_pages->getVersion(), lowerBound.toHexString().c_str(), upperBound.toHexString().c_str());
+			debug_printf("InternalCursor: page read: %s\n", ((const BTreePage *)rawPage->begin())->toString(lowerBound, upperBound).c_str());
+
 			self->m_path.emplace_back(lowerBound, upperBound, rawPage, id);
 			return Void();
 		}
@@ -1842,7 +1843,7 @@ TEST_CASE("/redwood/correctness") {
 	printf("Starting from version: %lld\n", lastVer);
 
 	state Version version = lastVer + 1;
-	state int commits = g_random->randomInt(1, maxCommits);
+	state int commits = 1 + g_random->randomInt(0, maxCommits);
 	//printf("Will do %d commits\n", commits);
 	state double insertTime = 0;
 	state int64_t keyBytesInserted = 0;

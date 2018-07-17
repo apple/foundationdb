@@ -676,7 +676,6 @@ public:
 			}
 
 			// Go right
-			debug_printf("going right: %s\n", pathToString().c_str());
 			int newMoves = p.nodeIsLeftChild ? 1 : p.moves + 1;
 			const PathEntry *borrowSource = (right->flags & Node::PREFIX_SOURCE_NEXT) ? &p - newMoves : &p;
 			pushPath(right, borrowSource, false, newMoves);
@@ -689,7 +688,6 @@ public:
 					return true;
 				}
 
-				debug_printf("going left: %s\n", pathToString().c_str());
 				int newMoves = p.nodeIsLeftChild ? p.moves + 1 : 1;
 				const PathEntry *borrowSource = (left->flags & Node::PREFIX_SOURCE_NEXT) ? &p : &p - newMoves;
 				pushPath(left, borrowSource, true, newMoves);
