@@ -283,25 +283,35 @@ ACTOR Future<bool> getStorageServersRecruiting( Database cx, Reference<AsyncVar<
 	}
 }
 
-ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
-	Void _ = wait( delay(time) );
-
+ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
 	if(g_network->isSimulated()) {
-		TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration");
-		g_simulator.usableRegions = 1;
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "repopulate_anti_quorum=1" ) );
-		while( dbInfo->get().recoveryState < RecoveryState::REMOTE_RECOVERED ) {
-			Void _ = wait( dbInfo->onChange() );
-		}
-		ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
-	}
+		bool primaryDead = g_simulator.datacenterDead(g_simulator.primaryDcId);
+		bool remoteDead = g_simulator.datacenterDead(g_simulator.remoteDcId);
 
+		ASSERT(!primaryDead || !remoteDead);
+		if(primaryDead || remoteDead) {
+			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Repopulate");
+			g_simulator.usableRegions = 1;
+			ConfigurationResult::Type _ = wait( changeConfig( cx, (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1" ) );
+			while( dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
+				Void _ = wait( dbInfo->onChange() );
+			}
+			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Usable_Regions");
+			ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
+	Void _ = wait( delay(time) );
+	Void _ = wait( repairDeadDatacenter(cx, dbInfo, context) );
 	return Void();
 }
 
 ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string phase, int64_t dataInFlightGate = 2e6,
 	int64_t maxTLogQueueGate = 5e6, int64_t maxStorageServerQueueGate = 5e6, int64_t maxDataDistributionQueueSize = 0 ) {
-	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100), dbInfo);
+	state Future<Void> reconfig = reconfigureAfter(cx, 100 + (g_random->random01()*100), dbInfo, "QuietDatabase");
 
 	TraceEvent(("QuietDatabase" + phase + "Begin").c_str());
 

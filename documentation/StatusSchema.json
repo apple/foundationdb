@@ -284,6 +284,9 @@
                "initializing_transaction_servers",
                "recovery_transaction",
                "writing_coordinated_state",
+               "accepting_commits",
+               "all_logs_recruited",
+               "storage_recovered",
                "fully_recovered"
             ]
          },
@@ -343,6 +346,7 @@
       },
       "cluster_controller_timestamp":1415650089,
       "protocol_version":"fdb00a400050001",
+      "connection_string":"a:a@127.0.0.1:4000",
       "full_replication":true,
       "configuration":{
          "log_anti_quorum":0,

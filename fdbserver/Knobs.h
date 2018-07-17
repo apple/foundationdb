@@ -31,6 +31,14 @@ static const int _PAGE_SIZE = 4096;
 
 class ServerKnobs : public Knobs {
 public:
+	// Versions
+	int64_t VERSIONS_PER_SECOND;
+	int64_t MAX_VERSIONS_IN_FLIGHT;
+	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
+	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
+	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
+	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+
 	// TLogs
 	double TLOG_TIMEOUT;  // tlog OR master proxy failure - master's reaction time
 	double RECOVERY_TLOG_SMART_QUORUM_DELAY;		// smaller might be better for bug amplification
@@ -58,14 +66,7 @@ public:
 	double PEEK_TRACKER_EXPIRATION_TIME;
 	int PARALLEL_GET_MORE_REQUESTS;
 	int64_t MAX_QUEUE_COMMIT_BYTES;
-
-	// Versions
-	int64_t VERSIONS_PER_SECOND;
-	int64_t MAX_VERSIONS_IN_FLIGHT;
-	int64_t MAX_VERSIONS_IN_FLIGHT_FORCED;
-	int64_t MAX_READ_TRANSACTION_LIFE_VERSIONS;
-	int64_t MAX_WRITE_TRANSACTION_LIFE_VERSIONS;
-	double MAX_COMMIT_BATCH_INTERVAL; // Each master proxy generates a CommitTransactionBatchRequest at least this often, so that versions always advance smoothly
+	int64_t VERSIONS_PER_BATCH;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -112,6 +113,7 @@ public:
 	double FREE_SPACE_RATIO_CUTOFF;
 	double FREE_SPACE_RATIO_DD_CUTOFF;
 	int DESIRED_TEAMS_PER_SERVER;
+	int MAX_TEAMS_PER_SERVER;
 	int64_t DD_SHARD_SIZE_GRANULARITY;
 	int64_t DD_SHARD_SIZE_GRANULARITY_SIM;
 	int DD_MOVE_KEYS_PARALLELISM;
@@ -154,6 +156,7 @@ public:
 	int64_t REPLACE_CONTENTS_BYTES;
 
 	// Leader election
+	int MAX_NOTIFICATIONS;
 	double CANDIDATE_MIN_DELAY;
 	double CANDIDATE_MAX_DELAY;
 	double CANDIDATE_GROWTH_RATE;

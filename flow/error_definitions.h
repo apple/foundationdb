@@ -99,7 +99,7 @@ ERROR( http_not_accepted, 1519, "HTTP request not accepted" )
 ERROR( checksum_failed, 1520, "A data checksum failed" )
 ERROR( io_timeout, 1521, "A disk IO operation failed to complete in a timely manner" )
 ERROR( file_corrupt, 1522, "A structurally corrupt data file was detected" )
-ERROR( http_request_failed, 1523, "HTTP response code indicated failure" )
+ERROR( http_request_failed, 1523, "HTTP response code not received or indicated failure" )
 ERROR( http_auth_failed, 1524, "HTTP request failed due to bad credentials" )
 
 

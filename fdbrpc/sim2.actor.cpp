@@ -1001,26 +1001,47 @@ public:
 	}
 	virtual bool isAvailable() const
 	{
-		std::vector<ProcessInfo*>	processesLeft, processesDead;
-
+		std::vector<ProcessInfo*> processesLeft, processesDead;
 		for (auto processInfo : getAllProcesses()) {
-			// Add non-test processes (ie. datahall is not be set for test processes)
 			if (processInfo->isAvailableClass()) {
-				// Ignore excluded machines
-				if (processInfo->isExcluded())
+				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
 					processesDead.push_back(processInfo);
-				else if (processInfo->isCleared())
-					processesDead.push_back(processInfo);
-				// Mark all of the unavailable as dead
-				else if (!processInfo->isAvailable())
-					processesDead.push_back(processInfo);
-				else if (protectedAddresses.count(processInfo->address))
+				} else {
 					processesLeft.push_back(processInfo);
-				else
-					processesLeft.push_back(processInfo);
+				}
 			}
 		}
 		return canKillProcesses(processesLeft, processesDead, KillInstantly, NULL);
+	}
+
+	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const
+	{
+		if(!dcId.present()) {
+			return false;
+		}
+
+		LocalityGroup primaryProcessesLeft, primaryProcessesDead;
+		std::vector<LocalityData> primaryLocalitiesDead, primaryLocalitiesLeft;
+
+		for (auto processInfo : getAllProcesses()) {
+			if (processInfo->isAvailableClass() && processInfo->locality.dcId() == dcId) {
+				if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
+					primaryProcessesDead.add(processInfo->locality);
+					primaryLocalitiesDead.push_back(processInfo->locality);
+				} else {
+					primaryProcessesLeft.add(processInfo->locality);
+					primaryLocalitiesLeft.push_back(processInfo->locality);
+				}
+			}
+		}
+
+		std::vector<LocalityData> badCombo;
+		bool primaryTLogsDead = tLogWriteAntiQuorum ? !validateAllCombinations(badCombo, primaryProcessesDead, tLogPolicy, primaryLocalitiesLeft, tLogWriteAntiQuorum, false) : primaryProcessesDead.validate(tLogPolicy);
+		if(usableRegions > 1 && remoteTLogPolicy && !primaryTLogsDead) {
+			primaryTLogsDead = primaryProcessesDead.validate(remoteTLogPolicy);
+		}
+
+		return primaryTLogsDead || primaryProcessesDead.validate(storagePolicy);
 	}
 
 	// The following function will determine if the specified configuration of available and dead processes can allow the cluster to survive
@@ -1106,18 +1127,24 @@ public:
 				}
 
 				if(!hasSatelliteReplication) {
-					notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) || !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy);
 					if(usableRegions > 1) {
 						tooManyDead = primaryTLogsDead || remoteTLogsDead || ( primaryProcessesDead.validate(storagePolicy) && remoteProcessesDead.validate(storagePolicy) );
+						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(remoteTLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) || !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(remoteTLogPolicy) || !remoteProcessesLeft.validate(storagePolicy);
 					} else {
 						tooManyDead = primaryTLogsDead || remoteTLogsDead || primaryProcessesDead.validate(storagePolicy) || remoteProcessesDead.validate(storagePolicy);
+						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) || !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy);
 					}
 				} else {
-					bool primarySatelliteTLogsDead = satelliteTLogWriteAntiQuorum ? !validateAllCombinations(badCombo, primarySatelliteProcessesDead, satelliteTLogPolicy, primarySatelliteLocalitiesLeft, satelliteTLogWriteAntiQuorum, false) : primarySatelliteProcessesDead.validate(satelliteTLogPolicy);
-					bool remoteSatelliteTLogsDead = satelliteTLogWriteAntiQuorum ? !validateAllCombinations(badCombo, remoteSatelliteProcessesDead, satelliteTLogPolicy, remoteSatelliteLocalitiesLeft, satelliteTLogWriteAntiQuorum, false) : remoteSatelliteProcessesDead.validate(satelliteTLogPolicy);
+					bool primarySatelliteTLogsDead = satelliteTLogWriteAntiQuorumFallback ? !validateAllCombinations(badCombo, primarySatelliteProcessesDead, satelliteTLogPolicyFallback, primarySatelliteLocalitiesLeft, satelliteTLogWriteAntiQuorumFallback, false) : primarySatelliteProcessesDead.validate(satelliteTLogPolicyFallback);
+					bool remoteSatelliteTLogsDead = satelliteTLogWriteAntiQuorumFallback ? !validateAllCombinations(badCombo, remoteSatelliteProcessesDead, satelliteTLogPolicyFallback, remoteSatelliteLocalitiesLeft, satelliteTLogWriteAntiQuorumFallback, false) : remoteSatelliteProcessesDead.validate(satelliteTLogPolicyFallback);
 
-					notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) || !primarySatelliteProcessesLeft.validate(satelliteTLogPolicy) || !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy) || !remoteSatelliteProcessesLeft.validate(satelliteTLogPolicy);
 					if(usableRegions > 1) {
+						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(remoteTLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) || !primarySatelliteProcessesLeft.validate(satelliteTLogPolicy) || !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(remoteTLogPolicy) || !remoteProcessesLeft.validate(storagePolicy) || !remoteSatelliteProcessesLeft.validate(satelliteTLogPolicy);
+					} else {
+						notEnoughLeft = !primaryProcessesLeft.validate(tLogPolicy) || !primaryProcessesLeft.validate(storagePolicy) || !primarySatelliteProcessesLeft.validate(satelliteTLogPolicy) || !remoteProcessesLeft.validate(tLogPolicy) || !remoteProcessesLeft.validate(storagePolicy) || !remoteSatelliteProcessesLeft.validate(satelliteTLogPolicy);
+					}
+
+					if(usableRegions > 1 && allowLogSetKills) {
 						tooManyDead = ( primaryTLogsDead && primarySatelliteTLogsDead ) || ( remoteTLogsDead && remoteSatelliteTLogsDead ) || ( primaryTLogsDead && remoteTLogsDead ) || ( primaryProcessesDead.validate(storagePolicy) && remoteProcessesDead.validate(storagePolicy) );
 					} else {
 						tooManyDead = primaryTLogsDead || remoteTLogsDead || primaryProcessesDead.validate(storagePolicy) || remoteProcessesDead.validate(storagePolicy);
@@ -1257,32 +1284,28 @@ public:
 			std::vector<ProcessInfo*> processesLeft, processesDead;
 			int	protectedWorker = 0, unavailable = 0, excluded = 0, cleared = 0;
 
-			for (auto machineRec : machines) {
-				for (auto processInfo : machineRec.second.processes) {
-					// Add non-test processes (ie. datahall is not be set for test processes)
-					if (processInfo->isAvailableClass()) {
-						// Do not include any excluded machines
-						if (processInfo->isExcluded()) {
-							processesDead.push_back(processInfo);
-							excluded++;
-						}
-						else if (!processInfo->isCleared()) {
-							processesDead.push_back(processInfo);
-							cleared++;
-						}
-						else if (!processInfo->isAvailable()) {
-							processesDead.push_back(processInfo);
-							unavailable++;
-						}
-						else if (protectedAddresses.count(processInfo->address)) {
-							processesLeft.push_back(processInfo);
-							protectedWorker++;
-						}
-						else if (machineRec.second.zoneId != zoneId)
-							processesLeft.push_back(processInfo);
-						// Add processes from dead machines and datacenter machines to dead group
-						else
-							processesDead.push_back(processInfo);
+			for (auto processInfo : getAllProcesses()) {
+				if (processInfo->isAvailableClass()) {
+					if (processInfo->isExcluded()) {
+						processesDead.push_back(processInfo);
+						excluded++;
+					}
+					else if (processInfo->isCleared()) {
+						processesDead.push_back(processInfo);
+						cleared++;
+					}
+					else if (!processInfo->isAvailable()) {
+						processesDead.push_back(processInfo);
+						unavailable++;
+					}
+					else if (protectedAddresses.count(processInfo->address)) {
+						processesLeft.push_back(processInfo);
+						protectedWorker++;
+					}
+					else if (processInfo->locality.zoneId() != zoneId) {
+						processesLeft.push_back(processInfo);
+					} else {
+						processesDead.push_back(processInfo);
 					}
 				}
 			}
@@ -1380,24 +1403,14 @@ public:
 		if ((kt == KillInstantly) || (kt == InjectFaults) || (kt == RebootAndDelete) || (kt == RebootProcessAndDelete))
 		{
 			std::vector<ProcessInfo*>	processesLeft, processesDead;
-			for (auto machineRec : machines) {
-				for (auto processInfo : machineRec.second.processes) {
-					// Add non-test processes (ie. datahall is not be set for test processes)
-					if (processInfo->isAvailableClass()) {
-						// Mark all of the unavailable as dead
-						if (processInfo->isExcluded())
-							processesDead.push_back(processInfo);
-						else if (processInfo->isCleared())
-							processesDead.push_back(processInfo);
-						else if (!processInfo->isAvailable())
-							processesDead.push_back(processInfo);
-						else if (protectedAddresses.count(processInfo->address))
-							processesLeft.push_back(processInfo);
-						// Keep all not in the datacenter zones
-						else if (datacenterZones.find(machineRec.second.zoneId) == datacenterZones.end())
-							processesLeft.push_back(processInfo);
-						else
-							processesDead.push_back(processInfo);
+			for (auto processInfo : getAllProcesses()) {
+				if (processInfo->isAvailableClass()) {
+					if (processInfo->isExcluded() || processInfo->isCleared() || !processInfo->isAvailable()) {
+						processesDead.push_back(processInfo);
+					} else if (protectedAddresses.count(processInfo->address) || datacenterZones.find(processInfo->locality.zoneId()) == datacenterZones.end()) {
+						processesLeft.push_back(processInfo);
+					} else {
+						processesDead.push_back(processInfo);
 					}
 				}
 			}
@@ -1473,8 +1486,12 @@ public:
 	}
 	virtual std::vector<ProcessInfo*> getAllProcesses() const {
 		std::vector<ProcessInfo*> processes;
-		for( auto c = machines.begin(); c != machines.end(); ++c )
-			processes.insert( processes.end(), c->second.processes.begin(), c->second.processes.end() );
+		for( auto& c : machines ) {
+			processes.insert( processes.end(), c.second.processes.begin(), c.second.processes.end() );
+		}
+		for( auto& c : currentlyRebootingProcesses ) {
+			processes.push_back( c.second );
+		}
 		return processes;
 	}
 	virtual ProcessInfo* getProcessByAddress( NetworkAddress const& address ) {

@@ -737,8 +737,8 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector< TesterInterface
 }
 
 //Runs the consistency check workload, which verifies that the database is in a consistent state
-ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > testers, StringRef database, bool doQuiescentCheck, 
-									double quiescentWaitTimeout, double softTimeLimit, double databasePingDelay) {
+ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > testers, StringRef database, bool doQuiescentCheck,
+									double quiescentWaitTimeout, double softTimeLimit, double databasePingDelay, Reference<AsyncVar<ServerDBInfo>> dbInfo) {
 	state TestSpec spec;
 
 	state double connectionFailures;
@@ -760,7 +760,6 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 
 	state double start = now();
 	state bool lastRun = false;
-	state bool reconfigure = true;
 	loop {
 		DistributedTestResults testResults = wait(runWorkload(cx, testers, database, spec));
 		if(testResults.ok() || lastRun) {
@@ -773,16 +772,11 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 			spec.options[0].push_back_deep(spec.options.arena(), KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 			lastRun = true;
 		}
-		if(g_network->isSimulated() && reconfigure) {
-			reconfigure = false;
-			TraceEvent(SevWarnAlways, "RepopulatingDeadRegions");
-			ConfigurationResult::Type _ = wait( changeConfig( cx, "repopulate_anti_quorum=1" ) );
-		}
+		Void _ = wait( repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck") );
 	}
 }
 
-ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers, 
-			StringRef database, TestSpec spec ) 
+ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers, StringRef database, TestSpec spec, Reference<AsyncVar<ServerDBInfo>> dbInfo )
 {
 	state DistributedTestResults testResults;
 
@@ -822,7 +816,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 		if(spec.runConsistencyCheck) {
 			try {
 				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
-				Void _ = wait(timeoutError(checkConsistency(cx, testers, database, quiescent, 10000.0, 18000, spec.databasePingDelay), 20000.0));
+				Void _ = wait(timeoutError(checkConsistency(cx, testers, database, quiescent, 10000.0, 18000, spec.databasePingDelay, dbInfo), 20000.0));
 			}
 			catch(Error& e) {
 				TraceEvent(SevError, "TestFailure").detail("Reason", "Unable to perform consistency check").error(e);
@@ -1072,7 +1066,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 	TraceEvent("TestsExpectedToPass").detail("Count", tests.size());
 	state int idx = 0;
 	for(; idx < tests.size(); idx++ ) {
-		bool ok = wait( runTest( cx, testers, database, tests[idx] ) );
+		bool ok = wait( runTest( cx, testers, database, tests[idx], dbInfo ) );
 		// do we handle a failure here?
 	}
 

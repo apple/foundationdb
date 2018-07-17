@@ -500,7 +500,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster( Reference<Mast
 		when ( CommitTransactionRequest req = waitNext( parent->provisionalProxies[0].commit.getFuture() ) ) {
 			req.reply.send(Never()); // don't reply (clients always get commit_unknown_result)
 			auto t = &req.transaction;
-			TraceEvent("PM_CTC", parent->dbgid).detail("Snapshot", t->read_snapshot).detail("Now", parent->lastEpochEnd);
 			if (t->read_snapshot == parent->lastEpochEnd && //< So no transactions can fall between the read snapshot and the recovery transaction this (might) be merged with
 				// vvv and also the changes we will make in the recovery transaction (most notably to lastEpochEndKey) BEFORE we merge initialConfChanges won't conflict
 				!std::any_of(t->read_conflict_ranges.begin(), t->read_conflict_ranges.end(), [](KeyRangeRef const& r){return r.contains(lastEpochEndKey);}))
@@ -641,7 +640,9 @@ ACTOR Future<Void> readTransactionSystemState( Reference<MasterData> self, Refer
 
 	Standalone<VectorRef<KeyValueRef>> rawTags = wait( self->txnStateStore->readRange( serverTagKeys ) );
 	self->allTags.clear();
-	self->allTags.push_back(txsTag);
+	if(self->lastEpochEnd > 0) {
+		self->allTags.push_back(txsTag);
+	}
 	for(auto& kv : rawTags) {
 		self->allTags.push_back(decodeServerTagValue( kv.value ));
 	}
@@ -1062,19 +1063,35 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 		}
 
 		if( finalUpdate ) {
-			self->recoveryState = RecoveryState::REMOTE_RECOVERED;
+			self->recoveryState = RecoveryState::FULLY_RECOVERED;
 			TraceEvent("MasterRecoveryState", self->dbgid)
-			.detail("StatusCode", RecoveryStatus::remote_recovered)
-			.detail("Status", RecoveryStatus::names[RecoveryStatus::remote_recovered])
+			.detail("StatusCode", RecoveryStatus::fully_recovered)
+			.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
+			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		} else if( !newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED ) {
+			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
+			TraceEvent("MasterRecoveryState", self->dbgid)
+			.detail("StatusCode", RecoveryStatus::storage_recovered)
+			.detail("Status", RecoveryStatus::names[RecoveryStatus::storage_recovered])
+			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+		} else if( allLogs && self->recoveryState < RecoveryState::ALL_LOGS_RECRUITED ) {
+			self->recoveryState = RecoveryState::ALL_LOGS_RECRUITED;
+			TraceEvent("MasterRecoveryState", self->dbgid)
+			.detail("StatusCode", RecoveryStatus::all_logs_recruited)
+			.detail("Status", RecoveryStatus::names[RecoveryStatus::all_logs_recruited])
 			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
 		}
 
+		if(newState.oldTLogData.size() && self->configuration.repopulateRegionAntiQuorum > 0 && self->logSystem->remoteStorageRecovered()) {
+			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid);
+			self->recruitmentStalled->set(true);
+		}
 		self->registrationTrigger.trigger();
 
 		if(allLogs && remoteRecovered.canBeSet()) {
 			remoteRecovered.send(Void());
 		}
-		
+
 		if( finalUpdate ) {
 			oldLogSystems->get()->stopRejoins();
 			rejoinRequests = rejoinRequestHandler(self);
@@ -1093,12 +1110,16 @@ ACTOR Future<Void> configurationMonitor( Reference<MasterData> self ) {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) ); 
+				Standalone<RangeResultRef> results = wait( tr.getRange( configKeys, CLIENT_KNOBS->TOO_MANY ) );
 				ASSERT( !results.more && results.size() < CLIENT_KNOBS->TOO_MANY );
 
 				DatabaseConfiguration conf;
 				conf.fromKeyValues((VectorRef<KeyValueRef>) results);
 				if(conf != self->configuration) {
+					if(self->recoveryState != RecoveryState::ALL_LOGS_RECRUITED && self->recoveryState != RecoveryState::FULLY_RECOVERED) {
+						throw master_recovery_failed();
+					}
+
 					self->configuration = conf;
 					self->registrationTrigger.trigger();
 				}
@@ -1268,7 +1289,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 
 	TraceEvent(recoveryInterval.end(), self->dbgid).detail("RecoveryTransactionVersion", self->recoveryTransactionVersion);
 
-	self->recoveryState = RecoveryState::FULLY_RECOVERED;
+	self->recoveryState = RecoveryState::ACCEPTING_COMMITS;
 	double recoveryDuration = now() - recoverStartTime;
 
 	TraceEvent((recoveryDuration > 4 && !g_network->isSimulated()) ? SevWarnAlways : SevInfo, "MasterRecoveryDuration", self->dbgid)
@@ -1276,8 +1297,8 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		.trackLatest("MasterRecoveryDuration");
 
 	TraceEvent("MasterRecoveryState", self->dbgid)
-		.detail("StatusCode", RecoveryStatus::fully_recovered)
-		.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
+		.detail("StatusCode", RecoveryStatus::accepting_commits)
+		.detail("Status", RecoveryStatus::names[RecoveryStatus::accepting_commits])
 		.detail("StoreType", self->configuration.storageServerStoreType)
 		.detail("RecoveryDuration", recoveryDuration)
 		.trackLatest("MasterRecoveryState");

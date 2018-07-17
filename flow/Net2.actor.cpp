@@ -51,7 +51,7 @@ using namespace boost::asio::ip;
 // These impact both communications and the deserialization of certain database and IKeyValueStore keys
 //                                                 xyzdev
 //                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00A560010001LL;
+uint64_t currentProtocolVersion        = 0x0FDB00A570010001LL;
 uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
 uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
@@ -817,6 +817,7 @@ void Net2::onMainThread(Promise<Void>&& signal, int taskID) {
 
 	if ( thread_network == this )
 	{
+		processThreadReady();
 		this->ready.push( OrderedTask( priority-(++tasksIssued), taskID, p ) );
 	} else {
 		if (threadReady.push( OrderedTask( priority, taskID, p ) ))
