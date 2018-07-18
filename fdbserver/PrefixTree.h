@@ -341,7 +341,7 @@ private:
 
 			int n = _node->getPrefixLen();
 			prefixBuffer.reserve(prefixBuffer.arena(), n);
-			prefix = prefixSource->key(n, prefixBuffer.begin());
+			prefix = prefixSource->key(n, prefixBuffer.begin(), false);
 		}
 
 		inline bool valid() const {
@@ -378,10 +378,15 @@ private:
 		}
 
 		// Extract size bytes from the reconstituted key
-		StringRef key(int size, uint8_t *dst) const {
+		StringRef key(int size, uint8_t *dst, bool alwaysCopy) const {
 			// If size is less than prefix length then return a substring of it without copying anything
 			if(size <= prefix.size()) {
-				return prefix.substr(0, size);
+				StringRef s = prefix.substr(0, size);
+				if(alwaysCopy) {
+					memcpy(dst, s.begin(), s.size());
+					s = StringRef(dst, size);
+				}
+				return s;
 			}
 
 			ASSERT(node != nullptr);
@@ -455,7 +460,7 @@ public:
 			const PathEntry &p = pathBack();
 			int n = p.node->getKeySize();
 			uint8_t *wptr = new (arena) uint8_t[n];
-			return pathBack().key(n, wptr);
+			return pathBack().key(n, wptr, true);
 		}
 
 		Standalone<StringRef> getKey() const {
@@ -474,7 +479,7 @@ public:
 			const PathEntry &p = pathBack();
 			int n = p.node->getKeySize();
 			uint8_t *wptr = new (kv.arena()) uint8_t[n];
-			kv.key = pathBack().key(n, wptr);
+			kv.key = pathBack().key(n, wptr, true);
 			kv.value = getValue();
 			return kv;
 		}

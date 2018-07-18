@@ -55,18 +55,24 @@ struct BTreePage {
 
 			do {
 				r += "\n  ";
-				Tuple t = Tuple::unpack(c.getKey(), true);
-				for(int i = 0; i < t.size(); ++i) {
-					if(i != 0)
-						r += ",";
-					if(t.getType(i) == Tuple::ElementType::BYTES)
-						r += format("'%s'", t.getString(i).printable().c_str());
-					if(t.getType(i) == Tuple::ElementType::INT)
-						r += format("%lld", t.getInt(i));
+				Tuple t;
+				try {
+					t = Tuple::unpack(c.getKey());
+					for(int i = 0; i < t.size(); ++i) {
+						if(i != 0)
+							r += ",";
+						if(t.getType(i) == Tuple::ElementType::BYTES)
+							r += format("'%s'", t.getString(i).printable().c_str());
+						if(t.getType(i) == Tuple::ElementType::INT)
+							r += format("%lld", t.getInt(i, true));
+					}
+				} catch(Error &e) {
 				}
+				r += format("['%s']", c.getKey().toHexString().c_str());
+
 				r += " -> ";
 				if(flags && IS_LEAF)
-					r += format("'%s'", c.getValue().printable().c_str());
+					r += format("'%s'", c.getValue().toHexString().c_str());
 				else
 					r += format("Page %u", *(const uint32_t *)c.getValue().begin());
 
@@ -205,17 +211,17 @@ struct KeyVersionValue {
 
 	// Supports partial/incomplete encoded sequences.
 	static inline KeyVersionValue unpack(KeyValueRef kv) {
-		//debug_printf("Unpacking: '%s' -> '%s' \n", kv.key.toHexString().c_str(), kv.value.toHexString().c_str());
+		debug_printf("Unpacking: '%s' -> '%s' \n", kv.key.toHexString().c_str(), kv.value.toHexString().c_str());
 		KeyVersionValue result;
 		if(kv.key.size() != 0) {
 			//debug_printf("KeyVersionValue::unpack: %s\n", kv.key.toHexString().c_str());
-			Tuple k = Tuple::unpack(kv.key, true);
+			Tuple k = Tuple::unpack(kv.key);
 			if(k.size() >= 1) {
 				result.key = k.getString(0);
 				if(k.size() >= 2) {
-					result.version = k.getInt(1);
+					result.version = k.getInt(1, true);
 					if(k.size() >= 3) {
-						result.valueIndex = k.getInt(2);
+						result.valueIndex = k.getInt(2, true);
 					}
 				}
 			}
@@ -632,8 +638,8 @@ private:
 
 		Reference<const IPage> rawPage = wait(snapshot->getPhysicalPage(root));
 		state BTreePage *page = (BTreePage *) rawPage->begin();
-		debug_printf("commitSubtree: page read: id=%d ver=%lld lower='%s' upper='%s'\n", root, snapshot->getVersion(), lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
-		debug_printf("commitSubtree: page read: id=%d %s\n", root, page->toString(lowerBoundKey, upperBoundKey).c_str());
+		debug_printf("%p commitSubtree: page read: id=%d ver=%lld lower='%s' upper='%s'\n", this, root, snapshot->getVersion(), lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
+		debug_printf("%p commitSubtree: page read: id=%d %s\n", this, root, page->toString(lowerBoundKey, upperBoundKey).c_str());
 
 		PrefixTree::Cursor existingCursor = page->tree.getCursor(lowerBoundKey, upperBoundKey);
 		bool existingCursorValid = existingCursor.moveFirst();
@@ -642,7 +648,7 @@ private:
 			VersionedChildrenT results;
 			PrefixTree::EntriesT merged;
 
-			debug_printf("MERGING EXISTING DATA WITH MUTATIONS:\n");
+			debug_printf("%p MERGING EXISTING DATA WITH MUTATIONS:\n", this);
 			self->printMutationBuffer(iMutationBoundary, iMutationBoundaryEnd);
 
 			// It's a given that the mutation map is not empty so it's safe to do this
@@ -685,7 +691,7 @@ private:
 						existing = KeyVersionValue::unpack(existingCursor.getKV());
 				}
 
-				// TODO:  If a mutation set is equal to the previous existing value of the key, don't write it.
+				// TODO:  If a mutation set is equal to the previous existing value of the key, maybe don't write it.
 				// Output mutations for the mutation boundary start key
 				while(iMutations != iMutationsEnd) {
 					const SingleKeyMutation &m = iMutations->second;
@@ -829,7 +835,7 @@ private:
 
 				existingCursorValid = existingCursor.moveNext();
 
-				// The upper bound for the last child is upperBoundKey, and entries[i+1] for the others.
+				// The upper bound for the last child is upperBoundKey, and the cursor's next key for the others.
 				Key childUpperBound = existingCursorValid ? existingCursor.getKey() : upperBoundKey;
 
 				ASSERT(childLowerBound <= childUpperBound);
