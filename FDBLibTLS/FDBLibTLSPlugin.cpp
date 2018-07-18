@@ -22,6 +22,7 @@
 
 #include "FDBLibTLSPlugin.h"
 #include "FDBLibTLSPolicy.h"
+#include "Trace.h"
 
 #include <string.h>
 
@@ -33,13 +34,13 @@ FDBLibTLSPlugin::FDBLibTLSPlugin() {
 FDBLibTLSPlugin::~FDBLibTLSPlugin() {
 }
 
-ITLSPolicy *FDBLibTLSPlugin::create_policy(ITLSLogFunc logf) {
+ITLSPolicy *FDBLibTLSPlugin::create_policy() {
 	if (rc < 0) {
 		// Log the failure from tls_init during our constructor.
-		logf("FDBLibTLSInitError", NULL, true, "LibTLSErrorMessage", "failed to initialize libtls", NULL);
+		TraceEvent(SevError, "FDBLibTLSInitError").detail("LibTLSErrorMessage", "failed to initialize libtls");
 		return NULL;
 	}
-	return new FDBLibTLSPolicy(Reference<FDBLibTLSPlugin>::addRef(this), logf);
+	return new FDBLibTLSPolicy(Reference<FDBLibTLSPlugin>::addRef(this));
 }
 
 extern "C" BOOST_SYMBOL_EXPORT void *get_tls_plugin(const char *plugin_type_name_and_version) {

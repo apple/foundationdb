@@ -146,7 +146,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 
 			endRole(err.id, err.context, "Error", ok, err.error);
 
-			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout || err.error.code() == error_code_io_error) throw err.error;
+			if (err.error.code() == error_code_please_reboot || err.error.code() == error_code_io_timeout) throw err.error;
 		}
 	}
 }
