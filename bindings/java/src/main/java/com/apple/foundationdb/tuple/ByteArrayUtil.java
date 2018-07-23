@@ -154,7 +154,39 @@ public class ByteArrayUtil {
 	 * @return a newly created array where {@code pattern} replaced with {@code replacement}
 	 */
 	public static byte[] replace(byte[] src, byte[] pattern, byte[] replacement) {
-		return join(replacement, split(src, pattern));
+		byte[] result = null;
+		int srcEnd = 0;
+		int srcStart = 0;
+		int resultStart = 0;
+		while (srcEnd <= src.length - pattern.length) {
+			if (ByteArrayUtil.regionEquals(src, srcEnd, pattern)) {
+				if (result == null) {
+					double ratio = (double) replacement.length / pattern.length;
+					if (ratio < 1) ratio = 1;
+					result = new byte[(int) Math.ceil(src.length * ratio)];
+				}
+				System.arraycopy(src, srcStart, result, resultStart, srcEnd - srcStart);
+				resultStart += srcEnd - srcStart;
+				System.arraycopy(replacement, 0, result, resultStart, replacement.length);
+				resultStart += replacement.length;
+				srcEnd += pattern.length;
+				srcStart = srcEnd;
+			} else {
+				++srcEnd;
+			}
+		}
+		if (result == null) {
+			return src;
+		}
+		System.arraycopy(src, srcStart, result, resultStart, src.length - srcStart);
+		if (resultStart + src.length - srcStart != result.length) {
+			byte[] shrunk = new byte[resultStart + src.length - srcStart];
+			System.arraycopy(result, 0, shrunk, 0, resultStart);
+			System.arraycopy(src, srcStart, shrunk, resultStart, src.length - srcStart);
+			return shrunk;
+		}
+		System.arraycopy(src, srcStart, result, resultStart, src.length - srcStart);
+		return result;
 	}
 
 	/**

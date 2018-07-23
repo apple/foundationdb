@@ -6,13 +6,14 @@ import org.junit.Test;
 import java.math.BigInteger;
 import java.util.*;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.*;
 
 public class TupleTest {
 
 	@Test
-	public void testByte() {
+	public void testPackByteArray() {
 		List<Object> list = new ArrayList<>();
 		byte[] b1 =  new byte[] {0};
 		byte[] b2 =  new byte[] {9, 5, 23, 42, 64, 3};
@@ -21,13 +22,14 @@ public class TupleTest {
 		list.add(b2);
 		list.add(b3);
 		byte[] res = TupleUtil.pack(list, null);
-		assertArrayEquals(b1, (byte[]) ByteArrayUtil.getObject(res, 0));
-		assertArrayEquals(b2, (byte[]) ByteArrayUtil.getObject(res, 1));
-		assertArrayEquals(b3, (byte[]) ByteArrayUtil.getObject(res, 2));
+		assertArrayEquals(b1, (byte[]) Tuple.unpackObject(res, 0));
+		assertArrayEquals(b2, (byte[]) Tuple.unpackObject(res, 1));
+		assertArrayEquals(b3, (byte[]) Tuple.unpackObject(res, 2));
+		assertEquals(3, Tuple.getEncodedObjectsCount(res));
 	}
 
 	@Test
-	public void testString() {
+	public void testPackString() {
 		List<Object> list = new ArrayList<>();
 		String str1 = "\u0000Sam";
 		String str2 = "S\u0000a\u0000m\u0000";
@@ -36,13 +38,14 @@ public class TupleTest {
 		list.add(str2);
 		list.add(str3);
 		byte[] res = TupleUtil.pack(list, null);
-		assertEquals(str1, ByteArrayUtil.getObject(res, 0));
-		assertEquals(str2, ByteArrayUtil.getObject(res, 1));
-		assertEquals(str3, ByteArrayUtil.getObject(res, 2));
+		assertEquals(str1, Tuple.unpackObject(res, 0));
+		assertEquals(str2, Tuple.unpackObject(res, 1));
+		assertEquals(str3, Tuple.unpackObject(res, 2));
+		assertEquals(3, Tuple.getEncodedObjectsCount(res));
 	}
 
 	@Test
-	public void testDouble() {
+	public void testPackDouble() {
 		List<Object> list = new ArrayList<>();
 		byte[] res = null;
 		double delta = 1e-15;
@@ -50,7 +53,7 @@ public class TupleTest {
 			for (int j = 0; j < 2; ++j) {
 				list.add(d);
 				res = TupleUtil.pack(list, null);
-				assertEquals(d, (double) ByteArrayUtil.getObject(res, 0), delta);
+				assertEquals(d, (double) Tuple.unpackObject(res, 0), delta);
 				list.clear();
 				d *= -1;
 			}
@@ -58,37 +61,38 @@ public class TupleTest {
 	}
 
 	@Test
-	public void testBoolean() {
+	public void testPackBoolean() {
 		List<Object> list = new ArrayList<>();
 		list.add(true);
 		list.add(false);
 		byte[] res = TupleUtil.pack(list, null);
-		assertEquals(true, ByteArrayUtil.getObject(res, 0));
-		assertEquals(false, ByteArrayUtil.getObject(res, 1));
+		assertEquals(true, Tuple.unpackObject(res, 0));
+		assertEquals(false, Tuple.unpackObject(res, 1));
+		assertEquals(2, Tuple.getEncodedObjectsCount(res));
 	}
 
 	@Test
-	public void testUUID() {
+	public void testPackUUID() {
 		List<Object> list = new ArrayList<>();
 		byte[] res = null;
 		for (int i = 0; i < 100; ++i) {
 			UUID id = UUID.randomUUID();
 			list.add(id);
 			res = TupleUtil.pack(list, null);
-			assertEquals(id, ByteArrayUtil.getObject(res, 0));
+			assertEquals(id, Tuple.unpackObject(res, 0));
 			list.clear();
 		}
 	}
 
 	@Test
-	public void testLong() {
+	public void testPackLong() {
 		List<Object> list = new ArrayList<>();
 		byte[] res = null;
 		for (long l = 1; l > 0; l *= 2) {
 			for (int j = 0; j < 2; ++j) {
 				list.add(l);
 				res = TupleUtil.pack(list, null);
-				assertEquals(l, (long) ByteArrayUtil.getObject(res, 0));
+				assertEquals(l, (long) Tuple.unpackObject(res, 0));
 				list.clear();
 				l *= -1;
 			}
@@ -96,7 +100,7 @@ public class TupleTest {
 	}
 
 	@Test
-	public void testBigInteger() {
+	public void testPackBigInteger() {
 		Random rand = new Random();
 		List<Object> list = new ArrayList<>();
 		byte[] res = null;
@@ -105,18 +109,18 @@ public class TupleTest {
 			big.multiply(new BigInteger(String.valueOf(rand.nextInt(10))));
 			list.add(big);
 			res = TupleUtil.pack(list, null);
-			assertEquals(big, ByteArrayUtil.getObject(res, 0));
+			assertEquals(big, Tuple.unpackObject(res, 0));
 			list.clear();
 			big = big.negate();
 			list.add(big);
 			res = TupleUtil.pack(list, null);
-			assertEquals(big, ByteArrayUtil.getObject(res, 0));
+			assertEquals(big, Tuple.unpackObject(res, 0));
 			list.clear();
 		}
 	}
 
 	@Test
-	public void testVersionStamp() {
+	public void testPackVersionStamp() {
 		byte[] b1 =  new byte[] {1, 2, 7, 4, 7, 2, 12, 56, 23, 1};
 		byte[] b2 =  new byte[] {43, 65, 22, 3, 46, 34, 12, 32, 17, 32};
 		Versionstamp v1 = Versionstamp.complete(b1, 3);
@@ -125,48 +129,39 @@ public class TupleTest {
 		list.add(v1);
 		list.add(v2);
 		byte[] res = TupleUtil.pack(list, null);
-		assertEquals(v1, ByteArrayUtil.getObject(res, 0));
-		assertEquals(v2, ByteArrayUtil.getObject(res, 1));
+		assertEquals(v1, Tuple.unpackObject(res, 0));
+		assertEquals(v2, Tuple.unpackObject(res, 1));
 		v1 = Versionstamp.complete(b1, 2);
 		v2 = Versionstamp.complete(b2, 1);
-		assertNotEquals(v1, ByteArrayUtil.getObject(res, 0));
-		assertNotEquals(v2, ByteArrayUtil.getObject(res, 1));
+		assertNotEquals(v1, Tuple.unpackObject(res, 0));
+		assertNotEquals(v2, Tuple.unpackObject(res, 1));
+		assertEquals(2, Tuple.getEncodedObjectsCount(res));
 	}
 
 	@Test
-	public void testList() {
+	public void testPackList() {
 		List<Object> objects = Arrays.asList(13L, "weffs", false, UUID.randomUUID());
 		List<Object> list = new ArrayList<>();
 		list.add(objects);
 		byte[] res = TupleUtil.pack(list, null);
-		assertEquals(objects, ByteArrayUtil.getObject(res, 0));
+		assertEquals(objects, Tuple.unpackObject(res, 0));
+		assertEquals(1, Tuple.getEncodedObjectsCount(res));
 	}
 
 	@Test
-	public void testGetObject() {
-		List<Object> objects = Arrays.asList(13L, "weffs", false, UUID.randomUUID());
+	public void testPackObjects() {
 		List<Object> list = new ArrayList<>();
 		list.add(13);
 		list.add("String");
 		byte[] res = TupleUtil.pack(list, null);
-		int[] count = new int[1];
-		int[] offset = new int[1];
-		assertEquals(13L, (long) ByteArrayUtil.getObject(res, 0));
-		assertEquals("String", ByteArrayUtil.getObject(res, 1));
-		ByteArrayUtil.getObject(res, 0, 0, count, offset);
-		assertEquals(2, count[0]);
-		assertEquals("String", ByteArrayUtil.getObject(res, 0, offset[0]));
-	}
-
-	private int compare(byte[] left, byte[] right) {
-		for (int i = 0, j = 0; i < left.length && j < right.length; i++, j++) {
-			int a = (left[i] & 0xff);
-			int b = (right[j] & 0xff);
-			if (a != b) {
-				return a - b;
-			}
-		}
-		return left.length - right.length;
+		AtomicInteger objectEnd = new AtomicInteger(0);
+		assertEquals(13L, (long) Tuple.unpackObject(res, 0));
+		assertEquals("String", Tuple.unpackObject(res, 1));
+		Tuple.unpackObject(res, 0, 0, objectEnd);
+		assertEquals("String", Tuple.unpackObject(res, 0, objectEnd.get()));
+		assertEquals(2, Tuple.getEncodedObjectsCount(res));
+		assertEquals(null, Tuple.unpackObject(res, 2));
+		assertEquals(null, Tuple.unpackObject(res, 1, objectEnd.get()));
 	}
 
 	@Test
@@ -188,17 +183,17 @@ public class TupleTest {
 				list.add(hostB);
 				list.add(start);
 				byte[] reference = metrics.add(metricId).add(hostB).add(start).pack();
-				assertEquals(0, compare(reference, TupleUtil.pack(list, null)));
+				assertEquals(0, ByteArrayUtil.compareUnsigned(reference, TupleUtil.pack(list, null)));
 
 				List<Object> items = metrics.getItems();
 				items.add(Long.MAX_VALUE);
-				assertEquals(0, compare(metrics.add(Long.MAX_VALUE).pack(),
+				assertEquals(0, ByteArrayUtil.compareUnsigned(metrics.add(Long.MAX_VALUE).pack(),
 						TupleUtil.pack(items,null)));
 
 				byte[] refMin = metrics.add(Long.MIN_VALUE).pack();
 				items =  metrics.getItems();
 				items.add(Long.MIN_VALUE);
-				assertEquals(0, compare(refMin, TupleUtil.pack(items, null)));
+				assertEquals(0, ByteArrayUtil.compareUnsigned(refMin, TupleUtil.pack(items, null)));
 			}
 			{
 				Long start = System.currentTimeMillis();

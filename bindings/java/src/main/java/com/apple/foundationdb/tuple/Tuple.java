@@ -28,6 +28,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -413,6 +414,102 @@ public class Tuple implements Comparable<Tuple>, Iterable<Object> {
 		Tuple t = new Tuple();
 		t.elements = TupleUtil.unpack(bytes, offset, length);
 		return t;
+	}
+
+
+	/**
+	 * Unpacks an object from {@code bytes}.
+	 * {@code bytes} should be encoded via Tuple's pack function
+	 *
+	 * @param bytes the encoded objects
+	 * @param index which element should be unpacked
+	 *
+	 * @return null if the {@code index} is greater than the encoded
+	 * 		   objects count, otherwise the unpacked object
+	 *
+	 * @throws IllegalArgumentException if the object at {@code index} has an unsupported type.
+	 * @throws NullPointerException if {@code bytes} is {@code null}.
+	 */
+	public static Object unpackObject(byte[] bytes, int index) {
+		return unpackObject(bytes, index, 0, null);
+	}
+
+	/**
+	 * Unpacks an object from {@code bytes}.
+	 * {@code bytes} should be encoded via Tuple's pack function
+	 *
+	 * @param bytes the encoded objects
+	 * @param index which element should be unpacked
+	 * @param offset the starting offset of byte array. If a valid tuple encoded object
+	 *               does not begin at the specified {@code offset} the function will throw an
+	 *               exception or return a garbage
+	 *
+	 * @return null if starting from {@code offset} the {@code index} is greater than the encoded
+	 * 		   objects count, otherwise the unpacked object
+	 *
+	 * @throws IllegalArgumentException if the object at {@code index} has an unsupported type.
+	 * @throws NullPointerException if {@code bytes} is {@code null}.
+	 */
+	public static Object unpackObject(byte[] bytes, int index, int offset) {
+		return unpackObject(bytes, index, offset, null);
+	}
+
+	/**
+	 * Unpacks an object from {@code bytes}.
+	 * {@code bytes} should be encoded via Tuple's pack function
+	 *
+	 * @param bytes the encoded objects
+	 * @param index which element should be unpacked
+	 * @param offset the starting offset of byte array. If a valid tuple encoded object
+	 *               does not begin at the specified {@code offset} the function will throw an
+	 *               exception or return a garbage
+	 * @param objectEnd gets the starting position of the next object
+	 *
+	 * @return null if starting from {@code offset} the {@code index} is greater than the encoded
+	 * 		   objects count, otherwise the unpacked object
+	 *
+	 * @throws IllegalArgumentException if the object at {@code index} has an unsupported type.
+	 * @throws NullPointerException if {@code bytes} is {@code null}.
+	 */
+	public static Object unpackObject(byte[] bytes, int index, int offset, AtomicInteger objectEnd) {
+		int current = offset;
+		int i = 0;
+		boolean decode;
+		while (current < bytes.length) {
+			decode = i == index;
+			TupleUtil.DecodeResult dr = TupleUtil.decode(bytes, current, bytes.length, decode);
+			current = dr.end;
+			if (decode) {
+				if (objectEnd != null) {
+					objectEnd.set(current);
+				}
+				return dr.o;
+			}
+			++i;
+		}
+		if (objectEnd != null) {
+			objectEnd.set(0);
+		}
+		return null;
+	}
+
+	/**
+	 * Returns the encoded objects count.
+	 * {@code bytes} should be encoded via Tuple's pack function
+	 *
+	 * @param bytes the encoded objects
+	 *
+	 * @return the encoded objects count
+	 */
+	public static int getEncodedObjectsCount(byte[] bytes) {
+	   int i = 0;
+	   int current = 0;
+	   while (current < bytes.length) {
+		   TupleUtil.DecodeResult dr = TupleUtil.decode(bytes, current, bytes.length, false);
+		   current = dr.end;
+		   ++i;
+	   }
+	   return i;
 	}
 
 	/**

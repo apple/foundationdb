@@ -1,7 +1,6 @@
-package com.apple.foundationdb.tuple;
+package com.apple.foundationdb.test;
 
-import org.junit.Ignore;
-import org.junit.Test;
+import com.apple.foundationdb.tuple.Tuple;
 
 import java.lang.ref.WeakReference;
 import java.math.BigInteger;
@@ -11,10 +10,13 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
-// This test is used to calculate memory usage and performance differences.
-// This test should be done manually comparing results before and after fix.
+// Calculates memory usage and performance during Tuple's pack
 public class TupleMemoryPerformanceTest {
-	private class Pair
+	public static void main(String[] args) {
+		testMemoryPerformance();
+	}
+
+	private static class Pair
 	{
 		double memory;
 		double performance;
@@ -42,9 +44,7 @@ public class TupleMemoryPerformanceTest {
 		static final int UUID = 200000;
 	}
 
-	@Test
-	@Ignore
-	public void testMemoryPerformance() {
+	public static void testMemoryPerformance() {
 		testMemoryPerformance(Type.DOUBLE);
 		testMemoryPerformance(Type.LONG);
 		testMemoryPerformance(Type.BIGINT);
@@ -53,7 +53,7 @@ public class TupleMemoryPerformanceTest {
 		testMemoryPerformance(Type.ALL);
 	}
 
-	private void testMemoryPerformance(int type) {
+	private static void testMemoryPerformance(int type) {
 		Pair p = new Pair(0, 0);
 		long count = 0;
 		int test_count = 20;
@@ -66,7 +66,7 @@ public class TupleMemoryPerformanceTest {
 		System.out.println();
 	}
 
-	private List<Object> getTestingObjects(int type) {
+	private static List<Object> getTestingObjects(int type) {
 		List<Object> list = new ArrayList<>();
 		Random rand = new Random();
 		if ((type & Type.DOUBLE) != 0) {
@@ -97,7 +97,7 @@ public class TupleMemoryPerformanceTest {
 		return list;
 	}
 
-	private long testMemoryPerformance(Pair p, int type) {
+	private static long testMemoryPerformance(Pair p, int type) {
 		Runtime runtime = Runtime.getRuntime();
 		List<Object> list = getTestingObjects(type);
 
@@ -108,16 +108,17 @@ public class TupleMemoryPerformanceTest {
 		try {
 			TimeUnit.SECONDS.sleep(1);
 		} catch (InterruptedException e) {
-			throw new AssertionError();
+			throw new AssertionError("interrupted");
 		}
 		//To be sure that garbage collector is called.
 		Integer r1 = wr1.get();
 		assert r1 == null;
 
+		Tuple tuple = Tuple.fromList(list);
 		WeakReference<Integer> wr2 = new WeakReference<>(new Integer(0));
 		long usedMemory1 = runtime.totalMemory() - runtime.freeMemory();
 		long start = System.currentTimeMillis();
-		TupleUtil.pack(list, null);
+		tuple.pack();
 		long end = System.currentTimeMillis();
 		long usedMemory2 = runtime.totalMemory() - runtime.freeMemory();
 
@@ -130,7 +131,7 @@ public class TupleMemoryPerformanceTest {
 		return list.size();
 	}
 
-	private String getRandomString() {
+	private static String getRandomString() {
 		Random rand = new Random();
 		StringBuilder stringBuilder = new StringBuilder(110);
 		int count = 10 + rand.nextInt(100);
@@ -140,7 +141,7 @@ public class TupleMemoryPerformanceTest {
 		return stringBuilder.toString();
 	}
 
-	private BigInteger getRandomBigInteger() {
+	private static BigInteger getRandomBigInteger() {
 		Random rand = new Random();
 		StringBuilder stringBuilder = new StringBuilder(150);
 		if (rand.nextInt(2) == 0)  {
@@ -154,7 +155,7 @@ public class TupleMemoryPerformanceTest {
 		return new BigInteger(stringBuilder.toString());
 	}
 
-	private String getTypeName(int type) {
+	private static String getTypeName(int type) {
 		switch(type) {
 			case Type.DOUBLE:
 				return "double";

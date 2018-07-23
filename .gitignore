@@ -16,11 +16,11 @@ packaging/msi/FDBInstaller.msi
 *.pom
 bindings/java/pom*.xml
 bindings/java/src*/main/overview.html
-bindings/java/src*/main/com/apple/foundationdb/*Options.java
-bindings/java/src*/main/com/apple/foundationdb/StreamingMode.java
-bindings/java/src*/main/com/apple/foundationdb/MutationType.java
-bindings/java/src*/main/com/apple/foundationdb/ConflictRangeType.java
-bindings/java/src*/main/com/apple/foundationdb/FDBException.java
+bindings/java/src*/main/java/com/apple/foundationdb/*Options.java
+bindings/java/src*/main/java/com/apple/foundationdb/StreamingMode.java
+bindings/java/src*/main/java/com/apple/foundationdb/MutationType.java
+bindings/java/src*/main/java/com/apple/foundationdb/ConflictRangeType.java
+bindings/java/src*/main/java/com/apple/foundationdb/FDBException.java
 bindings/python/fdb/fdb*options.py
 bindings/python/dist/
 bindings/python/setup.py
