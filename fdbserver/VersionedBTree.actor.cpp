@@ -181,16 +181,13 @@ static std::vector<BoundaryPagePairT> buildPages(bool minimalBoundaries, StringR
 // Internal key/value records represent either a cleared key at a version or a shard of a value of a key at a version.
 // When constructing and packing these it is assumed that the key and value memory is being held elsewhere.
 struct KeyVersionValueRef {
-	KeyVersionValueRef() : version(invalidVersion), valueTotalSize(0), valueIndex(-1) {}
+	KeyVersionValueRef() : version(invalidVersion) {}
 	// Cleared key at version
-	KeyVersionValueRef(KeyRef key, Version ver, Optional<ValueRef> val = {}, int64_t totalSize = -1, int64_t index = -1) 
-		: key(key), version(ver)
+	KeyVersionValueRef(KeyRef key, Version ver, Optional<ValueRef> val = {}) 
+		: key(key), version(ver), value(val), valueIndex(0)
 	{
-		// Non-split value
-		if(val.present() && totalSize < 0) {
+		if(value.present())
 			valueTotalSize = value.get().size();
-			valueIndex = 0;
-		}
 	}
 
 	KeyVersionValueRef(Arena &a, const KeyVersionValueRef &toCopy) {
@@ -225,7 +222,11 @@ struct KeyVersionValueRef {
 	// Generate a kv shard from a complete kv
 	KeyVersionValueRef split(int start, int len) {
 		ASSERT(value.present());
-		return KeyVersionValueRef(key, version, value.get().substr(start, len), value.get().size(), start);
+		KeyVersionValueRef r(key, version);
+		r.value = value.get().substr(start, len);
+		r.valueIndex = start;
+		r.valueTotalSize = valueTotalSize;
+		return r;
 	}
 
 	// Encode the record for writing to a btree page.
