@@ -60,6 +60,10 @@ struct Tuple {
 
 	Tuple subTuple(size_t beginIndex, size_t endIndex = std::numeric_limits<size_t>::max()) const;
 
+	// Return packed data with the arena it resides in
+	Standalone<VectorRef<uint8_t>> getData() { return data; }
+	Standalone<StringRef> getDataAsStandalone() { return Standalone<StringRef>(pack(), data.arena()); }
+
 private:
 	Tuple(const StringRef& data, bool exclude_incomplete = false);
 	Standalone<VectorRef<uint8_t>> data;

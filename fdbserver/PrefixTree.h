@@ -4,6 +4,7 @@
 #include "flow/Arena.h"
 #include "fdbclient/FDBTypes.h"
 #include "Knobs.h"
+#include <string.h>
 
 typedef uint64_t Word;
 static inline int commonPrefixLength(uint8_t const* ap, uint8_t const* bp, int cl) {
@@ -81,10 +82,9 @@ static int perfectSubtreeSplitPointCached(int subtree_size) {
 }
 
 struct PrefixTree {
+	// TODO: Make PrefixTree use a more complex record type with a multi column key
 	typedef KeyValueRef EntryRef;
-	typedef std::vector<EntryRef> EntryRefsT;
-	typedef Standalone<KeyValueRef> Entry;
-	typedef std::vector<Entry> EntriesT;
+	typedef Standalone<EntryRef> Entry;
 
 	struct Node {
 		uint8_t flags;
@@ -249,11 +249,6 @@ struct PrefixTree {
 				if(flags & HAS_VALUE)
 					header += large ? 2 : 1;
 				headerLen = header;
-/*printf("Parsed Node (%p):\n  Raw: %s\n  %d %d %d %d %d %d\n", node,
-	   StringRef((const uint8_t *)n, p8 - (const uint8_t *)n).toHexString().c_str(),
-	(int)headerLen, (int)prefixLen, (int)leftPos, (int)suffixPos, (int)valuePos, (int)rightPos
-);
-*/
 			}
 		};
 
@@ -265,7 +260,7 @@ struct PrefixTree {
 				overhead += large ? 2 : 1;
 			overhead += large ? 4 : 2;  // Worst case scenario for split and suffix lengths
 			if(index % 2 != 0)
-				overhead += 2;  // Left child length, about half of all nodes will have one
+				overhead += 2;  // Left child length, one less than half of nodes will have one.
 			return overhead;
 		}
 
@@ -312,36 +307,63 @@ struct PrefixTree {
 private:
 	struct PathEntry {
 		const Node *node;
-		StringRef prefix;
-		Standalone<VectorRef<uint8_t>> prefixBuffer;
-		bool nodeIsLeftChild;
-		int moves;  // number of consecutive moves in same direction
+		Node::Parser parser;
 
-		PathEntry(StringRef s = StringRef()) : node(nullptr), prefix(s) {
-		}
-		PathEntry(const Node *node, StringRef prefix, bool leftChild, int moves) : node(node), prefix(prefix), nodeIsLeftChild(leftChild), moves(moves) {
+		// Key may or may not point to the space within keyBuffer.
+		// Key will always contain at least the prefix bytes borrowed by node
+		// KeyBuffer will always be large enough to hold the entire reconstituted key for node
+		//
+		// These are mutable because getting key bytes from this PathEntry can change these
+		// but they're really just a read cache for reconstituted key bytes.
+		mutable StringRef key;
+		mutable Standalone<VectorRef<uint8_t>> keyBuffer;
+
+		// Path entry was reached by going left from the previous node
+		bool nodeIsLeftChild;
+		// number of consecutive moves in same direction
+		int moves;
+
+		PathEntry(StringRef s = StringRef()) : node(nullptr), key(s) {
 		}
 		PathEntry(const PathEntry &rhs) {
 			*this = rhs;
 		}
 
+		// Initialize the key byte buffer to hold bytes of a new node.  Use a new arena
+		// if the old arena is being held by any users.
+		void initKeyBufferSpace() {
+			int size = parser.keyLen();
+			if(keyBuffer.arena().impl && !keyBuffer.arena().impl->isSoleOwnerUnsafe()) {
+				keyBuffer.arena() = Arena(size);
+			}
+			keyBuffer.reserve(keyBuffer.arena(), size);
+		}
+
 		PathEntry & operator= (const PathEntry &rhs) {
 			node = rhs.node;
+			parser = rhs.parser;
 			nodeIsLeftChild = rhs.nodeIsLeftChild;
 			moves = rhs.moves;
-			prefixBuffer = VectorRef<uint8_t>((uint8_t *)rhs.prefix.begin(), rhs.prefix.size());
-			prefix = StringRef(prefixBuffer.begin(), prefixBuffer.size());
+			// New key buffer must be able to hold full reconstituted key, not just the
+			// part of it referenced by rhs.key (which may not be the whole thing)
+			initKeyBufferSpace();
+			// Copy rhs.key into keyBuffer and set key to the destination bytes
+			memcpy(keyBuffer.begin(), rhs.key.begin(), rhs.key.size());
+			key = StringRef(keyBuffer.begin(), rhs.key.size());
 			return *this;
 		}
 
-		void init(const Node *_node, const PathEntry *prefixSource, bool left, int _moves) {
+		void init(const Node *_node, const PathEntry *prefixSource, bool isLeft, int numMoves) {
 			node = _node;
-			nodeIsLeftChild = left;
-			moves = _moves;
+			parser.init(node);
+			nodeIsLeftChild = isLeft;
+			moves = numMoves;
 
-			int n = _node->getPrefixLen();
-			prefixBuffer.reserve(prefixBuffer.arena(), n);
-			prefix = prefixSource->key(n, prefixBuffer.begin(), false);
+			// keyBuffer will be large enough to hold the full reconstituted key but initially
+			// key will be a reference returned from prefixSource->getKeyRef()
+			// See comments near keyBuffer and key for more info.
+			initKeyBufferSpace();
+			key = prefixSource->getKeyRef(parser.prefixLen);
 		}
 
 		inline bool valid() const {
@@ -349,71 +371,106 @@ private:
 		}
 
 		int compareToKey(StringRef s) const {
-			// If s is shorter than prefix, compare s to prefix for final result
-			if(s.size() < prefix.size())
-				return s.compare(prefix);
+			// Key has at least this node's borrowed prefix bytes in it.
+			// If s is shorter than key, we only need to compare it to key
+			if(s.size() < key.size())
+				return s.compare(key);
 
-			// Compare prefix len of s to prefix
-			int cmp = s.substr(0, prefix.size()).compare(prefix);
+			int cmp = s.substr(0, key.size()).compare(key);
+			if(cmp != 0)
+				return cmp;
 
-			// If they are the same, move on to split string
-			if(cmp == 0) {
-				s = s.substr(prefix.size());
-				StringRef split = node->getSplitString();
-
-				// If s is shorter than split, compare s to split for final result
+			// The borrowed prefix bytes and possibly more have already been compared and were equal
+			int comparedLen = key.size();
+			s = s.substr(comparedLen);
+			StringRef split = parser.splitString();
+			int splitSizeOriginal = split.size();
+			int splitStart = comparedLen - parser.prefixLen;
+			if(splitStart < split.size()) {
+				split = split.substr(splitStart);
 				if(s.size() < split.size())
 					return s.compare(split);
-
-				// Compare split len of s to split
 				cmp = s.substr(0, split.size()).compare(split);
-
-				// If they are the same, move on to suffix string
-				if(cmp == 0) {
-					s = s.substr(split.size());
-					return s.compare(node->getSuffixString());
-				}
+				if(cmp != 0)
+					return cmp;
+				s = s.substr(split.size());
+				comparedLen += split.size();
 			}
-			return cmp;
+
+			int suffixStart = comparedLen - (parser.prefixLen + splitSizeOriginal);
+			StringRef suffix = parser.suffixString();
+			ASSERT(suffixStart >= 0 && suffixStart <= suffix.size());
+			return s.compare(suffix.substr(suffixStart));
 		}
 
-		// Extract size bytes from the reconstituted key
-		StringRef key(int size, uint8_t *dst, bool alwaysCopy) const {
-			// If size is less than prefix length then return a substring of it without copying anything
-			if(size <= prefix.size()) {
-				StringRef s = prefix.substr(0, size);
-				if(alwaysCopy) {
-					memcpy(dst, s.begin(), s.size());
-					s = StringRef(dst, size);
-				}
-				return s;
+		// Make sure that key refers to bytes in keyBuffer, copying if necessary
+		void ensureKeyInBuffer() const {
+			if(key.begin() != keyBuffer.begin()) {
+				memcpy(keyBuffer.begin(), key.begin(), key.size());
+				key = StringRef(keyBuffer.begin(), key.size());
+			}
+		}
+
+		// Get the borrowed prefix string.  Key must contain all of those bytes but it could contain more.
+		StringRef getPrefix() const {
+			if(node == nullptr)
+				return key;
+			return key.substr(0, parser.prefixLen);
+		}
+
+		// Return a reference to the first size bytes of the key.
+		//
+		// If size <= key's size then a substring of key will be returned, but if alwaysUseKeyBuffer
+		// is true then before returning the existing value of key (not just the first size bytes)
+		// will be copied into keyBuffer and key will be updated to point there.
+		//
+		// If size is greater than key's size, then key will be moved into keyBuffer if it is not already there
+		// and the remaining needed bytes will be copied into keyBuffer from the split and suffix strings.
+		KeyRef getKeyRef(int size = -1, bool alwaysUseKeyBuffer = false) const {
+			if(size < 0)
+				size = parser.keyLen();
+
+			// If size is less than key then return a substring of it, possibly after moving it to the keyBuffer.
+			if(size <= key.size()) {
+				if(alwaysUseKeyBuffer)
+					ensureKeyInBuffer();
+				return key.substr(0, size);
 			}
 
 			ASSERT(node != nullptr);
-			uint8_t *wptr = dst;
-			uint8_t *end = dst + size;
+			ensureKeyInBuffer();
 
-			// The entire prefix is definitely needed
-			memcpy(wptr, prefix.begin(), prefix.size());
-			wptr += prefix.size();
+			// The borrowed prefix bytes and possibly more must already be in key
+			int writtenLen = key.size();
+			StringRef split = parser.splitString();
+			StringRef suffix = parser.suffixString();
+			int splitStart = writtenLen - parser.prefixLen;
+			if(splitStart < split.size()) {
+				int splitLen = std::min(split.size() - splitStart, size - writtenLen);
+				memcpy(mutateString(key) + writtenLen, split.begin() + splitStart, splitLen);
+				writtenLen += splitLen;
+			}
+			int suffixStart = writtenLen - parser.prefixLen - split.size();
+			if(suffixStart < suffix.size()) {
+				int suffixLen = std::min(suffix.size() - suffixStart, size - writtenLen);
+				memcpy(mutateString(key) + writtenLen, suffix.begin() + suffixStart, suffixLen);
+				writtenLen += suffixLen;
+			}
+			ASSERT(writtenLen == size);
+			key = StringRef(key.begin(), size);
+			return key;
+		}
 
-			StringRef split = node->getSplitString();
-			int b = std::min<int>(end - wptr, split.size());
-			memcpy(wptr, split.begin(), b);
-			wptr += b;
-
-			StringRef suffix = node->getSuffixString();
-			b = std::min<int>(end - wptr, suffix.size());
-			memcpy(wptr, suffix.begin(), b);
-			ASSERT(wptr + b == end);
-
-			return StringRef(dst, size);
+		// Return keyRef(size) and the arena that keyBuffer resides in.
+		Key getKey(int size = -1) const {
+			StringRef k = getKeyRef(size, true);
+			return Key(k, keyBuffer.arena());
 		}
 	};
 
 public:
 	// Cursor provides a way to seek into a PrefixTree and iterate over its content
-	// Seek and move methods can return false if they fail to achieve the desired effect
+	// Seek and move methods can return false can return false if they fail to achieve the desired effect
 	// but a cursor will remain 'valid' as long as the tree is not empty.
 	// TODO:  Is this how it should work?
 	//
@@ -432,11 +489,12 @@ public:
 		// which avoids cursor destruction and creation which involves unnecessary memory churn.
 		// The root node is arbitrarily assumed to be a right child of prevAncestor which itself is a left child of nextAncestor
 		void init(const Node *root, StringRef prevAncestor, StringRef nextAncestor) {
-			path.resize(20);
-			path[0] = PathEntry(nextAncestor);
-			path[1] = PathEntry(prevAncestor);
-			StringRef rootPrefix = (root->flags & Node::PREFIX_SOURCE_NEXT ? nextAncestor : prevAncestor).substr(0, root->getPrefixLen());
-			path[2] = PathEntry(root, rootPrefix, false, 1);
+			path.reserve(20);
+			path.clear();
+			path.emplace_back(nextAncestor);
+			path.emplace_back(prevAncestor);
+			path.resize(initialPathLen);
+			path[2].init(root, &path[root->flags & Node::PREFIX_SOURCE_NEXT ? 0 : 1], false, 1);
 			pathLen = initialPathLen;
 		}
 
@@ -456,44 +514,34 @@ public:
 			return pathLen != 0 && pathBack().valid();
 		}
 
-		StringRef getKey(Arena &arena) const {
-			const PathEntry &p = pathBack();
-			int n = p.node->getKeySize();
-			uint8_t *wptr = new (arena) uint8_t[n];
-			return pathBack().key(n, wptr, true);
+		// Get a reference to the current key which is valid until the Cursor is moved.
+		KeyRef getKeyRef() const {
+			return pathBack().getKeyRef();
 		}
 
-		Standalone<StringRef> getKey() const {
-			Standalone<StringRef> s;
-			(StringRef &)s = getKey(s.arena());
-			return s;
+		// Get a Standalone<KeyRef> for the current key which will still be valid after the Cursor is moved.
+		Key getKey() const {
+			return pathBack().getKey();
 		}
 
-		StringRef getValue() const {
-			const PathEntry &p = pathBack();
-			return p.node->getValueString();
+		// Get a reference to the current value which is valid as long as the Cursor's page memory exists.
+		ValueRef getValueRef() const {
+			return pathBack().parser.valueString();
 		}
 
-		Entry getKV() const {
-			Entry kv;
-			const PathEntry &p = pathBack();
-			int n = p.node->getKeySize();
-			uint8_t *wptr = new (kv.arena()) uint8_t[n];
-			kv.key = pathBack().key(n, wptr, true);
-			kv.value = getValue();
-			return kv;
+		// Get a key/value reference that is valid until the Cursor is moved.
+		EntryRef getKVRef() const {
+			return EntryRef(getKeyRef(), getValueRef());
 		}
 
-		// Get a reference to the last contiguous segment of this key in the tree.
-		// This is a bit abstraction breaking, but callers can be assured that
-		// this will contain all of the part of the key which cannot be shared between
-		// adjacent keys.
-		// TODO:  Natively support a 'value' concept in PrefixTree
-		StringRef getSuffix() const {
-			StringRef s = pathBack().node->getSuffixString();
-			if(s.size() == 0)
-				return pathBack().node->getSplitString();
-			return s;
+		// Returns a standalone EntryRef where both key and value exist in the standalone's arena,
+		// unless copyValue is false in which case the value will be a reference into tree memory.
+		Entry getKV(bool copyValue = true) const {
+			Key k = getKey();
+			ValueRef v = getValueRef();
+			if(copyValue)
+				v = ValueRef(k.arena(), getValueRef());
+			return Entry(EntryRef(k, v), k.arena());
 		}
 
 		// Moves the cursor to the node with the greatest key less than or equal to s.  If successful,
@@ -509,7 +557,7 @@ public:
 			// to skip comparison of some prefix bytes when possible
 			while(1) {
 				const PathEntry &p = pathBack();
-				const Node *right = p.node->getRightChild();
+				const Node *right = p.parser.rightChild();
 				//_mm_prefetch(right, _MM_HINT_T0);
 
 				int cmp = p.compareToKey(s);
@@ -518,7 +566,7 @@ public:
 
 				if(cmp < 0) {
 					// Try to traverse left
-					const Node *left = p.node->getLeftChild();
+					const Node *left = p.parser.leftChild();
 					if(left == nullptr) {
 						// If we're at the root, cursor should now be before the first element
 						if(pathLen == initialPathLen) {
@@ -567,14 +615,6 @@ public:
 			return path[pathLen - 1];
 		}
 
-		inline void pushPath() {
-			++pathLen;
-			if(path.size() < pathLen) {
-				path.resize(pathLen);
-			}
-			pathBack().node = nullptr;
-		}
-
 		inline void pushPath(const Node *node, const PathEntry *borrowSource, bool left, int moves) {
 			++pathLen;
 			if(path.size() < pathLen) {
@@ -596,7 +636,7 @@ public:
 					s += "childDir=";
 					s += (path[i].nodeIsLeftChild ? "left " : "right ");
 				}
-				s += format("prefix='%s'", path[i].prefix.toHexString().c_str());
+				s += format("prefix='%s'", path[i].getPrefix().toHexString().c_str());
 				if(node != nullptr) {
 					s += format(" split='%s' suffix='%s' value='%s'", node->getSplitString().toHexString().c_str(), node->getSuffixString().toHexString().c_str(), node->getValueString().toHexString().c_str());
 				}
@@ -614,7 +654,7 @@ public:
 
 			while(1) {
 				const PathEntry &p = pathBack();
-				const Node *left = p.node->getLeftChild();
+				const Node *left = p.parser.leftChild();
 
 				if(left == nullptr)
 					break;
@@ -635,9 +675,8 @@ public:
 			pathLen = initialPathLen;
 
 			while(1) {
-				// TODO:  This can be simpler since it only goes right
 				const PathEntry &p = pathBack();
-				const Node *right = p.node->getRightChild();
+				const Node *right = p.parser.rightChild();
 
 				if(right == nullptr)
 					break;
@@ -659,7 +698,7 @@ public:
 				return false;
 			}
 
-			const Node *right = p.node->getRightChild();
+			const Node *right = p.parser.rightChild();
 
 			// If we can't go right, then go upward to the parent of the last left child
 			if(right == nullptr) {
@@ -688,7 +727,7 @@ public:
 			// Go left as far as possible
 			while(1) {
 				const PathEntry &p = pathBack();
-				const Node *left = p.node->getLeftChild();
+				const Node *left = p.parser.leftChild();
 				if(left == nullptr) {
 					return true;
 				}
@@ -707,7 +746,7 @@ public:
 				return false;
 			}
 
-			const Node *left = p.node->getLeftChild();
+			const Node *left = p.parser.leftChild();
 
 			// If we can't go left, then go upward to the parent of the last right child
 			if(left == nullptr) {
@@ -741,7 +780,7 @@ public:
 			// Go right as far as possible
 			while(1) {
 				const PathEntry &p = pathBack();
-				const Node *right = p.node->getRightChild();
+				const Node *right = p.parser.rightChild();
 				if(right == nullptr) {
 					return true;
 				}
@@ -779,15 +818,16 @@ public:
 		r += format("digraph PrefixTree%p {\n", this);
 
 		do {
-			const Node *n = c.pathBack().node;
-			const Node *left = n->getLeftChild();
-			const Node *right = n->getRightChild();
+			const PathEntry &p = c.pathBack();
+			const Node *n = p.node;
+			const Node *left = p.parser.leftChild();
+			const Node *right = p.parser.rightChild();
 
 			std::string label = escapeForDOT(format("PrefixSource: %s\nPrefix: [%s]\nSplit: %s\nSuffix: %s",
 				n->flags & Node::PREFIX_SOURCE_NEXT ? "Left" : "Right",
-				c.pathBack().prefix.toString().c_str(),
-				n->getSplitString().toString().c_str(),
-				n->getSuffixString().toString().c_str()
+				p.getPrefix().toString().c_str(),
+				p.parser.splitString().toString().c_str(),
+				p.parser.suffixString().toString().c_str()
 			));
 
 			r += format("node%p [ label = %s ];\nnode%p -> { %s %s };\n", n, label.c_str(), n,
@@ -803,7 +843,7 @@ public:
 	}
 
 	// Returns number of bytes written
-	int build(const Entry *begin, const Entry *end, StringRef prevAncestor, StringRef nextAncestor) {
+	int build(const EntryRef *begin, const EntryRef *end, StringRef prevAncestor, StringRef nextAncestor) {
 		// The boundary leading to the new page acts as the last time we branched right
 		if(begin == end) {
 			size = 0;
@@ -814,11 +854,7 @@ public:
 		return size;
 	}
 
-	int build(const EntriesT &entries, StringRef prevAncestor, StringRef nextAncestor) {
-		return build(&*entries.begin(), &*entries.end(), prevAncestor, nextAncestor);
-	}
-
-	static uint16_t build(Node &root, const Entry *begin, const Entry *end, const StringRef &nextAncestor, const StringRef &prevAncestor) {
+	static uint16_t build(Node &root, const EntryRef *begin, const EntryRef *end, const StringRef &nextAncestor, const StringRef &prevAncestor) {
 		ASSERT(end != begin);
 
 		int count = end - begin;

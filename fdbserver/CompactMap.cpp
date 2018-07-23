@@ -375,26 +375,26 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	printf("Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)*1e6, 1 / (t2 - t1) / 1e6);
 
 	t1 = timer_monotonic();
-	const int nBuild = 100000;
+	const int nBuild = 20000;
 	for (int i = 0; i < nBuild; i++)
 		r += t->build(testData);
 	t2 = timer_monotonic();
 	printf("Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)/nBuild*1e6, nBuild / (t2 - t1) / 1e6);
 
-	PrefixTree *pt = (PrefixTree *)new uint8_t[sizeof(PrefixTree) + totalKeyBytes + testData.size() * PrefixTree::Node::getMaxOverhead()];
+	PrefixTree *pt = (PrefixTree *)new uint8_t[sizeof(PrefixTree) + totalKeyBytes + testData.size() * PrefixTree::Node::getMaxOverhead(1, 256, 256)];
 
-	PrefixTree::EntriesT keys;
+	std::vector<PrefixTree::EntryRef> keys;
 	for(auto &k : testData) {
-		keys.push_back(PrefixTree::EntryRef(k, StringRef()));
+		keys.emplace_back(k, StringRef());
 	}
 
 	t1 = timer_monotonic();
-	int prefixTreeBytes = pt->build(keys, StringRef());
+	int prefixTreeBytes = pt->build(&*keys.begin(), &*keys.end(), StringRef(), StringRef());
 	t2 = timer_monotonic();
 
 	if(!prefixTreeDOTFile.empty()) {
 		FILE *fout = fopen(prefixTreeDOTFile.c_str(), "w");
-		fprintf(fout, "%s\n", pt->toDOT(StringRef()).c_str());
+		fprintf(fout, "%s\n", pt->toDOT(StringRef(), StringRef()).c_str());
 		fclose(fout);
 	}
 
@@ -410,7 +410,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)*1e6, 1 / (t2 - t1) / 1e6);
 
 	// Test cursor forward iteration
-	auto c = pt->getCursor();
+	auto c = pt->getCursor(StringRef(), StringRef());
 	ASSERT(c.moveFirst());
 
 	bool end = false;
@@ -419,6 +419,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 		end = !c.moveNext();
 	}
 	ASSERT(end);
+	printf("PrefixTree forward scan passed\n");
 
 	// Test cursor backward iteration
 	ASSERT(c.moveLast());
@@ -428,10 +429,11 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 		end = !c.movePrev();
 	}
 	ASSERT(end);
+	printf("PrefixTree reverse scan passed\n");
 
 	t1 = timer_monotonic();
 	for (int i = 0; i < nBuild; i++)
-		r += pt->build(keys, StringRef());
+		r += pt->build(&*keys.begin(), &*keys.end(), StringRef(), StringRef());
 	t2 = timer_monotonic();
 	printf("PrefixTree Build time %0.0f us (%0.2f M/sec)\n", (t2 - t1)/nBuild*1e6, nBuild / (t2 - t1) / 1e6);
 
@@ -467,7 +469,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	}
 
 	{
-		auto cur = pt->getCursor();
+		auto cur = pt->getCursor(StringRef(), StringRef());
 
 		for (int i = 0; i < keys.size(); i++) {
 			StringRef s = keys[i].key;
@@ -526,7 +528,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	t2 = timer_monotonic();
 	printf("compactmap, in cache: %d queries in %0.3f sec: %0.3f M/sec\n", (int)sampleQueries.size(), t2 - t1, sampleQueries.size() / (t2 - t1) / 1e6);
 
-	auto cur = pt->getCursor();
+	auto cur = pt->getCursor(StringRef(), StringRef());
 
 	t1 = timer_monotonic();
 	for (auto& q : sampleQueries)
@@ -551,7 +553,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 
 	std::vector<PrefixTree::Cursor> cursors;
 	for (int q = 0; q < sampleQueries.size(); q++)
-		cursors.push_back(prefixTreeCopies[q]->getCursor());
+		cursors.push_back(prefixTreeCopies[q]->getCursor(StringRef(), StringRef()));
 		
 	t1 = timer_monotonic();
 	for (int q = 0; q < sampleQueries.size(); q++)
@@ -633,7 +635,7 @@ std::vector<std::string> sampleBPlusTreeSeparators( std::vector<std::string> raw
 struct Page {
 	Page() : tree(nullptr), size(0), sizeBuilt(0), unsortedKeys(0) {}
 
-	PrefixTree::EntriesT keys;
+	std::vector<PrefixTree::EntryRef> keys;
 	PrefixTree *tree;
 	std::string treeBuffer;
 	int size;
@@ -641,7 +643,7 @@ struct Page {
 	int unsortedKeys;
 
 	void add(StringRef k) {
-		keys.push_back(PrefixTree::EntryRef(k, StringRef()));
+		keys.emplace_back(k, StringRef());
 		size += k.size();
 		++unsortedKeys;
 	}
@@ -659,9 +661,9 @@ struct Page {
 	int build() {
 		if(sizeBuilt != size) {
 			sort();
-			treeBuffer.reserve(keys.size() * PrefixTree::Node::getMaxOverhead() + size);
+			treeBuffer.reserve(keys.size() * PrefixTree::Node::getMaxOverhead(1, 256, 256) + size);
 			tree = (PrefixTree *)treeBuffer.data();
-			int b = tree->build(keys, StringRef());
+			int b = tree->build(&*keys.begin(), &*keys.end(), StringRef(), StringRef());
 			sizeBuilt = size;
 			return b;
 		}

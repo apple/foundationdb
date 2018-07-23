@@ -32,6 +32,13 @@
 #include "fdbclient/CommitTransaction.h"
 #include "IKeyValueStore.h"
 #include "PrefixTree.h"
+#include <string.h>
+
+// Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
+template<typename T> inline const T & dependsOn(Arena &arena, const Standalone<T> &s) {
+	arena.dependsOn(s.arena());
+	return s;
+}
 
 struct BTreePage {
 	enum EPageFlags { IS_LEAF = 1};
@@ -57,7 +64,7 @@ struct BTreePage {
 				r += "\n  ";
 				Tuple t;
 				try {
-					t = Tuple::unpack(c.getKey());
+					t = Tuple::unpack(c.getKeyRef());
 					for(int i = 0; i < t.size(); ++i) {
 						if(i != 0)
 							r += ",";
@@ -68,13 +75,13 @@ struct BTreePage {
 					}
 				} catch(Error &e) {
 				}
-				r += format("['%s']", c.getKey().toHexString().c_str());
+				r += format("['%s']", c.getKeyRef().toHexString().c_str());
 
 				r += " -> ";
 				if(flags && IS_LEAF)
-					r += format("'%s'", c.getValue().toHexString().c_str());
+					r += format("'%s'", c.getValueRef().toHexString().c_str());
 				else
-					r += format("Page %u", *(const uint32_t *)c.getValue().begin());
+					r += format("Page %u", *(const uint32_t *)c.getValueRef().begin());
 
 			} while(c.moveNext());
 		}
@@ -94,7 +101,7 @@ static void writeEmptyPage(Reference<IPage> page, uint8_t newFlags, int pageSize
 typedef std::pair<Key, Reference<IPage>> BoundaryPagePairT;
 // Returns a std::vector of pairs of lower boundary key indices within kvPairs and encoded pages.
 template<typename Allocator>
-static std::vector<BoundaryPagePairT> buildPages(bool minimalBoundaries, StringRef lowerBound, StringRef upperBound, const PrefixTree::EntriesT &entries, uint8_t newFlags, Allocator const &newPageFn, int pageSize) {
+static std::vector<BoundaryPagePairT> buildPages(bool minimalBoundaries, StringRef lowerBound, StringRef upperBound, std::vector<PrefixTree::EntryRef> entries, uint8_t newFlags, Allocator const &newPageFn, int pageSize) {
 	// Subtract space used for btree page and prefix tree headers to get prefix tree node space available/
 	pageSize -= (BTreePage::GetHeaderSize() + PrefixTree::GetHeaderSize());
 
@@ -171,90 +178,155 @@ static std::vector<BoundaryPagePairT> buildPages(bool minimalBoundaries, StringR
 	return pages;
 }
 
-// Represents a key, version, and value whole/part or lack thereof.
-// This structure exists to make working with low level key/value pairs in the tree convenient.
-// Values that are written whole have a value index of -1, which is not *actually* written
-// to the tree but will be seen in this structure when unpacked.
-// Split values are written such that the value index indicates the first byte offset in the
-// value that the value part represents.
-struct KeyVersionValue {
-	KeyVersionValue() : version(invalidVersion), valueIndex(-1) {}
-	KeyVersionValue(Key k, Version ver, int valIndex = -1, Optional<Value> val = Optional<Value>()) : key(k), version(ver), valueIndex(valIndex), value(val) {}
-	/*
-	bool operator< (KeyVersionValue const &rhs) const {
-		int64_t cmp = key.compare(rhs.key);
-		if(cmp == 0) {
-			cmp = version - rhs.version;
-			if(cmp == 0)
-				return false;
+// Internal key/value records represent either a cleared key at a version or a shard of a value of a key at a version.
+// When constructing and packing these it is assumed that the key and value memory is being held elsewhere.
+struct KeyVersionValueRef {
+	KeyVersionValueRef() : version(invalidVersion), valueTotalSize(0), valueIndex(-1) {}
+	// Cleared key at version
+	KeyVersionValueRef(KeyRef key, Version ver, Optional<ValueRef> val = {}, int64_t totalSize = -1, int64_t index = -1) 
+		: key(key), version(ver)
+	{
+		// Non-split value
+		if(val.present() && totalSize < 0) {
+			valueTotalSize = value.get().size();
+			valueIndex = 0;
 		}
-		return cmp < 0;
-	} */
-	Key key;
-	Version version;
-	int64_t valueIndex;
-	Optional<Value> value;
-
-	bool valid() const { return version != invalidVersion; }
-
-	inline Standalone<KeyValueRef> pack() const {
-		Tuple k;
-		k.append(key);
-		k.append(version);
-		if(valueIndex >= 0)
-			k.append(valueIndex);
-		Tuple v;
-		if(value.present())
-			v.append(value.get());
-		return KeyValueRef(k.pack(), v.pack());
 	}
 
-	// Supports partial/incomplete encoded sequences.
-	static inline KeyVersionValue unpack(KeyValueRef kv) {
-		debug_printf("Unpacking: '%s' -> '%s' \n", kv.key.toHexString().c_str(), kv.value.toHexString().c_str());
-		KeyVersionValue result;
-		if(kv.key.size() != 0) {
-			//debug_printf("KeyVersionValue::unpack: %s\n", kv.key.toHexString().c_str());
-			Tuple k = Tuple::unpack(kv.key);
-			if(k.size() >= 1) {
-				result.key = k.getString(0);
-				if(k.size() >= 2) {
-					result.version = k.getInt(1, true);
-					if(k.size() >= 3) {
-						result.valueIndex = k.getInt(2, true);
-					}
-				}
+	KeyVersionValueRef(Arena &a, const KeyVersionValueRef &toCopy) {
+		key = KeyRef(a, toCopy.key);
+		version = toCopy.version;
+		if(toCopy.value.present()) {
+			value = ValueRef(a, toCopy.value.get());
+		}
+		valueTotalSize = toCopy.valueTotalSize;
+		valueIndex = toCopy.valueIndex;
+	}
+
+	static inline Key searchKey(StringRef key, Version ver) {
+		Tuple t;
+		t.append(key);
+		t.append(ver);
+		Standalone<VectorRef<uint8_t>> packed = t.getData();
+		packed.append(packed.arena(), (const uint8_t *)"\xff", 1);
+		return Key(KeyRef(packed.begin(), packed.size()), packed.arena());
+	}
+
+	KeyRef key;
+	Version version;
+	int64_t valueTotalSize;      // Total size of value, including all other KVV parts if multipart
+	int64_t valueIndex;          // Index within reconstituted value of this part
+	Optional<ValueRef> value;
+
+	// Result undefined if value is not present
+	bool isMultiPart() const { return value.get().size() != valueTotalSize; }
+	bool valid() const { return version != invalidVersion; }
+
+	// Generate a kv shard from a complete kv
+	KeyVersionValueRef split(int start, int len) {
+		ASSERT(value.present());
+		return KeyVersionValueRef(key, version, value.get().substr(start, len), value.get().size(), start);
+	}
+
+	// Encode the record for writing to a btree page.
+	// If copyValue is false, the value is not copied into the returned arena.
+	//
+	// Encoded forms:
+	//  userKey, version                             - the value is present and complete (which includes an empty value)
+	//  userKey, version, valueSize=0                - the key was deleted as of this version
+	//  userKey, version, valueSize>=0, valuePart    - the value is present and spans multiple records
+	inline PrefixTree::Entry pack(bool copyValue = true) const {
+		Tuple t;
+		t.append(key);
+		t.append(version);
+
+		if(!value.present()) {
+			t.append(0);
+		}
+		else {
+			if(isMultiPart()) {
+				t.append(valueTotalSize);
+				t.append(valueIndex);
 			}
 		}
 
-		if(kv.value.size() != 0) {
-			Tuple v = Tuple::unpack(kv.value);
-			if(v.getType(0) == Tuple::BYTES)
-				result.value = v.getString(0);
+		Key k = t.getDataAsStandalone();
+		ValueRef v;
+		if(value.present()) {
+			v = copyValue ? StringRef(k.arena(), value.get()) : value.get();
 		}
 
+		return PrefixTree::Entry({k, v}, k.arena());
+	}
+
+	// Supports partial/incomplete encoded sequences.
+	// Unpack an encoded key/value pair.
+	// Both key and value will be in the returned arena unless copyValue is false in which case
+	// the value will not be copied to the arena.
+	static Standalone<KeyVersionValueRef> unpack(KeyValueRef kv, bool copyValue = true) {
+		debug_printf("Unpacking: '%s' -> '%s' \n", kv.key.toHexString(15).c_str(), kv.value.toHexString(15).c_str());
+		Standalone<KeyVersionValueRef> result;
+		if(kv.key.size() != 0) {
+			Tuple k = Tuple::unpack(kv.key);
+			int s = k.size();
+			switch(s) {
+				case 4:
+					// Value shard
+					result.valueIndex = k.getInt(3);
+					result.valueTotalSize = k.getInt(2);
+					result.value = kv.value;
+					break;
+				case 3:
+					// Deleted or Complete value
+					result.valueIndex = 0;
+					result.valueTotalSize = k.getInt(2);
+					// If not a clear, set the value, otherwise it remains non-present
+					if(result.valueTotalSize != 0)
+						result.value = kv.value;
+					break;
+				default:
+					result.valueIndex = 0;
+					result.valueTotalSize = kv.value.size();
+					result.value = kv.value;
+					break;
+			};
+			if(s > 0) {
+				Key sk = k.getString(0);
+				result.arena().dependsOn(sk.arena());
+				result.key = sk;
+				if(s > 1) {
+					result.version = k.getInt(1);
+				}
+			}
+		}
+		if(copyValue && result.value.present()) {
+			result.value = StringRef(result.arena(), result.value.get());
+		}
 		return result;
 	}
 
-	// Convenience function for unpacking keys only
-	static inline KeyVersionValue unpack(KeyRef key) {
-		return unpack({key, StringRef()});
+	static Standalone<KeyVersionValueRef> unpack(KeyRef k) {
+		return unpack(KeyValueRef(k, StringRef()));
 	}
 
 	std::string toString() const {
-		//return format("'%s' -> '%s' @%lld [%lld]", key.toString().c_str(), value.present() ? value.get().toString().c_str() : "<cleared>", version, valueIndex);
-		return format("'%s' -> %d bytes @%lld [%lld]", key.printable().c_str(), value.present() ? (int)value.get().size() : -1, version, valueIndex);
+		std::string r;
+		r += format("'%s' @%lld -> ", key.toHexString(10).c_str(), version);
+		r += value.present() ? format("'%s' %d/%d", value.get().toHexString(10).c_str(), valueIndex, valueTotalSize).c_str() : "<cleared>";
+		return r;
 	}
 };
+
+typedef Standalone<KeyVersionValueRef> KeyVersionValue;
 
 #define NOT_IMPLEMENTED { UNSTOPPABLE_ASSERT(false); }
 
 class VersionedBTree : public IVersionedStore {
 public:
 	// The first possible internal record possible in the tree
-	static KeyVersionValue beginKVV;
+	static KeyVersionValueRef beginKVV;
 	// A record which is greater than the last possible record in the tree
-	static KeyVersionValue endKVV;
+	static KeyVersionValueRef endKVV;
 
 	// The encoded key form of the above two things.
 	static Key beginKey;
@@ -425,14 +497,15 @@ private:
 
 		inline bool equalToSet(ValueRef val) { return isSet() && value == val; }
 
-		KeyVersionValue toKVV(Key key, Version version) const {
+		// The returned packed key will be added to arena, the value will just point to the SingleKeyMutation's memory
+		inline KeyVersionValueRef toKVV(KeyRef userKey, Version version) const {
 			// No point in serializing an atomic op, it needs to be coalesced to a real value.
 			ASSERT(!isAtomicOp());
 
 			if(isClear())
-				return KeyVersionValue(key, version);
+				return KeyVersionValueRef(userKey, version);
 
-			return KeyVersionValue(key, version, -1, value);
+			return KeyVersionValueRef(userKey, version, value);
 		}
 
 		std::string toString() const {
@@ -561,9 +634,9 @@ private:
 	void buildNewRoot(Version version, std::vector<BoundaryPagePairT> &pages, std::vector<LogicalPageID> &logicalPageIDs) {
 		// While there are multiple child pages for this version we must write new tree levels.
 		while(pages.size() > 1) {
-			PrefixTree::EntriesT childEntries;
+			std::vector<PrefixTree::EntryRef> childEntries;
 			for(int i=0; i<pages.size(); i++)
-				childEntries.push_back(KeyValueRef(pages[i].first, StringRef((unsigned char *)&logicalPageIDs[i], sizeof(uint32_t))));
+				childEntries.emplace_back(pages[i].first, StringRef((unsigned char *)&logicalPageIDs[i], sizeof(uint32_t)));
 
 			int oldPages = pages.size();
 			pages = buildPages(false, beginKey, endKey, childEntries, 0, [=](){ return m_pager->newPageBuffer(); }, m_pageSize);
@@ -592,10 +665,7 @@ private:
 	ACTOR static Future<VersionedChildrenT> commitSubtree(VersionedBTree *self, MutationBufferT *mutationBuffer, Reference<IPagerSnapshot> snapshot, LogicalPageID root, Key lowerBoundKey, Key upperBoundKey) {
 		debug_printf("%p commitSubtree: root=%d lower='%s' upper='%s'\n", this, root, lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
 
-		// Decode the upper and lower bound keys for this subtree
-		// Note that these could be truncated to be the shortest usable boundaries between two pages but that
-		// still works for what we're using them for here, so instead of using the KVV unpacker we'll have to
-		// something else here that supports incomplete keys.
+		// Decode the (likely truncate) upper and lower bound keys for this subtree.
 		state KeyVersionValue lowerBoundKVV = KeyVersionValue::unpack(lowerBoundKey);
 		state KeyVersionValue upperBoundKVV = KeyVersionValue::unpack(upperBoundKey);
 
@@ -637,7 +707,7 @@ private:
 		}
 
 		Reference<const IPage> rawPage = wait(snapshot->getPhysicalPage(root));
-		state BTreePage *page = (BTreePage *) rawPage->begin();
+		BTreePage *page = (BTreePage *) rawPage->begin();
 		debug_printf("%p commitSubtree: page read: id=%d ver=%lld lower='%s' upper='%s'\n", this, root, snapshot->getVersion(), lowerBoundKey.toHexString().c_str(), upperBoundKey.toHexString().c_str());
 		debug_printf("%p commitSubtree: page read: id=%d %s\n", this, root, page->toString(lowerBoundKey, upperBoundKey).c_str());
 
@@ -646,7 +716,8 @@ private:
 
 		if(page->flags & BTreePage::IS_LEAF) {
 			VersionedChildrenT results;
-			PrefixTree::EntriesT merged;
+			std::vector<PrefixTree::EntryRef> merged;
+			Arena mergedArena;
 
 			debug_printf("%p MERGING EXISTING DATA WITH MUTATIONS:\n", this);
 			self->printMutationBuffer(iMutationBoundary, iMutationBoundaryEnd);
@@ -656,9 +727,10 @@ private:
 
 			// There will be multiple loops advancing existing cursor, existing KVV will track its current value
 			KeyVersionValue existing;
-			KeyVersionValue lastExisting;
-			if(existingCursorValid)
-				existing = KeyVersionValue::unpack(existingCursor.getKV());
+
+			if(existingCursorValid) {
+				existing = KeyVersionValue::unpack(existingCursor.getKVRef());
+			}
 			// If replacement pages are written they will be at the minimum version seen in the mutations for this leaf
 			Version minVersion = invalidVersion;
 
@@ -683,39 +755,40 @@ private:
 
 				// Output old versions of the mutation boundary key
 				while(existingCursorValid && existing.key == iMutationBoundary->first) {
-					merged.push_back(existing.pack());
+					// Don't copy the value because this page will stay in memory until after we've built new version(s) of it
+					merged.push_back(dependsOn(mergedArena, existingCursor.getKV(false)));
 					debug_printf("%p: Added %s [existing, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 					existingCursorValid = existingCursor.moveNext();
 					if(existingCursorValid)
-						existing = KeyVersionValue::unpack(existingCursor.getKV());
+						existing = KeyVersionValue::unpack(existingCursor.getKVRef());
 				}
 
 				// TODO:  If a mutation set is equal to the previous existing value of the key, maybe don't write it.
 				// Output mutations for the mutation boundary start key
 				while(iMutations != iMutationsEnd) {
 					const SingleKeyMutation &m = iMutations->second;
-					//                ( (page_size - map_overhead) / min_kvpairs_per_leaf ) - kvpair_overhead_est - keybytes
 					int maxPartSize = std::min(255, self->m_pageSize / 4);
 					if(m.isClear() || m.value.size() <= maxPartSize) {
 						if(iMutations->first < minVersion || minVersion == invalidVersion)
 							minVersion = iMutations->first;
-						merged.push_back(iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack());
+						// Don't copy the value because this page will stay in memory until after we've built new version(s) of it
+						merged.push_back(dependsOn(mergedArena, iMutations->second.toKVV(iMutationBoundary->first, iMutations->first).pack(false)));
 						debug_printf("%p: Added %s [mutation, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 					}
 					else {
+						if(iMutations->first < minVersion || minVersion == invalidVersion)
+							minVersion = iMutations->first;
 						int bytesLeft = m.value.size();
-						KeyVersionValue kvv(iMutationBoundary->first, iMutations->first);
-						kvv.valueIndex = 0;
+						int start = 0;
+						KeyVersionValueRef whole(iMutationBoundary->first, iMutations->first, m.value);
 						while(bytesLeft > 0) {
 							int partSize = std::min(bytesLeft, maxPartSize);
-							kvv.value = Key(m.value.substr(kvv.valueIndex, partSize), m.value.arena());
-							if(iMutations->first < minVersion || minVersion == invalidVersion)
-								minVersion = iMutations->first;
-							merged.push_back(kvv.pack());
-							debug_printf("%p: Added %s [mutation, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
-							kvv.valueIndex += partSize;
 							bytesLeft -= partSize;
+							start += partSize;
+							// Don't copy the value chunk because this page will stay in memory until after we've built new version(s) of it
+							merged.push_back(dependsOn(mergedArena, whole.split(start, partSize).pack(false)));
+							debug_printf("%p: Added %s [mutation, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 						}
 					}
 					++iMutations;
@@ -730,7 +803,7 @@ private:
 
 				// Write existing keys which are less than the next mutation boundary key, clearing if needed.
 				while(existingCursorValid && existing.key < iMutationBoundary->first) {
-					merged.push_back(existing.pack());
+					merged.push_back(existingCursor.getKVRef());
 					debug_printf("%p: Added %s [existing, middle]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 					// Write a clear of this key if needed.  A clear is required if clearRangeVersion is set and the next key is different
@@ -738,7 +811,7 @@ private:
 					existingCursorValid = existingCursor.moveNext();
 					KeyVersionValue nextEntry;
 					if(existingCursorValid)
-						nextEntry = KeyVersionValue::unpack(existingCursor.getKV());
+						nextEntry = KeyVersionValue::unpack(existingCursor.getKVRef());
 					else
 						nextEntry = upperBoundKVV;
 
@@ -746,7 +819,7 @@ private:
 						Version clearVersion = clearRangeVersion.get();
 						if(clearVersion < minVersion || minVersion == invalidVersion)
 							minVersion = clearVersion;
-						merged.push_back(KeyVersionValue(existing.key, clearVersion).pack());
+						merged.push_back(dependsOn(mergedArena, KeyVersionValueRef(existing.key, clearVersion).pack(false)));
 						debug_printf("%p: Added %s [existing, middle clear]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 					}
 
@@ -757,12 +830,12 @@ private:
 
 			// Write any remaining existing keys, which are not subject to clears as they are beyond the cleared range.
 			while(existingCursorValid) {
-				merged.push_back(existing.pack());
+				merged.push_back(existingCursor.getKVRef());
 				debug_printf("%p: Added %s [existing, tail]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 				existingCursorValid = existingCursor.moveNext();
 				if(existingCursorValid)
-					existing = KeyVersionValue::unpack(existingCursor.getKV());
+					existing = KeyVersionValue::unpack(existingCursor.getKVRef());
 			}
 
 			debug_printf("%p Done merging mutations into existing leaf contents\n", this);
@@ -831,7 +904,7 @@ private:
 				if(first)
 					first = false;
 
-				uint32_t pageID = *(uint32_t*)existingCursor.getValue().begin();
+				uint32_t pageID = *(uint32_t*)existingCursor.getValueRef().begin();
 
 				existingCursorValid = existingCursor.moveNext();
 
@@ -866,7 +939,7 @@ private:
 			loop { // over version splits of this page
 				Version nextVersion = std::numeric_limits<Version>::max();
 
-				PrefixTree::EntriesT childEntries;  // Logically std::vector<std::pair<std::string, LogicalPageID>> childEntries;
+				std::vector<PrefixTree::EntryRef> childEntries;  // Logically std::vector<std::pair<std::string, LogicalPageID>> childEntries;
 
 				// For each Future<VersionedChildrenT>
 				debug_printf("%p creating replacement pages for id=%d at Version %lld\n", this, root, version);
@@ -914,7 +987,7 @@ private:
 					// Add the children at this version to the child entries list for the current version being built.
 					for (auto &childPage : cv->second) {
 						debug_printf("%p  Adding child page '%s'\n", this, printable(childPage.first).c_str());
-						childEntries.push_back( KeyValueRef(childPage.first, StringRef((unsigned char *)&childPage.second, sizeof(uint32_t))));
+						childEntries.emplace_back(childPage.first, StringRef((unsigned char *)&childPage.second, sizeof(uint32_t)));
 					}
 				}
 
@@ -1050,14 +1123,14 @@ private:
 			return move_impl(this, fwd);
 		}
 
-		KeyVersionValue kvv;  // The decoded current internal record in the tree
+		Standalone<KeyVersionValueRef> kvv;  // The decoded current internal record in the tree
 
 		std::string toString(const char *wrapPrefix = "") const {
 			std::string r;
 			r += format("InternalCursor(%p) ver=%lld oob=%d valid=%d", this, m_pages->getVersion(), outOfBound, valid());
 			r += format("\n%s  KVV: %s", wrapPrefix, kvv.toString().c_str());
 			for(const PageEntryLocation &p : m_path) {
-				std::string cur = p.cursor.valid() ? format("'%s' -> '%s'", p.cursor.getKey().toHexString().c_str(), p.cursor.getValue().toHexString().c_str()) : "invalid";
+				std::string cur = p.cursor.valid() ? format("'%s' -> '%s'", p.cursor.getKey().toHexString().c_str(), p.cursor.getValueRef().toHexString().c_str()) : "invalid";
 				r += format("\n%s  Page %d (%d records, %d bytes)  Cursor %s", wrapPrefix, p.pageNumber, p.btPage->count, p.btPage->kvBytes, cur.c_str());
 			}
 			return r;
@@ -1145,7 +1218,7 @@ private:
 					}
 					else {
 						// Found the target record
-						self->kvv = KeyVersionValue::unpack(p->cursor.getKV());
+						self->kvv = KeyVersionValue::unpack(p->cursor.getKVRef());
 					}
 					debug_printf("InternalCursor::seekLTE(%s): Exit, Found leaf page. %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->toString("  ").c_str());
 					return Void();
@@ -1155,7 +1228,7 @@ private:
 					// TODO:  It would, however, be more efficient to check foundLTE and if false move to the previous sibling page.
 					// But the page should NOT be empty so let's assert that the cursor is valid.
 					ASSERT(p->cursor.valid());
-					LogicalPageID newPage = (LogicalPageID)*(uint32_t *)p->cursor.getValue().begin();
+					LogicalPageID newPage = (LogicalPageID)*(uint32_t *)p->cursor.getValueRef().begin();
 					debug_printf("InternalCursor::seekLTE(%s): Found internal page, going to page %d.  %s\n", 
 						KeyVersionValue::unpack(key).toString().c_str(), newPage, self->toString("  ").c_str());
 					Void _ = wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), newPage));
@@ -1164,7 +1237,7 @@ private:
 		}
 
 		// Move one 'internal' key/value/version/valueindex/value record.
-		// Iterating with this function will "see" all parts of all values and clears at all versions.
+		// Iterating with this function will "see" all parts of all values and clears at all versions (that is, within the cursor's version of btree pages)
 		ACTOR static Future<Void> move_impl(InternalCursor *self, bool fwd) {
 			state TraversalPathT &path = self->m_path;
 			state const char *dir = fwd ? "forward" : "backward";
@@ -1177,7 +1250,7 @@ private:
 				// If we appear to be inbounds, see if we're off the other end of the db or if the page cursor is valid.
 				if(self->outOfBound == 0) {
 					if(!path.empty() && path.back().cursor.valid()) {
-						self->kvv = KeyVersionValue::unpack(path.back().cursor.getKV());
+						self->kvv = KeyVersionValue::unpack(path.back().cursor.getKVRef());
 					}
 					else {
 						self->outOfBound = fwd ? 1 : -1;
@@ -1221,7 +1294,7 @@ private:
 			// Each movement down will start on the far left or far right depending on fwd
 			while(!(p->btPage->flags & BTreePage::IS_LEAF)) {
 				// Get the page that the path's last entry points to
-				Void _ = wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), (LogicalPageID)*(uint32_t *)p->cursor.getValue().begin()));
+				Void _ = wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), (LogicalPageID)*(uint32_t *)p->cursor.getValueRef().begin()));
 				p = &(path.back());
 				// No page traversed to in this manner should be empty.
 				ASSERT(p->btPage->count != 0);
@@ -1236,7 +1309,7 @@ private:
 
 			// Found the target record, unpack it
 			ASSERT(p->cursor.valid());
-			self->kvv = KeyVersionValue::unpack(p->cursor.getKV());
+			self->kvv = KeyVersionValue::unpack(p->cursor.getKVRef());
 
 			debug_printf("InternalCursor::move(%s) Exiting  %s\n", dir, self->toString("  ").c_str());
 			return Void();
@@ -1293,20 +1366,19 @@ private:
 		Optional<KeyValueRef> m_kv; // The current user-level key/value in the tree
 		Arena m_arena;
 
-		// find key in tree closest to or equal to key.
+		// find key in tree closest to or equal to key (at this cursor's version)
 		// for less than or equal use cmp < 0
 		// for greater than or equal use cmp > 0
 		// for equal use cmp == 0
 		ACTOR static Future<Void> find_impl(Reference<Cursor> self, KeyRef key, bool needValue, int cmp) {
 			state InternalCursor &icur = self->m_icursor;
 
-			// Search for the last key at or before (key, version, max_value_index)
-			state KeyVersionValue target(key, self->m_version, std::numeric_limits<int>::max());
-			state Key record = target.pack().key;
+			// Search for the last key at or before (key, version, \xff)
+			state Key target = KeyVersionValueRef::searchKey(key, self->m_version);
 			self->m_kv = Optional<KeyValueRef>();
 
-			Void _ = wait(icur.seekLessThanOrEqual(record));
-			debug_printf("find%sE('%s'): %s\n", cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT"), target.toString().c_str(), icur.toString().c_str());
+			Void _ = wait(icur.seekLessThanOrEqual(target));
+			debug_printf("find%sE('%s'): %s\n", cmp > 0 ? "GT" : (cmp == 0 ? "" : "LT"), target.toHexString(40).c_str(), icur.toString().c_str());
 
 			// If we found the target key, return it as it is valid for any cmp option
 			if(icur.valid() && icur.kvv.value.present() && icur.kvv.key == key) {
@@ -1427,67 +1499,46 @@ private:
 		// m_current must be at either the first or the last value part.
 		ACTOR static Future<Void> readFullKVPair(Reference<Cursor> self) {
 			state KeyVersionValue &kvv = self->m_icursor.kvv;
-			// Initialize the optional kv to a KeyValueRef and get a reference to it.
 			state KeyValueRef &kv = (self->m_kv = KeyValueRef()).get();
-			kv.key = KeyRef(self->m_arena, kvv.key);
-			debug_printf("readFullKVPair:  starting from %s\n", kvv.toString().c_str());
-			state Version valueVersion = kvv.version;
+
+			ASSERT(kvv.value.present());
+			// Set the key and cursor arena to the arena containing that key
+			self->m_arena = kvv.arena();
+			kv.key = kvv.key;
 
 			// Unsplit value
-			if(kvv.valueIndex == -1) {
-				ASSERT(kvv.value.present());
-				kv.value = ValueRef(self->m_arena, kvv.value.get());
+			if(!kvv.isMultiPart()) {
+				kv.value = kvv.value.get();
 				debug_printf("readFullKVPair:  Unsplit, exit.  %s\n", self->toString("  ").c_str());
-				return Void();
 			}
-
-			// If we find a 0 valueindex then we're at the first segment and must iterate forward
-			if(kvv.valueIndex == 0) {
-				// TODO:  Performance, lots of extra copying is happening.
-				state std::vector<Value> parts;
-				state int size = 0;
+			else {
+				// Figure out if we should go forward or backward to find all the parts
+				state bool fwd = kvv.valueIndex == 0;
+				ASSERT(fwd || kvv.valueIndex + kvv.value.get().size() == kvv.valueTotalSize);
+				debug_printf("readFullKVPair:  Split, fwd %d totalsize %d  %s\n", fwd, kvv.valueTotalSize, self->toString("  ").c_str());
+				// Allocate space for the entire value in the same arena as the key
+				state int bytesLeft = kvv.valueTotalSize;
+				kv.value = makeString(bytesLeft, self->m_arena);
 				while(1) {
-					ASSERT(kvv.value.present());
-					parts.push_back(kvv.value.get());
-					size += kvv.value.get().size();
-					debug_printf("readFullKVPair:  Advancing to see if there is another chunk %s\n", self->toString("  ").c_str());
-					Void _ = wait(self->m_icursor.move(true));
-					if(!kvv.valid() || kvv.version != valueVersion || kvv.key != kv.key)
-						debug_printf("readFullKVPair:  Advanced, something doesn't match so no more chunks.  %s\n", self->toString("  ").c_str());
+				debug_printf("readFullKVPair:  Adding chunk start %d len %d total %d dir %d  %s\n", kvv.valueIndex, kvv.value.get().size(), kvv.valueTotalSize, fwd, self->toString("  ").c_str());
+					int partSize = kvv.value.get().size();
+					memcpy(mutateString(kv.value) + kvv.valueIndex, kvv.value.get().begin(), partSize);
+					bytesLeft -= partSize;
+					if(bytesLeft == 0)
 						break;
+					ASSERT(bytesLeft > 0);
+					Void _ = wait(self->m_icursor.move(fwd));
+					ASSERT(self->m_icursor.valid());
 				}
-				kv.value = makeString(size, self->m_arena);
-				uint8_t *wptr = mutateString(kv.value);
-				for(const Value &part : parts) {
-					memcpy(wptr, part.begin(), part.size());
-					wptr += part.size();
-				}
-				debug_printf("readFullKVPair:  Read chunks 0 and onward, exiting.  %s\n", self->toString("  ").c_str());
-				return Void();
 			}
 
-			// If we find any other valueIndex we must assume we're at the last segment and must iterate backward.
-			ASSERT(kvv.value.present());
-			kv.value = makeString(kvv.valueIndex + kvv.value.get().size(), self->m_arena);
-
-			while(1) {
-				ASSERT(kvv.value.present());
-				ASSERT(kvv.valueIndex >= 0);
-				ASSERT(kvv.valueIndex + kvv.value.get().size() <= kv.value.size());
-				memcpy(mutateString(kv.value) + kvv.valueIndex, kvv.value.get().begin(), kvv.value.get().size());
-				if(kvv.valueIndex == 0)
-					break;
-				Void _ = wait(self->m_icursor.move(false));
-			}
-
-			debug_printf("readFullKVPair:  Read from last chunk backward.  Exiting. %s\n", self->toString("  ").c_str());
 			return Void();
 		}
 	};
 };
 
-KeyVersionValue VersionedBTree::beginKVV(StringRef(), 0);
-KeyVersionValue VersionedBTree::endKVV(LiteralStringRef("\xff\xff\xff\xff"), 0);
+KeyVersionValueRef VersionedBTree::beginKVV(StringRef(), 0, StringRef());
+KeyVersionValueRef VersionedBTree::endKVV(LiteralStringRef("\xff\xff\xff\xff"), std::numeric_limits<int>::max(), StringRef());
 Key VersionedBTree::beginKey(beginKVV.pack().key);
 Key VersionedBTree::endKey(endKVV.pack().key);
 
