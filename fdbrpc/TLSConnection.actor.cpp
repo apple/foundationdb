@@ -312,14 +312,13 @@ void TLSOptions::register_network() {
 ACTOR static Future<ErrorOr<Standalone<StringRef>>> readEntireFile( std::string filename ) {
 	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY, 0));
 	state int64_t filesize = wait(file->size());
-	state Arena arena(filesize+8);
-	state uint8_t* arenabuf = new (arena) uint8_t[filesize];
-	int rc = wait(file->read(arenabuf, filesize, 0));
+	state Standalone<StringRef> buf = makeString(filesize);
+	int rc = wait(file->read(mutateString(buf), filesize, 0));
 	if (rc != filesize) {
 		// File modified during read, probably.  The mtime should change, and thus we'll be called again.
 		return tls_error();
 	}
-	return Standalone<StringRef>(StringRef(arenabuf, filesize), arena);
+	return buf;
 }
 
 ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncVar<Standalone<StringRef>> *contents_var ) {
@@ -339,7 +338,7 @@ ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncVar<St
 
 ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *pci, Reference<ITLSPlugin> plugin, AsyncVar<Reference<ITLSPolicy>> *realVerifyPeersPolicy, AsyncVar<Reference<ITLSPolicy>> *realNoVerifyPeersPolicy ) {
 	if (FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS <= 0) {
-		return;
+		return Void();
 	}
 	loop {
 		// Early in bootup, the filesystem might not be initialized yet.  Wait until it is.
@@ -463,5 +462,5 @@ void TLSOptions::init_plugin() {
 }
 
 bool TLSOptions::enabled() {
-	return !!policyVerifyPeersSet.get() && !!policyVerifyPeersNotSet.get();
+	return policyVerifyPeersSet.get().isValid() && policyVerifyPeersNotSet.get().isValid();
 }

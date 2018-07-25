@@ -1757,8 +1757,12 @@ Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDura
 }
 
 Future< std::time_t > Sim2FileSystem::lastWriteTime( std::string filename ) {
-	// TODO(alexmiller): FIXME
-	return 0;
+	// TODO: update this map upon file writes.
+	static std::map<std::string, double> fileWrites;
+	if (BUGGIFY && g_random->random01() < 0.01) {
+		fileWrites[filename] = now();
+	}
+	return fileWrites[filename];
 }
 
 void Sim2FileSystem::newFileSystem()
