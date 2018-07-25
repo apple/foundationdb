@@ -35,7 +35,7 @@
 #include <string.h>
 
 // Convenience method for converting a Standalone to a Ref while adding its arena to another arena.
-template<typename T> inline const T & dependsOn(Arena &arena, const Standalone<T> &s) {
+template<typename T> inline const Standalone<T> & dependsOn(Arena &arena, const Standalone<T> &s) {
 	arena.dependsOn(s.arena());
 	return s;
 }
@@ -265,22 +265,25 @@ struct KeyVersionValueRef {
 	// Both key and value will be in the returned arena unless copyValue is false in which case
 	// the value will not be copied to the arena.
 	static Standalone<KeyVersionValueRef> unpack(KeyValueRef kv, bool copyValue = true) {
-		debug_printf("Unpacking: '%s' -> '%s' \n", kv.key.toHexString(15).c_str(), kv.value.toHexString(15).c_str());
+		//debug_printf("Unpacking: '%s' -> '%s' \n", kv.key.toHexString(15).c_str(), kv.value.toHexString(15).c_str());
 		Standalone<KeyVersionValueRef> result;
 		if(kv.key.size() != 0) {
+#if REDWOOD_DEBUG
+			try { Tuple t = Tuple::unpack(kv.key); } catch(Error &e) { debug_printf("UNPACK FAIL %s %s\n", kv.key.toHexString().c_str(), platform::get_backtrace().c_str()); }
+#endif
 			Tuple k = Tuple::unpack(kv.key);
 			int s = k.size();
 			switch(s) {
 				case 4:
 					// Value shard
-					result.valueIndex = k.getInt(3);
 					result.valueTotalSize = k.getInt(2);
+					result.valueIndex = k.getInt(3, true);
 					result.value = kv.value;
 					break;
 				case 3:
 					// Deleted or Complete value
 					result.valueIndex = 0;
-					result.valueTotalSize = k.getInt(2);
+					result.valueTotalSize = k.getInt(2, true);
 					// If not a clear, set the value, otherwise it remains non-present
 					if(result.valueTotalSize != 0)
 						result.value = kv.value;
@@ -296,7 +299,7 @@ struct KeyVersionValueRef {
 				result.arena().dependsOn(sk.arena());
 				result.key = sk;
 				if(s > 1) {
-					result.version = k.getInt(1);
+					result.version = k.getInt(1, true);
 				}
 			}
 		}
@@ -785,10 +788,10 @@ private:
 						KeyVersionValueRef whole(iMutationBoundary->first, iMutations->first, m.value);
 						while(bytesLeft > 0) {
 							int partSize = std::min(bytesLeft, maxPartSize);
-							bytesLeft -= partSize;
-							start += partSize;
 							// Don't copy the value chunk because this page will stay in memory until after we've built new version(s) of it
 							merged.push_back(dependsOn(mergedArena, whole.split(start, partSize).pack(false)));
+							bytesLeft -= partSize;
+							start += partSize;
 							debug_printf("%p: Added %s [mutation, boundary start]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 						}
 					}
@@ -804,7 +807,7 @@ private:
 
 				// Write existing keys which are less than the next mutation boundary key, clearing if needed.
 				while(existingCursorValid && existing.key < iMutationBoundary->first) {
-					merged.push_back(existingCursor.getKVRef());
+					merged.push_back(dependsOn(mergedArena, existingCursor.getKV(false)));
 					debug_printf("%p: Added %s [existing, middle]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 					// Write a clear of this key if needed.  A clear is required if clearRangeVersion is set and the next key is different
@@ -831,7 +834,7 @@ private:
 
 			// Write any remaining existing keys, which are not subject to clears as they are beyond the cleared range.
 			while(existingCursorValid) {
-				merged.push_back(existingCursor.getKVRef());
+				merged.push_back(dependsOn(mergedArena, existingCursor.getKV(false)));
 				debug_printf("%p: Added %s [existing, tail]\n", this, KeyVersionValue::unpack(merged.back()).toString().c_str());
 
 				existingCursorValid = existingCursor.moveNext();
@@ -1194,7 +1197,7 @@ private:
 			state TraversalPathT &path = self->m_path;
 			Void _ = wait(reset(self));
 
-			debug_printf("InternalCursor::seekLTE(%s): start  %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->toString("  ").c_str());
+			debug_printf("InternalCursor::seekLTE(%s): start  %s\n", key.toHexString().c_str(), self->toString("  ").c_str());
 
 			loop {
 				state PageEntryLocation *p = &path.back();
@@ -1203,12 +1206,12 @@ private:
 					ASSERT(path.size() == 1);  // This must be the root page.
 					self->outOfBound = -1;
 					self->kvv.version = invalidVersion;
-					debug_printf("InternalCursor::seekLTE(%s): Exit, root page empty.  %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->toString("  ").c_str());
+					debug_printf("InternalCursor::seekLTE(%s): Exit, root page empty.  %s\n", key.toHexString().c_str(), self->toString("  ").c_str());
 					return Void();
 				}
 
 				state bool foundLTE = p->cursor.seekLessThanOrEqual(key);
-				debug_printf("InternalCursor::seekLTE(%s): Seek on path tail, result %d.  %s\n", KeyVersionValue::unpack(key).toString().c_str(), foundLTE, self->toString("  ").c_str());
+				debug_printf("InternalCursor::seekLTE(%s): Seek on path tail, result %d.  %s\n", key.toHexString().c_str(), foundLTE, self->toString("  ").c_str());
 				
 				if(p->btPage->flags & BTreePage::IS_LEAF) {
 					// It is possible for the current leaf key to be between the page's lower bound (in the parent page) and the 
@@ -1221,7 +1224,7 @@ private:
 						// Found the target record
 						self->kvv = KeyVersionValue::unpack(p->cursor.getKVRef());
 					}
-					debug_printf("InternalCursor::seekLTE(%s): Exit, Found leaf page. %s\n", KeyVersionValue::unpack(key).toString().c_str(), self->toString("  ").c_str());
+					debug_printf("InternalCursor::seekLTE(%s): Exit, Found leaf page. %s\n", key.toHexString().c_str(), self->toString("  ").c_str());
 					return Void();
 				}
 				else {
@@ -1231,7 +1234,7 @@ private:
 					ASSERT(p->cursor.valid());
 					LogicalPageID newPage = (LogicalPageID)*(uint32_t *)p->cursor.getValueRef().begin();
 					debug_printf("InternalCursor::seekLTE(%s): Found internal page, going to page %d.  %s\n", 
-						KeyVersionValue::unpack(key).toString().c_str(), newPage, self->toString("  ").c_str());
+						key.toHexString().c_str(), newPage, self->toString("  ").c_str());
 					Void _ = wait(pushPage(self, p->cursor.getKey(), p->getNextOrUpperBound(), newPage));
 				}
 			}
@@ -1516,12 +1519,12 @@ private:
 				// Figure out if we should go forward or backward to find all the parts
 				state bool fwd = kvv.valueIndex == 0;
 				ASSERT(fwd || kvv.valueIndex + kvv.value.get().size() == kvv.valueTotalSize);
-				debug_printf("readFullKVPair:  Split, fwd %d totalsize %d  %s\n", fwd, kvv.valueTotalSize, self->toString("  ").c_str());
+				debug_printf("readFullKVPair:  Split, fwd %d totalsize %lld  %s\n", fwd, kvv.valueTotalSize, self->toString("  ").c_str());
 				// Allocate space for the entire value in the same arena as the key
 				state int bytesLeft = kvv.valueTotalSize;
 				kv.value = makeString(bytesLeft, self->m_arena);
 				while(1) {
-				debug_printf("readFullKVPair:  Adding chunk start %d len %d total %d dir %d  %s\n", kvv.valueIndex, kvv.value.get().size(), kvv.valueTotalSize, fwd, self->toString("  ").c_str());
+					debug_printf("readFullKVPair:  Adding chunk start %lld len %d total %lld dir %d\n", kvv.valueIndex, kvv.value.get().size(), kvv.valueTotalSize, fwd);
 					int partSize = kvv.value.get().size();
 					memcpy(mutateString(kv.value) + kvv.valueIndex, kvv.value.get().begin(), partSize);
 					bytesLeft -= partSize;

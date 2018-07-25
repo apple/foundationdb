@@ -323,7 +323,7 @@ private:
 		// number of consecutive moves in same direction
 		int moves;
 
-		PathEntry(StringRef s = StringRef()) : node(nullptr), key(s) {
+		PathEntry() : node(nullptr) {
 		}
 		PathEntry(const PathEntry &rhs) {
 			*this = rhs;
@@ -332,11 +332,13 @@ private:
 		// Initialize the key byte buffer to hold bytes of a new node.  Use a new arena
 		// if the old arena is being held by any users.
 		void initKeyBufferSpace() {
-			int size = parser.keyLen();
-			if(keyBuffer.arena().impl && !keyBuffer.arena().impl->isSoleOwnerUnsafe()) {
-				keyBuffer.arena() = Arena(size);
+			if(node != nullptr) {
+				int size = parser.keyLen();
+				if(keyBuffer.arena().impl && !keyBuffer.arena().impl->isSoleOwnerUnsafe()) {
+					keyBuffer = Standalone<VectorRef<uint8_t>>();
+				}
+				keyBuffer.reserve(keyBuffer.arena(), size);
 			}
-			keyBuffer.reserve(keyBuffer.arena(), size);
 		}
 
 		PathEntry & operator= (const PathEntry &rhs) {
@@ -347,10 +349,20 @@ private:
 			// New key buffer must be able to hold full reconstituted key, not just the
 			// part of it referenced by rhs.key (which may not be the whole thing)
 			initKeyBufferSpace();
-			// Copy rhs.key into keyBuffer and set key to the destination bytes
-			memcpy(keyBuffer.begin(), rhs.key.begin(), rhs.key.size());
-			key = StringRef(keyBuffer.begin(), rhs.key.size());
+			if(node != nullptr && rhs.key.size() > 0) {
+				// Copy rhs.key into keyBuffer and set key to the destination bytes
+				memcpy(keyBuffer.begin(), rhs.key.begin(), rhs.key.size());
+				key = StringRef(keyBuffer.begin(), rhs.key.size());
+			}
+			else {
+				key = rhs.key;
+			}
 			return *this;
+		}
+
+		void init(StringRef s) {
+			node = nullptr;
+			key = s;
 		}
 
 		void init(const Node *_node, const PathEntry *prefixSource, bool isLeft, int numMoves) {
@@ -485,17 +497,17 @@ public:
 		}
 
 		static const int initialPathLen = 3;
+		static const int initialPathCapacity = 20;
 		// This is a separate function so that Cursors can be reused to search different PrefixTrees
 		// which avoids cursor destruction and creation which involves unnecessary memory churn.
 		// The root node is arbitrarily assumed to be a right child of prevAncestor which itself is a left child of nextAncestor
 		void init(const Node *root, StringRef prevAncestor, StringRef nextAncestor) {
-			path.reserve(20);
-			path.clear();
-			path.emplace_back(nextAncestor);
-			path.emplace_back(prevAncestor);
-			path.resize(initialPathLen);
-			path[2].init(root, &path[root->flags & Node::PREFIX_SOURCE_NEXT ? 0 : 1], false, 1);
+			if(path.size() < initialPathCapacity)
+				path.resize(initialPathCapacity);
 			pathLen = initialPathLen;
+			path[0].init(nextAncestor);
+			path[1].init(prevAncestor);
+			path[2].init(root, &path[root->flags & Node::PREFIX_SOURCE_NEXT ? 0 : 1], false, 1);
 		}
 
 		bool operator == (const Cursor &rhs) const {
@@ -558,7 +570,7 @@ public:
 			while(1) {
 				const PathEntry &p = pathBack();
 				const Node *right = p.parser.rightChild();
-				//_mm_prefetch(right, _MM_HINT_T0);
+				_mm_prefetch(right, _MM_HINT_T0);
 
 				int cmp = p.compareToKey(s);
 				if(cmp == 0)

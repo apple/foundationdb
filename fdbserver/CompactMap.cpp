@@ -415,7 +415,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 
 	bool end = false;
 	for(int i = 0; i < keys.size(); ++i) {
-		ASSERT(c.getKey() == keys[i].key);
+		ASSERT(c.getKeyRef() == keys[i].key);
 		end = !c.moveNext();
 	}
 	ASSERT(end);
@@ -425,7 +425,7 @@ void compactMapTests(std::vector<std::string> testData, std::vector<std::string>
 	ASSERT(c.moveLast());
 
 	for(int i = keys.size() - 1; i >= 0; --i) {
-		ASSERT(c.getKey() == keys[i].key);
+		ASSERT(c.getKeyRef() == keys[i].key);
 		end = !c.movePrev();
 	}
 	ASSERT(end);
