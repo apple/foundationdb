@@ -307,7 +307,8 @@ struct Peer : NonCopyable {
 
 		loop {
 			if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
-				throw connection_failed();
+				//FIXME: closing connections is causing client connection issues
+				//throw connection_failed();
 			}
 
 			Void _ = wait( delayJittered( FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME ) );
@@ -427,10 +428,11 @@ struct Peer : NonCopyable {
 				// Try to recover, even from serious errors, by retrying
 
 				if(self->peerReferences <= 0 && self->reliable.empty() && self->unsent.empty()) {
-					self->connect.cancel();
-					self->transport->peers.erase(self->destination);
-					delete self;
-					return Void();
+					//FIXME: closing connections is causing client connection issues
+					//self->connect.cancel();
+					//self->transport->peers.erase(self->destination);
+					//delete self;
+					//return Void();
 				}
 			}
 		}
