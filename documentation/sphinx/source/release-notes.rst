@@ -27,6 +27,7 @@ Performance
 Fixes
 -----
 
+* Backed out the changes which closed unnecessary connections. [6.0.3] `(PR #633) <https://github.com/apple/foundationdb/pull/633>`_
 * Not all endpoint failures were reported to the failure monitor.
 * Watches registered on a lagging storage server would take a long time to trigger.
 * The cluster controller would not start a new generation until it recovered its files from disk.
