@@ -35,7 +35,7 @@ struct FDBLibTLSPlugin : ITLSPlugin, ReferenceCounted<FDBLibTLSPlugin> {
 	virtual void addref() { ReferenceCounted<FDBLibTLSPlugin>::addref(); }
 	virtual void delref() { ReferenceCounted<FDBLibTLSPlugin>::delref(); }
 
-	virtual ITLSPolicy *create_policy(ITLSLogFunc logf);
+	virtual ITLSPolicy *create_policy();
 
 	int rc;
 };

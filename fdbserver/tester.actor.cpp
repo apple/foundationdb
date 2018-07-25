@@ -772,17 +772,7 @@ ACTOR Future<Void> checkConsistency(Database cx, std::vector< TesterInterface > 
 			spec.options[0].push_back_deep(spec.options.arena(), KeyValueRef(LiteralStringRef("failureIsError"), LiteralStringRef("true")));
 			lastRun = true;
 		}
-		if(g_network->isSimulated() && g_simulator.allowLogSetKills) {
-			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", "ConsistencyCheck").detail("Stage", "Repopulate");
-			g_simulator.usableRegions = 1;
-			ConfigurationResult::Type _ = wait( changeConfig( cx, "repopulate_anti_quorum=1" ) );
-			while( dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
-				Void _ = wait( dbInfo->onChange() );
-			}
-			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", "ConsistencyCheck").detail("Stage", "Usable_Regions");
-			ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
-			g_simulator.allowLogSetKills = false;
-		}
+		Void _ = wait( repairDeadDatacenter(cx, dbInfo, "ConsistencyCheck") );
 	}
 }
 

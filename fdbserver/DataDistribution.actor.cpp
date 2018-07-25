@@ -317,11 +317,16 @@ ACTOR Future<Void> storageServerFailureTracker(
 		if( status->isFailed )
 			restartRecruiting->trigger();
 
+		state double startTime = now();
 		choose {
 			when ( Void _ = wait( status->isFailed
 				? IFailureMonitor::failureMonitor().onStateEqual( server.waitFailure.getEndpoint(), FailureStatus(false) )
 				: waitFailureClient(server.waitFailure, SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME, 0, TaskDataDistribution) ) )
 			{
+				double elapsed = now() - startTime;
+				if(!status->isFailed && elapsed < SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME) {
+					Void _ = wait(delay(SERVER_KNOBS->DATA_DISTRIBUTION_FAILURE_REACTION_TIME - elapsed));
+				}
 				status->isFailed = !status->isFailed;
 				TraceEvent("StatusMapChange", masterId).detail("ServerID", server.id()).detail("Status", status->toString())
 					.detail("Available", IFailureMonitor::failureMonitor().getState(server.waitFailure.getEndpoint()).isAvailable());
@@ -446,11 +451,19 @@ ACTOR Future<Reference<InitialDataDistribution>> getInitialDataDistribution( Dat
 						}
 					} else {
 						info.primarySrc = src;
-						result->primaryTeams.insert( src );
+						auto srcIter = team_cache.find(src);
+						if(srcIter == team_cache.end()) {
+							result->primaryTeams.insert( src );
+							team_cache[src] = std::pair<vector<UID>, vector<UID>>();
+						}
 						if (dest.size()) {
 							info.hasDest = true;
 							info.primaryDest = dest;
-							result->primaryTeams.insert( dest );
+							auto destIter = team_cache.find(dest);
+							if(destIter == team_cache.end()) {
+								result->primaryTeams.insert( dest );
+								team_cache[dest] = std::pair<vector<UID>, vector<UID>>();
+							}
 						}
 					}
 					result->shards.push_back( info );
@@ -1262,6 +1275,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 	state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 
+	Void _ = wait( yield() );
 	TraceEvent("TeamTrackerStarting", self->masterId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
 
 	try {

@@ -1475,7 +1475,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 				}
 				when( Void _ = wait( dbInfoChange ) ) {
 					if( logData->logSystem->get() ) {
-						r = logData->logSystem->get()->peek( logData->logId, tagAt, tags, parallelGetMore );
+						r = logData->logSystem->get()->peek( logData->logId, tagAt, endVersion, tags, parallelGetMore );
 					} else {
 						r = Reference<ILogSystem::IPeekCursor>();
 					}
@@ -1517,6 +1517,10 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 
 					commitMessages(logData, ver, messages, self->bytesInput);
 
+					if(self->terminated) {
+						return Void();
+					}
+
 					// Log the changes to the persistent queue, to be committed by commitQueue()
 					AlternativeTLogQueueEntryRef qe;
 					qe.version = ver;
@@ -1548,6 +1552,10 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 
 						if(poppedIsKnownCommitted) {
 							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
+						}
+
+						if(self->terminated) {
+							return Void();
 						}
 
 						// Log the changes to the persistent queue, to be committed by commitQueue()
@@ -1845,7 +1853,6 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 bool tlogTerminated( TLogData* self, IKeyValueStore* persistentData, TLogQueue* persistentQueue, Error const& e ) {
 	// Dispose the IKVS (destroying its data permanently) only if this shutdown is definitely permanent.  Otherwise just close it.
-	self->terminated = true;
 	if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		persistentData->dispose();
 		persistentQueue->dispose();
@@ -2070,6 +2077,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 			}
 		}
 	} catch (Error& e) {
+		self.terminated = true;
 		TraceEvent("TLogError", tlogId).error(e, true);
 		endRole(tlogId, "SharedTLog", "Error", true);
 		if(recovered.canBeSet()) recovered.send(Void());

@@ -35,5 +35,6 @@ Future<int64_t> getDataDistributionQueueSize( Database const &cx, Reference<Asyn
 Future<vector<StorageServerInterface>> getStorageServers( Database const& cx, bool const &use_system_priority = false);
 Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> const& dbInfo, int const& flags = 0 );
 Future<WorkerInterface> getMasterWorker( Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo );
+Future<Void> repairDeadDatacenter(Database const& cx, Reference<AsyncVar<ServerDBInfo>> const& dbInfo, std::string const& context);
 
 #endif
