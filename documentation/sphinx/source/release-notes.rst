@@ -2,6 +2,11 @@
 Release Notes
 #############
 
+6.0.4
+=====
+
+* Backed out the changes which closed unnecessary connections. `(PR #633) <https://github.com/apple/foundationdb/pull/633>`_
+
 6.0.3
 =====
 
