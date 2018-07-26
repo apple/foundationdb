@@ -1082,12 +1082,16 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
 		}
 
+		if(newState.oldTLogData.size() && self->configuration.repopulateRegionAntiQuorum > 0 && self->logSystem->remoteStorageRecovered()) {
+			TraceEvent(SevWarnAlways, "RecruitmentStalled_RemoteStorageRecovered", self->dbgid);
+			self->recruitmentStalled->set(true);
+		}
 		self->registrationTrigger.trigger();
 
 		if(allLogs && remoteRecovered.canBeSet()) {
 			remoteRecovered.send(Void());
 		}
-		
+
 		if( finalUpdate ) {
 			oldLogSystems->get()->stopRejoins();
 			rejoinRequests = rejoinRequestHandler(self);

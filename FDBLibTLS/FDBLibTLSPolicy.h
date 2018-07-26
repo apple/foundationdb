@@ -33,14 +33,13 @@
 #include <vector>
 
 struct FDBLibTLSPolicy: ITLSPolicy, ReferenceCounted<FDBLibTLSPolicy> {
-	FDBLibTLSPolicy(Reference<FDBLibTLSPlugin> plugin, ITLSLogFunc logf);
+	FDBLibTLSPolicy(Reference<FDBLibTLSPlugin> plugin);
 	virtual ~FDBLibTLSPolicy();
 
 	virtual void addref() { ReferenceCounted<FDBLibTLSPolicy>::addref(); }
 	virtual void delref() { ReferenceCounted<FDBLibTLSPolicy>::delref(); }
 
 	Reference<FDBLibTLSPlugin> plugin;
-	ITLSLogFunc logf;
 
 	virtual ITLSSession* create_session(bool is_client, const char* servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid);
 

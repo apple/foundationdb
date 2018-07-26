@@ -817,6 +817,7 @@ void Net2::onMainThread(Promise<Void>&& signal, int taskID) {
 
 	if ( thread_network == this )
 	{
+		processThreadReady();
 		this->ready.push( OrderedTask( priority-(++tasksIssued), taskID, p ) );
 	} else {
 		if (threadReady.push( OrderedTask( priority, taskID, p ) ))

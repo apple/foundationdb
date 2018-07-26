@@ -118,20 +118,9 @@ struct ITLSPolicy {
 	// send and receive data on the underlying transport, and must
 	// provide send_ctx/recv_ctx to the callbacks.
 	//
-	// uid should only be provided when invoking an ITLSLogFunc, which
-	// will use it to identify this session.
+	// uid will be used to identify this session within trace events
 	virtual ITLSSession* create_session(bool is_client, const char *servername, TLSSendCallbackFunc send_func, void* send_ctx, TLSRecvCallbackFunc recv_func, void* recv_ctx, void* uid) = 0;
 };
-
-// Logs a message/error to the appropriate trace log.
-//
-// event must be a valid XML attribute value. uid may be NULL or the
-// uid provided to ITLSPolicy::create_session by the caller. is_error
-// should be true for errors and false for informational messages. The
-// remaining arguments must be pairs of (const char*); the first of
-// each pair must be a valid XML attribute name, and the second a
-// valid XML attribute value. The final parameter must be NULL.
-typedef void(*ITLSLogFunc)(const char* event, void* uid, int is_error, ...);
 
 struct ITLSPlugin {
 	virtual void addref() = 0;
@@ -139,11 +128,7 @@ struct ITLSPlugin {
 
 	// create_policy should return a new object that implements
 	// ITLSPolicy.
-	//
-	// The newly created policy, and any session further created from
-	// the policy, should use logf to log any messages or errors that
-	// occur.
-	virtual ITLSPolicy* create_policy(ITLSLogFunc logf) = 0;
+	virtual ITLSPolicy* create_policy() = 0;
 
 	static inline const char* get_plugin_type_name_and_version() { return "ITLSPlugin"; }
 };
