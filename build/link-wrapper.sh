@@ -27,10 +27,6 @@ case $1 in
 	    OPTIONS=$( echo $OPTIONS | sed -e s,-static-libstdc\+\+,, -e s,\$,\ `$CC -print-file-name=libstdc++.a`\ -lm, )
 	fi
 
-	if echo $OPTIONS | grep -q -- -static-libc\+\+ ; then
-	    OPTIONS=$( echo $OPTIONS | sed -e s,-static-libc\+\+,, -e s,\$,\ `$CC -print-file-name=libc++.a`\ -lm, )
-	fi
-
 	case $PLATFORM in
 	    osx)
 		if echo $OPTIONS | grep -q -- -static-libgcc ; then
@@ -41,7 +37,7 @@ case $1 in
 		;;
 		freebsd)
 		if [ -z ${CC+x} ] && type -p clang >/dev/null; then
-        	CC=clang
+        	CC=clang++
 		fi
 		$CC $OPTIONS
 		;;

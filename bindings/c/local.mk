@@ -36,8 +36,9 @@ ifeq ($(PLATFORM),linux)
 endif
 
 ifeq ($(PLATFORM),freebsd)
-  fdb_c_LIBS += lib/libc++.a -lm -lpthread -lrt
-  fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -static-libstdc++ -Wl,-z,nodelete
+  fdb_c_CFLAGS += -fPIC
+  fdb_c_LIBS += -lm -lpthread -lrt -lexecinfo -ldevstat -lkvm
+  fdb_c_LDFLAGS += -Wl,--version-script=bindings/c/fdb_c.map -Wl,-z,nodelete
   fdb_c_tests_LIBS += -lpthread
 endif
 

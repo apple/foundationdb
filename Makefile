@@ -60,7 +60,6 @@ else ifeq ($(PLATFORM),FreeBSD)
   TLS_LIBDIR ?= /usr/local/lib
   DLEXT := so
   java_DLEXT := so
-	TARGET_LIBC_VERSION ?= 2.11
 else ifeq ($(PLATFORM),Darwin)
   PLATFORM := osx
 
@@ -206,24 +205,6 @@ lib/libstdc++.a: $(shell $(CC) -print-file-name=libstdc++_pic.a)
 	done
 	@ar rcs $@ .libstdc++/*.o
 	@rm -r .libstdc++
-
-lib/libc++.a: $(shell $(CC) -print-file-name=libc++_p.a)
-	@echo "Frobnicating   $@"
-	@mkdir -p lib
-	@rm -rf .libc++
-	@mkdir .libc++
-	@(cd .libc++ && ar x $<)
-	@for i in .libc++/*.o ; do \
-		nm $$i | grep -q \@ || continue ; \
-		nm $$i | awk '$$3 ~ /@@/ { COPY = $$3; sub(/@@.*/, "", COPY); print $$3, COPY; }' > .libc++/replacements ; \
-		objcopy --redefine-syms=.libc++/replacements $$i $$i.new && mv $$i.new $$i ; \
-		rm .libc++/replacements ; \
-		nm $$i | awk '$$3 ~ /@/ { print $$3; }' > .libc++/deletes ; \
-		objcopy --strip-symbols=.libc++/deletes $$i $$i.new && mv $$i.new $$i ; \
-		rm .libc++/deletes ; \
-	done
-	@ar rcs $@ .libc++/*.o
-	@rm -r .libc++
 
 docpreview: javadoc
 	TARGETS= $(MAKE) -C documentation docpreview
