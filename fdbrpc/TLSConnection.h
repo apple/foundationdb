@@ -65,20 +65,6 @@ struct TLSConnection : IConnection, ReferenceCounted<TLSConnection> {
 	virtual UID getDebugID() { return uid; }
 };
 
-struct TLSListener : IListener, ReferenceCounted<TLSListener> {
-	Reference<IListener> listener;
-	Reference<ITLSPolicy> policy;
-
-	TLSListener( Reference<ITLSPolicy> policy, Reference<IListener> listener ) : policy(policy), listener(listener) {}
-
-	virtual void addref() { ReferenceCounted<TLSListener>::addref(); }
-	virtual void delref() { ReferenceCounted<TLSListener>::delref(); }
-
-	virtual Future<Reference<IConnection>> accept();
-
-	virtual NetworkAddress getListenAddress() { return listener->getListenAddress(); }
-};
-
 struct TLSOptions : ReferenceCounted<TLSOptions> {
 	enum { OPT_TLS = 100000, OPT_TLS_PLUGIN, OPT_TLS_CERTIFICATES, OPT_TLS_KEY, OPT_TLS_VERIFY_PEERS, OPT_TLS_CA_FILE, OPT_TLS_PASSWORD };
 	enum PolicyType { POLICY_VERIFY_PEERS = 1, POLICY_NO_VERIFY_PEERS };
@@ -103,14 +89,41 @@ struct TLSOptions : ReferenceCounted<TLSOptions> {
 	Reference<ITLSPolicy> get_policy(PolicyType type);
 	bool enabled();
 
+	struct PolicyInfo {
+		std::string ca_path;
+		Standalone<StringRef> ca_contents;
+		std::string key_path;
+		std::string keyPassword;
+		Standalone<StringRef> key_contents;
+		std::string cert_path;
+		Standalone<StringRef> cert_contents;
+		std::vector<std::string> verify_peers;
+	};
+
 private:
-	void init_plugin( );
+	void init_plugin();
 
 	Reference<ITLSPlugin> plugin;
-	Reference<ITLSPolicy> policyVerifyPeersSet;
-	Reference<ITLSPolicy> policyVerifyPeersNotSet;
+	PolicyInfo policyInfo;
+	AsyncVar<Reference<ITLSPolicy>> policyVerifyPeersSet;
+	AsyncVar<Reference<ITLSPolicy>> policyVerifyPeersNotSet;
+	Optional<Future<Void>> configurationReloader;
+
 	bool certs_set, key_set, verify_peers_set, ca_set;
-	std::string keyPassword;
+};
+
+struct TLSListener : IListener, ReferenceCounted<TLSListener> {
+	Reference<IListener> listener;
+	Reference<TLSOptions> options;
+
+	TLSListener( Reference<TLSOptions> options, Reference<IListener> listener ) : options(options), listener(listener) {}
+
+	virtual void addref() { ReferenceCounted<TLSListener>::addref(); }
+	virtual void delref() { ReferenceCounted<TLSListener>::delref(); }
+
+	virtual Future<Reference<IConnection>> accept();
+
+	virtual NetworkAddress getListenAddress() { return listener->getListenAddress(); }
 };
 
 struct TLSNetworkConnections : INetworkConnections {
