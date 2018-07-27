@@ -1756,6 +1756,15 @@ Future< Void > Sim2FileSystem::deleteFile( std::string filename, bool mustBeDura
 	return Sim2::deleteFileImpl(&g_sim2, filename, mustBeDurable);
 }
 
+Future< std::time_t > Sim2FileSystem::lastWriteTime( std::string filename ) {
+	// TODO: update this map upon file writes.
+	static std::map<std::string, double> fileWrites;
+	if (BUGGIFY && g_random->random01() < 0.01) {
+		fileWrites[filename] = now();
+	}
+	return fileWrites[filename];
+}
+
 void Sim2FileSystem::newFileSystem()
 {
 	g_network->setGlobal(INetwork::enFileSystem, (flowGlobalType) new Sim2FileSystem());
