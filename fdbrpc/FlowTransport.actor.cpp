@@ -585,6 +585,7 @@ ACTOR static Future<Void> connectionReader(
 	state bool expectConnectPacket = true;
 	state bool compatible = false;
 	state bool incompatibleProtocolVersionNewer = false;
+	state bool initiallyCompatible = (peer == nullptr) || peer->compatible;
 	state NetworkAddress peerAddress;
 	state uint64_t peerProtocolVersion = 0;
 
@@ -709,7 +710,7 @@ ACTOR static Future<Void> connectionReader(
 		}
 	}
 	catch (Error& e) {
-		if (peer && !peer->compatible) {
+		if (initiallyCompatible && peer && !peer->compatible) {
 			ASSERT(peer->transport->numIncompatibleConnections > 0);
 			peer->transport->numIncompatibleConnections--;
 		}
