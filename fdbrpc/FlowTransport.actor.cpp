@@ -148,6 +148,8 @@ public:
 		numIncompatibleConnections(0)
 	{}
 
+	~TransportData();
+
 	void initMetrics() {
 		bytesSent.init(LiteralStringRef("Net2.BytesSent"));
 		countPacketsReceived.init(LiteralStringRef("Net2.CountPacketsReceived"));
@@ -227,9 +229,10 @@ struct Peer : NonCopyable {
 	double lastConnectTime;
 	double reconnectionDelay;
 	int peerReferences;
+	bool incompatibleProtocolVersionNewer;
 
 	explicit Peer( TransportData* transport, NetworkAddress const& destination )
-		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), peerReferences(-1)
+		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), incompatibleProtocolVersionNewer(false), peerReferences(-1)
 	{
 		connect = connectionKeeper(this);
 	}
@@ -307,8 +310,7 @@ struct Peer : NonCopyable {
 
 		loop {
 			if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
-				//FIXME: closing connections is causing client connection issues
-				//throw connection_failed();
+				throw connection_failed();
 			}
 
 			Void _ = wait( delayJittered( FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME ) );
@@ -428,16 +430,23 @@ struct Peer : NonCopyable {
 				// Try to recover, even from serious errors, by retrying
 
 				if(self->peerReferences <= 0 && self->reliable.empty() && self->unsent.empty()) {
-					//FIXME: closing connections is causing client connection issues
-					//self->connect.cancel();
-					//self->transport->peers.erase(self->destination);
-					//delete self;
-					//return Void();
+					TraceEvent("PeerDestroy").detail("PeerAddr", self->destination).error(e).suppressFor(1.0);
+					self->connect.cancel();
+					self->transport->peers.erase(self->destination);
+					delete self;
+					return Void();
 				}
 			}
 		}
 	}
 };
+
+TransportData::~TransportData() {
+	for(auto &p : peers) {
+		p.second->connect.cancel();
+		delete p.second;
+	}
+}
 
 ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket ) {
 	int priority = self->endpoints.getPriority(destination.token);
@@ -581,6 +590,7 @@ ACTOR static Future<Void> connectionReader(
 	state bool expectConnectPacket = true;
 	state bool compatible = false;
 	state bool incompatiblePeerCounted = false;
+	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
 	state uint64_t peerProtocolVersion = 0;
 
@@ -621,7 +631,8 @@ ACTOR static Future<Void> connectionReader(
 							connectionId = p->connectionId;
 						}
 						
-						if( (p->protocolVersion&compatibleProtocolVersionMask) != (currentProtocolVersion&compatibleProtocolVersionMask) ) {
+						if( (p->protocolVersion & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask) ) {
+							incompatibleProtocolVersionNewer = p->protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress();
 							if(connectionId != 1) addr.port = 0;
 						
@@ -667,6 +678,7 @@ ACTOR static Future<Void> connectionReader(
 							// Outgoing connection; port information should be what we expect
 							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) ).suppressFor(1.0);
 							peer->compatible = compatible;
+							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
 								incompatiblePeerCounted = true;
@@ -678,6 +690,7 @@ ACTOR static Future<Void> connectionReader(
 							}
 							peer = transport->getPeer(peerAddress);
 							peer->compatible = compatible;
+							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
 								incompatiblePeerCounted = true;
@@ -895,7 +908,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		Peer* peer = self->getPeer(destination.address, openConnection);
 
 		// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
-		if (!peer || (peer->outgoingConnectionIdle && !destination.address.isPublic()) || (!peer->compatible && destination.token != WLTOKEN_PING_PACKET)) {
+		if (!peer || (peer->outgoingConnectionIdle && !destination.address.isPublic()) || (peer->incompatibleProtocolVersionNewer && destination.token != WLTOKEN_PING_PACKET)) {
 			TEST(true);  // Can't send to private address without a compatible open connection
 			return (PacketID)NULL;
 		}
