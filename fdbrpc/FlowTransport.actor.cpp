@@ -674,7 +674,7 @@ ACTOR static Future<Void> connectionReader(
 							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) ).suppressFor(1.0);
 							peer->compatible = compatible;
 							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
-							if (!compatible)
+							if (initiallyCompatible && !compatible)
 								peer->transport->numIncompatibleConnections++;
 							ASSERT( p->canonicalRemotePort == peerAddress.port );
 						} else {
@@ -684,7 +684,7 @@ ACTOR static Future<Void> connectionReader(
 							peer = transport->getPeer(peerAddress);
 							peer->compatible = compatible;
 							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
-							if (!compatible)
+							if (initiallyCompatible && !compatible)
 								peer->transport->numIncompatibleConnections++;
 							onConnected.send( peer );
 							Void _ = wait( delay(0) );  // Check for cancellation
