@@ -504,7 +504,7 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 	status = sysctlbyname("vm.stats.vm.v_active_count", &active_count, &uint_size, NULL, 0);
 	if (status < 0){
 		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
-	throw platform_error();
+		throw platform_error();
 	}
 
 	status = sysctlbyname("vm.stats.vm.v_inactive_count", &inactive_count, &uint_size, NULL, 0);
