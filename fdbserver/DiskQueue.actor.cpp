@@ -704,9 +704,9 @@ public:
 		ASSERT( recovered );
 		if (!pushedPageCount()) {
 			if (!anyPopped) return Void();
-			anyPopped = false;
 			addEmptyPage();
 		}
+		anyPopped = false;
 		backPage().popped = poppedSeq;
 		backPage().zeroPad();
 		backPage().updateHash();
@@ -732,6 +732,7 @@ public:
 		pushed_page_buffer = 0;
 		return f;
 	}
+
 	void stall() {
 		rawQueue->stall();
 	}
@@ -1007,7 +1008,7 @@ private:
 	RawDiskQueue_TwoFiles *rawQueue;
 	UID dbgid;
 
-	bool anyPopped;  // pop() has been called since the most recent commit()
+	bool anyPopped;  // pop() has been called since the most recent call to commit()
 	bool warnAlwaysForMemory;
 	loc_t nextPageSeq, poppedSeq;
 	loc_t lastPoppedSeq;  // poppedSeq the last time commit was called
