@@ -148,6 +148,8 @@ public:
 		numIncompatibleConnections(0)
 	{}
 
+	~TransportData();
+
 	void initMetrics() {
 		bytesSent.init(LiteralStringRef("Net2.BytesSent"));
 		countPacketsReceived.init(LiteralStringRef("Net2.CountPacketsReceived"));
@@ -433,6 +435,13 @@ struct Peer : NonCopyable {
 		}
 	}
 };
+
+TransportData::~TransportData() {
+	for(auto &p : peers) {
+		p.second->connect.cancel();
+		delete p.second;
+	}
+}
 
 ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket ) {
 	int priority = self->endpoints.getPriority(destination.token);
