@@ -519,8 +519,8 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 		throw platform_error();
 	}
 
-	memInfo.total = (int64_t)((free_count + active_count + inactive_count + wire_count) * (u_int64_t)page_size);
-	memInfo.available = (int64_t)(free_count * (u_int64_t)page_size);
+	memInfo.total = (int64_t)((free_count + active_count + inactive_count + wire_count) * (u_int64_t)(page_size / 1024));
+	memInfo.available = (int64_t)(free_count * (u_int64_t)(page_size / 1024));
 	memInfo.committed = memInfo.total - memInfo.available;
 #elif defined(_WIN32)
 	MEMORYSTATUSEX mem_status;
