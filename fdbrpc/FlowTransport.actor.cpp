@@ -425,7 +425,7 @@ struct Peer : NonCopyable {
 				// Try to recover, even from serious errors, by retrying
 
 				if(self->reliable.empty() && self->unsent.empty()) {
-					TraceEvent("PeerDestroy").detail("PeerAddr", self->destination).error(e, true);
+					TraceEvent("PeerDestroy").detail("PeerAddr", self->destination).error(e).suppressFor(1.0);
 					self->connect.cancel();
 					self->transport->peers.erase(self->destination);
 					delete self;
