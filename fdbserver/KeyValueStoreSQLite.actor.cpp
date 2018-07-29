@@ -102,15 +102,14 @@ struct PageChecksumCodec {
 		// Verify if not in write mode
 		if(!write && sum != *pSumInPage) {
 			if(!silent)
-				TraceEvent (SevError, "SQLitePageChecksumFailure")
+				TraceEvent (SevError, "SQLitePageChecksumFailure", checksum_failed())
 					.detail("CodecPageSize", pageSize)
 					.detail("CodecReserveSize", reserveSize)
 					.detail("Filename", filename)
 					.detail("PageNumber", pageNumber)
 					.detail("PageSize", pageLen)
 					.detail("ChecksumInPage", pSumInPage->toString())
-					.detail("ChecksumCalculated", sum.toString())
-					.error(checksum_failed());
+					.detail("ChecksumCalculated", sum.toString());
 
 			return false;
 		}
@@ -234,7 +233,7 @@ struct SQLiteDB : NonCopyable {
 				db->errCode = rc;
 			if (rc == SQLITE_NOMEM) platform::outOfMemory(); // SOMEDAY: Trap out of memory errors at allocation time; check out different allocation options in sqlite
 
-			TraceEvent(SevError, "DiskError").error(err).detail("In", context).detail("File", filename).detail("SQLiteError", sqlite3ErrStr(rc)).detail("SQLiteErrorCode", rc).GetLastError();
+			TraceEvent(SevError, "DiskError", err).detail("In", context).detail("File", filename).detail("SQLiteError", sqlite3ErrStr(rc)).detail("SQLiteErrorCode", rc).GetLastError();
 			throw err;
 		}
 	}
@@ -1833,7 +1832,7 @@ private:
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
 				.detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown")
-				.error(e,true);
+				.error(e);
 			error = e;
 		}
 

@@ -253,7 +253,7 @@ public:
 				waitfor.push_back( files[1].f->truncate( files[1].size ) );
 
 				if(fileSizeWarningLimit > 0 && files[1].size > fileSizeWarningLimit) {
-					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", dbgid).detail("Filename", filename(1)).detail("Size", files[1].size).suppressFor(1.0);
+					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", dbgid, 1.0).detail("Filename", filename(1)).detail("Size", files[1].size);
 				}
 			}
 		}
@@ -322,7 +322,7 @@ public:
 			delete pageMem;
 			TEST(true);  // push error
 			TEST(2==syncFiles.size());  // push spanning both files error
-			TraceEvent(SevError, "RDQPushAndCommitError", dbgid).detail("InitialFilename0", filename).error(e, true);
+			TraceEvent(SevError, "RDQPushAndCommitError", dbgid).detail("InitialFilename0", filename).error(e);
 
 			if (errorPromise.canBeSet()) errorPromise.sendError(e);
 			if (pushing.canBeSet()) pushing.sendError(e);
@@ -429,7 +429,7 @@ public:
 		} catch( Error &e ) {
 			TraceEvent(SevError, "DiskQueueShutdownError", self->dbgid)
 				.detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown")
-				.error(e,true);
+				.error(e);
 			error = e;
 		}
 
@@ -533,7 +533,7 @@ public:
 			return result.str;
 		} catch (Error& e) {
 			bool ok = e.code() == error_code_file_not_found;
-			TraceEvent(ok ? SevInfo : SevError, "RDQReadFirstAndLastPagesError", self->dbgid).detail("File0Name", self->files[0].dbgFilename).error(e, true);
+			TraceEvent(ok ? SevInfo : SevError, "RDQReadFirstAndLastPagesError", self->dbgid).detail("File0Name", self->files[0].dbgFilename).error(e);
 			if (!self->error.isSet()) self->error.sendError(e);
 			throw;
 		}
@@ -588,7 +588,7 @@ public:
 			return result;
 		} catch (Error& e) {
 			TEST(true);  // Read next page error
-			TraceEvent(SevError, "RDQReadNextPageError", self->dbgid).detail("File0Name", self->files[0].dbgFilename).error(e, true);
+			TraceEvent(SevError, "RDQReadNextPageError", self->dbgid).detail("File0Name", self->files[0].dbgFilename).error(e);
 			if (!self->error.isSet()) self->error.sendError(e);
 			throw;
 		}
@@ -633,7 +633,7 @@ public:
 
 			return Void();
 		} catch (Error& e) {
-			TraceEvent(SevError, "RDQTruncateBeforeLastReadPageError", self->dbgid).detail("File0Name", self->files[0].dbgFilename).error(e);
+			TraceEvent(SevError, "RDQTruncateBeforeLastReadPageError", self->dbgid, e).detail("File0Name", self->files[0].dbgFilename);
 			if (!self->error.isSet()) self->error.sendError(e);
 			throw;
 		}
@@ -711,12 +711,11 @@ public:
 		backPage().updateHash();
 
 		if( pushedPageCount() >= 8000 ) {
-			TraceEvent( warnAlwaysForMemory ? SevWarnAlways : SevWarn, "DiskQueueMemoryWarning", dbgid)
+			TraceEvent( warnAlwaysForMemory ? SevWarnAlways : SevWarn, "DiskQueueMemoryWarning", dbgid, 1.0)
 				.detail("PushedPages", pushedPageCount())
 				.detail("NextPageSeq", nextPageSeq)
 				.detail("Details", format("%d pages", pushedPageCount()))
-				.detail("File0Name", rawQueue->files[0].dbgFilename)
-				.suppressFor(1.0);
+				.detail("File0Name", rawQueue->files[0].dbgFilename);
 			if(g_network->isSimulated())
 				warnAlwaysForMemory = false;
 		}

@@ -130,8 +130,7 @@ struct CycleWorkload : TestWorkload {
 				self->totalLatency += now() - tstart;
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
-				TraceEvent(SevError, "CycleClient").error(e);
+			TraceEvent(SevError, "CycleClient", e);
 			throw;
 		}
 	}
@@ -183,7 +182,7 @@ struct CycleWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					retryCount++;
-					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError").error(e);
+					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "CycleCheckError", e);
 					Void _ = wait(tr.onError(e));
 				}
 			}

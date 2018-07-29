@@ -209,7 +209,7 @@ ACTOR Future<Void> trackShardBytes(
 
 				shardSize->set( metrics );
 			} catch( Error &e ) {
-				//TraceEvent("ShardSizeUpdateError").detail("Begin", printable(keys.begin)).detail("End", printable(keys.end)).detail("TrackerID", trackerID).error(e, true);
+				//TraceEvent("ShardSizeUpdateError").detail("Begin", printable(keys.begin)).detail("End", printable(keys.end)).detail("TrackerID", trackerID).error(e);
 				Void _ = wait( tr.onError(e) );
 			}
 		}
@@ -691,7 +691,7 @@ ACTOR Future<Void> dataDistributionTracker(
 			when( Void _ = wait( self.sizeChanges.getResult() ) ) {}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError, "DataDistributionTrackerError", self.masterId).error(e);
+		TraceEvent(SevError, "DataDistributionTrackerError", self.masterId, e);
 		throw e;
 	}
 }

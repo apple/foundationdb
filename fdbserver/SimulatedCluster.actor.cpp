@@ -270,7 +270,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				if(e.code() != error_code_actor_cancelled)
 					printf("SimulatedFDBDTerminated: %s\n", e.what());
 				ASSERT( destructed || g_simulator.getCurrentProcess() == process ); // simulatedFDBD catch called on different process
-				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed ? SevInfo : SevError, "SimulatedFDBDTerminated", localities.zoneId()).error(e, true);
+				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed ? SevInfo : SevError, "SimulatedFDBDTerminated", localities.zoneId()).error(e);
 			}
 
 			TraceEvent("SimulatedFDBDDone", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
@@ -282,7 +282,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			if (!onShutdown.isReady())
 				onShutdown = ISimulator::InjectFaults;
 		} catch (Error& e) {
-			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError", localities.zoneId()).detail("RandomId", randomId).error(e, true);
+			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError", localities.zoneId()).detail("RandomId", randomId).error(e);
 			onShutdown = e;
 		}
 
@@ -658,7 +658,7 @@ ACTOR Future<Void> restartSimulatedSystem(
 		g_simulator.processesPerMachine = processesPerMachine;
 	}
 	catch (Error& e) {
-		TraceEvent(SevError, "RestartSimulationError").error(e);
+		TraceEvent(SevError, "RestartSimulationError", e);
 	}
 
 	TraceEvent("RestartSimulatorSettings")
@@ -1251,7 +1251,7 @@ ACTOR void setupAndRun(std::string dataFolder, const char *testFile, bool reboot
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connFile.get().toString());
 		Void _ = wait(timeoutError(runTests(Reference<ClusterConnectionFile>(new ClusterConnectionFile(joinPath(clusterFileDir, "fdb.cluster"))), TEST_TYPE_FROM_FILE, TEST_ON_TESTERS, testerCount, testFile, startingConfiguration), buggifyActivated ? 36000.0 : 5400.0));
 	} catch (Error& e) {
-		TraceEvent(SevError, "SetupAndRunError").error(e);
+		TraceEvent(SevError, "SetupAndRunError", e);
 	}
 
 	TraceEvent("SimulatedSystemDestruct");

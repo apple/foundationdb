@@ -392,7 +392,7 @@ ACTOR Future<Void> runMetrics( Future<Database> fcx, Key prefix ) {
 				it.value->setConfig(false);
 		}
 		
-		TraceEvent(SevWarnAlways, "TDMetricsStopped").error(e);
+		TraceEvent(SevWarnAlways, "TDMetricsStopped", e);
 		throw e;
 	}
 	return Void();

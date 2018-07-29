@@ -119,7 +119,7 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 			if (e.isError()) throw e.getError(); else return e.get();
 		}
 		when (ErrorOr<Void> e = wait( storeError )) {
-			TraceEvent("WorkerTerminatingByIOError", id).error(e.getError(), true);
+			TraceEvent("WorkerTerminatingByIOError", id).error(e.getError());
 			actor.cancel();
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be reported SevError.
 			if (e.getError().code() == error_code_file_not_found) {
@@ -410,7 +410,7 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 			.detail("As", as)
 			.detail("Reason", reason);
 		if(e.code() != invalid_error_code)
-			ev.error(e, true);
+			ev.error(e);
 
 		ev.trackLatest( (id.shortString() + ".Role").c_str() );
 	}
@@ -422,7 +422,7 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 		err.detail("Reason", reason);
 
 		if(e.code() != invalid_error_code) {
-			err.error(e, true);
+			err.error(e);
 		}
 	}
 
@@ -507,7 +507,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				state Reference<Cluster> cluster = Cluster::createCluster( metricsConnFile, Cluster::API_VERSION_LATEST );
 				metricsLogger = runMetrics( cluster->createDatabase(LiteralStringRef("DB"), locality), KeyRef(metricsPrefix) );
 			} catch(Error &e) {
-				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile").error(e).detail("ConnFile", metricsConnFile);
+				TraceEvent(SevWarnAlways, "TDMetricsBadClusterFile", e).detail("ConnFile", metricsConnFile);
 			}
 		} else {
 			bool lockAware = metricsPrefix.size() && metricsPrefix[0] == '\xff';
@@ -902,7 +902,7 @@ ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
 	}
 	catch(Error &e) {
 		if(e.code() == error_code_file_not_found) {
-			TraceEvent(SevWarn, "ClusterCoordinatorFailed").error(e);
+			TraceEvent(SevWarn, "ClusterCoordinatorFailed", e);
 			return Never();
 		}
 		throw;
@@ -989,7 +989,7 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 		if (e.code() != error_code_actor_cancelled) {
 			if (!e.isInjectedFault())
 				fprintf(stderr, "ERROR: error creating or opening process id file `%s'.\n", joinPath(folder, "processId").c_str());
-			TraceEvent(SevError, "OpenProcessIdError").error(e);
+			TraceEvent(SevError, "OpenProcessIdError", e);
 		}
 		throw;
 	}

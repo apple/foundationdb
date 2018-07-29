@@ -389,19 +389,17 @@ public:
 				}));
 			}
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "TB_ExecuteFailure")
+			TraceEvent(SevWarn, "TB_ExecuteFailure", e)
 				.detail("TaskUID", task->key.printable())
 				.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
-				.detail("Priority", task->getPriority())
-				.error(e);
+				.detail("Priority", task->getPriority());
 			try {
 				Void _ = wait(taskFunc->handleError(cx, task, e));
 			} catch(Error &e) {
-				TraceEvent(SevWarn, "TB_ExecuteFailureLogErrorFailed")
+				TraceEvent(SevWarn, "TB_ExecuteFailureLogErrorFailed", e) // output handleError() error instead of original task error
 					.detail("TaskUID", task->key.printable())
 					.detail("TaskType", task->params[Task::reservedTaskParamKeyType].printable())
-					.detail("Priority", task->getPriority())
-					.error(e);  // output handleError() error instead of original task error
+					.detail("Priority", task->getPriority());
 			}
 		}
 

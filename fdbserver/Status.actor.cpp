@@ -269,7 +269,7 @@ static StatusObject getError(const TraceEventFields& errorFields) {
 		}
 	}
 	catch (Error &e){
-		TraceEvent(SevError, "StatusGetErrorError").error(e).detail("RawError", errorFields.toString());
+		TraceEvent(SevError, "StatusGetErrorError", e).detail("RawError", errorFields.toString());
 	}
 	return statusObj;
 }
@@ -1517,7 +1517,7 @@ static std::map<std::string, StatusObject> getProcessIssuesAsMessages( ProcessIs
 		}
 	}
 	catch (Error &e) {
-		TraceEvent(SevError, "ErrorParsingProcessIssues").error(e);
+		TraceEvent(SevError, "ErrorParsingProcessIssues", e);
 		// swallow
 	}
 
@@ -1547,7 +1547,7 @@ static StatusArray getClientIssuesAsMessages( ProcessIssuesMap const& _issues) {
 		}
 	}
 	catch (Error &e) {
-		TraceEvent(SevError, "ErrorParsingClientIssues").error(e);
+		TraceEvent(SevError, "ErrorParsingClientIssues", e);
 		// swallow
 	}
 
@@ -1600,7 +1600,7 @@ ACTOR Future<StatusObject> layerStatusFetcher(Database cx, StatusArray *messages
 			}
 		}
 	} catch(Error &e) {
-		TraceEvent(SevWarn, "LayerStatusError").error(e);
+		TraceEvent(SevWarn, "LayerStatusError", e);
 		incomplete_reasons->insert(format("Unable to retrieve layer status (%s).", e.what()));
 		json.create("_error") = format("Unable to retrieve layer status (%s).", e.what());
 		json.create("_valid") = false;
@@ -1887,7 +1887,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		return statusObj;
 	} catch( Error&e ) {
-		TraceEvent(SevError, "StatusError").error(e);
+		TraceEvent(SevError, "StatusError", e);
 		throw;
 	}
 }

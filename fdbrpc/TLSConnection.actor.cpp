@@ -45,10 +45,10 @@ static int send_func(void* ctx, const uint8_t* buf, int len) {
 		int w = conn->conn->write( &sb );
 		return w;
 	} catch ( Error& e ) {
-		TraceEvent("TLSConnectionSendError", conn->getDebugID()).error(e);
+		TraceEvent("TLSConnectionSendError", conn->getDebugID(), e);
 		return -1;
 	} catch ( ... ) {
-		TraceEvent("TLSConnectionSendError", conn->getDebugID()).error( unknown_error() );
+		TraceEvent("TLSConnectionSendError", conn->getDebugID(), unknown_error());
 		return -1;
 	}
 }
@@ -61,10 +61,10 @@ static int recv_func(void* ctx, uint8_t* buf, int len) {
 		int r = conn->conn->read( buf, buf + len );
 		return r;
 	} catch ( Error& e ) {
-		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).error(e);
+		TraceEvent("TLSConnectionRecvError", conn->getDebugID(), e);
 		return -1;
 	} catch ( ... ) {
-		TraceEvent("TLSConnectionRecvError", conn->getDebugID()).error( unknown_error() );
+		TraceEvent("TLSConnectionRecvError", conn->getDebugID(), unknown_error());
 		return -1;
 	}
 }

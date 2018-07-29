@@ -358,7 +358,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 					TraceEvent("ReadThroughShortRead").detail("ReadAmount", _).detail("PageSize", self->pageCache->pageSize).detail("PageOffset", self->pageOffset);
 			} catch (Error& e) {
 				self->zeroCopyRefCount = 0;
-				TraceEvent("ReadThroughFailed").error(e);
+				TraceEvent("ReadThroughFailed", e);
 				throw;
 			}
 		}

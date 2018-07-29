@@ -110,7 +110,6 @@ struct SuppressionMap {
 
 TraceBatch g_traceBatch;
 trace_clock_t g_trace_clock = TRACE_CLOCK_NOW;
-std::set<StringRef> suppress;
 IRandom* trace_random = NULL;
 
 LatestEventCache latestEventCache;
@@ -534,16 +533,6 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	std::string baseName = format("%s.%03d.%03d.%03d.%03d.%d", baseOfBase.c_str(), (na.ip>>24)&0xff, (na.ip>>16)&0xff, (na.ip>>8)&0xff, na.ip&0xff, na.port);
 	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
-	// FIXME
-	suppress.insert( LiteralStringRef( "TLogCommitDurable" ) );
-	suppress.insert( LiteralStringRef( "StorageServerUpdate" ) );
-	suppress.insert( LiteralStringRef( "TLogCommit" ) );
-	suppress.insert( LiteralStringRef( "StorageServerDurable" ) );
-	suppress.insert( LiteralStringRef( "ForgotVersionsBefore" ) );
-	suppress.insert( LiteralStringRef( "FDData" ) );
-	suppress.insert( LiteralStringRef( "FailureDetectionPoll" ) );
-	suppress.insert( LiteralStringRef( "MasterProxyRate" ) );
-
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskFlushTrace));
 	g_traceBatch.dump();
 }
@@ -560,45 +549,96 @@ bool traceFileIsOpen() {
 	return g_traceLog.isOpen();
 }
 
-bool TraceEvent::isEnabled( const char* type, Severity severity ) {
-	//if (!g_traceLog.isOpen()) return false;
-	if(g_network && severity < FLOW_KNOBS->MIN_TRACE_SEVERITY) return false;
-	StringRef s( (const uint8_t*)type, strlen(type) );
-	return !suppress.count(s);
-}
-
-TraceEvent::TraceEvent( const char* type, UID id ) : id(id) {
-	init(SevInfo, type);
+TraceEvent::TraceEvent( const char* type, UID id, double suppressFor ) : id(id) {
+	init(SevInfo, type, Error(), suppressFor);
 	detail("ID", id);
 }
 
-TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : id(id) {
-	init(severity, type);
-	detail("ID", id);
+TraceEvent::TraceEvent( const char* type, double suppressFor ) {
+	init(SevInfo, type, Error(), suppressFor);
 }
 
-TraceEvent::TraceEvent(const char* type, const StringRef& zoneId) {
+TraceEvent::TraceEvent( const char* type, const StringRef& zoneId ) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
-	init(SevInfo, type);
+	init(SevInfo, type, Error());
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent(Severity severity, const char* type, const StringRef& zoneId) {
-	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
-	init(severity, type);
-	detailext("ID", zoneId);
-}
-
-TraceEvent::TraceEvent(const char* type, const Optional<Standalone<StringRef>>& zoneId) {
+TraceEvent::TraceEvent( const char* type, const Optional<Standalone<StringRef>>& zoneId ) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
-	init(SevInfo, type);
+	init(SevInfo, type, Error());
 	detailext("ID", zoneId);
 }
 
-TraceEvent::TraceEvent(Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId) {
-	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL, 0);
-	init(severity, type);
+TraceEvent::TraceEvent( const char* type, const class Error& e, double suppressFor ) {
+	init(SevInfo, type, e, suppressFor);
+	error(e);
+}
+
+TraceEvent::TraceEvent( const char* type, UID id, const class Error& e, double suppressFor ) : id(id) {
+	init(SevInfo, type, e, suppressFor);
+	detail("ID", id);
+	error(e);
+}
+
+TraceEvent::TraceEvent( const char* type, const StringRef& zoneId, const class Error& e, double suppressFor ) {
+	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
+	init(SevInfo, type, e, suppressFor);
 	detailext("ID", zoneId);
+	error(e);
+}
+
+TraceEvent::TraceEvent( const char* type, const Optional<Standalone<StringRef>>& zoneId, const class Error& e, double suppressFor ) {
+	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
+	init(SevInfo, type, e, suppressFor);
+	detailext("ID", zoneId);
+	error(e);
+}
+
+TraceEvent::TraceEvent( Severity severity, const char* type, UID id, double suppressFor ) : id(id) {
+	init(severity, type, Error(), suppressFor);
+	detail("ID", id);
+}
+
+TraceEvent::TraceEvent( Severity severity, const char* type, double suppressFor ) {
+	init(severity, type, Error(), suppressFor);
+}
+
+TraceEvent::TraceEvent( Severity severity, const char* type, const StringRef& zoneId ) {
+	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
+	init(severity, type, Error());
+	detailext("ID", zoneId);
+}
+
+TraceEvent::TraceEvent( Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId ) {
+	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
+	init(severity, type, Error());
+	detailext("ID", zoneId);
+}
+
+TraceEvent::TraceEvent( Severity severity, const char* type, const class Error& e, double suppressFor ) {
+	init(severity, type, e, suppressFor);
+	error(e);
+}
+
+TraceEvent::TraceEvent( Severity severity, const char* type, UID id, const class Error& e, double suppressFor ) : id(id) {
+	init(severity, type, e, suppressFor);
+	detail("ID", id);
+	error(e);
+}
+
+TraceEvent::TraceEvent( Severity severity, const char* type, const StringRef& zoneId, const class Error& e, double suppressFor ) {
+	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
+	init(severity, type, e, suppressFor);
+	detailext("ID", zoneId);
+	error(e);
+}
+
+TraceEvent::TraceEvent( Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId, const class Error& e, double suppressFor ) {
+	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
+	init(severity, type, e, suppressFor);
+	detailext("ID", zoneId);
+	error(e);
 }
 
 TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id) {
@@ -612,7 +652,7 @@ TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : i
 }
 
 bool TraceEvent::init( Severity severity, TraceInterval& interval ) {
-	bool result = init( severity, interval.type );
+	bool result = init( severity, interval.type, Error() );
 	switch (interval.count++) {
 		case 0: { detail("BeginPair", interval.pairID); break; }
 		case 1: { detail("EndPair", interval.pairID); break; }
@@ -621,19 +661,24 @@ bool TraceEvent::init( Severity severity, TraceInterval& interval ) {
 	return result;
 }
 
-bool TraceEvent::init( Severity severity, const char* type ) {
+bool TraceEvent::init( Severity severity, const char* type, const Error& e, double suppressFor ) {
 	ASSERT(*type != '\0');
 
 	this->type = type;
 	this->severity = severity;
 
-	enabled = isEnabled(type, severity);
+	enabled = (!g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY) && e.code() != error_code_actor_cancelled;
+	int64_t suppressedEventCount = -1;
+	if(enabled && g_network && suppressFor > 0.0 && isNetworkThread()) {
+		suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, suppressFor);
+		enabled = enabled && suppressedEventCount >= 0;
+	}
 
 	// Backstop to throttle very spammy trace events
 	if (enabled && g_network && !g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
 		if (traceEventThrottlerCache->isAboveThreshold(StringRef((uint8_t*)type, strlen(type)))) {
 			enabled = false;
-			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str()).suppressFor(5);
+			TraceEvent(SevWarnAlways, std::string(TRACE_EVENT_THROTTLE_STARTING_TYPE).append(type).c_str(), 5);
 		}
 		else {
 			traceEventThrottlerCache->addAndExpire(StringRef((uint8_t*)type, strlen(type)), 1, now() + FLOW_KNOBS->TRACE_EVENT_THROTTLER_SAMPLE_EXPIRY);
@@ -668,23 +713,26 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 		tmpEventMetric = nullptr;
 	}
 
+	if(enabled && suppressedEventCount >= 0 && isNetworkThread()) {
+		detail("SuppressedEventCount", suppressedEventCount);
+	}
+	if(enabled && g_network && suppressFor > 0.0 && !isNetworkThread()) {
+		TraceEvent(SevError, "SuppressionFromNonNetworkThread");
+		detail("__InvalidSuppression__", ""); // Choosing a detail name that is unlikely to collide with other names
+	}
+
 	return enabled;
 }
 
-TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
-	if (enabled) {
-		if (error.code() == error_code_actor_cancelled && !includeCancelled) {
-			// Suppress the entire message
-			enabled = false;
-		} else {
-			if (error.isInjectedFault()) {
-				detail("ErrorIsInjectedFault", true);
-				if (severity == SevError) severity = SevWarnAlways;
-			}
-			detail("Error", error.name());
-			detail("ErrorDescription", error.what());
-			detail("ErrorCode", error.code());
+TraceEvent& TraceEvent::error(class Error const& error) {
+	if (enabled && error.isValid()) {
+		if (error.isInjectedFault()) {
+			detail("ErrorIsInjectedFault", true);
+			if (severity == SevError) severity = SevWarnAlways;
 		}
+		detail("Error", error.name());
+		detail("ErrorDescription", error.what());
+		detail("ErrorCode", error.code());
 	}
 	return *this;
 }
@@ -792,40 +840,10 @@ TraceEvent& TraceEvent::trackLatest( const char *trackingKey ){
 	return *this;
 }
 
-TraceEvent& TraceEvent::sample( double sampleRate, bool logSampleRate ) {
-	if(!g_random) {
-		sampleRate = 1.0;
-	}
-	else {
-		enabled = enabled && g_random->random01() < sampleRate;
-	}
-
-	if(enabled && logSampleRate) {
-		detail("SampleRate", sampleRate);
-	}
-
-	return *this;
-}
-
-TraceEvent& TraceEvent::suppressFor( double duration, bool logSuppressedEventCount ) {
-	if(g_network) {
-		if(isNetworkThread()) {
-			int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration);
-			enabled = enabled && suppressedEventCount >= 0;
-			if(enabled && logSuppressedEventCount) {
-				detail("SuppressedEventCount", suppressedEventCount);
-			}
-		}
-		else {
-			TraceEvent(SevError, "SuppressionFromNonNetworkThread");
-			detail("__InvalidSuppression__", ""); // Choosing a detail name that is unlikely to collide with other names
-		}
-	}
-
-	return *this;
-}
-
 TraceEvent& TraceEvent::GetLastError() {
+	if(!enabled) {
+		return *this;
+	}
 #ifdef _WIN32
 	return detailf("WinErrorCode", "%x", ::GetLastError());
 #elif defined(__unixish__)
@@ -842,7 +860,7 @@ unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
 }
 
 TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
-	if (this->severity == SevError) return *this; // We'll backtrace this later in ~TraceEvent
+	if (this->severity == SevError || !enabled) return *this; // We'll backtrace this later in ~TraceEvent
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
@@ -872,7 +890,7 @@ TraceEvent::~TraceEvent() {
 			}
 		}
 	} catch( Error &e ) {
-		TraceEvent(SevError, "TraceEventDestructorError").error(e,true);
+		TraceEvent(SevError, "TraceEventDestructorError", e);
 	}
 	delete tmpEventMetric;
 }

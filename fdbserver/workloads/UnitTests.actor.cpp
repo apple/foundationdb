@@ -102,7 +102,7 @@ struct UnitTestWorkload : TestWorkload {
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
 				.detail("Name", test->name)
 				.detail("File", test->file).detail("Line", test->line)
-				.error(result, true)
+				.error(result)
 				.detail("WallTime", wallTime)
 				.detail("FlowTime", simTime);
 		}

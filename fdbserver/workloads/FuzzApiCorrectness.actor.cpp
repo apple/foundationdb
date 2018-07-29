@@ -67,16 +67,15 @@ struct ExceptionContract {
 		if (i != expected.end() && i->second != Never)
 		{
 			Severity s = (i->second == Possible) ? SevWarn : SevInfo;
-			TraceEvent evt(s, func.c_str());
-			evt.error(e).detail("Thrown", true)
-				.detail("Expected", i->second == Possible ? "possible" : "always").backtrace();
+			TraceEvent evt(s, func.c_str(), e);
+			evt.detail("Thrown", true).detail("Expected", i->second == Possible ? "possible" : "always").backtrace();
 			if (augment)
 				augment(evt);
 			return;
 		}
 
-		TraceEvent evt(SevError, func.c_str());
-		evt.error(e).detail("Thrown", true).detail("Expected", "never").backtrace();
+		TraceEvent evt(SevError, func.c_str(), e);
+		evt.detail("Thrown", true).detail("Expected", "never").backtrace();
 		if (augment)
 			augment(evt);
 		throw e;
@@ -86,8 +85,8 @@ struct ExceptionContract {
 	void handleNotThrown() const {
 		for (auto i : expected) {
 			if (i.second == Always) {
-				TraceEvent evt(SevError, func.c_str());
-				evt.detail("Thrown", false).detail("Expected", "always").error(Error::fromUnvalidatedCode(i.first)).backtrace();
+				TraceEvent evt(SevError, func.c_str(), Error::fromUnvalidatedCode(i.first));
+				evt.detail("Thrown", false).detail("Expected", "always").backtrace();
 				if (augment)
 					augment(evt);
 			}
@@ -248,7 +247,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 			}
 		}
 		} catch (Error &e) {
-			TraceEvent("FuzzLoadAndRunError").error(e).backtrace();
+			TraceEvent("FuzzLoadAndRunError", e).backtrace();
 			throw e;
 		}
 	}
@@ -286,8 +285,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 						try {
 							operations.push_back(testCases[operationType](++self->operationId, self, tr));
 						} catch( Error &e ) {
-							TraceEvent(SevWarn, "IgnoredOperation").error(e)
-								.detail("Operation", operationType).detail("Id", self->operationId);
+							TraceEvent(SevWarn, "IgnoredOperation", e).detail("Operation", operationType).detail("Id", self->operationId);
 						}
 					}
 

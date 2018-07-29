@@ -125,7 +125,7 @@ struct WatchAndWaitWorkload : TestWorkload {
 				}
 			}
 		} catch( Error &e ) {
-			TraceEvent(SevError, "WatchAndWaitError").error(e);
+			TraceEvent(SevError, "WatchAndWaitError", e);
 			throw e;
 		}
 	}

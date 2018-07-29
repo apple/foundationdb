@@ -540,7 +540,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError,"DumpDatabaseError").error(e).detail("Filename", outputFilename);
+		TraceEvent(SevError,"DumpDatabaseError", e).detail("Filename", outputFilename);
 		throw;
 	}
 }
@@ -1495,7 +1495,7 @@ int main(int argc, char* argv[]) {
 					listenError = FlowTransport::transport().bind(publicAddress, listenAddress);
 					if (listenError.isReady()) listenError.get();
 				} catch (Error& e) {
-					TraceEvent("BindError").error(e);
+					TraceEvent("BindError", e);
 					fprintf(stderr, "Error initializing networking with public address %s and listen address %s (%s)\n", publicAddress.toString().c_str(), listenAddress.toString().c_str(), e.what());
 					printHelpTeaser(argv[0]);
 					flushAndExit(FDB_EXIT_ERROR);
@@ -1773,12 +1773,12 @@ int main(int argc, char* argv[]) {
 		flushAndExit(rc);
 	} catch (Error& e) {
 		fprintf(stderr, "Error: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(e);
+		TraceEvent(SevError, "MainError", e);
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	} catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		TraceEvent(SevError, "MainError", unknown_error()).detail("RootException", e.what());
 		//printf("\n%d tests passed; %d tests failed\n", passCount, failCount);
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}

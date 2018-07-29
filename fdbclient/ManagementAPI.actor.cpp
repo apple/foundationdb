@@ -748,7 +748,7 @@ ACTOR Future<CoordinatorsResult::Type> changeQuorum( Database cx, Reference<IQuo
 			Void _ = wait( tr.commit() );
 			ASSERT( false ); //commit should fail, but the value has changed
 		} catch (Error& e) {
-			TraceEvent("RetryQuorumChange").error(e).detail("Retries", retries);
+			TraceEvent("RetryQuorumChange", e).detail("Retries", retries);
 			Void _ = wait( tr.onError(e) );
 			++retries;
 		}
@@ -1018,7 +1018,7 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 			Void _ = wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("IncludeServersError").error(e, true);
+			TraceEvent("IncludeServersError").error(e);
 			Void _ = wait( tr.onError(e) );
 		}
 	}
@@ -1112,7 +1112,7 @@ ACTOR Future<int> setDDMode( Database cx, int mode ) {
 			Void _ = wait( tr.commit() );
 			return oldMode;
 		} catch (Error& e) {
-			TraceEvent("SetDDModeRetrying").error(e);
+			TraceEvent("SetDDModeRetrying", e);
 			Void _ = wait (tr.onError(e));
 		}
 	}

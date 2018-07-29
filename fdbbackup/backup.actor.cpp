@@ -1251,7 +1251,7 @@ ACTOR Future<Void> updateAgentPollRate(Database src, std::string rootKey, std::s
 				*pollDelay = (double)processes / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE;
 			}
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "BackupAgentPollRateUpdateError").error(e);
+			TraceEvent(SevWarn, "BackupAgentPollRateUpdateError", e);
 		}
 		Void _ = wait(delay(CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE_UPDATE_INTERVAL));
 	}
@@ -1306,7 +1306,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest, std::string name
 				pollRateUpdater = updateAgentPollRate(statusUpdateDest, rootKey, name, pollDelay);
 		}
 		catch (Error& e) {
-			TraceEvent(SevWarnAlways, "UnableToWriteStatus").error(e);
+			TraceEvent(SevWarnAlways, "UnableToWriteStatus", e);
 			Void _ = wait(delay(10.0));
 		}
 	}
@@ -1328,7 +1328,7 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 			if (e.code() == error_code_operation_cancelled)
 				throw;
 
-			TraceEvent(SevError, "DA_runAgent").error(e);
+			TraceEvent(SevError, "DA_runAgent", e);
 			fprintf(stderr, "ERROR: DR agent encountered fatal error `%s'\n", e.what());
 
 			Void _ = wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
@@ -1353,7 +1353,7 @@ ACTOR Future<Void> runAgent(Database db) {
 			if (e.code() == error_code_operation_cancelled)
 				throw;
 
-			TraceEvent(SevError, "BA_runAgent").error(e);
+			TraceEvent(SevError, "BA_runAgent", e);
 			fprintf(stderr, "ERROR: backup agent encountered fatal error `%s'\n", e.what());
 
 			Void _ = wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
@@ -2996,10 +2996,10 @@ int main(int argc, char* argv[]) {
 		}
 		#endif
 	} catch (Error& e) {
-		TraceEvent(SevError, "MainError").error(e);
+		TraceEvent(SevError, "MainError", e);
 		status = FDB_EXIT_MAIN_ERROR;
 	} catch (std::exception& e) {
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		TraceEvent(SevError, "MainError", unknown_error()).detail("RootException", e.what());
 		status = FDB_EXIT_MAIN_EXCEPTION;
 	}
 

@@ -126,7 +126,7 @@ ACTOR Future<Void> failureMonitorClientLoop(
 	} catch (Error& e) {
 		if (e.code() == error_code_broken_promise)  // broken promise from clustercontroller means it has died (and hopefully will be replaced)
 			return Void();
-		TraceEvent(SevError, "FailureMonitorClientError").error(e);
+		TraceEvent(SevError, "FailureMonitorClientError", e);
 		throw;  // goes nowhere
 	}
 }

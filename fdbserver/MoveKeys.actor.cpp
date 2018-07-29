@@ -313,11 +313,10 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 					Void _ = wait( tr.onError(e) );
 
 					if(retries%10 == 0) {
-						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId)
+						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId, err)
 							.detail("Keys", printable(keys))
 							.detail("BeginKey", printable(begin))
-							.detail("NumTries", retries)
-							.error(err);
+							.detail("NumTries", retries);
 					}
 				}
 			}
@@ -333,7 +332,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 			.detail("Shards", shards)
 			.detail("MaxRetries", maxRetries);
 	} catch( Error& e ) {
-		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e, true);
+		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e);
 		throw;
 	}
 
@@ -616,8 +615,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 					Void _ = wait( tr.onError(error) );
 					retries++;
 					if(retries%10 == 0) {
-						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_FinishMoveKeysRetrying", relocationIntervalId)
-							.error(err)
+						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn, "RelocateShard_FinishMoveKeysRetrying", relocationIntervalId, err)
 							.detail("KeyBegin", printable(keys.begin))
 							.detail("KeyEnd", printable(keys.end))
 							.detail("IterationBegin", printable(begin))
@@ -629,7 +627,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 
 		TraceEvent(SevDebug, interval.end(), relocationIntervalId);
 	} catch(Error &e) {
-		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e, true);
+		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e);
 		throw;
 	}
 	return Void();
@@ -813,7 +811,7 @@ ACTOR Future<Void> removeStorageServer( Database cx, UID serverID, MoveKeysLock 
 		} catch (Error& e) {
 			state Error err = e;
 			Void _ = wait( tr.onError(e) );
-			TraceEvent("RemoveStorageServerRetrying").error(err);
+			TraceEvent("RemoveStorageServerRetrying", err);
 		}
 	}
 }

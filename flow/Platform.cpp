@@ -1408,7 +1408,7 @@ static int ModifyPrivilege( const char* szPrivilege, bool fEnable )
 						   TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
 						   &hToken ))
 	{
-		TraceEvent( SevWarn, "OpenProcessTokenError" ).error(large_alloc_failed()).GetLastError();
+		TraceEvent( SevWarn, "OpenProcessTokenError", large_alloc_failed() ).GetLastError();
 		return ERROR_FUNCTION_FAILED;
 	}
 
@@ -1418,7 +1418,7 @@ static int ModifyPrivilege( const char* szPrivilege, bool fEnable )
 								&luid ))
 	{
 		CloseHandle( hToken );
-		TraceEvent( SevWarn, "LookupPrivilegeValue" ).error(large_alloc_failed()).GetLastError();
+		TraceEvent( SevWarn, "LookupPrivilegeValue", large_alloc_failed() ).GetLastError();
 		return ERROR_FUNCTION_FAILED;
 	}
 
@@ -1438,7 +1438,7 @@ static int ModifyPrivilege( const char* szPrivilege, bool fEnable )
 							   NULL,
 							   NULL))
 	{
-		TraceEvent( SevWarn, "AdjustTokenPrivileges" ).error(large_alloc_failed()).GetLastError();
+		TraceEvent( SevWarn, "AdjustTokenPrivileges", large_alloc_failed() ).GetLastError();
 		hr = ERROR_FUNCTION_FAILED;
 	}
 
@@ -1683,7 +1683,7 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		INJECT_FAULT( io_error, "atomicReplace" );
 	}
 	catch(Error &e) {
-		TraceEvent(SevWarn, "AtomicReplace").detail("Path", path).error(e).GetLastError();
+		TraceEvent(SevWarn, "AtomicReplace", e).detail("Path", path).GetLastError();
 		if (f) fclose(f);
 		throw;
 	}

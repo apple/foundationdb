@@ -257,7 +257,7 @@ struct StatusWorkload : TestWorkload {
 			}
 			catch (Error& e) {
 				if (e.code() != error_code_actor_cancelled) {
-					TraceEvent(SevError, "StatusWorkloadError").error(e);
+					TraceEvent(SevError, "StatusWorkloadError", e);
 					++self->errors;
 				}
 				throw;

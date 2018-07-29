@@ -212,11 +212,11 @@ public:
 
 	Future<Void> logError(Database cx, Error e, std::string const &details, void *taskInstance = nullptr) {
 		if(!uid.isValid()) {
-			TraceEvent(SevError, "FileRestoreErrorNoUID").error(e).detail("Description", details);
+			TraceEvent(SevError, "FileRestoreErrorNoUID", e).detail("Description", details);
 			return Void();
 		}
-		TraceEvent t(SevWarn, "FileRestoreError");
-		t.error(e).detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		TraceEvent t(SevWarn, "FileRestoreError", e);
+		t.detail("RestoreUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
 		// These should not happen
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();
@@ -595,13 +595,12 @@ namespace fileBackup {
 			return results;
 
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock")
+			TraceEvent(SevWarn, "FileRestoreCorruptRangeFileBlock", e)
 				.detail("Filename", file->getFilename())
 				.detail("BlockOffset", offset)
 				.detail("BlockLen", len)
 				.detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-				.detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset)
-				.error(e);
+				.detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
 			throw;
 		}
 	}
@@ -689,13 +688,12 @@ namespace fileBackup {
 			return results;
 
 		} catch(Error &e) {
-			TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock")
+			TraceEvent(SevWarn, "FileRestoreCorruptLogFileBlock", e)
 				.detail("Filename", file->getFilename())
 				.detail("BlockOffset", offset)
 				.detail("BlockLen", len)
 				.detail("ErrorRelativeOffset", reader.rptr - buf.begin())
-				.detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset)
-				.error(e);
+				.detail("ErrorAbsoluteOffset", reader.rptr - buf.begin() + offset);
 			throw;
 		}
 	}
@@ -1046,12 +1044,11 @@ namespace fileBackup {
 			state Key beginKey = Params.beginKey().get(task);
 			state Key endKey = Params.endKey().get(task);
 
-			TraceEvent("FileBackupRangeStart")
+			TraceEvent("FileBackupRangeStart", 60)
 				.detail("BackupUID", BackupConfig(task).getUid())
 				.detail("BeginKey", Params.beginKey().get(task).printable())
 				.detail("EndKey", Params.endKey().get(task).printable())
-				.detail("TaskKey", task->key.printable())
-				.suppressFor(60, true);
+				.detail("TaskKey", task->key.printable());
 
 			// When a key range task saves the last chunk of progress and then the executor dies, when the task continues
 			// its beginKey and endKey will be equal but there is no work to be done.
@@ -1110,15 +1107,14 @@ namespace fileBackup {
 						Void _ = wait(rangeFile.writeKey(nextKey));
 
 						bool usedFile = wait(finishRangeFile(outFile, cx, task, taskBucket, KeyRangeRef(beginKey, nextKey), outVersion));
-						TraceEvent("FileBackupWroteRangeFile")
+						TraceEvent("FileBackupWroteRangeFile", 60)
 							.detail("BackupUID", backup.getUid())
 							.detail("Size", outFile->size())
 							.detail("Keys", nrKeys)
 							.detail("ReadVersion", outVersion)
 							.detail("BeginKey", beginKey.printable())
 							.detail("EndKey", nextKey.printable())
-							.detail("AddedFileToMap", usedFile)
-							.suppressFor(60, true);
+							.detail("AddedFileToMap", usedFile);
 
 						nrKeys = 0;
 						beginKey = nextKey;
@@ -1163,13 +1159,12 @@ namespace fileBackup {
 			for (int idx = 0; idx < keys.size(); ++idx) {
 				if (nextKey != keys[idx]) {
 					addTaskVector.push_back(addTask(tr, taskBucket, task, task->getPriority(), nextKey, keys[idx], TaskCompletionKey::joinWith(onDone)));
-					TraceEvent("FileBackupRangeSplit")
+					TraceEvent("FileBackupRangeSplit", 60)
 						.detail("BackupUID", BackupConfig(task).getUid())
 						.detail("BeginKey", Params.beginKey().get(task).printable())
 						.detail("EndKey", Params.endKey().get(task).printable())
 						.detail("SliceBeginKey", nextKey.printable())
-						.detail("SliceEndKey", keys[idx].printable())
-						.suppressFor(60, true);
+						.detail("SliceEndKey", keys[idx].printable());
 				}
 				nextKey = keys[idx];
 			}
@@ -1196,12 +1191,11 @@ namespace fileBackup {
 
 			Void _ = wait(taskBucket->finish(tr, task));
 
-			TraceEvent("FileBackupRangeFinish")
+			TraceEvent("FileBackupRangeFinish", 60)
 				.detail("BackupUID", BackupConfig(task).getUid())
 				.detail("BeginKey", Params.beginKey().get(task).printable())
 				.detail("EndKey", Params.endKey().get(task).printable())
-				.detail("TaskKey", task->key.printable())
-				.suppressFor(60, true);
+				.detail("TaskKey", task->key.printable());
 
 			return Void();
 		}
@@ -1535,14 +1529,13 @@ namespace fileBackup {
 				state int64_t oldBatchSize = snapshotBatchSize.get();
 				state int64_t newBatchSize = oldBatchSize + rangesToAdd.size();
 
-				// Now add the selected ranges in a single transaction.  
+				// Now add the selected ranges in a single transaction.
 				tr->reset();
 				loop {
 					try {
-						TraceEvent("FileBackupSnapshotDispatchAddingTasks")
+						TraceEvent("FileBackupSnapshotDispatchAddingTasks", 2)
 							.detail("TasksToAdd", rangesToAdd.size())
-							.detail("NewBatchSize", newBatchSize)
-							.suppressFor(2, true);
+							.detail("NewBatchSize", newBatchSize);
 
 						tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1608,13 +1601,12 @@ namespace fileBackup {
 								int priority = latestSnapshotEndVersion.present() ? 0 : 1;
 								addTaskFutures.push_back(success(BackupRangeTaskFunc::addTask(tr, taskBucket, task, priority, range.begin, range.end, TaskCompletionKey::joinWith(snapshotBatchFuture), Reference<TaskFuture>(), scheduledVersion)));
 
-								TraceEvent("FileBackupSnapshotRangeDispatched")
+								TraceEvent("FileBackupSnapshotRangeDispatched", 2)
 									.detail("BackupUID", config.getUid())
 									.detail("CurrentVersion", recentReadVersion)
 									.detail("ScheduledVersion", scheduledVersion)
 									.detail("BeginKey", range.begin.printable())
-									.detail("EndKey", range.end.printable())
-									.suppressFor(2);
+									.detail("EndKey", range.end.printable());
 							}
 							else {
 								// This shouldn't happen because if the transaction was already done or if another execution
@@ -1812,13 +1804,12 @@ namespace fileBackup {
 
 			Void _ = wait(outFile->finish());
 
-			TraceEvent("FileBackupWroteLogFile")
+			TraceEvent("FileBackupWroteLogFile", 60)
 				.detail("BackupUID", config.getUid())
 				.detail("Size", outFile->size())
 				.detail("BeginVersion", beginVersion)
 				.detail("EndVersion", endVersion)
-				.detail("LastReadVersion", latestVersion)
-				.suppressFor(60, true);
+				.detail("LastReadVersion", latestVersion);
 
 			Params.fileSize().set(task, outFile->size());
 
@@ -2016,11 +2007,10 @@ namespace fileBackup {
 
 			state Version endVersion = std::max<Version>( tr->getReadVersion().get() + 1, beginVersion + (CLIENT_KNOBS->BACKUP_MAX_LOG_RANGES-1)*CLIENT_KNOBS->LOG_RANGE_BLOCK_SIZE );
 
-			TraceEvent("FileBackupLogDispatch")
+			TraceEvent("FileBackupLogDispatch", 60)
 				.detail("BeginVersion", beginVersion)
 				.detail("EndVersion", endVersion)
-				.detail("RestorableVersion", restorableVersion.orDefault(-1))
-				.suppressFor(60, true);
+				.detail("RestorableVersion", restorableVersion.orDefault(-1));
 
 			state Reference<TaskFuture> logDispatchBatchFuture = futureBucket->future(tr);
 
@@ -2039,11 +2029,10 @@ namespace fileBackup {
 
 			Void _ = wait(taskBucket->finish(tr, task));
 
-			TraceEvent("FileBackupLogsDispatchContinuing")
+			TraceEvent("FileBackupLogsDispatchContinuing", 60)
 				.detail("BackupUID", config.getUid())
 				.detail("BeginVersion", beginVersion)
-				.detail("EndVersion", endVersion)
-				.suppressFor(60, true);
+				.detail("EndVersion", endVersion);
 
 			return Void();
 		}
@@ -2436,15 +2425,14 @@ namespace fileBackup {
 			state int64_t readOffset = Params.readOffset().get(task);
 			state int64_t readLen = Params.readLen().get(task);
 
-			TraceEvent("FileRestoreRangeStart")
+			TraceEvent("FileRestoreRangeStart", 60)
 				.detail("RestoreUID", restore.getUid())
 				.detail("FileName", rangeFile.fileName)
 				.detail("FileVersion", rangeFile.version)
 				.detail("FileSize", rangeFile.fileSize)
 				.detail("ReadOffset", readOffset)
 				.detail("ReadLen", readLen)
-				.detail("TaskInstance", (uint64_t)this)
-				.suppressFor(60, true);
+				.detail("TaskInstance", (uint64_t)this);
 
 			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
 			state Future<Reference<IBackupContainer>> bc;
@@ -2553,7 +2541,7 @@ namespace fileBackup {
 
 					Void _ = wait(tr->commit());
 
-					TraceEvent("FileRestoreCommittedRange")
+					TraceEvent("FileRestoreCommittedRange", 60)
 						.detail("RestoreUID", restore.getUid())
 						.detail("FileName", rangeFile.fileName)
 						.detail("FileVersion", rangeFile.version)
@@ -2568,8 +2556,7 @@ namespace fileBackup {
 						.detail("DataSize", data.size())
 						.detail("Bytes", txBytes)
 						.detail("OriginalFileRange", printable(originalFileRange))
-						.detail("TaskInstance", (uint64_t)this)
-						.suppressFor(60, true);
+						.detail("TaskInstance", (uint64_t)this);
 
 					// Commit succeeded, so advance starting point
 					start = i;
@@ -2649,7 +2636,7 @@ namespace fileBackup {
 			state int64_t readOffset = Params.readOffset().get(task);
 			state int64_t readLen = Params.readLen().get(task);
 
-			TraceEvent("FileRestoreLogStart")
+			TraceEvent("FileRestoreLogStart", 60)
 				.detail("RestoreUID", restore.getUid())
 				.detail("FileName", logFile.fileName)
 				.detail("FileBeginVersion", logFile.version)
@@ -2657,8 +2644,7 @@ namespace fileBackup {
 				.detail("FileSize", logFile.fileSize)
 				.detail("ReadOffset", readOffset)
 				.detail("ReadLen", readLen)
-				.detail("TaskInstance", (uint64_t)this)
-				.suppressFor(60, true);
+				.detail("TaskInstance", (uint64_t)this);
 
 			state Reference<ReadYourWritesTransaction> tr( new ReadYourWritesTransaction(cx) );
 			state Reference<IBackupContainer> bc;
@@ -2717,7 +2703,7 @@ namespace fileBackup {
 
 					Void _ = wait(tr->commit());
 
-					TraceEvent("FileRestoreCommittedLog")
+					TraceEvent("FileRestoreCommittedLog", 60)
 						.detail("RestoreUID", restore.getUid())
 						.detail("FileName", logFile.fileName)
 						.detail("FileBeginVersion", logFile.version)
@@ -2730,8 +2716,7 @@ namespace fileBackup {
 						.detail("EndIndex", i)
 						.detail("DataSize", data.size())
 						.detail("Bytes", txBytes)
-						.detail("TaskInstance", (uint64_t)this)
-						.suppressFor(60, true);
+						.detail("TaskInstance", (uint64_t)this);
 
 					// Commit succeeded, so advance starting point
 					start = i;
@@ -2980,11 +2965,10 @@ namespace fileBackup {
 				beginFile = beginFile + '\x00';
 				beginBlock = 0;
 
-				TraceEvent("FileRestoreDispatchedFile")
+				TraceEvent("FileRestoreDispatchedFile", 60)
 					.detail("RestoreUID", restore.getUid())
 					.detail("FileName", f.fileName)
-					.detail("TaskInstance", (uint64_t)this)
-					.suppressFor(60, true);
+					.detail("TaskInstance", (uint64_t)this);
 			}
 
 			// If no blocks were dispatched then the next dispatch task should run now and be joined with the allPartsDone future

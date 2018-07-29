@@ -118,7 +118,7 @@ struct WatchesWorkload : TestWorkload {
 				extraLoc += 1000;
 				//TraceEvent("WatcherInitialSetup").detail("Watch", printable(watchKey)).detail("Ver", tr.getCommittedVersion());
 			} catch( Error &e ) {
-				//TraceEvent("WatcherInitialSetupError").detail("ExtraLoc", extraLoc).error(e);
+				//TraceEvent("WatcherInitialSetupError", e).detail("ExtraLoc", extraLoc);
 				Void _ = wait( tr.onError(e) );
 			}
 		}

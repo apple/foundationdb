@@ -231,7 +231,7 @@ struct ReadWriteWorkload : KVWorkload {
 				Void _ = wait( delay( 1.0 ) );
 			}
 		} catch( Error &e ) {
-			TraceEvent(SevError, "FailedToDumpWorkers").error(e);
+			TraceEvent(SevError, "FailedToDumpWorkers", e);
 			throw;
 		}
 	}

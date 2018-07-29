@@ -449,7 +449,7 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 	catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
-		TraceEvent(SevError, "ClientStatusFetchError").error(e);
+		TraceEvent(SevError, "ClientStatusFetchError", e);
 		clientMessages.push_back(makeMessage("status_incomplete_client", "Could not retrieve client status information."));
 
 		// quorum_reachable will be false because clientStatusFetcher won't throw and it's the only thing would change it.
@@ -495,7 +495,7 @@ ACTOR Future<StatusObject> statusFetcherImpl( Reference<ClusterConnectionFile> f
 			statusObj["cluster"] = statusObjCluster;
 		}
 		catch (Error &e){
-			TraceEvent(e.code() == error_code_all_alternatives_failed ? SevInfo : SevError, "ClusterStatusFetchError").error(e);
+			TraceEvent(e.code() == error_code_all_alternatives_failed ? SevInfo : SevError, "ClusterStatusFetchError", e);
 			// Set client.messages to an array of one message
 			clientMessages.push_back(makeMessage("status_incomplete_cluster", "Could not retrieve cluster status information."));
 		}

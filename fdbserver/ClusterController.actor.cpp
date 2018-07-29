@@ -631,7 +631,7 @@ public:
 				if (e.code() != error_code_no_more_servers || regions[1].priority < 0) {
 					throw;
 				}
-				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id).error(e);
+				TraceEvent(SevWarn, "AttemptingRecruitmentInRemoteDC", id, e);
 				auto reply = findWorkersForConfiguration(req, regions[1].dcId);
 				if(!setPrimaryDesired) {
 					vector<Optional<Key>> dcPriority;
@@ -1104,11 +1104,11 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				Void _ = wait( delay(SERVER_KNOBS->MASTER_SPIN_DELAY) );
 			}
 		} catch (Error& e) {
-			TraceEvent("CCWDB", cluster->id).error(e, true).detail("Master", iMaster.id());
+			TraceEvent("CCWDB", cluster->id).error(e).detail("Master", iMaster.id());
 			if (e.code() == error_code_actor_cancelled) throw;
 
 			bool ok = e.code() == error_code_no_more_servers;
-			TraceEvent(ok ? SevWarn : SevError,"ClusterWatchDatabaseRetrying", cluster->id).error(e);
+			TraceEvent(ok ? SevWarn : SevError,"ClusterWatchDatabaseRetrying", cluster->id, e);
 			if (!ok)
 				throw e;
 			Void _ = wait( delay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY) );
@@ -1198,9 +1198,9 @@ void checkOutstandingRecruitmentRequests( ClusterControllerData* self ) {
 			self->outstandingRecruitmentRequests.pop_back();
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
-				TraceEvent(SevWarn, "RecruitTLogMatchingSetNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitTLogMatchingSetNotAvailable", self->id, e);
 			} else {
-				TraceEvent(SevError, "RecruitTLogsRequestError", self->id).error(e);
+				TraceEvent(SevError, "RecruitTLogsRequestError", self->id, e);
 				throw;
 			}
 		}
@@ -1216,9 +1216,9 @@ void checkOutstandingRemoteRecruitmentRequests( ClusterControllerData* self ) {
 			self->outstandingRemoteRecruitmentRequests.pop_back();
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
-				TraceEvent(SevWarn, "RecruitRemoteTLogMatchingSetNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitRemoteTLogMatchingSetNotAvailable", self->id, e);
 			} else {
-				TraceEvent(SevError, "RecruitRemoteTLogsRequestError", self->id).error(e);
+				TraceEvent(SevError, "RecruitRemoteTLogsRequestError", self->id, e);
 				throw;
 			}
 		}
@@ -1247,9 +1247,9 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id, e);
 			} else {
-				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
+				TraceEvent(SevError, "RecruitStorageError", self->id, e);
 				throw;
 			}
 		}
@@ -1273,7 +1273,7 @@ ACTOR Future<Void> doCheckOutstandingRequests( ClusterControllerData* self ) {
 		}
 	} catch( Error &e ) {
 		if(e.code() != error_code_operation_failed && e.code() != error_code_no_more_servers) {
-			TraceEvent(SevError, "CheckOutstandingError").error(e);
+			TraceEvent(SevError, "CheckOutstandingError", e);
 		}
 	}
 	return Void();
@@ -1430,7 +1430,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			for(auto it=currentStatus.begin(); it!=currentStatus.end(); it++)
 				if (it->second.penultimateRequestTime) {
 					delays.push_back(it->second.latency(t));
-					TraceEvent("FDData", uniqueID).detail("S", it->first.toString()).detail("L", it->second.latency(t));
+					//TraceEvent("FDData", uniqueID).detail("S", it->first.toString()).detail("L", it->second.latency(t));
 				}
 			int pivot = std::max(0, (int)delays.size()-2);
 			double pivotDelay = 0;
@@ -1440,7 +1440,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			}
 			pivotDelay = std::max(0.0, pivotDelay - FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
 
-			TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
+			//TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
 			//TraceEvent("FailureDetectionAcceptableDelay").detail("Delay", acceptableDelay1000);
 
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {
@@ -1486,9 +1486,9 @@ void clusterRecruitStorage( ClusterControllerData* self, RecruitStorageRequest r
 	} catch ( Error& e ) {
 		if (e.code() == error_code_no_more_servers) {
 			self->outstandingStorageRequests.push_back( std::make_pair(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT) );
-			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id).error(e);
+			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id, e);
 		} else {
-			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
+			TraceEvent(SevError, "RecruitStorageError", self->id, e);
 			throw;  // Any other error will bring down the cluster controller
 		}
 	}
@@ -1504,13 +1504,13 @@ ACTOR Future<Void> clusterRecruitFromConfiguration( ClusterControllerData* self,
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers && now() - self->startTime >= SERVER_KNOBS->WAIT_FOR_GOOD_RECRUITMENT_DELAY) {
 				self->outstandingRecruitmentRequests.push_back( req );
-				TraceEvent(SevWarn, "RecruitFromConfigurationNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitFromConfigurationNotAvailable", self->id, e);
 				return Void();
 			} else if(e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 				//recruitment not good enough, try again
 			}
 			else {
-				TraceEvent(SevError, "RecruitFromConfigurationError", self->id).error(e);
+				TraceEvent(SevError, "RecruitFromConfigurationError", self->id, e);
 				throw;  // goodbye, cluster controller
 			}
 		}
@@ -1528,13 +1528,13 @@ ACTOR Future<Void> clusterRecruitRemoteFromConfiguration( ClusterControllerData*
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers && self->remoteStartTime.present() && now() - self->remoteStartTime.get() >= SERVER_KNOBS->WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY) {
 				self->outstandingRemoteRecruitmentRequests.push_back( req );
-				TraceEvent(SevWarn, "RecruitRemoteFromConfigurationNotAvailable", self->id).error(e);
+				TraceEvent(SevWarn, "RecruitRemoteFromConfigurationNotAvailable", self->id, e);
 				return Void();
 			} else if(e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 				//recruitment not good enough, try again
 			}
 			else {
-				TraceEvent(SevError, "RecruitRemoteFromConfigurationError", self->id).error(e);
+				TraceEvent(SevError, "RecruitRemoteFromConfigurationError", self->id, e);
 				throw;  // goodbye, cluster controller
 			}
 		}
@@ -1824,7 +1824,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 			}
 		}
 		catch (Error &e) {
-			TraceEvent(SevError, "StatusServerError").error(e);
+			TraceEvent(SevError, "StatusServerError", e);
 			throw e;
 		}
 	}
@@ -2259,7 +2259,7 @@ ACTOR Future<Void> clusterController( ServerCoordinators coordinators, Reference
 			if (inRole)
 				endRole(cci.id(), "ClusterController", "Error", e.code() == error_code_actor_cancelled || e.code() == error_code_coordinators_changed, e);
 			else
-				TraceEvent( e.code() == error_code_coordinators_changed ? SevInfo : SevError, "ClusterControllerCandidateError", cci.id()).error(e);
+				TraceEvent( e.code() == error_code_coordinators_changed ? SevInfo : SevError, "ClusterControllerCandidateError", cci.id(), e);
 			throw;
 		}
 	}

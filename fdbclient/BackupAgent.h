@@ -748,11 +748,11 @@ public:
 
 	Future<Void> logError(Database cx, Error e, std::string details, void *taskInstance = nullptr) {
 		if(!uid.isValid()) {
-			TraceEvent(SevError, "FileBackupErrorNoUID").error(e).detail("Description", details);
+			TraceEvent(SevError, "FileBackupErrorNoUID", e).detail("Description", details);
 			return Void();
 		}
-		TraceEvent t(SevWarn, "FileBackupError");
-		t.error(e).detail("BackupUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
+		TraceEvent t(SevWarn, "FileBackupError", e);
+		t.detail("BackupUID", uid).detail("Description", details).detail("TaskInstance", (uint64_t)taskInstance);
 		// These should not happen
 		if(e.code() == error_code_key_not_found)
 			t.backtrace();

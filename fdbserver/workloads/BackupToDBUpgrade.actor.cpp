@@ -121,7 +121,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			TraceEvent("DRU_DoBackupInDifferentialMode").detail("Tag", printable(tag));
 		} catch (Error &e) {
-			TraceEvent("DRU_DoBackupSubmitBackupError").detail("Tag", printable(tag)).error(e);
+			TraceEvent("DRU_DoBackupSubmitBackupError", e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) {
 				throw e;
 			}
@@ -233,7 +233,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				break;
 			}
 			catch (Error &e) {
-				TraceEvent("DRU_CheckError").error(e);
+				TraceEvent("DRU_CheckError", e);
 				Void _ = wait(tr->onError(e));
 			}
 		}
@@ -259,7 +259,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 			TraceEvent("DRU_DoBackupWaitEnd").detail("BackupTag", printable(self->backupTag));
 		}
 		catch (Error& e) {
-			TraceEvent(SevError, "BackupToDBUpgradeSetuEerror").error(e);
+			TraceEvent(SevError, "BackupToDBUpgradeSetuEerror", e);
 			throw;
 		}
 
@@ -425,7 +425,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					Void _ = wait( tr2->commit() );
 					break;
 				} catch( Error &e ) {
-					TraceEvent("DRU_RestoreSetupError").error(e, true);
+					TraceEvent("DRU_RestoreSetupError").error(e);
 					Void _ = wait( tr2->onError(e) );
 				}
 			}
@@ -441,7 +441,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				Void _ = wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
 			}
 			catch (Error& e) {
-				TraceEvent("DRU_RestoreSubmitBackupError").detail("Tag", printable(self->restoreTag)).error(e);
+				TraceEvent("DRU_RestoreSubmitBackupError", e).detail("Tag", printable(self->restoreTag));
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 					throw;
 			}
@@ -459,7 +459,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				g_simulator.drAgents = ISimulator::NoBackupAgents;
 			}
 		} catch (Error& e) {
-			TraceEvent(SevError, "BackupAndRestoreCorrectnessError").error(e);
+			TraceEvent(SevError, "BackupAndRestoreCorrectnessError", e);
 			throw;
 		}
 

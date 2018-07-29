@@ -74,7 +74,7 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface masterWorker
 		sscanf(md.getValue("TotalBytes").c_str(), "%lld", &dataInFlight);
 		return dataInFlight;
 	} catch( Error &e ) {
-		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract DataInFlight").error(e);
+		TraceEvent("QuietDatabaseFailure", masterWorker.id(), e).detail("Reason", "Failed to extract DataInFlight");
 		throw;
 	}
 
@@ -358,13 +358,13 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			}
 		} catch (Error& e) {
 			if( e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
-				TraceEvent(("QuietDatabase" + phase + "Error").c_str()).error(e);
+				TraceEvent(("QuietDatabase" + phase + "Error").c_str(), e);
 
 			//Client invalid operation occurs if we don't get back a message from one of the servers, often corrected by retrying
 			if(e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
 				throw;
 
-			TraceEvent(("QuietDatabase" + phase + "Retry").c_str()).error(e);
+			TraceEvent(("QuietDatabase" + phase + "Retry").c_str(), e);
 			Void _ = wait(delay(1.0));
 			numSuccesses = 0;
 		}

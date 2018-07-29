@@ -204,7 +204,7 @@ struct _IncludeVersion {
 		ar >> v;
 		if (v < minValidProtocolVersion) {
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "InvalidSerializationVersion").detailf("Version", "%llx", v).error(err);
+			TraceEvent(SevError, "InvalidSerializationVersion", err).detailf("Version", "%llx", v);
 			throw err;
 		}
 		if (v > currentProtocolVersion) {
@@ -212,7 +212,7 @@ struct _IncludeVersion {
 			// particular data structures (e.g. to support mismatches between client and server versions when the client
 			// must deserialize zookeeper and database structures)
 			auto err = incompatible_protocol_version();
-			TraceEvent(SevError, "FutureProtocolVersion").detailf("Version", "%llx", v).error(err);
+			TraceEvent(SevError, "FutureProtocolVersion", err).detailf("Version", "%llx", v);
 			throw err;
 		}
 		ar.setProtocolVersion(v);

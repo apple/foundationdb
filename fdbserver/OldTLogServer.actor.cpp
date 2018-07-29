@@ -1005,7 +1005,7 @@ namespace oldTLog {
 		logData->queueCommittedVersion.set(ver);
 		self->queueCommitEnd.set(commitNumber);
 
-		TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
+		//TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 
 		return Void();
 	}
@@ -1405,7 +1405,7 @@ namespace oldTLog {
 			Void _ = wait( error );
 			throw internal_error();
 		} catch (Error& e) {
-			TraceEvent("TLogError", tlogId).error(e, true);
+			TraceEvent("TLogError", tlogId).error(e);
 
 			for( auto& it : self.id_data ) {
 				if(it.second->recoverySuccessful.canBeSet()) {

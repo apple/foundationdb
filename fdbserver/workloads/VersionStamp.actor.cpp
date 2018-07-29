@@ -290,7 +290,7 @@ struct VersionStampWorkload : TestWorkload {
 						tr = ReadYourWritesTransaction(cx_is_primary ? cx : extraDB);
 						break;
 					} else if (err.code() == error_code_commit_unknown_result) {
-						//TraceEvent("VST_CommitUnknownResult").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).error(e);
+						//TraceEvent("VST_CommitUnknownResult", e).detail("Key", printable(key)).detail("VsKey", printable(versionStampKey));
 						loop {
 							state ReadYourWritesTransaction cur_tr(cx_is_primary ? cx : extraDB);
 							cur_tr.setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -326,7 +326,7 @@ struct VersionStampWorkload : TestWorkload {
 				}
 
 				if (error) {
-					TraceEvent("VST_CommitFailed").detail("Key", printable(key)).detail("VsKey", printable(versionStampKey)).error(err);
+					TraceEvent("VST_CommitFailed", err).detail("Key", printable(key)).detail("VsKey", printable(versionStampKey));
 					Void _ = wait(tr.onError(err));
 					continue;
 				}

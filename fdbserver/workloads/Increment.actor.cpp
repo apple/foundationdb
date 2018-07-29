@@ -104,8 +104,7 @@ struct Increment : TestWorkload {
 				self->totalLatency += now() - tstart;
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
-				TraceEvent(SevError, "IncrementClient").error(e);
+			TraceEvent(SevError, "IncrementClient", e);
 			throw;
 		}
 	}
@@ -154,7 +153,7 @@ struct Increment : TestWorkload {
 					break;
 				} catch (Error& e) {
 					retryCount++;
-					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "IncrementCheckError").error(e);
+					TraceEvent(retryCount > 20 ? SevWarnAlways : SevWarn, "IncrementCheckError", e);
 					Void _ = wait(tr.onError(e));
 				}
 			}

@@ -41,7 +41,7 @@ Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value,
 		TraceEvent(type).detail(key, value);
 		return val;
 	} catch( Error &e ) {
-		if(traceErrors) TraceEvent(type).detail(key, value).error(e,true);
+		if(traceErrors) TraceEvent(type).detail(key, value).error(e);
 		throw;
 	}
 }
@@ -54,11 +54,11 @@ Future<T> traceAfterCall(Future<T> what, const char* type, const char* key, X fu
 		try {
 			TraceEvent(type).detail(key, func(val));
 		} catch( Error &e ) {
-			TraceEvent(SevError, "TraceAfterCallError").error(e);
+			TraceEvent(SevError, "TraceAfterCallError", e);
 		}
 		return val;
 	} catch( Error &e ) {
-		if(traceErrors) TraceEvent(type).error(e,true);
+		if(traceErrors) TraceEvent(type).error(e);
 		throw;
 	}
 }
@@ -71,7 +71,7 @@ Future<Optional<T>> stopAfter( Future<T> what ) {
 		ret = Optional<T>(_);
 	} catch (Error& e) {
 		bool ok = e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete || e.code() == error_code_actor_cancelled;
-		TraceEvent(ok ? SevInfo : SevError, "StopAfterError").error(e);
+		TraceEvent(ok ? SevInfo : SevError, "StopAfterError", e);
 		if(!ok) {
 			fprintf(stderr, "Fatal Error: %s\n", e.what());
 			ret = Optional<T>();
@@ -991,7 +991,7 @@ Future<T> reportErrorsExcept( Future<T> in, const char* context, UID id, std::se
 		return t;
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && (!pExceptErrors || !pExceptErrors->count(e.code())))
-			TraceEvent(SevError, context, id).error(e);
+			TraceEvent(SevError, context, id, e);
 		throw;
 	}
 }

@@ -418,9 +418,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 						ASSERT(dataSizeLimit >= CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->KEY_SIZE_LIMIT);
 					}
 					else {
-						TraceEvent(SevWarnAlways, "ClientTrInfoErrorCommit")
-							.error(e)
-							.detail("TxBytes", txBytes);
+						TraceEvent(SevWarnAlways, "ClientTrInfoErrorCommit", e).detail("TxBytes", txBytes);
 						commitQ.clear();
 						txBytes = 0;
 						throw;
@@ -443,7 +441,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 				throw;
 			}
 			cx->clientStatusUpdater.outStatusQ.clear();
-			TraceEvent(SevWarnAlways, "UnableToWriteClientStatus").error(e);
+			TraceEvent(SevWarnAlways, "UnableToWriteClientStatus", e);
 			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
 			// Hence destroy the transacation before sleeping to give a chance for the actor to be cleanedup if the Database is destroyed by the user.
 			tr = Transaction();
@@ -521,12 +519,10 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 			}
 		}
 	} catch( Error& e ) {
-		TraceEvent(SevError, "MonitorClientInfoError")
+		TraceEvent(SevError, "MonitorClientInfoError", e)
 			.detail("DBName", printable(dbName))
 			.detail("ConnectionFile", ccf && ccf->canGetFilename() ? ccf->getFilename() : "")
-			.detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "")
-			.error(e);
-
+			.detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "");
 		throw;
 	}
 }
@@ -816,9 +812,7 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			try {
 				tlsOptions->set_verify_peers({ value.get().toString() });
 			} catch( Error& e ) {
-				TraceEvent(SevWarnAlways, "TLSValidationSetError")
-					.detail("Input", value.get().toString() )
-					.error( e );
+				TraceEvent(SevWarnAlways, "TLSValidationSetError", e).detail("Input", value.get().toString() );
 				throw invalid_option_value();
 			}
 			break;
@@ -1269,12 +1263,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
-				if(e.code() != error_code_actor_cancelled) {
-					TraceEvent(SevInfo, "GetKeyError")
-						.error(e)
-						.detail("AtKey", printable(k.getKey()))
-						.detail("Offset", k.offset);
-				}
+				TraceEvent(SevInfo, "GetKeyError", e).detail("AtKey", printable(k.getKey())).detail("Offset", k.offset);
 				throw e;
 			}
 		}
@@ -1295,7 +1284,7 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevError, "WaitForCommittedVersionError").error(e);
+		TraceEvent(SevError, "WaitForCommittedVersionError", e);
 		throw;
 	}
 }
@@ -1489,10 +1478,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 					Void _ = wait( delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID ));
 					break;
 				} else {
-					TraceEvent(SevInfo, "GetExactRangeError")
-						.error(e)
-						.detail("ShardBegin", printable(locations[shard].first.begin))
-						.detail("ShardEnd", printable(locations[shard].first.end));
+					TraceEvent(SevInfo, "GetExactRangeError", e).detail("ShardBegin", printable(locations[shard].first.begin)).detail("ShardEnd", printable(locations[shard].first.end));
 					throw;
 				}
 			}
@@ -1773,7 +1759,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 			} catch ( Error& e ) {
 				if( info.debugID.present() ) {
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getRange.Error");
-					TraceEvent("TransactionDebugError", info.debugID.get()).error(e);
+					TraceEvent("TransactionDebugError", info.debugID.get(), e);
 				}
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 					(e.code() == error_code_transaction_too_old && readVersion == latestVersion))
@@ -2311,7 +2297,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		TraceEvent("CheckWritesSuccess").detail("Version", version).detail("MutationCount", mCount).detail("CheckedRanges", checkedRanges);
 	} catch( Error& e ) {
 		bool ok = e.code() == error_code_transaction_too_old || e.code() == error_code_future_version;
-		TraceEvent( ok ? SevWarn : SevError, "CheckWritesFailed" ).error(e);
+		TraceEvent( ok ? SevWarn : SevError, "CheckWritesFailed", e);
 		throw;
 	}
 }
@@ -2332,7 +2318,7 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 			Void _ = wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("CommitDummyTransactionError").error(e,true).detail("Key", printable(range.begin)).detail("Retries", retries);
+			TraceEvent("CommitDummyTransactionError").error(e).detail("Key", printable(range.begin)).detail("Retries", retries);
 			Void _ = wait( tr.onError(e) );
 		}
 		++retries;
@@ -2453,7 +2439,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 			throw commit_unknown_result();
 		} else {
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed && e.code() != error_code_database_locked && e.code() != error_code_proxy_memory_limit_exceeded)
-				TraceEvent(SevError, "TryCommitError").error(e);
+				TraceEvent(SevError, "TryCommitError", e);
 			if (trLogInfo)
 				trLogInfo->addLog(FdbClientLogEvents::EventCommitError(startTime, static_cast<int>(e.code()), req));
 			throw;
@@ -2482,12 +2468,11 @@ Future<Void> Transaction::commitMutations() {
 
 		size_t transactionSize = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() + tr.transaction.write_conflict_ranges.expectedSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
-			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction", 1.0)
 				.detail("Size", transactionSize)
 				.detail("NumMutations", tr.transaction.mutations.size())
 				.detail("ReadConflictSize", tr.transaction.read_conflict_ranges.expectedSize())
-				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize())
-				.suppressFor(1.0);
+				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize());
 		}
 
 		if(!apiVersionAtLeast(300)) {
@@ -2536,11 +2521,11 @@ Future<Void> Transaction::commitMutations() {
 		}
 		return commitResult;
 	} catch( Error& e ) {
-		TraceEvent("ClientCommitError").error(e);
+		TraceEvent("ClientCommitError", e);
 		return Future<Void>( e );
 	} catch( ... ) {
 		Error e( error_code_unknown_error );
-		TraceEvent("ClientCommitError").error(e);
+		TraceEvent("ClientCommitError", e);
 		return Future<Void>( e );
 	}
 }
@@ -2693,8 +2678,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			}
 		}
 	} catch (Error& e) {
-		if( e.code() != error_code_broken_promise && e.code() != error_code_actor_cancelled )
-			TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
+		if( e.code() != error_code_broken_promise )
+			TraceEvent(SevError, "GetConsistentReadVersionError", e);
 		throw;
 	}
 }
@@ -2931,7 +2916,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-					TraceEvent(SevError, "WaitStorageMetricsError").error(e);
+					TraceEvent(SevError, "WaitStorageMetricsError", e);
 					throw;
 				}
 				cx->invalidateCache(keys);
@@ -2999,7 +2984,7 @@ ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, 
 				return results;
 			} catch (Error& e) {
 				if (e.code() != error_code_wrong_shard_server && e.code() != error_code_all_alternatives_failed) {
-					TraceEvent(SevError, "SplitStorageMetricsError").error(e);
+					TraceEvent(SevError, "SplitStorageMetricsError", e);
 					throw;
 				}
 				cx->invalidateCache( keys );

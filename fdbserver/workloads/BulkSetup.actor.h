@@ -49,7 +49,7 @@ Future<bool> checkRangeSimpleValueSize( Database cx, T* workload, uint64_t begin
 			Void _ = wait( success( first ) && success( last ) );
 			return first.get().present() && last.get().present();
 		} catch (Error& e) {
-			TraceEvent("CheckRangeError").detail("Begin", begin).detail("End", end).error(e);
+			TraceEvent("CheckRangeError", e).detail("Begin", begin).detail("End", end);
 			Void _ = wait( tr.onError(e) );
 		}
 	}
@@ -289,7 +289,7 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 		Void _ = wait( success(insertionTimes) && waitForAll(fs) );
 	} catch(Error& e) {
 		if( e.code() == error_code_operation_failed ) {
-			TraceEvent(SevError, "BulkSetupFailed").error(e);
+			TraceEvent(SevError, "BulkSetupFailed", e);
 		}
 		throw;
 	}
@@ -325,7 +325,7 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 		} catch (Error& e) {
 			if( e.code() == error_code_actor_cancelled )
 				throw;
-			TraceEvent("DynamicWarmingError").error(e);
+			TraceEvent("DynamicWarmingError", e);
 			if( postSetupWarming > 0 )
 				Void _ = wait( timeout( databaseWarmer( cx ), postSetupWarming, Void() ) );
 		}

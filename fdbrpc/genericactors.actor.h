@@ -160,7 +160,7 @@ Future<ErrorOr<X>> waitValueOrSignal( Future<X> value, Future<Void> signal, Endp
 			}
 		} catch (Error& e) {
 			if (signal.isError()) {
-				TraceEvent(SevError, "WaitValueOrSignalError").error(signal.getError());
+				TraceEvent(SevError, "WaitValueOrSignalError", signal.getError());
 				return ErrorOr<X>(internal_error());
 			}
 
