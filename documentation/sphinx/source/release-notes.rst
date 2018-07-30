@@ -13,7 +13,7 @@ Bindings
 Fixes
 -----
 
-* Sometimes the multi-version client would not reconnect to the cluster after it was upgraded. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
+* Sometimes the multi-version client would not reconnect to the cluster after the database was upgraded. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
 
 5.2.6
 =====
