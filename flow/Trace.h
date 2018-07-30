@@ -205,7 +205,7 @@ private:
 	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
 
-	bool init( Severity, const char* type, const class Error& e, double suppressFor = 0.0 );
+	bool init( Severity, const char* type, bool isEnabled, double suppressFor = 0.0 );
 	bool init( Severity, struct TraceInterval& );
 };
 

@@ -550,93 +550,93 @@ bool traceFileIsOpen() {
 }
 
 TraceEvent::TraceEvent( const char* type, UID id, double suppressFor ) : id(id) {
-	init(SevInfo, type, Error(), suppressFor);
+	init(SevInfo, type, true, suppressFor);
 	detail("ID", id);
 }
 
 TraceEvent::TraceEvent( const char* type, double suppressFor ) {
-	init(SevInfo, type, Error(), suppressFor);
+	init(SevInfo, type, true, suppressFor);
 }
 
 TraceEvent::TraceEvent( const char* type, const StringRef& zoneId ) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
-	init(SevInfo, type, Error());
+	init(SevInfo, type, true);
 	detailext("ID", zoneId);
 }
 
 TraceEvent::TraceEvent( const char* type, const Optional<Standalone<StringRef>>& zoneId ) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
-	init(SevInfo, type, Error());
+	init(SevInfo, type, true);
 	detailext("ID", zoneId);
 }
 
 TraceEvent::TraceEvent( const char* type, const class Error& e, double suppressFor ) {
-	init(SevInfo, type, e, suppressFor);
+	init(SevInfo, type, e.code() != error_code_actor_cancelled, suppressFor);
 	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( const char* type, UID id, const class Error& e, double suppressFor ) : id(id) {
-	init(SevInfo, type, e, suppressFor);
+	init(SevInfo, type, e.code() != error_code_actor_cancelled, suppressFor);
 	detail("ID", id);
 	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( const char* type, const StringRef& zoneId, const class Error& e, double suppressFor ) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
-	init(SevInfo, type, e, suppressFor);
+	init(SevInfo, type, e.code() != error_code_actor_cancelled, suppressFor);
 	detailext("ID", zoneId);
 	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( const char* type, const Optional<Standalone<StringRef>>& zoneId, const class Error& e, double suppressFor ) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
-	init(SevInfo, type, e, suppressFor);
+	init(SevInfo, type, e.code() != error_code_actor_cancelled, suppressFor);
 	detailext("ID", zoneId);
 	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id, double suppressFor ) : id(id) {
-	init(severity, type, Error(), suppressFor);
+	init(severity, type, true, suppressFor);
 	detail("ID", id);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, double suppressFor ) {
-	init(severity, type, Error(), suppressFor);
+	init(severity, type, true, suppressFor);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, const StringRef& zoneId ) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
-	init(severity, type, Error());
+	init(severity, type, true);
 	detailext("ID", zoneId);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId ) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
-	init(severity, type, Error());
+	init(severity, type, true);
 	detailext("ID", zoneId);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, const class Error& e, double suppressFor ) {
-	init(severity, type, e, suppressFor);
+	init(severity, type, e.code() != error_code_actor_cancelled, suppressFor);
 	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id, const class Error& e, double suppressFor ) : id(id) {
-	init(severity, type, e, suppressFor);
+	init(severity, type, e.code() != error_code_actor_cancelled, suppressFor);
 	detail("ID", id);
 	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, const StringRef& zoneId, const class Error& e, double suppressFor ) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
-	init(severity, type, e, suppressFor);
+	init(severity, type, e.code() != error_code_actor_cancelled, suppressFor);
 	detailext("ID", zoneId);
 	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId, const class Error& e, double suppressFor ) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
-	init(severity, type, e, suppressFor);
+	init(severity, type, e.code() != error_code_actor_cancelled, suppressFor);
 	detailext("ID", zoneId);
 	errorUnconditional(e);
 }
@@ -652,7 +652,7 @@ TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : i
 }
 
 bool TraceEvent::init( Severity severity, TraceInterval& interval ) {
-	bool result = init( severity, interval.type, Error() );
+	bool result = init( severity, interval.type, true );
 	switch (interval.count++) {
 		case 0: { detail("BeginPair", interval.pairID); break; }
 		case 1: { detail("EndPair", interval.pairID); break; }
@@ -661,13 +661,13 @@ bool TraceEvent::init( Severity severity, TraceInterval& interval ) {
 	return result;
 }
 
-bool TraceEvent::init( Severity severity, const char* type, const Error& e, double suppressFor ) {
+bool TraceEvent::init( Severity severity, const char* type, bool isEnabled, double suppressFor ) {
 	ASSERT(*type != '\0');
 
 	this->type = type;
 	this->severity = severity;
 
-	enabled = (!g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY) && e.code() != error_code_actor_cancelled;
+	enabled = isEnabled && (!g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY);
 	int64_t suppressedEventCount = -1;
 	if(enabled && g_network && suppressFor > 0.0 && isNetworkThread()) {
 		suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, suppressFor);
