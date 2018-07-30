@@ -1898,7 +1898,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 				break;
 			} catch (Error& e) {
-				TraceEvent("FKBlockFail", data->thisServerID, 1.0).detail("FKID", interval.pairID).error(e);
+				TraceEvent("FKBlockFail", data->thisServerID, 1.0).detail("FKID", interval.pairID).errorUnconditional(e);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
 					Version lastFV = fetchVersion;
@@ -2007,7 +2007,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error &e){
-		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e).detail("Version", data->version.get());
+		TraceEvent(SevDebug, interval.end(), data->thisServerID).errorUnconditional(e).detail("Version", data->version.get());
 
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
@@ -3274,7 +3274,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		 e.code() == error_code_file_not_found ||
 		 e.code() == error_code_actor_cancelled )
 	{
-		TraceEvent("StorageServerTerminated", self.thisServerID).error(e);
+		TraceEvent("StorageServerTerminated", self.thisServerID).errorUnconditional(e);
 		return true;
 	} else
 		return false;

@@ -160,7 +160,7 @@ struct TraceEvent {
 	static void setNetworkThread();
 	static bool isNetworkThread();
 
-	TraceEvent& error(const class Error& e);
+	TraceEvent& errorUnconditional(const class Error& e);
 
 	TraceEvent& detail( std::string key, std::string value );
 	TraceEvent& detail( std::string key, double value );

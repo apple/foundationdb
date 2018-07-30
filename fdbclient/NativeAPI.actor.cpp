@@ -2318,7 +2318,7 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 			Void _ = wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("CommitDummyTransactionError").error(e).detail("Key", printable(range.begin)).detail("Retries", retries);
+			TraceEvent("CommitDummyTransactionError").errorUnconditional(e).detail("Key", printable(range.begin)).detail("Retries", retries);
 			Void _ = wait( tr.onError(e) );
 		}
 		++retries;

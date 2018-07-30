@@ -141,7 +141,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 			}
 			return Void();
 		} catch( Error &e ) {
-			TraceEvent(SevError, "FastWatchError").error(e);
+			TraceEvent(SevError, "FastWatchError").errorUnconditional(e);
 			throw;
 		}
 	}

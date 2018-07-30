@@ -332,7 +332,7 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 			.detail("Shards", shards)
 			.detail("MaxRetries", maxRetries);
 	} catch( Error& e ) {
-		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e);
+		TraceEvent(SevDebug, interval.end(), relocationIntervalId).errorUnconditional(e);
 		throw;
 	}
 
@@ -627,7 +627,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 
 		TraceEvent(SevDebug, interval.end(), relocationIntervalId);
 	} catch(Error &e) {
-		TraceEvent(SevDebug, interval.end(), relocationIntervalId).error(e);
+		TraceEvent(SevDebug, interval.end(), relocationIntervalId).errorUnconditional(e);
 		throw;
 	}
 	return Void();

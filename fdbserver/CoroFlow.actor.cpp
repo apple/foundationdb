@@ -156,7 +156,7 @@ class WorkPool : public IThreadPool, public ReferenceCounted<WorkPool<Threadlike
 				stopped.send(Void());
 				return;
 			} catch (Error& e) {
-				TraceEvent("WorkPoolError").error(e);
+				TraceEvent("WorkPoolError").errorUnconditional(e);
 				error.sendError(e);
 			} catch (...) {
 				TraceEvent("WorkPoolError");

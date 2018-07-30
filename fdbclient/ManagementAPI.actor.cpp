@@ -1018,7 +1018,7 @@ ACTOR Future<Void> includeServers( Database cx, vector<AddressExclusion> servers
 			Void _ = wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
-			TraceEvent("IncludeServersError").error(e);
+			TraceEvent("IncludeServersError").errorUnconditional(e);
 			Void _ = wait( tr.onError(e) );
 		}
 	}

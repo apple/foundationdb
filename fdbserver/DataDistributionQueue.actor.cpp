@@ -1045,7 +1045,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(relocateShardInterval.end(), masterId).error(e);
+		TraceEvent(relocateShardInterval.end(), masterId).errorUnconditional(e);
 		if( !signalledTransferComplete )
 			dataTransferComplete.send( rd );
 

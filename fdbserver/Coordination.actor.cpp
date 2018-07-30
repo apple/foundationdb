@@ -437,7 +437,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder) {
 		Void _ = wait( localGenerationReg(myInterface, &store) || leaderServer(myLeaderInterface, &store) || store.getError() );
 		throw internal_error();
 	} catch (Error& e) {
-		TraceEvent("CoordinationServerError", myID).error(e);
+		TraceEvent("CoordinationServerError", myID).errorUnconditional(e);
 		throw;
 	}
 }

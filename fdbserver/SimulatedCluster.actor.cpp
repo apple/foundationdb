@@ -270,7 +270,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 				if(e.code() != error_code_actor_cancelled)
 					printf("SimulatedFDBDTerminated: %s\n", e.what());
 				ASSERT( destructed || g_simulator.getCurrentProcess() == process ); // simulatedFDBD catch called on different process
-				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed ? SevInfo : SevError, "SimulatedFDBDTerminated", localities.zoneId()).error(e);
+				TraceEvent(e.code() == error_code_actor_cancelled || e.code() == error_code_file_not_found || destructed ? SevInfo : SevError, "SimulatedFDBDTerminated", localities.zoneId()).errorUnconditional(e);
 			}
 
 			TraceEvent("SimulatedFDBDDone", localities.zoneId()).detail("Cycles", cycles).detail("RandomId", randomId)
@@ -282,7 +282,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(
 			if (!onShutdown.isReady())
 				onShutdown = ISimulator::InjectFaults;
 		} catch (Error& e) {
-			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError", localities.zoneId()).detail("RandomId", randomId).error(e);
+			TraceEvent(destructed ? SevInfo : SevError, "SimulatedFDBDRebooterError", localities.zoneId()).detail("RandomId", randomId).errorUnconditional(e);
 			onShutdown = e;
 		}
 

@@ -423,7 +423,7 @@ ACTOR Future<Void> logRouter(
 	catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed)
 		{
-			TraceEvent("LogRouterTerminated", interf.id()).error(e);
+			TraceEvent("LogRouterTerminated", interf.id()).errorUnconditional(e);
 			return Void();
 		}
 		throw;

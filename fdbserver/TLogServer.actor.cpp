@@ -1865,7 +1865,7 @@ bool tlogTerminated( TLogData* self, IKeyValueStore* persistentData, TLogQueue* 
 		 e.code() == error_code_recruitment_failed ||
 		 e.code() == error_code_file_not_found )
 	{
-		TraceEvent("TLogTerminated", self->dbgid).error(e);
+		TraceEvent("TLogTerminated", self->dbgid).errorUnconditional(e);
 		return true;
 	} else
 		return false;
@@ -2078,7 +2078,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 		}
 	} catch (Error& e) {
 		self.terminated = true;
-		TraceEvent("TLogError", tlogId).error(e);
+		TraceEvent("TLogError", tlogId).errorUnconditional(e);
 		endRole(tlogId, "SharedTLog", "Error", true);
 		if(recovered.canBeSet()) recovered.send(Void());
 

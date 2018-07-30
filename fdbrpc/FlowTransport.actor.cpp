@@ -415,10 +415,10 @@ struct Peer : NonCopyable {
 				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed );
 
 				if(self->compatible) {
-					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID(), 1.0).detail("PeerAddr", self->destination).error(e);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID(), 1.0).detail("PeerAddr", self->destination).errorUnconditional(e);
 				}
 				else {
-					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).errorUnconditional(e);
 				}
 
 				if (conn) {

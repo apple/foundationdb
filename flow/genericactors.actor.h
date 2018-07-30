@@ -41,7 +41,7 @@ Future<T> traceAfter(Future<T> what, const char* type, const char* key, X value,
 		TraceEvent(type).detail(key, value);
 		return val;
 	} catch( Error &e ) {
-		if(traceErrors) TraceEvent(type).detail(key, value).error(e);
+		if(traceErrors) TraceEvent(type).detail(key, value).errorUnconditional(e);
 		throw;
 	}
 }
@@ -58,7 +58,7 @@ Future<T> traceAfterCall(Future<T> what, const char* type, const char* key, X fu
 		}
 		return val;
 	} catch( Error &e ) {
-		if(traceErrors) TraceEvent(type).error(e);
+		if(traceErrors) TraceEvent(type).errorUnconditional(e);
 		throw;
 	}
 }

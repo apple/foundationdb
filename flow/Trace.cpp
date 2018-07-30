@@ -572,27 +572,27 @@ TraceEvent::TraceEvent( const char* type, const Optional<Standalone<StringRef>>&
 
 TraceEvent::TraceEvent( const char* type, const class Error& e, double suppressFor ) {
 	init(SevInfo, type, e, suppressFor);
-	error(e);
+	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( const char* type, UID id, const class Error& e, double suppressFor ) : id(id) {
 	init(SevInfo, type, e, suppressFor);
 	detail("ID", id);
-	error(e);
+	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( const char* type, const StringRef& zoneId, const class Error& e, double suppressFor ) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
 	init(SevInfo, type, e, suppressFor);
 	detailext("ID", zoneId);
-	error(e);
+	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( const char* type, const Optional<Standalone<StringRef>>& zoneId, const class Error& e, double suppressFor ) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
 	init(SevInfo, type, e, suppressFor);
 	detailext("ID", zoneId);
-	error(e);
+	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id, double suppressFor ) : id(id) {
@@ -618,27 +618,27 @@ TraceEvent::TraceEvent( Severity severity, const char* type, const Optional<Stan
 
 TraceEvent::TraceEvent( Severity severity, const char* type, const class Error& e, double suppressFor ) {
 	init(severity, type, e, suppressFor);
-	error(e);
+	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, UID id, const class Error& e, double suppressFor ) : id(id) {
 	init(severity, type, e, suppressFor);
 	detail("ID", id);
-	error(e);
+	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, const StringRef& zoneId, const class Error& e, double suppressFor ) {
 	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
 	init(severity, type, e, suppressFor);
 	detailext("ID", zoneId);
-	error(e);
+	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId, const class Error& e, double suppressFor ) {
 	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
 	init(severity, type, e, suppressFor);
 	detailext("ID", zoneId);
-	error(e);
+	errorUnconditional(e);
 }
 
 TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id) {
@@ -724,7 +724,7 @@ bool TraceEvent::init( Severity severity, const char* type, const Error& e, doub
 	return enabled;
 }
 
-TraceEvent& TraceEvent::error(class Error const& error) {
+TraceEvent& TraceEvent::errorUnconditional(class Error const& error) {
 	if (enabled && error.isValid()) {
 		if (error.isInjectedFault()) {
 			detail("ErrorIsInjectedFault", true);

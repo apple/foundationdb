@@ -1104,7 +1104,7 @@ ACTOR Future<Void> clusterWatchDatabase( ClusterControllerData* cluster, Cluster
 				Void _ = wait( delay(SERVER_KNOBS->MASTER_SPIN_DELAY) );
 			}
 		} catch (Error& e) {
-			TraceEvent("CCWDB", cluster->id).error(e).detail("Master", iMaster.id());
+			TraceEvent("CCWDB", cluster->id).errorUnconditional(e).detail("Master", iMaster.id());
 			if (e.code() == error_code_actor_cancelled) throw;
 
 			bool ok = e.code() == error_code_no_more_servers;

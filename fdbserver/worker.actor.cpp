@@ -119,7 +119,7 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 			if (e.isError()) throw e.getError(); else return e.get();
 		}
 		when (ErrorOr<Void> e = wait( storeError )) {
-			TraceEvent("WorkerTerminatingByIOError", id).error(e.getError());
+			TraceEvent("WorkerTerminatingByIOError", id).errorUnconditional(e.getError());
 			actor.cancel();
 			// file_not_found can occur due to attempting to open a partially deleted DiskQueue, which should not be reported SevError.
 			if (e.getError().code() == error_code_file_not_found) {
@@ -410,7 +410,7 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 			.detail("As", as)
 			.detail("Reason", reason);
 		if(e.code() != invalid_error_code)
-			ev.error(e);
+			ev.errorUnconditional(e);
 
 		ev.trackLatest( (id.shortString() + ".Role").c_str() );
 	}
@@ -422,7 +422,7 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 		err.detail("Reason", reason);
 
 		if(e.code() != invalid_error_code) {
-			err.error(e);
+			err.errorUnconditional(e);
 		}
 	}
 

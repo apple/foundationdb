@@ -1569,7 +1569,7 @@ public:
 					currentProcess->cpuTicks = 0;
 				}*/
 			} catch (Error& e) {
-				TraceEvent(SevError, "UnhandledSimulationEventError").error(e);
+				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnconditional(e);
 				killProcess(t.machine, KillInstantly);
 			}
 

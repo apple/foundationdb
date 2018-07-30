@@ -1405,7 +1405,7 @@ namespace oldTLog {
 			Void _ = wait( error );
 			throw internal_error();
 		} catch (Error& e) {
-			TraceEvent("TLogError", tlogId).error(e);
+			TraceEvent("TLogError", tlogId).errorUnconditional(e);
 
 			for( auto& it : self.id_data ) {
 				if(it.second->recoverySuccessful.canBeSet()) {

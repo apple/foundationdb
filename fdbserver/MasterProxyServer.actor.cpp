@@ -1379,7 +1379,7 @@ ACTOR Future<Void> masterProxyServer(
 			e.code() == error_code_master_tlog_failed || e.code() == error_code_coordinators_changed || e.code() == error_code_coordinated_state_conflict ||
 			e.code() == error_code_new_coordinators_timed_out)
 		{
-			TraceEvent("MasterProxyTerminated", proxy.id()).error(e);
+			TraceEvent("MasterProxyTerminated", proxy.id()).errorUnconditional(e);
 			return Void();
 		}
 		throw;

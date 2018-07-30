@@ -311,7 +311,7 @@ ACTOR Future<Void> resolver(
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_worker_removed) {
-			TraceEvent("ResolverTerminated", resolver.id()).error(e);
+			TraceEvent("ResolverTerminated", resolver.id()).errorUnconditional(e);
 			return Void();
 		}
 		throw;

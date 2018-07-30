@@ -209,7 +209,7 @@ ACTOR Future<Void> trackShardBytes(
 
 				shardSize->set( metrics );
 			} catch( Error &e ) {
-				//TraceEvent("ShardSizeUpdateError").detail("Begin", printable(keys.begin)).detail("End", printable(keys.end)).detail("TrackerID", trackerID).error(e);
+				//TraceEvent("ShardSizeUpdateError").detail("Begin", printable(keys.begin)).detail("End", printable(keys.end)).detail("TrackerID", trackerID).errorUnconditional(e);
 				Void _ = wait( tr.onError(e) );
 			}
 		}

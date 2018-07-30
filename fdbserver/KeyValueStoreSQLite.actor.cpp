@@ -1832,7 +1832,7 @@ private:
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
 				.detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown")
-				.error(e);
+				.errorUnconditional(e);
 			error = e;
 		}
 
