@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+5.2.7
+=====
+
+Bindings
+--------
+
+* The go bindings now caches database connections on a per-cluster basis. `(Issue #607) <https://github.com/apple/foundationdb/issues/607>`_
+
 5.2.6
 =====
 
