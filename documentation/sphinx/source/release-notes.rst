@@ -10,6 +10,11 @@ Bindings
 
 * The go bindings now caches database connections on a per-cluster basis. `(Issue #607) <https://github.com/apple/foundationdb/issues/607>`_
 
+Fixes
+-----
+
+* Sometimes the multi-version client would not reconnect to the cluster after it was upgraded. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
+
 5.2.6
 =====
 
