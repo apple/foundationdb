@@ -64,6 +64,12 @@ using std::make_pair;
 NetworkOptions networkOptions;
 Reference<TLSOptions> tlsOptions;
 
+static void initTLSOptions() {
+	if (!tlsOptions) {
+		tlsOptions = Reference<TLSOptions>(new TLSOptions());
+	}
+}
+
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
@@ -783,36 +789,45 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		case FDBNetworkOptions::TLS_PLUGIN:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_cert_file( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_CERT_BYTES:
+			initTLSOptions();
 			tlsOptions->set_cert_data( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_CA_PATH:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_ca_file( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_CA_BYTES:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_ca_data(value.get().toString());
 			break;
 		case FDBNetworkOptions::TLS_PASSWORD:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_key_password(value.get().toString());
 			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_key_file( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_KEY_BYTES:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_key_data( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			try {
 				tlsOptions->set_verify_peers({ value.get().toString() });
 			} catch( Error& e ) {
@@ -871,7 +886,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	FlowTransport::createInstance(transportId);
 	Net2FileSystem::newFileSystem();
 
-	tlsOptions = Reference<TLSOptions>( new TLSOptions );
+	initTLSOptions();
 
 #ifndef TLS_DISABLED
 	tlsOptions->register_network();
