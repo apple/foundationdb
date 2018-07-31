@@ -82,7 +82,7 @@ public:
 		if (_stat( filename.c_str(), &buf ) != 0) {
 			throw io_error();
 		}
-		return buf->st_mtime;
+		return buf.st_mtime;
 	}
 
 	virtual void addref() { ReferenceCounted<AsyncFileWinASIO>::addref(); }
