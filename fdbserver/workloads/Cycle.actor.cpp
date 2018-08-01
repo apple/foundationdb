@@ -130,8 +130,7 @@ struct CycleWorkload : TestWorkload {
 				self->totalLatency += now() - tstart;
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
-				TraceEvent(SevError, "CycleClient").error(e);
+			TraceEvent(SevError, "CycleClient").error(e);
 			throw;
 		}
 	}

@@ -97,14 +97,14 @@ ACTOR Future<Void> getRate(UID myID, MasterInterface master, int64_t* inTransact
 		when(GetRateInfoReply rep = wait(reply)) {
 			reply = Never();
 			*outTransactionRate = rep.transactionRate;
-			TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
+			//TraceEvent("MasterProxyRate", myID).detail("Rate", rep.transactionRate).detail("Lease", rep.leaseDuration).detail("ReleasedTransactions", *inTransactionCount - lastTC);
 			lastTC = *inTransactionCount;
 			leaseTimeout = delay(rep.leaseDuration);
 			nextRequestTimer = delayJittered(rep.leaseDuration / 2);
 		}
 		when(Void _ = wait(leaseTimeout)) {
 			*outTransactionRate = 0;
-			TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
+			//TraceEvent("MasterProxyRate", myID).detail("Rate", 0).detail("Lease", "Expired");
 			leaseTimeout = Never();
 		}
 	}
