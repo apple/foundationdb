@@ -239,7 +239,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 				}
 				catch (Error &e) {
 					if (e.code() == error_code_timed_out)
-						TraceEvent(SevWarn, "TaskBucketCorrectness").error(e);
+						TraceEvent(SevWarn, "TaskBucketCorrectness", e);
 					else
 						Void _ = wait(tr->onError(e));
 				}
@@ -251,7 +251,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			}
 		}
 		catch (Error &e) {
-			TraceEvent(SevError, "TaskBucketCorrectness").error(e);
+			TraceEvent(SevError, "TaskBucketCorrectness", e);
 			Void _ = wait(tr->onError(e));
 		}
 

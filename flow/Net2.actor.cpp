@@ -240,7 +240,7 @@ public:
 		try {
 			if (error) {
 				// Log the error...
-				TraceEvent(SevWarn, errContext, errID).detail("Message", error.value()).suppressFor(1.0);
+				TraceEvent(SevWarn, errContext, errID, 1.0).detail("Message", error.value());
 				p.sendError( connection_failed() );
 			} else
 				p.send( Void() );
@@ -411,15 +411,15 @@ private:
 		boost::system::error_code error;
 		socket.close(error);
 		if (error)
-			TraceEvent(SevWarn, "N2_CloseError", id).detail("Message", error.value()).suppressFor(1.0);
+			TraceEvent(SevWarn, "N2_CloseError", id, 1.0).detail("Message", error.value());
 	}
 
 	void onReadError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_ReadError", id).detail("Message", error.value()).suppressFor(1.0);
+		TraceEvent(SevWarn, "N2_ReadError", id, 1.0).detail("Message", error.value());
 		closeSocket();
 	}
 	void onWriteError( const boost::system::error_code& error ) {
-		TraceEvent(SevWarn, "N2_WriteError", id).detail("Message", error.value()).suppressFor(1.0);
+		TraceEvent(SevWarn, "N2_WriteError", id, 1.0).detail("Message", error.value());
 		closeSocket();
 	}
 };
@@ -626,9 +626,9 @@ void Net2::run() {
 			try {
 				(*task)();
 			} catch (Error& e) {
-				TraceEvent(SevError, "TaskError").error(e);
+				TraceEvent(SevError, "TaskError", e);
 			} catch (...) {
-				TraceEvent(SevError, "TaskError").error(unknown_error());
+				TraceEvent(SevError, "TaskError", unknown_error());
 			}
 
 			if (check_yield(TaskMaxPriority, true)) { ++countYields; break; }
@@ -900,15 +900,15 @@ Reference<IListener> Net2::listen( NetworkAddress localAddr ) {
 			x = invalid_local_address();
 		else
 			x = bind_failed();
-		TraceEvent("Net2ListenError").detail("Message", e.what()).error(x);
+		TraceEvent("Net2ListenError", x).detail("Message", e.what());
 		throw x;
 	} catch (std::exception const& e) {
 		Error x = unknown_error();
-		TraceEvent("Net2ListenError").detail("Message", e.what()).error(x);
+		TraceEvent("Net2ListenError", x).detail("Message", e.what());
 		throw x;
 	} catch (...) {
 		Error x = unknown_error();
-		TraceEvent("Net2ListenError").error(x);
+		TraceEvent("Net2ListenError", x);
 		throw x;
 	}
 }

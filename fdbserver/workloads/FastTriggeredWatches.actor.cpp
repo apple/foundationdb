@@ -87,7 +87,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 				//TraceEvent("FTWSetEnd").detail("Key", printable(key)).detail("Value", printable(value)).detail("Ver", tr.getCommittedVersion());
 				return tr.getCommittedVersion();
 			} catch( Error &e ) {
-				//TraceEvent("FTWSetError").detail("Key", printable(key)).detail("Value", printable(value)).error(e);
+				//TraceEvent("FTWSetError", e).detail("Key", printable(key)).detail("Value", printable(value));
 				Void _ = wait( tr.onError(e) );
 			}
 		}
@@ -128,7 +128,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 						watchEnd = now();
 						first = false;
 					} catch( Error &e ) {
-						//TraceEvent("FTWWatchError").detail("Key", printable(setKey)).error(e);
+						//TraceEvent("FTWWatchError", e).detail("Key", printable(setKey));
 						Void _ = wait( tr.onError(e) );
 					}
 				}
@@ -141,7 +141,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 			}
 			return Void();
 		} catch( Error &e ) {
-			TraceEvent(SevError, "FastWatchError").error(e,true);
+			TraceEvent(SevError, "FastWatchError").errorUnconditional(e);
 			throw;
 		}
 	}

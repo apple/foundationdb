@@ -581,7 +581,7 @@ private:
 			return Void();
 		} catch( Error &e ) {
 			bool ok = e.code() == error_code_operation_cancelled || e.code() == error_code_file_not_found;
-			TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).error(e, true);
+			TraceEvent(ok ? SevInfo : SevError, "ErrorDuringRecovery", dbgid).errorUnconditional(e);
 			throw e;
 		}
 	}

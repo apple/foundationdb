@@ -129,10 +129,10 @@ public:
 		try {
 			func();
 		} catch (Error& e) {
-			TraceEvent(SevError, "NewMachineError").error(e);
+			TraceEvent(SevError, "NewMachineError", e);
 			killProcess(currentProcess, KillInstantly);
 		} catch (...) {
-			TraceEvent(SevError, "NewMachineError").error(unknown_error());
+			TraceEvent(SevError, "NewMachineError", unknown_error());
 			killProcess(currentProcess, KillInstantly);
 		}
 		std::swap(m, currentProcess);

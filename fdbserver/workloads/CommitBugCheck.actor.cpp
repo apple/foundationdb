@@ -63,7 +63,7 @@ struct CommitBugWorkload : TestWorkload
 					break;
 				}
 				catch(Error &e) {
-					TraceEvent("CommitBugSetVal1Error").error(e);
+					TraceEvent("CommitBugSetVal1Error", e);
 					TEST(e.code() == error_code_commit_unknown_result); //Commit unknown result
 					Void _ = wait(tr.onError(e));
 				}
@@ -76,7 +76,7 @@ struct CommitBugWorkload : TestWorkload
 					break;
 				}
 				catch(Error &e) {
-					TraceEvent("CommitBugSetVal2Error").error(e);
+					TraceEvent("CommitBugSetVal2Error", e);
 					Void _ = wait(tr.onError(e));
 				}
 			}
@@ -93,7 +93,7 @@ struct CommitBugWorkload : TestWorkload
 					break;
 				}
 				catch(Error &e) {
-					TraceEvent("CommitBugGetValError").error(e);
+					TraceEvent("CommitBugGetValError", e);
 					Void _ = wait(tr.onError(e));
 				}
 			}
@@ -105,7 +105,7 @@ struct CommitBugWorkload : TestWorkload
 					break;
 				}
 				catch(Error &e) {
-					TraceEvent("CommitBugClearValError").error(e);
+					TraceEvent("CommitBugClearValError", e);
 					Void _ = wait(tr.onError(e));
 				}
 			}
@@ -160,7 +160,7 @@ struct CommitBugWorkload : TestWorkload
 					else {
 						TEST(true); //Commit conflict
 
-						TraceEvent("CommitBug2Error").detail("AttemptedNum", i+1).error(e);
+						TraceEvent("CommitBug2Error", e).detail("AttemptedNum", i+1);
 						Void _ = wait(tr.onError(e));
 					}
 				}

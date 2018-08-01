@@ -114,7 +114,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			}
 			catch(Error& e)
 			{
-				TraceEvent("ConsistencyCheck_QuietDatabaseError").error(e);
+				TraceEvent("ConsistencyCheck_QuietDatabaseError", e);
 				self->testFailure("Unable to achieve a quiet database");
 				self->performQuiescentChecks = false;
 			}
@@ -228,7 +228,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					{
 						if(e.code() == error_code_attribute_not_found)
 						{
-							TraceEvent("ConsistencyCheck_StorageQueueSizeError").detail("Reason", "Could not read queue size").error(e);
+							TraceEvent("ConsistencyCheck_StorageQueueSizeError", e).detail("Reason", "Could not read queue size");
 
 							//This error occurs if we have undesirable servers; in that case just report the undesirable servers error
 							if(!hasUndesirableServers)
@@ -274,7 +274,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 			catch(Error &e)
 			{
 				if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed || e.code() == error_code_server_request_queue_full)
-					TraceEvent("ConsistencyCheck_Retry").error(e); // FIXME: consistency check does not retry in this case
+					TraceEvent("ConsistencyCheck_Retry", e); // FIXME: consistency check does not retry in this case
 				else
 					self->testFailure(format("Error %d - %s", e.code(), e.name()));
 			}
@@ -462,7 +462,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 				{
 					//If we failed because of a version problem, then retry
 					if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
-						TraceEvent("ConsistencyCheck_RetryGetKeyLocations").error(e);
+						TraceEvent("ConsistencyCheck_RetryGetKeyLocations", e);
 					else
 						throw;
 				}
@@ -532,7 +532,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 		catch(Error& e)
 		{
-			TraceEvent("ConsistencyCheck_ErrorFetchingMetrics").detail("Begin", printable(shard.begin)).detail("End", printable(shard.end)).error(e);
+			TraceEvent("ConsistencyCheck_ErrorFetchingMetrics", e).detail("Begin", printable(shard.begin)).detail("End", printable(shard.end));
 			estimatedBytes.clear();
 		}
 
@@ -843,8 +843,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 							//If the data is not available and we aren't relocating this shard
 							else if(!isRelocating)
 							{
-								TraceEvent("ConsistencyCheck_StorageServerUnavailable").detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token).suppressFor(1.0);
+								TraceEvent("ConsistencyCheck_StorageServerUnavailable", 1.0).detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
+									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
 
 								//All shards should be available in quiscence
 								if(self->performQuiescentChecks)
@@ -912,7 +912,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					{
 						//If we failed because of a version problem, then retry
 						if(e.code() == error_code_transaction_too_old || e.code() == error_code_future_version || e.code() == error_code_transaction_too_old)
-							TraceEvent("ConsistencyCheck_RetryDataConsistency").error(e);
+							TraceEvent("ConsistencyCheck_RetryDataConsistency", e);
 						else
 							throw;
 					}
@@ -1107,7 +1107,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		for(itr = workers.begin(); itr != workers.end(); ++itr) {
 			ErrorOr<Standalone<VectorRef<UID>>> stores = wait(itr->first.diskStoreRequest.getReplyUnlessFailedFor(DiskStoreRequest(false), 2, 0));
 			if(stores.isError()) {
-				TraceEvent("ConsistencyCheck_GetDataStoreFailure").detail("Address", itr->first.address()).error(stores.getError());
+				TraceEvent("ConsistencyCheck_GetDataStoreFailure", stores.getError()).detail("Address", itr->first.address());
 				self->testFailure("Failed to get data stores");
 				return false;
 			}

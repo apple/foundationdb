@@ -65,7 +65,7 @@ public:
 		if (h == INVALID_HANDLE_VALUE) {
 			bool notFound = GetLastError() == ERROR_FILE_NOT_FOUND;
 			Error e = notFound ? file_not_found() : io_error();
-			TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError").error(e).GetLastError()
+			TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError", e).GetLastError()
 				.detail("File", filename).detail("Flags", flags).detail("Mode", mode);
 			return e;
 		}
@@ -85,7 +85,7 @@ public:
 	static void onReadReady( Promise<int> onReady, const boost::system::error_code& error, size_t bytesRead ) {
 		if (error) {
 			Error e = io_error();
-			TraceEvent("AsyncReadError").GetLastError().error(e)
+			TraceEvent("AsyncReadError", e).GetLastError()
 				.detail("ASIOCode", error.value())
 				.detail("ASIOMessage", error.message());
 			onReady.sendError(e);
@@ -96,7 +96,7 @@ public:
 	static void onWriteReady( Promise<Void> onReady, size_t bytesExpected, const boost::system::error_code& error, size_t bytesWritten ) {
 		if (error) {
 			Error e = io_error();
-			TraceEvent("AsyncWriteError").GetLastError().error(e)
+			TraceEvent("AsyncWriteError", e).GetLastError()
 				.detail("ASIOCode", error.value())
 				.detail("ASIOMessage", error.message());
 			onReady.sendError(e);

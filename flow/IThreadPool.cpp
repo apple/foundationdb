@@ -45,7 +45,7 @@ class ThreadPool : public IThreadPool, public ReferenceCounted<ThreadPool> {
 				userObject->init();
 				while (pool->ios.run_one() && !pool->mode);
 			} catch (Error& e) {
-				TraceEvent(SevError, "ThreadPoolError").error(e);
+				TraceEvent(SevError, "ThreadPoolError", e);
 			}
 			delete userObject; userObject = 0;
 			stopped.set();

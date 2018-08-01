@@ -1818,7 +1818,7 @@ ACTOR Future<Void> initializeStorage( DDTeamCollection *self, RecruitStorageRepl
 		.detail("WorkerLocality", candidateWorker.worker.locality.toString()).detail("Interf", interfaceId).detail("Addr", candidateWorker.worker.address());
 
 	if( newServer.isError() ) {
-		TraceEvent(SevWarn, "DDRecruitmentError").error(newServer.getError());
+		TraceEvent(SevWarn, "DDRecruitmentError", newServer.getError());
 		if( !newServer.isError( error_code_recruitment_failed ) && !newServer.isError( error_code_request_maybe_delivered ) )
 			throw newServer.getError();
 		Void _ = wait( delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY, TaskDataDistribution) );
@@ -2005,7 +2005,7 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_movekeys_conflict)
-			TraceEvent(SevError, "DataDistributionTeamCollectionError", masterId).error(e);
+			TraceEvent(SevError, "DataDistributionTeamCollectionError", masterId, e);
 		throw e;
 	}
 }

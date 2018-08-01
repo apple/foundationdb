@@ -793,8 +793,7 @@ public:
 			Void _ = wait(f->finish());
 			return Void();
 		} catch(Error &e) {
-			if(e.code() != error_code_actor_cancelled)
-				TraceEvent(SevWarn, "BackupContainerWritePropertyFailed").detail("Path", path).error(e);
+			TraceEvent(SevWarn, "BackupContainerWritePropertyFailed", e).detail("Path", path);
 			throw;
 		}
 	}
@@ -816,8 +815,7 @@ public:
 		} catch(Error &e) {
 			if(e.code() == error_code_file_not_found)
 				return Optional<Version>();
-			if(e.code() != error_code_actor_cancelled)
-				TraceEvent(SevWarn, "BackupContainerReadPropertyFailed").detail("Path", path).error(e);
+			TraceEvent(SevWarn, "BackupContainerReadPropertyFailed", e).detail("Path", path);
 			throw;
 		}
 	}

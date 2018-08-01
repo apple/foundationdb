@@ -72,7 +72,7 @@ Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int> > out, FutureS
 					// Drop requests if memory is under severe pressure
 					if (*commitBatchesMemBytesCount + bytes > commitBatchesMemBytesLimit) {
 						x.reply.sendError(proxy_memory_limit_exceeded());
-						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded").detail("CommitBatchesMemBytesCount", *commitBatchesMemBytesCount).detail("CommitBatchesMemLimit", commitBatchesMemBytesLimit).suppressFor(60, true);
+						TraceEvent(SevWarnAlways, "ProxyCommitBatchMemoryThresholdExceeded", 60).detail("CommitBatchesMemBytesCount", *commitBatchesMemBytesCount).detail("CommitBatchesMemLimit", commitBatchesMemBytesLimit);
 						continue;
 					}
 

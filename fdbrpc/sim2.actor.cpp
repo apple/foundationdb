@@ -382,7 +382,7 @@ private:
 		Void _ = wait( g_simulator.onProcess( self->process ) );
 		// SOMEDAY: Make this value variable? Dependent on buggification status?
 		Void _ = wait( delay( 20.0 ) );
-		TraceEvent(SevError, "LeakedConnection", self->dbgid).error(connection_leaked()).detail("MyAddr", self->process->address).detail("PeerAddr", self->peerEndpoint).detail("PeerId", self->peerId).detail("Opened", self->opened);
+		TraceEvent(SevError, "LeakedConnection", self->dbgid, connection_leaked()).detail("MyAddr", self->process->address).detail("PeerAddr", self->peerEndpoint).detail("PeerId", self->peerId).detail("Opened", self->opened);
 		return Void();
 	}
 };
@@ -449,7 +449,7 @@ public:
 			if( h == -1 ) {
 				bool notFound = errno == ENOENT;
 				Error e = notFound ? file_not_found() : io_error();
-				TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError").error(e).GetLastError().detail("File", filename).detail("Flags", flags);
+				TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError", e).GetLastError().detail("File", filename).detail("Flags", flags);
 				throw e;
 			}
 
@@ -1569,7 +1569,7 @@ public:
 					currentProcess->cpuTicks = 0;
 				}*/
 			} catch (Error& e) {
-				TraceEvent(SevError, "UnhandledSimulationEventError").error(e, true);
+				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnconditional(e);
 				killProcess(t.machine, KillInstantly);
 			}
 
@@ -1668,7 +1668,7 @@ ACTOR void doReboot( ISimulator::ProcessInfo *p, ISimulator::KillType kt ) {
 		}
 		p->shutdownSignal.send( kt );
 	} catch (Error& e) {
-		TraceEvent(SevError, "RebootError").error(e);
+		TraceEvent(SevError, "RebootError", e);
 		p->shutdownSignal.sendError(e);  // ?
 		throw; // goes nowhere!
 	}

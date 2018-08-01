@@ -1362,7 +1362,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 
 		if (normalMasterErrors().count(err.code()))
 		{
-			TraceEvent("MasterTerminated", mi.id()).error(err);
+			TraceEvent("MasterTerminated", mi.id(), err);
 			return Void();
 		}
 		throw err;

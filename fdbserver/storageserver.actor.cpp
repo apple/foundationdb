@@ -1455,7 +1455,7 @@ bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) 
 	data->durableVersion.set( nextDurableVersion );
 	if (checkFatalError.isReady()) checkFatalError.get();
 
-	TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
+	//TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
 	validate(data);
 
 	return nextDurableVersion == desiredDurableVersion;
@@ -1898,7 +1898,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 				break;
 			} catch (Error& e) {
-				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true).suppressFor(1.0);
+				TraceEvent("FKBlockFail", data->thisServerID, 1.0).detail("FKID", interval.pairID).errorUnconditional(e);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
 					Version lastFV = fetchVersion;
@@ -2007,7 +2007,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 		TraceEvent(SevDebug, interval.end(), data->thisServerID);
 	} catch (Error &e){
-		TraceEvent(SevDebug, interval.end(), data->thisServerID).error(e, true).detail("Version", data->version.get());
+		TraceEvent(SevDebug, interval.end(), data->thisServerID).errorUnconditional(e).detail("Version", data->version.get());
 
 		if (e.code() == error_code_actor_cancelled && !data->shuttingDown && shard->phase >= AddingShard::Fetching) {
 			if (shard->phase < AddingShard::Waiting) {
@@ -2022,8 +2022,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 			}
 		}
 
-		TraceEvent(SevError, "FetchKeysError", data->thisServerID)
-			.error(e)
+		TraceEvent(SevError, "FetchKeysError", data->thisServerID, e)
 			.detail("Elapsed", now()-startt)
 			.detail("KeyBegin", printable(keys.begin))
 			.detail("KeyEnd",printable(keys.end));
@@ -2585,7 +2584,7 @@ ACTOR Future<Void> update( StorageServer* data, bool* pReceivedUpdate )
 		return Void();  // update will get called again ASAP
 	} catch (Error& e) {
 		if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot)
-			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
+			TraceEvent(SevError, "SSUpdateError", data->thisServerID, e).backtrace();
 		throw;
 	}
 }
@@ -2638,7 +2637,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			Void _ = wait( yield(TaskUpdateStorage) );
 		}
 
-		TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
+		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 
 		Void _ = wait( durableDelay );
 	}
@@ -3275,7 +3274,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 		 e.code() == error_code_file_not_found ||
 		 e.code() == error_code_actor_cancelled )
 	{
-		TraceEvent("StorageServerTerminated", self.thisServerID).error(e, true);
+		TraceEvent("StorageServerTerminated", self.thisServerID).errorUnconditional(e);
 		return true;
 	} else
 		return false;

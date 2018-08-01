@@ -181,7 +181,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 			catch(Error &e) {
 				self->success = false;
 				printf("Thread %d.%d failed: %s\n", self->clientId, i, e.name());
-				TraceEvent(SevError, "ThreadSafety_ThreadFailed").error(e);
+				TraceEvent(SevError, "ThreadSafety_ThreadFailed", e);
 			}
 
 			delete threadInfo[i];

@@ -370,10 +370,10 @@ void ThreadSafeApi::runNetwork() {
 			hook.first(hook.second);
 		}
 		catch(Error &e) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+			TraceEvent(SevError, "NetworkShutdownHookError", e);
 		}
 		catch(...) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+			TraceEvent(SevError, "NetworkShutdownHookError", unknown_error());
 		}
 	}
 

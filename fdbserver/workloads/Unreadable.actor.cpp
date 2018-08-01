@@ -368,7 +368,7 @@ struct UnreadableWorkload : TestWorkload {
 							ASSERT(containsUnreadable(unreadableMap, range, true).present() == value.isError());
 					}
 					else {
-						//TraceEvent("RYWT_Reset1").error(value.getError(), true);
+						//TraceEvent("RYWT_Reset1").errorUnconditional(value.getError());
 						setMap = std::map<KeyRef, ValueRef>();
 						unreadableMap = KeyRangeMap<bool>();
 						tr = ReadYourWritesTransaction(cx);

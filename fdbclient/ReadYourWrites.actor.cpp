@@ -1910,7 +1910,7 @@ void ReadYourWritesTransaction::debugLogRetries(Optional<Error> error) {
 				
 				trace.detail("Elapsed", elapsed).detail("Retries", retries).detail("Committed", committed);
 				if(error.present())
-					trace.error(error.get(), true);
+					trace.errorUnconditional(error.get());
 			}
 			transactionDebugInfo->lastRetryLogTime = now();
 		}

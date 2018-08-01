@@ -64,7 +64,7 @@ struct DDMetricsWorkload : TestWorkload {
 				}
 			}
 		} catch( Error& e ) {
-			TraceEvent("DDMetricsError").error(e);
+			TraceEvent("DDMetricsError", e);
 		}
 		return Void();
 	}

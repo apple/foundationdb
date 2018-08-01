@@ -81,7 +81,7 @@ struct LowLatencyWorkload : TestWorkload {
 			}
 			return Void();
 		} catch( Error &e ) {
-			TraceEvent(SevError, "LowLatencyError").error(e,true);
+			TraceEvent(SevError, "LowLatencyError").errorUnconditional(e);
 			throw;
 		}
 	}

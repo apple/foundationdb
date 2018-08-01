@@ -111,9 +111,9 @@ public:
 		if (fd<0) {
 			Error e = errno==ENOENT ? file_not_found() : io_error();
 			int ecode = errno;  // Save errno in case it is modified before it is used below
-			TraceEvent ev("AsyncFileKAIOOpenFailed");
+			TraceEvent ev("AsyncFileKAIOOpenFailed", e);
 			ev.detail("Filename", filename).detailf("Flags", "%x", flags)
-			  .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT).detailf("Mode", "0%o", mode).error(e).GetLastError();
+			  .detailf("OSFlags", "%x", openFlags(flags) | O_DIRECT).detailf("Mode", "0%o", mode).GetLastError();
 			if(ecode == EINVAL)
 				ev.detail("Description", "Invalid argument - Does the target filesystem support KAIO?");
 			return e;
@@ -604,7 +604,7 @@ private:
 							.detail("ErrorDesc", strerror(errno));
 					}
 				} catch(Error &e) {
-					TraceEvent(SevError, "KAIOLogOpenFailure").error(e);
+					TraceEvent(SevError, "KAIOLogOpenFailure", e);
 				}
 			}
 		}

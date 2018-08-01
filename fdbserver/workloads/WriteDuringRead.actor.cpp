@@ -155,7 +155,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			}
 			return Void();
 		} catch( Error &e ) {
-			//TraceEvent("WDRGetKeyError", randomID).error(e,true);
+			//TraceEvent("WDRGetKeyError", randomID).errorUnconditional(e);
 			if( e.code() == error_code_used_during_commit ) {
 				ASSERT( *doingCommit );
 				return Void();
@@ -277,7 +277,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			}
 			return Void();
 		} catch( Error &e ) {
-			//TraceEvent("WDRGetRangeError", randomID).error(e,true);
+			//TraceEvent("WDRGetRangeError", randomID).errorUnconditional(e);
 			if( e.code() == error_code_used_during_commit ) {
 				ASSERT( *doingCommit );
 				return Void();
@@ -309,7 +309,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			}
 			return Void();
 		} catch( Error &e ) {
-			//TraceEvent("WDRGetError", randomID).error(e,true);
+			//TraceEvent("WDRGetError", randomID).errorUnconditional(e);
 			if( e.code() == error_code_used_during_commit ) {
 				ASSERT( *doingCommit );
 				return Void();
@@ -348,7 +348,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			return Void();
 		} catch( Error &e ) {
 			//check for transaction cancelled if the watch was not committed
-			//TraceEvent("WDRWatchError", randomID).error(e,true);
+			//TraceEvent("WDRWatchError", randomID).errorUnconditional(e);
 			if( e.code() == error_code_used_during_commit ) {
 				ASSERT( *doingCommit );
 				return Void();
@@ -421,7 +421,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			
 			return Void();
 		} catch( Error &e ) {
-			//TraceEvent("WDRCommitCancelled", randomID).error(e,true);
+			//TraceEvent("WDRCommitCancelled", randomID).errorUnconditional(e);
 			if( e.code() == error_code_actor_cancelled || e.code() == error_code_transaction_cancelled || e.code() == error_code_used_during_commit )
 				*cancelled = true;
 			if( e.code() == error_code_actor_cancelled || e.code() == error_code_transaction_cancelled )
@@ -816,7 +816,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 				watches.clear();
 				self->changeCount.insert( allKeys, 0 );
 				doingCommit = false;
-				//TraceEvent("WDRError").error(e, true);
+				//TraceEvent("WDRError").errorUnconditional(e);
 				if(e.code() == error_code_database_locked) {
 					self->memoryDatabase = self->lastCommittedDatabase;
 					self->addedConflicts.insert(allKeys, false);

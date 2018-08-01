@@ -195,7 +195,7 @@ Standalone<VectorRef<MutationRef>> decodeBackupLogValue(StringRef value) {
 		return result;
 	}
 	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue", e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
 		throw;
 	}
 }
@@ -303,7 +303,7 @@ void decodeBackupLogValue(Arena& arena, VectorRef<MutationRef>& result, int& mut
 		}
 	}
 	catch (Error& e) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue").error(e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarn : SevError, "BA_DecodeBackupLogValue", e).GetLastError().detail("ValueSize", value.size()).detail("Value", printable(value));
 		throw;
 	}
 }
@@ -619,7 +619,7 @@ ACTOR Future<Void> applyMutations(Database cx, Key uid, Key addPrefix, Key remov
 			beginVersion = newEndVersion;
 		}
 	} catch( Error &e ) {
-		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError").error(e);
+		TraceEvent(e.code() == error_code_restore_missing_data ? SevWarnAlways : SevError, "ApplyMutationsError", e);
 		throw;	
 	}
 }

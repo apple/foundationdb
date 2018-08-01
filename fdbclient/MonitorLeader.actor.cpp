@@ -99,7 +99,7 @@ bool ClusterConnectionFile::fileContentsUpToDate(ClusterConnectionString &fileCo
 		return fileConnectionString.toString() == cs.toString();
 	}
 	catch (Error& e) {
-		TraceEvent(SevWarnAlways, "ClusterFileError").detail("Filename", filename).error(e);
+		TraceEvent(SevWarnAlways, "ClusterFileError", e).detail("Filename", filename);
 		return false; // Swallow the error and report that the file is out of date
 	}
 }
@@ -118,7 +118,7 @@ bool ClusterConnectionFile::writeFile() {
 
 			return true;
 		} catch( Error &e ) {
-			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile").detail("Filename", filename).detail("ConnStr", cs.toString()).error(e);
+			TraceEvent(SevWarnAlways, "UnableToChangeConnectionFile", e).detail("Filename", filename).detail("ConnStr", cs.toString());
 		}
 	}
 

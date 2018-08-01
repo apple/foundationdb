@@ -1653,7 +1653,7 @@ ACTOR static Future<Void> runTest(Reference<FlowTesterData> data, Reference<Data
 		Void _ = wait(waitForAll(data->subThreads));
 	}
 	catch (Error& e) {
-		TraceEvent(SevError, "FlowTesterDataRunError").error(e);
+		TraceEvent(SevError, "FlowTesterDataRunError", e);
 	}
 
 	return Void();
@@ -1725,7 +1725,7 @@ ACTOR void startTest(std::string clusterFilename, StringRef prefix, int apiVersi
 		g_network->stop();
 	}
 	catch(Error &e) {
-		TraceEvent("ErrorRunningTest").error(e);
+		TraceEvent("ErrorRunningTest", e);
 		if(LOG_ERRORS) {
 			printf("Flow tester encountered error: %s\n", e.name());
 			fflush(stdout);
@@ -1767,7 +1767,7 @@ ACTOR void _test_versionstamp() {
 		g_network->stop();
 	}
 	catch (Error &e) {
-		TraceEvent("ErrorRunningTest").error(e);
+		TraceEvent("ErrorRunningTest", e);
 		if (LOG_ERRORS) {
 			printf("Flow tester encountered error: %s\n", e.name());
 			fflush(stdout);
@@ -1811,12 +1811,12 @@ int main( int argc, char** argv ) {
 	}
 	catch (Error& e) {
 		fprintf(stderr, "Error: %s\n", e.name());
-		TraceEvent(SevError, "MainError").error(e);
+		TraceEvent(SevError, "MainError", e);
 		flushAndExit(FDB_EXIT_MAIN_ERROR);
 	}
 	catch (std::exception& e) {
 		fprintf(stderr, "std::exception: %s\n", e.what());
-		TraceEvent(SevError, "MainError").error(unknown_error()).detail("RootException", e.what());
+		TraceEvent(SevError, "MainError", unknown_error()).detail("RootException", e.what());
 		flushAndExit(FDB_EXIT_MAIN_EXCEPTION);
 	}
 }

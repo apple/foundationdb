@@ -926,7 +926,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				}
 				TEST(true); //did not find a healthy destination team on the first attempt
 				stuckCount++;
-				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).detail("Count", stuckCount).suppressFor(1.0);
+				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId, 1.0).detail("Count", stuckCount);
 				Void _ = wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
 			}
 
@@ -1045,7 +1045,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(relocateShardInterval.end(), masterId).error(e, true);
+		TraceEvent(relocateShardInterval.end(), masterId).errorUnconditional(e);
 		if( !signalledTransferComplete )
 			dataTransferComplete.send( rd );
 
@@ -1281,7 +1281,7 @@ ACTOR Future<Void> dataDistributionQueue(
 	} catch (Error& e) {
 		if (e.code() != error_code_broken_promise && // FIXME: Get rid of these broken_promise errors every time we are killed by the master dying
 			e.code() != error_code_movekeys_conflict)
-			TraceEvent(SevError, "DataDistributionQueueError", mi.id()).error(e);
+			TraceEvent(SevError, "DataDistributionQueueError", mi.id(), e);
 		throw e;
 	}
 }

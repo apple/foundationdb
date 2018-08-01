@@ -3087,7 +3087,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						}
 						catch(Error &e) {
 							//options->setOption() prints error message
-							TraceEvent(SevWarn, "CLISetOptionError").detail("Option", printable(tokens[2])).error(e);
+							TraceEvent(SevWarn, "CLISetOptionError", e).detail("Option", printable(tokens[2]));
 							is_error = true;
 						}
 					}
@@ -3138,7 +3138,7 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 		linenoise.historyLoad(historyFilename);
 	}
 	catch(Error &e) {
-		TraceEvent(SevWarnAlways, "ErrorLoadingCliHistory").detail("Filename", historyFilename.empty() ? "<unknown>" : historyFilename).error(e).GetLastError();
+		TraceEvent(SevWarnAlways, "ErrorLoadingCliHistory", e).detail("Filename", historyFilename.empty() ? "<unknown>" : historyFilename).GetLastError();
 	}
 
 	state int result = wait(cli(opt, &linenoise));
@@ -3148,7 +3148,7 @@ ACTOR Future<int> runCli(CLIOptions opt) {
 			linenoise.historySave(historyFilename);
 		}
 		catch(Error &e) {
-			TraceEvent(SevWarnAlways, "ErrorSavingCliHistory").detail("Filename", historyFilename).error(e).GetLastError();
+			TraceEvent(SevWarnAlways, "ErrorSavingCliHistory", e).detail("Filename", historyFilename).GetLastError();
 		}
 	}
 

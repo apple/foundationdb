@@ -135,20 +135,32 @@ template <class T> class Standalone;
 template <class T> class Optional;
 
 struct TraceEvent {
-	TraceEvent( const char* type, UID id = UID() );   // Assumes SevInfo severity
-	TraceEvent( Severity, const char* type, UID id = UID() );
+	// Assumes SevInfo severity
+	TraceEvent( const char* type, UID id = UID(), double suppressFor = 0.0 );
+	TraceEvent( const char* type, double suppressFor );
+	TraceEvent( const char* type, const StringRef& id);
+	TraceEvent( const char* type, const Optional<Standalone<StringRef>>& id);
+	TraceEvent( const char* type, const class Error& e, double suppressFor = 0.0 );
+	TraceEvent( const char* type, UID id, const class Error& e, double suppressFor = 0.0 );
+	TraceEvent( const char* type, const StringRef& id, const class Error& e, double suppressFor = 0.0 );
+	TraceEvent( const char* type, const Optional<Standalone<StringRef>>& id, const class Error& e, double suppressFor = 0.0 );
+
+	TraceEvent( Severity, const char* type, UID id = UID(), double suppressFor = 0.0 );
+	TraceEvent( Severity, const char* type, double suppressFor );
+	TraceEvent( Severity, const char* type, const StringRef& id);
+	TraceEvent( Severity, const char* type, const Optional<Standalone<StringRef>>& id);
+	TraceEvent( Severity, const char* type, const class Error& e, double suppressFor = 0.0 );
+	TraceEvent( Severity, const char* type, UID id, const class Error& e, double suppressFor = 0.0 );
+	TraceEvent( Severity, const char* type, const StringRef& id, const class Error& e, double suppressFor = 0.0 );
+	TraceEvent( Severity, const char* type, const Optional<Standalone<StringRef>>& id, const class Error& e, double suppressFor = 0.0 );
+
 	TraceEvent( struct TraceInterval&, UID id = UID() );
 	TraceEvent( Severity severity, struct TraceInterval& interval, UID id = UID() );
-	TraceEvent(const char* type, const StringRef& id);   // Assumes SevInfo severity
-	TraceEvent(Severity, const char* type, const StringRef& id);
-	TraceEvent(const char* type, const Optional<Standalone<StringRef>>& id);   // Assumes SevInfo severity
-	TraceEvent(Severity, const char* type, const Optional<Standalone<StringRef>>& id);
 
-	static bool isEnabled( const char* type, Severity = SevMax );
 	static void setNetworkThread();
 	static bool isNetworkThread();
 
-	TraceEvent& error(const class Error& e, bool includeCancelled=false);
+	TraceEvent& errorUnconditional(const class Error& e);
 
 	TraceEvent& detail( std::string key, std::string value );
 	TraceEvent& detail( std::string key, double value );
@@ -171,8 +183,6 @@ public:
 	TraceEvent& detail( std::string key, const UID& value );
 	TraceEvent& backtrace(const std::string& prefix = "");
 	TraceEvent& trackLatest( const char* trackingKey );
-	TraceEvent& sample( double sampleRate, bool logSampleRate=true );
-	TraceEvent& suppressFor( double duration, bool logSuppressedEventCount=true );
 
 	TraceEvent& GetLastError();
 
@@ -195,7 +205,7 @@ private:
 	static unsigned long eventCounts[5];
 	static thread_local bool networkThread;
 
-	bool init( Severity, const char* type );
+	bool init( Severity, const char* type, bool isEnabled, double suppressFor = 0.0 );
 	bool init( Severity, struct TraceInterval& );
 };
 
@@ -251,11 +261,6 @@ private:
 };
 
 extern LatestEventCache latestEventCache;
-
-// Evil but potentially useful for verbose messages:
-#if CENABLED(0, NOT_IN_CLEAN)
-#define TRACE( t, m ) if (TraceEvent::isEnabled(t)) TraceEvent(t,m)
-#endif
 
 struct NetworkAddress;
 void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogsSize, std::string directory = ".", std::string baseOfBase = "trace", std::string logGroup = "default");

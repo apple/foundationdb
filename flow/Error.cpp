@@ -40,7 +40,7 @@ extern void flushTraceFileVoid();
 Error Error::fromUnvalidatedCode(int code) {
 	if (code < 0 || code > 30000) {
 		Error e = Error::fromCode(error_code_unknown_error);
-		TraceEvent(SevWarn, "ConvertedUnvalidatedErrorCode").detail("OriginalCode", code).error(e);
+		TraceEvent(SevWarn, "ConvertedUnvalidatedErrorCode", e).detail("OriginalCode", code);
 		return e;
 	}
 	else
@@ -50,8 +50,7 @@ Error Error::fromUnvalidatedCode(int code) {
 Error internal_error_impl( const char* file, int line ) {
 	fprintf(stderr, "Internal Error @ %s %d:\n  %s\n", file, line, platform::get_backtrace().c_str());
 
-	TraceEvent(SevError, "InternalError")
-		.error(Error::fromCode(error_code_internal_error))
+	TraceEvent(SevError, "InternalError", Error::fromCode(error_code_internal_error))
 		.detail("File", file)
 		.detail("Line", line)
 		.backtrace();
@@ -65,7 +64,7 @@ Error::Error(int error_code)
 	if (TRACE_SAMPLE()) TraceEvent(SevSample, "ErrorCreated").detail("ErrorCode", error_code);
 	//std::cout << "Error: " << error_code << std::endl;
 	if (error_code >= 3000 && error_code < 6000) {
-		TraceEvent(SevError, "SystemError").error(*this).backtrace();
+		TraceEvent(SevError, "SystemError", *this).backtrace();
 		if (g_crashOnError) {
 			flushOutputStreams();
 			flushTraceFileVoid();

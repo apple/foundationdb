@@ -343,10 +343,10 @@ void DLApi::runNetwork() {
 			hook.first(hook.second);
 		}
 		catch(Error &e) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(e);
+			TraceEvent(SevError, "NetworkShutdownHookError", e);
 		}
 		catch(...) {
-			TraceEvent(SevError, "NetworkShutdownHookError").error(unknown_error());
+			TraceEvent(SevError, "NetworkShutdownHookError", unknown_error());
 		}
 	}
 
@@ -615,7 +615,7 @@ void MultiVersionDatabase::DatabaseState::fire(const Void &unused, int& userPara
 					}
 					catch(Error &e) {
 						optionFailed = true;
-						TraceEvent(SevError, "DatabaseVersionChangeOptionError").detail("Option", option.first).detail("OptionValue", printable(option.second)).error(e);
+						TraceEvent(SevError, "DatabaseVersionChangeOptionError", e).detail("Option", option.first).detail("OptionValue", printable(option.second));
 					}
 				}
 
@@ -644,7 +644,7 @@ void MultiVersionDatabase::DatabaseState::error(const Error& e, int& userParam) 
 	}
 
 	// TODO: retry?
-	TraceEvent(SevWarnAlways, "DatabaseCreationFailed").error(e);
+	TraceEvent(SevWarnAlways, "DatabaseCreationFailed", e);
 	onMainThreadVoid([this]() {
 		updateDatabase();
 		delref();
@@ -811,7 +811,7 @@ void MultiVersionCluster::Connector::error(const Error& e, int& userParam) {
 		// TODO: is it right to abandon this connection attempt?
 		client->failed = true;
 		MultiVersionApi::api->updateSupportedVersions();
-		TraceEvent(SevError, "ClusterConnectionError").detail("ClientLibrary", this->client->libPath).error(e);
+		TraceEvent(SevError, "ClusterConnectionError", e).detail("ClientLibrary", this->client->libPath);
 	}
 
 	delref();
@@ -850,7 +850,7 @@ void MultiVersionCluster::ClusterState::stateChanged() {
 		}
 		catch(Error &e) {
 			optionLock.leave();
-			TraceEvent(SevError, "ClusterVersionChangeOptionError").detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath).error(e);
+			TraceEvent(SevError, "ClusterVersionChangeOptionError", e).detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath);
 			connectionAttempts[newIndex]->connected = false;
 			clients[newIndex]->failed = true;
 			MultiVersionApi::api->updateSupportedVersions();
@@ -910,7 +910,7 @@ void MultiVersionApi::runOnExternalClients(std::function<void(Reference<ClientIn
 			}
 		}
 		catch(Error &e) {
-			TraceEvent(SevWarnAlways, "ExternalClientFailure").detail("LibPath", c->second->libPath).error(e);
+			TraceEvent(SevWarnAlways, "ExternalClientFailure", e).detail("LibPath", c->second->libPath);
 			if(e.code() == error_code_external_client_already_loaded) {
 				c = externalClients.erase(c);
 				continue;
@@ -1156,7 +1156,7 @@ THREAD_FUNC_RETURN runNetworkThread(void *param) {
 		((ClientInfo*)param)->api->runNetwork();
 	}
 	catch(Error &e) {
-		TraceEvent(SevError, "RunNetworkError").error(e);
+		TraceEvent(SevError, "RunNetworkError", e);
 	}
 
 	THREAD_RETURN;
@@ -1342,7 +1342,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 				}
 			}
 			catch(Error &e) {
-				TraceEvent(SevError, "EnvironmentVariableNetworkOptionFailed").detail("Option", option.second.name).detail("Value", valueStr).error(e);
+				TraceEvent(SevError, "EnvironmentVariableNetworkOptionFailed", e).detail("Option", option.second.name).detail("Value", valueStr);
 				throw environment_variable_network_option_failed();
 			}
 		}
