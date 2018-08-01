@@ -2,6 +2,14 @@
 Release Notes
 #############
 
+5.2.8
+=====
+
+Bindings
+--------
+
+* Java: ``FDBDatabase::run`` and ``FDBDatabase::read`` now use the ``Executor`` provided for executing asynchronous callbacks instead of the default one for the database. `(Issue #640) <https://github.com/apple/foundationdb/issues/640>`_
+
 5.2.7
 =====
 
