@@ -706,8 +706,7 @@ struct DDTeamCollection {
 					while( similarTeams.size() && randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT ) {
 						int randomTeam = g_random->randomInt( 0, similarTeams.size() );
 						randomTeams.push_back( std::make_pair( SOME_SHARED, similarTeams[randomTeam] ) );
-						std::swap( similarTeams[randomTeam], similarTeams.back() );
-						similarTeams.pop_back();
+						swapAndPop( &similarTeams, randomTeam );
 					}
 				}
 			}

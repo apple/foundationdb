@@ -24,6 +24,7 @@
 #include "DatabaseContext.h"
 #include "StatusClient.h"
 #include "MonitorLeader.h"
+#include "flow/Util.h"
 
 class RYWImpl {
 public:
@@ -936,16 +937,12 @@ public:
 			
 			for( int i = 0; i < itCopy->value.size(); i++ ) {
 				if(itCopy->value[i]->onChangeTrigger.isSet()) {
-					if( i < itCopy->value.size() - 1 )
-						std::swap(itCopy->value[i--], itCopy->value.back());
-					itCopy->value.pop_back();
+					swapAndPop(&itCopy->value, i--);
 				} else if( !valueKnown || 
 						   (itCopy->value[i]->setPresent && (itCopy->value[i]->setValue.present() != val.present() || (val.present() && itCopy->value[i]->setValue.get() != val.get()))) ||
 						   (itCopy->value[i]->valuePresent && (itCopy->value[i]->value.present() != val.present() || (val.present() && itCopy->value[i]->value.get() != val.get()))) ) {
 					itCopy->value[i]->onChangeTrigger.send(Void());
-					if( i < itCopy->value.size() - 1 )
-						std::swap(itCopy->value[i--], itCopy->value.back());
-					itCopy->value.pop_back();
+					swapAndPop(&itCopy->value, i--);
 				} else {
 					itCopy->value[i]->setPresent = true;
 					itCopy->value[i]->setValue = val.cast_to<Value>();

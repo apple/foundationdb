@@ -31,6 +31,7 @@
 
 #include "actorcompiler.h"
 #include "Knobs.h"
+#include "flow/Util.h"
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
 
 ACTOR template<class T, class X>
@@ -1464,8 +1465,7 @@ public:
 				return false;
 			}
 			else if(!futures[i].isError()) {
-				std::swap(futures[i], futures.back());
-				futures.pop_back();
+				swapAndPop(&futures, i);
 			}
 		}
 		return true;
@@ -1481,8 +1481,7 @@ public:
 	void cleanup() {
 		for( int i = 0; i < futures.size(); i++ ) {
 			if( futures[i].isReady() && !futures[i].isError() ) {
-				std::swap(futures[i--], futures.back());
-				futures.pop_back();
+				swapAndPop(&futures, i--);
 			}
 		}
 	}
