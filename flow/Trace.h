@@ -186,7 +186,6 @@ private:
 	bool enabled;
 	std::string trackingKey;
 	TraceEventFields fields;
-	int length;
 	Severity severity;
 	const char *type;
 	UID id;
