@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.3
+6.0.4
 =====
 
 Features
@@ -27,13 +27,15 @@ Performance
 Fixes
 -----
 
-* Backed out the changes which closed unnecessary connections. [6.0.3] `(PR #633) <https://github.com/apple/foundationdb/pull/633>`_
 * Not all endpoint failures were reported to the failure monitor.
 * Watches registered on a lagging storage server would take a long time to trigger.
 * The cluster controller would not start a new generation until it recovered its files from disk.
 * Under heavy write load, storage servers would occasionally pause for ~100ms. [6.0.2] `(PR #597) <https://github.com/apple/foundationdb/pull/597>`_
 * Storage servers were not given time to rejoin the cluster before being marked as failed. [6.0.2] `(PR #592) <https://github.com/apple/foundationdb/pull/592>`_
 * Incorrect accounting of incompatible connections led to occasional assertion failures. [6.0.3] `(PR #616) <https://github.com/apple/foundationdb/pull/616>`_
+* Sometimes clients would not reconnect to the cluster after the database was upgraded. [6.0.4] `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
+* A large number of concurrent read attempts could bring the database down after a cluster reboot. [6.0.4] `(PR #650) <https://github.com/apple/foundationdb/pull/650>`_
+* Automatic suppression of trace events which occur too frequently was happening before trace events were suppressed by other mechanisms. [6.0.4] `(PR #656) <https://github.com/apple/foundationdb/pull/656>`_
 
 Status
 ------
