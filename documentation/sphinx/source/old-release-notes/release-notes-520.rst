@@ -10,6 +10,11 @@ Bindings
 
 * Java: ``FDBDatabase::run`` and ``FDBDatabase::read`` now use the ``Executor`` provided for executing asynchronous callbacks instead of the default one for the database. `(Issue #640) <https://github.com/apple/foundationdb/issues/640>`_
 
+Fixes
+-----
+
+* A large number of concurrent read attempts could bring the database down after a cluster reboot. `(PR #650) <https://github.com/apple/foundationdb/pull/650>`_
+
 5.2.7
 =====
 
@@ -21,7 +26,7 @@ Bindings
 Fixes
 -----
 
-* Sometimes the multi-version client would not reconnect to the cluster after the database was upgraded. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
+* Sometimes clients would not reconnect to the cluster after the database was upgraded. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
 
 5.2.6
 =====
