@@ -148,6 +148,8 @@ public:
 		numIncompatibleConnections(0)
 	{}
 
+	~TransportData();
+
 	void initMetrics() {
 		bytesSent.init(LiteralStringRef("Net2.BytesSent"));
 		countPacketsReceived.init(LiteralStringRef("Net2.CountPacketsReceived"));
@@ -227,9 +229,10 @@ struct Peer : NonCopyable {
 	double lastConnectTime;
 	double reconnectionDelay;
 	int peerReferences;
+	bool incompatibleProtocolVersionNewer;
 
 	explicit Peer( TransportData* transport, NetworkAddress const& destination )
-		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), peerReferences(-1)
+		: transport(transport), destination(destination), outgoingConnectionIdle(false), lastConnectTime(0.0), reconnectionDelay(FLOW_KNOBS->INITIAL_RECONNECTION_TIME), compatible(true), incompatibleProtocolVersionNewer(false), peerReferences(-1)
 	{
 		connect = connectionKeeper(this);
 	}
@@ -307,8 +310,7 @@ struct Peer : NonCopyable {
 
 		loop {
 			if(peer->peerReferences == 0 && peer->reliable.empty() && peer->unsent.empty()) {
-				//FIXME: closing connections is causing client connection issues
-				//throw connection_failed();
+				throw connection_failed();
 			}
 
 			Void _ = wait( delayJittered( FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME ) );
@@ -374,14 +376,14 @@ struct Peer : NonCopyable {
 					Void _ = wait( delayJittered( std::max(0.0, self->lastConnectTime+self->reconnectionDelay - now()) ) );  // Don't connect() to the same peer more than once per 2 sec
 					self->lastConnectTime = now();
 
-					TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).suppressFor(1.0);
+					TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
 					Reference<IConnection> _conn = wait( timeout( INetworkConnections::net()->connect(self->destination), FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT, Reference<IConnection>() ) );
 					if (_conn) {
 						conn = _conn;
-						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID()).detail("PeerAddr", self->destination).suppressFor(1.0);
+						TraceEvent("ConnectionExchangingConnectPacket", conn->getDebugID()).suppressFor(1.0).detail("PeerAddr", self->destination);
 						self->prependConnectPacket();
 					} else {
-						TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).suppressFor(1.0);
+						TraceEvent("ConnectionTimedOut", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
 						throw connection_failed();
 					}
 
@@ -413,10 +415,10 @@ struct Peer : NonCopyable {
 				bool ok = e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed );
 
 				if(self->compatible) {
-					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true).suppressFor(1.0);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "ConnectionClosed", conn ? conn->getDebugID() : UID()).error(e, true).suppressFor(1.0).detail("PeerAddr", self->destination);
 				}
 				else {
-					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).detail("PeerAddr", self->destination).error(e, true);
+					TraceEvent(ok ? SevInfo : SevWarnAlways, "IncompatibleConnectionClosed", conn ? conn->getDebugID() : UID()).error(e, true).detail("PeerAddr", self->destination);
 				}
 
 				if (conn) {
@@ -428,16 +430,23 @@ struct Peer : NonCopyable {
 				// Try to recover, even from serious errors, by retrying
 
 				if(self->peerReferences <= 0 && self->reliable.empty() && self->unsent.empty()) {
-					//FIXME: closing connections is causing client connection issues
-					//self->connect.cancel();
-					//self->transport->peers.erase(self->destination);
-					//delete self;
-					//return Void();
+					TraceEvent("PeerDestroy").error(e).suppressFor(1.0).detail("PeerAddr", self->destination);
+					self->connect.cancel();
+					self->transport->peers.erase(self->destination);
+					delete self;
+					return Void();
 				}
 			}
 		}
 	}
 };
+
+TransportData::~TransportData() {
+	for(auto &p : peers) {
+		p.second->connect.cancel();
+		delete p.second;
+	}
+}
 
 ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket ) {
 	int priority = self->endpoints.getPriority(destination.token);
@@ -550,10 +559,10 @@ static void scanPackets( TransportData* transport, uint8_t*& unprocessed_begin, 
 
 		if (packetLen > FLOW_KNOBS->PACKET_WARNING) {
 			TraceEvent(transport->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+				.suppressFor(1.0)
 				.detail("FromPeer", peerAddress.toString())
 				.detail("Length", (int)packetLen)
-				.detail("Token", token)
-				.suppressFor(1.0);
+				.detail("Token", token);
 
 			if(g_network->isSimulated())
 				transport->warnAlwaysForLargePacket = false;
@@ -581,6 +590,7 @@ ACTOR static Future<Void> connectionReader(
 	state bool expectConnectPacket = true;
 	state bool compatible = false;
 	state bool incompatiblePeerCounted = false;
+	state bool incompatibleProtocolVersionNewer = false;
 	state NetworkAddress peerAddress;
 	state uint64_t peerProtocolVersion = 0;
 
@@ -621,7 +631,8 @@ ACTOR static Future<Void> connectionReader(
 							connectionId = p->connectionId;
 						}
 						
-						if( (p->protocolVersion&compatibleProtocolVersionMask) != (currentProtocolVersion&compatibleProtocolVersionMask) ) {
+						if( (p->protocolVersion & compatibleProtocolVersionMask) != (currentProtocolVersion & compatibleProtocolVersionMask) ) {
+							incompatibleProtocolVersionNewer = p->protocolVersion > currentProtocolVersion;
 							NetworkAddress addr = p->canonicalRemotePort ? NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) : conn->getPeerAddress();
 							if(connectionId != 1) addr.port = 0;
 						
@@ -652,8 +663,9 @@ ACTOR static Future<Void> connectionReader(
 						else {
 							compatible = true;
 							TraceEvent("ConnectionEstablished", conn->getDebugID())
+								.suppressFor(1.0)
 								.detail("Peer", conn->getPeerAddress())
-								.detail("ConnectionId", connectionId).suppressFor(1.0);
+								.detail("ConnectionId", connectionId);
 						}
 
 						if(connectionId > 1) {
@@ -665,8 +677,9 @@ ACTOR static Future<Void> connectionReader(
 						peerProtocolVersion = p->protocolVersion;
 						if (peer != nullptr) {
 							// Outgoing connection; port information should be what we expect
-							TraceEvent("ConnectedOutgoing").detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) ).suppressFor(1.0);
+							TraceEvent("ConnectedOutgoing").suppressFor(1.0).detail("PeerAddr", NetworkAddress( p->canonicalRemoteIp, p->canonicalRemotePort ) );
 							peer->compatible = compatible;
+							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
 								incompatiblePeerCounted = true;
@@ -678,6 +691,7 @@ ACTOR static Future<Void> connectionReader(
 							}
 							peer = transport->getPeer(peerAddress);
 							peer->compatible = compatible;
+							peer->incompatibleProtocolVersionNewer = incompatibleProtocolVersionNewer;
 							if (!compatible) {
 								peer->transport->numIncompatibleConnections++;
 								incompatiblePeerCounted = true;
@@ -730,7 +744,7 @@ ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<ICo
 		}
 		return Void();
 	} catch (Error& e) {
-		TraceEvent("IncomingConnectionError", conn->getDebugID()).error(e).detail("FromAddress", conn->getPeerAddress()).suppressFor(1.0);
+		TraceEvent("IncomingConnectionError", conn->getDebugID()).error(e).suppressFor(1.0).detail("FromAddress", conn->getPeerAddress());
 		conn->close();
 		return Void();
 	}
@@ -742,7 +756,7 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 	try {
 		loop {
 			Reference<IConnection> conn = wait( listener->accept() );
-			TraceEvent("ConnectionFrom", conn->getDebugID()).detail("FromAddress", conn->getPeerAddress()).suppressFor(1.0);
+			TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0).detail("FromAddress", conn->getPeerAddress());
 			incoming.add( connectionIncoming(self, conn) );
 		}
 	} catch (Error& e) {
@@ -895,7 +909,7 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		Peer* peer = self->getPeer(destination.address, openConnection);
 
 		// If there isn't an open connection, a public address, or the peer isn't compatible, we can't send
-		if (!peer || (peer->outgoingConnectionIdle && !destination.address.isPublic()) || (!peer->compatible && destination.token != WLTOKEN_PING_PACKET)) {
+		if (!peer || (peer->outgoingConnectionIdle && !destination.address.isPublic()) || (peer->incompatibleProtocolVersionNewer && destination.token != WLTOKEN_PING_PACKET)) {
 			TEST(true);  // Can't send to private address without a compatible open connection
 			return (PacketID)NULL;
 		}
@@ -956,11 +970,11 @@ static PacketID sendPacket( TransportData* self, ISerializeSource const& what, c
 		} 
 		else if (len > FLOW_KNOBS->PACKET_WARNING) {
 			TraceEvent(self->warnAlwaysForLargePacket ? SevWarnAlways : SevWarn, "Net2_LargePacket")
+				.suppressFor(1.0)
 				.detail("ToPeer", destination.address)
 				.detail("Length", (int)len)
 				.detail("Token", destination.token)
-				.backtrace()
-				.suppressFor(1.0);
+				.backtrace();
 
 			if(g_network->isSimulated())
 				self->warnAlwaysForLargePacket = false;

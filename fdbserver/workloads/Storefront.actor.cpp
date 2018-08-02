@@ -75,7 +75,7 @@ struct StorefrontWorkload : TestWorkload {
 		for(int c=0; c<clients.size(); c++)
 			if( clients[c].isError() ) {
 				errors++;
-				TraceEvent(SevError, "TestFailure").detail("Reason", "ClientError").error(clients[c].getError());
+				TraceEvent(SevError, "TestFailure").error(clients[c].getError()).detail("Reason", "ClientError");
 			}
 		clients.clear();
 		return inventoryCheck( cx->clone(), this, !errors );
@@ -173,8 +173,7 @@ struct StorefrontWorkload : TestWorkload {
 				self->totalLatency += now() - tstart;
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_actor_cancelled)
-				TraceEvent(SevError, "OrderingClient").error(e);
+			TraceEvent(SevError, "OrderingClient").error(e);
 			throw;
 		}
 	}

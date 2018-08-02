@@ -1455,7 +1455,7 @@ bool changeDurableVersion( StorageServer* data, Version desiredDurableVersion ) 
 	data->durableVersion.set( nextDurableVersion );
 	if (checkFatalError.isReady()) checkFatalError.get();
 
-	TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
+	//TraceEvent("ForgotVersionsBefore", data->thisServerID).detail("Version", nextDurableVersion);
 	validate(data);
 
 	return nextDurableVersion == desiredDurableVersion;
@@ -1898,7 +1898,7 @@ ACTOR Future<Void> fetchKeys( StorageServer *data, AddingShard* shard ) {
 
 				break;
 			} catch (Error& e) {
-				TraceEvent("FKBlockFail", data->thisServerID).detail("FKID", interval.pairID).error(e,true).suppressFor(1.0);
+				TraceEvent("FKBlockFail", data->thisServerID).error(e,true).suppressFor(1.0).detail("FKID", interval.pairID);
 				if (e.code() == error_code_transaction_too_old){
 					TEST(true); // A storage server has forgotten the history data we are fetching
 					Version lastFV = fetchVersion;
@@ -2638,7 +2638,7 @@ ACTOR Future<Void> updateStorage(StorageServer* data) {
 			Void _ = wait( yield(TaskUpdateStorage) );
 		}
 
-		TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
+		//TraceEvent("StorageServerDurable", data->thisServerID).detail("Version", newOldestVersion);
 
 		Void _ = wait( durableDelay );
 	}

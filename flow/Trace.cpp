@@ -110,7 +110,6 @@ struct SuppressionMap {
 
 TraceBatch g_traceBatch;
 trace_clock_t g_trace_clock = TRACE_CLOCK_NOW;
-std::set<StringRef> suppress;
 IRandom* trace_random = NULL;
 
 LatestEventCache latestEventCache;
@@ -118,6 +117,7 @@ SuppressionMap suppressedEvents;
 
 static TransientThresholdMetricSample<Standalone<StringRef>> *traceEventThrottlerCache;
 static const char *TRACE_EVENT_THROTTLE_STARTING_TYPE = "TraceEventThrottle_";
+static const char *TRACE_EVENT_INVALID_SUPPRESSION = "InvalidSuppression_";
 static int TRACE_LOG_MAX_PREOPEN_BUFFER = 1000000;
 static int TRACE_EVENT_MAX_SIZE = 4000;
 
@@ -534,16 +534,6 @@ void openTraceFile(const NetworkAddress& na, uint64_t rollsize, uint64_t maxLogs
 	std::string baseName = format("%s.%03d.%03d.%03d.%03d.%d", baseOfBase.c_str(), (na.ip>>24)&0xff, (na.ip>>16)&0xff, (na.ip>>8)&0xff, na.ip&0xff, na.port);
 	g_traceLog.open( directory, baseName, logGroup, format("%lld", time(NULL)), rollsize, maxLogsSize, !g_network->isSimulated() ? na : Optional<NetworkAddress>());
 
-	// FIXME
-	suppress.insert( LiteralStringRef( "TLogCommitDurable" ) );
-	suppress.insert( LiteralStringRef( "StorageServerUpdate" ) );
-	suppress.insert( LiteralStringRef( "TLogCommit" ) );
-	suppress.insert( LiteralStringRef( "StorageServerDurable" ) );
-	suppress.insert( LiteralStringRef( "ForgotVersionsBefore" ) );
-	suppress.insert( LiteralStringRef( "FDData" ) );
-	suppress.insert( LiteralStringRef( "FailureDetectionPoll" ) );
-	suppress.insert( LiteralStringRef( "MasterProxyRate" ) );
-
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskFlushTrace));
 	g_traceBatch.dump();
 }
@@ -560,59 +550,17 @@ bool traceFileIsOpen() {
 	return g_traceLog.isOpen();
 }
 
-bool TraceEvent::isEnabled( const char* type, Severity severity ) {
-	//if (!g_traceLog.isOpen()) return false;
-	if(g_network && severity < FLOW_KNOBS->MIN_TRACE_SEVERITY) return false;
-	StringRef s( (const uint8_t*)type, strlen(type) );
-	return !suppress.count(s);
+TraceEvent::TraceEvent( const char* type, UID id ) : id(id), type(type), severity(SevInfo), initialized(false), enabled(true) {}
+TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : id(id), type(type), severity(severity), initialized(false), enabled(true) {}
+TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id), type(interval.type), severity(interval.severity), initialized(false), enabled(true) {
+	init(interval);
+}
+TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : id(id), type(interval.type), severity(severity), initialized(false), enabled(true) {
+	init(interval);
 }
 
-TraceEvent::TraceEvent( const char* type, UID id ) : id(id) {
-	init(SevInfo, type);
-	detail("ID", id);
-}
-
-TraceEvent::TraceEvent( Severity severity, const char* type, UID id ) : id(id) {
-	init(severity, type);
-	detail("ID", id);
-}
-
-TraceEvent::TraceEvent(const char* type, const StringRef& zoneId) {
-	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
-	init(SevInfo, type);
-	detailext("ID", zoneId);
-}
-
-TraceEvent::TraceEvent(Severity severity, const char* type, const StringRef& zoneId) {
-	id = UID(hashlittle(zoneId.begin(), zoneId.size(), 0), 0);
-	init(severity, type);
-	detailext("ID", zoneId);
-}
-
-TraceEvent::TraceEvent(const char* type, const Optional<Standalone<StringRef>>& zoneId) {
-	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL,0);
-	init(SevInfo, type);
-	detailext("ID", zoneId);
-}
-
-TraceEvent::TraceEvent(Severity severity, const char* type, const Optional<Standalone<StringRef>>& zoneId) {
-	id = zoneId.present() ? UID(hashlittle(zoneId.get().begin(), zoneId.get().size(), 0), 0) : UID(-1LL, 0);
-	init(severity, type);
-	detailext("ID", zoneId);
-}
-
-TraceEvent::TraceEvent( TraceInterval& interval, UID id ) : id(id) {
-	init(interval.severity, interval);
-	detail("ID", id);
-}
-
-TraceEvent::TraceEvent( Severity severity, TraceInterval& interval, UID id ) : id(id) {
-	init(severity, interval);
-	detail("ID", id);
-}
-
-bool TraceEvent::init( Severity severity, TraceInterval& interval ) {
-	bool result = init( severity, interval.type );
+bool TraceEvent::init( TraceInterval& interval ) {
+	bool result = init();
 	switch (interval.count++) {
 		case 0: { detail("BeginPair", interval.pairID); break; }
 		case 1: { detail("EndPair", interval.pairID); break; }
@@ -621,13 +569,14 @@ bool TraceEvent::init( Severity severity, TraceInterval& interval ) {
 	return result;
 }
 
-bool TraceEvent::init( Severity severity, const char* type ) {
+bool TraceEvent::init() {
+	if(initialized) {
+		return enabled;
+	}
+	initialized = true;
+
 	ASSERT(*type != '\0');
-
-	this->type = type;
-	this->severity = severity;
-
-	enabled = isEnabled(type, severity);
+	enabled = enabled && ( !g_network || severity >= FLOW_KNOBS->MIN_TRACE_SEVERITY );
 
 	// Backstop to throttle very spammy trace events
 	if (enabled && g_network && !g_network->isSimulated() && severity > SevDebug && isNetworkThread()) {
@@ -657,12 +606,25 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 			time = timer();
 		}
 
+		if(err.isValid() && err.isInjectedFault() && severity == SevError) {
+			severity = SevWarnAlways;
+		}
+
 		detail("Severity", severity);
 		detailf("Time", "%.6f", time);
 		detail("Type", type);
 		if(g_network && g_network->isSimulated()) {
 			NetworkAddress local = g_network->getLocalAddress();
 			detailf("Machine", "%d.%d.%d.%d:%d", (local.ip>>24)&0xff, (local.ip>>16)&0xff, (local.ip>>8)&0xff, local.ip&0xff, local.port);
+		}
+		detail("ID", id);
+		if(err.isValid()) {
+			if (err.isInjectedFault()) {
+				detail("ErrorIsInjectedFault", true);
+			}
+			detail("Error", err.name());
+			detail("ErrorDescription", err.what());
+			detail("ErrorCode", err.code());
 		}
 	} else {
 		tmpEventMetric = nullptr;
@@ -672,24 +634,31 @@ bool TraceEvent::init( Severity severity, const char* type ) {
 }
 
 TraceEvent& TraceEvent::error(class Error const& error, bool includeCancelled) {
-	if (enabled) {
-		if (error.code() == error_code_actor_cancelled && !includeCancelled) {
-			// Suppress the entire message
-			enabled = false;
-		} else {
-			if (error.isInjectedFault()) {
-				detail("ErrorIsInjectedFault", true);
-				if (severity == SevError) severity = SevWarnAlways;
+	if(enabled) {
+		if (error.code() != error_code_actor_cancelled || includeCancelled) {
+			err = error;
+			if (initialized) {
+				if (error.isInjectedFault()) {
+					detail("ErrorIsInjectedFault", true);
+					if(severity == SevError) severity = SevWarnAlways;
+				}
+				detail("Error", error.name());
+				detail("ErrorDescription", error.what());
+				detail("ErrorCode", error.code());
 			}
-			detail("Error", error.name());
-			detail("ErrorDescription", error.what());
-			detail("ErrorCode", error.code());
+		} else {
+			if (initialized) {
+				TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str()).suppressFor(5);
+			} else {
+				enabled = false;
+			}
 		}
 	}
 	return *this;
 }
 
 TraceEvent& TraceEvent::detailImpl( std::string&& key, std::string&& value, bool writeEventMetricField) {
+	init();
 	if (enabled) {
 		if( value.size() > 495 ) {
 			value = value.substr(0, 495) + "...";
@@ -713,36 +682,43 @@ TraceEvent& TraceEvent::detail( std::string key, std::string value ) {
 	return detailImpl(std::move(key), std::move(value));
 }
 TraceEvent& TraceEvent::detail( std::string key, double value ) {
+	init();
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), value);
 	return detailfNoMetric( std::move(key), "%g", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, int value ) {
+	init();
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
 	return detailfNoMetric( std::move(key), "%d", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, unsigned value ) {
+	init();
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
 	return detailfNoMetric( std::move(key), "%u", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long int value ) {
+	init();
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
 	return detailfNoMetric( std::move(key), "%ld", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long unsigned int value ) {
+	init();
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
 	return detailfNoMetric( std::move(key), "%lu", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long long int value ) {
+	init();
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
 	return detailfNoMetric( std::move(key), "%lld", value );
 }
 TraceEvent& TraceEvent::detail( std::string key, long long unsigned int value ) {
+	init();
 	if(enabled)
 		tmpEventMetric->setField(key.c_str(), (int64_t)value);
 	return detailfNoMetric( std::move(key), "%llu", value );
@@ -793,33 +769,48 @@ TraceEvent& TraceEvent::trackLatest( const char *trackingKey ){
 }
 
 TraceEvent& TraceEvent::sample( double sampleRate, bool logSampleRate ) {
-	if(!g_random) {
-		sampleRate = 1.0;
-	}
-	else {
-		enabled = enabled && g_random->random01() < sampleRate;
-	}
+	if(enabled) {
+		if(initialized) {
+			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str()).suppressFor(5);
+			return *this;
+		}
 
-	if(enabled && logSampleRate) {
-		detail("SampleRate", sampleRate);
+		if(!g_random) {
+			sampleRate = 1.0;
+		}
+		else {
+			enabled = enabled && g_random->random01() < sampleRate;
+		}
+
+		if(enabled && logSampleRate) {
+			detail("SampleRate", sampleRate);
+		}
 	}
 
 	return *this;
 }
 
 TraceEvent& TraceEvent::suppressFor( double duration, bool logSuppressedEventCount ) {
-	if(g_network) {
-		if(isNetworkThread()) {
-			int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration);
-			enabled = enabled && suppressedEventCount >= 0;
-			if(enabled && logSuppressedEventCount) {
-				detail("SuppressedEventCount", suppressedEventCount);
+	if(enabled) {
+		if(initialized) {
+			TraceEvent(g_network && g_network->isSimulated() ? SevError : SevWarnAlways, std::string(TRACE_EVENT_INVALID_SUPPRESSION).append(type).c_str()).suppressFor(5);
+			return *this;
+		}
+
+		if(g_network) {
+			if(isNetworkThread()) {
+				int64_t suppressedEventCount = suppressedEvents.checkAndInsertSuppression(type, duration);
+				enabled = enabled && suppressedEventCount >= 0;
+				if(enabled && logSuppressedEventCount) {
+					detail("SuppressedEventCount", suppressedEventCount);
+				}
+			}
+			else {
+				TraceEvent(SevError, "SuppressionFromNonNetworkThread");
+				detail("__InvalidSuppression__", ""); // Choosing a detail name that is unlikely to collide with other names
 			}
 		}
-		else {
-			TraceEvent(SevError, "SuppressionFromNonNetworkThread");
-			detail("__InvalidSuppression__", ""); // Choosing a detail name that is unlikely to collide with other names
-		}
+		init(); //we do not want any future calls on this trace event to disable it, because we have already counted it towards our suppression budget
 	}
 
 	return *this;
@@ -842,11 +833,12 @@ unsigned long TraceEvent::CountEventsLoggedAt(Severity sev) {
 }
 
 TraceEvent& TraceEvent::backtrace(const std::string& prefix) {
-	if (this->severity == SevError) return *this; // We'll backtrace this later in ~TraceEvent
+	if (this->severity == SevError || !enabled) return *this; // We'll backtrace this later in ~TraceEvent
 	return detail(prefix + "Backtrace", platform::get_backtrace());
 }
 
 TraceEvent::~TraceEvent() {
+	init();
 	try {
 		if (enabled) {
 			if (this->severity == SevError) {

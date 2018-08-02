@@ -192,12 +192,17 @@ var apiVersion int
 var networkStarted bool
 var networkMutex sync.Mutex
 
+type DatabaseId struct {
+	clusterFile string
+	dbName      string
+}
+
 var openClusters map[string]Cluster
-var openDatabases map[string]Database
+var openDatabases map[DatabaseId]Database
 
 func init() {
 	openClusters = make(map[string]Cluster)
-	openDatabases = make(map[string]Database)
+	openDatabases = make(map[DatabaseId]Database)
 }
 
 func startNetwork() error {
@@ -287,13 +292,13 @@ func Open(clusterFile string, dbName []byte) (Database, error) {
 		openClusters[clusterFile] = cluster
 	}
 
-	db, ok := openDatabases[string(dbName)]
+	db, ok := openDatabases[DatabaseId{clusterFile, string(dbName)}]
 	if !ok {
 		db, e = cluster.OpenDatabase(dbName)
 		if e != nil {
 			return Database{}, e
 		}
-		openDatabases[string(dbName)] = db
+		openDatabases[DatabaseId{clusterFile, string(dbName)}] = db
 	}
 
 	return db, nil

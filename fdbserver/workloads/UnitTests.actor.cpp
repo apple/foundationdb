@@ -100,9 +100,9 @@ struct UnitTestWorkload : TestWorkload {
 
 			auto test = *t;
 			TraceEvent(result.code() != error_code_success ? SevError : SevInfo, "UnitTest")
+				.error(result, true)
 				.detail("Name", test->name)
 				.detail("File", test->file).detail("Line", test->line)
-				.error(result, true)
 				.detail("WallTime", wallTime)
 				.detail("FlowTime", simTime);
 		}

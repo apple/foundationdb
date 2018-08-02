@@ -2,6 +2,32 @@
 Release Notes
 #############
 
+5.2.8
+=====
+
+Bindings
+--------
+
+* Java: ``FDBDatabase::run`` and ``FDBDatabase::read`` now use the ``Executor`` provided for executing asynchronous callbacks instead of the default one for the database. `(Issue #640) <https://github.com/apple/foundationdb/issues/640>`_
+
+Fixes
+-----
+
+* A large number of concurrent read attempts could bring the database down after a cluster reboot. `(PR #650) <https://github.com/apple/foundationdb/pull/650>`_
+
+5.2.7
+=====
+
+Bindings
+--------
+
+* The go bindings now caches database connections on a per-cluster basis. `(Issue #607) <https://github.com/apple/foundationdb/issues/607>`_
+
+Fixes
+-----
+
+* Sometimes clients would not reconnect to the cluster after the database was upgraded. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
+
 5.2.6
 =====
 
