@@ -1005,7 +1005,7 @@ namespace oldTLog {
 		logData->queueCommittedVersion.set(ver);
 		self->queueCommitEnd.set(commitNumber);
 
-		TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
+		//TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 
 		return Void();
 	}

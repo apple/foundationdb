@@ -85,7 +85,7 @@ public:
 	static void onReadReady( Promise<int> onReady, const boost::system::error_code& error, size_t bytesRead ) {
 		if (error) {
 			Error e = io_error();
-			TraceEvent("AsyncReadError").GetLastError().error(e)
+			TraceEvent("AsyncReadError").error(e).GetLastError()
 				.detail("ASIOCode", error.value())
 				.detail("ASIOMessage", error.message());
 			onReady.sendError(e);
@@ -96,7 +96,7 @@ public:
 	static void onWriteReady( Promise<Void> onReady, size_t bytesExpected, const boost::system::error_code& error, size_t bytesWritten ) {
 		if (error) {
 			Error e = io_error();
-			TraceEvent("AsyncWriteError").GetLastError().error(e)
+			TraceEvent("AsyncWriteError").error(e).GetLastError()
 				.detail("ASIOCode", error.value())
 				.detail("ASIOMessage", error.message());
 			onReady.sendError(e);

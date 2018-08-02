@@ -615,7 +615,7 @@ void MultiVersionDatabase::DatabaseState::fire(const Void &unused, int& userPara
 					}
 					catch(Error &e) {
 						optionFailed = true;
-						TraceEvent(SevError, "DatabaseVersionChangeOptionError").detail("Option", option.first).detail("OptionValue", printable(option.second)).error(e);
+						TraceEvent(SevError, "DatabaseVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", printable(option.second));
 					}
 				}
 
@@ -811,7 +811,7 @@ void MultiVersionCluster::Connector::error(const Error& e, int& userParam) {
 		// TODO: is it right to abandon this connection attempt?
 		client->failed = true;
 		MultiVersionApi::api->updateSupportedVersions();
-		TraceEvent(SevError, "ClusterConnectionError").detail("ClientLibrary", this->client->libPath).error(e);
+		TraceEvent(SevError, "ClusterConnectionError").error(e).detail("ClientLibrary", this->client->libPath);
 	}
 
 	delref();
@@ -850,7 +850,7 @@ void MultiVersionCluster::ClusterState::stateChanged() {
 		}
 		catch(Error &e) {
 			optionLock.leave();
-			TraceEvent(SevError, "ClusterVersionChangeOptionError").detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath).error(e);
+			TraceEvent(SevError, "ClusterVersionChangeOptionError").error(e).detail("Option", option.first).detail("OptionValue", printable(option.second)).detail("LibPath", clients[newIndex]->libPath);
 			connectionAttempts[newIndex]->connected = false;
 			clients[newIndex]->failed = true;
 			MultiVersionApi::api->updateSupportedVersions();
@@ -910,7 +910,7 @@ void MultiVersionApi::runOnExternalClients(std::function<void(Reference<ClientIn
 			}
 		}
 		catch(Error &e) {
-			TraceEvent(SevWarnAlways, "ExternalClientFailure").detail("LibPath", c->second->libPath).error(e);
+			TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", c->second->libPath);
 			if(e.code() == error_code_external_client_already_loaded) {
 				c = externalClients.erase(c);
 				continue;
@@ -1342,7 +1342,7 @@ void MultiVersionApi::loadEnvironmentVariableNetworkOptions() {
 				}
 			}
 			catch(Error &e) {
-				TraceEvent(SevError, "EnvironmentVariableNetworkOptionFailed").detail("Option", option.second.name).detail("Value", valueStr).error(e);
+				TraceEvent(SevError, "EnvironmentVariableNetworkOptionFailed").error(e).detail("Option", option.second.name).detail("Value", valueStr);
 				throw environment_variable_network_option_failed();
 			}
 		}

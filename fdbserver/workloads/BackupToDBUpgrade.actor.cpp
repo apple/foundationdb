@@ -121,7 +121,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 
 			TraceEvent("DRU_DoBackupInDifferentialMode").detail("Tag", printable(tag));
 		} catch (Error &e) {
-			TraceEvent("DRU_DoBackupSubmitBackupError").detail("Tag", printable(tag)).error(e);
+			TraceEvent("DRU_DoBackupSubmitBackupError").error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) {
 				throw e;
 			}
@@ -441,7 +441,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				Void _ = wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRanges, true, StringRef(), self->backupPrefix));
 			}
 			catch (Error& e) {
-				TraceEvent("DRU_RestoreSubmitBackupError").detail("Tag", printable(self->restoreTag)).error(e);
+				TraceEvent("DRU_RestoreSubmitBackupError").error(e).detail("Tag", printable(self->restoreTag));
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 					throw;
 			}

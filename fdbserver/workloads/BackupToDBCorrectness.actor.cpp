@@ -215,7 +215,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				Void _ = wait(backupAgent->abortBackup(cx, tag));
 			}
 			catch (Error& e) {
-				TraceEvent("BARW_DoBackupAbortBackupException", randomID).detail("Tag", printable(tag)).error(e);
+				TraceEvent("BARW_DoBackupAbortBackupException", randomID).error(e).detail("Tag", printable(tag));
 				if (e.code() != error_code_backup_unneeded)
 					throw;
 			}
@@ -250,7 +250,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 			}
 		}
 		catch (Error &e) {
-			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).detail("Tag", printable(tag)).error(e);
+			TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(tag));
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate) {
 				throw e;
 			}
@@ -294,7 +294,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 				}
 			}
 			catch (Error& e) {
-				TraceEvent("BARW_DoBackupDiscontinueBackupException", randomID).detail("Tag", printable(tag)).error(e);
+				TraceEvent("BARW_DoBackupDiscontinueBackupException", randomID).error(e).detail("Tag", printable(tag));
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 					throw;
 			}
@@ -480,7 +480,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					extraBackup = backupAgent.submitBackup(self->extraDB, self->backupTag, self->backupRanges, true, self->extraPrefix, StringRef(), self->locked);
 				}
 				catch (Error& e) {
-					TraceEvent("BARW_SubmitBackup2Exception", randomID).detail("BackupTag", printable(self->backupTag)).error(e);
+					TraceEvent("BARW_SubmitBackup2Exception", randomID).error(e).detail("BackupTag", printable(self->backupTag));
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
@@ -520,7 +520,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					Void _ = wait(restoreAgent.submitBackup(cx, self->restoreTag, restoreRange, true, StringRef(), self->backupPrefix, self->locked));
 				}
 				catch (Error& e) {
-					TraceEvent("BARW_DoBackupSubmitBackupException", randomID).detail("Tag", printable(self->restoreTag)).error(e);
+					TraceEvent("BARW_DoBackupSubmitBackupException", randomID).error(e).detail("Tag", printable(self->restoreTag));
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}
@@ -536,7 +536,7 @@ struct BackupToDBCorrectnessWorkload : TestWorkload {
 					Void _ = wait(extraBackup);
 				}
 				catch (Error& e) {
-					TraceEvent("BARW_ExtraBackupException", randomID).detail("BackupTag", printable(self->backupTag)).error(e);
+					TraceEvent("BARW_ExtraBackupException", randomID).error(e).detail("BackupTag", printable(self->backupTag));
 					if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 						throw;
 				}

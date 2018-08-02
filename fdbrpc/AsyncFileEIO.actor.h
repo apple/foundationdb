@@ -83,7 +83,7 @@ public:
 			TraceEvent(notFound ? SevWarn : SevWarnAlways, "FileOpenError").error(e).GetLastError().detail("File", filename).detail("Flags", flags).detail("Mode", mode);
 			throw e;
 		}
-		TraceEvent("AsyncFileOpened").detail("Filename", filename).detail("Fd", r->result).detail("Flags", flags).suppressFor(1.0);
+		TraceEvent("AsyncFileOpened").suppressFor(1.0).detail("Filename", filename).detail("Fd", r->result).detail("Flags", flags);
 
 		if ((flags & OPEN_LOCK) && !lock_fd(r->result)) {
 			TraceEvent(SevError, "UnableToLockFile").detail("Filename", filename).GetLastError();
@@ -254,7 +254,7 @@ private:
 	static void error( const char* context, int fd, eio_req* r, Reference<ErrorInfo> const& err = Reference<ErrorInfo>() ) {
 		Error e = io_error();
 		errno = r->errorno;
-		TraceEvent(context).detail("Fd", fd).detail("Result", r->result).GetLastError().error(e);
+		TraceEvent(context).error(e).detail("Fd", fd).detail("Result", r->result).GetLastError();
 		if (err) err->set(e);
 		else throw e;
 	}
@@ -264,7 +264,7 @@ private:
 		state eio_req* r = eio_close(fd, 0, eio_callback, &p);
 		Void _ = wait( p.getFuture() );
 		if (r->result) error( "CloseError", fd, r );
-		TraceEvent("AsyncFileClosed").detail("Fd", fd).suppressFor(1.0);
+		TraceEvent("AsyncFileClosed").suppressFor(1.0).detail("Fd", fd);
 	}
 
 	ACTOR static Future<int> read_impl( int fd, void* data, int length, int64_t offset ) {

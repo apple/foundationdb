@@ -40,7 +40,7 @@ extern void flushTraceFileVoid();
 Error Error::fromUnvalidatedCode(int code) {
 	if (code < 0 || code > 30000) {
 		Error e = Error::fromCode(error_code_unknown_error);
-		TraceEvent(SevWarn, "ConvertedUnvalidatedErrorCode").detail("OriginalCode", code).error(e);
+		TraceEvent(SevWarn, "ConvertedUnvalidatedErrorCode").error(e).detail("OriginalCode", code);
 		return e;
 	}
 	else

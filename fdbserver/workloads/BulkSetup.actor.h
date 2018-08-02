@@ -49,7 +49,7 @@ Future<bool> checkRangeSimpleValueSize( Database cx, T* workload, uint64_t begin
 			Void _ = wait( success( first ) && success( last ) );
 			return first.get().present() && last.get().present();
 		} catch (Error& e) {
-			TraceEvent("CheckRangeError").detail("Begin", begin).detail("End", end).error(e);
+			TraceEvent("CheckRangeError").error(e).detail("Begin", begin).detail("End", end);
 			Void _ = wait( tr.onError(e) );
 		}
 	}

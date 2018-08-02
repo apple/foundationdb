@@ -926,7 +926,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				}
 				TEST(true); //did not find a healthy destination team on the first attempt
 				stuckCount++;
-				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).detail("Count", stuckCount).suppressFor(1.0);
+				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).suppressFor(1.0).detail("Count", stuckCount);
 				Void _ = wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
 			}
 
