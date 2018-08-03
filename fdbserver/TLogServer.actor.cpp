@@ -1775,7 +1775,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 			for(auto &kv : data) {
 				Tag tag = decodeTagPoppedKey(rawId, kv.key);
 				Version popped = decodeTagPoppedValue(kv.value);
-				TraceEvent("TLogRestorePop", logData->logId).detail("Tag", tag.toString()).detail("To", popped);
+				TraceEvent("TLogRestorePopped", logData->logId).detail("Tag", tag.toString()).detail("To", popped);
 				auto tagData = logData->getTagData(tag);
 				ASSERT( !tagData );
 				logData->createTagData(tag, popped, false, false, false);
