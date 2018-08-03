@@ -748,6 +748,7 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 			Reference<IConnection> conn = wait( listener->accept() );
 			TraceEvent("ConnectionFrom", conn->getDebugID()).detail("FromAddress", conn->getPeerAddress()).suppressFor(1.0);
 			incoming.add( connectionIncoming(self, conn) );
+			Void _ = wait(delay(0));
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);
