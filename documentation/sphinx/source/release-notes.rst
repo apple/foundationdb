@@ -33,7 +33,7 @@ Fixes
 * Under heavy write load, storage servers would occasionally pause for ~100ms. [6.0.2] `(PR #597) <https://github.com/apple/foundationdb/pull/597>`_
 * Storage servers were not given time to rejoin the cluster before being marked as failed. [6.0.2] `(PR #592) <https://github.com/apple/foundationdb/pull/592>`_
 * Incorrect accounting of incompatible connections led to occasional assertion failures. [6.0.3] `(PR #616) <https://github.com/apple/foundationdb/pull/616>`_
-* Sometimes clients would not reconnect to the cluster after the database was upgraded. [6.0.4] `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
+* A client could fail to connect to a cluster when the cluster was upgraded to a version compatible with the client. This affected upgrades that were using the multi-version client to maintain compatibility with both versions of the cluster. [6.0.4] `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
 * A large number of concurrent read attempts could bring the database down after a cluster reboot. [6.0.4] `(PR #650) <https://github.com/apple/foundationdb/pull/650>`_
 * Automatic suppression of trace events which occur too frequently was happening before trace events were suppressed by other mechanisms. [6.0.4] `(PR #656) <https://github.com/apple/foundationdb/pull/656>`_
 
