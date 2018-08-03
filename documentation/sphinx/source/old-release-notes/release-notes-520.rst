@@ -26,7 +26,7 @@ Bindings
 Fixes
 -----
 
-* Sometimes clients would not reconnect to the cluster after the database was upgraded. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
+* A client could fail to connect to a cluster when the cluster was upgraded to a version compatible with the client. This affected upgrades that were using the multi-version client to maintain compatibility with both versions of the cluster. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
 
 5.2.6
 =====
