@@ -658,6 +658,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	if(logData->stopped) {
 		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD) {
 			while(logData->persistentDataDurableVersion != logData->version.get()) {
+				totalSize = 0;
 				std::vector<std::pair<std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator, std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator>> iters;
 
 				for(tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
