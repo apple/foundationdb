@@ -1430,7 +1430,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			for(auto it=currentStatus.begin(); it!=currentStatus.end(); it++)
 				if (it->second.penultimateRequestTime) {
 					delays.push_back(it->second.latency(t));
-					TraceEvent("FDData", uniqueID).detail("S", it->first.toString()).detail("L", it->second.latency(t));
+					//TraceEvent("FDData", uniqueID).detail("S", it->first.toString()).detail("L", it->second.latency(t));
 				}
 			int pivot = std::max(0, (int)delays.size()-2);
 			double pivotDelay = 0;
@@ -1440,7 +1440,7 @@ ACTOR Future<Void> failureDetectionServer( UID uniqueID, FutureStream< FailureMo
 			}
 			pivotDelay = std::max(0.0, pivotDelay - FLOW_KNOBS->SERVER_REQUEST_INTERVAL);
 
-			TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
+			//TraceEvent("FailureDetectionPoll", uniqueID).detail("PivotDelay", pivotDelay).detail("Clients", currentStatus.size());
 			//TraceEvent("FailureDetectionAcceptableDelay").detail("Delay", acceptableDelay1000);
 
 			for(auto it = currentStatus.begin(); it != currentStatus.end(); ) {

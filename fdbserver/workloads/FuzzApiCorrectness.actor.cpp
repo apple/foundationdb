@@ -87,7 +87,7 @@ struct ExceptionContract {
 		for (auto i : expected) {
 			if (i.second == Always) {
 				TraceEvent evt(SevError, func.c_str());
-				evt.detail("Thrown", false).detail("Expected", "always").error(Error::fromUnvalidatedCode(i.first)).backtrace();
+				evt.error(Error::fromUnvalidatedCode(i.first)).detail("Thrown", false).detail("Expected", "always").backtrace();
 				if (augment)
 					augment(evt);
 			}

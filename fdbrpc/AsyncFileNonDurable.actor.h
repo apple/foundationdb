@@ -238,7 +238,7 @@ public:
 			state Error err = e;
 			std::string currentFilename = ( wrappedFile.isReady() && !wrappedFile.isError() ) ? wrappedFile.get()->getFilename() : actualFilename;
 			currentProcess->machine->openFiles.erase( currentFilename );
-			//TraceEvent("AsyncFileNonDurableOpenError").detail("Filename", filename).detail("Address", currentProcess->address).error(e, true).detail("Addr", g_simulator.getCurrentProcess()->address);
+			//TraceEvent("AsyncFileNonDurableOpenError").error(e, true).detail("Filename", filename).detail("Address", currentProcess->address).detail("Addr", g_simulator.getCurrentProcess()->address);
 			Void _ = wait( g_simulator.onProcess( currentProcess, currentTaskID ) );
 			throw err;
 		}
