@@ -843,7 +843,7 @@ struct TagPartitionedLogSystem : ILogSystem, ReferenceCounted<TagPartitionedLogS
 				last = to.first;
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled) throw;
-				TraceEvent( (e.code() == error_code_broken_promise) ? SevInfo : SevError, "LogPopError", self->dbgid ).detail("Log", log->get().id()).error(e);
+				TraceEvent( (e.code() == error_code_broken_promise) ? SevInfo : SevError, "LogPopError", self->dbgid ).error(e).detail("Log", log->get().id());
 				return Void();  // Leaving outstandingPops filled in means no further pop requests to this tlog from this logSystem
 			}
 		}

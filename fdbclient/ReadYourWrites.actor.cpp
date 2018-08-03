@@ -1905,12 +1905,11 @@ void ReadYourWritesTransaction::debugLogRetries(Optional<Error> error) {
 				fprintf(stderr, "fdb WARNING: long transaction (%.2fs elapsed%s, %d retries, %s)\n", elapsed, transactionNameStr.c_str(), retries, committed ? "committed" : error.get().what());
 			{
 				TraceEvent trace = TraceEvent("LongTransaction");
-				if(!transactionDebugInfo->transactionName.empty())
-					trace.detail("TransactionName", printable(StringRef(transactionDebugInfo->transactionName)));
-				
-				trace.detail("Elapsed", elapsed).detail("Retries", retries).detail("Committed", committed);
 				if(error.present())
 					trace.error(error.get(), true);
+				if(!transactionDebugInfo->transactionName.empty())
+					trace.detail("TransactionName", printable(StringRef(transactionDebugInfo->transactionName)));
+				trace.detail("Elapsed", elapsed).detail("Retries", retries).detail("Committed", committed);
 			}
 			transactionDebugInfo->lastRetryLogTime = now();
 		}

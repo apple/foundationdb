@@ -160,7 +160,7 @@ struct CommitBugWorkload : TestWorkload
 					else {
 						TEST(true); //Commit conflict
 
-						TraceEvent("CommitBug2Error").detail("AttemptedNum", i+1).error(e);
+						TraceEvent("CommitBug2Error").error(e).detail("AttemptedNum", i+1);
 						Void _ = wait(tr.onError(e));
 					}
 				}

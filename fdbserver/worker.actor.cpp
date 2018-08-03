@@ -406,11 +406,11 @@ void startRole(UID roleId, UID workerId, std::string as, std::map<std::string, s
 void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 	{
 		TraceEvent ev("Role", id);
+		if(e.code() != invalid_error_code)
+			ev.error(e, true);
 		ev.detail("Transition", "End")
 			.detail("As", as)
 			.detail("Reason", reason);
-		if(e.code() != invalid_error_code)
-			ev.error(e, true);
 
 		ev.trackLatest( (id.shortString() + ".Role").c_str() );
 	}
@@ -419,11 +419,10 @@ void endRole(UID id, std::string as, std::string reason, bool ok, Error e) {
 		std::string type = as + "Failed";
 
 		TraceEvent err(SevError, type.c_str(), id);
-		err.detail("Reason", reason);
-
 		if(e.code() != invalid_error_code) {
 			err.error(e, true);
 		}
+		err.detail("Reason", reason);
 	}
 
 	latestEventCache.clear( id.shortString() );

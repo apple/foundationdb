@@ -228,7 +228,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 					{
 						if(e.code() == error_code_attribute_not_found)
 						{
-							TraceEvent("ConsistencyCheck_StorageQueueSizeError").detail("Reason", "Could not read queue size").error(e);
+							TraceEvent("ConsistencyCheck_StorageQueueSizeError").error(e).detail("Reason", "Could not read queue size");
 
 							//This error occurs if we have undesirable servers; in that case just report the undesirable servers error
 							if(!hasUndesirableServers)
@@ -532,7 +532,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		}
 		catch(Error& e)
 		{
-			TraceEvent("ConsistencyCheck_ErrorFetchingMetrics").detail("Begin", printable(shard.begin)).detail("End", printable(shard.end)).error(e);
+			TraceEvent("ConsistencyCheck_ErrorFetchingMetrics").error(e).detail("Begin", printable(shard.begin)).detail("End", printable(shard.end));
 			estimatedBytes.clear();
 		}
 
@@ -843,8 +843,8 @@ struct ConsistencyCheckWorkload : TestWorkload
 							//If the data is not available and we aren't relocating this shard
 							else if(!isRelocating)
 							{
-								TraceEvent("ConsistencyCheck_StorageServerUnavailable").detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
-									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token).suppressFor(1.0);
+								TraceEvent("ConsistencyCheck_StorageServerUnavailable").suppressFor(1.0).detail("StorageServer", storageServers[j]).detail("ShardBegin", printable(range.begin)).detail("ShardEnd", printable(range.end))
+									.detail("Address", storageServerInterfaces[j].address()).detail("GetKeyValuesToken", storageServerInterfaces[j].getKeyValues.getEndpoint().token);
 
 								//All shards should be available in quiscence
 								if(self->performQuiescentChecks)
@@ -1107,7 +1107,7 @@ struct ConsistencyCheckWorkload : TestWorkload
 		for(itr = workers.begin(); itr != workers.end(); ++itr) {
 			ErrorOr<Standalone<VectorRef<UID>>> stores = wait(itr->first.diskStoreRequest.getReplyUnlessFailedFor(DiskStoreRequest(false), 2, 0));
 			if(stores.isError()) {
-				TraceEvent("ConsistencyCheck_GetDataStoreFailure").detail("Address", itr->first.address()).error(stores.getError());
+				TraceEvent("ConsistencyCheck_GetDataStoreFailure").error(stores.getError()).detail("Address", itr->first.address());
 				self->testFailure("Failed to get data stores");
 				return false;
 			}

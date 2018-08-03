@@ -74,7 +74,7 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface masterWorker
 		sscanf(md.getValue("TotalBytes").c_str(), "%lld", &dataInFlight);
 		return dataInFlight;
 	} catch( Error &e ) {
-		TraceEvent("QuietDatabaseFailure", masterWorker.id()).detail("Reason", "Failed to extract DataInFlight").error(e);
+		TraceEvent("QuietDatabaseFailure", masterWorker.id()).error(e).detail("Reason", "Failed to extract DataInFlight");
 		throw;
 	}
 
