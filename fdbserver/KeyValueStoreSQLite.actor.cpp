@@ -103,14 +103,14 @@ struct PageChecksumCodec {
 		if(!write && sum != *pSumInPage) {
 			if(!silent)
 				TraceEvent (SevError, "SQLitePageChecksumFailure")
+					.error(checksum_failed())
 					.detail("CodecPageSize", pageSize)
 					.detail("CodecReserveSize", reserveSize)
 					.detail("Filename", filename)
 					.detail("PageNumber", pageNumber)
 					.detail("PageSize", pageLen)
 					.detail("ChecksumInPage", pSumInPage->toString())
-					.detail("ChecksumCalculated", sum.toString())
-					.error(checksum_failed());
+					.detail("ChecksumCalculated", sum.toString());
 
 			return false;
 		}
@@ -1832,8 +1832,8 @@ private:
 			}
 		} catch (Error& e) {
 			TraceEvent(SevError, "KVDoCloseError", self->logID)
-				.detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown")
-				.error(e,true);
+				.error(e,true)
+				.detail("Reason", e.code() == error_code_platform_error ? "could not delete database" : "unknown");
 			error = e;
 		}
 

@@ -658,6 +658,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	if(logData->stopped) {
 		if (self->bytesInput - self->bytesDurable >= SERVER_KNOBS->TLOG_SPILL_THRESHOLD) {
 			while(logData->persistentDataDurableVersion != logData->version.get()) {
+				totalSize = 0;
 				std::vector<std::pair<std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator, std::deque<std::pair<Version, LengthPrefixedStringRef>>::iterator>> iters;
 
 				for(tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
@@ -1107,7 +1108,7 @@ ACTOR Future<Void> doQueueCommit( TLogData* self, Reference<LogData> logData ) {
 		logData->recoveryComplete.send(Void());
 	}
 
-	TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
+	//TraceEvent("TLogCommitDurable", self->dbgid).detail("Version", ver);
 	if(logData->logSystem->get() && (!logData->isPrimary || logData->logRouterPoppedVersion < logData->logRouterPopToVersion)) {
 		logData->logRouterPoppedVersion = ver;
 		logData->logSystem->get()->pop(ver, logData->remoteTag, knownCommittedVersion, logData->locality);
@@ -1204,7 +1205,7 @@ ACTOR Future<Void> tLogCommit(
 		if(req.debugID.present())
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
-		TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
+		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
 		commitMessages(logData, req.version, req.arena, req.messages, self->bytesInput);
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);

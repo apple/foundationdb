@@ -418,7 +418,7 @@ ACTOR Future<Void> runWorkloadAsync( Database cx, WorkloadInterface workIface, T
 					setupResult = Void();
 				} catch (Error& e) {
 					setupResult = operation_failed();
-					TraceEvent(SevError, "TestSetupError", workIface.id()).detail("Workload", workload->description()).error(e);
+					TraceEvent(SevError, "TestSetupError", workIface.id()).error(e).detail("Workload", workload->description());
 					if( e.code() == error_code_please_reboot || e.code() == error_code_please_reboot_delete) throw;
 				}
 			}
@@ -709,8 +709,8 @@ ACTOR Future<DistributedTestResults> runWorkload( Database cx, std::vector< Test
 				metricsResults.push_back( metricTasks[i].get() );
 			else
 				TraceEvent(SevError, "TestFailure")
-					.detail("Reason", "Metrics not retrieved")
 					.error(metricTasks[i].getError())
+					.detail("Reason", "Metrics not retrieved")
 					.detail("From", workloads[i].metrics.getEndpoint().address);
 		}
 	}
@@ -790,7 +790,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 		logMetrics( testResults.metrics );
 	} catch(Error& e) {
 		if( e.code() == error_code_timed_out ) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Test timed out").detail("Timeout", spec.timeout).error(e);
+			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Test timed out").detail("Timeout", spec.timeout);
 			fprintf(stderr, "ERROR: Test timed out after %d seconds.\n", spec.timeout);
 			testResults.failures = testers.size();
 			testResults.successes = 0;
@@ -805,7 +805,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 			try {
 				Void _ = wait( timeoutError( dumpDatabase( cx, "dump after " + printable(spec.title) + ".html", allKeys ), 30.0 ) );
 			} catch (Error& e) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Unable to dump database").error(e);
+				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to dump database");
 				ok = false;
 			}
 
@@ -819,7 +819,7 @@ ACTOR Future<bool> runTest( Database cx, std::vector< TesterInterface > testers,
 				Void _ = wait(timeoutError(checkConsistency(cx, testers, database, quiescent, 10000.0, 18000, spec.databasePingDelay, dbInfo), 20000.0));
 			}
 			catch(Error& e) {
-				TraceEvent(SevError, "TestFailure").detail("Reason", "Unable to perform consistency check").error(e);
+				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
 				ok = false;
 			}
 		}
@@ -1047,7 +1047,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 			Void _ = wait(timeoutError(changeConfiguration(cx, testers, database, startingConfiguration), 2000.0));
 		}
 		catch(Error& e) {
-			TraceEvent(SevError, "TestFailure").detail("Reason", "Unable to set starting configuration").error(e);
+			TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to set starting configuration");
 		}
 	}
 
@@ -1057,8 +1057,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 			Void _ = wait( quietDatabase( cx, dbInfo, "Start") || 
 				( databasePingDelay == 0.0 ? Never() : testDatabaseLiveness( cx, databasePingDelay, "QuietDatabaseStart", startDelay ) ) );
 		} catch( Error& e ) {
-			if( e.code() != error_code_actor_cancelled )
-				TraceEvent("QuietDatabaseStartExternalError").error(e);
+			TraceEvent("QuietDatabaseStartExternalError").error(e);
 			throw;
 		}
 	}
@@ -1079,8 +1078,7 @@ ACTOR Future<Void> runTests( Reference<AsyncVar<Optional<struct ClusterControlle
 				Void _ = wait( quietDatabase( cx, dbInfo, "End", 0, 2e6, 2e6 ) || 
 					( databasePingDelay == 0.0 ? Never() : testDatabaseLiveness( cx, databasePingDelay, "QuietDatabaseEnd" ) ) );
 			} catch( Error& e ) {
-				if( e.code() != error_code_actor_cancelled )
-					TraceEvent("QuietDatabaseEndExternalError").error(e);
+				TraceEvent("QuietDatabaseEndExternalError").error(e);
 				throw;
 			}
 		}

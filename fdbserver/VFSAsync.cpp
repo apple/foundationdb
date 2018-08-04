@@ -200,10 +200,10 @@ static int asyncSync(sqlite3_file *pFile, int flags){
 		return SQLITE_OK;
 	} catch (Error& e) {
 		TraceEvent("VFSSyncError")
+			.error(e)
 			.detail("Filename", p->filename)
 			.detail("Sqlite3File", (int64_t)pFile)
-			.detail("IAsyncFile", (int64_t)p->file.getPtr())
-			.error(e);
+			.detail("IAsyncFile", (int64_t)p->file.getPtr());
 		
 		return SQLITE_IOERR_FSYNC;
 	}
@@ -528,7 +528,7 @@ static int asyncOpen(
 			.detail("Sqlite3File", DEBUG_DETERMINISM ? 0 : (int64_t)pFile)
 			.detail("IAsyncFile", DEBUG_DETERMINISM ? 0 : (int64_t)p->file.getPtr());*/
 	} catch (Error& e) {
-		TraceEvent("SQLiteOpenFail").detail("Filename", p->filename).error(e);
+		TraceEvent("SQLiteOpenFail").error(e).detail("Filename", p->filename);
 		p->~VFSAsyncFile();
 		return SQLITE_CANTOPEN;
 	}
@@ -632,10 +632,10 @@ static int asyncFullPathname(
 		memcpy(zPathOut, s.c_str(), s.size()+1);
 		return SQLITE_OK;
 	} catch (Error& e) {
-		TraceEvent(SevError,"VFSAsyncFullPathnameError").detail("PathIn", (std::string)zPath).error(e);
+		TraceEvent(SevError,"VFSAsyncFullPathnameError").error(e).detail("PathIn", (std::string)zPath);
 		return SQLITE_IOERR;
 	} catch(...) {
-		TraceEvent(SevError,"VFSAsyncFullPathnameError").detail("PathIn", (std::string)zPath).error(unknown_error());
+		TraceEvent(SevError,"VFSAsyncFullPathnameError").error(unknown_error()).detail("PathIn", (std::string)zPath);
 		return SQLITE_IOERR;
 	}
 }
