@@ -943,9 +943,9 @@ void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime) {
 		sum += cur[cpustate];
 	}
 
-	totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS]);
+	totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS] + cur[CP_IDLE]);
 
-	idleTime = (uint64_t)cur[CP_IDLE];
+	idleTime = (uint64_t)(cur[CP_IDLE]);
 
 }
 
@@ -971,7 +971,7 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 
 	kvm_t *kd = NULL;
 
-	etime = ts.tv_nsec * 1e-6;
+	etime = ts.tv_nsec * 1e-6;;
 
 	int dn;
 	u_int64_t total_transfers_read, total_transfers_write;
@@ -994,7 +994,6 @@ void getDiskStatistics(std::string const& directory, uint64_t& currentIOs, uint6
 
 	for (dn = 0; dn < num_devices; dn++)
 	{
-		int di;
 
 		if (devstat_compute_statistics(&dscur.dinfo->devices[dn], NULL, etime,
 		DSM_MS_PER_TRANSACTION, &ms_per_transaction,

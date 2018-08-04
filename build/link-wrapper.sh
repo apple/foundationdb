@@ -35,12 +35,6 @@ case $1 in
 		    $CC $OPTIONS
 		fi
 		;;
-		freebsd)
-		if [ -z ${CC+x} ] && type -p clang >/dev/null; then
-			CC=clang++
-		fi
-		$CC $OPTIONS
-		;;
 	    *)
 		$CC $OPTIONS
 		;;
