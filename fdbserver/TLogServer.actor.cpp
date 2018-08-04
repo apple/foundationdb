@@ -270,13 +270,14 @@ struct TLogData : NonCopyable {
 
 	PromiseStream<Future<Void>> sharedActors;
 	bool terminated;
+	FlowLock concurrentLogRouterReads;
 
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
 			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
 			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
-			  bytesInput(0), bytesDurable(0), updatePersist(Void()), terminated(false)
+			  bytesInput(0), bytesDurable(0), updatePersist(Void()), terminated(false), concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
 		{
 		}
 };
@@ -989,6 +990,12 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	if( logData->version.get() < req.begin ) {
 		Void _ = wait( logData->version.whenAtLeast( req.begin ) );
 		Void _ = wait( delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()) );
+	}
+
+	if( req.tag.locality == tagLocalityLogRouter ) {
+		Void _ = wait( self->concurrentLogRouterReads.take() );
+		state FlowLock::Releaser globalReleaser(self->concurrentLogRouterReads);
+		Void _ = wait( delay(0.0, TaskLowPriority) );
 	}
 
 	Version poppedVer = poppedVersion(logData, req.tag);

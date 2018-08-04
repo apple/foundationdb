@@ -2069,7 +2069,7 @@ ACTOR Future<Void> updateDatacenterVersionDifference( ClusterControllerData *sel
 
 		state Optional<TLogInterface> primaryLog;
 		state Optional<TLogInterface> remoteLog;
-		if(self->db.serverInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED) {
+		if(self->db.serverInfo->get().recoveryState >= RecoveryState::ALL_LOGS_RECRUITED) {
 			for(auto& logSet : self->db.serverInfo->get().logSystemConfig.tLogs) {
 				if(logSet.isLocal && logSet.locality != tagLocalitySatellite) {
 					for(auto& tLog : logSet.tLogs) {
