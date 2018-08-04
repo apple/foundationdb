@@ -314,10 +314,10 @@ ACTOR Future<Void> startMoveKeys( Database occ, KeyRange keys, vector<UID> serve
 
 					if(retries%10 == 0) {
 						TraceEvent(retries == 50 ? SevWarnAlways : SevWarn, "StartMoveKeysRetrying", relocationIntervalId)
+							.error(err)
 							.detail("Keys", printable(keys))
 							.detail("BeginKey", printable(begin))
-							.detail("NumTries", retries)
-							.error(err);
+							.detail("NumTries", retries);
 					}
 				}
 			}

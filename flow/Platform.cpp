@@ -2002,7 +2002,7 @@ void atomicReplace( std::string const& path, std::string const& content, bool te
 		INJECT_FAULT( io_error, "atomicReplace" );
 	}
 	catch(Error &e) {
-		TraceEvent(SevWarn, "AtomicReplace").detail("Path", path).error(e).GetLastError();
+		TraceEvent(SevWarn, "AtomicReplace").error(e).detail("Path", path).GetLastError();
 		if (f) fclose(f);
 		throw;
 	}

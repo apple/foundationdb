@@ -64,6 +64,12 @@ using std::make_pair;
 NetworkOptions networkOptions;
 Reference<TLSOptions> tlsOptions;
 
+static void initTLSOptions() {
+	if (!tlsOptions) {
+		tlsOptions = Reference<TLSOptions>(new TLSOptions());
+	}
+}
+
 static const Key CLIENT_LATENCY_INFO_PREFIX = LiteralStringRef("client_latency/");
 static const Key CLIENT_LATENCY_INFO_CTR_PREFIX = LiteralStringRef("client_latency_counter/");
 
@@ -522,10 +528,10 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 		}
 	} catch( Error& e ) {
 		TraceEvent(SevError, "MonitorClientInfoError")
+			.error(e)
 			.detail("DBName", printable(dbName))
 			.detail("ConnectionFile", ccf && ccf->canGetFilename() ? ccf->getFilename() : "")
-			.detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "")
-			.error(e);
+			.detail("ConnectionString", ccf ? ccf->getConnectionString().toString() : "");
 
 		throw;
 	}
@@ -783,42 +789,51 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		case FDBNetworkOptions::TLS_PLUGIN:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_cert_file( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_CERT_BYTES:
+			initTLSOptions();
 			tlsOptions->set_cert_data( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_CA_PATH:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_ca_file( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_CA_BYTES:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_ca_data(value.get().toString());
 			break;
 		case FDBNetworkOptions::TLS_PASSWORD:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_key_password(value.get().toString());
 			break;
 		case FDBNetworkOptions::TLS_KEY_PATH:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_key_file( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_KEY_BYTES:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			tlsOptions->set_key_data( value.get().toString() );
 			break;
 		case FDBNetworkOptions::TLS_VERIFY_PEERS:
 			validateOptionValue(value, true);
+			initTLSOptions();
 			try {
 				tlsOptions->set_verify_peers({ value.get().toString() });
 			} catch( Error& e ) {
 				TraceEvent(SevWarnAlways, "TLSValidationSetError")
-					.detail("Input", value.get().toString() )
-					.error( e );
+					.error( e )
+					.detail("Input", value.get().toString() );
 				throw invalid_option_value();
 			}
 			break;
@@ -871,7 +886,7 @@ void setupNetwork(uint64_t transportId, bool useMetrics) {
 	FlowTransport::createInstance(transportId);
 	Net2FileSystem::newFileSystem();
 
-	tlsOptions = Reference<TLSOptions>( new TLSOptions );
+	initTLSOptions();
 
 #ifndef TLS_DISABLED
 	tlsOptions->register_network();
@@ -1269,12 +1284,10 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 
 				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
-				if(e.code() != error_code_actor_cancelled) {
-					TraceEvent(SevInfo, "GetKeyError")
-						.error(e)
-						.detail("AtKey", printable(k.getKey()))
-						.detail("Offset", k.offset);
-				}
+				TraceEvent(SevInfo, "GetKeyError")
+					.error(e)
+					.detail("AtKey", printable(k.getKey()))
+					.detail("Offset", k.offset);
 				throw e;
 			}
 		}
@@ -2483,11 +2496,11 @@ Future<Void> Transaction::commitMutations() {
 		size_t transactionSize = tr.transaction.mutations.expectedSize() + tr.transaction.read_conflict_ranges.expectedSize() + tr.transaction.write_conflict_ranges.expectedSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
 			TraceEvent(!g_network->isSimulated() ? SevWarnAlways : SevWarn, "LargeTransaction")
+				.suppressFor(1.0)
 				.detail("Size", transactionSize)
 				.detail("NumMutations", tr.transaction.mutations.size())
 				.detail("ReadConflictSize", tr.transaction.read_conflict_ranges.expectedSize())
-				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize())
-				.suppressFor(1.0);
+				.detail("WriteConflictSize", tr.transaction.write_conflict_ranges.expectedSize());
 		}
 
 		if(!apiVersionAtLeast(300)) {
@@ -2693,7 +2706,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 			}
 		}
 	} catch (Error& e) {
-		if( e.code() != error_code_broken_promise && e.code() != error_code_actor_cancelled )
+		if( e.code() != error_code_broken_promise )
 			TraceEvent(SevError, "GetConsistentReadVersionError").error(e);
 		throw;
 	}
