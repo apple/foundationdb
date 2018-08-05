@@ -648,7 +648,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 	}
 
 	state Reference<LogData> logData = self->id_data[self->queueOrder.front()];
-	state Version nextVersion = 0;
+	state Version nextVersion = logData->version.get();
 	state int totalSize = 0;
 
 	state int tagLocality = 0;
@@ -660,6 +660,7 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 			while(logData->persistentDataDurableVersion != logData->version.get()) {
 				totalSize = 0;
 				Map<Version, std::pair<int,int>>::iterator sizeItr = logData->version_sizes.begin();
+				nextVersion = logData->version.get();
 				while( totalSize < SERVER_KNOBS->UPDATE_STORAGE_BYTE_LIMIT && sizeItr != logData->version_sizes.end() )
 				{
 					totalSize += sizeItr->value.first + sizeItr->value.second;
@@ -701,8 +702,6 @@ ACTOR Future<Void> updateStorage( TLogData* self ) {
 			++sizeItr;
 			nextVersion = sizeItr == logData->version_sizes.end() ? logData->version.get() : sizeItr->key;
 		}
-
-		nextVersion = std::max<Version>(nextVersion, logData->persistentDataVersion);
 
 		//TraceEvent("UpdateStorageVer", logData->logId).detail("NextVersion", nextVersion).detail("PersistentDataVersion", logData->persistentDataVersion).detail("TotalSize", totalSize);
 
