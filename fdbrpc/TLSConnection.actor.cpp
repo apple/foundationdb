@@ -172,7 +172,7 @@ TLSNetworkConnections::TLSNetworkConnections( Reference<TLSOptions> options ) : 
 Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress toAddr, std::string host) {
 	if ( toAddr.isTLS() ) {
 		NetworkAddress clearAddr( toAddr.ip, toAddr.port, toAddr.isPublic(), false );
-		TraceEvent("TLSConnectionConnecting").detail("ToAddr", toAddr);
+		TraceEvent("TLSConnectionConnecting").suppressFor(1.0).detail("ToAddr", toAddr);
 		if (host.empty() || host == toIPString(toAddr.ip))
 			return wrap(options->get_policy(TLSOptions::POLICY_VERIFY_PEERS), true, network->connect(clearAddr), std::string(""));
 		else
@@ -199,10 +199,10 @@ Reference<IListener> TLSNetworkConnections::listen( NetworkAddress localAddr ) {
 
 void TLSOptions::set_cert_file( std::string const& cert_file ) {
 	try {
-		TraceEvent("TLSConnectionSettingCertFile").detail("CertFilePath", cert_file);
+		TraceEvent("TLSConnectionSettingCertFile").suppressFor(1.0).detail("CertFilePath", cert_file);
 		set_cert_data( readFileBytes( cert_file, CERT_FILE_MAX_SIZE ) );
 	} catch ( Error& ) {
-		TraceEvent(SevError, "TLSOptionsSetCertFileError").detail("Filename", cert_file);
+		TraceEvent(SevError, "TLSOptionsSetCertFileError").suppressFor(1.0).detail("Filename", cert_file);
 		throw;
 	}
 }
@@ -345,12 +345,12 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 
 void TLSOptions::init_plugin() {
 
-	TraceEvent("TLSConnectionLoadingPlugin").detail("Plugin", tlsPluginName);
+	TraceEvent("TLSConnectionLoadingPlugin").suppressFor(1.0).detail("Plugin", tlsPluginName);
 
 	plugin = loadPlugin<ITLSPlugin>( tlsPluginName );
 
 	if ( !plugin ) {
-		TraceEvent(SevError, "TLSConnectionPluginInitError").detail("Plugin", tlsPluginName).GetLastError();
+		TraceEvent(SevError, "TLSConnectionPluginInitError").suppressFor(1.0).detail("Plugin", tlsPluginName).GetLastError();
 		throw tls_error();
 	}
 
