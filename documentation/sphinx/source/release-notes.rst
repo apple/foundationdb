@@ -23,7 +23,7 @@ Performance
 * Clients optimistically assume the first leader reply from a coordinator is correct. `(PR #425) <https://github.com/apple/foundationdb/pull/425>`_
 * Network connections are now closed after no interface needs the connection. [6.0.1] `(Issue #375) <https://github.com/apple/foundationdb/issues/375>`_
 * Significantly improved the CPU efficiency of copy mutations to transaction logs during recovery. [6.0.2] `(PR #595) <https://github.com/apple/foundationdb/pull/595>`_
-* A cluster configured with usable_regions=2 did not limit the rate at which it could copying data from the primary DC to the remote DC. This caused poor performance when recovering from a DC outage. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
+* A cluster configured with usable_regions=2 did not limit the rate at which it could copy data from the primary DC to the remote DC. This caused poor performance when recovering from a DC outage. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
 
 Fixes
 -----
@@ -37,7 +37,7 @@ Fixes
 * A client could fail to connect to a cluster when the cluster was upgraded to a version compatible with the client. This affected upgrades that were using the multi-version client to maintain compatibility with both versions of the cluster. [6.0.4] `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
 * A large number of concurrent read attempts could bring the database down after a cluster reboot. [6.0.4] `(PR #650) <https://github.com/apple/foundationdb/pull/650>`_
 * Automatic suppression of trace events which occur too frequently was happening before trace events were suppressed by other mechanisms. [6.0.4] `(PR #656) <https://github.com/apple/foundationdb/pull/656>`_
-* After a recovery, the rate at which transactions logs made mutations durable to disk was around 5 times slower than normal. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
+* After a recovery, the rate at which transaction logs made mutations durable to disk was around 5 times slower than normal. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
 * Clusters configured to use TLS could get stuck spending all of their CPU opening new connections. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
 
 Status
