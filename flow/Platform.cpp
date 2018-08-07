@@ -2458,12 +2458,12 @@ void* loadLibrary(const char* lib_path) {
 #if defined(__unixish__)
 	dlobj = dlopen( lib_path, RTLD_LAZY | RTLD_LOCAL );
 	if(dlobj == NULL) {
-		TraceEvent(SevWarn, "LoadLibraryFailed").suppressFor(1.0).detail("Library", lib_path).detail("Error", dlerror());
+		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
 	}
 #else
 	dlobj = LoadLibrary( lib_path );
 	if(dlobj == NULL) {
-		TraceEvent(SevWarn, "LoadLibraryFailed").suppressFor(1.0).detail("Library", lib_path).GetLastError();
+		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).GetLastError();
 	}
 #endif
 
@@ -2476,12 +2476,12 @@ void* loadFunction(void* lib, const char* func_name) {
 #if defined(__unixish__)
 	dlfcn = dlsym( lib, func_name );
 	if(dlfcn == NULL) {
-		TraceEvent(SevWarn, "LoadFunctionFailed").suppressFor(1.0).detail("Function", func_name).detail("Error", dlerror());
+		TraceEvent(SevWarn, "LoadFunctionFailed").detail("Function", func_name).detail("Error", dlerror());
 	}
 #else
 	dlfcn = GetProcAddress( (HINSTANCE)lib, func_name );
 	if(dlfcn == NULL) {
-		TraceEvent(SevWarn, "LoadFunctionFailed").suppressFor(1.0).detail("Function", func_name).GetLastError();
+		TraceEvent(SevWarn, "LoadFunctionFailed").detail("Function", func_name).GetLastError();
 	}
 #endif
 
