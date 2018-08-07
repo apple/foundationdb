@@ -1067,19 +1067,19 @@ ACTOR Future<Void> trackTlogRecovery( Reference<MasterData> self, Reference<Asyn
 			TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", RecoveryStatus::fully_recovered)
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::fully_recovered])
-			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("MasterRecoveryState");
 		} else if( !newState.oldTLogData.size() && self->recoveryState < RecoveryState::STORAGE_RECOVERED ) {
 			self->recoveryState = RecoveryState::STORAGE_RECOVERED;
 			TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", RecoveryStatus::storage_recovered)
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::storage_recovered])
-			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("MasterRecoveryState");
 		} else if( allLogs && self->recoveryState < RecoveryState::ALL_LOGS_RECRUITED ) {
 			self->recoveryState = RecoveryState::ALL_LOGS_RECRUITED;
 			TraceEvent("MasterRecoveryState", self->dbgid)
 			.detail("StatusCode", RecoveryStatus::all_logs_recruited)
 			.detail("Status", RecoveryStatus::names[RecoveryStatus::all_logs_recruited])
-			.trackLatest(format("%s/MasterRecoveryState", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("MasterRecoveryState");
 		}
 
 		if(newState.oldTLogData.size() && self->configuration.repopulateRegionAntiQuorum > 0 && self->logSystem->remoteStorageRecovered()) {

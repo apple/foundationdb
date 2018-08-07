@@ -67,6 +67,7 @@ public:
 	int PARALLEL_GET_MORE_REQUESTS;
 	int64_t MAX_QUEUE_COMMIT_BYTES;
 	int64_t VERSIONS_PER_BATCH;
+	int CONCURRENT_LOG_ROUTER_READS;
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
