@@ -757,7 +757,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 			}
 
 			if(ssLag[address] >= 60) {
-				messages.push_back(makeMessage("storage_server_lagging", format("Storage server lagging by %.2f seconds.", ssLag[address]).c_str()));
+				messages.push_back(makeMessage("storage_server_lagging", format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
