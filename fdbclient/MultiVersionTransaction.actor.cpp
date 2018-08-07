@@ -910,12 +910,13 @@ void MultiVersionApi::runOnExternalClients(std::function<void(Reference<ClientIn
 			}
 		}
 		catch(Error &e) {
-			TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", c->second->libPath);
 			if(e.code() == error_code_external_client_already_loaded) {
+				TraceEvent(SevInfo, "ExternalClientAlreadyLoaded").error(e).detail("LibPath", c->second->libPath);
 				c = externalClients.erase(c);
 				continue;
 			}
 			else {
+				TraceEvent(SevWarnAlways, "ExternalClientFailure").error(e).detail("LibPath", c->second->libPath);
 				c->second->failed = true;
 				newFailure = true;
 			}

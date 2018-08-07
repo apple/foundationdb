@@ -153,6 +153,7 @@ public:
 		return Reference<T>::addRef((T*)ptr);
 	}
 
+	bool isValid() const { return ptr != NULL; }
 	explicit operator bool() const { return ptr != NULL; }
 
 private:
