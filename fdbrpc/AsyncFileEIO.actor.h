@@ -357,7 +357,6 @@ private:
 		EIO_STRUCT_STAT *statdata = (EIO_STRUCT_STAT *)r->ptr2;
 		if (!statdata) error("FStatBufferError", fd, r);
 		state int64_t size = statdata->st_size;
-		free(statdata);
 		Void _ = wait( delay(0, taskID) );
 		return size;
 	}
