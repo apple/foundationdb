@@ -574,11 +574,13 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 	}
 
 	state std::vector<std::pair<StorageServerInterface, TraceEventFields>>::iterator ss;
-	state std::map<NetworkAddress, int64_t> ssLag;
+	state std::map<NetworkAddress, double> ssLag;
 	for(ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
 		StatusObject const& roleStatus = roles.addRole( "storage", ss->first, ss->second, maxTLogVersion );
-		if(roleStatus.count("data_version_lag") > 0) {
-			ssLag[ss->first.address()] = roleStatus.at("data_version_lag").get_int64();
+		JSONDoc doc(roleStatus);
+		double lagSeconds;
+		if(doc.tryGet("data_lag.seconds", lagSeconds)) {
+			ssLag[ss->first.address()] = lagSeconds;
 		}
 		Void _ = wait(yield());
 	}
@@ -754,8 +756,8 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 				messages.push_back(tracefileOpenErrorMap[strAddress]);
 			}
 
-			if(ssLag[address] > 60 * SERVER_KNOBS->VERSIONS_PER_SECOND) {
-				messages.push_back(makeMessage("storage_server_lagging", format("Storage server lagging by %ld seconds.", ssLag[address] / SERVER_KNOBS->VERSIONS_PER_SECOND).c_str()));
+			if(ssLag[address] >= 60) {
+				messages.push_back(makeMessage("storage_server_lagging", format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
