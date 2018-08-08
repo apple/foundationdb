@@ -48,13 +48,19 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-// These impact both communications and the deserialization of certain database and IKeyValueStore keys
-//                                                 xyzdev
-//                                                 vvvv
-uint64_t currentProtocolVersion        = 0x0FDB00B061000001LL;
-uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
-uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
+// These impact both communications and the deserialization of certain database and IKeyValueStore keys.
+//
+// The convention is that 'x' and 'y' should match the major and minor version of the software, and 'z' should be 0.
+// To make a change without a corresponding increase to the x.y version, increment the 'dev' digit.
+//
+//                                                       xyzdev
+//                                                       vvvv
+const uint64_t currentProtocolVersion        = 0x0FDB00B061000001LL;
+const uint64_t compatibleProtocolVersionMask = 0xffffffffffff0000LL;
+const uint64_t minValidProtocolVersion       = 0x0FDB00A200060001LL;
 
+// This assert is intended to help prevent incrementing the leftmost digits accidentally. It will probably need to change when we reach version 10.
+static_assert(currentProtocolVersion < 0x0FDB00B100000000LL, "Unexpected protocol version");
 
 #if defined(__linux__)
 #include <execinfo.h>
