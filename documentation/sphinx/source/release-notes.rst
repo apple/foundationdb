@@ -43,8 +43,9 @@ Fixes
 Status
 ------
 
-* The replication factor in status JSON is stored under "redundancy_mode" instead of "redundancy":"factor". `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
-* Additional metrics for storage server lag as well as the number of watches and mutation count have been added and are exposed through status. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
+* The replication factor in status JSON is stored under ``redundancy_mode`` instead of ``redundancy.factor``. `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
+* The metric ``data_version_lag`` has been replaced by ``data_lag.versions`` and ``data_lag.seconds``. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
+* Additional metrics for the number of watches and mutation count have been added and are exposed through status. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
 
 
 Bindings
