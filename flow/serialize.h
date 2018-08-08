@@ -185,9 +185,9 @@ static bool valgrindCheck( const void* data, int bytes, const char* context ) {
 static inline bool valgrindCheck( const void* data, int bytes, const char* context ) { return true; }
 #endif
 
-extern uint64_t currentProtocolVersion;
-extern uint64_t minValidProtocolVersion;
-extern uint64_t compatibleProtocolVersionMask;
+extern const uint64_t currentProtocolVersion;
+extern const uint64_t minValidProtocolVersion;
+extern const uint64_t compatibleProtocolVersionMask;
 
 struct _IncludeVersion {
 	uint64_t v;
