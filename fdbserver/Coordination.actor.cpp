@@ -208,6 +208,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state Future<Void> nextInterval = delay( 0 );
 	state double candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
 	state int leaderIntervalCount = 0;
+	state double lastNotifiedCleared = now();
 
 	loop choose {
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
@@ -216,10 +217,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				notify.push_back( req.reply );
 				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
+					TraceEvent(now() - lastNotifiedCleared < 100000 ? SevWarnAlways : SevWarn, "TooManyNotifications").detail("Amount", notify.size());
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( currentNominee.get() );
 					notify.clear();
+					lastNotifiedCleared = now();
 				}
 			}
 		}
@@ -232,10 +234,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				notify.push_back( req.reply );
 				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
+					TraceEvent(now() - lastNotifiedCleared < 100000 ? SevWarnAlways : SevWarn, "TooManyNotifications").detail("Amount", notify.size());
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( currentNominee.get() );
 					notify.clear();
+					lastNotifiedCleared = now();
 				}
 			}
 		}
@@ -252,6 +255,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			for(int i=0; i<notify.size(); i++)
 				notify[i].send( newInfo );
 			notify.clear();
+			lastNotifiedCleared = now();
 			req.reply.send( Void() );
 			return Void();
 		}
@@ -280,6 +284,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( nextNominee );
 					notify.clear();
+					lastNotifiedCleared = now();
 					currentNominee = nextNominee;
 				} else if (currentNominee.present() && nextNominee.present() && currentNominee.get().equalInternalId(nextNominee.get())) {
 					// leader becomes better
