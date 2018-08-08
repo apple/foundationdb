@@ -20,6 +20,7 @@
 
 #ifndef _FLOW_UTIL_H_
 #define _FLOW_UTIL_H_
+#pragma once
 
 template <typename C>
 void swapAndPop(C* container, int index) {
