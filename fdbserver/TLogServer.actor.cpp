@@ -269,7 +269,7 @@ struct TLogData : NonCopyable {
 	Future<Void> updatePersist; //SOMEDAY: integrate the recovery and update storage so that only one of them is committing to persistant data.
 
 	PromiseStream<Future<Void>> sharedActors;
-	bool terminated;
+	Promise<Void> terminated;
 	FlowLock concurrentLogRouterReads;
 
 	TLogData(UID dbgid, IKeyValueStore* persistentData, IDiskQueue * persistentQueue, Reference<AsyncVar<ServerDBInfo>> const& dbInfo)
@@ -277,7 +277,7 @@ struct TLogData : NonCopyable {
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
 			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
-			  bytesInput(0), bytesDurable(0), updatePersist(Void()), terminated(false), concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
+			  bytesInput(0), bytesDurable(0), updatePersist(Void()), concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
 		{
 		}
 };
@@ -411,10 +411,11 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	int8_t locality;
 	UID recruitmentID;
 	std::set<Tag> allTags;
+	Future<Void> terminated;
 
 	explicit LogData(TLogData* tLogData, TLogInterface interf, Tag remoteTag, bool isPrimary, int logRouterTags, UID recruitmentID, std::vector<Tag> tags) : tLogData(tLogData), knownCommittedVersion(1), logId(interf.id()),
 			cc("TLog", interf.id().toString()), bytesInput("BytesInput", cc), bytesDurable("BytesDurable", cc), remoteTag(remoteTag), isPrimary(isPrimary), logRouterTags(logRouterTags), recruitmentID(recruitmentID),
-			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), allTags(tags.begin(), tags.end()),
+			logSystem(new AsyncVar<Reference<ILogSystem>>()), logRouterPoppedVersion(0), durableKnownCommittedVersion(0), minKnownCommittedVersion(0), allTags(tags.begin(), tags.end()), terminated(tLogData->terminated.getFuture()),
 			// These are initialized differently on init() or recovery
 			recoveryCount(), stopped(false), initialized(false), queueCommittingVersion(0), newPersistentDataVersion(invalidVersion), unrecoveredBefore(1), recoveredAt(1), unpoppedRecoveredTags(0),
 			logRouterPopToVersion(0), locality(tagLocalityInvalid)
@@ -440,13 +441,14 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	}
 
 	~LogData() {
-		tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
-		TraceEvent("TLogBytesWhenRemoved", logId).detail("SharedBytesInput", tLogData->bytesInput).detail("SharedBytesDurable", tLogData->bytesDurable).detail("LocalBytesInput", bytesInput.getValue()).detail("LocalBytesDurable", bytesDurable.getValue());
-
-		ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
 		endRole(logId, "TLog", "Error", true);
 
-		if(!tLogData->terminated) {
+		if(!terminated.isReady()) {
+			tLogData->bytesDurable += bytesInput.getValue() - bytesDurable.getValue();
+			TraceEvent("TLogBytesWhenRemoved", logId).detail("SharedBytesInput", tLogData->bytesInput).detail("SharedBytesDurable", tLogData->bytesDurable).detail("LocalBytesInput", bytesInput.getValue()).detail("LocalBytesDurable", bytesDurable.getValue());
+
+			ASSERT_ABORT(tLogData->bytesDurable <= tLogData->bytesInput);
+
 			Key logIdKey = BinaryWriter::toValue(logId,Unversioned());
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistCurrentVersionKeys.begin)) );
 			tLogData->persistentData->clear( singleKeyRange(logIdKey.withPrefix(persistKnownCommittedVersionKeys.begin)) );
@@ -1488,7 +1490,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 
 					commitMessages(logData, ver, messages, self->bytesInput);
 
-					if(self->terminated) {
+					if(self->terminated.isSet()) {
 						return Void();
 					}
 
@@ -1525,7 +1527,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 							logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
 						}
 
-						if(self->terminated) {
+						if(self->terminated.isSet()) {
 							return Void();
 						}
 
@@ -2048,7 +2050,7 @@ ACTOR Future<Void> tLog( IKeyValueStore* persistentData, IDiskQueue* persistentQ
 			}
 		}
 	} catch (Error& e) {
-		self.terminated = true;
+		self.terminated.send(Void());
 		TraceEvent("TLogError", tlogId).error(e, true);
 		endRole(tlogId, "SharedTLog", "Error", true);
 		if(recovered.canBeSet()) recovered.send(Void());
