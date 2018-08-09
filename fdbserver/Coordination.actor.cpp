@@ -204,11 +204,11 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 	state std::set<LeaderInfo> availableCandidates;
 	state std::set<LeaderInfo> availableLeaders;
 	state Optional<LeaderInfo> currentNominee;
-	state vector<ReplyPromise<Optional<LeaderInfo>>> notify;
+	state Deque<ReplyPromise<Optional<LeaderInfo>>> notify;
 	state Future<Void> nextInterval = delay( 0 );
 	state double candidateDelay = SERVER_KNOBS->CANDIDATE_MIN_DELAY;
 	state int leaderIntervalCount = 0;
-	state double lastNotifiedCleared = now();
+	state Future<Void> notifyCheck = delay(SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / SERVER_KNOBS->MIN_NOTIFICATIONS);
 
 	loop choose {
 		when ( GetLeaderRequest req = waitNext( interf.getLeader.getFuture() ) ) {
@@ -217,11 +217,10 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				notify.push_back( req.reply );
 				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-					TraceEvent(now() - lastNotifiedCleared < 100000 ? SevWarnAlways : SevWarn, "TooManyNotifications").detail("Amount", notify.size());
+					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( currentNominee.get() );
 					notify.clear();
-					lastNotifiedCleared = now();
 				}
 			}
 		}
@@ -234,11 +233,10 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			} else {
 				notify.push_back( req.reply );
 				if(notify.size() > SERVER_KNOBS->MAX_NOTIFICATIONS) {
-					TraceEvent(now() - lastNotifiedCleared < 100000 ? SevWarnAlways : SevWarn, "TooManyNotifications").detail("Amount", notify.size());
+					TraceEvent(SevWarnAlways, "TooManyNotifications").detail("Amount", notify.size());
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( currentNominee.get() );
 					notify.clear();
-					lastNotifiedCleared = now();
 				}
 			}
 		}
@@ -255,7 +253,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 			for(int i=0; i<notify.size(); i++)
 				notify[i].send( newInfo );
 			notify.clear();
-			lastNotifiedCleared = now();
 			req.reply.send( Void() );
 			return Void();
 		}
@@ -284,7 +281,6 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 					for(int i=0; i<notify.size(); i++)
 						notify[i].send( nextNominee );
 					notify.clear();
-					lastNotifiedCleared = now();
 					currentNominee = nextNominee;
 				} else if (currentNominee.present() && nextNominee.present() && currentNominee.get().equalInternalId(nextNominee.get())) {
 					// leader becomes better
@@ -304,6 +300,13 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 
 				availableLeaders.clear();
 				availableCandidates.clear();
+			}
+		}
+		when( Void _ = wait(notifyCheck) ) {
+			notifyCheck = delay( SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()) );
+			if(!notify.empty() && currentNominee.present()) {
+				notify.front().send( currentNominee.get() );
+				notify.pop_front();
 			}
 		}
 	}
