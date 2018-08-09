@@ -85,12 +85,12 @@ FDBLibTLSSession::FDBLibTLSSession(Reference<FDBLibTLSPolicy> policy, bool is_cl
 			throw std::runtime_error("FDBLibTLSServerError");
 		}
 		if (tls_configure(tls_sctx, policy->tls_cfg) == -1) {
-			TraceEvent(SevError, "FDBLibTLSConfigureError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx));
+			TraceEvent(SevError, "FDBLibTLSConfigureError", uid).detail("LibTLSErrorMessage", tls_error(tls_sctx));
 			tls_free(tls_sctx);
 			throw std::runtime_error("FDBLibTLSConfigureError");
 		}
 		if (tls_accept_cbs(tls_sctx, &tls_ctx, tls_read_func, tls_write_func, this) == -1) {
-			TraceEvent(SevError, "FDBLibTLSAcceptError", uid).detail("LibTLSErrorMessage", tls_error(tls_ctx));
+			TraceEvent(SevError, "FDBLibTLSAcceptError", uid).detail("LibTLSErrorMessage", tls_error(tls_sctx));
 			tls_free(tls_sctx);
 			throw std::runtime_error("FDBLibTLSAcceptError");
 		}
