@@ -38,6 +38,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "flow/Util.h"
 
 void failAfter( Future<Void> trigger, Endpoint e );
 
@@ -1194,8 +1195,7 @@ void checkOutstandingRecruitmentRequests( ClusterControllerData* self ) {
 		RecruitFromConfigurationRequest& req = self->outstandingRecruitmentRequests[i];
 		try {
 			req.reply.send( self->findWorkersForConfiguration( req ) );
-			std::swap( self->outstandingRecruitmentRequests[i--], self->outstandingRecruitmentRequests.back() );
-			self->outstandingRecruitmentRequests.pop_back();
+			swapAndPop( &self->outstandingRecruitmentRequests, i-- );
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
 				TraceEvent(SevWarn, "RecruitTLogMatchingSetNotAvailable", self->id).error(e);
@@ -1212,8 +1212,7 @@ void checkOutstandingRemoteRecruitmentRequests( ClusterControllerData* self ) {
 		RecruitRemoteFromConfigurationRequest& req = self->outstandingRemoteRecruitmentRequests[i];
 		try {
 			req.reply.send( self->findRemoteWorkersForConfiguration( req ) );
-			std::swap( self->outstandingRemoteRecruitmentRequests[i--], self->outstandingRemoteRecruitmentRequests.back() );
-			self->outstandingRemoteRecruitmentRequests.pop_back();
+			swapAndPop( &self->outstandingRemoteRecruitmentRequests, i-- );
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
 				TraceEvent(SevWarn, "RecruitRemoteTLogMatchingSetNotAvailable", self->id).error(e);
@@ -1231,8 +1230,7 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 		try {
 			if(req.second < now()) {
 				req.first.reply.sendError(timed_out());
-				std::swap( self->outstandingStorageRequests[i--], self->outstandingStorageRequests.back() );
-				self->outstandingStorageRequests.pop_back();
+				swapAndPop( &self->outstandingStorageRequests, i-- );
 			} else {
 				if(!self->gotProcessClasses && !req.first.criticalRecruitment)
 					throw no_more_servers();
@@ -1242,8 +1240,7 @@ void checkOutstandingStorageRequests( ClusterControllerData* self ) {
 				rep.worker = worker.first;
 				rep.processClass = worker.second;
 				req.first.reply.send( rep );
-				std::swap( self->outstandingStorageRequests[i--], self->outstandingStorageRequests.back() );
-				self->outstandingStorageRequests.pop_back();
+				swapAndPop( &self->outstandingStorageRequests, i-- );
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {

@@ -25,6 +25,7 @@
 #include "flow/IndexedSet.h"
 #include "flow/Hash3.h"
 #include "flow/ActorCollection.h"
+#include "flow/Util.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
@@ -3072,8 +3073,7 @@ ACTOR Future<Void> waitMetrics( StorageServerMetrics* self, WaitMetricsRequest r
 		auto &x = i->value();
 		for( int j = 0; j < x.size(); j++ ) {
 			if( x[j] == change ) {
-				std::swap( x[j], x.back() );
-				x.pop_back();
+				swapAndPop(&x, j);
 				break;
 			}
 		}

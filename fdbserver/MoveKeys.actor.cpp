@@ -19,6 +19,7 @@
  */
 
 #include "flow/actorcompiler.h"
+#include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "MoveKeys.h"
@@ -470,8 +471,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 						} else {
 							for(int i = 0; i < completeSrc.size(); i++) {
 								if(!srcSet.count(completeSrc[i])) {
-									std::swap(completeSrc[i--], completeSrc.back());
-									completeSrc.pop_back();
+									swapAndPop(&completeSrc, i--);
 								}
 							}
 						}
@@ -520,8 +520,7 @@ ACTOR Future<Void> finishMoveKeys( Database occ, KeyRange keys, vector<UID> dest
 
 						for(int i = 0; i < completeSrc.size(); i++) {
 							if(!srcSet.count(completeSrc[i])) {
-								std::swap(completeSrc[i--], completeSrc.back());
-								completeSrc.pop_back();
+								swapAndPop(&completeSrc, i--);
 							}
 						}
 

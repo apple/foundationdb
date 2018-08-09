@@ -20,6 +20,7 @@
 
 #include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
+#include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/SystemData.h"
 #include "DataDistribution.h"
@@ -535,8 +536,7 @@ struct DDQueueData {
 						} else {
 							for(int i = 0; i < input.completeSources.size(); i++) {
 								if(std::find(src.begin(), src.end(), input.completeSources[i]) == src.end()) {
-									std::swap(input.completeSources[i--], input.completeSources.back());
-									input.completeSources.pop_back();
+									swapAndPop(&input.completeSources, i--);
 								}
 							}
 						}

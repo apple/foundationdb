@@ -84,8 +84,12 @@ public:
 	template <class C>
 	void randomShuffle( C& container ) {
 		int s = (int)container.size();
-		for(int i=0; i<s; i++)
-			std::swap( container[i], container[ randomInt( i, s ) ] );
+		for(int i=0; i<s; i++) {
+			int j = randomInt( i, s );
+			if (i != j) {
+				std::swap( container[i], container[j] );
+			}
+		}
 	}
 
 	bool coinflip() { return (this->random01() < 0.5); }

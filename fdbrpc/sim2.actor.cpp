@@ -20,6 +20,7 @@
 
 #include "simulator.h"
 #include "flow/IThreadPool.h"
+#include "flow/Util.h"
 #include "IAsyncFile.h"
 #include "AsyncFileCached.actor.h"
 #include "AsyncFileNonDurable.actor.h"
@@ -1226,8 +1227,7 @@ public:
 			auto processes = getAllProcesses();
 			for( int i = 0; i < processes.size(); i++ ) {
 				if( processes[i]->locality.zoneId() != zoneId || processes[i]->rebooting ) {
-					std::swap(processes[i--], processes.back());
-					processes.pop_back();
+					swapAndPop(&processes, i--);
 				}
 			}
 			if( processes.size() )

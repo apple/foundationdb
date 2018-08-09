@@ -247,7 +247,6 @@ struct RemoveServersSafelyWorkload : TestWorkload {
 		int	randomIndex;
 		bool bCanKillProcess;
 		ISimulator::ProcessInfo*	randomProcess;
-		auto deadProcess = processesDead.back();
 		for (int killsLeft = killProcArray.size(); killsLeft > 0; killsLeft --)
 		{
 			// Select a random kill process
