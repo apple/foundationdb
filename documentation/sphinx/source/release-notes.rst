@@ -13,6 +13,7 @@ Features
 * The TLS plugin is now statically linked into the client and server binaries and no longer requires a separate library. `(Issue #436) <https://github.com/apple/foundationdb/issues/436>`_
 * TLS peer verification now supports verifiying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
 * TLS peer verification now supports suffix matching by field. `(Issue #515) <https://github.com/apple/foundationdb/issues/515>`_
+* TLS certificates are automatically reloaded after being updated. [6.0.5] `(Issue #505) <https://github.com/apple/foundationdb/issues/505>`_
 
 Performance
 -----------
@@ -39,6 +40,9 @@ Fixes
 * Automatic suppression of trace events which occur too frequently was happening before trace events were suppressed by other mechanisms. [6.0.4] `(PR #656) <https://github.com/apple/foundationdb/pull/656>`_
 * After a recovery, the rate at which transaction logs made mutations durable to disk was around 5 times slower than normal. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
 * Clusters configured to use TLS could get stuck spending all of their CPU opening new connections. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
+* Configuring usable_regions=2 on a cluster with a large amount of data caused commits to pause for a few seconds. [6.0.5] `(PR #687) <https://github.com/apple/foundationdb/pull/687>`_
+* On clusters configured with usable_regions=2, status reported no replicas remaining when the primary DC was still healthy. [6.0.5] `(PR #687) <https://github.com/apple/foundationdb/pull/687>`_
+* Clients could crash when passing in TLS options. [6.0.5] `(PR #649) <https://github.com/apple/foundationdb/pull/649>`_
 
 Status
 ------
