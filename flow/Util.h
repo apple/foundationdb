@@ -22,6 +22,8 @@
 #define _FLOW_UTIL_H_
 #pragma once
 
+#include <algorithm>
+
 template <typename C>
 void swapAndPop(C* container, int index) {
 	if (index != container->size()-1) {
