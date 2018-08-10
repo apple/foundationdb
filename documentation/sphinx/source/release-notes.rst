@@ -14,6 +14,7 @@ Features
 * TLS peer verification now supports verifiying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
 * TLS peer verification now supports suffix matching by field. `(Issue #515) <https://github.com/apple/foundationdb/issues/515>`_
 * TLS certificates are automatically reloaded after being updated. [6.0.5] `(Issue #505) <https://github.com/apple/foundationdb/issues/505>`_
+* fdbcli now supports changing the database configuration based on a JSON document stored in a file. [6.0.5] `(PR #692) <https://github.com/apple/foundationdb/pull/692>`_
 
 Performance
 -----------
