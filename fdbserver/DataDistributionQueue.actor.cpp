@@ -363,7 +363,8 @@ struct DDQueueData {
 	PromiseStream<RelocateData> relocationComplete;
 	PromiseStream<RelocateData> fetchSourceServersComplete;
 
-	PromiseStream<RelocateShard> input;
+	PromiseStream<RelocateShard> output;
+	FutureStream<RelocateShard> input;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 
 	double* lastLimited;
@@ -394,10 +395,10 @@ struct DDQueueData {
 
 	DDQueueData( MasterInterface mi, MoveKeysLock lock, Database cx, std::vector<TeamCollectionInterface> teamCollections,
 		Reference<ShardsAffectedByTeamFailure> sABTF, PromiseStream<Promise<int64_t>> getAverageShardBytes,
-		int teamSize, PromiseStream<RelocateShard> input, PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited, Version recoveryVersion ) :
+		int teamSize, PromiseStream<RelocateShard> output, FutureStream<RelocateShard> input, PromiseStream<GetMetricsRequest> getShardMetrics, double* lastLimited, Version recoveryVersion ) :
 			activeRelocations( 0 ), queuedRelocations( 0 ), bytesWritten ( 0 ), teamCollections( teamCollections ),
 			shardsAffectedByTeamFailure( sABTF ), getAverageShardBytes( getAverageShardBytes ), mi( mi ), lock( lock ),
-			cx( cx ), teamSize( teamSize ), input( input ), getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
+			cx( cx ), teamSize( teamSize ), output( output ), input( input ), getShardMetrics( getShardMetrics ), startMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ),
 			finishMoveKeysParallelismLock( SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM ), lastLimited(lastLimited), recoveryVersion(recoveryVersion),
 			suppressIntervals(0), lastInterval(0), unhealthyRelocations(0), rawProcessingUnhealthy( new AsyncVar<bool>(false) ) {}
 
@@ -569,10 +570,6 @@ struct DDQueueData {
 
 	//This function cannot handle relocation requests which split a shard into three pieces
 	void queueRelocation( RelocateData rd, std::set<UID> &serversToLaunchFrom ) {
-		// Update sabtf for changes from DDTracker
-		if( rd.changesBoundaries() )
-			shardsAffectedByTeamFailure->defineShard( rd.keys );
-
 		//TraceEvent("QueueRelocationBegin").detail("Begin", printable(rd.keys.begin)).detail("End", printable(rd.keys.end));
 
 		// remove all items from both queues that are fully contained in the new relocation (i.e. will be overwritten)
@@ -1086,7 +1083,7 @@ ACTOR Future<bool> rebalanceTeams( DDQueueData* self, int priority, Reference<ID
 				.detail("SourceTeam", sourceTeam->getDesc())
 				.detail("DestTeam", destTeam->getDesc());
 
-			self->input.send( RelocateShard( moveShard, priority ) );
+			self->output.send( RelocateShard( moveShard, priority ) );
 			return true;
 		}
 	}
@@ -1166,7 +1163,8 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 
 ACTOR Future<Void> dataDistributionQueue(
 	Database cx,
-	PromiseStream<RelocateShard> input,
+	PromiseStream<RelocateShard> output,
+	FutureStream<RelocateShard> input,
 	PromiseStream<GetMetricsRequest> getShardMetrics,
 	Reference<AsyncVar<bool>> processingUnhealthy,
 	std::vector<TeamCollectionInterface> teamCollections,
@@ -1178,7 +1176,7 @@ ACTOR Future<Void> dataDistributionQueue(
 	double* lastLimited,
 	Version recoveryVersion)
 {
-	state DDQueueData self( mi, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, input, getShardMetrics, lastLimited, recoveryVersion );
+	state DDQueueData self( mi, lock, cx, teamCollections, shardsAffectedByTeamFailure, getAverageShardBytes, teamSize, output, input, getShardMetrics, lastLimited, recoveryVersion );
 	state std::set<UID> serversToLaunchFrom;
 	state KeyRange keysToLaunchFrom;
 	state RelocateData launchData;
@@ -1213,7 +1211,7 @@ ACTOR Future<Void> dataDistributionQueue(
 			ASSERT( launchData.startTime == -1 && keysToLaunchFrom.empty() );
 
 			choose {
-				when ( RelocateShard rs = waitNext( self.input.getFuture() ) ) {
+				when ( RelocateShard rs = waitNext( self.input ) ) {
 					bool wasEmpty = serversToLaunchFrom.empty();
 					self.queueRelocation( rs, serversToLaunchFrom );
 					if(wasEmpty && !serversToLaunchFrom.empty())

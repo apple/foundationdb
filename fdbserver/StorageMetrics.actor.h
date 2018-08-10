@@ -72,7 +72,7 @@ struct StorageMetricSample {
 		}
 
 		// If we didn't return above, we didn't find anything.
-		TraceEvent(SevWarnAlways, "CannotSplitLastSampleKey").detail("Range", printable(range)).detail("Offset", offset);
+		TraceEvent(SevWarn, "CannotSplitLastSampleKey").detail("Range", printable(range)).detail("Offset", offset);
 		return front ? range.end : range.begin;
 	}
 };
