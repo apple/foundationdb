@@ -1096,7 +1096,7 @@ ACTOR Future<Void> commitQueue( TLogData* self ) {
 	state Reference<LogData> logData;
 
 	loop {
-		bool foundCount = 0;
+		int foundCount = 0;
 		for(auto it : self->id_data) {
 			if(!it.second->stopped) {
 				 logData = it.second;
