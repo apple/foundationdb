@@ -43,6 +43,7 @@ Fixes
 * Configuring usable_regions=2 on a cluster with a large amount of data caused commits to pause for a few seconds. [6.0.5] `(PR #687) <https://github.com/apple/foundationdb/pull/687>`_
 * On clusters configured with usable_regions=2, status reported no replicas remaining when the primary DC was still healthy. [6.0.5] `(PR #687) <https://github.com/apple/foundationdb/pull/687>`_
 * Clients could crash when passing in TLS options. [6.0.5] `(PR #649) <https://github.com/apple/foundationdb/pull/649>`_
+* A mismatched TLS certificate and key set could cause the server to crash. [6.0.5] `(PR #689) <https://github.com/apple/foundationdb/pull/689>`_
 
 Status
 ------
@@ -64,6 +65,7 @@ Other Changes
 
 * Does not support upgrades from any version older than 5.0.
 * Normalized the capitalization of trace event names and attributes. `(PR #455) <https://github.com/apple/foundationdb/pull/455>`_
+* Increased the memory requirements of the transaction log by 400MB. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
 
 Earlier release notes
 ---------------------
