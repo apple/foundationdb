@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/flow.h"
 #include "flow/FastAlloc.h"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"

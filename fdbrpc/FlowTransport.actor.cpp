@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "flow/flow.h"
 #include "FlowTransport.h"
 #include "genericactors.actor.h"
 #include "fdbrpc.h"
@@ -31,6 +32,7 @@
 #if VALGRIND
 #include <memcheck.h>
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 static NetworkAddress g_currentDeliveryPeerAddress;
 

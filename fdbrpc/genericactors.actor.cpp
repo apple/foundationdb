@@ -18,9 +18,11 @@
  * limitations under the License.
  */
 
+#include "flow/flow.h"
 #include "genericactors.actor.h"	// Gets genericactors.actor.g.h indirectly
 #include "flow/network.h"
 #include "simulator.h"
+#include "flow/actorcompiler.h"
 
 ACTOR void simDeliverDuplicate( Standalone<StringRef> data, Endpoint destination ) {
 	wait( delay( g_random->random01() * FLOW_KNOBS->MAX_DELIVER_DUPLICATE_DELAY ) );

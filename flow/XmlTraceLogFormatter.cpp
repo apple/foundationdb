@@ -19,6 +19,7 @@
  */
 
 
+#include "flow/flow.h"
 #include "XmlTraceLogFormatter.h"
 #include "actorcompiler.h"
 

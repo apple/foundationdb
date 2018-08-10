@@ -29,6 +29,7 @@
 
 #include <list>
 
+#include "flow/flow.h"
 #include "Knobs.h"
 #include "flow/Util.h"
 #include "flow/actorcompiler.h"  // This must be the last #include.
