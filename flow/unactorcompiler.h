@@ -1,5 +1,5 @@
 /*
- * EventTypes.actor.h
+ * unactorcompiler.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,23 +18,17 @@
  * limitations under the License.
  */
 
-#pragma once
+#ifndef POST_ACTOR_COMPILER
 
-// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source version.
-#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_EVENTTYPES_ACTOR_G_H)
-	#define FDBCLIENT_EVENTTYPES_ACTOR_G_H
-	#include "EventTypes.actor.g.h"
-#elif !defined(FDBCLIENT_EVENTTYPES_ACTOR_H)
-	#define FDBCLIENT_EVENTTYPESS_ACTOR_H
-
-#include "flow/flow.h"
-#include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h"
-
-DESCR struct GetValueComplete {
-	int64_t latency; //ns
-};
-
-#include "flow/unactorcompiler.h"
+#ifndef NO_INTELLISENSE
+#undef ACTOR
+#undef DESCR
+#undef state
+#undef UNCANCELLABLE
+#undef choose
+#undef when
+#endif
 
 #endif
+
+// loop is still defined

@@ -27,9 +27,9 @@
 #elif !defined(FLOW_BATCHER_ACTOR_H)
 	#define FLOW_BATCHER_ACTOR_H
 
-#include "flow/actorcompiler.h"
 #include "flow/flow.h"
 #include "flow/Stats.h"
+#include "flow/actorcompiler.h"
 
 template <class X>
 void logOnReceive(X x) { }
@@ -110,5 +110,7 @@ Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int> > out, FutureS
 		lastBatch = now();
 	}
 }
+
+#include "flow/unactorcompiler.h"
 
 #endif

@@ -29,9 +29,9 @@
 
 #include <list>
 
-#include "actorcompiler.h"
 #include "Knobs.h"
 #include "flow/Util.h"
+#include "actorcompiler.h"
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
 
 ACTOR template<class T, class X>
@@ -1634,5 +1634,6 @@ Future<Void> timeReply(Future<T> replyToTime, PromiseStream<double> timeOutput){
 	return Void();
 }
 
+#include "flow/unactorcompiler.h"
 
 #endif

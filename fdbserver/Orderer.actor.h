@@ -71,4 +71,6 @@ private:
 	Promise<Void> shutdown;  // Never set, only broken on destruction
 };
 
+#include "flow/unactorcompiler.h"
+
 #endif

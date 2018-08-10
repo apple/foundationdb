@@ -28,14 +28,14 @@
 #elif !defined(FDBSERVER_BULK_SETUP_ACTOR_H)
 		#define FDBSERVER_BULK_SETUP_ACTOR_H
 
-#include "flow/actorcompiler.h"
+#include <string>
 #include "fdbclient/NativeAPI.h"
 #include "workloads.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
 
-#include <string>
+#include "flow/actorcompiler.h"
 
 ACTOR template<class T>
 Future<bool> checkRangeSimpleValueSize( Database cx, T* workload, uint64_t begin, uint64_t end) {
@@ -337,5 +337,7 @@ Future<Void> bulkSetup( Database cx, T* workload, uint64_t nodeCount, Promise<do
 		.detail("KeyLoadElapsedTime", elapsed);
 	return Void();
 }
+
+#include "flow/unactorcompiler.h"
 
 #endif
