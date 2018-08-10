@@ -445,8 +445,8 @@ void initHelp() {
 		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
 		"change the database configuration",
 		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
-	helpMap["configurefile"] = CommandHelp(
-		"configurefile <FILENAME>",
+	helpMap["fileconfigure"] = CommandHelp(
+		"fileconfigure <FILENAME>",
 		"change the database configuration from a file",
 		"Load a JSON document from the provided file, and change the database configuration to match the contents of the JSON document. The format should be the same as the \"configuration\" entry in status JSON without \"excluded_servers\" or \"coordinators_count\".");
 	helpMap["coordinators"] = CommandHelp(
@@ -1599,7 +1599,7 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	return ret;
 }
 
-ACTOR Future<bool> configurefile(Database db, std::string filePath) {
+ACTOR Future<bool> fileconfigure(Database db, std::string filePath) {
 	std::string contents(readFileBytes(filePath, 100000));
 	json_spirit::mValue schema;
 	json_spirit::read_string( contents, schema );
@@ -1616,7 +1616,7 @@ ACTOR Future<bool> configurefile(Database db, std::string filePath) {
 		} else if( kv.second.type() == json_spirit::array_type ) {
 			configString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none);
 		} else {
-			printUsage(LiteralStringRef("configurefile"));
+			printUsage(LiteralStringRef("fileconfigure"));
 			return true;
 		}
 	}
@@ -1629,7 +1629,7 @@ ACTOR Future<bool> configurefile(Database db, std::string filePath) {
 	case ConfigurationResult::CONFLICTING_OPTIONS:
 	case ConfigurationResult::UNKNOWN_OPTION:
 	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
-		printUsage(LiteralStringRef("configurefile"));
+		printUsage(LiteralStringRef("fileconfigure"));
 		ret = true;
 		break;
 
@@ -2514,12 +2514,12 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "configurefile")) {
+				if (tokencmp(tokens[0], "fileconfigure")) {
 					if (tokens.size() != 2) {
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						bool err = wait( configurefile( db, tokens[1].toString() ) );
+						bool err = wait( fileconfigure( db, tokens[1].toString() ) );
 						if (err) is_error = true;
 					}
 					continue;
