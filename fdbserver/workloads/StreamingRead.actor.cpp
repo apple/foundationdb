@@ -135,7 +135,7 @@ struct StreamingReadWorkload : TestWorkload {
 						self->readKeys += values.size();
 						break;
 					} catch (Error& e) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 				}
 

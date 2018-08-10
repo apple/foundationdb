@@ -159,13 +159,13 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		state StatisticsState statState;
 		customSystemMonitor("AsyncFile Metrics", &statState);
 
-		Void _ = wait(timeout(self->runCorrectnessTest(self), self->testDuration, Void()));
+		wait(timeout(self->runCorrectnessTest(self), self->testDuration, Void()));
 
 		SystemStatistics stats = customSystemMonitor("AsyncFile Metrics", &statState);
 		self->averageCpuUtilization = stats.processCPUSeconds / stats.elapsed;
 
 		//Try to let the IO operations finish so we can clean up after them
-		Void _ = wait(timeout(waitForAll(self->operations), 10, Void()));
+		wait(timeout(waitForAll(self->operations), 10, Void()));
 
 		return Void();
 	}
@@ -177,7 +177,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 
 		loop
 		{
-			Void _ = wait(delay(0));
+			wait(delay(0));
 
 			//Fill the operations buffer with random operations
 			while(self->operations.size() < self->numSimultaneousOperations && postponedOperations.size() == 0)
@@ -429,7 +429,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 
 			//Perform the write.  Don't allow it to be cancelled (because the underlying IO may not be cancellable) and don't allow
 			//objects that the write uses to be deleted
-			Void _ = wait
+			wait
 			(
 				uncancellable
 				(
@@ -447,12 +447,12 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		else if(info.operation == SYNC)
 		{
 			info.data = Reference<AsyncFileBuffer>(NULL);
-			Void _ = wait(self->fileHandle->file->sync());
+			wait(self->fileHandle->file->sync());
 		}
 		else if(info.operation == REOPEN)
 		{
 			// Will fail if the file does not exist
-			Void _ = wait(self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, 0, false));
+			wait(self->openFile(self, IAsyncFile::OPEN_READWRITE, 0666, 0, false));
 			int64_t fileSize = wait(self->fileHandle->file->size());
 			int64_t fileSizeChange = fileSize - self->fileSize;
 			if(fileSizeChange >= _PAGE_SIZE)
@@ -472,7 +472,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		{
 			//Perform the truncate.  Don't allow it to be cancelled (because the underlying IO may not be cancellable) and don't allow
 			//file handle to be deleted
-			Void _ = wait
+			wait
 			(
 				uncancellable
 				(

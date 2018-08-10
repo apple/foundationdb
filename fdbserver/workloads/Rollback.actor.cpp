@@ -89,7 +89,7 @@ struct RollbackWorkload : TestWorkload {
 				//g_simulator.clogInterface( g_simulator.getProcess( system.tlogs[t].commit.getEndpoint() ), self->clogDuration, ClogAll );
 
 		// While the clogged machines are still clogged...
-		Void _ = wait( delay( self->clogDuration/3 ) );
+		wait( delay( self->clogDuration/3 ) );
 		auto system = self->dbInfo->get();
 
 		// Kill the proxy and the unclogged tlog
@@ -108,12 +108,12 @@ struct RollbackWorkload : TestWorkload {
 		if (self->multiple) {
 			state double lastTime = now();
 			loop {
-				Void _ = wait( poisson( &lastTime, delay ) );
-				Void _ = wait( self->simulateFailure( cx, self ) );
+				wait( poisson( &lastTime, delay ) );
+				wait( self->simulateFailure( cx, self ) );
 			}
 		} else {
-			Void _ = wait( ::delay( g_random->random01()*std::max(0.0, self->testDuration - self->clogDuration*13.0) ) );
-			Void _ = wait( self->simulateFailure(cx, self) );
+			wait( ::delay( g_random->random01()*std::max(0.0, self->testDuration - self->clogDuration*13.0) ) );
+			wait( self->simulateFailure(cx, self) );
 		}
 		return Void();
 	}

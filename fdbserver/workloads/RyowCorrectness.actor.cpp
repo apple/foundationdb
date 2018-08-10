@@ -83,7 +83,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		std::vector<TransactionType> types;
 		types.push_back(READ_YOUR_WRITES);
 
-		Void _ = wait(self->chooseTransactionFactory(cx, types));
+		wait(self->chooseTransactionFactory(cx, types));
 		return Void();
 	}
 
@@ -272,7 +272,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 					}
 				}
 
-				Void _ = wait(transaction->commit());
+				wait(transaction->commit());
 				return results;
 			}
 			catch(Error &e) {
@@ -283,7 +283,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 				else if(!dontUpdateResults)
 					results.clear();
 
-				Void _ = wait(transaction->onError(e));
+				wait(transaction->onError(e));
 			}
 		}
 	}

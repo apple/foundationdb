@@ -111,7 +111,7 @@ struct PerformanceWorkload : TestWorkload {
 					workers = w;
 					break; 
 				}
-				when( Void _ = wait( self->dbInfo->onChange() ) ) {}
+				when( wait( self->dbInfo->onChange() ) ) {}
 			}
 		}
 
@@ -213,7 +213,7 @@ struct PerformanceWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> _start( Database cx, PerformanceWorkload *self ) {
-		Void _ = wait( self->getSaturation( cx, self ) );
+		wait( self->getSaturation( cx, self ) );
 		TraceEvent("PerformanceSaturation").detail("SaturationRate", self->maxAchievedTPS.value())
 			.detail("SaturationLatency", self->latencySaturation.value());
 		return Void();

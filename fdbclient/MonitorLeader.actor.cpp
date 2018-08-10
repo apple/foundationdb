@@ -309,7 +309,7 @@ ClientLeaderRegInterface::ClientLeaderRegInterface( INetwork* local ) {
 ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, AsyncTrigger* nomineeChange, Optional<LeaderInfo> *info, int generation ) {
 	loop {
 		state Optional<LeaderInfo> li = wait( retryBrokenPromise( coord.getLeader, GetLeaderRequest( key, info->present() ? info->get().changeID : UID() ), TaskCoordinationReply ) );
-		Void _ = wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
+		wait( Future<Void>(Void()) ); // Make sure we weren't cancelled
 
 		TraceEvent("GetLeaderReply").detail("Coordinator", coord.getLeader.getEndpoint().address).detail("Nominee", li.present() ? li.get().changeID : UID()).detail("Generation", generation);
 
@@ -318,8 +318,8 @@ ACTOR Future<Void> monitorNominee( Key key, ClientLeaderRegInterface coord, Asyn
 			nomineeChange->trigger();
 
 			if( li.present() && li.get().forward )
-				Void _ = wait( Future<Void>(Never()) );
-			Void _ = wait( Future<Void>(Void()) );
+				wait( Future<Void>(Never()) );
+			wait( Future<Void>(Void()) );
 		}
 	}
 }
@@ -420,7 +420,7 @@ ACTOR Future<MonitorLeaderInfo> monitorLeaderOneGeneration( Reference<ClusterCon
 
 			outSerializedLeaderInfo->set( leader.get().first.serializedInfo );
 		}
-		Void _ = wait( nomineeChange.onTrigger() || allActors );
+		wait( nomineeChange.onTrigger() || allActors );
 	}
 }
 

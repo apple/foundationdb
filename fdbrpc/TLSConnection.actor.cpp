@@ -80,7 +80,7 @@ ACTOR static Future<Void> handshake( TLSConnection* self ) {
 			throw connection_failed();
 		}
 		ASSERT( r == ITLSSession::WANT_WRITE || r == ITLSSession::WANT_READ );
-		Void _ = wait( r == ITLSSession::WANT_WRITE ? self->conn->onWritable() : self->conn->onReadable() );
+		wait( r == ITLSSession::WANT_WRITE ? self->conn->onWritable() : self->conn->onReadable() );
 	}
 
 	TraceEvent("TLSConnectionHandshakeSuccessful", self->getDebugID())
@@ -324,7 +324,7 @@ ACTOR static Future<ErrorOr<Standalone<StringRef>>> readEntireFile( std::string 
 ACTOR static Future<Void> watchFileForChanges( std::string filename, AsyncVar<Standalone<StringRef>> *contents_var ) {
 	state std::time_t lastModTime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
 	loop {
-		Void _ = wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
+		wait(delay(FLOW_KNOBS->TLS_CERT_REFRESH_DELAY_SECONDS));
 		std::time_t modtime = wait(IAsyncFileSystem::filesystem()->lastWriteTime(filename));
 		if (lastModTime != modtime) {
 			lastModTime = modtime;
@@ -345,7 +345,7 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 		if (IAsyncFileSystem::filesystem() != nullptr) {
 			break;
 		}
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 	state AsyncVar<Standalone<StringRef>> ca_var;
 	state AsyncVar<Standalone<StringRef>> key_var;
@@ -358,7 +358,7 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 		state Future<Void> ca_changed = ca_var.onChange();
 		state Future<Void> key_changed = key_var.onChange();
 		state Future<Void> cert_changed = cert_var.onChange();
-		Void _ = wait( ca_changed || key_changed || cert_changed );
+		wait( ca_changed || key_changed || cert_changed );
 		if (ca_changed.isReady()) pci->ca_contents = ca_var.get();
 		if (key_changed.isReady()) pci->key_contents = key_var.get();
 		if (cert_changed.isReady()) pci->cert_contents = cert_var.get();

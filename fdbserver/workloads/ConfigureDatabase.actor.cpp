@@ -77,7 +77,7 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 	ACTOR Future<Void> _start( ConfigureDatabaseWorkload *self, Database cx ) {
 		if( self->clientId == 0 ) {
 			self->clients.push_back( timeout( self->singleDB( self, cx ), self->testDuration, Void() ) );
-			Void _ = wait( waitForAll( self->clients ) );
+			wait( waitForAll( self->clients ) );
 		}
 		return Void();
 	}
@@ -98,17 +98,17 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 			if( randomChoice == 0 ) {
 				double waitDuration = 3.0 * g_random->random01();
 				//TraceEvent("ConfigureTestWaitAfter").detail("WaitDuration",waitDuration);
-				Void _ = wait( delay( waitDuration ) );
+				wait( delay( waitDuration ) );
 			}
 			else if( randomChoice == 1 ) {
 				tr = Transaction( cx );
 				loop {
 					try {
 						tr.clear( normalKeys );
-						Void _ = wait( tr.commit() );
+						wait( tr.commit() );
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 				}
 			}
@@ -129,16 +129,16 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 								uint64_t nextVal = val.present() ? valueToUInt64( val.get() ) + 1 : 0;
 								tr.set( randomKey, format( "%016llx", nextVal ) );
 							}
-							Void _ = wait( tr.commit() );
+							wait( tr.commit() );
 							amtLoaded += 10;
 							break;
 						}
 						catch( Error& e ) {
-							Void _ = wait( tr.onError( e ) );
+							wait( tr.onError( e ) );
 							++self->retries;
 						}
 					}
-					Void _ = wait( delay( 0.1 ) );
+					wait( delay( 0.1 ) );
 				}
 
 				//TraceEvent("ConfigureTestLoadData").detail("LoadTime", now() - startTime).detail("AmountLoaded",amtLoaded);

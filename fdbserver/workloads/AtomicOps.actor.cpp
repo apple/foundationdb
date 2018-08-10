@@ -130,10 +130,10 @@ struct AtomicOpsWorkload : TestWorkload {
 						uint64_t intValue = 0;
 						tr.set(StringRef(format("ops%08x%08x",g,i)), StringRef((const uint8_t*) &intValue, sizeof(intValue)));
 					}
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -143,7 +143,7 @@ struct AtomicOpsWorkload : TestWorkload {
 	ACTOR Future<Void> atomicOpWorker( Database cx, AtomicOpsWorkload* self, double delay ) {
 		state double lastTime = now();
 		loop {
-			Void _ = wait( poisson( &lastTime, delay ) );
+			wait( poisson( &lastTime, delay ) );
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
@@ -152,10 +152,10 @@ struct AtomicOpsWorkload : TestWorkload {
 					Key val = StringRef((const uint8_t*) &intValue, sizeof(intValue));
 					tr.set(self->logKey(group), val);
 					tr.atomicOp(StringRef(format("ops%08x%08x",group,g_random->randomInt(0,self->nodeCount/100))), val, self->opType);
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -207,7 +207,7 @@ struct AtomicOpsWorkload : TestWorkload {
 					}
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}

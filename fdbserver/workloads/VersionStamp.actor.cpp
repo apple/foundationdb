@@ -227,7 +227,7 @@ struct VersionStampWorkload : TestWorkload {
 				break;
 			}
 			catch (Error &e) {
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 		TraceEvent("VST_CheckEnd");
@@ -247,7 +247,7 @@ struct VersionStampWorkload : TestWorkload {
 		}
 
 		loop{
-			Void _ = wait(poisson(&lastTime, delay));
+			wait(poisson(&lastTime, delay));
 			bool oldVSFormat = !cx->cluster->apiVersionAtLeast(520);
 
 			state bool cx_is_primary = true;
@@ -276,7 +276,7 @@ struct VersionStampWorkload : TestWorkload {
 					tr.clear(range);
 					tr.atomicOp(versionStampKey, value, MutationRef::SetVersionstampedKey);
 					state Future<Standalone<StringRef>> fTrVs = tr.getVersionstamp();
-					Void _ = wait(tr.commit());
+					wait(tr.commit());
 
 					committedVersion = tr.getCommittedVersion();
 					Standalone<StringRef> committedVersionStamp_ = wait(fTrVs);
@@ -317,7 +317,7 @@ struct VersionStampWorkload : TestWorkload {
 								}
 								break;
 							} catch (Error &e) {
-								Void _ = wait(cur_tr.onError(e));
+								wait(cur_tr.onError(e));
 							}
 						}
 					} else {
@@ -327,7 +327,7 @@ struct VersionStampWorkload : TestWorkload {
 
 				if (error) {
 					TraceEvent("VST_CommitFailed").error(err).detail("Key", printable(key)).detail("VsKey", printable(versionStampKey));
-					Void _ = wait(tr.onError(err));
+					wait(tr.onError(err));
 					continue;
 				}
 

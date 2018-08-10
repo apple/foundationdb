@@ -511,9 +511,9 @@ struct DDQueueData {
 
 		// FIXME: is the merge case needed
 		if( input.priority == PRIORITY_MERGE_SHARD ) {
-			Void _ = wait( delay( 0.5, TaskDataDistribution - 2 ) );
+			wait( delay( 0.5, TaskDataDistribution - 2 ) );
 		} else {
-			Void _ = wait( delay( 0.0001, TaskDataDistributionLaunch ) );
+			wait( delay( 0.0001, TaskDataDistributionLaunch ) );
 		}
 
 		loop {
@@ -559,7 +559,7 @@ struct DDQueueData {
 
 				break;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 
@@ -924,7 +924,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 				TEST(true); //did not find a healthy destination team on the first attempt
 				stuckCount++;
 				TraceEvent(stuckCount > 50 ? SevWarnAlways : SevWarn, "BestTeamStuck", masterId).suppressFor(1.0).detail("Count", stuckCount);
-				Void _ = wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
+				wait( delay( SERVER_KNOBS->BEST_TEAM_STUCK_DELAY, TaskDataDistributionLaunch ) );
 			}
 
 			state std::vector<UID> destIds;
@@ -971,7 +971,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			try {
 				loop {
 					choose {
-						when( Void _ = wait( doMoveKeys ) ) {
+						when( wait( doMoveKeys ) ) {
 							if(extraIds.size()) {
 								destIds.insert(destIds.end(), extraIds.begin(), extraIds.end());
 								healthyIds.insert(healthyIds.end(), extraIds.begin(), extraIds.end());
@@ -982,7 +982,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 								break;
 							}
 						}
-						when( Void _ = wait( pollHealth ) ) {
+						when( wait( pollHealth ) ) {
 							if (!healthyDestinations.isHealthy()) {
 								if (!signalledTransferComplete) {
 									signalledTransferComplete = true;
@@ -991,7 +991,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 							}
 							pollHealth = signalledTransferComplete ? Never() : delay( SERVER_KNOBS->HEALTH_POLL_TIME, TaskDataDistributionLaunch );
 						}
-						when( Void _ = wait( signalledTransferComplete ? Never() : dataMovementComplete.getFuture() ) ) {
+						when( wait( signalledTransferComplete ? Never() : dataMovementComplete.getFuture() ) ) {
 							self->fetchKeysComplete.insert( rd );
 							if( !signalledTransferComplete ) {
 								signalledTransferComplete = true;
@@ -1009,7 +1009,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			if( error.code() != error_code_move_to_removed_server ) {
 				if( !error.code() ) {
 					try {
-						Void _ = wait( healthyDestinations.updatePhysicalMetrics() ); //prevent a gap between the polling for an increase in physical metrics and decrementing data in flight
+						wait( healthyDestinations.updatePhysicalMetrics() ); //prevent a gap between the polling for an increase in physical metrics and decrementing data in flight
 					} catch( Error& e ) {
 						error = e;
 					}
@@ -1038,7 +1038,7 @@ ACTOR Future<Void> dataDistributionRelocator( DDQueueData *self, RelocateData rd
 			} else {
 				TEST(true);  // move to removed server
 				healthyDestinations.addDataInFlightToTeam( -metrics.bytes );
-				Void _ = wait( delay( SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskDataDistributionLaunch ) );
+				wait( delay( SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskDataDistributionLaunch ) );
 			}
 		}
 	} catch (Error& e) {
@@ -1095,7 +1095,7 @@ ACTOR Future<Void> BgDDMountainChopper( DDQueueData* self, int teamCollectionInd
 	state double checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	loop {
-		Void _ = wait( delay(checkDelay, TaskDataDistributionLaunch) );
+		wait( delay(checkDelay, TaskDataDistributionLaunch) );
 		if (self->priority_relocations[PRIORITY_REBALANCE_OVERUTILIZED_TEAM] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 			state Optional<Reference<IDataDistributionTeam>> randomTeam = wait( brokenPromiseToNever( self->teamCollections[teamCollectionIndex].getTeam.getReply( GetTeamRequest( true, false, true ) ) ) );
 			if( randomTeam.present() ) {
@@ -1130,7 +1130,7 @@ ACTOR Future<Void> BgDDValleyFiller( DDQueueData* self, int teamCollectionIndex)
 	state double checkDelay = SERVER_KNOBS->BG_DD_POLLING_INTERVAL;
 	state int resetCount = SERVER_KNOBS->DD_REBALANCE_RESET_AMOUNT;
 	loop {
-		Void _ = wait( delay(checkDelay, TaskDataDistributionLaunch) );
+		wait( delay(checkDelay, TaskDataDistributionLaunch) );
 		if (self->priority_relocations[PRIORITY_REBALANCE_UNDERUTILIZED_TEAM] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 			state Optional<Reference<IDataDistributionTeam>> randomTeam = wait( brokenPromiseToNever( self->teamCollections[teamCollectionIndex].getTeam.getReply( GetTeamRequest( true, false, false ) ) ) );
 			if( randomTeam.present() ) {
@@ -1217,7 +1217,7 @@ ACTOR Future<Void> dataDistributionQueue(
 					if(wasEmpty && !serversToLaunchFrom.empty())
 						launchQueuedWorkTimeout = delay(0, TaskDataDistributionLaunch);
 				}
-				when ( Void _ = wait(launchQueuedWorkTimeout) ) {
+				when ( wait(launchQueuedWorkTimeout) ) {
 					self.launchQueuedWork( serversToLaunchFrom );
 					serversToLaunchFrom = std::set<UID>();
 					launchQueuedWorkTimeout = Never();
@@ -1246,7 +1246,7 @@ ACTOR Future<Void> dataDistributionQueue(
 				when ( KeyRange done = waitNext( rangesComplete.getFuture() ) ) {
 					keysToLaunchFrom = done;
 				}
-				when ( Void _ = wait( recordMetrics ) ) {
+				when ( wait( recordMetrics ) ) {
 					Promise<int64_t> req;
 					getAverageShardBytes.send( req );
 
@@ -1272,8 +1272,8 @@ ACTOR Future<Void> dataDistributionQueue(
 						.detail( "BytesWritten", self.bytesWritten )
 						.trackLatest( format("%s/MovingData", printable(cx->dbName).c_str() ).c_str() );
 				}
-				when ( Void _ = wait( self.error.getFuture() ) ) {}  // Propagate errors from dataDistributionRelocator
-				when ( Void _ = wait(waitForAll( balancingFutures ) )) {}
+				when ( wait( self.error.getFuture() ) ) {}  // Propagate errors from dataDistributionRelocator
+				when ( wait(waitForAll( balancingFutures ) )) {}
 			}
 		}
 	} catch (Error& e) {

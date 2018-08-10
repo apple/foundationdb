@@ -240,7 +240,7 @@ struct StatusWorkload : TestWorkload {
 		state double lastTime = now();
 
 		loop{
-			Void _ = wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
+			wait(poisson(&lastTime, 1.0 / self->requestsPerSecond));
 			try {
 				// Since we count the requests that start, we could potentially never really hear back?
 				++self->requests;

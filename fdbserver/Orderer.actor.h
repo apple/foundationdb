@@ -55,8 +55,8 @@ public:
 	}
 private:
 	ACTOR static Future<bool> waitAndOrder( Orderer<Seq>* self, Seq s, int taskID ) {
-		Void _ = wait( self->ready.whenAtLeast(s) );
-		Void _ = wait( yield( taskID ) || self->shutdown.getFuture() );
+		wait( self->ready.whenAtLeast(s) );
+		wait( yield( taskID ) || self->shutdown.getFuture() );
 		return self->dedup(s);
 	}
 	bool dedup( Seq s ) {

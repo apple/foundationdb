@@ -135,8 +135,8 @@ public:
 	virtual Future<Void> truncate( int64_t size );
 
 	ACTOR Future<Void> truncate_impl( AsyncFileCached* self, int64_t size, Future<Void> truncates ) {
-		Void _ = wait( truncates );
-		Void _ = wait( self->uncached->truncate( size ) );
+		wait( truncates );
+		wait( self->uncached->truncate( size ) );
 		return Void();
 	}
 
@@ -254,8 +254,8 @@ private:
 	Future<Void> quiesce();
 
 	ACTOR static Future<Void> waitAndSync( AsyncFileCached* self, Future<Void> flush ) {
-		Void _ = wait( flush );
-		Void _ = wait( self->uncached->sync() );
+		wait( flush );
+		wait( self->uncached->sync() );
 		return Void();
 	}
 
@@ -300,7 +300,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	ACTOR static Future<Void> waitAndWrite( AFCPage* self, void const* data, int length, int offset ) {
-		Void _ = wait( self->notReading );
+		wait( self->notReading );
 		memcpy( static_cast<uint8_t*>(self->data) + offset, data, length );
 		return Void();
 	}
@@ -344,7 +344,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	ACTOR static Future<Void> waitAndRead( AFCPage* self, void* data, int length, int offset ) {
-		Void _ = wait( self->notReading );
+		wait( self->notReading );
 		memcpy( data, static_cast<uint8_t const*>(self->data) + offset, length );
 		return Void();
 	}
@@ -374,7 +374,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 			++self->writeThroughCount;
 			self->updateFlushableIndex();
 
-			Void _ = wait( self->notReading && self->notFlushing );
+			wait( self->notReading && self->notFlushing );
 
 			if (dirty) {
 				if ( self->pageOffset + self->pageCache->pageSize > self->owner->length ) {
@@ -384,7 +384,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 
 				auto f = self->owner->uncached->write( self->data, self->pageCache->pageSize, self->pageOffset );
 
-				Void _ = wait( f );
+				wait( f );
 			}
 		}
 		catch(Error& e) {
@@ -439,7 +439,7 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	}
 
 	ACTOR static Future<Void> truncate_impl( AFCPage* self ) {
-		Void _ = wait( self->notReading && self->notFlushing && yield() );
+		wait( self->notReading && self->notFlushing && yield() );
 		delete self;
 		return Void();
 	}

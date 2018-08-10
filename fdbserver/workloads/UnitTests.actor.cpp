@@ -85,7 +85,7 @@ struct UnitTestWorkload : TestWorkload {
 			state double start_timer = timer();
 
 			try {
-				Void _ = wait(test->func());
+				wait(test->func());
 			}
 			catch (Error& e) {
 				++self->testsFailed;
@@ -114,6 +114,6 @@ struct UnitTestWorkload : TestWorkload {
 WorkloadFactory<UnitTestWorkload> UnitTestWorkloadFactory("UnitTests");
 
 TEST_CASE("fdbserver/UnitTestWorkload/long delay") {
-	Void _ = wait(delay(60));
+	wait(delay(60));
 	return Void();
 }

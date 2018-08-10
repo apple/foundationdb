@@ -113,10 +113,10 @@ struct PingWorkload : TestWorkload {
 					break;
 				}
 				tr.set( format("Ping/Client/%d", self->clientId), serializedInterface );
-				Void _ = wait( tr.commit() );
+				wait( tr.commit() );
 				break;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 		return Void();
@@ -139,7 +139,7 @@ struct PingWorkload : TestWorkload {
 				}
 				return result;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	}
@@ -148,7 +148,7 @@ struct PingWorkload : TestWorkload {
 		state double lastTime = now();
 
 		loop {
-			Void _ = wait( poisson( &lastTime, self->actorCount / self->operationsPerSecond ) );
+			wait( poisson( &lastTime, self->actorCount / self->operationsPerSecond ) );
 			auto& peer = g_random->randomChoice(peers);
 			state NetworkAddress addr = peer.getEndpoint().address;
 			state double before = now();
@@ -175,7 +175,7 @@ struct PingWorkload : TestWorkload {
 		vector<Future<Void>> pingers;
 		for(int i=0; i<self->actorCount; i++)
 			pingers.push_back( self->pinger( self, peers ) );
-		Void _ = wait( waitForAll(pingers) );
+		wait( waitForAll(pingers) );
 		return Void();
 	}
 
@@ -187,13 +187,13 @@ struct PingWorkload : TestWorkload {
 		vector<Future<Void>> pingers;
 		for(int i=0; i<self->actorCount; i++)
 			pingers.push_back( self->pinger( self, peers ) );
-		Void _ = wait( waitForAll(pingers) );
+		wait( waitForAll(pingers) );
 		return Void();
 	}
 
 	// ACTOR Future<Void> poisson_spin( double *last, double meanInterval ) {
 	// 	*last += meanInterval*-log( g_random->random01() );
-	// 	Void _ = wait( delay( std::max( *last - timer() - 0.01, 0.0 ) ) );
+	// 	wait( delay( std::max( *last - timer() - 0.01, 0.0 ) ) );
 	// 	if( timer() >= *last )
 	// 		TraceEvent(SevWarnAlways, "SpinPoissonInaccurateTime").detail("Diff", timer() - *last);
 	// 	while( timer() < *last )
@@ -219,7 +219,7 @@ struct PingWorkload : TestWorkload {
 
 		// std::random_shuffle( peers.begin(), peers.end() );
 		loop {
-			Void _ = wait( poisson( &lastTime, 1.0 / 6.0 ) );
+			wait( poisson( &lastTime, 1.0 / 6.0 ) );
 			addActor.send( self->payloadPinger( self, cx, endpoints ) );
 		}
 	}
@@ -232,7 +232,7 @@ struct PingWorkload : TestWorkload {
 	// }
 
 	// ACTOR Future<Void> payloadDelayer( PingRequest req, PromiseStream<PingRequest> stream ) {
-	// 	Void _ = wait( delay( g_random->random01() * 0.100 ) );
+	// 	wait( delay( g_random->random01() * 0.100 ) );
 	// 	PingReply rep = wait( stream.getReply( req ) );
 	// 	return Void();
 	// }
@@ -256,16 +256,16 @@ struct PingWorkload : TestWorkload {
 				// replies.push_back( self->payloadDelayer( req, peers[i].payloadPing ) );
 			}
 			TraceEvent("PayloadPingSent", pingId);
-			Void _ = wait( waitForAll( replies ) );
+			wait( waitForAll( replies ) );
 			double elapsed = now() - start;
 			TraceEvent("PayloadPingDone", pingId).detail("Elapsed", elapsed);
-		// 	Void _ = wait( delay( g_random->random01() / 100 ) );
+		// 	wait( delay( g_random->random01() / 100 ) );
 		// }
 		return Void();
 	}
 
 	// ACTOR Future<Void> packetPonger( PingWorkload* self, LoadedPingRequest req ) {
-	// 	Void _ = wait( delay( g_random->random01() * 0.100 ) );
+	// 	wait( delay( g_random->random01() * 0.100 ) );
 		
 	// 	LoadedReply rep;
 	// 	rep.id = req.id;

@@ -224,13 +224,13 @@ Future<decltype(fake<F>()().getValue())> executeMutation(Reference<InstructionDa
 		try {
 			state decltype(fake<F>()().getValue()) result = wait(func());
 			if(instruction->isDatabase) {
-				Void _ = wait(instruction->tr->commit());
+				wait(instruction->tr->commit());
 			}
 			return result;
 		}
 		catch(Error &e) {
 			if(instruction->isDatabase) {
-				Void _ = wait(instruction->tr->onError(e));
+				wait(instruction->tr->onError(e));
 			}
 			else {
 				throw;

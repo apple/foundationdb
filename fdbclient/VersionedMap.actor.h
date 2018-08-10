@@ -42,7 +42,7 @@ Future<Void> deferredCleanupActor( std::vector<Tree> toFree, int taskID = 7000 )
 		}
 
 		if(++freeCount % 100 == 0)
-			Void _ = wait( yield(taskID) );
+			wait( yield(taskID) );
 	}
 
 	return Void();

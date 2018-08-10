@@ -125,7 +125,7 @@ struct StorefrontWorkload : TestWorkload {
 		state double lastTime = now();
 		try {
 			loop {
-				Void _ = wait( poisson( &lastTime, delay ) );
+				wait( poisson( &lastTime, delay ) );
 
 				state double tstart = now();
 				state int itemsToOrder = g_random->randomInt(1, self->maxOrderSize);
@@ -154,18 +154,18 @@ struct StorefrontWorkload : TestWorkload {
 								itemList.push_back( it->first );
 							updaters.push_back( self->itemUpdater( &tr, self, it->first, it->second ) );
 						}
-						Void _ = wait( waitForAll( updaters ) );
+						wait( waitForAll( updaters ) );
 						updaters.clear();
 
 						// set value for the order
 						BinaryWriter wr(AssumeVersion(currentProtocolVersion)); wr << itemList;
 						tr.set( orderKey, wr.toStringRef() );
 
-						Void _ = wait( tr.commit() );
+						wait( tr.commit() );
 						self->orders[id] = items; // save this in a local list to test durability
 						break;
 					} catch (Error& e) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 					}
 					++self->retries;
 				}
@@ -212,7 +212,7 @@ struct StorefrontWorkload : TestWorkload {
 		state Future<Standalone<RangeResultRef>> values = tr.getRange( 
 				KeyRangeRef( self->itemKey(0), self->itemKey(self->itemCount)), self->itemCount+1 );
 
-		Void _ = wait( waitForAll( accumulators ) );
+		wait( waitForAll( accumulators ) );
 		state vector<int> totals(self->itemCount);
 		for(int c=0; c<accumulators.size(); c++) {
 			vector<int> subTotals = accumulators[c].get();
@@ -257,7 +257,7 @@ struct StorefrontWorkload : TestWorkload {
 				}
 				return true;
 			} catch(Error& e) {
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	}
@@ -274,7 +274,7 @@ struct StorefrontWorkload : TestWorkload {
 				}
 				checkers.push_back( self->orderChecker( cx->clone(), self, orderIDs ) );
 			}
-			Void _ = wait( waitForAll( checkers ) );
+			wait( waitForAll( checkers ) );
 			for(int c=0; c < checkers.size(); c++)
 				ok = ok && !checkers[c].isError() && checkers[c].isReady() && checkers[c].get();
 			checkers.clear();

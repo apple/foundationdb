@@ -49,7 +49,7 @@ bool firstInBatch(CommitTransactionRequest x) {
 ACTOR template <class X>
 Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int> > out, FutureStream<X> in, double avgMinDelay, double* avgMaxDelay, double emptyBatchTimeout, int maxCount, int desiredBytes, int maxBytes, Optional<PromiseStream<Void>> batchStartedStream, int64_t *commitBatchesMemBytesCount, int64_t commitBatchesMemBytesLimit, int taskID = TaskDefaultDelay, Counter* counter = 0)
 {
-	Void _ = wait( delayJittered(*avgMaxDelay, taskID) );  // smooth out
+	wait( delayJittered(*avgMaxDelay, taskID) );  // smooth out
 	// This is set up to deliver even zero-size batches if emptyBatchTimeout elapses, because that's what master proxy wants.  The source control history
 	// contains a version that does not.
 
@@ -103,7 +103,7 @@ Future<Void> batcher(PromiseStream<std::pair<std::vector<X>, int> > out, FutureS
 					batchBytes += bytes;
 					*commitBatchesMemBytesCount += bytes;
 				}
-				when ( Void _ = wait( timeout ) ) {}
+				when ( wait( timeout ) ) {}
 			}
 		}
 		out.send({std::move(batch), batchBytes});

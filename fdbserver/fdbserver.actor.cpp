@@ -288,7 +288,7 @@ auto sortByTime = [](DebugEntryRef const& a, DebugEntryRef const& b) { return a.
 		replies[w] = timeoutError(workers[w].debugQuery.getReply( req ), 5.0);
 	}
 	//state vector<Standalone<VectorRef<DebugEntryRef>>> result = wait( getAll( replies ) );
-	Void _ = wait(waitForAllReady( replies ));
+	wait(waitForAllReady( replies ));
 	state vector<Standalone<VectorRef<DebugEntryRef>>> result( workers.size() );
 	for(int r=0; r<result.size(); r++) {
 		if (replies[r].isError())
@@ -417,7 +417,7 @@ UID getSharedMemoryMachineId() {
 
 
 ACTOR void failAfter( Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess() ) {
-	Void _ = wait( trigger );
+	wait( trigger );
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
 		g_simulator.killProcess( m, ISimulator::KillInstantly );
@@ -536,7 +536,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 				return Void();
 			} catch (Error& e) {
 				fclose(output);
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	} catch (Error& e) {

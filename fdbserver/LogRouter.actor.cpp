@@ -63,7 +63,7 @@ struct LogRouterData {
 					self->version_messages.pop_front();
 				}
 
-				Void _ = wait(yield(taskID));
+				wait(yield(taskID));
 			}
 
 			return Void();
@@ -180,10 +180,10 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 	loop {
 		loop {
 			choose {
-				when(Void _ = wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
+				when(wait( r ? r->getMore(TaskTLogCommit) : Never() ) ) {
 					break;
 				}
-				when( Void _ = wait( dbInfoChange ) ) { //FIXME: does this actually happen?
+				when( wait( dbInfoChange ) ) { //FIXME: does this actually happen?
 					if(r) tagPopped = std::max(tagPopped, r->popped());
 					if( self->logSystem->get() )
 						r = self->logSystem->get()->peekLogRouter( self->dbgid, tagAt, self->routerTag );
@@ -203,7 +203,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 			if (!foundMessage || r->version().version != ver) {
 				ASSERT(r->version().version > lastVer);
 				if (ver) {
-					Void _ = wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
+					wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 					commitMessages(self, ver, messages);
 					self->version.set( ver );
 					//TraceEvent("LogRouterVersion").detail("Ver",ver);
@@ -215,7 +215,7 @@ ACTOR Future<Void> pullAsyncData( LogRouterData *self ) {
 				if (!foundMessage) {
 					ver--; //ver is the next possible version we will get data for
 					if(ver > self->version.get()) {
-						Void _ = wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
+						wait(self->minPopped.whenAtLeast(std::min(self->version.get(), ver - SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS)));
 						self->version.set( ver );
 					}
 					break;
@@ -290,8 +290,8 @@ ACTOR Future<Void> logRouterPeekMessages( LogRouterData* self, TLogPeekRequest r
 	}
 
 	if( self->version.get() < req.begin ) {
-		Void _ = wait( self->version.whenAtLeast( req.begin ) );
-		Void _ = wait( delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()) );
+		wait( self->version.whenAtLeast( req.begin ) );
+		wait( delay(SERVER_KNOBS->TLOG_PEEK_DELAY, g_network->getCurrentTask()) );
 	}
 
 	Version poppedVer = poppedVersion(self, req.tag);
@@ -326,7 +326,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 	} else if (req.to > tagData->popped) {
 		tagData->popped = req.to;
 		tagData->durableKnownCommittedVersion = req.durableKnownCommittedVersion;
-		Void _ = wait(tagData->eraseMessagesBefore( req.to, self, TaskTLogPop ));
+		wait(tagData->eraseMessagesBefore( req.to, self, TaskTLogPop ));
 	}
 
 	state Version minPopped = std::numeric_limits<Version>::max();
@@ -340,7 +340,7 @@ ACTOR Future<Void> logRouterPop( LogRouterData* self, TLogPopRequest req ) {
 
 	while(!self->messageBlocks.empty() && self->messageBlocks.front().first < minPopped) {
 		self->messageBlocks.pop_front();
-		Void _ = wait(yield(TaskTLogPop));
+		wait(yield(TaskTLogPop));
 	}
 
 	if(self->logSystem->get() && self->allowPops) {
@@ -364,7 +364,7 @@ ACTOR Future<Void> logRouterCore(
 	addActor.send( pullAsyncData(&logRouterData) );
 
 	loop choose {
-		when( Void _ = wait( dbInfoChange ) ) {
+		when( wait( dbInfoChange ) ) {
 			dbInfoChange = db->onChange();
 			logRouterData.allowPops = db->get().recoveryState == RecoveryState::FULLY_RECOVERED;
 			logRouterData.logSystem->set(ILogSystem::fromServerDBInfo( logRouterData.dbgid, db->get(), true ));
@@ -375,7 +375,7 @@ ACTOR Future<Void> logRouterCore(
 		when( TLogPopRequest req = waitNext( interf.popMessages.getFuture() ) ) {
 			addActor.send( logRouterPop( &logRouterData, req ) );
 		}
-		when (Void _ = wait(error)) {}
+		when (wait(error)) {}
 	}
 }
 
@@ -403,7 +403,7 @@ ACTOR Future<Void> checkRemoved(Reference<AsyncVar<ServerDBInfo>> db, uint64_t r
 		if (isDisplaced) {
 			throw worker_removed();
 		}
-		Void _ = wait(db->onChange());
+		wait(db->onChange());
 	}
 }
 
@@ -416,8 +416,8 @@ ACTOR Future<Void> logRouter(
 		TraceEvent("LogRouterStart", interf.id()).detail("Start", req.startVersion).detail("Tag", req.routerTag.toString()).detail("Localities", req.tLogLocalities.size()).detail("Locality", req.locality);
 		state Future<Void> core = logRouterCore(interf, req, db);
 		loop choose{
-			when(Void _ = wait(core)) { return Void(); }
-			when(Void _ = wait(checkRemoved(db, req.recoveryCount, interf))) {}
+			when(wait(core)) { return Void(); }
+			when(wait(checkRemoved(db, req.recoveryCount, interf))) {}
 		}
 	}
 	catch (Error& e) {

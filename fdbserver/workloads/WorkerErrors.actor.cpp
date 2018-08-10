@@ -48,7 +48,7 @@ struct WorkerErrorsWorkload : TestWorkload {
 			eventTraces.push_back( workers[c].first.eventLogRequest.getReply( EventLogRequest() ) );
 		}
 
-		Void _ = wait( timeoutError( waitForAll( eventTraces ), 2.0 ) );
+		wait( timeoutError( waitForAll( eventTraces ), 2.0 ) );
 
 		vector<TraceEventFields> results;
 		for(int i = 0; i < eventTraces.size(); i++) {

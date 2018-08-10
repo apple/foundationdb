@@ -57,7 +57,7 @@ struct RandomCloggingWorkload : TestWorkload {
 	}
 
 	ACTOR void doClog( ISimulator::ProcessInfo* machine, double t, double delay = 0.0 ) {
-		Void _ = wait(::delay(delay));
+		wait(::delay(delay));
 		g_simulator.clogInterface( machine->address.ip, t );
 	}
 
@@ -72,7 +72,7 @@ struct RandomCloggingWorkload : TestWorkload {
 		state double lastTime = now();
 		state double workloadEnd = now() + self->testDuration;
 		loop {
-			Void _ = wait( poisson( &lastTime, self->scale / self->clogginess ) );
+			wait( poisson( &lastTime, self->scale / self->clogginess ) );
 			auto machine = g_random->randomChoice( g_simulator.getAllProcesses() );
 			double t = self->scale * 10.0 * exp( -10.0 * g_random->random01() );
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
@@ -88,7 +88,7 @@ struct RandomCloggingWorkload : TestWorkload {
 		state double lastTime = now();
 		state double workloadEnd = now() + self->testDuration;
 		loop {
-			Void _ = wait( poisson( &lastTime, self->scale / self->clogginess ) );
+			wait( poisson( &lastTime, self->scale / self->clogginess ) );
 			double t = self->scale * 10.0 * exp( -10.0 * g_random->random01() );
 			t = std::max(0.0, std::min(t, workloadEnd - now()));
 

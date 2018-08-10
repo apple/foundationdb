@@ -35,7 +35,7 @@ public:
 			}
 
 			if(!self->cursor->hasMessage()) {
-				Void _ = wait( self->cursor->getMore() );
+				wait( self->cursor->getMore() );
 				TraceEvent("PeekNextGetMore").detail("Queue", self->recoveryQueue.size()).detail("Bytes", bytes).detail("Loc", self->recoveryLoc).detail("End", self->logSystem->getEnd()); 
 				if(self->recoveryQueueDataSize == 0) {
 					self->recoveryQueueLoc = self->recoveryLoc;

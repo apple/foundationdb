@@ -64,7 +64,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 			self->clients.push_back(
 				timeout(
 				self->backgroundSelectorWorker( cx, self ), self->testDuration, Void()) );
-		Void _ = wait( waitForAll( self->clients ) );
+		wait( waitForAll( self->clients ) );
 		return Void();
 	}
 
@@ -124,12 +124,12 @@ struct BackgroundSelectorWorkload : TestWorkload {
 					}
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError( e ) );
+					wait( tr.onError( e ) );
 				}
 			}
 
 			loop {
-				Void _ = wait( poisson( &lastTime, 1.0 / self->transactionsPerSecond ) );
+				wait( poisson( &lastTime, 1.0 / self->transactionsPerSecond ) );
 				tr.reset();
 				startDrift = direction * g_random->randomInt( self->minDrift, self->maxDrift );
 				endDrift   = direction * g_random->randomInt( self->minDrift, self->maxDrift );
@@ -187,7 +187,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 
 						break;
 					} catch (Error& e) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 						++self->retries;
 					}
 				}

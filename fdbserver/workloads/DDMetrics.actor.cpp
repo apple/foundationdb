@@ -51,11 +51,11 @@ struct DDMetricsWorkload : TestWorkload {
 	ACTOR Future<Void> work( Database cx, DDMetricsWorkload *self ) {
 		try {
 			TraceEvent("DDMetricsWaiting").detail("StartDelay", self->startDelay);
-			Void _ = wait( delay( self->startDelay ) );
+			wait( delay( self->startDelay ) );
 			TraceEvent("DDMetricsStarting");
 			state double startTime = now();
 			loop {
-				Void _ = wait( delay( 2.5 ) );
+				wait( delay( 2.5 ) );
 				int dif = wait( self->getHighPriorityRelocationsInFlight( cx, self ) );
 				TraceEvent("DDMetricsCheck").detail("DIF", dif);
 				if( dif == 0 ) {

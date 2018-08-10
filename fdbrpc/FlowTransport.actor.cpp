@@ -313,7 +313,7 @@ struct Peer : NonCopyable {
 				throw connection_failed();
 			}
 
-			Void _ = wait( delayJittered( FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME ) );
+			wait( delayJittered( FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME ) );
 
 			// SOMEDAY: Stop monitoring and close the connection after a long period of inactivity with no reliable or onDisconnect requests outstanding
 
@@ -321,9 +321,9 @@ struct Peer : NonCopyable {
 			FlowTransport::transport().sendUnreliable( SerializeSource<ReplyPromise<Void>>(reply), remotePing.getEndpoint() );
 
 			choose {
-				when (Void _ = wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").detail("WithAddr", peer->destination); throw connection_failed(); }
-				when (Void _ = wait( reply.getFuture() )) {}
-				when (Void _ = wait( peer->incompatibleDataRead.onTrigger())) {}
+				when (wait( delay( FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT ) )) { TraceEvent("ConnectionTimeout").detail("WithAddr", peer->destination); throw connection_failed(); }
+				when (wait( reply.getFuture() )) {}
+				when (wait( peer->incompatibleDataRead.onTrigger())) {}
 			}
 		}
 	}
@@ -331,10 +331,10 @@ struct Peer : NonCopyable {
 	ACTOR static Future<Void> connectionWriter( Peer* self, Reference<IConnection> conn ) {
 		state double lastWriteTime = now();
 		loop {
-			//Void _ = wait( delay(0, TaskWriteSocket) );
-			Void _ = wait( delayJittered(std::max<double>(FLOW_KNOBS->MIN_COALESCE_DELAY, FLOW_KNOBS->MAX_COALESCE_DELAY - (now() - lastWriteTime)), TaskWriteSocket) );
-			//Void _ = wait( delay(500e-6, TaskWriteSocket) );
-			//Void _ = wait( yield(TaskWriteSocket) );
+			//wait( delay(0, TaskWriteSocket) );
+			wait( delayJittered(std::max<double>(FLOW_KNOBS->MIN_COALESCE_DELAY, FLOW_KNOBS->MAX_COALESCE_DELAY - (now() - lastWriteTime)), TaskWriteSocket) );
+			//wait( delay(500e-6, TaskWriteSocket) );
+			//wait( yield(TaskWriteSocket) );
 
 			// Send until there is nothing left to send
 			loop {
@@ -348,13 +348,13 @@ struct Peer : NonCopyable {
 				if (self->unsent.empty()) break;
 
 				TEST(true); // We didn't write everything, so apparently the write buffer is full.  Wait for it to be nonfull.
-				Void _ = wait( conn->onWritable() );
-				Void _ = wait( yield(TaskWriteSocket) );
+				wait( conn->onWritable() );
+				wait( yield(TaskWriteSocket) );
 			}
 
 			// Wait until there is something to send
 			while ( self->unsent.empty() )
-				Void _ = wait( self->dataToSend.onTrigger() );
+				wait( self->dataToSend.onTrigger() );
 		}
 	}
 
@@ -370,10 +370,10 @@ struct Peer : NonCopyable {
 					self->outgoingConnectionIdle = true;
 					// Wait until there is something to send
 					while ( self->unsent.empty() )
-						Void _ = wait( self->dataToSend.onTrigger() );
+						wait( self->dataToSend.onTrigger() );
 					ASSERT( self->destination.isPublic() );
 					self->outgoingConnectionIdle = false;
-					Void _ = wait( delayJittered( std::max(0.0, self->lastConnectTime+self->reconnectionDelay - now()) ) );  // Don't connect() to the same peer more than once per 2 sec
+					wait( delayJittered( std::max(0.0, self->lastConnectTime+self->reconnectionDelay - now()) ) );  // Don't connect() to the same peer more than once per 2 sec
 					self->lastConnectTime = now();
 
 					TraceEvent("ConnectingTo", conn ? conn->getDebugID() : UID()).suppressFor(1.0).detail("PeerAddr", self->destination);
@@ -394,7 +394,7 @@ struct Peer : NonCopyable {
 
 				try {
 					self->transport->countConnEstablished++;
-					Void _ = wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
+					wait( connectionWriter( self, conn ) || reader || connectionMonitor(self) );
 				} catch (Error& e) {
 					 if (e.code() == error_code_connection_failed || e.code() == error_code_actor_cancelled || ( g_network->isSimulated() && e.code() == error_code_checksum_failed ))
 						self->transport->countConnClosedWithoutError++;
@@ -451,7 +451,7 @@ TransportData::~TransportData() {
 ACTOR static void deliver( TransportData* self, Endpoint destination, ArenaReader reader, bool inReadSocket ) {
 	int priority = self->endpoints.getPriority(destination.token);
 	if (priority < TaskReadSocket || !inReadSocket) {
-		Void _ = wait( delay(0, priority) );
+		wait( delay(0, priority) );
 	} else {
 		g_network->setCurrentTask( priority );
 	}
@@ -697,7 +697,7 @@ ACTOR static Future<Void> connectionReader(
 								incompatiblePeerCounted = true;
 							}
 							onConnected.send( peer );
-							Void _ = wait( delay(0) );  // Check for cancellation
+							wait( delay(0) );  // Check for cancellation
 						}
 					}
 				}
@@ -712,11 +712,11 @@ ACTOR static Future<Void> connectionReader(
 				if (readWillBlock)
 					break;
 
-				Void _ = wait(yield(TaskReadSocket));
+				wait(yield(TaskReadSocket));
 			}
 
-			Void _ = wait( conn->onReadable() );
-			Void _ = wait(delay(0, TaskReadSocket));  // We don't want to call conn->read directly from the reactor - we could get stuck in the reactor reading 1 packet at a time
+			wait( conn->onReadable() );
+			wait(delay(0, TaskReadSocket));  // We don't want to call conn->read directly from the reactor - we could get stuck in the reactor reading 1 packet at a time
 		}
 	}
 	catch (Error& e) {
@@ -733,11 +733,11 @@ ACTOR static Future<Void> connectionIncoming( TransportData* self, Reference<ICo
 		state Promise<Peer*> onConnected;
 		state Future<Void> reader = connectionReader( self, conn, nullptr, onConnected );
 		choose {
-			when( Void _ = wait( reader ) ) { ASSERT(false); return Void(); }
+			when( wait( reader ) ) { ASSERT(false); return Void(); }
 			when( Peer *p = wait( onConnected.getFuture() ) ) {
 				p->onIncomingConnection( conn, reader );
 			}
-			when( Void _ = wait( delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT) ) ) {
+			when( wait( delayJittered(FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT) ) ) {
 				TEST(true);  // Incoming connection timed out
 				throw timed_out();
 			}
@@ -758,7 +758,7 @@ ACTOR static Future<Void> listen( TransportData* self, NetworkAddress listenAddr
 			Reference<IConnection> conn = wait( listener->accept() );
 			TraceEvent("ConnectionFrom", conn->getDebugID()).suppressFor(1.0).detail("FromAddress", conn->getPeerAddress());
 			incoming.add( connectionIncoming(self, conn) );
-			Void _ = wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskWriteSocket));
+			wait(delay(0) || delay(FLOW_KNOBS->CONNECTION_ACCEPT_DELAY, TaskWriteSocket));
 		}
 	} catch (Error& e) {
 		TraceEvent(SevError, "ListenError").error(e);
@@ -781,7 +781,7 @@ Peer* TransportData::getPeer( NetworkAddress const& address, bool openConnection
 
 ACTOR static Future<Void> multiVersionCleanupWorker( TransportData* self ) {
 	loop {
-		Void _ = wait(delay(FLOW_KNOBS->CONNECTION_CLEANUP_DELAY));
+		wait(delay(FLOW_KNOBS->CONNECTION_CLEANUP_DELAY));
 		for(auto it = self->incompatiblePeers.begin(); it != self->incompatiblePeers.end();) {
 			if( self->multiVersionConnections.count(it->second.first) ) {
 				it = self->incompatiblePeers.erase(it);

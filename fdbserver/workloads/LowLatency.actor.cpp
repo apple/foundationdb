@@ -57,7 +57,7 @@ struct LowLatencyWorkload : TestWorkload {
 		state double testStart = now();
 		try {
 			loop {
-				Void _ = wait( delay( self->checkDelay ) );
+				wait( delay( self->checkDelay ) );
 				state Transaction tr( cx );
 				state double operationStart = now();
 				++self->operations;
@@ -68,7 +68,7 @@ struct LowLatencyWorkload : TestWorkload {
 						Version _ = wait(tr.getReadVersion());
 						break;
 					} catch( Error &e ) {
-						Void _ = wait( tr.onError(e) );
+						wait( tr.onError(e) );
 						++self->retries;
 					}
 				}

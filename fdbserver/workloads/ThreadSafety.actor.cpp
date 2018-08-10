@@ -167,7 +167,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 			g_network->startThread(self->threadStart, threadInfo[i]);
 		}
 
-		Void _ = wait(delay(self->threadDuration));
+		wait(delay(self->threadDuration));
 
 		// Signals the threads to stop
 		self->mutex.enter();
@@ -176,7 +176,7 @@ struct ThreadSafetyWorkload : TestWorkload {
 			
 		for(i = 0; i < threadInfo.size(); ++i) {
 			try {
-				Void _ = wait(threadInfo[i]->done.getFuture());
+				wait(threadInfo[i]->done.getFuture());
 			}
 			catch(Error &e) {
 				self->success = false;

@@ -78,17 +78,17 @@ struct IndexScanWorkload : KVWorkload {
 		loop {
 			state Transaction tr(cx);
 			try {
-				Void _ = wait( tr.warmRange( cx, allKeys ) );
+				wait( tr.warmRange( cx, allKeys ) );
 				break;
 			} catch( Error& e ) {
-				Void _ = wait( tr.onError( e ) );
+				wait( tr.onError( e ) );
 			}
 		}
 
 		// Wait some small amount of time for things to "settle". Maybe this is historical?
-		Void _ = wait( delay( std::max(0.1, 1.0 - (now() - startTime) ) ) );
+		wait( delay( std::max(0.1, 1.0 - (now() - startTime) ) ) );
 
-		Void _ = wait( timeout( serialScans( cx, self ), self->testDuration, Void() ) );
+		wait( timeout( serialScans( cx, self ), self->testDuration, Void() ) );
 		return Void();
 	}
 
@@ -135,7 +135,7 @@ struct IndexScanWorkload : KVWorkload {
 			} catch( Error& e ) {
 				if( e.code() != error_code_actor_cancelled )
 					++self->failedTransactions;
-				Void _ = wait( tr.onError( e ) );
+				wait( tr.onError( e ) );
 			}
 		}
 

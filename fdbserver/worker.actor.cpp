@@ -60,7 +60,7 @@ extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);
 ACTOR static Future<Void> extractClientInfo( Reference<AsyncVar<ServerDBInfo>> db, Reference<AsyncVar<ClientDBInfo>> info ) {
 	loop {
 		info->set( db->get().client );
-		Void _ = wait( db->onChange() );
+		wait( db->onChange() );
 	}
 }
 
@@ -101,7 +101,7 @@ ACTOR Future<Void> forwardError( PromiseStream<ErrorInfo> errors,
 	Future<Void> process )
 {
 	try {
-		Void _ = wait(process);
+		wait(process);
 		errors.send( ErrorInfo(success(), context, id) );
 		return Void();
 	} catch (Error& e) {
@@ -114,7 +114,7 @@ ACTOR Future<Void> handleIOErrors( Future<Void> actor, IClosable* store, UID id,
 	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr( store->getError() );
 	choose {
 		when (state ErrorOr<Void> e = wait( errorOr(actor) )) {
-			Void _ = wait(onClosed);
+			wait(onClosed);
 			if(storeError.isReady()) throw storeError.getError();
 			if (e.isError()) throw e.getError(); else return e.get();
 		}
@@ -155,9 +155,9 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 //		for an extra second, so that clients are more likely to see broken_promise errors
 ACTOR template<class T> Future<Void> zombie(T workerInterface, Future<Void> worker) {
 	try {
-		Void _ = wait(worker);
+		wait(worker);
 		if (BUGGIFY)
-			Void _ = wait(delay(1.0));
+			wait(delay(1.0));
 		return Void();
 	} catch (Error& e) {
 		throw;
@@ -264,7 +264,7 @@ ACTOR Future<Void> registrationClient( Reference<AsyncVar<Optional<ClusterContro
 				processClass = reply.processClass;	
 				asyncPriorityInfo->set( reply.priorityInfo );
 			}
-			when ( Void _ = wait( ccInterface->onChange() )) { }
+			when ( wait( ccInterface->onChange() )) { }
 		}
 	}
 }
@@ -335,7 +335,7 @@ ACTOR Future<Void> runProfiler(ProfilerRequest req) {
 	if (req.action == ProfilerRequest::Action::RUN) {
 		req.action = ProfilerRequest::Action::ENABLE;
 		updateCpuProfiler(req);
-		Void _ = wait(delay(req.duration));
+		wait(delay(req.duration));
 		req.action = ProfilerRequest::Action::DISABLE;
 		updateCpuProfiler(req);
 		return Void();
@@ -353,7 +353,7 @@ ACTOR Future<Void> storageServerRollbackRebooter( Future<Void> prevStorageServer
 
 		TraceEvent("StorageServerRequestedReboot", id);
 
-		//if (BUGGIFY) Void _ = wait(delay(1.0)); // This does the same thing as zombie()
+		//if (BUGGIFY) wait(delay(1.0)); // This does the same thing as zombie()
 		// We need a new interface, since the new storageServer will do replaceInterface().  And we need to destroy
 		// the old one so the failure detector will know it is gone.
 		StorageServerInterface ssi;
@@ -471,7 +471,7 @@ ACTOR Future<Void> monitorServerDBInfo( Reference<AsyncVar<Optional<ClusterContr
 				localInfo.myLocality = locality;
 				dbInfo->set(localInfo);
 			}
-			when( Void _ = wait( ccInterface->onChange() ) ) {
+			when( wait( ccInterface->onChange() ) ) {
 				if(ccInterface->get().present())
 					TraceEvent("GotCCInterfaceChange").detail("CCID", ccInterface->get().get().id()).detail("CCMachine", ccInterface->get().get().getWorkers.getEndpoint().address);
 			}
@@ -612,7 +612,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 		details["StoresPresent"] = format("%d", stores.size());
 		startRole( interf.id(), interf.id(), "Worker", details );
 
-		Void _ = wait(waitForAll(recoveries));
+		wait(waitForAll(recoveries));
 		recoveredDiskFiles.send(Void());
 
 		errorForwarders.add( registrationClient( ccInterface, interf, asyncPriorityInfo, initialClass ) );
@@ -625,7 +625,7 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				state RebootRequest rebootReq = req;
 				if(rebootReq.checkData) {
 					Reference<IAsyncFile> checkFile = wait( IAsyncFileSystem::filesystem()->open( joinPath(folder, validationFilename), IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE, 0600 ) );
-					Void _ = wait( checkFile->sync() );
+					wait( checkFile->sync() );
 				}
 
 				if(g_network->isSimulated()) {
@@ -849,12 +849,12 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 				}
 				req.reply.send(ids);
 			}
-			when( Void _ = wait( loggingTrigger ) ) {
+			when( wait( loggingTrigger ) ) {
 				systemMonitor();
 				loggingTrigger = delay( loggingDelay, TaskFlushTrace );
 			}
-			when( Void _ = wait( errorForwarders.getResult() ) ) {}
-			when( Void _ = wait( handleErrors ) ) {}
+			when( wait( errorForwarders.getResult() ) ) {}
+			when( wait( handleErrors ) ) {}
 		}
 	} catch (Error& err) {
 		state Error e = err;
@@ -866,8 +866,8 @@ ACTOR Future<Void> workerServer( Reference<ClusterConnectionFile> connFile, Refe
 
 		if (e.code() != error_code_actor_cancelled) { // We get cancelled e.g. when an entire simulation times out, but in that case we won't be restarted and don't need to wait for shutdown
 			stopping.send(Void());
-			Void _ = wait( filesClosed.getResult() ); // Wait for complete shutdown of KV stores
-			Void _ = wait(delay(0.0)); //Unwind the callstack to make sure that IAsyncFile references are all gone
+			wait( filesClosed.getResult() ); // Wait for complete shutdown of KV stores
+			wait(delay(0.0)); //Unwind the callstack to make sure that IAsyncFile references are all gone
 			TraceEvent(SevInfo, "WorkerShutdownComplete", interf.id());
 		}
 
@@ -881,7 +881,7 @@ ACTOR Future<Void> extractClusterInterface( Reference<AsyncVar<Optional<ClusterC
 			b->set(a->get().get().clientInterface);
 		else
 			b->set(Optional<ClusterInterface>());
-		Void _ = wait(a->onChange());
+		wait(a->onChange());
 	}
 }
 
@@ -896,7 +896,7 @@ static std::set<int> const& normalWorkerErrors() {
 
 ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
 	try {
-		Void _ = wait(f);
+		wait(f);
 		return Void();
 	}
 	catch(Error &e) {
@@ -909,7 +909,7 @@ ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
 }
 
 ACTOR Future<Void> printTimeout() {
-	Void _ = wait( delay(5) );
+	wait( delay(5) );
 	if( !g_network->isSimulated() ) {
 		fprintf(stderr, "Warning: FDBD has not joined the cluster after 5 seconds.\n");
 		fprintf(stderr, "  Check configuration and availability using the 'status' command with the fdbcli\n");
@@ -921,12 +921,12 @@ ACTOR Future<Void> printOnFirstConnected( Reference<AsyncVar<Optional<ClusterInt
 	state Future<Void> timeoutFuture = printTimeout();
 	loop {
 		choose {
-			when (Void _ = wait( ci->get().present() ? IFailureMonitor::failureMonitor().onStateEqual( ci->get().get().openDatabase.getEndpoint(), FailureStatus(false) ) : Never() )) {
+			when (wait( ci->get().present() ? IFailureMonitor::failureMonitor().onStateEqual( ci->get().get().openDatabase.getEndpoint(), FailureStatus(false) ) : Never() )) {
 				printf("FDBD joined cluster.\n");
 				TraceEvent("FDBDConnected");
 				return Void();
 			}
-			when( Void _ = wait(ci->onChange())) {}
+			when( wait(ci->onChange())) {}
 		}
 	}
 }
@@ -952,7 +952,7 @@ ClusterControllerPriorityInfo getCCPriorityInfo(std::string filePath, ProcessCla
 
 ACTOR Future<Void> monitorAndWriteCCPriorityInfo(std::string filePath, Reference<AsyncVar<ClusterControllerPriorityInfo>> asyncPriorityInfo) {
 	loop {
-		Void _ = wait(asyncPriorityInfo->onChange());
+		wait(asyncPriorityInfo->onChange());
 		std::string contents(BinaryWriter::toValue(asyncPriorityInfo->get(), IncludeVersion()).toString());
 		atomicReplace(filePath, contents, false);
 	}
@@ -972,8 +972,8 @@ ACTOR Future<UID> createAndLockProcessIdFile(std::string folder) {
 			processIDUid = g_random->randomUniqueID();
 			BinaryWriter wr(IncludeVersion());
 			wr << processIDUid;
-			Void _ = wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));
-			Void _ = wait(lockFile.get()->sync());
+			wait(lockFile.get()->write(wr.getData(), wr.getLength(), 0));
+			wait(lockFile.get()->sync());
 		}
 		else {
 			if (lockFile.isError()) throw lockFile.getError(); // If we've failed to open the file, throw an exception
@@ -1032,7 +1032,7 @@ ACTOR Future<Void> fdbd(
 		v.push_back( reportErrorsExcept(workerServer(connFile, cc, localities, asyncPriorityInfo, processClass, dataFolder, memoryLimit, metricsConnFile, metricsPrefix, recoveredDiskFiles, processIDUid), "WorkerServer", UID(), &normalWorkerErrors()) );
 		state Future<Void> firstConnect = reportErrors( printOnFirstConnected(ci), "ClusterFirstConnectedError" );
 
-		Void _ = wait( quorum(v,1) );
+		wait( quorum(v,1) );
 		ASSERT(false);  // None of these actors should terminate normally
 		throw internal_error();
 	} catch(Error &e) {

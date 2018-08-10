@@ -84,10 +84,10 @@ struct BulkLoadWorkload : TestWorkload {
 						tr.set( format( "/bulkload/%04x/%04x/%08x", self->clientId, actorId, idx + i ), self->value );
 					tr.makeSelfConflicting();
 					Version _ = wait( tr.getReadVersion() );
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					break;
 				} catch (Error& e) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 					++self->retries;
 				}
 			}

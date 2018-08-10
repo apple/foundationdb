@@ -555,7 +555,7 @@ private:
 					loggingDelay = delay(1.0);
 				}
 
-				Void _ = wait( yield() );
+				wait( yield() );
 			}
 
 			if (zeroFillSize) {
@@ -611,7 +611,7 @@ private:
 	}
 
 	ACTOR static Future<Void> snapshot( KeyValueStoreMemory* self ) {
-		Void _ = wait(self->recovering);
+		wait(self->recovering);
 
 		state Key nextKey = self->recoveredSnapshotKey;
 		state bool nextKeyAfter = false; //setting this to true is equilvent to setting nextKey = keyAfter(nextKey)
@@ -623,7 +623,7 @@ private:
 		TraceEvent("KVSMemStartingSnapshot", self->id).detail("StartKey", printable(nextKey));
 
 		loop {
-			Void _ = wait( self->notifiedCommittedWriteBytes.whenAtLeast( snapshotTotalWrittenBytes + 1 ) );
+			wait( self->notifiedCommittedWriteBytes.whenAtLeast( snapshotTotalWrittenBytes + 1 ) );
 
 			if(self->resetSnapshot) {
 				nextKey = Key();
@@ -681,24 +681,24 @@ private:
 	}
 
 	ACTOR static Future<Optional<Value>> waitAndReadValue( KeyValueStoreMemory* self, Key key ) {
-		Void _ = wait( self->recovering );
+		wait( self->recovering );
 		return self->readValue(key).get();
 	}
 	ACTOR static Future<Optional<Value>> waitAndReadValuePrefix( KeyValueStoreMemory* self, Key key, int maxLength) {
-		Void _ = wait( self->recovering );
+		wait( self->recovering );
 		return self->readValuePrefix(key, maxLength).get();
 	}
 	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> waitAndReadRange( KeyValueStoreMemory* self, KeyRange keys, int rowLimit, int byteLimit ) {
-		Void _ = wait( self->recovering );
+		wait( self->recovering );
 		return self->readRange(keys, rowLimit, byteLimit).get();
 	}
 	ACTOR static Future<Void> waitAndCommit(KeyValueStoreMemory* self, bool sequential) {
-		Void _ = wait(self->recovering);
-		Void _ = wait(self->commit(sequential));
+		wait(self->recovering);
+		wait(self->commit(sequential));
 		return Void();
 	}
 	ACTOR static Future<Void> commitAndUpdateVersions( KeyValueStoreMemory* self, Future<Void> commit, IDiskQueue::location location ) {
-		Void _ = wait( commit );
+		wait( commit );
 		self->log->pop(location);
 		return Void();
 	}

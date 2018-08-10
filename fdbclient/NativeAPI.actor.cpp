@@ -215,7 +215,7 @@ template <> void delref( DatabaseContext* ptr ) { ptr->delref(); }
 
 ACTOR Future<Void> databaseLogger( DatabaseContext *cx ) {
 	loop {
-		Void _ = wait( delay( CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, cx->taskID ) );
+		wait( delay( CLIENT_KNOBS->SYSTEM_MONITOR_INTERVAL, cx->taskID ) );
 		TraceEvent("TransactionMetrics")
 			.detail("ReadVersions", cx->transactionReadVersions)
 			.detail("LogicalUncachedReads", cx->transactionLogicalReads)
@@ -266,12 +266,12 @@ ACTOR static Future<Standalone<StringRef> > getSampleVersionStamp(Transaction *t
 			Optional<Value> _ = wait(tr->get(LiteralStringRef("\xff/StatusJsonTestKey62793")));
 			state Future<Standalone<StringRef> > vstamp = tr->getVersionstamp();
 			tr->makeSelfConflicting();
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 			Standalone<StringRef> val = wait(vstamp);
 			return val;
 		}
 		catch (Error& e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -296,14 +296,14 @@ ACTOR static Future<Void> transactionInfoCommitActor(Transaction *tr, std::vecto
 				numCommitBytes += chunk.key.size() + chunk.value.size() - 4; // subtract number of bytes of key that denotes verstion stamp index
 			}
 			tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&numCommitBytes, 8), MutationRef::AddValue);
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 			return Void();
 		}
 		catch (Error& e) {
 			retryCount++;
 			if (retryCount == 10)
 				throw;
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -344,13 +344,13 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction *tr, int64_t 
 				TraceEvent(SevInfo, "DeletingExcessCntTxnEntries").detail("BytesToBeDeleted", numBytesToDel);
 				int64_t bytesDel = -numBytesToDel;
 				tr->atomicOp(clientLatencyAtomicCtr, StringRef((uint8_t*)&bytesDel, 8), MutationRef::AddValue);
-				Void _ = wait(tr->commit());
+				wait(tr->commit());
 			}
 			if (txInfoSize - numBytesToDel <= clientTxInfoSizeLimit)
 				return Void();
 		}
 		catch (Error& e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -402,7 +402,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 				try {
 					while (iter != trChunksQ.end()) {
 						if (iter->value.size() + iter->key.size() + txBytes > dataSizeLimit) {
-							Void _ = wait(transactionInfoCommitActor(&tr, &commitQ));
+							wait(transactionInfoCommitActor(&tr, &commitQ));
 							tracking_iter = iter;
 							commitQ.clear();
 							txBytes = 0;
@@ -412,7 +412,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 						++iter;
 					}
 					if (!commitQ.empty()) {
-						Void _ = wait(transactionInfoCommitActor(&tr, &commitQ));
+						wait(transactionInfoCommitActor(&tr, &commitQ));
 						commitQ.clear();
 						txBytes = 0;
 					}
@@ -437,12 +437,12 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			double clientSamplingProbability = std::isinf(cx->clientInfo->get().clientTxnInfoSampleRate) ? CLIENT_KNOBS->CSI_SAMPLING_PROBABILITY : cx->clientInfo->get().clientTxnInfoSampleRate;
 			int64_t clientTxnInfoSizeLimit = cx->clientInfo->get().clientTxnInfoSizeLimit == -1 ? CLIENT_KNOBS->CSI_SIZE_LIMIT : cx->clientInfo->get().clientTxnInfoSizeLimit;
 			if (!trChunksQ.empty() && g_random->random01() < clientSamplingProbability)
-				Void _ = wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
+				wait(delExcessClntTxnEntriesActor(&tr, clientTxnInfoSizeLimit));
 
 			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
 			// Hence destroy the transacation before sleeping to give a chance for the actor to be cleanedup if the Database is destroyed by the user.
 			tr = Transaction();
-			Void _ = wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
+			wait(delay(CLIENT_KNOBS->CSI_STATUS_DELAY));
 		}
 		catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
@@ -453,7 +453,7 @@ ACTOR static Future<Void> clientStatusUpdateActor(DatabaseContext *cx) {
 			// tr is destructed because it hold a reference to DatabaseContext which creates a cycle mentioned above.
 			// Hence destroy the transacation before sleeping to give a chance for the actor to be cleanedup if the Database is destroyed by the user.
 			tr = Transaction();
-			Void _ = wait(delay(10.0));
+			wait(delay(10.0));
 		}
 	}
 }
@@ -463,7 +463,7 @@ ACTOR static Future<Void> monitorMasterProxiesChange(Reference<AsyncVar<ClientDB
 	curProxies = clientDBInfo->get().proxies;
 
 	loop{
-		Void _ = wait(clientDBInfo->onChange());
+		wait(clientDBInfo->onChange());
 		if (clientDBInfo->get().proxies != curProxies) {
 			curProxies = clientDBInfo->get().proxies;
 			triggerVar->trigger();
@@ -520,7 +520,7 @@ ACTOR static Future<Void> monitorClientInfo( Reference<AsyncVar<Optional<Cluster
 					TraceEvent("ClientInfoChange").detail("ChangeID", ni.id);
 					outInfo->set(ni);
 				}
-				when( Void _ = wait( clusterInterface->onChange() ) ) {
+				when( wait( clusterInterface->onChange() ) ) {
 					if(clusterInterface->get().present())
 						TraceEvent("ClientInfo_CCInterfaceChange").detail("CCID", clusterInterface->get().get().id());
 				}
@@ -931,7 +931,7 @@ ACTOR Future<Reference<ProxyInfo>> getMasterProxiesFuture(DatabaseContext *cx) {
 		Reference<ProxyInfo> proxies = cx->getMasterProxies();
 		if (proxies)
 			return proxies;
-		Void _ = wait( cx->onMasterProxiesChanged() );
+		wait( cx->onMasterProxiesChanged() );
 	}
 }
 
@@ -1055,7 +1055,7 @@ ACTOR Future< pair<KeyRange,Reference<LocationInfo>> > getKeyLocation_internal( 
 
 	loop {
 		choose {
-			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( wait( cx->onMasterProxiesChanged() ) ) {}
 			when ( GetKeyServerLocationsReply rep = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(key, Optional<KeyRef>(), 100, isBackward, key.arena()), TaskDefaultPromiseEndpoint ) ) ) {
 				if( info.debugID.present() )
 					g_traceBatch.addEvent("TransactionDebug", info.debugID.get().first(), "NativeAPI.getKeyLocation.After");
@@ -1092,7 +1092,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 
 	loop {
 		choose {
-			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
+			when ( wait( cx->onMasterProxiesChanged() ) ) {}
 			when ( GetKeyServerLocationsReply _rep = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getKeyServersLocations, GetKeyServerLocationsRequest(keys.begin, keys.end, limit, reverse, keys.arena()), TaskDefaultPromiseEndpoint ) ) ) {
 				state GetKeyServerLocationsReply rep = _rep;
 				if( info.debugID.present() )
@@ -1104,7 +1104,7 @@ ACTOR Future< vector< pair<KeyRange,Reference<LocationInfo>> > > getKeyRangeLoca
 				for (; shard < rep.results.size(); shard++) {
 					//FIXME: these shards are being inserted into the map sequentially, it would be much more CPU efficient to save the map pairs and insert them all at once.
 					results.push_back( make_pair(rep.results[shard].first & keys, cx->setCachedLocation(rep.results[shard].first, rep.results[shard].second)) );
-					Void _ = wait(yield());
+					wait(yield());
 				}
 
 				return results;
@@ -1167,7 +1167,7 @@ ACTOR Future<Void> warmRange_impl( Transaction *self, Database cx, KeyRange keys
 					Version _ = wait( tr.getReadVersion() );
 					break;
 				} catch( Error &e ) {
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		}
@@ -1239,7 +1239,7 @@ ACTOR Future<Optional<Value>> getValue( Future<Version> version, Key key, Databa
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 				(e.code() == error_code_transaction_too_old && ver == latestVersion) ) {
 				cx->invalidateCache( key );
-				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				if (trLogInfo)
 					trLogInfo->addLog(FdbClientLogEvents::EventGetError(startTimeD, static_cast<int>(e.code()), key));
@@ -1282,7 +1282,7 @@ ACTOR Future<Key> getKey( Database cx, KeySelector k, Future<Version> version, T
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(k.getKey(), k.isBackward());
 
-				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else {
 				TraceEvent(SevInfo, "GetKeyError")
 					.error(e)
@@ -1298,12 +1298,12 @@ ACTOR Future<Version> waitForCommittedVersion( Database cx, Version version ) {
 	try {
 		loop {
 			choose {
-				when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
+				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getConsistentReadVersion, GetReadVersionRequest( 0, GetReadVersionRequest::PRIORITY_SYSTEM_IMMEDIATE ), cx->taskID ) ) ) {
 					if (v.version >= version)
 						return v.version;
 					// SOMEDAY: Do the wait on the server side, possibly use less expensive source of committed version (causal consistency is not needed for this purpose)
-					Void _ = wait( delay( CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, cx->taskID ) );
+					wait( delay( CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, cx->taskID ) );
 				}
 			}
 		}
@@ -1349,16 +1349,16 @@ ACTOR Future< Void > watchValue( Future<Version> version, Key key, Optional<Valu
 		} catch (Error& e) {
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache( key );
-				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 			} else if( e.code() == error_code_watch_cancelled ) {
 				TEST( true ); // Too many watches on the storage server, poll for changes instead
-				Void _ = wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, info.taskID));
+				wait(delay(CLIENT_KNOBS->WATCH_POLLING_TIME, info.taskID));
 			} else if ( e.code() == error_code_timed_out ) { //The storage server occasionally times out watches in case it was cancelled
 				TEST( true ); // A watch timed out
-				Void _ = wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, info.taskID));
+				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, info.taskID));
 			} else {
 				state Error err = e;
-				Void _ = wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, info.taskID));
+				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, info.taskID));
 				throw err;
 			}
 		}
@@ -1499,7 +1499,7 @@ ACTOR Future<Standalone<RangeResultRef>> getExactRange( Database cx, Version ver
 						keys = KeyRangeRef( range.begin, keys.end );
 
 					cx->invalidateCache( keys );
-					Void _ = wait( delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID ));
+					wait( delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID ));
 					break;
 				} else {
 					TraceEvent(SevInfo, "GetExactRangeError")
@@ -1799,7 +1799,7 @@ ACTOR Future<Standalone<RangeResultRef>> getRange( Database cx, Reference<Transa
 						return result;
 					}
 
-					Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
+					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, info.taskID));
 				} else {
 					if (trLogInfo)
 						trLogInfo->addLog(FdbClientLogEvents::EventGetRangeError(startTime, static_cast<int>(e.code()), begin.getKey(), end.getKey()));
@@ -1907,13 +1907,13 @@ ACTOR Future<Void> watch( Reference<Watch> watch, Database cx, Transaction *self
 		choose {
 			// RYOW write to value that is being watched (if applicable)
 			// Errors
-			when(Void _ = wait(watch->onChangeTrigger.getFuture())) { }
+			when(wait(watch->onChangeTrigger.getFuture())) { }
 
 			// NativeAPI finished commit and updated watchFuture
-			when(Void _ = wait(watch->onSetWatchTrigger.getFuture())) {
+			when(wait(watch->onSetWatchTrigger.getFuture())) {
 
 				// NativeAPI watchValue future finishes or errors
-				Void _ = wait(watch->watchFuture);
+				wait(watch->watchFuture);
 			}
 		}
 	}
@@ -2263,7 +2263,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 {
 	state Version version;
 	try {
-		Void _ = wait( committed );
+		wait( committed );
 		// If the commit is successful, by definition the transaction still exists for now.  Grab the version, and don't use it again.
 		version = checkTr->getCommittedVersion();
 		outCommitted.send(Void());
@@ -2272,7 +2272,7 @@ ACTOR void checkWrites( Database cx, Future<Void> committed, Promise<Void> outCo
 		return;
 	}
 
-	Void _ = wait( delay( g_random->random01() ) ); // delay between 0 and 1 seconds
+	wait( delay( g_random->random01() ) ); // delay between 0 and 1 seconds
 
 	//Future<Optional<Version>> version, Database cx, CommitTransactionRequest req ) {
 	state KeyRangeMap<MutationBlock> expectedValues;
@@ -2342,11 +2342,11 @@ ACTOR static Future<Void> commitDummyTransaction( Database cx, KeyRange range, T
 			tr.setOption( FDBTransactionOptions::LOCK_AWARE );
 			tr.addReadConflictRange(range);
 			tr.addWriteConflictRange(range);
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			return Void();
 		} catch (Error& e) {
 			TraceEvent("CommitDummyTransactionError").error(e,true).detail("Key", printable(range.begin)).detail("Retries", retries);
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 		++retries;
 	}
@@ -2403,7 +2403,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 		}
 
 		choose {
-			when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {
+			when ( wait( cx->onMasterProxiesChanged() ) ) {
 				reply.cancel();
 				throw request_maybe_delivered();
 			}
@@ -2459,7 +2459,7 @@ ACTOR static Future<Void> tryCommit( Database cx, Reference<TransactionLogInfo> 
 
 				TEST(true);  // Waiting for dummy transaction to report commit_unknown_result
 
-				Void _ = wait( commitDummyTransaction( cx, singleKeyRange(selfConflictingRange.begin), info, tr->options ) );
+				wait( commitDummyTransaction( cx, singleKeyRange(selfConflictingRange.begin), info, tr->options ) );
 			}
 
 			// The user needs to be informed that we aren't sure whether the commit happened.  Standard retry loops retry it anyway (relying on transaction idempotence) but a client might do something else.
@@ -2560,7 +2560,7 @@ Future<Void> Transaction::commitMutations() {
 
 ACTOR Future<Void> commitAndWatch(Transaction *self) {
 	try {
-		Void _ = wait(self->commitMutations());
+		wait(self->commitMutations());
 
 		if(!self->watches.empty()) {
 			self->setupWatches();
@@ -2696,7 +2696,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion( DatabaseContext *cx,
 		loop {
 			state GetReadVersionRequest req( transactionCount, flags, debugID );
 			choose {
-				when ( Void _ = wait( cx->onMasterProxiesChanged() ) ) {}
+				when ( wait( cx->onMasterProxiesChanged() ) ) {}
 				when ( GetReadVersionReply v = wait( loadBalance( cx->getMasterProxies(), &MasterProxyInterface::getConsistentReadVersion, req, cx->taskID ) ) ) {
 					if( debugID.present() )
 						g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getConsistentReadVersion.After");
@@ -2741,7 +2741,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 				else if (!timeout.isValid())
 					timeout = delay(batchTime, cx->taskID);
 			}
-			when(Void _ = wait(timeout.isValid() ? timeout : Never())) {
+			when(wait(timeout.isValid() ? timeout : Never())) {
 				send_batch = true;
 			}
 			// dynamic batching monitors reply latencies
@@ -2749,7 +2749,7 @@ ACTOR Future<Void> readVersionBatcher( DatabaseContext *cx, FutureStream< std::p
 				double target_latency = reply_latency * 0.5;
 				batchTime = min(0.1 * target_latency + 0.9 * batchTime, CLIENT_KNOBS->GRV_BATCH_TIMEOUT);
 			}
-			when(Void _ = wait(collection)){} // for errors
+			when(wait(collection)){} // for errors
 		}
 		if (send_batch) {
 			int count = requests.size();
@@ -2889,7 +2889,7 @@ ACTOR Future< StorageMetrics > waitStorageMetricsMultipleLocations(
 		req.max.bytes = -1;
 		fx[i] = loadBalance( locations[i].second, &StorageServerInterface::waitMetrics, req, TaskDataDistribution );
 	}
-	Void _ = wait( waitForAll(fx) );
+	wait( waitForAll(fx) );
 
 	// invariant: true total is between (total-permittedError/2, total+permittedError/2)
 	for(int i=0; i<nLocs; i++)
@@ -2927,7 +2927,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 				.detail("Locations", locations.size())
 				.detail("Limit", CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT)
 				.detail("JitteredSecondsOfPenitence", CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY);
-			Void _ = wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskDataDistribution));
+			wait(delayJittered(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskDataDistribution));
 			// make sure that the next getKeyRangeLocations() call will actually re-fetch the range
 			cx->invalidateCache( keys );
 		} else {
@@ -2948,7 +2948,7 @@ ACTOR Future< StorageMetrics > waitStorageMetrics(
 					throw;
 				}
 				cx->invalidateCache(keys);
-				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskDataDistribution));
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskDataDistribution));
 			}
 		}
 	}
@@ -2979,7 +2979,7 @@ ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, 
 
 		//SOMEDAY: Right now, if there are too many shards we delay and check again later. There may be a better solution to this.
 		if(locations.size() == CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT) {
-			Void _ = wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskDataDistribution));
+			wait(delay(CLIENT_KNOBS->STORAGE_METRICS_TOO_MANY_SHARDS_DELAY, TaskDataDistribution));
 			cx->invalidateCache(keys);
 		}
 		else {
@@ -3016,7 +3016,7 @@ ACTOR Future< Standalone<VectorRef<KeyRef>> > splitStorageMetrics( Database cx, 
 					throw;
 				}
 				cx->invalidateCache( keys );
-				Void _ = wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskDataDistribution));
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskDataDistribution));
 			}
 		}
 	}

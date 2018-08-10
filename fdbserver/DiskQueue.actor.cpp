@@ -102,9 +102,9 @@ private:
 	Reference<IAsyncFile> file;
 
 	ACTOR static Future<Void> waitAndSync(SyncQueue* self) {
-		Void _ = wait( self->outstanding.front() );
+		wait( self->outstanding.front() );
 		self->outstanding.pop_front();
-		Void _ = wait( self->file->sync() );
+		wait( self->file->sync() );
 		return Void();
 	}
 };
@@ -288,7 +288,7 @@ public:
 				self->readyToPush = self->lastCommit;
 			}
 
-			Void _ = wait( ready );
+			wait( ready );
 
 			TEST( pageData.size() > sizeof(Page) ); // push more than one page of data
 
@@ -296,19 +296,19 @@ public:
 			pushing.send(Void());
 			ASSERT( syncFiles.size() >= 1 && syncFiles.size() <= 2 );
 			TEST(2==syncFiles.size());  // push spans both files
-			Void _ = wait( pushed );
+			wait( pushed );
 
 			delete pageMem;
 			pageMem = 0;
 
 			Future<Void> sync = syncFiles[0]->onSync();
 			for(int i=1; i<syncFiles.size(); i++) sync = sync && syncFiles[i]->onSync();
-			Void _ = wait( sync );
-			Void _ = wait( lastCommit );
+			wait( sync );
+			wait( lastCommit );
 
 			//Calling check_yield instead of yield to avoid a destruction ordering problem in simulation
 			if(g_network->check_yield(g_network->getCurrentTask())) {
-				Void _ = wait(delay(0, g_network->getCurrentTask()));
+				wait(delay(0, g_network->getCurrentTask()));
 			}
 
 			self->updatePopped( poppedPages*sizeof(Page) );
@@ -351,7 +351,7 @@ public:
 		//  when in fact it contains many pages that follow file 1.  These ok pages may be incorrectly read if the machine dies after overwritting the
 		//  first page of file 0 and is then recovered
 		if(file == 1)
-			Void _ = wait(self->truncateFile(self, 0, 0));
+			wait(self->truncateFile(self, 0, 0));
 
 		return Void();
 	}
@@ -360,7 +360,7 @@ public:
 		state vector<Future<Reference<IAsyncFile>>> fs;
 		for(int i=0; i<2; i++)
 			fs.push_back( IAsyncFileSystem::filesystem()->open( self->filename(i), IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK, 0 ) );
-		Void _ = wait( waitForAllReady(fs) );
+		wait( waitForAllReady(fs) );
 
 		// Treatment of errors here is important.  If only one of the two files is present
 		// (due to a power failure during creation or deletion, or administrative error) we don't want to
@@ -378,7 +378,7 @@ public:
 				fs[i] = IAsyncFileSystem::filesystem()->open( self->filename(i), IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE | IAsyncFile::OPEN_CREATE | IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED | IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK, 0600 );
 
 			// Any error here is fatal
-			Void _ = wait( waitForAll(fs) );
+			wait( waitForAll(fs) );
 
 			// sync on each file to actually create it will be done below
 		} else {
@@ -396,7 +396,7 @@ public:
 		vector<Future<Void>> syncs;
 		for(int i=0; i<fs.size(); i++)
 			syncs.push_back( fs[i].get()->sync() );
-		Void _ = wait(waitForAll(syncs));
+		wait(waitForAll(syncs));
 
 		// Successfully opened or created; fill in self->files[]
 		for(int i=0; i<2; i++)
@@ -411,7 +411,7 @@ public:
 		try {
 			ErrorOr<Void> _ = wait(errorOr(self->lastCommit));
 			while (self->recoveryActorCount.get(false))
-				Void _ = wait( self->recoveryActorCount.onChange(false) );
+				wait( self->recoveryActorCount.onChange(false) );
 
 			for(int i=0; i<2; i++)
 				self->files[i].f.clear();
@@ -420,8 +420,8 @@ public:
 				TraceEvent("DiskQueueShutdownDeleting", self->dbgid)
 					.detail("File0", self->filename(0))
 					.detail("File1", self->filename(1));
-				Void _ = wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename(0), false ) );
-				Void _ = wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename(1), true ) );
+				wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename(0), false ) );
+				wait( IAsyncFileSystem::filesystem()->incrementalDeleteFile( self->filename(1), true ) );
 			}
 			TraceEvent("DiskQueueShutdownComplete", self->dbgid)
 				.detail("DeleteFiles", deleteFiles)
@@ -449,7 +449,7 @@ public:
 			state Page* firstPage = (Page*)result.append(sizeof(Page)*3);
 
 			// Open both files or create both files
-			Void _ = wait( openFiles(self) );
+			wait( openFiles(self) );
 
 			// Get the file sizes
 			vector<Future<int64_t>> fsize;
@@ -468,7 +468,7 @@ public:
 			for(int i=0; i<2; i++)
 				if( self->files[i].size > 0)
 					reads.push_back( self->files[i].f->read( &firstPage[i], sizeof(Page), 0 ) );
-			Void _ = wait( waitForAll(reads) );
+			wait( waitForAll(reads) );
 
 			// Determine which file comes first
 			if ( compare( &firstPage[1], &firstPage[0] ) ) {
@@ -487,7 +487,7 @@ public:
 					if(self->files[i].size > 0)
 						truncates.push_back(self->truncateFile(self, i, 0));
 
-				Void _ = wait(waitForAll(truncates));
+				wait(waitForAll(truncates));
 
 
 				self->files[0].popped = self->files[0].size;
@@ -579,7 +579,7 @@ public:
 				int read = wait( self->fillReadingBuffer() );
 				ASSERT( read == self->readingBuffer.size() );
 
-				Void _ = wait(f);
+				wait(f);
 			}
 			if (!self->readingBuffer.size()) return Standalone<StringRef>();
 
@@ -598,8 +598,8 @@ public:
 		state TrackMe trackMe(self);
 		TraceEvent("DQTruncateFile", self->dbgid).detail("File", file).detail("Pos", pos).detail("File0Name", self->files[0].dbgFilename);
 		state Reference<IAsyncFile> f = self->files[file].f;  // Hold onto a reference in the off-chance that the DQ is removed from underneath us.
-		Void _ = wait( f->zeroRange( pos, self->files[file].size-pos ) );
-		Void _ = wait(self->files[file].syncQueue->onSync());
+		wait( f->zeroRange( pos, self->files[file].size-pos ) );
+		wait(self->files[file].syncQueue->onSync());
 		// We intentionally don't return the f->zero future, so that TrackMe is destructed after f->zero finishes.
 		return Void();
 	}
@@ -624,7 +624,7 @@ public:
 				pos = 0;
 			}
 
-			Void _ = wait( waitForAll(commits) );
+			wait( waitForAll(commits) );
 
 			if (swap) {
 				std::swap(self->files[0], self->files[1]);
@@ -883,7 +883,7 @@ private:
 			if (!self->readBufPage->checkHash() || self->readBufPage->seq < self->nextReadLocation/sizeof(Page)*sizeof(Page)) {
 				TraceEvent("DQRecInvalidPage", self->dbgid).detail("NextReadLocation", self->nextReadLocation).detail("HashCheck", self->readBufPage->checkHash())
 					.detail("Seq", self->readBufPage->seq).detail("Expect", self->nextReadLocation/sizeof(Page)*sizeof(Page)).detail("File0Name", self->rawQueue->files[0].dbgFilename);
-				Void _ = wait( self->rawQueue->truncateBeforeLastReadPage() );
+				wait( self->rawQueue->truncateBeforeLastReadPage() );
 				break;
 			}
 			//TraceEvent("DQRecPage", self->dbgid).detail("NextReadLoc", self->nextReadLocation).detail("Seq", self->readBufPage->seq).detail("Pop", self->readBufPage->popped).detail("Payload", self->readBufPage->payloadSize).detail("File0Name", self->rawQueue->files[0].dbgFilename);
@@ -896,7 +896,7 @@ private:
 		int f; int64_t p;
 		TEST( self->lastPoppedSeq/sizeof(Page) != self->poppedSeq/sizeof(Page) );  // DiskQueue: Recovery popped position not fully durable
 		self->findPhysicalLocation( self->lastPoppedSeq, f, p, "lastPoppedSeq" );
-		Void _ = wait(self->rawQueue->setPoppedPage( f, p, self->lastPoppedSeq/sizeof(Page)*sizeof(Page) ));
+		wait(self->rawQueue->setPoppedPage( f, p, self->lastPoppedSeq/sizeof(Page)*sizeof(Page) ));
 
 		// Writes go at the end of our reads (but on the next page)
 		self->nextPageSeq = self->nextReadLocation/sizeof(Page)*sizeof(Page);

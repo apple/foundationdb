@@ -60,7 +60,7 @@ Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
 		++eraseCount;
 
 		if(!synchronous && eraseCount % 1000 == 0)
-			Void _ = wait(yield());
+			wait(yield());
 	}
 
 	return Void();

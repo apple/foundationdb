@@ -104,7 +104,7 @@ struct WatchAndWaitWorkload : TestWorkload {
 			watches.push_back( self->watchAndWait( cx, self, i ) );
 			watchCounter++;
 		}
-		Void _ = wait( delay( self->testDuration )); // || waitForAll( watches )
+		wait( delay( self->testDuration )); // || waitForAll( watches )
 		TraceEvent("WatchAndWaitEnd").detail("Duration", self->testDuration);
 		return Void();
 	}
@@ -116,12 +116,12 @@ struct WatchAndWaitWorkload : TestWorkload {
 				cx->maxOutstandingWatches = 1e6;
 				try {
 					state Future<Void> watch = tr.watch( self->keyForIndex( index ) );
-					Void _ = wait( tr.commit() );
-					Void _ = wait( watch );
+					wait( tr.commit() );
+					wait( watch );
 					++self->triggers;
 				} catch( Error &e ) {
 					++self->retries;
-					Void _ = wait( tr.onError(e) );
+					wait( tr.onError(e) );
 				}
 			}
 		} catch( Error &e ) {

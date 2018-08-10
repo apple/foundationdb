@@ -150,7 +150,7 @@ ACTOR Future<Void> waitKeyboardInterrupt(boost::asio::io_service* ios) {
         }
     });
 
-    Void _ = wait(result.getFuture());
+    wait(result.getFuture());
     return Void();
 }
 
