@@ -210,6 +210,7 @@ Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> const& initData,
 	Database const& cx,
 	PromiseStream<RelocateShard> const& output,
+	Reference<ShardsAffectedByTeamFailure> const& shardsAffectedByTeamFailure,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
 	FutureStream<Promise<int64_t>> const& getAverageShardBytes,
 	Promise<Void> const& readyToStart,
@@ -218,7 +219,8 @@ Future<Void> dataDistributionTracker(
 
 Future<Void> dataDistributionQueue(
 	Database const& cx,
-	PromiseStream<RelocateShard> const& input,
+	PromiseStream<RelocateShard> const& output,
+	FutureStream<RelocateShard> const& input,
 	PromiseStream<GetMetricsRequest> const& getShardMetrics,
 	Reference<AsyncVar<bool>> const& processingUnhealthy,
 	vector<TeamCollectionInterface> const& teamCollection,

@@ -69,7 +69,7 @@ ACTOR Future<int64_t> getDataInFlight( Database cx, WorkerInterface masterWorker
 	try {
 		TraceEvent("DataInFlight").detail("Database", printable(cx->dbName)).detail("Stage", "ContactingMaster");
 		TraceEventFields md = wait( timeoutError(masterWorker.eventLogRequest.getReply(
-			EventLogRequest( StringRef( cx->dbName.toString() + "/TotalDataInFlight" ) ) ), 1.0 ) );
+			EventLogRequest( LiteralStringRef("TotalDataInFlight") ) ), 1.0 ) );
 		int64_t dataInFlight;
 		sscanf(md.getValue("TotalBytes").c_str(), "%lld", &dataInFlight);
 		return dataInFlight;

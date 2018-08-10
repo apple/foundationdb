@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.4
+6.0.5
 =====
 
 Features
@@ -13,6 +13,7 @@ Features
 * The TLS plugin is now statically linked into the client and server binaries and no longer requires a separate library. `(Issue #436) <https://github.com/apple/foundationdb/issues/436>`_
 * TLS peer verification now supports verifiying on Subject Alternative Name. `(Issue #514) <https://github.com/apple/foundationdb/issues/514>`_
 * TLS peer verification now supports suffix matching by field. `(Issue #515) <https://github.com/apple/foundationdb/issues/515>`_
+* TLS certificates are automatically reloaded after being updated. [6.0.5] `(Issue #505) <https://github.com/apple/foundationdb/issues/505>`_
 
 Performance
 -----------
@@ -23,6 +24,7 @@ Performance
 * Clients optimistically assume the first leader reply from a coordinator is correct. `(PR #425) <https://github.com/apple/foundationdb/pull/425>`_
 * Network connections are now closed after no interface needs the connection. [6.0.1] `(Issue #375) <https://github.com/apple/foundationdb/issues/375>`_
 * Significantly improved the CPU efficiency of copy mutations to transaction logs during recovery. [6.0.2] `(PR #595) <https://github.com/apple/foundationdb/pull/595>`_
+* A cluster configured with usable_regions=2 did not limit the rate at which it could copy data from the primary DC to the remote DC. This caused poor performance when recovering from a DC outage. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
 
 Fixes
 -----
@@ -36,12 +38,19 @@ Fixes
 * A client could fail to connect to a cluster when the cluster was upgraded to a version compatible with the client. This affected upgrades that were using the multi-version client to maintain compatibility with both versions of the cluster. [6.0.4] `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
 * A large number of concurrent read attempts could bring the database down after a cluster reboot. [6.0.4] `(PR #650) <https://github.com/apple/foundationdb/pull/650>`_
 * Automatic suppression of trace events which occur too frequently was happening before trace events were suppressed by other mechanisms. [6.0.4] `(PR #656) <https://github.com/apple/foundationdb/pull/656>`_
+* After a recovery, the rate at which transaction logs made mutations durable to disk was around 5 times slower than normal. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
+* Clusters configured to use TLS could get stuck spending all of their CPU opening new connections. [6.0.5] `(PR #666) <https://github.com/apple/foundationdb/pull/666>`_
+* Configuring usable_regions=2 on a cluster with a large amount of data caused commits to pause for a few seconds. [6.0.5] `(PR #687) <https://github.com/apple/foundationdb/pull/687>`_
+* On clusters configured with usable_regions=2, status reported no replicas remaining when the primary DC was still healthy. [6.0.5] `(PR #687) <https://github.com/apple/foundationdb/pull/687>`_
+* Clients could crash when passing in TLS options. [6.0.5] `(PR #649) <https://github.com/apple/foundationdb/pull/649>`_
+* A mismatched TLS certificate and key set could cause the server to crash. [6.0.5] `(PR #689) <https://github.com/apple/foundationdb/pull/689>`_
 
 Status
 ------
 
-* The replication factor in status JSON is stored under "redundancy_mode" instead of "redundancy":"factor". `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
-* Additional metrics for storage server lag as well as the number of watches and mutation count have been added and are exposed through status. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
+* The replication factor in status JSON is stored under ``redundancy_mode`` instead of ``redundancy.factor``. `(PR #492) <https://github.com/apple/foundationdb/pull/492>`_
+* The metric ``data_version_lag`` has been replaced by ``data_lag.versions`` and ``data_lag.seconds``. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
+* Additional metrics for the number of watches and mutation count have been added and are exposed through status. `(PR #521) <https://github.com/apple/foundationdb/pull/521>`_
 
 
 Bindings
@@ -56,6 +65,7 @@ Other Changes
 
 * Does not support upgrades from any version older than 5.0.
 * Normalized the capitalization of trace event names and attributes. `(PR #455) <https://github.com/apple/foundationdb/pull/455>`_
+* Increased the memory requirements of the transaction log by 400MB. [6.0.5] `(PR #673) <https://github.com/apple/foundationdb/pull/673>`_
 
 Earlier release notes
 ---------------------

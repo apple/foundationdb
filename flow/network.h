@@ -68,7 +68,6 @@ enum {
 	TaskDataDistribution = 3500,
 	TaskDiskWrite = 3010,
 	TaskUpdateStorage = 3000,
-	TaskBatchCopy = 2900,
 	TaskLowPriority = 2000,
 
 	TaskMinPriority = 1000

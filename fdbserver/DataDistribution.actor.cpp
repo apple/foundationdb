@@ -520,6 +520,7 @@ struct DDTeamCollection {
 	vector<UID> allServers;
 	ServerStatusMap server_status;
 	int64_t unhealthyServers;
+	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
 	vector<Reference<TCTeamInfo>> teams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
@@ -1276,6 +1277,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 	Void _ = wait( yield() );
 	TraceEvent("TeamTrackerStarting", self->masterId).detail("Reason", "Initial wait complete (sc)").detail("Team", team->getDesc());
+	self->priority_teams[team->getPriority()]++;
 
 	try {
 		loop {
@@ -1370,6 +1372,12 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 					team->setPriority( PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER );
 				else
 					team->setPriority( PRIORITY_TEAM_HEALTHY );
+
+				if(lastPriority != team->getPriority()) {
+					self->priority_teams[lastPriority]--;
+					self->priority_teams[team->getPriority()]++;
+				}
+
 				TraceEvent("TeamPriorityChange", self->masterId).detail("Priority", team->getPriority());
 
 				lastZeroHealthy = self->zeroHealthyTeams->get(); //set this again in case it changed from this teams health changing
@@ -1378,23 +1386,25 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 
 					for(int i=0; i<shards.size(); i++) {
 						int maxPriority = team->getPriority();
-						auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
-						for( int t=0; t<teams.size(); t++) {
-							if( teams[t].servers.size() && self->server_info.count( teams[t].servers[0] ) ) {
-								auto& info = self->server_info[teams[t].servers[0]];
+						if(maxPriority < PRIORITY_TEAM_0_LEFT) {
+							auto teams = self->shardsAffectedByTeamFailure->getTeamsFor( shards[i] );
+							for( int t=0; t<teams.size(); t++) {
+								if( teams[t].servers.size() && self->server_info.count( teams[t].servers[0] ) ) {
+									auto& info = self->server_info[teams[t].servers[0]];
 
-								bool found = false;
-								for( int i = 0; i < info->teams.size(); i++ ) {
-									if( info->teams[i]->serverIDs == teams[t].servers ) {
-										maxPriority = std::max( maxPriority, info->teams[i]->getPriority() );
-										found = true;
-										break;
+									bool found = false;
+									for( int i = 0; i < info->teams.size(); i++ ) {
+										if( info->teams[i]->serverIDs == teams[t].servers ) {
+											maxPriority = std::max( maxPriority, info->teams[i]->getPriority() );
+											found = true;
+											break;
+										}
 									}
-								}
 
-								TEST(!found); // A removed team is still associated with a shard in SABTF
-							} else {
-								TEST(teams[t].servers.size()); // A removed server is still associated with a team in SABTF
+									TEST(!found); // A removed team is still associated with a shard in SABTF
+								} else {
+									TEST(teams[t].servers.size()); // A removed server is still associated with a team in SABTF
+								}
 							}
 						}
 
@@ -1428,6 +1438,7 @@ ACTOR Future<Void> teamTracker( DDTeamCollection *self, Reference<IDataDistribut
 			Void _ = wait( yield() );
 		}
 	} catch(Error& e) {
+		self->priority_teams[team->getPriority()]--;
 		if( team->isHealthy() ) {
 			self->healthyTeamCount--;
 			ASSERT( self->healthyTeamCount >= 0 );
@@ -1994,8 +2005,14 @@ ACTOR Future<Void> dataDistributionTeamCollection(
 				}
 			}
 			when( Void _ = wait( loggingTrigger ) ) {
-				TraceEvent("TotalDataInFlight", masterId).detail("TotalBytes", self.getDebugTotalDataInFlight()).detail("UnhealthyServers", self.unhealthyServers).trackLatest(
-					(cx->dbName.toString() + "/TotalDataInFlight").c_str());
+				int highestPriority = 0;
+				for(auto it : self.priority_teams) {
+					if(it.second > 0) {
+						highestPriority = std::max(highestPriority, it.first);
+					}
+				}
+				TraceEvent("TotalDataInFlight", masterId).detail("Primary", self.primary).detail("TotalBytes", self.getDebugTotalDataInFlight()).detail("UnhealthyServers", self.unhealthyServers)
+					.detail("HighestPriority", highestPriority).trackLatest( self.primary ? "TotalDataInFlight" : "TotalDataInFlightRemote" );
 				loggingTrigger = delay( SERVER_KNOBS->DATA_DISTRIBUTION_LOGGING_INTERVAL );
 				self.countHealthyTeams();
 			}
@@ -2181,8 +2198,8 @@ ACTOR Future<Void> dataDistribution(
 					.detail( "HighestPriority", 0 )
 					.trackLatest( format("%s/MovingData", printable(cx->dbName).c_str() ).c_str() );
 
-				TraceEvent("TotalDataInFlight", mi.id()).detail("TotalBytes", 0)
-					.trackLatest((cx->dbName.toString() + "/TotalDataInFlight").c_str());
+				TraceEvent("TotalDataInFlight", mi.id()).detail("Primary", true).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", 0).trackLatest("TotalDataInFlight");
+				TraceEvent("TotalDataInFlight", mi.id()).detail("Primary", false).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", configuration.usableRegions > 1 ? 0 : -1).trackLatest("TotalDataInFlightRemote");
 
 				Void _ = wait( waitForDataDistributionEnabled(cx) );
 				TraceEvent("DataDistributionEnabled");
@@ -2192,6 +2209,7 @@ ACTOR Future<Void> dataDistribution(
 			ASSERT(configuration.storageTeamSize > 0);
 
 			state PromiseStream<RelocateShard> output;
+			state PromiseStream<RelocateShard> input;
 			state PromiseStream<Promise<int64_t>> getAverageShardBytes;
 			state PromiseStream<GetMetricsRequest> getShardMetrics;
 			state Reference<AsyncVar<bool>> processingUnhealthy( new AsyncVar<bool>(false) );
@@ -2217,6 +2235,7 @@ ACTOR Future<Void> dataDistribution(
 			}
 
 			Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure( new ShardsAffectedByTeamFailure );
+			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			for(int s=0; s<initData->shards.size() - 1; s++) {
 				KeyRangeRef keys = KeyRangeRef(initData->shards[s].key, initData->shards[s+1].key);
@@ -2235,8 +2254,8 @@ ACTOR Future<Void> dataDistribution(
 			}
 
 			actors.push_back( pollMoveKeysLock(cx, lock) );
-			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
-			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, lastLimited, recoveryCommitVersion ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
+			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, lastLimited, recoveryCommitVersion ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[0], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, primaryDcId, configuration.usableRegions > 1 ? remoteDcIds : std::vector<Optional<Key>>(), serverChanges, readyToStart.getFuture(), zeroHealthyTeams[0], true, processingUnhealthy ), "DDTeamCollectionPrimary", mi.id(), &normalDDQueueErrors() ) );
 			if (configuration.usableRegions > 1) {
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[1], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >>(), readyToStart.getFuture() && remoteRecovered, zeroHealthyTeams[1], false, processingUnhealthy ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );

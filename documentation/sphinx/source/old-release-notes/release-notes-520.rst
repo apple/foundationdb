@@ -27,6 +27,7 @@ Fixes
 -----
 
 * A client could fail to connect to a cluster when the cluster was upgraded to a version compatible with the client. This affected upgrades that were using the multi-version client to maintain compatibility with both versions of the cluster. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
+* Incorrect accounting of incompatible connections led to occasional assertion failures. `(PR #637) <https://github.com/apple/foundationdb/pull/637>`_
 
 5.2.6
 =====

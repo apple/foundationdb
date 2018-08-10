@@ -174,7 +174,7 @@ TLSNetworkConnections::TLSNetworkConnections( Reference<TLSOptions> options ) : 
 Future<Reference<IConnection>> TLSNetworkConnections::connect( NetworkAddress toAddr, std::string host) {
 	if ( toAddr.isTLS() ) {
 		NetworkAddress clearAddr( toAddr.ip, toAddr.port, toAddr.isPublic(), false );
-		TraceEvent("TLSConnectionConnecting").detail("ToAddr", toAddr);
+		TraceEvent("TLSConnectionConnecting").suppressFor(1.0).detail("ToAddr", toAddr);
 		// For FDB<->FDB connections, we don't have hostnames and can't verify IP
 		// addresses against certificates, so we have our own peer verifying logic
 		// to use. For FDB<->external system connections, we can use the standard
@@ -205,11 +205,11 @@ Reference<IListener> TLSNetworkConnections::listen( NetworkAddress localAddr ) {
 
 void TLSOptions::set_cert_file( std::string const& cert_file ) {
 	try {
-		TraceEvent("TLSConnectionSettingCertFile").detail("CertFilePath", cert_file);
+		TraceEvent("TLSConnectionSettingCertFile").suppressFor(1.0).detail("CertFilePath", cert_file);
 		policyInfo.cert_path = cert_file;
 		set_cert_data( readFileBytes( cert_file, CERT_FILE_MAX_SIZE ) );
 	} catch ( Error& ) {
-		TraceEvent(SevError, "TLSOptionsSetCertFileError").detail("Filename", cert_file);
+		TraceEvent(SevError, "TLSOptionsSetCertFileError").suppressFor(1.0).detail("Filename", cert_file);
 		throw;
 	}
 }
@@ -437,12 +437,12 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 
 void TLSOptions::init_plugin() {
 
-	TraceEvent("TLSConnectionLoadingPlugin").detail("Plugin", tlsPluginName);
+	TraceEvent("TLSConnectionLoadingPlugin").suppressFor(1.0).detail("Plugin", tlsPluginName);
 
 	plugin = loadPlugin<ITLSPlugin>( tlsPluginName );
 
 	if ( !plugin ) {
-		TraceEvent(SevError, "TLSConnectionPluginInitError").detail("Plugin", tlsPluginName).GetLastError();
+		TraceEvent(SevError, "TLSConnectionPluginInitError").suppressFor(1.0).detail("Plugin", tlsPluginName).GetLastError();
 		throw tls_error();
 	}
 

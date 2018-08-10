@@ -74,14 +74,15 @@ struct DataDistributionTracker {
 
 	// CapacityTracker
 	PromiseStream<RelocateShard> output;
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 
 	Promise<Void> readyToStart;
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams;
 
-	DataDistributionTracker(Database cx, UID masterId, Promise<Void> const& readyToStart, PromiseStream<RelocateShard> const& output, Reference<AsyncVar<bool>> anyZeroHealthyTeams)
+	DataDistributionTracker(Database cx, UID masterId, Promise<Void> const& readyToStart, PromiseStream<RelocateShard> const& output, Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure, Reference<AsyncVar<bool>> anyZeroHealthyTeams)
 		: cx(cx), masterId( masterId ), dbSizeEstimate( new AsyncVar<int64_t>() ),
 			maxShardSize( new AsyncVar<Optional<int64_t>>() ),
-			sizeChanges(false), readyToStart(readyToStart), output( output ), anyZeroHealthyTeams(anyZeroHealthyTeams) {}
+			sizeChanges(false), readyToStart(readyToStart), output( output ), shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), anyZeroHealthyTeams(anyZeroHealthyTeams) {}
 
 	~DataDistributionTracker()
 	{
@@ -357,10 +358,16 @@ ACTOR Future<Void> shardSplitter(
 		for( int i = numShards-1; i > skipRange; i-- )
 			restartShardTrackers( self, KeyRangeRef(splitKeys[i], splitKeys[i+1]) );
 
-		for( int i = 0; i < skipRange; i++ )
-			self->output.send( RelocateShard( KeyRangeRef(splitKeys[i], splitKeys[i+1]), PRIORITY_SPLIT_SHARD) );
-		for( int i = numShards-1; i > skipRange; i-- )
-			self->output.send( RelocateShard(  KeyRangeRef(splitKeys[i], splitKeys[i+1]), PRIORITY_SPLIT_SHARD) );
+		for( int i = 0; i < skipRange; i++ ) {
+			KeyRangeRef r(splitKeys[i], splitKeys[i+1]);
+			self->shardsAffectedByTeamFailure->defineShard( r );
+			self->output.send( RelocateShard( r, PRIORITY_SPLIT_SHARD) );
+		}
+		for( int i = numShards-1; i > skipRange; i-- ) {
+			KeyRangeRef r(splitKeys[i], splitKeys[i+1]);
+			self->shardsAffectedByTeamFailure->defineShard( r );
+			self->output.send( RelocateShard( r, PRIORITY_SPLIT_SHARD) );
+		}
 
 		self->sizeChanges.add( changeSizes( self, keys, shardSize->get().get().bytes ) );
 	} else {
@@ -461,6 +468,7 @@ Future<Void> shardMerger(
 		.detail("TrackerID", trackerId);
 
 	restartShardTrackers( self, mergeRange, endingStats );
+	self->shardsAffectedByTeamFailure->defineShard( mergeRange );
 	self->output.send( RelocateShard( mergeRange, PRIORITY_MERGE_SHARD ) );
 
 	// We are about to be cancelled by the call to restartShardTrackers
@@ -661,13 +669,14 @@ ACTOR Future<Void> dataDistributionTracker(
 	Reference<InitialDataDistribution> initData,
 	Database cx,
 	PromiseStream<RelocateShard> output,
+	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	PromiseStream<GetMetricsRequest> getShardMetrics,
 	FutureStream<Promise<int64_t>> getAverageShardBytes,
 	Promise<Void> readyToStart,
 	Reference<AsyncVar<bool>> anyZeroHealthyTeams,
 	UID masterId)
 {
-	state DataDistributionTracker self(cx, masterId, readyToStart, output, anyZeroHealthyTeams);
+	state DataDistributionTracker self(cx, masterId, readyToStart, output, shardsAffectedByTeamFailure, anyZeroHealthyTeams);
 	state Future<Void> loggingTrigger = Void();
 	try {
 		Void _ = wait( trackInitialShards( &self, initData ) );

@@ -574,11 +574,13 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 	}
 
 	state std::vector<std::pair<StorageServerInterface, TraceEventFields>>::iterator ss;
-	state std::map<NetworkAddress, int64_t> ssLag;
+	state std::map<NetworkAddress, double> ssLag;
 	for(ss = storageServers.begin(); ss != storageServers.end(); ++ss) {
 		StatusObject const& roleStatus = roles.addRole( "storage", ss->first, ss->second, maxTLogVersion );
-		if(roleStatus.count("data_version_lag") > 0) {
-			ssLag[ss->first.address()] = roleStatus.at("data_version_lag").get_int64();
+		JSONDoc doc(roleStatus);
+		double lagSeconds;
+		if(doc.tryGet("data_lag.seconds", lagSeconds)) {
+			ssLag[ss->first.address()] = lagSeconds;
 		}
 		Void _ = wait(yield());
 	}
@@ -754,8 +756,8 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 				messages.push_back(tracefileOpenErrorMap[strAddress]);
 			}
 
-			if(ssLag[address] > 60 * SERVER_KNOBS->VERSIONS_PER_SECOND) {
-				messages.push_back(makeMessage("storage_server_lagging", format("Storage server lagging by %ld seconds.", ssLag[address] / SERVER_KNOBS->VERSIONS_PER_SECOND).c_str()));
+			if(ssLag[address] >= 60) {
+				messages.push_back(makeMessage("storage_server_lagging", format("Storage server lagging by %ld seconds.", (int64_t)ssLag[address]).c_str()));
 			}
 
 			// Store the message array into the status object that represents the worker process
@@ -1068,7 +1070,6 @@ static StatusObject configurationFetcher(Optional<DatabaseConfiguration> conf, S
 }
 
 ACTOR static Future<StatusObject> dataStatusFetcher(std::pair<WorkerInterface, ProcessClass> mWorker, std::string dbName, int *minReplicasRemaining) {
-	state StatusObject stateSectionObj;
 	state StatusObject statusObjData;
 
 	try {
@@ -1077,96 +1078,135 @@ ACTOR static Future<StatusObject> dataStatusFetcher(std::pair<WorkerInterface, P
 		// TODO:  Should this be serial?
 		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/DDTrackerStarting"))), 1.0));
 		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/DDTrackerStats"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/MovingData"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlight"))), 1.0));
+		futures.push_back(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(LiteralStringRef("TotalDataInFlightRemote"))), 1.0));
 
 		std::vector<TraceEventFields> dataInfo = wait(getAll(futures));
 
 		TraceEventFields startingStats = dataInfo[0];
-		state TraceEventFields dataStats = dataInfo[1];
+		TraceEventFields dataStats = dataInfo[1];
 
 		if (startingStats.size() && startingStats.getValue("State") != "Active") {
+			StatusObject stateSectionObj;
 			stateSectionObj["name"] = "initializing";
 			stateSectionObj["description"] = "(Re)initializing automatic data distribution";
+			statusObjData["state"] = stateSectionObj;
+			return statusObjData;
 		}
-		else {
-			state TraceEventFields md = wait(timeoutError(mWorker.first.eventLogRequest.getReply(EventLogRequest(StringRef(dbName + "/MovingData"))), 1.0));
 
-			// If we have a MovingData message, parse it.
-			if (md.size())
-			{
-				int64_t partitionsInQueue = parseInt64(md.getValue("InQueue"));
-				int64_t partitionsInFlight = parseInt64(md.getValue("InFlight"));
-				int64_t averagePartitionSize = parseInt64(md.getValue("AverageShardSize"));
-				int64_t totalBytesWritten = parseInt64(md.getValue("BytesWritten"));
-				int highestPriority = parseInt(md.getValue("HighestPriority"));
+		TraceEventFields md = dataInfo[2];
 
-				if( averagePartitionSize >= 0 ) {
-					StatusObject moving_data;
-					moving_data["in_queue_bytes"] = partitionsInQueue * averagePartitionSize;
-					moving_data["in_flight_bytes"] = partitionsInFlight * averagePartitionSize;
-					moving_data["total_written_bytes"] = totalBytesWritten;
+		// If we have a MovingData message, parse it.
+		if (md.size())
+		{
+			int64_t partitionsInQueue = parseInt64(md.getValue("InQueue"));
+			int64_t partitionsInFlight = parseInt64(md.getValue("InFlight"));
+			int64_t averagePartitionSize = parseInt64(md.getValue("AverageShardSize"));
+			int64_t totalBytesWritten = parseInt64(md.getValue("BytesWritten"));
+			int highestPriority = parseInt(md.getValue("HighestPriority"));
 
-					// TODO: moving_data["rate_bytes"] = makeCounter(hz, c, r);
-					statusObjData["moving_data"] = moving_data;
+			if( averagePartitionSize >= 0 ) {
+				StatusObject moving_data;
+				moving_data["in_queue_bytes"] = partitionsInQueue * averagePartitionSize;
+				moving_data["in_flight_bytes"] = partitionsInFlight * averagePartitionSize;
+				moving_data["total_written_bytes"] = totalBytesWritten;
+				moving_data["highest_priority"] = highestPriority;
 
-					statusObjData["average_partition_size_bytes"] = averagePartitionSize;
-				}
+				// TODO: moving_data["rate_bytes"] = makeCounter(hz, c, r);
+				statusObjData["moving_data"] = moving_data;
 
-				if (highestPriority >= PRIORITY_TEAM_0_LEFT) {
-					stateSectionObj["healthy"] = false;
-					stateSectionObj["name"] = "missing_data";
-					stateSectionObj["description"] = "No replicas remain of some data";
-					stateSectionObj["min_replicas_remaining"] = 0;
+				statusObjData["average_partition_size_bytes"] = averagePartitionSize;
+			}
+		}
+
+		if (dataStats.size())
+		{
+			int64_t totalDBBytes = parseInt64(dataStats.getValue("TotalSizeBytes"));
+			statusObjData["total_kv_size_bytes"] = totalDBBytes;
+			int shards = parseInt(dataStats.getValue("Shards"));
+			statusObjData["partitions_count"] = shards;
+		}
+
+		StatusArray teamTrackers;
+		for(int i = 0; i < 2; i++) {
+			TraceEventFields inFlight = dataInfo[3 + i];
+			if (!inFlight.size()) {
+				continue;
+			}
+
+			bool primary = parseInt(inFlight.getValue("Primary"));
+			int64_t totalDataInFlight = parseInt64(inFlight.getValue("TotalBytes"));
+			int unhealthyServers = parseInt(inFlight.getValue("UnhealthyServers"));
+			int highestPriority = parseInt(inFlight.getValue("HighestPriority"));
+
+			StatusObject team_tracker;
+			team_tracker["primary"] = primary;
+			team_tracker["in_flight_bytes"] = totalDataInFlight;
+			team_tracker["unhealthy_servers"] = unhealthyServers;
+
+			StatusObject stateSectionObj;
+			if (highestPriority >= PRIORITY_TEAM_0_LEFT) {
+				stateSectionObj["healthy"] = false;
+				stateSectionObj["name"] = "missing_data";
+				stateSectionObj["description"] = "No replicas remain of some data";
+				stateSectionObj["min_replicas_remaining"] = 0;
+				if(primary) {
 					*minReplicasRemaining = 0;
 				}
-				else if (highestPriority >= PRIORITY_TEAM_1_LEFT) {
-					stateSectionObj["healthy"] = false;
-					stateSectionObj["name"] = "healing";
-					stateSectionObj["description"] = "Only one replica remains of some data";
-					stateSectionObj["min_replicas_remaining"] = 1;
+			}
+			else if (highestPriority >= PRIORITY_TEAM_1_LEFT) {
+				stateSectionObj["healthy"] = false;
+				stateSectionObj["name"] = "healing";
+				stateSectionObj["description"] = "Only one replica remains of some data";
+				stateSectionObj["min_replicas_remaining"] = 1;
+				if(primary) {
 					*minReplicasRemaining = 1;
 				}
-				else if (highestPriority >= PRIORITY_TEAM_2_LEFT) {
-					stateSectionObj["healthy"] = false;
-					stateSectionObj["name"] = "healing";
-					stateSectionObj["description"] = "Only two replicas remain of some data";
-					stateSectionObj["min_replicas_remaining"] = 2;
+			}
+			else if (highestPriority >= PRIORITY_TEAM_2_LEFT) {
+				stateSectionObj["healthy"] = false;
+				stateSectionObj["name"] = "healing";
+				stateSectionObj["description"] = "Only two replicas remain of some data";
+				stateSectionObj["min_replicas_remaining"] = 2;
+				if(primary) {
 					*minReplicasRemaining = 2;
 				}
-				else if (highestPriority >= PRIORITY_TEAM_UNHEALTHY) {
-					stateSectionObj["healthy"] = false;
-					stateSectionObj["name"] = "healing";
-					stateSectionObj["description"] = "Restoring replication factor";
-				}
-				else if (highestPriority >= PRIORITY_MERGE_SHARD) {
-					stateSectionObj["healthy"] = true;
-					stateSectionObj["name"] = "healthy_repartitioning";
-					stateSectionObj["description"] = "Repartitioning.";
-				}
-				else if (highestPriority >= PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
-					stateSectionObj["healthy"] = true;
-					stateSectionObj["name"] = "healthy_removing_server";
-					stateSectionObj["description"] = "Removing storage server";
-				}
-				else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
-					stateSectionObj["healthy"] = true;
-					stateSectionObj["name"] = "healthy_rebalancing";
-					stateSectionObj["description"] = "Rebalancing";
-				}
-				else if (highestPriority >= 0) {
-					stateSectionObj["healthy"] = true;
-					stateSectionObj["name"] = "healthy";
-				}
+			}
+			else if (highestPriority >= PRIORITY_TEAM_UNHEALTHY) {
+				stateSectionObj["healthy"] = false;
+				stateSectionObj["name"] = "healing";
+				stateSectionObj["description"] = "Restoring replication factor";
+			}
+			else if (highestPriority >= PRIORITY_MERGE_SHARD) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy_repartitioning";
+				stateSectionObj["description"] = "Repartitioning.";
+			}
+			else if (highestPriority >= PRIORITY_TEAM_CONTAINS_UNDESIRED_SERVER) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy_removing_server";
+				stateSectionObj["description"] = "Removing storage server";
+			}
+			else if (highestPriority >= PRIORITY_REBALANCE_SHARD) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy_rebalancing";
+				stateSectionObj["description"] = "Rebalancing";
+			}
+			else if (highestPriority >= 0) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy";
 			}
 
-			if (dataStats.size())
-			{
-				int64_t totalDBBytes = parseInt64(dataStats.getValue("TotalSizeBytes"));
-				statusObjData["total_kv_size_bytes"] = totalDBBytes;
-				int shards = parseInt(dataStats.getValue("Shards"));
-				statusObjData["partitions_count"] = shards;
+			if(!stateSectionObj.empty()) {
+				team_tracker["state"] = stateSectionObj;
+				teamTrackers.push_back(team_tracker);
+				if(primary) {
+					statusObjData["state"] = stateSectionObj;
+				}
 			}
-
 		}
+		statusObjData["team_trackers"] = teamTrackers;
 	}
 	catch (Error &e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -1174,9 +1214,6 @@ ACTOR static Future<StatusObject> dataStatusFetcher(std::pair<WorkerInterface, P
 		// The most likely reason to be here is a timeout, either way we have no idea if the data state is healthy or not
 		// from the "cluster" perspective - from the client perspective it is not but that is indicated elsewhere.
 	}
-
-	if (!stateSectionObj.empty())
-		statusObjData["state"] = stateSectionObj;
 
 	return statusObjData;
 }
