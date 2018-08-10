@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/Status.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct DDMetricsWorkload : TestWorkload {
 	double startDelay, ddDone;

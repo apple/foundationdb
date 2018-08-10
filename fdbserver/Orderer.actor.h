@@ -28,7 +28,7 @@
 	#define FDBSERVER_ORDERER_ACTOR_H
 
 #include "fdbclient/Notified.h"
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 template <class Seq>
 class Orderer {

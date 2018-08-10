@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 KeySelector randomizedSelector(const KeyRef &key, bool orEqual, int offset ) {
 	if( orEqual && g_random->random01() > 0.5 )

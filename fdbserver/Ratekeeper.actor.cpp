@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/IndexedSet.h"
 #include "Ratekeeper.h"
 #include "fdbrpc/FailureMonitor.h"
@@ -26,6 +25,7 @@
 #include "fdbrpc/Smoother.h"
 #include "ServerDBInfo.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum limitReason_t {
 	unlimited,  // TODO: rename to workload?

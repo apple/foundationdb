@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
@@ -26,6 +25,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct RollbackWorkload : TestWorkload {
 	bool enableFailures, multiple, enabled;

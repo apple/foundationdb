@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/PerfMetric.h"
 #include "flow/Trace.h"
@@ -44,6 +43,7 @@
 #include "IKeyValueStore.h"
 #include "ApplyMetadataMutation.h"
 #include "RecoveryState.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
 using std::min;

@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/Deque.h"
 #include "Knobs.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> waitFailureServer(FutureStream<ReplyPromise<Void>> waitFailure){
 	// when this actor is cancelled, the promises in the queue will send broken_promise

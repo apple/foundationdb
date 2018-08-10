@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "FailureMonitor.h"
 
 ACTOR Future<Void> waitForStateEqual( IFailureMonitor* monitor, Endpoint endpoint, FailureStatus status ) {

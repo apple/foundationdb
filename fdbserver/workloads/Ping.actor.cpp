@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
@@ -26,6 +25,7 @@
 #include "fdbserver/WorkerInterface.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct PingWorkloadInterface {
 	RequestStream< LoadedPingRequest > payloadPing;

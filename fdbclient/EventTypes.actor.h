@@ -29,7 +29,7 @@
 
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 DESCR struct GetValueComplete {
 	int64_t latency; //ns

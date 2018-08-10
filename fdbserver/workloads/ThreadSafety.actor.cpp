@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbserver/TesterInterface.h"
@@ -27,6 +26,7 @@
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ThreadSafetyWorkload;
 

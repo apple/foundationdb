@@ -26,7 +26,6 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 #include "boost/date_time/posix_time/posix_time_types.hpp"
-#include "actorcompiler.h"
 #include "network.h"
 #include "IThreadPool.h"
 #include "boost/range.hpp"
@@ -41,6 +40,7 @@
 #ifdef WIN32
 #include <mmsystem.h>
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Defined to track the stack limit
 extern "C" intptr_t g_stackYieldLimit;

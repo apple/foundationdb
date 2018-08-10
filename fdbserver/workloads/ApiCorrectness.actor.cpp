@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/QuietDatabase.h"
 
 #include "workloads.h"
 #include "ApiWorkload.h"
 #include "MemoryKeyValueStore.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //An enum of API operation types used in the random test
 enum OperationType {

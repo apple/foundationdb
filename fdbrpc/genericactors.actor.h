@@ -28,6 +28,7 @@
 
 #include "flow/genericactors.actor.h"
 #include "fdbrpc.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class Req>
 Future<REPLY_TYPE(Req)> retryBrokenPromise( RequestStream<Req> to, Req request ) {
@@ -207,5 +208,6 @@ Future<X> reportEndpointFailure( Future<X> value, Endpoint endpoint ) {
 
 Future<Void> disableConnectionFailuresAfter( double const& time, std::string const& context );
 
+#include "flow/unactorcompiler.h"
 
 #endif

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "actorcompiler.h"	// Gets genericactors.actor.g.h indirectly
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<bool> allTrue( std::vector<Future<bool>> all ) {
 	state int i=0;

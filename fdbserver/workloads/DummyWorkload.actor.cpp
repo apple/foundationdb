@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // The workload that do nothing. It can be used for waiting for quiescence
 struct DummyWorkload : TestWorkload {

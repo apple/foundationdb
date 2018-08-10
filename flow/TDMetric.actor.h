@@ -35,7 +35,7 @@
 #include "CompressedInt.h"
 #include <algorithm>
 #include <functional>
-#include "actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricNameRef {
 	MetricNameRef() {}

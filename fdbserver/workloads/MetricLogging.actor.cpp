@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "flow/TDMetric.actor.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricLoggingWorkload : TestWorkload {
 	int actorCount, metricCount;

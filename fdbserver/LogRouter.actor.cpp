@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "WorkerInterface.h"
@@ -32,6 +31,7 @@
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/Stats.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LogRouterData {
 	struct TagData : NonCopyable, public ReferenceCounted<TagData> {

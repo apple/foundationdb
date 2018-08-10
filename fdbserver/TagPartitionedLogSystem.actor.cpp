@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "LogSystem.h"
 #include "ServerDBInfo.h"
@@ -29,6 +28,7 @@
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "RecoveryState.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Version> minVersionWhenReady( Future<Void> f, std::vector<Future<Version>> replies) {
 	wait(f);

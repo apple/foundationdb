@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/SystemData.h"
 #include "MoveKeys.h"
 #include "Knobs.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::min;
 using std::max;

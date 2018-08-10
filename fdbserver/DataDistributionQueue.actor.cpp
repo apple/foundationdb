@@ -18,7 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <numeric>
+#include <limits>
+
 #include "flow/ActorCollection.h"
 #include "flow/Util.h"
 #include "fdbrpc/sim_validation.h"
@@ -28,8 +30,7 @@
 #include "MoveKeys.h"
 #include "Knobs.h"
 #include "fdbrpc/simulator.h"
-#include <numeric>
-#include <limits>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define WORK_FULL_UTILIZATION 10000   // This is not a knob; it is a fixed point scaling factor!
 

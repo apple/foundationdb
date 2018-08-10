@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ClusterRecruitmentInterface.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct PerformanceWorkload : TestWorkload {
 	Value probeWorkload;

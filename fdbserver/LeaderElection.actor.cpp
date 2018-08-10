@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "ClusterRecruitmentInterface.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "fdbclient/MonitorLeader.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 Optional<std::pair<LeaderInfo, bool>> getLeader( const vector<Optional<LeaderInfo>>& nominees );
 

@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "IDiskQueue.h"
 #include "fdbrpc/IAsyncFile.h"
 #include "Knobs.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 typedef bool(*compare_pages)(void*,void*);
 typedef int64_t loc_t;

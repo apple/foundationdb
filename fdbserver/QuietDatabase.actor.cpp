@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
@@ -29,6 +28,7 @@
 #include "ServerDBInfo.h"
 #include "Status.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
 	loop {

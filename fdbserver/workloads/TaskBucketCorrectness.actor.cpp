@@ -18,7 +18,10 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <iostream>
+#include <sstream>
+#include <cctype>
+
 #include "fdbrpc/simulator.h"
 #include "flow/UnitTest.h"
 #include "flow/Error.h"
@@ -26,10 +29,7 @@
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
-
-#include <iostream>
-#include <sstream>
-#include <cctype>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct SayHelloTaskFunc : TaskFuncBase {
 	static StringRef name;

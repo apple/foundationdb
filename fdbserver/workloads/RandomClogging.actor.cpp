@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct RandomCloggingWorkload : TestWorkload {
 	bool enabled;

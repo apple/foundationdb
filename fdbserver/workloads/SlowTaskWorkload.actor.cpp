@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
 #include "flow/SignalSafeUnwind.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Stress test the slow task profiler or flow profiler
 struct SlowTaskWorkload : TestWorkload {

@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "workloads.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //For this test to report properly buggify must be disabled (flow.h) , and failConnection must be disabled in (sim2.actor.cpp)
 

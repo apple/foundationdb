@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which starts the CPU profiler at a given time and duration on all workers in a cluster
 struct CpuProfilerWorkload : TestWorkload

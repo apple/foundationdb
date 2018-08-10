@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/ActorCollection.h"
 #include "workloads.h"
 #include "fdbclient/Atomic.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct WriteDuringReadWorkload : TestWorkload {
 	double testDuration, slowModeStart;

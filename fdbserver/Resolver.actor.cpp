@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "ResolverInterface.h"

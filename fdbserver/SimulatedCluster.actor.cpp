@@ -19,7 +19,6 @@
  */
 
 #include <fstream>
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/FailureMonitorClient.h"
 #include "fdbclient/DatabaseContext.h"
@@ -39,6 +38,7 @@
 #ifndef WIN32
 #include "versions.h"
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef max
 #undef min

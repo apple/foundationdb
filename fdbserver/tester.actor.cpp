@@ -19,7 +19,7 @@
  */
 
 #include <fstream>
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "flow/ActorCollection.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"

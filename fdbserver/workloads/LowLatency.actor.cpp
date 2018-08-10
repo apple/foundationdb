@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/Knobs.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
 	double testDuration;

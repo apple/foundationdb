@@ -20,7 +20,7 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "IKeyValueStore.h"
 #include "CoroFlow.h"
 #include "Knobs.h"

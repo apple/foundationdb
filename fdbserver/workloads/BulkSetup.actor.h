@@ -35,7 +35,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
 
-#include "flow/actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template<class T>
 Future<bool> checkRangeSimpleValueSize( Database cx, T* workload, uint64_t begin, uint64_t end) {

@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/pubsub.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct PubSubMultiplesWorkload : TestWorkload {
 	double testDuration, messagesPerSecond;

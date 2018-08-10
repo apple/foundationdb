@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <cmath>
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include <cmath>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MetricsRule {
 	MetricsRule(bool enabled = false, int minLevel = 0, StringRef const &name = StringRef()) : enabled(enabled), minLevel(minLevel), namePattern(name) {}

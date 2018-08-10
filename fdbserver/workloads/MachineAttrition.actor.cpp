@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"
 #include "workloads.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 static std::set<int> const& normalAttritionErrors() {
 	static std::set<int> s;

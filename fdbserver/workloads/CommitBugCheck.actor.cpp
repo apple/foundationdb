@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/TesterInterface.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Regression tests for 2 commit related bugs
 struct CommitBugWorkload : TestWorkload

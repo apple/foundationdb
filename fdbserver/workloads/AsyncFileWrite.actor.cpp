@@ -18,13 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
-
 #include "fdbrpc/IAsyncFile.h"
 #include "AsyncFile.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct AsyncFileWriteWorkload : public AsyncFileWorkload
 {

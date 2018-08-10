@@ -18,12 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "workloads.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
-
 #include "AsyncFile.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //An enumeration representing the type of operation to be performed in a correctness test operation
 enum OperationType

@@ -18,7 +18,8 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <boost/lexical_cast.hpp>
+
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
@@ -28,8 +29,7 @@
 #include "fdbserver/ClusterRecruitmentInterface.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
-
-#include <boost/lexical_cast.hpp>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const int sampleSize = 10000;
 static Future<Version> nextRV;

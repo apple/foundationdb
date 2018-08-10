@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "pubsub.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 Value uInt64ToValue( uint64_t v ) {
 	return StringRef(format("%016llx", v));

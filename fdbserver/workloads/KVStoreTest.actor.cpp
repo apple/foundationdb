@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <ctime>
 #include "workloads.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
-#include <time.h>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern IKeyValueStore *makeDummyKeyValueStore();
 

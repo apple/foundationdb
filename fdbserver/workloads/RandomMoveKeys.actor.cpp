@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/ManagementAPI.h"
@@ -27,6 +26,7 @@
 #include "workloads.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct MoveKeysWorkload : TestWorkload {
 	bool enabled;

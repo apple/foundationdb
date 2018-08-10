@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "actorcompiler.h"
 #include "ActorCollection.h"
 #include "IndexedSet.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<Void> actorCollection( FutureStream<Future<Void>> addActor, int* pCount, double *lastChangeTime, double *idleTime, double *allTime, bool returnWhenEmptied )
 {

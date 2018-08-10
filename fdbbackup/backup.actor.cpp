@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/FastAlloc.h"
 #include "flow/serialize.h"
 #include "flow/IRandom.h"
@@ -68,6 +67,7 @@ using std::endl;
 #endif
 
 #include "flow/SimpleOpt.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 
 // Type of program being executed

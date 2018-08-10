@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbserver/CoordinationInterface.h"
 #include "IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "Knobs.h"
 #include "flow/UnitTest.h"
 #include "flow/IndexedSet.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // This module implements coordinationServer() and the interfaces in CoordinationInterface.h
 

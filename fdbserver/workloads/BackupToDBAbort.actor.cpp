@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/BackupAgent.h"
 #include "fdbclient/ManagementAPI.h"
 #include "fdbclient/NativeAPI.h"
 #include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct BackupToDBAbort : TestWorkload {
 	double abortDelay;

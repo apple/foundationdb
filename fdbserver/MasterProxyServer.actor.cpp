@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/MasterProxyInterface.h"
 #include "fdbclient/NativeAPI.h"
@@ -41,6 +40,7 @@
 #include "RecoveryState.h"
 #include "fdbclient/Atomic.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ProxyStats {
 	CounterCollection cc;

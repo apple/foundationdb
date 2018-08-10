@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "ReadYourWrites.h"
 #include "Atomic.h"
 #include "DatabaseContext.h"
 #include "StatusClient.h"
 #include "MonitorLeader.h"
 #include "flow/Util.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 class RYWImpl {
 public:

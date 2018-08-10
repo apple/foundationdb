@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "flow/SystemMonitor.h"
 #include "flow/TDMetric.actor.h"
@@ -47,6 +46,7 @@
 #include <thread>
 #include <execinfo.h>
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #if CENABLED(0, NOT_IN_CLEAN)
 extern IKeyValueStore* keyValueStoreCompressTestData(IKeyValueStore* store);

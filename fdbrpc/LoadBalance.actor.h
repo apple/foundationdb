@@ -35,6 +35,7 @@
 #include "Locality.h"
 #include "QueueModel.h"
 #include "MultiInterface.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::vector;
 
@@ -420,5 +421,7 @@ inline Future< REPLY_TYPE(Request) > loadBalance(
 {
 	return loadBalance( Reference<MultiInterface<Interface>>(alternatives), channel, request, taskID, atMostOnce, model );
 }
+
+#include "flow/unactorcompiler.h"
 
 #endif

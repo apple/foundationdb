@@ -19,7 +19,6 @@
  */
 
 #include "Status.h"
-#include "flow/actorcompiler.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
@@ -32,6 +31,7 @@
 #include "flow/UnitTest.h"
 #include "QuietDatabase.h"
 #include "RecoveryState.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",

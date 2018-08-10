@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/Hash3.h"
 #include "flow/Stats.h"
 #include "flow/UnitTest.h"
@@ -38,6 +37,7 @@
 #include "LogSystem.h"
 #include "WaitFailure.h"
 #include "RecoveryState.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::pair;
 using std::make_pair;

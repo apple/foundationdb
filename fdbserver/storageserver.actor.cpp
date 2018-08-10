@@ -19,7 +19,6 @@
  */
 
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/LoadBalance.h"
 #include "flow/IndexedSet.h"
@@ -49,6 +48,7 @@
 #include "RecoveryState.h"
 #include "LogProtocolMessage.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::make_pair;
 

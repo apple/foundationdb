@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/IRandom.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
@@ -31,6 +30,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct ConsistencyCheckWorkload : TestWorkload
 {

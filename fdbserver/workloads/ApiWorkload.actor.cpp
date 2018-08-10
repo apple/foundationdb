@@ -18,10 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-
 #include "ApiWorkload.h"
 #include "fdbclient/MultiVersionTransaction.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //Clears the keyspace used by this test
 ACTOR Future<Void> clearKeyspace(ApiWorkload *self) {

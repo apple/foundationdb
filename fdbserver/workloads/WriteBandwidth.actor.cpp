@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <boost/lexical_cast.hpp>
+
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
-
-#include <boost/lexical_cast.hpp>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct WriteBandwidthWorkload : KVWorkload {
 	int keysPerTransaction;

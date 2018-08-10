@@ -22,7 +22,6 @@
 #include "NativeAPI.h"
 #include "Atomic.h"
 #include "flow/Platform.h"
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "SystemData.h"
 #include "fdbrpc/LoadBalance.h"
@@ -53,6 +52,7 @@
 #include <time.h>
 #include "versions.h"
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 extern IRandom* trace_random;
 extern const char* getHGVersion();

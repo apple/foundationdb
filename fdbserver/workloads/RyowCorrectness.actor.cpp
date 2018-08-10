@@ -18,14 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbserver/TesterInterface.h"
+#include <vector>
 
+#include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "MemoryKeyValueStore.h"
 #include "ApiWorkload.h"
-
-#include <vector>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define TRACE_TRANSACTION 0
 

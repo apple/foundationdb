@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "IKeyValueStore.h"
 #include "IDiskQueue.h"
 #include "flow/IndexedSet.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define OP_DISK_OVERHEAD (sizeof(OpHeader) + 1)
 

@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which test the correctness of upgrading DR from 5.1 to 5.2
 struct BackupToDBUpgradeWorkload : TestWorkload {

@@ -31,7 +31,7 @@
 
 #include "Knobs.h"
 #include "flow/Util.h"
-#include "actorcompiler.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 #pragma warning( disable: 4355 )	// 'this' : used in base member initializer list
 
 ACTOR template<class T, class X>

@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "NetworkTest.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 UID WLTOKEN_NETWORKTEST( -1, 2 );
 

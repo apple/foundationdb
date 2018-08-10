@@ -18,16 +18,16 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbserver/TesterInterface.h"
-#include "fdbclient/ThreadSafeTransaction.h"
-#include "flow/ActorCollection.h"
-#include "workloads.h"
-
 #include <limits.h>
 #include <mutex>
 #include <functional>
 #include <sstream>
+
+#include "fdbserver/TesterInterface.h"
+#include "fdbclient/ThreadSafeTransaction.h"
+#include "flow/ActorCollection.h"
+#include "workloads.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace ph = std::placeholders;
 

@@ -18,12 +18,12 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbclient/ManagementAPI.h"
 #include "workloads.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // "ssd" is an alias to the preferred type which skews the random distribution toward it but that's okay.
 static const char* storeTypes[] = { "ssd", "ssd-1", "ssd-2", "memory" };

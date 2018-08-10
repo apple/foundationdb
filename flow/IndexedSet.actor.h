@@ -28,6 +28,7 @@
 	#define FLOW_INDEXEDSET_ACTOR_H
 
 #include "flow.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template <class Node>
 Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
@@ -66,4 +67,5 @@ Future<Void> ISFreeNodes(std::vector<Node*> toFree, bool synchronous) {
 	return Void();
 }
 
+#include "flow/unactorcompiler.h"
 #endif
