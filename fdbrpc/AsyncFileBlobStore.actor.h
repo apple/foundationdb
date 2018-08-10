@@ -37,6 +37,7 @@
 #include "BlobStore.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template<typename T> static Future<T> joinErrorGroup(Future<T> f, Promise<Void> p) {
 	try {
@@ -291,4 +292,5 @@ public:
 
 };
 
+#include "flow/unactorcompiler.h"
 #endif

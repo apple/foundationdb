@@ -39,6 +39,7 @@
 #include <stdio.h>
 #include "flow/Hash3.h"
 #include "flow/genericactors.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Set this to true to enable detailed KAIO request logging, which currently is written to a hardcoded location /data/v7/fdb/
 #define KAIO_LOGGING 0
@@ -830,5 +831,6 @@ TEST_CASE("fdbrpc/AsyncFileKAIO/RequestList") {
 
 AsyncFileKAIO::Context AsyncFileKAIO::ctx;
 
+#include "flow/unactorcompiler.h"
 #endif 
 #endif

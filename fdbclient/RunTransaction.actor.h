@@ -29,6 +29,7 @@
 
 #include "flow/flow.h"
 #include "ReadYourWrites.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template < class Function >
 Future<decltype(fake<Function>()(Reference<ReadYourWritesTransaction>()).getValue())>
@@ -72,4 +73,6 @@ runRYWTransactionNoRetry(Database cx, Function func) {
 	wait(tr->commit());
 	return result;
 }
+
+#include "flow/unactorcompiler.h"
 #endif

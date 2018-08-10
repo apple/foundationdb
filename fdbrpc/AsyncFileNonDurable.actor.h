@@ -33,6 +33,7 @@
 #include "simulator.h"
 #include "TraceFileIO.h"
 #include "RangeMap.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #undef max
 #undef min
@@ -753,4 +754,5 @@ private:
 	}
 };
 
+#include "flow/unactorcompiler.h"
 #endif

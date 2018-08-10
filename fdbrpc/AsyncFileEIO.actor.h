@@ -31,14 +31,15 @@
 #elif !defined(FLOW_ASYNCFILEEIO_ACTOR_H)
 	#define FLOW_ASYNCFILEEIO_ACTOR_H
 
+#include <fcntl.h>
+#include <sys/stat.h>
+
 #include "eio.h"
 #include "flow/flow.h"
 #include "flow/ThreadHelper.actor.h"
 #include "IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
-
-#include <fcntl.h>
-#include <sys/stat.h>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 class AsyncFileEIO : public IAsyncFile, public ReferenceCounted<AsyncFileEIO> {
 
@@ -439,5 +440,6 @@ private:
 volatile int32_t AsyncFileEIO::want_poll = 0;
 #endif
 
+#include "flow/unactorcompiler.h"
 #endif 
 #endif

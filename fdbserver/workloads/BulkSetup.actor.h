@@ -34,7 +34,6 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
-
 #include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR template<class T>

@@ -32,6 +32,7 @@
 #include "flow/Knobs.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/network.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct EvictablePage {
 	void* data;
@@ -493,4 +494,5 @@ struct AFCPage : public EvictablePage, public FastAllocated<AFCPage> {
 	int zeroCopyRefCount;  // references held by "zero-copy" reads
 };
 
+#include "flow/unactorcompiler.h"
 #endif

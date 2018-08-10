@@ -29,6 +29,7 @@
 		#define FLOW_THREADHELPER_ACTOR_H
 
 #include "flow/flow.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // template <class F>
 // void onMainThreadVoid( F f ) {
@@ -629,4 +630,5 @@ private:
 	ThreadSpinLock lock;
 };
 
+#include "flow/unactorcompiler.h"
 #endif

@@ -29,6 +29,7 @@
 
 #include "workloads.h"
 #include "fdbrpc/IAsyncFile.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 class RandomByteGenerator{
 private:
@@ -155,4 +156,5 @@ struct AsyncFileWorkload : TestWorkload
 	}
 };
 
+#include "flow/unactorcompiler.h"
 #endif

@@ -32,6 +32,7 @@
 #include "bindings/flow/IDirectory.h"
 #include "bindings/flow/Subspace.h"
 #include "bindings/flow/DirectoryLayer.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define LOG_ALL 0
 #define LOG_INSTRUCTIONS LOG_ALL || 0
@@ -239,4 +240,5 @@ Future<decltype(fake<F>()().getValue())> executeMutation(Reference<InstructionDa
 	}
 }
 
+#include "flow/unactorcompiler.h"
 #endif
