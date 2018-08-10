@@ -312,7 +312,7 @@ ACTOR Future<Void> leaderRegister(LeaderElectionRegInterface interf, Key key) {
 				availableCandidates.clear();
 			}
 		}
-		when( Void _ = wait(notifyCheck) ) {
+		when( wait(notifyCheck) ) {
 			notifyCheck = delay( SERVER_KNOBS->NOTIFICATION_FULL_CLEAR_TIME / std::max<double>(SERVER_KNOBS->MIN_NOTIFICATIONS, notify.size()) );
 			if(!notify.empty() && currentNominee.present()) {
 				notify.front().send( currentNominee.get() );

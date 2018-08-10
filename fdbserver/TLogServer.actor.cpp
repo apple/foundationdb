@@ -958,9 +958,9 @@ ACTOR Future<Void> tLogPeekMessages( TLogData* self, TLogPeekRequest req, Refere
 	}
 
 	if( req.tag.locality == tagLocalityLogRouter ) {
-		Void _ = wait( self->concurrentLogRouterReads.take() );
+		wait( self->concurrentLogRouterReads.take() );
 		state FlowLock::Releaser globalReleaser(self->concurrentLogRouterReads);
-		Void _ = wait( delay(0.0, TaskLowPriority) );
+		wait( delay(0.0, TaskLowPriority) );
 	}
 
 	Version poppedVer = poppedVersion(logData, req.tag);
