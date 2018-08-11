@@ -556,6 +556,11 @@ namespace actorcompiler
                 bool constructorSyntax;
                 ParseDeclaration( toks.RevSkipWhile(t=>t.Value==";"), out name, out type, out initializer, out constructorSyntax );
 
+		string typestring = str(NormalizeWhitespace(type));
+		if (typestring == "Void") {
+		    throw new Error(ws.FirstSourceLine, "Assigning the result of a Void wait is not allowed.  Just use a standalone wait statement.");
+		} 
+
                 ws.result = new VarDeclaration
                 {
                     name = name.Value,

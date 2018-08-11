@@ -1322,7 +1322,7 @@ ACTOR Future<Void> runDBAgent(Database src, Database dest) {
 
 	loop {
 		try {
-			state Void run = wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(dest, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		}
 		catch (Error& e) {
@@ -1347,7 +1347,7 @@ ACTOR Future<Void> runAgent(Database db) {
 
 	loop {
 		try {
-			state Void run = wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
+			wait(backupAgent.run(db, &pollDelay, CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT));
 			break;
 		}
 		catch (Error& e) {

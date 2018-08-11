@@ -117,7 +117,7 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload
 		self->fileSize = 0;
 
 		//Create or open the file being used for testing
-		Void _  = wait(self->openFile(self, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, self->fileSize, true));
+		wait(self->openFile(self, IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_CREATE, 0666, self->fileSize, true));
 
 		return Void();
 	}

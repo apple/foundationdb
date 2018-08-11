@@ -96,7 +96,7 @@ struct IndexScanWorkload : KVWorkload {
 		state double start = now();
 		try {
 			loop {
-				Void _  = wait( scanDatabase( cx, self ) );
+				wait( scanDatabase( cx, self ) );
 			}
 		} catch( ... ) {
 			self->totalTimeFetching = now() - start;

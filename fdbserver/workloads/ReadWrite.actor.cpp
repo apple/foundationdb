@@ -520,7 +520,7 @@ struct ReadWriteWorkload : KVWorkload {
 		state UID debugID;
 
 		if (self->rampUpConcurrency) {
-			Void _  = wait( ::delay( self->testDuration/2 * (double(clientIndex) / self->actorCount + double(self->clientId) / self->clientCount / self->actorCount) ) );
+			wait( ::delay( self->testDuration/2 * (double(clientIndex) / self->actorCount + double(self->clientId) / self->clientCount / self->actorCount) ) );
 			TraceEvent("ClientStarting").detail("ActorIndex", clientIndex).detail("ClientIndex", self->clientId).detail("NumActors", clientIndex*self->clientCount + self->clientId + 1);
 		}
 

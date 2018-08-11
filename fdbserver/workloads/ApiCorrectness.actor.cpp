@@ -150,7 +150,7 @@ public:
 
 	ACTOR Future<Void> performTest(Database cx, Standalone<VectorRef<KeyValueRef>> data, ApiCorrectnessWorkload *self) {
 		//Run the scripted test for a maximum of 10 minutes
-		Void _scripted = wait(timeout(self->runScriptedTest(self, data), 600, Void()));
+		wait(timeout(self->runScriptedTest(self, data), 600, Void()));
 
 		if(!self->hasFailed()) {
 			//Return database to original state (for a maximum of 1800 seconds)
@@ -169,7 +169,7 @@ public:
 			}
 
 			//Run the random test for the user-specified duration
-			Void _random = wait(timeout(self->runRandomTest(self, data), self->randomTestDuration, Void()));
+			wait(timeout(self->runRandomTest(self, data), self->randomTestDuration, Void()));
 		}
 
 		return Void();
@@ -335,7 +335,7 @@ public:
 					break;
 				}
 				catch(Error &e) {
-					Void _  = wait(transaction->onError(e));
+					wait(transaction->onError(e));
 				}
 			}
 		}

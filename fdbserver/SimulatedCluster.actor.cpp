@@ -147,7 +147,7 @@ ACTOR Future<Void> runBackup( Reference<ClusterConnectionFile> connFile ) {
 		}
 	}
 
-	Void _= wait(Future<Void>(Never()));
+	wait(Future<Void>(Never()));
 	throw internal_error();
 }
 
@@ -188,7 +188,7 @@ ACTOR Future<Void> runDr( Reference<ClusterConnectionFile> connFile ) {
 		}
 	}
 
-	Void _= wait(Future<Void>(Never()));
+	wait(Future<Void>(Never()));
 	throw internal_error();
 }
 

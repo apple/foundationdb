@@ -170,7 +170,7 @@ ACTOR static Future<vector<pair<uint64_t, double> > > trackInsertionCount(Databa
 		{
 			state Future<Standalone<RangeResultRef>> countFuture = tr.getRange(keyPrefix, 1000000000);
 			state Future<Standalone<RangeResultRef>> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
-			Void __ = wait(success(countFuture) && success(bytesFuture));
+			wait(success(countFuture) && success(bytesFuture));
 
 			Standalone<RangeResultRef> counts = countFuture.get();
 			Standalone<RangeResultRef> bytes = bytesFuture.get();

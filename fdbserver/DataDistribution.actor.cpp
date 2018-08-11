@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "flow/ActorCollection.h"
 #include "DataDistribution.h"
 #include "fdbclient/SystemData.h"
@@ -32,6 +31,7 @@
 #include "fdbclient/ManagementAPI.h"
 #include "fdbrpc/Replication.h"
 #include "flow/UnitTest.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 class TCTeamInfo;
 
