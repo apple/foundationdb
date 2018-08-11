@@ -20,7 +20,6 @@
 
 
 #define SQLITE_THREADSAFE 0  // also in sqlite3.amalgamation.c!
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "IKeyValueStore.h"
 #include "CoroFlow.h"
 #include "Knobs.h"
@@ -33,6 +32,7 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 #include "flow/ThreadPrimitives.h"
 #include "template_fdb.h"
 #include "fdbrpc/simulator.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #if SQLITE_THREADSAFE == 0
 	#define sqlite3_mutex_enter(x)

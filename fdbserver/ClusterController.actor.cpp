@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "fdbrpc/FailureMonitor.h"
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
@@ -39,6 +38,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "flow/Util.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 void failAfter( Future<Void> trigger, Endpoint e );
 

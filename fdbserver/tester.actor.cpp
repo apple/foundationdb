@@ -19,7 +19,6 @@
  */
 
 #include <fstream>
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "flow/ActorCollection.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
@@ -36,6 +35,7 @@
 #include "fdbclient/FailureMonitorClient.h"
 #include "CoordinationInterface.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using namespace std;
 

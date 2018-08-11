@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
+#include <iostream>
+#include <algorithm>
 #include "flow/FastRef.h"
 #undef ERROR
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "simulator.h"
 #include "ActorFuzz.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/ThreadHelper.actor.h"
-#include <iostream>
-#include <algorithm>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 using std::cout;
 using std::endl;

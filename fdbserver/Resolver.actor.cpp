@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "flow/ActorCollection.h"
 #include "fdbclient/NativeAPI.h"
 #include "ResolverInterface.h"
@@ -31,6 +30,7 @@
 #include "ConflictSet.h"
 #include "StorageMetrics.h"
 #include "fdbclient/SystemData.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 namespace {
 struct ProxyRequestsInfo {

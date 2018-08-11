@@ -20,12 +20,12 @@
 
 // Unit tests for the flow language and libraries
 
-#include "flow/actorcompiler.h"  // This must be the last #include.
 #include "flow/UnitTest.h"
 #include "flow/DeterministicRandom.h"
 #include "flow/IThreadPool.h"
 #include "fdbrpc.h"
 #include "IAsyncFile.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 void forceLinkFlowTests() {}
 
