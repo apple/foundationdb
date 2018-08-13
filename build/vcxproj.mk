@@ -60,7 +60,7 @@ GENNAME: GENTARGET
 
 $(CMDDIR)/GENDIR/compile_commands.json: build/project_commands.py ${GENNAME()_ALL_SOURCES}
 	@mkdir -p $(basename $@)
-	@build/project_commands.py "$(CFLAGS) $(CXXFLAGS) $(GENNAME()_CFLAGS) $(GENNAME()_CXXFLAGS)" "$(GENNAME()_ALL_SOURCES)" "$@"
+	@build/project_commands.py --cflags="$(CFLAGS) $(GENNAME()_CFLAGS)" --cxxflags="$(CXXFLAGS) $(GENNAME()_CXXFLAGS)" --sources="$(GENNAME()_ALL_SOURCES)" --out="$@"
 
 -include $(GENNAME()_DEPS)
 

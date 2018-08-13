@@ -1,26 +1,39 @@
 #!/usr/bin/env python
 
-import sys
+import argparse
+import json
 import os
 import os.path
-import json
+import sys
 
-flags = sys.argv[1]
-all_files = sys.argv[2]
-outfile = sys.argv[3]
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--cflags', help="$(CFLAGS)")
+    parser.add_argument('--cxxflags', help="$(CXXFLAGS)")
+    parser.add_argument('--sources', help="All the source files")
+    parser.add_argument('--out', help="Output file name")
+    return parser.parse_args()
 
-cwd = os.getcwd()
+def main():
+    args = parse_args()
+    cwd = os.getcwd()
 
-commands = []
-for fname in all_files.split(' '):
-  d = {}
-  d["directory"] = cwd
-  if fname.endswith("cpp") or fname.endswith(".h"):
-    compiler = "clang++ -x c++ "
-  if fname.endswith("c"):
-    compiler = "clang -x c "
-  d["command"] = compiler + flags.replace('-DNO_INTELLISENSE', '').replace("/opt/boost", cwd+"/../boost") + "-c " + fname
-  d["file"] = fname
-  commands.append(d)
+    args.cflags = args.cflags.replace('-DNO_INTELLISENSE', '').replace("/opt/boost", cwd+"/../boost")
 
-json.dump(commands, open(outfile, "w"))
+    commands = []
+    for fname in args.sources.split(' '):
+      d = {}
+      d["directory"] = cwd
+      compiler = ""
+      if fname.endswith("cpp") or fname.endswith(".h"):
+        compiler = "clang++ -x c++ " + args.cflags + args.cxxflags
+      if fname.endswith("c"):
+        compiler = "clang -x c " + args.cflags
+      d["command"] = compiler
+      d["file"] = fname
+      commands.append(d)
+
+    json.dump(commands, open(args.out, "w"))
+
+if __name__ == '__main__':
+    main()
