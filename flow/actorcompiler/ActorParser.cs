@@ -494,10 +494,10 @@ namespace actorcompiler
         {
             var expr = toks.Consume("when")
                            .SkipWhile(Whitespace)
-			   .First()
+                           .First()
                            .Assert("Expected (", t => t.Value == "(")
                            .GetMatchingRangeIn(toks)
-			   .SkipWhile(Whitespace);
+                           .SkipWhile(Whitespace);
 
             return new WhenStatement {
                 wait = ParseWaitStatement(expr),
@@ -540,26 +540,26 @@ namespace actorcompiler
                 ws.resultIsState = true;
                 toks = toks.Consume("state");
             }
-	    TokenRange initializer;
-	    if (toks.First().Value == "wait" || toks.First().Value == "waitNext")
-	    {
-		initializer = toks.RevSkipWhile(t=>t.Value==";");
-		ws.result = new VarDeclaration {
-			name = "_",
-			type = "Void",
-			initializer = "",
-			initializerConstructorSyntax = false
-		};
-	    } else {
+            TokenRange initializer;
+            if (toks.First().Value == "wait" || toks.First().Value == "waitNext")
+            {
+                initializer = toks.RevSkipWhile(t=>t.Value==";");
+                ws.result = new VarDeclaration {
+                        name = "_",
+                        type = "Void",
+                        initializer = "",
+                        initializerConstructorSyntax = false
+                };
+            } else {
                 Token name;
                 TokenRange type;
                 bool constructorSyntax;
                 ParseDeclaration( toks.RevSkipWhile(t=>t.Value==";"), out name, out type, out initializer, out constructorSyntax );
 
-		string typestring = str(NormalizeWhitespace(type));
-		if (typestring == "Void") {
-		    throw new Error(ws.FirstSourceLine, "Assigning the result of a Void wait is not allowed.  Just use a standalone wait statement.");
-		} 
+                string typestring = str(NormalizeWhitespace(type));
+                if (typestring == "Void") {
+                    throw new Error(ws.FirstSourceLine, "Assigning the result of a Void wait is not allowed.  Just use a standalone wait statement.");
+                }
 
                 ws.result = new VarDeclaration
                 {
@@ -568,9 +568,9 @@ namespace actorcompiler
                     initializer = "",
                     initializerConstructorSyntax = false
                 };
-	    }
+            }
 
-	    if (initializer == null) throw new Error(ws.FirstSourceLine, "Wait statement must be a declaration or standalone statement");
+            if (initializer == null) throw new Error(ws.FirstSourceLine, "Wait statement must be a declaration or standalone statement");
 
             var waitParams = initializer
                 .SkipWhile(Whitespace).Consume("Statement contains a wait, but is not a valid wait statement or a supported compound statement.1", 
@@ -583,7 +583,7 @@ namespace actorcompiler
                 .GetMatchingRangeIn(initializer);
             if (!range(waitParams.End, initializer.End).Consume(")").All(Whitespace)) {
                 throw new Error(toks.First().SourceLine, "Statement contains a wait, but is not a valid wait statement or a supported compound statement.2");
-	    }
+            }
 
             ws.futureExpression = str(NormalizeWhitespace(waitParams));
             return ws;
