@@ -110,22 +110,12 @@ struct LeaderInfo {
 
 	// All but the first 7 bits are used to represent process id
 	bool equalInternalId(LeaderInfo const& leaderInfo) const {
-		if ( (changeID.first() & mask) == (leaderInfo.changeID.first() & mask) && changeID.second() == leaderInfo.changeID.second() ) {
-			return true;
-		} else {
-			return false;
-		}
+		return ((changeID.first() & mask) == (leaderInfo.changeID.first() & mask)) && changeID.second() == leaderInfo.changeID.second();
 	}
 
-	// Change leader only if 
-	// 1. the candidate has better process class fitness and the candidate is not the leader
-	// 2. the leader process class fitness become worse
+	// Change leader only if the candidate has better process class fitness
 	bool leaderChangeRequired(LeaderInfo const& candidate) const {
-		if ( ((changeID.first() & ~mask) > (candidate.changeID.first() & ~mask) && !equalInternalId(candidate)) || ((changeID.first() & ~mask) < (candidate.changeID.first() & ~mask) && equalInternalId(candidate)) ) {
-			return true;
-		} else {
-			return false;
-		}
+		return (changeID.first() & ~mask) > (candidate.changeID.first() & ~mask);
 	}
 
 	template <class Ar>
