@@ -2231,7 +2231,7 @@ ACTOR Future<Void> dataDistribution(
 					// DataDistributionQueue to track it, but it's easier to just (with low priority) schedule it for movement.
 					output.send( RelocateShard( keys, PRIORITY_RECOVER_MOVE ) );
 				}
-				Void _ = wait( yield(TaskDataDistribution) );
+				wait( yield(TaskDataDistribution) );
 			}
 
 			vector<TeamCollectionInterface> tcis;
