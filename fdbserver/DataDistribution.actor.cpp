@@ -2254,7 +2254,6 @@ ACTOR Future<Void> dataDistribution(
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
 
-			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 			actors.push_back( pollMoveKeysLock(cx, lock) );
 			actors.push_back( reportErrorsExcept( dataDistributionTracker( initData, cx, output, shardsAffectedByTeamFailure, getShardMetrics, getAverageShardBytes.getFuture(), readyToStart, anyZeroHealthyTeams, mi.id() ), "DDTracker", mi.id(), &normalDDQueueErrors() ) );
 			actors.push_back( reportErrorsExcept( dataDistributionQueue( cx, output, input.getFuture(), getShardMetrics, processingUnhealthy, tcis, shardsAffectedByTeamFailure, lock, getAverageShardBytes, mi, storageTeamSize, lastLimited, recoveryCommitVersion ), "DDQueue", mi.id(), &normalDDQueueErrors() ) );
@@ -2262,6 +2261,7 @@ ACTOR Future<Void> dataDistribution(
 			if (configuration.usableRegions > 1) {
 				actors.push_back( reportErrorsExcept( dataDistributionTeamCollection( initData, tcis[1], cx, db, shardsAffectedByTeamFailure, lock, output, mi.id(), configuration, remoteDcIds, Optional<std::vector<Optional<Key>>>(), Optional<PromiseStream< std::pair<UID, Optional<StorageServerInterface>> >>(), readyToStart.getFuture() && remoteRecovered, zeroHealthyTeams[1], false, processingUnhealthy ), "DDTeamCollectionSecondary", mi.id(), &normalDDQueueErrors() ) );
 			}
+			actors.push_back(yieldPromiseStream(output.getFuture(), input));
 
 			Void _ = wait( waitForAll( actors ) );
 			return Void();
