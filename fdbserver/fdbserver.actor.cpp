@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "flow/DeterministicRandom.h"
 #include "fdbrpc/PerfMetric.h"
@@ -73,6 +72,7 @@
 #endif
 
 #include "flow/SimpleOpt.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 enum {
 	OPT_CONNFILE, OPT_SEEDCONNFILE, OPT_SEEDCONNSTRING, OPT_ROLE, OPT_LISTEN, OPT_PUBLICADDR, OPT_DATAFOLDER, OPT_LOGFOLDER, OPT_PARENTPID, OPT_NEWCONSOLE, OPT_NOBOX, OPT_TESTFILE, OPT_RESTARTING, OPT_RANDOMSEED, OPT_KEY, OPT_MEMLIMIT, OPT_STORAGEMEMLIMIT, OPT_MACHINEID, OPT_DCID, OPT_MACHINE_CLASS, OPT_BUGGIFY, OPT_VERSION, OPT_CRASHONERROR, OPT_HELP, OPT_NETWORKIMPL, OPT_NOBUFSTDOUT, OPT_BUFSTDOUTERR, OPT_TRACECLOCK, OPT_NUMTESTERS, OPT_DEVHELP, OPT_ROLLSIZE, OPT_MAXLOGS, OPT_MAXLOGSSIZE, OPT_KNOB, OPT_TESTSERVERS, OPT_TEST_ON_SERVERS, OPT_METRICSCONNFILE, OPT_METRICSPREFIX,
@@ -288,7 +288,7 @@ auto sortByTime = [](DebugEntryRef const& a, DebugEntryRef const& b) { return a.
 		replies[w] = timeoutError(workers[w].debugQuery.getReply( req ), 5.0);
 	}
 	//state vector<Standalone<VectorRef<DebugEntryRef>>> result = wait( getAll( replies ) );
-	Void _ = wait(waitForAllReady( replies ));
+	wait(waitForAllReady( replies ));
 	state vector<Standalone<VectorRef<DebugEntryRef>>> result( workers.size() );
 	for(int r=0; r<result.size(); r++) {
 		if (replies[r].isError())
@@ -417,7 +417,7 @@ UID getSharedMemoryMachineId() {
 
 
 ACTOR void failAfter( Future<Void> trigger, ISimulator::ProcessInfo* m = g_simulator.getCurrentProcess() ) {
-	Void _ = wait( trigger );
+	wait( trigger );
 	if (enableFailures) {
 		printf("Killing machine: %s at %f\n", m->address.toString().c_str(), now());
 		g_simulator.killProcess( m, ISimulator::KillInstantly );
@@ -536,7 +536,7 @@ ACTOR Future<Void> dumpDatabase( Database cx, std::string outputFilename, KeyRan
 				return Void();
 			} catch (Error& e) {
 				fclose(output);
-				Void _ = wait( tr.onError(e) );
+				wait( tr.onError(e) );
 			}
 		}
 	} catch (Error& e) {

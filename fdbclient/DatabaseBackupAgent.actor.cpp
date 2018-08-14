@@ -110,7 +110,7 @@ namespace dbBackup {
 		uint32_t taskVersion = task->getVersion();
 		if (taskVersion > version) {
 			TraceEvent(SevError, "BA_BackupRangeTaskFuncExecute").detail("TaskVersion", taskVersion).detail("Name", printable(name)).detail("Version", version);
-			Void _ = wait(logError(tr, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]),
+			wait(logError(tr, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]),
 				format("ERROR: %s task version `%lu' is greater than supported version `%lu'", task->params[Task::reservedTaskParamKeyType].toString().c_str(), (unsigned long)taskVersion, (unsigned long)version)));
 
 			throw task_invalid_version();
@@ -162,7 +162,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -170,7 +170,7 @@ namespace dbBackup {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 			state Subspace conf = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(task->params[BackupAgentBase::keyConfigLogUid]);
 
-			Void _ = wait(checkTaskVersion(cx, task, BackupRangeTaskFunc::name, BackupRangeTaskFunc::version));
+			wait(checkTaskVersion(cx, task, BackupRangeTaskFunc::name, BackupRangeTaskFunc::version));
 			// Find out if there is a shard boundary in(beginKey, endKey)
 			Standalone<VectorRef<KeyRef>> keys = wait(runRYWTransaction(taskBucket->src, [=](Reference<ReadYourWritesTransaction> tr){ return getBlockOfShards(tr, task->params[DatabaseBackupAgent::keyBeginKey], task->params[DatabaseBackupAgent::keyEndKey], CLIENT_KNOBS->BACKUP_SHARD_TASK_LIMIT); }));
 			if (keys.size() > 0) {
@@ -239,7 +239,7 @@ namespace dbBackup {
 								return Void();
 							}
 
-							Void _ = wait(logError(cx, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]), format("ERROR: %s", err.what())));
+							wait(logError(cx, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]), format("ERROR: %s", err.what())));
 
 							throw err;
 						}
@@ -270,8 +270,8 @@ namespace dbBackup {
 						state Future<Standalone<RangeResultRef>> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)), firstGreaterOrEqual(strinc(prefix)), 1, true, false);
 						state Future<Void> verified = taskBucket->keepRunning(tr, task);
 
-						Void _ = wait( checkDatabaseLock(tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())) );
-						Void _ = wait( success(backupVersions) && success(logVersionValue) && success(rangeCountValue) && success(prevRange) && success(nextRange) && success(verified) );
+						wait( checkDatabaseLock(tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())) );
+						wait( success(backupVersions) && success(logVersionValue) && success(rangeCountValue) && success(prevRange) && success(nextRange) && success(verified) );
 
 						int64_t rangeCount = 0;
 						if(rangeCountValue.get().present()) {
@@ -288,7 +288,7 @@ namespace dbBackup {
 							if(rangeCount > CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT)
 								TraceEvent(SevWarnAlways, "DBA_KeyRangeMapTooLarge");
 
-							Void _ = wait( delay(1) );
+							wait( delay(1) );
 							task->params[BackupRangeTaskFunc::keyBackupRangeBeginKey] = rangeBegin;
 							return Void();
 						}
@@ -343,9 +343,9 @@ namespace dbBackup {
 							versionLoc++;
 						}
 
-						Void _ = wait(waitForAll(setRanges));
+						wait(waitForAll(setRanges));
 
-						Void _ = wait(tr->commit());
+						wait(tr->commit());
 						Params.bytesWritten().set(task, Params.bytesWritten().getOrDefault(task) + bytesSet);
 						//TraceEvent("DBA_SetComplete", debugID).detail("Ver", values.second).detail("LogVersion", logVersion).detail("ReadVersion", readVer).detail("CommitVer", tr.getCommittedVersion()).detail("Range", printable(versionRange));
 
@@ -358,7 +358,7 @@ namespace dbBackup {
 						}
 					}
 					catch (Error &e) {
-						Void _ = wait(tr->onError(e));
+						wait(tr->onError(e));
 						valueLoc = committedValueLoc;
 					}
 				}
@@ -384,7 +384,7 @@ namespace dbBackup {
 				addTaskVector.push_back(addTask(tr, taskBucket, task, nextKey, task->params[BackupAgentBase::keyEndKey], TaskCompletionKey::joinWith(onDone)));
 			}
 
-			Void _ = wait(waitForAll(addTaskVector));
+			wait(waitForAll(addTaskVector));
 
 			return Void();
 		}
@@ -398,14 +398,14 @@ namespace dbBackup {
 			config.rangeBytesWritten().atomicOp(tr, bytesWritten, MutationRef::AddValue);
 
 			if (task->params.find(BackupRangeTaskFunc::keyAddBackupRangeTasks) != task->params.end()) {
-				Void _ = wait(startBackupRangeInternal(tr, BinaryReader::fromStringRef<Standalone<VectorRef<KeyRef>>>(task->params[BackupRangeTaskFunc::keyAddBackupRangeTasks], IncludeVersion()), taskBucket, futureBucket, task, taskFuture) && taskBucket->finish(tr, task));
+				wait(startBackupRangeInternal(tr, BinaryReader::fromStringRef<Standalone<VectorRef<KeyRef>>>(task->params[BackupRangeTaskFunc::keyAddBackupRangeTasks], IncludeVersion()), taskBucket, futureBucket, task, taskFuture) && taskBucket->finish(tr, task));
 			}
 			else if (task->params.find(BackupRangeTaskFunc::keyBackupRangeBeginKey) != task->params.end() && task->params[BackupRangeTaskFunc::keyBackupRangeBeginKey] < task->params[BackupAgentBase::keyEndKey]) {
 				ASSERT(taskFuture->key.size() > 0);
-				Void _ = wait(success(BackupRangeTaskFunc::addTask(tr, taskBucket, task, task->params[BackupRangeTaskFunc::keyBackupRangeBeginKey], task->params[BackupAgentBase::keyEndKey], TaskCompletionKey::signal(taskFuture->key))) && taskBucket->finish(tr, task));
+				wait(success(BackupRangeTaskFunc::addTask(tr, taskBucket, task, task->params[BackupRangeTaskFunc::keyBackupRangeBeginKey], task->params[BackupAgentBase::keyEndKey], TaskCompletionKey::signal(taskFuture->key))) && taskBucket->finish(tr, task));
 			}
 			else {
-				Void _ = wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
+				wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 			}
 
 			return Void();
@@ -424,7 +424,7 @@ namespace dbBackup {
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace states = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
-			Void _ = wait(checkTaskVersion(tr, task, FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version));
+			wait(checkTaskVersion(tr, task, FinishFullBackupTaskFunc::name, FinishFullBackupTaskFunc::version));
 
 			// Enable the stop key
 			Transaction srcTr(taskBucket->src);
@@ -432,7 +432,7 @@ namespace dbBackup {
 			Version readVersion = wait(srcTr.getReadVersion());
 			tr->set(states.pack(DatabaseBackupAgent::keyCopyStop), BinaryWriter::toValue(readVersion, Unversioned()));
 			TraceEvent("DBA_FinishFullBackup").detail("CopyStop", readVersion);
-			Void _ = wait(taskBucket->finish(tr, task));
+			wait(taskBucket->finish(tr, task));
 
 			return Void();
 		}
@@ -448,7 +448,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -474,11 +474,11 @@ namespace dbBackup {
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state FlowLock lock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 
-			Void _ = wait(checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version));
+			wait(checkTaskVersion(cx, task, EraseLogRangeTaskFunc::name, EraseLogRangeTaskFunc::version));
 
 			Version endVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyEndVersion], Unversioned());
 
-			Void _ = wait(eraseLogData(taskBucket->src, task->params[BackupAgentBase::keyConfigLogUid], task->params[BackupAgentBase::destUid], Optional<Version>(endVersion), true, BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned())));
+			wait(eraseLogData(taskBucket->src, task->params[BackupAgentBase::keyConfigLogUid], task->params[BackupAgentBase::destUid], Optional<Version>(endVersion), true, BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned())));
 
 			return Void();
 		}
@@ -496,7 +496,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -504,7 +504,7 @@ namespace dbBackup {
 
 			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
-			Void _ = wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
+			wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 			return Void();
 		}
 	};
@@ -579,7 +579,7 @@ namespace dbBackup {
 						try {
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 							tr.options.customTransactionSizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-							Void _ = wait(checkDatabaseLock(&tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
+							wait(checkDatabaseLock(&tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
 							state int64_t bytesSet = 0;
 
 							bool first = true;
@@ -594,12 +594,12 @@ namespace dbBackup {
 								}
 							}
 
-							Void _ = wait(tr.commit());
+							wait(tr.commit());
 							Params.bytesWritten().set(task, Params.bytesWritten().getOrDefault(task) + bytesSet);
 							break;
 						}
 						catch (Error &e) {
-							Void _ = wait(tr.onError(e));
+							wait(tr.onError(e));
 						}
 					}
 				}
@@ -608,7 +608,7 @@ namespace dbBackup {
 						throw e;
 
 					state Error err = e;
-					Void _ = wait(logError(cx, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]), format("ERROR: Failed to dump mutations because of error %s", err.what())));
+					wait(logError(cx, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]), format("ERROR: Failed to dump mutations because of error %s", err.what())));
 
 					throw err;
 				}
@@ -618,7 +618,7 @@ namespace dbBackup {
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 
-			Void _ = wait(checkTaskVersion(cx, task, CopyLogRangeTaskFunc::name, CopyLogRangeTaskFunc::version));
+			wait(checkTaskVersion(cx, task, CopyLogRangeTaskFunc::name, CopyLogRangeTaskFunc::version));
 
 			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
 			state Version endVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyEndVersion], Unversioned());
@@ -635,7 +635,7 @@ namespace dbBackup {
 				dump.push_back(dumpData(cx, task, results[i], lock.getPtr(), taskBucket));
 			}
 
-			Void _ = wait(waitForAll(dump));
+			wait(waitForAll(dump));
 
 			if (newEndVersion < endVersion) {
 				task->params[CopyLogRangeTaskFunc::keyNextBeginVersion] = BinaryWriter::toValue(newEndVersion, Unversioned());
@@ -657,7 +657,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -674,11 +674,11 @@ namespace dbBackup {
 
 			if (task->params.find(CopyLogRangeTaskFunc::keyNextBeginVersion) != task->params.end()) {
 				state Version nextVersion = BinaryReader::fromStringRef<Version>(task->params[CopyLogRangeTaskFunc::keyNextBeginVersion], Unversioned());
-				Void _ = wait(success(CopyLogRangeTaskFunc::addTask(tr, taskBucket, task, nextVersion, endVersion, TaskCompletionKey::signal(taskFuture->key))) &&
+				wait(success(CopyLogRangeTaskFunc::addTask(tr, taskBucket, task, nextVersion, endVersion, TaskCompletionKey::signal(taskFuture->key))) &&
 					          taskBucket->finish(tr, task));
 			}
 			else {
-				Void _ = wait(taskFuture->set(tr, taskBucket) &&
+				wait(taskFuture->set(tr, taskBucket) &&
 					         taskBucket->finish(tr, task));
 			}
 
@@ -697,7 +697,7 @@ namespace dbBackup {
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace conf = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			state Subspace states = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
-			Void _ = wait(checkTaskVersion(tr, task, CopyLogsTaskFunc::name, CopyLogsTaskFunc::version));
+			wait(checkTaskVersion(tr, task, CopyLogsTaskFunc::name, CopyLogsTaskFunc::version));
 
 			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
 			state Version prevBeginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyPrevBeginVersion], Unversioned());
@@ -711,9 +711,9 @@ namespace dbBackup {
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 			if (endVersion <= beginVersion) {
-				Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				Key _ = wait(CopyLogsTaskFunc::addTask(tr, taskBucket, task, prevBeginVersion, beginVersion, TaskCompletionKey::signal(onDone)));
-				Void _ = wait(taskBucket->finish(tr, task));
+				wait(taskBucket->finish(tr, task));
 				return Void();
 			}
 
@@ -751,16 +751,16 @@ namespace dbBackup {
 					addTaskVector.push_back(EraseLogRangeTaskFunc::addTask(tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(allPartsDone)));
 				}
 
-				Void _ = wait(waitForAll(addTaskVector) && taskBucket->finish(tr, task));
+				wait(waitForAll(addTaskVector) && taskBucket->finish(tr, task));
 			} else {
 				if(appliedVersion <= stopVersionData) {
-					Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+					wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					Key _ = wait(CopyLogsTaskFunc::addTask(tr, taskBucket, task, prevBeginVersion, beginVersion, TaskCompletionKey::signal(onDone)));
-					Void _ = wait(taskBucket->finish(tr, task));
+					wait(taskBucket->finish(tr, task));
 					return Void();
 				}
 
-				Void _ = wait(onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
+				wait(onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
 				tr->set(states.pack(DatabaseBackupAgent::keyStateStop), BinaryWriter::toValue(beginVersion, Unversioned()));
 			}
 
@@ -779,7 +779,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -802,7 +802,7 @@ namespace dbBackup {
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
 
-			Void _ = wait(checkTaskVersion(cx, task, FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version));
+			wait(checkTaskVersion(cx, task, FinishedFullBackupTaskFunc::name, FinishedFullBackupTaskFunc::version));
 
 			state Transaction tr2(cx);
 			loop {
@@ -815,13 +815,13 @@ namespace dbBackup {
 
 					//TraceEvent("DBA_FinishedFullBackup").detail("Applied", appliedVersion).detail("EndVer", endVersion);
 					if(appliedVersion < endVersion) {
-						Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+						wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 						task->params[FinishedFullBackupTaskFunc::keyInsertTask] = StringRef();
 						return Void();
 					}
 					break;
 				} catch( Error &e ) {
-					Void _ = wait(tr2.onError(e));
+					wait(tr2.onError(e));
 				}
 			}
 
@@ -850,12 +850,12 @@ namespace dbBackup {
 					endVersion = tr->getReadVersion().get();
 					break;
 				} catch(Error &e) {
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 
 			Version backupUid = BinaryReader::fromStringRef<Version>(task->params[BackupAgentBase::keyFolderId], Unversioned());
-			Void _ = wait(eraseLogData(taskBucket->src, logUidValue, destUidValue, Optional<Version>(), true, backupUid));
+			wait(eraseLogData(taskBucket->src, logUidValue, destUidValue, Optional<Version>(), true, backupUid));
 
 			return Void();
 		}
@@ -870,7 +870,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -881,7 +881,7 @@ namespace dbBackup {
 			if (task->params.find(FinishedFullBackupTaskFunc::keyInsertTask) != task->params.end()) {
 				state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 				Key _ = wait(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::signal(onDone)));
-				Void _ = wait(taskBucket->finish(tr, task));
+				wait(taskBucket->finish(tr, task));
 				return Void();
 			}
 
@@ -893,7 +893,7 @@ namespace dbBackup {
 			tr->clear(conf.range());
 			tr->set(states.pack(DatabaseBackupAgent::keyStateStatus), StringRef(BackupAgentBase::getStateText(BackupAgentBase::STATE_COMPLETED)));
 
-			Void _ = wait(taskBucket->finish(tr, task));
+			wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
@@ -912,7 +912,7 @@ namespace dbBackup {
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace conf = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			state Subspace states = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
-			Void _ = wait(checkTaskVersion(tr, task, CopyDiffLogsTaskFunc::name, CopyDiffLogsTaskFunc::version));
+			wait(checkTaskVersion(tr, task, CopyDiffLogsTaskFunc::name, CopyDiffLogsTaskFunc::version));
 
 			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
 			state Version prevBeginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyPrevBeginVersion], Unversioned());
@@ -925,9 +925,9 @@ namespace dbBackup {
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 			if (endVersion <= beginVersion) {
-				Void _ = wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				Key _ = wait(CopyDiffLogsTaskFunc::addTask(tr, taskBucket, task, prevBeginVersion, beginVersion, TaskCompletionKey::signal(onDone)));
-				Void _ = wait(taskBucket->finish(tr, task));
+				wait(taskBucket->finish(tr, task));
 				return Void();
 			}
 
@@ -954,9 +954,9 @@ namespace dbBackup {
 					addTaskVector.push_back(EraseLogRangeTaskFunc::addTask(tr, taskBucket, task, beginVersion, TaskCompletionKey::joinWith(allPartsDone)));
 				}
 
-				Void _ = wait(waitForAll(addTaskVector) && taskBucket->finish(tr, task));
+				wait(waitForAll(addTaskVector) && taskBucket->finish(tr, task));
 			} else {
-				Void _ = wait(onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
+				wait(onDone->set(tr, taskBucket) && taskBucket->finish(tr, task));
 			}
 			return Void();
 		}
@@ -974,7 +974,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -994,7 +994,7 @@ namespace dbBackup {
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Reference<TaskFuture> taskFuture = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
-			Void _ = wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
+			wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 			return Void();
 		}
 
@@ -1076,7 +1076,7 @@ namespace dbBackup {
 						try {
 							tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 							tr.options.customTransactionSizeLimit = 2 * CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
-							Void _ = wait(checkDatabaseLock(&tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
+							wait(checkDatabaseLock(&tr, BinaryReader::fromStringRef<UID>(task->params[BackupAgentBase::keyConfigLogUid], Unversioned())));
 							state int64_t bytesSet = 0;
 
 							bool first = true;
@@ -1091,12 +1091,12 @@ namespace dbBackup {
 								}
 							}
 
-							Void _ = wait(tr.commit());
+							wait(tr.commit());
 							Params.bytesWritten().set(task, Params.bytesWritten().getOrDefault(task) + bytesSet);
 							break;
 						}
 						catch (Error &e) {
-							Void _ = wait(tr.onError(e));
+							wait(tr.onError(e));
 						}
 					}
 				}
@@ -1105,7 +1105,7 @@ namespace dbBackup {
 						throw e;
 
 					state Error err = e;
-					Void _ = wait(logError(cx, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]), format("ERROR: Failed to dump mutations because of error %s", err.what())));
+					wait(logError(cx, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyErrors).pack(task->params[BackupAgentBase::keyConfigLogUid]), format("ERROR: Failed to dump mutations because of error %s", err.what())));
 
 					throw err;
 				}
@@ -1115,7 +1115,7 @@ namespace dbBackup {
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Reference<FlowLock> lock(new FlowLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES));
 
-			Void _ = wait(checkTaskVersion(cx, task, OldCopyLogRangeTaskFunc::name, OldCopyLogRangeTaskFunc::version));
+			wait(checkTaskVersion(cx, task, OldCopyLogRangeTaskFunc::name, OldCopyLogRangeTaskFunc::version));
 
 			state Version beginVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyBeginVersion], Unversioned());
 			state Version endVersion = BinaryReader::fromStringRef<Version>(task->params[DatabaseBackupAgent::keyEndVersion], Unversioned());
@@ -1132,7 +1132,7 @@ namespace dbBackup {
 				dump.push_back(dumpData(cx, task, results[i], lock.getPtr(), taskBucket));
 			}
 
-			Void _ = wait(waitForAll(dump));
+			wait(waitForAll(dump));
 
 			if (newEndVersion < endVersion) {
 				task->params[OldCopyLogRangeTaskFunc::keyNextBeginVersion] = BinaryWriter::toValue(newEndVersion, Unversioned());
@@ -1154,7 +1154,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1171,10 +1171,10 @@ namespace dbBackup {
 
 			if (task->params.find(OldCopyLogRangeTaskFunc::keyNextBeginVersion) != task->params.end()) {
 				state Version nextVersion = BinaryReader::fromStringRef<Version>(task->params[OldCopyLogRangeTaskFunc::keyNextBeginVersion], Unversioned());
-				Void _ = wait(success(OldCopyLogRangeTaskFunc::addTask(tr, taskBucket, task, nextVersion, endVersion, TaskCompletionKey::signal(taskFuture->key))) && taskBucket->finish(tr, task));
+				wait(success(OldCopyLogRangeTaskFunc::addTask(tr, taskBucket, task, nextVersion, endVersion, TaskCompletionKey::signal(taskFuture->key))) && taskBucket->finish(tr, task));
 			}
 			else {
-				Void _ = wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
+				wait(taskFuture->set(tr, taskBucket) && taskBucket->finish(tr, task));
 			}
 
 			return Void();
@@ -1207,18 +1207,18 @@ namespace dbBackup {
 					tagNameKey = tagName.get();
 					break;
 				} catch (Error &e) {
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 			
 			TraceEvent("DBA_AbortOldBackup").detail("TagName", tagNameKey.printable());
-			Void _ = wait(srcDrAgent.abortBackup(cx, tagNameKey, false, true));
+			wait(srcDrAgent.abortBackup(cx, tagNameKey, false, true));
 
 			return Void();
 		}
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(taskBucket->finish(tr, task));
+			wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
@@ -1232,7 +1232,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1260,7 +1260,7 @@ namespace dbBackup {
 			state Key logUidValue = task->params[DatabaseBackupAgent::keyConfigLogUid];
 			state Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
 			state Subspace config = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(logUidValue);
-			Void _ = wait(checkTaskVersion(cx, task, CopyDiffLogsUpgradeTaskFunc::name, CopyDiffLogsUpgradeTaskFunc::version));
+			wait(checkTaskVersion(cx, task, CopyDiffLogsUpgradeTaskFunc::name, CopyDiffLogsUpgradeTaskFunc::version));
 
 			// Retrieve backupRanges
 			state Standalone<VectorRef<KeyRangeRef>> backupRanges;
@@ -1270,7 +1270,7 @@ namespace dbBackup {
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					Future<Void> verified = taskBucket->keepRunning(tr, task);
-					Void _ = wait(verified);
+					wait(verified);
 
 					Optional<Key> backupKeysPacked = wait(tr->get(config.pack(BackupAgentBase::keyConfigBackupRanges)));
 					if (!backupKeysPacked.present()) {
@@ -1281,7 +1281,7 @@ namespace dbBackup {
 					br >> backupRanges;
 					break;
 				} catch(Error &e) {
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 
@@ -1316,10 +1316,10 @@ namespace dbBackup {
 
 					Key versionKey = logUidValue.withPrefix(destUidValue).withPrefix(backupLatestVersionsPrefix);
 					srcTr->set(versionKey, task->params[DatabaseBackupAgent::keyBeginVersion]);
-					Void _ = wait(srcTr->commit());
+					wait(srcTr->commit());
 					break;
 				} catch(Error &e) {
-					Void _ = wait(srcTr->onError(e));
+					wait(srcTr->onError(e));
 				}
 			}
 
@@ -1331,7 +1331,7 @@ namespace dbBackup {
 
 
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
-			Void _ = wait(checkTaskVersion(tr, task, CopyDiffLogsUpgradeTaskFunc::name, CopyDiffLogsUpgradeTaskFunc::version));
+			wait(checkTaskVersion(tr, task, CopyDiffLogsUpgradeTaskFunc::name, CopyDiffLogsUpgradeTaskFunc::version));
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 			if (task->params[BackupAgentBase::destUid].size() == 0) {
@@ -1345,7 +1345,7 @@ namespace dbBackup {
 				Key _ = wait(CopyDiffLogsTaskFunc::addTask(tr, taskBucket, task, 0, beginVersion, TaskCompletionKey::signal(onDone)));
 			}
 
-			Void _ = wait(taskBucket->finish(tr, task));
+			wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
@@ -1364,7 +1364,7 @@ namespace dbBackup {
 
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
-			Void _ = wait(checkTaskVersion(cx, task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
+			wait(checkTaskVersion(cx, task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
 			state Transaction tr(taskBucket->src);
 			loop{
 				try {
@@ -1380,11 +1380,11 @@ namespace dbBackup {
 
 					task->params[DatabaseBackupAgent::keyPrevBeginVersion] = prevBeginVersion.get();
 
-					Void _ = wait(tr.commit());
+					wait(tr.commit());
 					return Void();
 				}
 				catch (Error &e) {
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 			}
 		}
@@ -1392,7 +1392,7 @@ namespace dbBackup {
 		ACTOR static Future<Void> _finish(Reference<ReadYourWritesTransaction> tr, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Subspace conf = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(task->params[BackupAgentBase::keyConfigLogUid]);
 			state Subspace states = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyStates).get(task->params[BackupAgentBase::keyConfigLogUid]);
-			Void _ = wait(checkTaskVersion(tr, task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
+			wait(checkTaskVersion(tr, task, BackupRestorableTaskFunc::name, BackupRestorableTaskFunc::version));
 
 			state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
@@ -1423,7 +1423,7 @@ namespace dbBackup {
 				Key _ = wait(FinishedFullBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), allPartsDone));
 			}
 
-			Void _ = wait(taskBucket->finish(tr, task));
+			wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
@@ -1437,7 +1437,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, parentTask->params[Task::reservedTaskParamValidKey], task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1457,7 +1457,7 @@ namespace dbBackup {
 		ACTOR static Future<Void> _execute(Database cx, Reference<TaskBucket> taskBucket, Reference<FutureBucket> futureBucket, Reference<Task> task) {
 			state Key logUidValue = task->params[DatabaseBackupAgent::keyConfigLogUid];
 			state Subspace sourceStates = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
-			Void _ = wait(checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version));
+			wait(checkTaskVersion(cx, task, StartFullBackupTaskFunc::name, StartFullBackupTaskFunc::version));
 			state Key destUidValue(logUidValue);
 
 			state Standalone<VectorRef<KeyRangeRef>> backupRanges = BinaryReader::fromStringRef<Standalone<VectorRef<KeyRangeRef>>>(task->params[DatabaseBackupAgent::keyConfigBackupRanges], IncludeVersion());
@@ -1486,10 +1486,10 @@ namespace dbBackup {
 
 					task->params[BackupAgentBase::destUid] = destUidValue;
 
-					Void _ = wait(srcTr->commit());
+					wait(srcTr->commit());
 					break;
 				} catch(Error &e) {
-					Void _ = wait(srcTr->onError(e));
+					wait(srcTr->onError(e));
 				}
 			}
 
@@ -1499,7 +1499,7 @@ namespace dbBackup {
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					state Future<Void> verified = taskBucket->keepRunning(tr, task);
-					Void _ = wait(verified);
+					wait(verified);
 
 					// Set destUid at destination side
 					state Subspace config = Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(logUidValue);
@@ -1515,10 +1515,10 @@ namespace dbBackup {
 
 					task->params[BackupAgentBase::keyBeginVersion] = beginVersionKey;
 
-					Void _ = wait(tr->commit());
+					wait(tr->commit());
 					break;
 				} catch (Error &e) {
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 
@@ -1546,10 +1546,10 @@ namespace dbBackup {
 						srcTr2->set(logRangesEncodeKey(backupRange.begin, BinaryReader::fromStringRef<UID>(destUidValue, Unversioned())), logRangesEncodeValue(backupRange.end, destPath));
 					}
 
-					Void _ = wait(srcTr2->commit());
+					wait(srcTr2->commit());
 					break;
 				} catch (Error &e) {
-					Void _ = wait(srcTr2->onError(e));
+					wait(srcTr2->onError(e));
 				}
 			}
 
@@ -1590,7 +1590,7 @@ namespace dbBackup {
 			// After the Backup completes, clear the backup subspace and update the status
 			Key _ = wait(BackupRestorableTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal(), kvBackupComplete));
 
-			Void _ = wait(taskBucket->finish(tr, task));
+			wait(taskBucket->finish(tr, task));
 			return Void();
 		}
 
@@ -1611,7 +1611,7 @@ namespace dbBackup {
 				return taskBucket->addTask(tr, task, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(logUid).pack(BackupAgentBase::keyFolderId), task->params[BackupAgentBase::keyFolderId]);
 			}
 
-			Void _ = wait(waitFor->onSetAddTask(tr, taskBucket, task, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(logUid).pack(BackupAgentBase::keyFolderId), task->params[BackupAgentBase::keyFolderId]));
+			wait(waitFor->onSetAddTask(tr, taskBucket, task, Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keyConfig).get(logUid).pack(BackupAgentBase::keyFolderId), task->params[BackupAgentBase::keyFolderId]));
 			return LiteralStringRef("OnSetAddTask");
 		}
 
@@ -1650,11 +1650,11 @@ public:
 					}
 
 					state Future<Void> watchDrVersionFuture = tr->watch(drVersionKey);
-					Void _ = wait(tr->commit());
-					Void _ = wait(watchDrVersionFuture);
+					wait(tr->commit());
+					wait(watchDrVersionFuture);
 					break;
 				} catch (Error &e) {
-					Void _ = wait(tr->onError(e));
+					wait(tr->onError(e));
 				}
 			}
 		}
@@ -1685,11 +1685,11 @@ public:
 				}
 
 				state Future<Void> watchFuture = tr->watch(statusKey);
-				Void _ = wait(tr->commit());
-				Void _ = wait(watchFuture);
+				wait(tr->commit());
+				wait(watchFuture);
 			}
 			catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
@@ -1713,11 +1713,11 @@ public:
 				}
 
 				state Future<Void> watchFuture = tr->watch(statusKey);
-				Void _ = wait(tr->commit());
-				Void _ = wait(watchFuture);
+				wait(tr->commit());
+				wait(watchFuture);
 			}
 			catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
@@ -1768,7 +1768,7 @@ public:
 			for (auto& backupRange : backupRanges) {
 				backupIntoResults.push_back(tr->getRange(backupRange.removePrefix(removePrefix).withPrefix(addPrefix), 1));
 			}
-			Void _ = wait(waitForAll(backupIntoResults));
+			wait(waitForAll(backupIntoResults));
 			for (auto result : backupIntoResults) {
 				if (result.get().size() > 0) {
 					// One of the ranges we will be backing up into has pre-existing data.
@@ -1820,9 +1820,9 @@ public:
 			addPrefix, removePrefix, BinaryWriter::toValue(backupRanges, IncludeVersion()), tagName, TaskCompletionKey::noSignal(), Reference<TaskFuture>(), databasesInSync));
 
 		if (lockDB)
-			Void _ = wait(lockDatabase(tr, logUid));
+			wait(lockDatabase(tr, logUid));
 		else
-			Void _ = wait(checkDatabaseLock(tr, logUid));
+			wait(checkDatabaseLock(tr, logUid));
 
 		TraceEvent("DBA_Submit").detail("LogUid", logUid).detail("Lock", lockDB).detail("LogUID", printable(logUidValue)).detail("Tag", printable(tagName))
 			.detail("Key", printable(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId))).detail("MapPrefix", printable(mapPrefix));
@@ -1832,7 +1832,7 @@ public:
 
 	ACTOR static Future<Void> unlockBackup(DatabaseBackupAgent* backupAgent, Reference<ReadYourWritesTransaction> tr, Key tagName) {
 		UID logUid = wait(backupAgent->getLogUid(tr, tagName));
-		Void _ = wait(unlockDatabase(tr, logUid));
+		wait(unlockDatabase(tr, logUid));
 		TraceEvent("DBA_Unlock").detail("Tag", printable(tagName));
 		return Void();
 	}
@@ -1861,13 +1861,13 @@ public:
 		state Version commitVersion;
 		loop {
 			try {
-				Void _ = wait( lockDatabase(&tr, logUid) );
+				wait( lockDatabase(&tr, logUid) );
 				tr.set(backupAgent->tagNames.pack(tagName), logUidValue);
-				Void _ = wait(tr.commit());
+				wait(tr.commit());
 				commitVersion = tr.getCommittedVersion();
 				break;
 			} catch( Error &e ) {
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 
@@ -1889,18 +1889,18 @@ public:
 					break;
 
 				state Future<Void> versionWatch = tr2.watch(BinaryWriter::toValue(destlogUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin));
-				Void _ = wait(tr2.commit());
-				Void _ = wait(versionWatch);
+				wait(tr2.commit());
+				wait(versionWatch);
 				tr2.reset();
 			} catch( Error &e ) {
-				Void _ = wait(tr2.onError(e));
+				wait(tr2.onError(e));
 			}
 		}
 
 		TraceEvent("DBA_SwitchoverReady");
 
 		try {
-			Void _ = wait( backupAgent->discontinueBackup(dest, tagName) );
+			wait( backupAgent->discontinueBackup(dest, tagName) );
 		} catch( Error &e ) {
 			if( e.code() != error_code_backup_duplicate && e.code() != error_code_backup_unneeded )
 				throw;
@@ -1920,19 +1920,19 @@ public:
 				if (destVersion <= commitVersion) {
 					TEST(true);  // Forcing dest backup cluster to higher version
 					tr3.set(minRequiredCommitVersionKey, BinaryWriter::toValue(commitVersion+1, Unversioned()));
-					Void _ = wait(tr3.commit());
+					wait(tr3.commit());
 				} else {
 					break;
 				}
 			} catch( Error &e ) {
-				Void _ = wait(tr3.onError(e));
+				wait(tr3.onError(e));
 			}
 		}
 
 		TraceEvent("DBA_SwitchoverVersionUpgraded");
 
 		try {
-			Void _ = wait( drAgent.submitBackup(backupAgent->taskBucket->src, tagName, backupRanges, false, addPrefix, removePrefix, true, true) );
+			wait( drAgent.submitBackup(backupAgent->taskBucket->src, tagName, backupRanges, false, addPrefix, removePrefix, true, true) );
 		} catch( Error &e ) {
 			if( e.code() != error_code_backup_duplicate )
 				throw;
@@ -1944,7 +1944,7 @@ public:
 
 		TraceEvent("DBA_SwitchoverStarted");
 
-		Void _ = wait( backupAgent->unlockBackup(dest, tagName) );
+		wait( backupAgent->unlockBackup(dest, tagName) );
 
 		TraceEvent("DBA_SwitchoverUnlocked");
 
@@ -1992,7 +1992,7 @@ public:
 
 				state Future<int> statusFuture= backupAgent->getStateValue(tr, logUid);
 				state Future<UID> destUidFuture = backupAgent->getDestUid(tr, logUid);
-				Void _ = wait(success(statusFuture) && success(destUidFuture));
+				wait(success(statusFuture) && success(destUidFuture));
 
 				UID destUid = destUidFuture.get();
 				if (destUid.isValid()) {
@@ -2016,12 +2016,12 @@ public:
 
 				tr->set(StringRef(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyStateStatus)), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_PARTIALLY_ABORTED)));
 
-				Void _ = wait(tr->commit());
+				wait(tr->commit());
 				TraceEvent("DBA_Abort").detail("CommitVersion", tr->getCommittedVersion());
 				break;
 			}
 			catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 
@@ -2059,10 +2059,10 @@ public:
 						tr->addWriteConflictRange(singleKeyRange(minRequiredCommitVersionKey));
 					}
 				}
-				Void _ = wait(tr->commit());
+				wait(tr->commit());
 				break;
 			} catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 
@@ -2106,18 +2106,18 @@ public:
 				srcTr->set( backupAgent->sourceStates.pack(DatabaseBackupAgent::keyStateStatus), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_PARTIALLY_ABORTED) ));
 				srcTr->set( backupAgent->sourceStates.get(logUidValue).pack(DatabaseBackupAgent::keyFolderId), backupUid );
 
-				Void _ = wait(srcTr->commit());
+				wait(srcTr->commit());
 				endVersion = srcTr->getCommittedVersion() + 1;
 
 				break;
 			}
 			catch (Error &e) {
-				Void _ = wait(srcTr->onError(e));
+				wait(srcTr->onError(e));
 			}
 		}
 
 		if (clearSrcDb && !abortOldBackup) {
-			Void _ = wait(eraseLogData(backupAgent->taskBucket->src, logUidValue, destUidValue));
+			wait(eraseLogData(backupAgent->taskBucket->src, logUidValue, destUidValue));
 		}
 
 		tr = Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
@@ -2133,12 +2133,12 @@ public:
 
 				tr->set(StringRef(backupAgent->states.get(logUidValue).pack(DatabaseBackupAgent::keyStateStatus)), StringRef(DatabaseBackupAgent::getStateText(BackupAgentBase::STATE_ABORTED)));
 
-				Void _ = wait(tr->commit());
+				wait(tr->commit());
 
 				return Void();
 			}
 			catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 	}
@@ -2257,7 +2257,7 @@ public:
 				break;
 			}
 			catch (Error &e) {
-				Void _ = wait(tr->onError(e));
+				wait(tr->onError(e));
 			}
 		}
 

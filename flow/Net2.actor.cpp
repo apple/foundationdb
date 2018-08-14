@@ -26,7 +26,6 @@
 #include "boost/asio.hpp"
 #include "boost/bind.hpp"
 #include "boost/date_time/posix_time/posix_time_types.hpp"
-#include "actorcompiler.h"
 #include "network.h"
 #include "IThreadPool.h"
 #include "boost/range.hpp"
@@ -41,6 +40,7 @@
 #ifdef WIN32
 #include <mmsystem.h>
 #endif
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 // Defined to track the stack limit
 extern "C" intptr_t g_stackYieldLimit;
@@ -283,7 +283,7 @@ public:
 			Future<Void> onConnected = p.getFuture();
 			self->socket.async_connect( to, std::move(p) );
 
-			Void _ = wait( onConnected );
+			wait( onConnected );
 			self->init();
 			return self;
 		} catch (Error&) {
@@ -458,7 +458,7 @@ private:
 			BindPromise p("N2_AcceptError", UID());
 			auto f = p.getFuture();
 			self->acceptor.async_accept( conn->getSocket(), peer_endpoint, std::move(p) );
-			Void _ = wait( f );
+			wait( f );
 			conn->accept( NetworkAddress(peer_endpoint.address().to_v4().to_ulong(), peer_endpoint.port()) );
 
 			return conn;
@@ -520,7 +520,7 @@ ACTOR Future<Void> Net2::logTimeOffset() {
 		double processTime = timer_monotonic();
 		double systemTime = timer();
 		TraceEvent("ProcessTimeOffset").detailf("ProcessTime", "%lf", processTime).detailf("SystemTime", "%lf", systemTime).detailf("OffsetFromSystemTime", "%lf", processTime - systemTime);
-		Void _ = wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
+		wait(::delay(FLOW_KNOBS->TIME_OFFSET_LOGGING_INTERVAL));
 	}
 }
 

@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "NetworkTest.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 UID WLTOKEN_NETWORKTEST( -1, 2 );
 
@@ -45,7 +45,7 @@ ACTOR Future<Void> networkTestServer() {
 				req.reply.send( NetworkTestReply( Value( std::string( req.replySize, '.' ) ) ) );
 				sent++;
 			}
-			when( Void _ = wait( logging ) ) {
+			when( wait( logging ) ) {
 				auto spd = sent / (now() - lastTime);
 				fprintf( stderr, "responses per second: %f (%f us)\n", spd, 1e6/spd );
 				lastTime = now();
@@ -68,7 +68,7 @@ ACTOR Future<Void> testClient( std::vector<NetworkTestInterface> interfs, int* s
 ACTOR Future<Void> logger( int* sent ) {
 	state double lastTime = now();
 	loop {
-		Void _ = wait( delay(1.0) );
+		wait( delay(1.0) );
 		auto spd = *sent / (now() - lastTime);
 		fprintf( stderr, "messages per second: %f\n", spd);
 		lastTime = now();
@@ -154,6 +154,6 @@ ACTOR Future<Void> networkTestClient( std:: string testServers ) {
 		clients.push_back( testClient( interfs, &sent ) );
 	clients.push_back( logger( &sent ) );
 
-	Void _ = wait( waitForAll( clients ) );
+	wait( waitForAll( clients ) );
 	return Void();
 }

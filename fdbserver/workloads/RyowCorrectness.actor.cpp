@@ -18,14 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
-#include "fdbserver/TesterInterface.h"
+#include <vector>
 
+#include "fdbserver/TesterInterface.h"
 #include "workloads.h"
 #include "MemoryKeyValueStore.h"
 #include "ApiWorkload.h"
-
-#include <vector>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 #define TRACE_TRANSACTION 0
 
@@ -83,7 +82,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 		std::vector<TransactionType> types;
 		types.push_back(READ_YOUR_WRITES);
 
-		Void _ = wait(self->chooseTransactionFactory(cx, types));
+		wait(self->chooseTransactionFactory(cx, types));
 		return Void();
 	}
 
@@ -272,7 +271,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 					}
 				}
 
-				Void _ = wait(transaction->commit());
+				wait(transaction->commit());
 				return results;
 			}
 			catch(Error &e) {
@@ -283,7 +282,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 				else if(!dontUpdateResults)
 					results.clear();
 
-				Void _ = wait(transaction->onError(e));
+				wait(transaction->onError(e));
 			}
 		}
 	}

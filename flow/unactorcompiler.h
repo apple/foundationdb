@@ -1,5 +1,5 @@
 /*
- * Util.h
+ * unactorcompiler.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,20 +18,17 @@
  * limitations under the License.
  */
 
-#ifndef _FLOW_UTIL_H_
-#define _FLOW_UTIL_H_
-#pragma once
+#ifndef POST_ACTOR_COMPILER
 
-#include <algorithm>
+#ifndef NO_INTELLISENSE
+#undef ACTOR
+#undef DESCR
+#undef state
+#undef UNCANCELLABLE
+#undef choose
+#undef when
+#endif
 
-template <typename C>
-void swapAndPop(C* container, int index) {
-	if (index != container->size()-1) {
-		using std::swap;
-		swap((*container)[index], container->back());
-	}
+#endif
 
-	container->pop_back();
-}
-
-#endif  // _FLOW_UTIL_H_
+// loop is still defined

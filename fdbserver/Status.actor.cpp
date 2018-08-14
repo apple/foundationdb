@@ -19,7 +19,6 @@
  */
 
 #include "Status.h"
-#include "flow/actorcompiler.h"
 #include "flow/Trace.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbclient/SystemData.h"
@@ -32,6 +31,7 @@
 #include "flow/UnitTest.h"
 #include "QuietDatabase.h"
 #include "RecoveryState.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 const char* RecoveryStatus::names[] = {
 	"reading_coordinated_state", "locking_coordinated_state", "locking_old_transaction_servers", "reading_transaction_system_state",
@@ -106,7 +106,7 @@ ACTOR static Future< Optional< std::pair<WorkerEvents, std::set<std::string>> > 
 			eventTraces.push_back(errorOr(timeoutError(workers[c].first.eventLogRequest.getReply(req), 2.0)));
 		}
 
-		Void _ = wait(waitForAll(eventTraces));
+		wait(waitForAll(eventTraces));
 
 		std::set<std::string> failed;
 		WorkerEvents results;
@@ -508,7 +508,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 	state std::map<std::string, StatusObject> tracefileOpenErrorMap;
 	state WorkerEvents::iterator traceFileErrorsItr;
 	for(traceFileErrorsItr = traceFileOpenErrors.begin(); traceFileErrorsItr != traceFileOpenErrors.end(); ++traceFileErrorsItr) {
-		Void _ = wait(yield());
+		wait(yield());
 		if (traceFileErrorsItr->second.size()){
 			try {
 				// Have event fields, parse it and turn it into a message object describing the trace file opening error
@@ -529,7 +529,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 	state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo> machineMemoryUsage;
 	state std::vector<std::pair<WorkerInterface, ProcessClass>>::iterator workerItr;
 	for(workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
-		Void _ = wait(yield());
+		wait(yield());
 		state std::map<Optional<Standalone<StringRef>>, MachineMemoryInfo>::iterator memInfo = machineMemoryUsage.insert(std::make_pair(workerItr->first.locality.machineId(), MachineMemoryInfo())).first;
 		try {
 			ASSERT(pMetrics.count(workerItr->first.address()));
@@ -559,7 +559,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 		state int proxyIndex;
 		for(proxyIndex = 0; proxyIndex < proxies->size(); proxyIndex++) {
 			roles.addRole( "proxy", proxies->getInterface(proxyIndex) );
-			Void _ = wait(yield());
+			wait(yield());
 		}
 	}
 
@@ -570,7 +570,7 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 		if(roleStatus.count("data_version") > 0) {
 			maxTLogVersion = std::max(maxTLogVersion, roleStatus.at("data_version").get_int64());
 		}
-		Void _ = wait(yield());
+		wait(yield());
 	}
 
 	state std::vector<std::pair<StorageServerInterface, TraceEventFields>>::iterator ss;
@@ -582,18 +582,18 @@ ACTOR static Future<StatusObject> processStatusFetcher(
 		if(doc.tryGet("data_lag.seconds", lagSeconds)) {
 			ssLag[ss->first.address()] = lagSeconds;
 		}
-		Void _ = wait(yield());
+		wait(yield());
 	}
 
 	state std::vector<ResolverInterface>::const_iterator res;
 	state std::vector<ResolverInterface> resolvers = db->get().resolvers;
 	for(res = resolvers.begin(); res != resolvers.end(); ++res) {
 		roles.addRole( "resolver", *res );
-		Void _ = wait(yield());
+		wait(yield());
 	}
 
 	for(workerItr = workers.begin(); workerItr != workers.end(); ++workerItr) {
-		Void _ = wait(yield());
+		wait(yield());
 		state StatusObject statusObj;
 		try {
 			ASSERT(pMetrics.count(workerItr->first.address()));
@@ -877,7 +877,7 @@ ACTOR static Future<double> doGrvProbe(Transaction *tr, Optional<FDBTransactionO
 			return timer_monotonic() - start;
 		}
 		catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -897,7 +897,7 @@ ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction *tr
 			return timer_monotonic() - start;
 		}
 		catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		}
 	}
@@ -919,11 +919,11 @@ ACTOR static Future<double> doCommitProbe(Future<double> grvProbe, Transaction *
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->makeSelfConflicting();
-			Void _ = wait(tr->commit());
+			wait(tr->commit());
 			return timer_monotonic() - start;
 		}
 		catch(Error &e) {
-			Void _ = wait(tr->onError(e));
+			wait(tr->onError(e));
 		}
 	}
 }
@@ -938,7 +938,7 @@ ACTOR static Future<Void> doProbe(Future<double> probe, int timeoutSeconds, cons
 				(*probeObj)[format("%s_seconds", prefix).c_str()] = result.get();
 			}
 		}
-		when(Void _ = wait(delay(timeoutSeconds))) {
+		when(wait(delay(timeoutSeconds))) {
 			messages->push_back(makeMessage(format("%s_probe_timeout", prefix).c_str(), format("Unable to %s after %d seconds.", description, timeoutSeconds).c_str()));
 		}
 	}
@@ -971,7 +971,7 @@ ACTOR static Future<StatusObject> latencyProbeFetcher(Database cx, StatusArray *
 		probes.push_back(doProbe(readProbe, timeoutSeconds, "read", "read", &statusObj, messages, incomplete_reasons));
 		probes.push_back(doProbe(commitProbe, timeoutSeconds, "commit", "commit", &statusObj, messages, incomplete_reasons));
 
-		Void _ = wait(waitForAll(probes));
+		wait(waitForAll(probes));
 	}
 	catch (Error &e) {
 		incomplete_reasons->insert(format("Unable to retrieve latency probe information (%s).", e.what()));
@@ -1002,7 +1002,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 
 					result = configuration;
 				}
-				when(Void _ = wait(getConfTimeout)) {
+				when(wait(getConfTimeout)) {
 					if(!result.present()) {
 						messages->push_back(makeMessage("unreadable_configuration", "Unable to read database configuration."));
 					} else {
@@ -1019,7 +1019,7 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 			}
 
 			choose {
-				when( Void _ = wait( waitForAll(replicasFutures) ) ) {
+				when( wait( waitForAll(replicasFutures) ) ) {
 					int unreplicated = 0;
 					for(int i = 0; i < result.get().regions.size(); i++) {
 						if( !replicasFutures[i].get().present() || decodeDatacenterReplicasValue(replicasFutures[i].get().get()) < result.get().storageTeamSize ) {
@@ -1029,14 +1029,14 @@ ACTOR static Future<std::pair<Optional<DatabaseConfiguration>,Optional<bool>>> l
 
 					fullReplication = (!unreplicated || (result.get().usableRegions == 1 && unreplicated < result.get().regions.size()));
 				}
-				when(Void _ = wait(getConfTimeout)) {
+				when(wait(getConfTimeout)) {
 					messages->push_back(makeMessage("full_replication_timeout", "Unable to read datacenter replicas."));
 				}
 			}
 			break;
 		}
 		catch (Error &e) {
-			Void _ = wait(tr.onError(e));
+			wait(tr.onError(e));
 		}
 	}
 	return std::make_pair(result, fullReplication);
@@ -1237,7 +1237,7 @@ static Future<vector<std::pair<iface, TraceEventFields>>> getServerMetrics(vecto
 		futures.push_back(latestEventOnWorker(address_workers[s.address()], s.id().toString() + suffix));
 	}
 
-	Void _ = wait(waitForAll(futures));
+	wait(waitForAll(futures));
 
 	vector<std::pair<iface, TraceEventFields>> results;
 	for (int i = 0; i < servers.size(); i++) {
@@ -1622,9 +1622,9 @@ ACTOR Future<StatusObject> layerStatusFetcher(Database cx, StatusArray *messages
 						state json_spirit::mValue doc;
 						try {
 							json_spirit::read_string(docs[j].value.toString(), doc);
-							Void _ = wait(yield());
+							wait(yield());
 							json.absorb(doc.get_obj());
-							Void _ = wait(yield());
+							wait(yield());
 						} catch(Error &e) {
 							TraceEvent(SevWarn, "LayerStatusBadJSON").detail("Key", printable(docs[j].key));
 						}
@@ -1633,7 +1633,7 @@ ACTOR Future<StatusObject> layerStatusFetcher(Database cx, StatusArray *messages
 				json.create("_valid") = true;
 				break;
 			} catch(Error &e) {
-				Void _ = wait(tr.onError(e));
+				wait(tr.onError(e));
 			}
 		}
 	} catch(Error &e) {
@@ -1663,7 +1663,7 @@ ACTOR Future<StatusObject> lockedStatusFetcher(Reference<AsyncVar<struct ServerD
 					statusObj["database_locked"] = false;
 				}
 
-				when(Void _ = wait(getTimeout)) {
+				when(wait(getTimeout)) {
 					incomplete_reasons->insert(format("Unable to determine if database is locked after %d seconds.", timeoutSeconds));
 				}
 			}
@@ -1676,7 +1676,7 @@ ACTOR Future<StatusObject> lockedStatusFetcher(Reference<AsyncVar<struct ServerD
 			}
 			else {
 				try {
-					Void _ = wait(tr.onError(e));
+					wait(tr.onError(e));
 				}
 				catch (Error &e) {
 					incomplete_reasons->insert(format("Unable to determine if database is locked (%s).", e.what()));

@@ -18,15 +18,15 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
+#include <boost/lexical_cast.hpp>
+
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.h"
 #include "fdbserver/TesterInterface.h"
 #include "fdbserver/WorkerInterface.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
-
-#include <boost/lexical_cast.hpp>
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 struct WriteBandwidthWorkload : KVWorkload {
 	int keysPerTransaction;
@@ -91,7 +91,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 		state Promise<double> loadTime;
 		state Promise<vector<pair<uint64_t, double> > > ratesAtKeyCounts;
 
-		Void _ = wait( bulkSetup( cx, self, self->nodeCount, loadTime, true, self->warmingDelay, self->maxInsertRate ) );
+		wait( bulkSetup( cx, self, self->nodeCount, loadTime, true, self->warmingDelay, self->maxInsertRate ) );
 		self->loadTime = loadTime.getFuture().get();
 		return Void();
 	}
@@ -101,7 +101,7 @@ struct WriteBandwidthWorkload : KVWorkload {
 			self->clients.push_back( self->writeClient( cx, self ) );
 		}
 
-		Void _ = wait( timeout( waitForAll( self->clients ), self->testDuration, Void() ) );
+		wait( timeout( waitForAll( self->clients ), self->testDuration, Void() ) );
 		self->clients.clear();
 		return Void();
 	}
@@ -125,11 +125,11 @@ struct WriteBandwidthWorkload : KVWorkload {
 						tr.set( self->keyForIndex( startIdx + i, false ), self->randomValue(), false );
 
 					start = now();
-					Void _ = wait( tr.commit() );
+					wait( tr.commit() );
 					self->commitLatencies.addSample( now() - start );
 					break;
 				} catch( Error& e ) {
-					Void _ = wait( tr.onError( e ) );
+					wait( tr.onError( e ) );
 					++self->retries;
 				}
 			}

@@ -18,13 +18,13 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "ReadYourWrites.h"
 #include "Atomic.h"
 #include "DatabaseContext.h"
 #include "StatusClient.h"
 #include "MonitorLeader.h"
 #include "flow/Util.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 class RYWImpl {
 public:
@@ -246,7 +246,7 @@ public:
 			when (typename Req::Result result = wait( readThrough( ryw, req, snapshot ) )) {
 				return result;
 			}
-			when (Void _ = wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when (wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
 	ACTOR template <class Req> static Future<typename Req::Result> readWithConflictRangeSnapshot( ReadYourWritesTransaction* ryw, Req req ) {
@@ -255,7 +255,7 @@ public:
 			when (typename Req::Result result = wait( read( ryw, req, &it ) )) {
 				return result;
 			}
-			when (Void _ = wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when (wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
 	ACTOR template <class Req> static Future<typename Req::Result> readWithConflictRangeRYW( ReadYourWritesTransaction* ryw, Req req, bool snapshot ) {
@@ -267,7 +267,7 @@ public:
 					addConflictRange( ryw, req, it.extractWriteMapIterator(), result );
 				return result;
 			}
-			when (Void _ = wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
+			when (wait(ryw->resetPromise.getFuture())) { throw internal_error(); }
 		}
 	}
 	template <class Req> static inline Future<typename Req::Result> readWithConflictRange( ReadYourWritesTransaction* ryw, Req const& req, bool snapshot ) {
@@ -974,7 +974,7 @@ public:
 			val = ryw->tr.get(key);
 
 		try {
-			Void _ = wait(ryw->resetPromise.getFuture() || success(val) || watch->onChangeTrigger.getFuture());
+			wait(ryw->resetPromise.getFuture() || success(val) || watch->onChangeTrigger.getFuture());
 		} catch( Error &e ) {
 			done.send(Void());
 			throw;
@@ -999,7 +999,7 @@ public:
 		watchFuture = ryw->tr.watch(watch); // throws if there are too many outstanding watches	
 		done.send(Void());
 
-		Void _ = wait(watchFuture);
+		wait(watchFuture);
 
 		return Void();
 	}
@@ -1009,12 +1009,12 @@ public:
 			ryw->commitStarted = true;
 			
 			Future<Void> ready = ryw->reading;
-			Void _ = wait( ryw->resetPromise.getFuture() || ready );
+			wait( ryw->resetPromise.getFuture() || ready );
 
 			if( ryw->options.readYourWritesDisabled ) {
 				if (ryw->resetPromise.isSet())
 					throw ryw->resetPromise.getFuture().getError();
-				Void _ = wait( ryw->resetPromise.getFuture() || ryw->tr.commit() );
+				wait( ryw->resetPromise.getFuture() || ryw->tr.commit() );
 
 				ryw->debugLogRetries();
 
@@ -1034,7 +1034,7 @@ public:
 				}
 			}
 
-			Void _ = wait( ryw->resetPromise.getFuture() || ryw->tr.commit() );
+			wait( ryw->resetPromise.getFuture() || ryw->tr.commit() );
 
 			ryw->debugLogRetries();
 			if(!ryw->tr.apiVersionAtLeast(410)) {
@@ -1068,7 +1068,7 @@ public:
 				throw e;
 			}
 
-			Void _ = wait( ryw->resetPromise.getFuture() || ryw->tr.onError(e) );
+			wait( ryw->resetPromise.getFuture() || ryw->tr.onError(e) );
 
 			ryw->debugLogRetries(e);
 
@@ -1090,7 +1090,7 @@ public:
 				return v;
 			}
 
-			when(Void _ = wait(ryw->resetPromise.getFuture())) {
+			when(wait(ryw->resetPromise.getFuture())) {
 				throw internal_error();
 			}
 		}
@@ -1101,10 +1101,10 @@ ReadYourWritesTransaction::ReadYourWritesTransaction( Database const& cx ) : cac
 
 ACTOR Future<Void> timebomb(double totalSeconds, Promise<Void> resetPromise) {
 	if(totalSeconds == 0.0) {
-		Void _ = wait ( Never() );
+		wait ( Never() );
 	}
 	else if (now() < totalSeconds) {
-		Void _ = wait ( delayUntil( totalSeconds ) );
+		wait ( delayUntil( totalSeconds ) );
 	}
 	if( !resetPromise.isSet() )
 		resetPromise.sendError(transaction_timed_out());
@@ -1150,7 +1150,7 @@ ACTOR Future<Standalone<RangeResultRef>> getWorkerInterfaces (Reference<ClusterC
 			
 				return result;
 			}
-			when( Void _ = wait(clusterInterface->onChange()) ) {}	
+			when( wait(clusterInterface->onChange()) ) {}	
 		}
 	}
 }

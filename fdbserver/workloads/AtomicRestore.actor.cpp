@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/BackupAgent.h"
 #include "workloads.h"
 #include "BulkSetup.actor.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 //A workload which test the correctness of backup and restore process
 struct AtomicRestoreWorkload : TestWorkload {
@@ -61,12 +61,12 @@ struct AtomicRestoreWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(Database cx, AtomicRestoreWorkload* self) {
 		state FileBackupAgent backupAgent;
 
-		Void _ = wait( delay(self->startAfter * g_random->random01()) );
+		wait( delay(self->startAfter * g_random->random01()) );
 		TraceEvent("AtomicRestore_Start");
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		try {
-			Void _ = wait(backupAgent.submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), BackupAgentBase::getDefaultTagName(), self->backupRanges, false));
+			wait(backupAgent.submitBackup(cx, StringRef(backupContainer), g_random->randomInt(0, 100), BackupAgentBase::getDefaultTagName(), self->backupRanges, false));
 		}
 		catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
@@ -76,7 +76,7 @@ struct AtomicRestoreWorkload : TestWorkload {
 		TraceEvent("AtomicRestore_Wait");
 		int _ = wait( backupAgent.waitBackup(cx, BackupAgentBase::getDefaultTagName(), false) );
 		TraceEvent("AtomicRestore_BackupStart");
-		Void _ = wait( delay(self->restoreAfter * g_random->random01()) );
+		wait( delay(self->restoreAfter * g_random->random01()) );
 		TraceEvent("AtomicRestore_RestoreStart");
 
 		loop {
@@ -86,14 +86,14 @@ struct AtomicRestoreWorkload : TestWorkload {
 				restores.push_back(backupAgent.atomicRestore(cx, BackupAgentBase::getDefaultTag(), range, StringRef(), StringRef()));
 			}
 			try {
-				Void _ = wait(waitForAll(restores));
+				wait(waitForAll(restores));
 				break;
 			}
 			catch (Error& e) {
 				if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 					throw;
 			}
-			Void _ = wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
+			wait( delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY) );
 		}
 		
 		// SOMEDAY: Remove after backup agents can exist quiescently

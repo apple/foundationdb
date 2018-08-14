@@ -18,9 +18,9 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "fdbclient/NativeAPI.h"
 #include "pubsub.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 Value uInt64ToValue( uint64_t v ) {
 	return StringRef(format("%016llx", v));
@@ -118,10 +118,10 @@ ACTOR Future<uint64_t> _createFeed(Database cx, Standalone<StringRef> metadata) 
 			tr.set(keyForFeed(id), metadata);
 			tr.set(keyForFeedSubcriberCount(id), uInt64ToValue(0));
 			tr.set(keyForFeedMessageCount(id), uInt64ToValue(0));
-			Void _ = wait(tr.commit());
+			wait(tr.commit());
 			break;
 		} catch(Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 	return id;
@@ -145,10 +145,10 @@ ACTOR Future<uint64_t> _createInbox(Database cx, Standalone<StringRef> metadata)
 			}
 			tr.set(keyForInbox(id), metadata);
 			tr.set(keyForInboxSubcriptionCount(id), uInt64ToValue(0));
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			break;
 		} catch(Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 	return id;
@@ -192,10 +192,10 @@ ACTOR Future<bool> _createSubcription(Database cx, uint64_t feed, uint64_t inbox
 			// Add inbox as watcher of feed.
 			tr.set(keyForFeedWatcher(feed, inbox), StringRef());
 
-			Void _ = wait( tr.commit() );
+			wait( tr.commit() );
 			break;
 		} catch(Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 	return true;
@@ -274,10 +274,10 @@ ACTOR Future<uint64_t> _postMessage(Database cx, uint64_t feed, Standalone<Strin
 			tr.set(keyForMessage(messageId), StringRef());
 			tr.set(keyForDisptchEntry(messageId), StringRef());
 
-			Void _ = wait(tr.commit());
+			wait(tr.commit());
 			break;
 		} catch(Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 	tr = Transaction(cx);
@@ -295,16 +295,16 @@ ACTOR Future<uint64_t> _postMessage(Database cx, uint64_t feed, Standalone<Strin
 			tr.set(keyForFeedMessageCount(feed), uInt64ToValue(messageCount));
 
 			// Go through the list of watching inboxes
-			Void _ = wait(updateFeedWatchers(&tr, feed));
+			wait(updateFeedWatchers(&tr, feed));
 
 			// Post the real message data; clear the "dispatching" entry
 			tr.set(keyForMessage(messageId), data);
 			tr.clear(keyForDisptchEntry(messageId));
 
-			Void _ = wait(tr.commit());
+			wait(tr.commit());
 			break;
 		} catch(Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 	return messageId;
@@ -356,10 +356,10 @@ ACTOR Future<int> singlePassInboxCacheUpdate(Database cx, uint64_t inbox, int sw
 				tr.set(keyForFeedWatcher(feed, inbox), StringRef());
 				//printf("  --> adding watch to feed: %s\n", keyForFeedWatcher(feed, inbox).toString().c_str());
 			}
-			Void _ = wait(tr.commit());
+			wait(tr.commit());
 			return staleFeeds.size();
 		} catch(Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -404,7 +404,7 @@ Future<std::vector<Message>> _listInboxMessages(Database const& cx,
 ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbox, int count, uint64_t cursor)
 {
 	TraceEvent("PubSubListInbox").detail("Inbox", inbox).detail("Count", count).detail("Cursor", cursor);
-	Void _ = wait(updateInboxCache(cx, inbox));
+	wait(updateInboxCache(cx, inbox));
 	state StringRef perIdPrefix = keyForInboxCacheByIDPrefix(inbox);
 	loop {
 		state Transaction tr(cx);
@@ -471,7 +471,7 @@ ACTOR Future<std::vector<Message>> _listInboxMessages(Database cx, uint64_t inbo
 
 			return messages;
 		} catch(Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -501,7 +501,7 @@ ACTOR Future<std::vector<Message>> _listFeedMessages(Database cx, Feed feed, int
 			}
 			return messages;
 		} catch(Error& e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }

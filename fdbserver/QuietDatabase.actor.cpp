@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "flow/actorcompiler.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/simulator.h"
 #include "flow/Trace.h"
@@ -29,6 +28,7 @@
 #include "ServerDBInfo.h"
 #include "Status.h"
 #include "fdbclient/ManagementAPI.h"
+#include "flow/actorcompiler.h"  // This must be the last #include.
 
 ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Reference<AsyncVar<ServerDBInfo>> dbInfo, int flags = 0 ) {
 	loop {
@@ -36,7 +36,7 @@ ACTOR Future<vector<std::pair<WorkerInterface, ProcessClass>>> getWorkers( Refer
 			when( vector<std::pair<WorkerInterface, ProcessClass>> w = wait( brokenPromiseToNever( dbInfo->get().clusterInterface.getWorkers.getReply( GetWorkersRequest( flags ) ) ) ) ) {
 				return w;
 			}
-			when( Void _ = wait( dbInfo->onChange() ) ) {}
+			when( wait( dbInfo->onChange() ) ) {}
 		}
 	}
 }
@@ -60,7 +60,7 @@ ACTOR Future<WorkerInterface> getMasterWorker( Database cx, Reference<AsyncVar<S
 			.detail("Master", dbInfo->get().master.id()).detail("MasterAddress", dbInfo->get().master.address())
 			.detail("WorkerCount", workers.size());
 
-		Void _ = wait(delay(1.0));
+		wait(delay(1.0));
 	}
 }
 
@@ -121,7 +121,7 @@ ACTOR Future<int64_t> getMaxTLogQueueSize( Database cx, Reference<AsyncVar<Serve
 		messages.push_back( timeoutError(itr->second.eventLogRequest.getReply(
 			EventLogRequest( StringRef(tlogs[i].id().toString() + "/TLogMetrics") ) ), 1.0 ) );
 	}
-	Void _ = wait( waitForAll( messages ) );
+	wait( waitForAll( messages ) );
 
 	TraceEvent("MaxTLogQueueSize").detail("Database", printable(cx->dbName))
 		.detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
@@ -162,7 +162,7 @@ ACTOR Future<vector<StorageServerInterface>> getStorageServers( Database cx, boo
 			return servers;
 		}
 		catch(Error &e) {
-			Void _ = wait( tr.onError(e) );
+			wait( tr.onError(e) );
 		}
 	}
 }
@@ -193,7 +193,7 @@ ACTOR Future<int64_t> getMaxStorageServerQueueSize( Database cx, Reference<Async
 			EventLogRequest( StringRef(servers[i].id().toString() + "/StorageMetrics") ) ), 1.0 ) );
 	}
 
-	Void _ = wait( waitForAll(messages) );
+	wait( waitForAll(messages) );
 
 	TraceEvent("MaxStorageServerQueueSize").detail("Database", printable(cx->dbName)).detail("Stage", "ComputingMax").detail("MessageCount", messages.size());
 
@@ -294,7 +294,7 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 			g_simulator.usableRegions = 1;
 			ConfigurationResult::Type _ = wait( changeConfig( cx, (primaryDead ? g_simulator.disablePrimary : g_simulator.disableRemote) + " repopulate_anti_quorum=1" ) );
 			while( dbInfo->get().recoveryState < RecoveryState::STORAGE_RECOVERED ) {
-				Void _ = wait( dbInfo->onChange() );
+				wait( dbInfo->onChange() );
 			}
 			TraceEvent(SevWarnAlways, "DisablingFearlessConfiguration").detail("Location", context).detail("Stage", "Usable_Regions");
 			ConfigurationResult::Type _ = wait( changeConfig( cx, "usable_regions=1" ) );
@@ -304,8 +304,8 @@ ACTOR Future<Void> repairDeadDatacenter(Database cx, Reference<AsyncVar<ServerDB
 }
 
 ACTOR Future<Void> reconfigureAfter(Database cx, double time, Reference<AsyncVar<ServerDBInfo>> dbInfo, std::string context) {
-	Void _ = wait( delay(time) );
-	Void _ = wait( repairDeadDatacenter(cx, dbInfo, context) );
+	wait( delay(time) );
+	wait( repairDeadDatacenter(cx, dbInfo, context) );
 	return Void();
 }
 
@@ -317,7 +317,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 
 	//In a simulated environment, wait 5 seconds so that workers can move to their optimal locations
 	if(g_network->isSimulated())
-		Void _ = wait(delay(5.0));
+		wait(delay(5.0));
 
 	//Require 3 consecutive successful quiet database checks spaced 2 second apart
 	state int numSuccesses = 0;
@@ -335,7 +335,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 			state Future<bool> dataDistributionActive = getDataDistributionActive( cx, masterWorker );
 			state Future<bool> storageServersRecruiting = getStorageServersRecruiting ( cx, dbInfo, masterWorker );
 
-			Void _ = wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
+			wait( success( dataInFlight ) && success( tLogQueueSize ) && success( dataDistributionQueueSize )
 							&& success( storageQueueSize ) && success( dataDistributionActive ) && success( storageServersRecruiting ) );
 			TraceEvent(("QuietDatabase" + phase).c_str())
 				.detail("DataInFlight", dataInFlight.get()).detail("MaxTLogQueueSize", tLogQueueSize.get()).detail("DataDistributionQueueSize", dataDistributionQueueSize.get())
@@ -346,7 +346,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				|| dataDistributionQueueSize.get() > maxDataDistributionQueueSize || storageQueueSize.get() > maxStorageServerQueueGate
 				|| dataDistributionActive.get() == false || storageServersRecruiting.get() == true) {
 
-				Void _ = wait( delay( 1.0 ) );
+				wait( delay( 1.0 ) );
 				numSuccesses = 0;
 			} else {
 				if(++numSuccesses == 3) {
@@ -354,7 +354,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 					break;
 				}
 				else
-					Void _ = wait(delay( 2.0 ) );
+					wait(delay( 2.0 ) );
 			}
 		} catch (Error& e) {
 			if( e.code() != error_code_actor_cancelled && e.code() != error_code_attribute_not_found && e.code() != error_code_timed_out)
@@ -365,7 +365,7 @@ ACTOR Future<Void> waitForQuietDatabase( Database cx, Reference<AsyncVar<ServerD
 				throw;
 
 			TraceEvent(("QuietDatabase" + phase + "Retry").c_str()).error(e);
-			Void _ = wait(delay(1.0));
+			wait(delay(1.0));
 			numSuccesses = 0;
 		}
 	}
