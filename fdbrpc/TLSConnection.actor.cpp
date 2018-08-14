@@ -205,11 +205,11 @@ Reference<IListener> TLSNetworkConnections::listen( NetworkAddress localAddr ) {
 
 void TLSOptions::set_cert_file( std::string const& cert_file ) {
 	try {
-		TraceEvent("TLSConnectionSettingCertFile").suppressFor(1.0).detail("CertFilePath", cert_file);
+		TraceEvent("TLSConnectionSettingCertFile").detail("CertFilePath", cert_file);
 		policyInfo.cert_path = cert_file;
 		set_cert_data( readFileBytes( cert_file, CERT_FILE_MAX_SIZE ) );
 	} catch ( Error& ) {
-		TraceEvent(SevError, "TLSOptionsSetCertFileError").suppressFor(1.0).detail("Filename", cert_file);
+		TraceEvent(SevError, "TLSOptionsSetCertFileError").detail("Filename", cert_file);
 		throw;
 	}
 }
@@ -437,12 +437,12 @@ Reference<ITLSPolicy> TLSOptions::get_policy(PolicyType type) {
 
 void TLSOptions::init_plugin() {
 
-	TraceEvent("TLSConnectionLoadingPlugin").suppressFor(1.0).detail("Plugin", tlsPluginName);
+	TraceEvent("TLSConnectionLoadingPlugin").detail("Plugin", tlsPluginName);
 
 	plugin = loadPlugin<ITLSPlugin>( tlsPluginName );
 
 	if ( !plugin ) {
-		TraceEvent(SevError, "TLSConnectionPluginInitError").suppressFor(1.0).detail("Plugin", tlsPluginName).GetLastError();
+		TraceEvent(SevError, "TLSConnectionPluginInitError").detail("Plugin", tlsPluginName).GetLastError();
 		throw tls_error();
 	}
 
