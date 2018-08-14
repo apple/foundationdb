@@ -113,9 +113,11 @@ struct LeaderInfo {
 		return ((changeID.first() & mask) == (leaderInfo.changeID.first() & mask)) && changeID.second() == leaderInfo.changeID.second();
 	}
 
-	// Change leader only if the candidate has better process class fitness
+	// Change leader only if
+	// 1. the candidate has better process class fitness and the candidate is not the leader
+	// 2. the leader process class fitness becomes worse
 	bool leaderChangeRequired(LeaderInfo const& candidate) const {
-		return (changeID.first() & ~mask) > (candidate.changeID.first() & ~mask);
+		return ((changeID.first() & ~mask) > (candidate.changeID.first() & ~mask) && !equalInternalId(candidate)) || ((changeID.first() & ~mask) < (candidate.changeID.first() & ~mask) && equalInternalId(candidate));
 	}
 
 	template <class Ar>
