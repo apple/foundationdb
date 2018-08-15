@@ -789,7 +789,6 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 		}
 		case FDBNetworkOptions::TLS_PLUGIN:
 			validateOptionValue(value, true);
-			initTLSOptions();
 			break;
 		case FDBNetworkOptions::TLS_CERT_PATH:
 			validateOptionValue(value, true);
