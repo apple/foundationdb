@@ -586,10 +586,10 @@ void MultiVersionDatabase::setOption(FDBDatabaseOptions::Option option, Optional
 
 	auto itr = FDBDatabaseOptions::optionInfo.find(option);
 	if(itr != FDBDatabaseOptions::optionInfo.end()) {
-		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name).detail("Value", printable(value));
+		TraceEvent("SetDatabaseOption").detail("Option", itr->second.name);
 	}
 	else {
-		TraceEvent("UnknownDatabaseOption").detail("Option", option).detail("Value", printable(value));
+		TraceEvent("UnknownDatabaseOption").detail("Option", option);
 		throw invalid_option();
 	}
 
@@ -743,10 +743,10 @@ void MultiVersionCluster::setOption(FDBClusterOptions::Option option, Optional<S
 
 	auto itr = FDBClusterOptions::optionInfo.find(option);
 	if(itr != FDBClusterOptions::optionInfo.end()) {
-		TraceEvent("SetClusterOption").detail("Option", itr->second.name).detail("Value", printable(value));
+		TraceEvent("SetClusterOption").detail("Option", itr->second.name);
 	}
 	else {
-		TraceEvent("UnknownClusterOption").detail("Option", option).detail("Value", printable(value));
+		TraceEvent("UnknownClusterOption").detail("Option", option);
 		throw invalid_option();
 	}
 
@@ -1002,6 +1002,7 @@ void MultiVersionApi::addExternalLibrary(std::string path) {
 	std::string filename = basename(path);
 
 	if(filename.empty() || !fileExists(path)) {
+		TraceEvent("ExternalClientNotFound").detail("LibraryPath", filename);
 		throw file_not_found();
 	}
 
@@ -1070,10 +1071,10 @@ void MultiVersionApi::setNetworkOption(FDBNetworkOptions::Option option, Optiona
 void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option, Optional<StringRef> value) {
 	auto itr = FDBNetworkOptions::optionInfo.find(option);
 	if(itr != FDBNetworkOptions::optionInfo.end()) {
-		TraceEvent("SetNetworkOption").detail("Option", itr->second.name).detail("Value", printable(value));
+		TraceEvent("SetNetworkOption").detail("Option", itr->second.name);
 	}
 	else {
-		TraceEvent("UnknownNetworkOption").detail("Option", option).detail("Value", printable(value));
+		TraceEvent("UnknownNetworkOption").detail("Option", option);
 		throw invalid_option();
 	}
 

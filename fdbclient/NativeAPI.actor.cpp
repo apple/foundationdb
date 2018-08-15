@@ -767,17 +767,21 @@ void setNetworkOption(FDBNetworkOptions::Option option, Optional<StringRef> valu
 			validateOptionValue(value, true);
 
 			std::string optionValue = value.get().toString();
+			TraceEvent("SetKnob").detail("KnobString", optionValue);
+
 			size_t eq = optionValue.find_first_of('=');
 			if(eq == optionValue.npos) {
+				TraceEvent(SevWarnAlways, "InvalidKnobString").detail("KnobString", optionValue);
 				throw invalid_option_value();
 			}
 
-			std::string knob_name = optionValue.substr(0, eq);
-			std::string knob_value = optionValue.substr(eq+1);
-			if (!const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob( knob_name, knob_value ) &&
-				!const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob( knob_name, knob_value ))
+			std::string knobName = optionValue.substr(0, eq);
+			std::string knobValue = optionValue.substr(eq+1);
+			if (!const_cast<FlowKnobs*>(FLOW_KNOBS)->setKnob( knobName, knobValue ) &&
+				!const_cast<ClientKnobs*>(CLIENT_KNOBS)->setKnob( knobName, knobValue ))
 			{
-				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knob_name.c_str());
+				TraceEvent(SevWarnAlways, "UnrecognizedKnob").detail("Knob", knobName.c_str());
+				fprintf(stderr, "FoundationDB client ignoring unrecognized knob option '%s'\n", knobName.c_str());
 			}
 			break;
 		}
