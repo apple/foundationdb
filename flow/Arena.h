@@ -473,8 +473,19 @@ public:
 	}
 
 	std::string toHexString(int limit = -1) const {
+		if(limit < 0)
+			limit = length;
+		if(length > limit) {
+			// If limit is high enough split it so that 2/3 of limit is used to show prefix bytes and the rest is used for suffix bytes
+			if(limit >= 9) {
+				int suffix = limit / 3;
+				return substr(0, limit - suffix).toHexString() + "..." + substr(length - suffix, suffix).toHexString() + format("...[%d]", length);
+			}
+			return substr(0, limit).toHexString() + format("...[%d]", length);
+		}
+
 		std::string s;
-		int len = (limit < 0) ? length : std::min(limit, length);
+		s.reserve(length * 7);
 		for (int i = 0; i<length; i++) {
 			uint8_t b = (*this)[i];
 			if(isalnum(b))
@@ -484,8 +495,6 @@ public:
 		}
 		if(s.size() > 0)
 			s.resize(s.size() - 1);
-		if(limit >= 0 && limit < length)
-			s.append(format("...[+%d]", length - limit));
 		return s;
 	}
 

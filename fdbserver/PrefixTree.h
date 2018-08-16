@@ -1,3 +1,23 @@
+/*
+ * PrefixTree.h
+ *
+ * This source file is part of the FoundationDB open source project
+ *
+ * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include "flow/flow.h"
@@ -253,13 +273,13 @@ struct PrefixTree {
 		};
 
 		static inline int getMaxOverhead(int index, int keySize, int valueSize) {
-			bool large = (valueSize > 255 || keySize > 255);
+			bool large = keySize > 255;
 			int overhead = 1 + (large ? 2 : 1);  // flags and prefix len
 			// Value length size if present
 			if(valueSize > 0)
 				overhead += large ? 2 : 1;
 			overhead += large ? 4 : 2;  // Worst case scenario for split and suffix lengths
-			if(index % 2 != 0)
+			if((index & 0x01) != 0)
 				overhead += 2;  // Left child length, one less than half of nodes will have one.
 			return overhead;
 		}
@@ -375,6 +395,7 @@ private:
 			// key will be a reference returned from prefixSource->getKeyRef()
 			// See comments near keyBuffer and key for more info.
 			initKeyBufferSpace();
+			printf("prefix len %d\n", parser.prefixLen);
 			key = prefixSource->getKeyRef(parser.prefixLen);
 		}
 
@@ -493,6 +514,7 @@ public:
 		}
 
 		Cursor(const Node *root, StringRef prevAncestor, StringRef nextAncestor) {
+			printf("root = %p\n", root);
 			init(root, prevAncestor, nextAncestor);
 		}
 
@@ -505,6 +527,8 @@ public:
 			if(path.size() < initialPathCapacity)
 				path.resize(initialPathCapacity);
 			pathLen = initialPathLen;
+			printf("init: \nprev=%s\nnext=%s\n", prevAncestor.toHexString(15).c_str(), nextAncestor.toHexString(15).c_str());
+			printf("init: source_next flag %d\n", root->flags & Node::PREFIX_SOURCE_NEXT);
 			path[0].init(nextAncestor);
 			path[1].init(prevAncestor);
 			path[2].init(root, &path[root->flags & Node::PREFIX_SOURCE_NEXT ? 0 : 1], false, 1);
@@ -879,21 +903,24 @@ public:
 		// Since key must be between lastLeft and lastRight, any common prefix they share must be shared by key
 		// so rather than comparing all of key to each one separately we can just compare lastLeft and lastRight
 		// to each other and then skip over the resulting length in key
-		int leftRightCommon = commonPrefixLength(nextAncestor.begin(), prevAncestor.begin(), std::min(nextAncestor.size(), prevAncestor.size()));
+		int nextPrevCommon = commonPrefixLength(nextAncestor.begin(), prevAncestor.begin(), std::min(nextAncestor.size(), prevAncestor.size()));
 
 		// Pointer to remainder of key after the left/right common bytes
-		const uint8_t *keyExt = key.begin() + leftRightCommon;
+		const uint8_t *keyExt = key.begin() + nextPrevCommon;
 
 		// Find out how many bytes beyond leftRightCommon key has with each last left/right string separately
-		int extLeft = commonPrefixLength(keyExt, nextAncestor.begin() + leftRightCommon, std::min(key.size(), nextAncestor.size()) - leftRightCommon);
-		int extRight = commonPrefixLength(keyExt, prevAncestor.begin() + leftRightCommon, std::min(key.size(), prevAncestor.size()) - leftRightCommon);
+		int extNext = commonPrefixLength(keyExt, nextAncestor.begin() + nextPrevCommon, std::min(key.size(), nextAncestor.size()) - nextPrevCommon);
+		int extPrev = commonPrefixLength(keyExt, prevAncestor.begin() + nextPrevCommon, std::min(key.size(), prevAncestor.size()) - nextPrevCommon);
 
 		// Use the longer result
-		bool prefixSourceLeft = extLeft > extRight;
-		int prefixLen = leftRightCommon + (prefixSourceLeft ? extLeft : extRight);
+		bool prefixSourceNext = extNext > extPrev;
+		
+		int prefixLen = nextPrevCommon + (prefixSourceNext ? extNext : extPrev);
 
 		int splitLen;   // Bytes after prefix required to make traversal decision
 		int suffixLen;  // Remainder of key bytes after split key portion
+
+		printf("build: '%s'\n  prefixLen %d  prefixSourceNext %d\n", key.toHexString().c_str(), prefixLen, prefixSourceNext);
 
 		// 2 entries or less means no right child, so just put all remaining key bytes into split string.
 		if(count < 3) {
@@ -925,7 +952,7 @@ public:
 		bool large = prefixLen > 255 || splitLen > 255 || suffixLen > 255 || val.size() > 255;
 		root.flags = large ? Node::USE_LARGE_LENGTHS : 0;
 
-		if(prefixSourceLeft)
+		if(prefixSourceNext)
 			root.flags |= Node::PREFIX_SOURCE_NEXT;
 
 		union {
