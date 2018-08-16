@@ -131,7 +131,7 @@ struct PerformanceWorkload : TestWorkload {
 		TestSpec spec( LiteralStringRef("PerformanceSetup"), false, false );
 		spec.options = options;
 		spec.phases = TestWorkload::SETUP;
-		DistributedTestResults results = wait( runWorkload( cx, testers, self->dbName, spec ) );
+		DistributedTestResults results = wait( runWorkload( cx, testers, spec ) );
 
 		return Void();
 	}
@@ -166,7 +166,7 @@ struct PerformanceWorkload : TestWorkload {
 				TestSpec spec( LiteralStringRef("PerformanceRun"), false, false );
 				spec.phases = TestWorkload::EXECUTION | TestWorkload::METRICS;
 				spec.options = options;
-				DistributedTestResults r = wait( runWorkload( cx, self->testers, self->dbName, spec ) );
+				DistributedTestResults r = wait( runWorkload( cx, self->testers, spec ) );
 				results = r;
 			} catch(Error& e) {
 				TraceEvent("PerformanceRunError").error(e, true).detail("Workload", printable(self->probeWorkload));

@@ -201,7 +201,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 
 	std::map<UID, ProxyVersionReplies> lastProxyVersionReplies;
 
-	Standalone<StringRef> dbName;
 	Standalone<StringRef> dbId;
 
 	MasterInterface myInterface;
@@ -227,7 +226,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		MasterInterface const& myInterface,
 		ServerCoordinators const& coordinators,
 		ClusterControllerFullInterface const& clusterController,
-		Standalone<StringRef> const& dbName,
 		Standalone<StringRef> const& dbId,
 		PromiseStream<Future<Void>> const& addActor,
 		bool forceRecovery
@@ -238,7 +236,6 @@ struct MasterData : NonCopyable, ReferenceCounted<MasterData> {
 		  cstate(coordinators, addActor, dbgid),
 		  coordinators(coordinators),
 		  clusterController(clusterController),
-		  dbName(dbName),
 		  dbId(dbId),
 		  forceRecovery(forceRecovery),
 		  lastEpochEnd(invalidVersion),
@@ -436,7 +433,6 @@ ACTOR Future<Void> updateLogsValue( Reference<MasterData> self, Database cx ) {
 
 Future<Void> sendMasterRegistration( MasterData* self, LogSystemConfig const& logSystemConfig, vector<MasterProxyInterface> proxies, vector<ResolverInterface> resolvers, DBRecoveryCount recoveryCount, vector<UID> priorCommittedLogServers ) {
 	RegisterMasterRequest masterReq;
-	masterReq.dbName = self->dbName;
 	masterReq.id = self->myInterface.id();
 	masterReq.mi = self->myInterface.locality;
 	masterReq.logSystemConfig = logSystemConfig;
@@ -1308,7 +1304,7 @@ ACTOR Future<Void> masterCore( Reference<MasterData> self ) {
 		PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > ddStorageServerChanges;
 		state double lastLimited = 0;
 		self->addActor.send( reportErrorsExcept( dataDistribution( self->dbInfo, self->myInterface, self->configuration, ddStorageServerChanges, self->logSystem, self->recoveryTransactionVersion, self->primaryDcId, self->remoteDcIds, &lastLimited, remoteRecovered.getFuture() ), "DataDistribution", self->dbgid, &normalMasterErrors() ) );
-		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->dbName, self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
+		self->addActor.send( reportErrors( rateKeeper( self->dbInfo, ddStorageServerChanges, self->myInterface.getRateInfo.getFuture(), self->configuration, &lastLimited ), "Ratekeeper", self->dbgid) );
 	}
 
 	if( self->resolvers.size() > 1 )
@@ -1325,7 +1321,7 @@ ACTOR Future<Void> masterServer( MasterInterface mi, Reference<AsyncVar<ServerDB
 {
 	state Future<Void> onDBChange = Void();
 	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self( new MasterData( db, mi, coordinators, db->get().clusterInterface, db->get().dbName, LiteralStringRef(""), addActor, forceRecovery ) );
+	state Reference<MasterData> self( new MasterData( db, mi, coordinators, db->get().clusterInterface, LiteralStringRef(""), addActor, forceRecovery ) );
 	state Future<Void> collection = actorCollection( self->addActor.getFuture() );
 
 	TEST( !lifetime.isStillValid( db->get().masterLifetime, mi.id()==db->get().master.id() ) );  // Master born doomed

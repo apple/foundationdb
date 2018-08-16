@@ -1476,8 +1476,8 @@ ACTOR template <class T> Future<T> makeInterruptable( Future<T> f ) {
 	}
 }
 
-ACTOR Future<Database> openDatabase( Reference<ClusterConnectionFile> ccf, Reference<Cluster> cluster, Standalone<StringRef> name, bool doCheckStatus ) {
-	state Database db = wait( cluster->createDatabase(name) );
+ACTOR Future<Database> openDatabase( Reference<ClusterConnectionFile> ccf, Reference<Cluster> cluster, bool doCheckStatus ) {
+	state Database db = wait( cluster->createDatabase() );
 	if (doCheckStatus) {
 		wait( makeInterruptable( checkStatus( Void(), ccf )) );
 	}
@@ -2218,9 +2218,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 
 	state FdbOptions *options = &globalOptions;
 
-	state const char *database = "DB";
-	state Standalone<StringRef> openDbName = StringRef(database);
-
 	state Reference<ClusterConnectionFile> ccf;
 
 	state std::pair<std::string, bool> resolvedClusterFile = ClusterConnectionFile::lookupClusterFileName( opt.clusterFile );
@@ -2258,9 +2255,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 			.trackLatest("ProgramStart");
 	}
 
-	if (connected && database) {
+	if (connected) {
 		try {
-			Database _db = wait( openDatabase( ccf, cluster, openDbName, !opt.exec.present() && opt.initialStatusCheck ) );
+			Database _db = wait( openDatabase( ccf, cluster, !opt.exec.present() && opt.initialStatusCheck ) );
 			db = _db;
 			tr = Reference<ReadYourWritesTransaction>();
 			opened = true;
@@ -2269,7 +2266,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 		} catch (Error& e) {
 			if(e.code() != error_code_actor_cancelled) {
 				printf("ERROR: %s (%d)\n", e.what(), e.code());
-				printf("Unable to open database `%s'\n", database);
+				printf("Unable to open database\n");
 			}
 			return 1;
 		}

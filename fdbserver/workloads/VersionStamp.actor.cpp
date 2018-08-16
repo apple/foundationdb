@@ -152,7 +152,7 @@ struct VersionStampWorkload : TestWorkload {
 		if (self->validateExtraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			cx = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			cx = extraCluster->createDatabase().get();
 		}
 		state ReadYourWritesTransaction tr(cx);
 		// We specifically wish to grab the smalles read version that we can get and maintain it, to
@@ -243,7 +243,7 @@ struct VersionStampWorkload : TestWorkload {
 		if (g_simulator.extraDB != NULL) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			Reference<Cluster> extraCluster = Cluster::createCluster(extraFile, -1);
-			state Database extraDB = extraCluster->createDatabase(LiteralStringRef("DB")).get();
+			state Database extraDB = extraCluster->createDatabase().get();
 		}
 
 		loop{

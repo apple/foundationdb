@@ -194,7 +194,6 @@ struct GetWorkersRequest {
 };
 
 struct RegisterMasterRequest {
-	Standalone<StringRef> dbName;
 	UID id;
 	LocalityData mi;
 	LogSystemConfig logSystemConfig;
@@ -214,7 +213,7 @@ struct RegisterMasterRequest {
 	template <class Ar>
 	void serialize( Ar& ar ) {
 		ASSERT( ar.protocolVersion() >= 0x0FDB00A200040001LL );
-		ar & dbName & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & recoveryStalled & reply;
+		ar & id & mi & logSystemConfig & proxies & resolvers & recoveryCount & registrationCount & configuration & priorCommittedLogServers & recoveryState & recoveryStalled & reply;
 	}
 };
 

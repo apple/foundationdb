@@ -570,7 +570,7 @@ struct DDTeamCollection {
 		if(!primary || configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", masterId)
 				.detail( "State", "Inactive" )
-				.trackLatest( format("%s/DDTrackerStarting", printable(cx->dbName).c_str() ).c_str() );
+				.trackLatest( "DDTrackerStarting" );
 		}
 	}
 
@@ -596,7 +596,7 @@ struct DDTeamCollection {
 		if(!self->primary || self->configuration.usableRegions == 1) {
 			TraceEvent("DDTrackerStarting", self->masterId)
 				.detail( "State", "Active" )
-				.trackLatest( format("%s/DDTrackerStarting", printable(self->cx->dbName).c_str() ).c_str() );
+				.trackLatest( "DDTrackerStarting" );
 		}
 
 		return Void();
@@ -1777,7 +1777,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection *self) {
 	state bool recruiting = false;
 	TraceEvent("StorageServerRecruitment", self->masterId)
 		.detail("State", "Idle")
-		.trackLatest((self->cx->dbName.toString() + "/StorageServerRecruitment_" + self->masterId.toString()).c_str());
+		.trackLatest(("StorageServerRecruitment_" + self->masterId.toString()).c_str());
 	loop {
 		if( !recruiting ) {
 			while(self->recruitingStream.get() == 0) {
@@ -1785,7 +1785,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection *self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->masterId)
 				.detail("State", "Recruiting")
-				.trackLatest((self->cx->dbName.toString() + "/StorageServerRecruitment_" + self->masterId.toString()).c_str());
+				.trackLatest(("StorageServerRecruitment_" + self->masterId.toString()).c_str());
 			recruiting = true;
 		} else {
 			loop {
@@ -1796,7 +1796,7 @@ ACTOR Future<Void> monitorStorageServerRecruitment(DDTeamCollection *self) {
 			}
 			TraceEvent("StorageServerRecruitment", self->masterId)
 				.detail("State", "Idle")
-				.trackLatest((self->cx->dbName.toString() + "/StorageServerRecruitment_" + self->masterId.toString()).c_str());
+				.trackLatest(("StorageServerRecruitment_" + self->masterId.toString()).c_str());
 			recruiting = false;
 		}
 	}
@@ -2196,7 +2196,7 @@ ACTOR Future<Void> dataDistribution(
 					.detail( "LowPriorityRelocations", 0 )
 					.detail( "HighPriorityRelocations", 0 )
 					.detail( "HighestPriority", 0 )
-					.trackLatest( format("%s/MovingData", printable(cx->dbName).c_str() ).c_str() );
+					.trackLatest( "MovingData" );
 
 				TraceEvent("TotalDataInFlight", mi.id()).detail("Primary", true).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", 0).trackLatest("TotalDataInFlight");
 				TraceEvent("TotalDataInFlight", mi.id()).detail("Primary", false).detail("TotalBytes", 0).detail("UnhealthyServers", 0).detail("HighestPriority", configuration.usableRegions > 1 ? 0 : -1).trackLatest("TotalDataInFlightRemote");

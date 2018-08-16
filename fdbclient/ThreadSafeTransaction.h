@@ -33,7 +33,7 @@ class ThreadSafeCluster : public ICluster, public ThreadSafeReferenceCounted<Thr
 public:
 	static ThreadFuture<Reference<ICluster>> create( std::string connFilename, int apiVersion = -1 );
 	~ThreadSafeCluster();
-	ThreadFuture<Reference<IDatabase>> createDatabase( Standalone<StringRef> dbName );
+	ThreadFuture<Reference<IDatabase>> createDatabase();
 
 	void setOption( FDBClusterOptions::Option option, Optional<StringRef> value  = Optional<StringRef>() );
 

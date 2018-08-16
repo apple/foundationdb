@@ -117,7 +117,6 @@ struct Ratekeeper {
 	std::map<UID, std::pair<int64_t, double> > proxy_transactionCountAndTime;
 	Smoother smoothReleasedTransactions, smoothTotalDurableBytes;
 	double TPSLimit;
-	Standalone<StringRef> dbName;
 	DatabaseConfiguration configuration;
 
 	Int64MetricHandle tpsLimitMetric;
@@ -502,7 +501,7 @@ void updateRate( Ratekeeper* self ) {
 			.detail("TotalDiskUsageBytes", totalDiskUsageBytes)
 			.detail("WorstStorageServerVersionLag", worstVersionLag)
 			.detail("LimitingStorageServerVersionLag", limitingVersionLag)
-			.trackLatest(format("%s/RkUpdate", printable(self->dbName).c_str() ).c_str());
+			.trackLatest("RkUpdate");
 	}
 }
 
@@ -510,7 +509,6 @@ ACTOR Future<Void> rateKeeper(
 	Reference<AsyncVar<ServerDBInfo>> dbInfo,
 	PromiseStream< std::pair<UID, Optional<StorageServerInterface>> > serverChanges,
 	FutureStream< struct GetRateInfoRequest > getRateInfo,
-	Standalone<StringRef> dbName,
 	DatabaseConfiguration configuration,
 	double* lastLimited)
 {
@@ -521,7 +519,6 @@ ACTOR Future<Void> rateKeeper(
 	state std::vector<Future<Void>> tlogTrackers;
 	state std::vector<TLogInterface> tlogInterfs;
 	state Promise<Void> err;
-	self.dbName = dbName;
 	self.configuration = configuration;
 	self.lastLimited = lastLimited;
 

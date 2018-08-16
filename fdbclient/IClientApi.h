@@ -84,7 +84,7 @@ public:
 class ICluster {
 public:
 	virtual ~ICluster() {}
-	virtual ThreadFuture<Reference<IDatabase>> createDatabase(Standalone<StringRef> dbName) = 0;
+	virtual ThreadFuture<Reference<IDatabase>> createDatabase() = 0;
 	virtual void setOption(FDBClusterOptions::Option option, Optional<StringRef> value = Optional<StringRef>()) = 0;
 
 	virtual void addref() = 0;

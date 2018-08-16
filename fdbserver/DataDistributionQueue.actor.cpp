@@ -1271,7 +1271,7 @@ ACTOR Future<Void> dataDistributionQueue(
 						.detail( "HighPriorityRelocations", highPriorityRelocations )
 						.detail( "HighestPriority", highestPriorityRelocation )
 						.detail( "BytesWritten", self.bytesWritten )
-						.trackLatest( format("%s/MovingData", printable(cx->dbName).c_str() ).c_str() );
+						.trackLatest( "MovingData" );
 				}
 				when ( wait( self.error.getFuture() ) ) {}  // Propagate errors from dataDistributionRelocator
 				when ( wait(waitForAll( balancingFutures ) )) {}

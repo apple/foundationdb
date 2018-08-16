@@ -58,7 +58,7 @@ struct ChangeConfigWorkload : TestWorkload {
 		if (g_network->isSimulated() && g_simulator.extraDB) {
 			Reference<ClusterConnectionFile> extraFile(new ClusterConnectionFile(*g_simulator.extraDB));
 			Reference<Cluster> cluster = Cluster::createCluster(extraFile, -1);
-			state Database extraDB = cluster->createDatabase(LiteralStringRef("DB")).get();
+			state Database extraDB = cluster->createDatabase().get();
 
 			wait(delay(5*g_random->random01()));
 			if (self->configMode.size()) {
