@@ -1922,7 +1922,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			statusObj["cluster_controller_timestamp"] = clusterTime;
 		}
 
-		return statusObj;
+		return StatusReply(statusObj);
 	} catch( Error&e ) {
 		TraceEvent(SevError, "StatusError").error(e);
 		throw;

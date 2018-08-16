@@ -2,7 +2,7 @@
 Release Notes
 #############
 
-6.0.6
+6.0.7
 =====
 
 Features
@@ -46,6 +46,7 @@ Fixes
 * A mismatched TLS certificate and key set could cause the server to crash. [6.0.5] `(PR #689) <https://github.com/apple/foundationdb/pull/689>`_
 * Databases with more than 10TB of data would pause for a few seconds after recovery. [6.0.6] `(PR #705) <https://github.com/apple/foundationdb/pull/705>`_
 * Sometimes a minority of coordinators would fail to converge after a new leader was elected. [6.0.6] `(PR #700) <https://github.com/apple/foundationdb/pull/700>`_
+* Calling status too many times in a 5 second interval caused the cluster controller to pause for a few seconds. [6.0.7] `(PR #711) <https://github.com/apple/foundationdb/pull/711>`_
 
 Status
 ------
