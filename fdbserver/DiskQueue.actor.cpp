@@ -828,15 +828,15 @@ private:
 		}
 	}
 
-	void readFromBuffer( StringBuffer& result, int& bytes ) {
+	void readFromBuffer( StringBuffer* result, int* bytes ) {
 		// extract up to bytes from readBufPage into result
-		int len = std::min( readBufPage->payloadSize - readBufPos, bytes );
+		int len = std::min( readBufPage->payloadSize - readBufPos, *bytes );
 		if (len<=0) return;
 
-		result.append( StringRef(readBufPage->payload+readBufPos, len) );
+		result->append( StringRef(readBufPage->payload+readBufPos, len) );
 
 		readBufPos += len;
-		bytes -= len;
+		*bytes -= len;
 		nextReadLocation += len;
 	}
 
@@ -866,7 +866,7 @@ private:
 
 		loop {
 			if (self->readBufPage) {
-				self->readFromBuffer( result, bytes );
+				self->readFromBuffer( &result, &bytes );
 				// if done, return
 				if (!bytes) return result.str;
 				ASSERT( self->readBufPos == self->readBufPage->payloadSize );
@@ -899,7 +899,7 @@ private:
 		// The fully durable popped point is self->lastPoppedSeq; tell the raw queue that.
 		int f; int64_t p;
 		TEST( self->lastPoppedSeq/sizeof(Page) != self->poppedSeq/sizeof(Page) );  // DiskQueue: Recovery popped position not fully durable
-		self->findPhysicalLocation( self->lastPoppedSeq, f, p, "lastPoppedSeq" );
+		self->findPhysicalLocation( self->lastPoppedSeq, &f, &p, "lastPoppedSeq" );
 		wait(self->rawQueue->setPoppedPage( f, p, self->lastPoppedSeq/sizeof(Page)*sizeof(Page) ));
 
 		// Writes go at the end of our reads (but on the next page)
@@ -948,13 +948,13 @@ private:
 		*/
 
 		int file; int64_t page;
-		self->findPhysicalLocation( self->poppedSeq, file, page, "poppedSeq" );
+		self->findPhysicalLocation( self->poppedSeq, &file, &page, "poppedSeq" );
 		self->rawQueue->setStartPage( file, page );
 
 		return true;
 	}
 
-	void findPhysicalLocation( loc_t loc, int& file, int64_t& page, const char* context ) {
+	void findPhysicalLocation( loc_t loc, int* file, int64_t* page, const char* context ) {
 		bool ok = false;
 		Page*p = (Page*)recoveryFirstPages.begin();
 
@@ -970,11 +970,11 @@ private:
 
 		for(int i=recoveryFirstPages.size() / sizeof(Page) - 2; i>=0; i--)
 			if ( p[i].checkHash() && p[i].seq <= (size_t)loc ) {
-				file = i;
-				page = (loc - p[i].seq)/sizeof(Page);
+				*file = i;
+				*page = (loc - p[i].seq)/sizeof(Page);
 				TraceEvent("FoundPhysicalLocation", dbgid)
 					.detail("PageIndex", i)
-					.detail("PageLocation", page)
+					.detail("PageLocation", *page)
 					.detail("RecoveryFirstPagesSize", recoveryFirstPages.size())
 					.detail("SizeofPage", sizeof(Page))
 					.detail("PageSequence", p[i].seq)
