@@ -27,6 +27,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ManagementAPI.h"
+#include "fdbclient/Schemas.h"
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 
@@ -443,8 +444,12 @@ void initHelp() {
 		"All keys between BEGINKEY (inclusive) and ENDKEY (exclusive) are cleared from the database. This command will succeed even if the specified range is empty, but may fail because of conflicts." ESCAPINGK);
 	helpMap["configure"] = CommandHelp(
 		"configure [new] <single|double|triple|three_data_hall|three_datacenter|ssd|memory|proxies=<PROXIES>|logs=<LOGS>|resolvers=<RESOLVERS>>*",
-		"change database configuration",
+		"change the database configuration",
 		"The `new' option, if present, initializes a new database with the given configuration rather than changing the configuration of an existing one. When used, both a redundancy mode and a storage engine must be specified.\n\nRedundancy mode:\n  single - one copy of the data.  Not fault tolerant.\n  double - two copies of data (survive one failure).\n  triple - three copies of data (survive two failures).\n  three_data_hall - See the Admin Guide.\n  three_datacenter - See the Admin Guide.\n\nStorage engine:\n  ssd - B-Tree storage engine optimized for solid state disks.\n  memory - Durable in-memory storage engine for small datasets.\n\nproxies=<PROXIES>: Sets the desired number of proxies in the cluster. Must be at least 1, or set to -1 which restores the number of proxies to the default value.\n\nlogs=<LOGS>: Sets the desired number of log servers in the cluster. Must be at least 1, or set to -1 which restores the number of logs to the default value.\n\nresolvers=<RESOLVERS>: Sets the desired number of resolvers in the cluster. Must be at least 1, or set to -1 which restores the number of resolvers to the default value.\n\nSee the FoundationDB Administration Guide for more information.");
+	helpMap["fileconfigure"] = CommandHelp(
+		"fileconfigure <FILENAME>",
+		"change the database configuration from a file",
+		"Load a JSON document from the provided file, and change the database configuration to match the contents of the JSON document. The format should be the same as the value of the \"configuration\" entry in status JSON without \"excluded_servers\" or \"coordinators_count\". Add \"create\":\"new\" to initialize a new database.");
 	helpMap["coordinators"] = CommandHelp(
 		"coordinators auto|<ADDRESS>+ [description=new_cluster_description]",
 		"change cluster coordinators or description",
@@ -1595,6 +1600,69 @@ ACTOR Future<bool> configure( Database db, std::vector<StringRef> tokens, Refere
 	return ret;
 }
 
+ACTOR Future<bool> fileConfigure(Database db, std::string filePath) {
+	std::string contents(readFileBytes(filePath, 100000));
+	json_spirit::mValue config;
+	if(!json_spirit::read_string( contents, config )) {
+		printf("ERROR: Invalid JSON\n");
+		return true;
+	}
+	StatusObject configJSON = config.get_obj();
+
+	json_spirit::mValue schema;
+	json_spirit::read_string( configurationSchema.toString(), schema );
+	if( !schemaMatch(schema.get_obj(), configJSON) ) {
+		return true;
+	}
+
+	std::string configString;
+	for(auto kv : configJSON) {
+		if(!configString.empty()) {
+			configString += " ";
+		}
+		if( kv.second.type() == json_spirit::int_type ) {
+			configString += kv.first + ":=" + format("%d", kv.second.get_int());
+		} else if( kv.second.type() == json_spirit::str_type ) {
+			configString += kv.second.get_str();
+		} else if( kv.second.type() == json_spirit::array_type ) {
+			configString += kv.first + "=" + json_spirit::write_string(json_spirit::mValue(kv.second.get_array()), json_spirit::Output_options::none);
+		} else {
+			printUsage(LiteralStringRef("fileconfigure"));
+			return true;
+		}
+	}
+	ConfigurationResult::Type result = wait( makeInterruptable( changeConfig(db, configString) ) );
+	// Real errors get thrown from makeInterruptable and printed by the catch block in cli(), but
+	// there are various results specific to changeConfig() that we need to report:
+	bool ret;
+	switch(result) {
+	case ConfigurationResult::NO_OPTIONS_PROVIDED:
+	case ConfigurationResult::CONFLICTING_OPTIONS:
+	case ConfigurationResult::UNKNOWN_OPTION:
+	case ConfigurationResult::INCOMPLETE_CONFIGURATION:
+		printUsage(LiteralStringRef("fileconfigure"));
+		ret = true;
+		break;
+
+	case ConfigurationResult::DATABASE_ALREADY_CREATED:
+		printf("ERROR: Database already exists! To change the configuration, remove \"create\":\"new\"\n");
+		ret=true;
+		break;
+	case ConfigurationResult::DATABASE_CREATED:
+		printf("Database created\n");
+		ret=false;
+		break;
+	case ConfigurationResult::SUCCESS:
+		printf("Configuration changed\n");
+		ret=false;
+		break;
+	default:
+		ASSERT(false);
+		ret=true;
+	};
+	return ret;
+}
+
 // FIXME: Factor address parsing from coordinators, include, exclude
 
 ACTOR Future<bool> coordinators( Database db, std::vector<StringRef> tokens, bool isClusterTLS ) {
@@ -2454,6 +2522,17 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 				if (tokencmp(tokens[0], "configure")) {
 					bool err = wait( configure( db, tokens, ccf, &linenoise, warn ) );
 					if (err) is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "fileconfigure")) {
+					if (tokens.size() != 2) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						bool err = wait( fileConfigure( db, tokens[1].toString() ) );
+						if (err) is_error = true;
+					}
 					continue;
 				}
 
