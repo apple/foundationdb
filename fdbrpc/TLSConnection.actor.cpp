@@ -309,7 +309,7 @@ void TLSOptions::register_network() {
 }
 
 ACTOR static Future<ErrorOr<Standalone<StringRef>>> readEntireFile( std::string filename ) {
-	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY, 0));
+	state Reference<IAsyncFile> file = wait(IAsyncFileSystem::filesystem()->open(filename, IAsyncFile::OPEN_READONLY | IAsyncFile::OPEN_UNCACHED, 0));
 	state int64_t filesize = wait(file->size());
 	state Standalone<StringRef> buf = makeString(filesize);
 	int rc = wait(file->read(mutateString(buf), filesize, 0));
