@@ -373,11 +373,18 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 			TraceEvent(SevInfo, "TLSRefreshCertChanged").detail("path", pci->cert_path).detail("length", cert_var.get().size());
 			pci->cert_contents = cert_var.get();
 		}
-		try {
-			Reference<ITLSPolicy> verifypeers = Reference<ITLSPolicy>(plugin->create_policy());
-			verifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
-			verifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
-			verifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+		bool rc = true;
+		Reference<ITLSPolicy> verifypeers = Reference<ITLSPolicy>(plugin->create_policy());
+		Reference<ITLSPolicy> noverifypeers = Reference<ITLSPolicy>(plugin->create_policy());
+		loop {
+			// Don't actually loop.  We're just using loop/break as a `goto err`.
+			// This loop always ends with an unconditional break.
+			rc = verifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
+			if (!rc) break;
+			rc = verifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
+			if (!rc) break;
+			rc = verifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+			if (!rc) break;
 			{
 				std::unique_ptr<const uint8_t *[]> verify_peers_arr(new const uint8_t*[pci->verify_peers.size()]);
 				std::unique_ptr<int[]> verify_peers_len(new int[pci->verify_peers.size()]);
@@ -385,18 +392,24 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 					verify_peers_arr[i] = (const uint8_t *)&pci->verify_peers[i][0];
 					verify_peers_len[i] = pci->verify_peers[i].size();
 				}
-				verifypeers->set_verify_peers(pci->verify_peers.size(), verify_peers_arr.get(), verify_peers_len.get());
+				rc = verifypeers->set_verify_peers(pci->verify_peers.size(), verify_peers_arr.get(), verify_peers_len.get());
+				if (!rc) break;
 			}
-			Reference<ITLSPolicy> noverifypeers = Reference<ITLSPolicy>(plugin->create_policy());
-			noverifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
-			noverifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
-			noverifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+			rc = noverifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
+			if (!rc) break;
+			rc = noverifypeers->set_key_data(pci->key_contents.begin(), pci->key_contents.size(), pci->keyPassword.c_str());
+			if (!rc) break;
+			rc = noverifypeers->set_cert_data(pci->cert_contents.begin(), pci->cert_contents.size());
+			if (!rc) break;
+			break;
+		}
 
+		if (rc) {
 			realVerifyPeersPolicy->set(verifypeers);
 			realNoVerifyPeersPolicy->set(noverifypeers);
-		} catch (Error& e) {
+		} else {
 			// Some files didn't match up, they should in the future, and we'll retry then.
-			TraceEvent(SevWarn, "TLSCertificateRefresh").error(e);
+			TraceEvent(SevWarn, "TLSCertificateRefresh");
 		}
 	}
 }
