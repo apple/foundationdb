@@ -230,6 +230,7 @@ void TLSOptions::set_ca_data(std::string const& ca_data) {
 		init_plugin();
 
 	TraceEvent("TLSConnectionSettingCAData").detail("CADataSize", ca_data.size());
+	policyInfo.ca_contents = Standalone<StringRef>(ca_data);
 	if (!policyVerifyPeersSet.get()->set_ca_data((const uint8_t*)&ca_data[0], ca_data.size()))
 		throw tls_error();
 	if (!policyVerifyPeersNotSet.get()->set_ca_data((const uint8_t*)&ca_data[0], ca_data.size()))
@@ -243,6 +244,7 @@ void TLSOptions::set_cert_data( std::string const& cert_data ) {
 		init_plugin();
 
 	TraceEvent("TLSConnectionSettingCertData").detail("CertDataSize", cert_data.size());
+	policyInfo.cert_contents = Standalone<StringRef>(cert_data);
 	if ( !policyVerifyPeersSet.get()->set_cert_data( (const uint8_t*)&cert_data[0], cert_data.size() ) )
 		throw tls_error();
 	if (!policyVerifyPeersNotSet.get()->set_cert_data((const uint8_t*)&cert_data[0], cert_data.size()))
@@ -272,6 +274,7 @@ void TLSOptions::set_key_data( std::string const& key_data ) {
 		init_plugin();
 	const char *passphrase = policyInfo.keyPassword.empty() ? NULL : policyInfo.keyPassword.c_str();
 	TraceEvent("TLSConnectionSettingKeyData").detail("KeyDataSize", key_data.size());
+	policyInfo.key_contents = Standalone<StringRef>(key_data);
 	if ( !policyVerifyPeersSet.get()->set_key_data( (const uint8_t*)&key_data[0], key_data.size(), passphrase) )
 		throw tls_error();
 	if (!policyVerifyPeersNotSet.get()->set_key_data((const uint8_t*)&key_data[0], key_data.size(), passphrase))
@@ -358,9 +361,18 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 		state Future<Void> key_changed = key_var.onChange();
 		state Future<Void> cert_changed = cert_var.onChange();
 		wait( ca_changed || key_changed || cert_changed );
-		if (ca_changed.isReady()) pci->ca_contents = ca_var.get();
-		if (key_changed.isReady()) pci->key_contents = key_var.get();
-		if (cert_changed.isReady()) pci->cert_contents = cert_var.get();
+		if (ca_changed.isReady()) {
+			TraceEvent(SevInfo, "TLSRefreshCAChanged").detail("path", pci->ca_path).detail("length", ca_var.get().size());
+			pci->ca_contents = ca_var.get();
+		}
+		if (key_changed.isReady()) {
+			TraceEvent(SevInfo, "TLSRefreshKeyChanged").detail("path", pci->key_path).detail("length", key_var.get().size());
+			pci->key_contents = key_var.get();
+		}
+		if (cert_changed.isReady()) {
+			TraceEvent(SevInfo, "TLSRefreshCertChanged").detail("path", pci->cert_path).detail("length", cert_var.get().size());
+			pci->cert_contents = cert_var.get();
+		}
 		try {
 			Reference<ITLSPolicy> verifypeers = Reference<ITLSPolicy>(plugin->create_policy());
 			verifypeers->set_ca_data(pci->ca_contents.begin(), pci->ca_contents.size());
