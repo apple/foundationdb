@@ -82,18 +82,6 @@ Future<T> timeoutWarning( Future<T> what, double time, PromiseStream<Void> outpu
 }
 
 ACTOR template <class T>
-void networkSender( Future<T> input, Endpoint endpoint ) {
-	try {
-		T value = wait( input );
-		FlowTransport::transport().sendUnreliable( SerializeBoolAnd<T>(true, value), endpoint, false );
-	} catch (Error& err) {
-		//if (err.code() == error_code_broken_promise) return;
-		ASSERT( err.code() != error_code_actor_cancelled );
-		FlowTransport::transport().sendUnreliable( SerializeBoolAnd<Error>(false, err), endpoint, false );
-	}
-}
-
-ACTOR template <class T>
 void forwardPromise( Promise<T> output, Future<T> input ) {
 	try {
 		T value = wait(input);

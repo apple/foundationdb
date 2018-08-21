@@ -25,6 +25,7 @@
     <ActorCompiler Include="AsyncFileBlobStore.actor.h" />
     <ActorCompiler Include="AsyncFileReadAhead.actor.h" />
     <ActorCompiler Include="IAsyncFile.actor.cpp" />
+    <ActorCompiler Include="networksender.actor.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Locality.cpp" />

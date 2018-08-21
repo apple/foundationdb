@@ -98,6 +98,9 @@
     <ClInclude Include="JSONDoc.h" />
     <ClInclude Include="linux_kaio.h" />
     <ClInclude Include="LoadPlugin.h" />
+    <ActorCompiler Include="networksender.actor.h">
+      <EnableCompile>false</EnableCompile>
+    </ActorCompiler>
     <ClInclude Include="sha1\SHA1.h" />
     <ClInclude Include="libb64\encode.h" />
     <ClInclude Include="libb64\cencode.h" />
