@@ -349,6 +349,7 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 		}
 		wait(delay(1.0));
 	}
+	state int mismatches = 0;
 	state AsyncVar<Standalone<StringRef>> ca_var;
 	state AsyncVar<Standalone<StringRef>> key_var;
 	state AsyncVar<Standalone<StringRef>> cert_var;
@@ -405,11 +406,14 @@ ACTOR static Future<Void> reloadConfigurationOnChange( TLSOptions::PolicyInfo *p
 		}
 
 		if (rc) {
+			TraceEvent(SevInfo, "TLSCertificateRefreshSucceeded");
 			realVerifyPeersPolicy->set(verifypeers);
 			realNoVerifyPeersPolicy->set(noverifypeers);
+			mismatches = 0;
 		} else {
 			// Some files didn't match up, they should in the future, and we'll retry then.
-			TraceEvent(SevWarn, "TLSCertificateRefresh");
+			mismatches++;
+			TraceEvent(SevWarn, "TLSCertificateRefreshMismatch").detail("mismatches", mismatches);
 		}
 	}
 }
