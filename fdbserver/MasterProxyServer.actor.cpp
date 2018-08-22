@@ -506,10 +506,8 @@ ACTOR Future<Void> commitBatch(
 	state Optional<Key> lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
 	state bool locked = lockedKey.present() && lockedKey.get().size();
 
-	state Optional<Key> onlySystemKey = self->txnStateStore->readValue(onlySystemTransactionsKey).get();
-	state bool onlySystem = onlySystemKey.present() && onlySystemKey.get().size();
-
-	if(onlySystem) {
+	state Optional<Key> mustContainSystemKey = self->txnStateStore->readValue(mustContainSystemMutationsKey).get();
+	if(mustContainSystemKey.present() && mustContainSystemKey.get().size()) {
 		for (int t = 0; t<trs.size(); t++) {
 			if( committed[t] == ConflictBatch::TransactionCommitted ) {
 				bool foundSystem = false;

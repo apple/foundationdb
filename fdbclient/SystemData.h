@@ -250,6 +250,6 @@ extern const KeyRef metricConfPrefix;
 extern const KeyRef maxUIDKey;
 
 extern const KeyRef databaseLockedKey;
-extern const KeyRef onlySystemTransactionsKey;
+extern const KeyRef mustContainSystemMutationsKey;
 
 #endif
