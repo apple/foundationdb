@@ -523,6 +523,7 @@ struct DDTeamCollection {
 	std::map<int,int> priority_teams;
 	std::map<UID, Reference<TCServerInfo>> server_info;
 	vector<Reference<TCTeamInfo>> teams;
+	vector<Reference<TCTeamInfo>> badTeams;
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
 	PromiseStream<UID> removedServers;
 	std::set<UID> recruitingIds; // The IDs of the SS which are being recruited
@@ -579,6 +580,9 @@ struct DDTeamCollection {
 		// It also ensures that the trackers are done fiddling with healthyTeamCount before we free this
 		for(int i=0; i < teams.size(); i++) {
 			teams[i]->tracker.cancel();
+		}
+		for(int i=0; i < badTeams.size(); i++) {
+			badTeams[i]->tracker.cancel();
 		}
 		// The following makes sure that, even if a reference to a team is held in the DD Queue, the tracker will be stopped
 		//  before the server_status map to which it has a pointer, is destroyed.
@@ -796,30 +800,28 @@ struct DDTeamCollection {
 	}
 
 	void addSubsetOfEmergencyTeams() {
-		for( int i = 0; i < teams.size(); i++ ) {
-			if( teams[i]->servers.size() > configuration.storageTeamSize ) {
-				auto& serverIds = teams[i]->getServerIDs();
-				bool foundTeam = false;
-				for( int j = 0; j < std::max( 1, (int)(serverIds.size() - configuration.storageTeamSize + 1) ) && !foundTeam; j++ ) {
-					auto& serverTeams = server_info[serverIds[j]]->teams;
-					for( int k = 0; k < serverTeams.size(); k++ ) {
-						auto &testTeam = serverTeams[k]->getServerIDs();
-						bool allInTeam = true;
-						for( int l = 0; l < testTeam.size(); l++ ) {
-							if( std::find( serverIds.begin(), serverIds.end(), testTeam[l] ) == serverIds.end() ) {
-								allInTeam = false;
-								break;
-							}
-						}
-						if( allInTeam ) {
-							foundTeam = true;
+		for( int i = 0; i < badTeams.size(); i++ ) {
+			auto& serverIds = badTeams[i]->getServerIDs();
+			bool foundTeam = false;
+			for( int j = 0; j < std::max( 1, (int)(serverIds.size() - configuration.storageTeamSize + 1) ) && !foundTeam; j++ ) {
+				auto& serverTeams = server_info[serverIds[j]]->teams;
+				for( int k = 0; k < serverTeams.size(); k++ ) {
+					auto &testTeam = serverTeams[k]->getServerIDs();
+					bool allInTeam = true;
+					for( int l = 0; l < testTeam.size(); l++ ) {
+						if( std::find( serverIds.begin(), serverIds.end(), testTeam[l] ) == serverIds.end() ) {
+							allInTeam = false;
 							break;
 						}
 					}
+					if( allInTeam ) {
+						foundTeam = true;
+						break;
+					}
 				}
-				if( !foundTeam ) {
-					addTeam(serverIds.begin(), serverIds.begin() + configuration.storageTeamSize );
-				}
+			}
+			if( !foundTeam ) {
+				addTeam(serverIds.begin(), serverIds.begin() + configuration.storageTeamSize );
 			}
 		}
 	}
@@ -913,9 +915,13 @@ struct DDTeamCollection {
 		Reference<TCTeamInfo> teamInfo( new TCTeamInfo( newTeamServers ) );
 		TraceEvent("TeamCreation", masterId).detail("Team", teamInfo->getDesc());
 		teamInfo->tracker = teamTracker( this, teamInfo );
-		teams.push_back( teamInfo );
-		for (int i=0;i<newTeamServers.size();i++) {
-			server_info[ newTeamServers[i]->id ]->teams.push_back( teamInfo );
+		if( teamInfo->servers.size() > configuration.storageTeamSize ) {
+			badTeams.push_back( teamInfo );
+		} else {
+			teams.push_back( teamInfo );
+			for (int i=0;i<newTeamServers.size();i++) {
+				server_info[ newTeamServers[i]->id ]->teams.push_back( teamInfo );
+			}
 		}
 	}
 
@@ -1108,7 +1114,7 @@ struct DDTeamCollection {
 				}
 			}
 
-			TraceEvent("BuildTeamsBegin", self->masterId).detail("DesiredTeams", desiredTeams).detail("MaxTeams", maxTeams)
+			TraceEvent("BuildTeamsBegin", self->masterId).detail("DesiredTeams", desiredTeams).detail("MaxTeams", maxTeams).detail("BadTeams", self->badTeams.size())
 				.detail("UniqueMachines", uniqueMachines).detail("TeamSize", self->configuration.storageTeamSize).detail("Servers", serverCount)
 				.detail("CurrentTrackedTeams", self->teams.size()).detail("HealthyTeamCount", teamCount).detail("TotalTeamCount", totalTeamCount);
 
@@ -1245,11 +1251,20 @@ struct DDTeamCollection {
 				teams.pop_back();
 			}
 		}
+		for(int t=0; t<badTeams.size(); t++) {
+			if ( std::count( badTeams[t]->getServerIDs().begin(), badTeams[t]->getServerIDs().end(), removedServer ) ) {
+				badTeams[t]->tracker.cancel();
+				badTeams[t--] = badTeams.back();
+				badTeams.pop_back();
+			}
+		}
+
 		doBuildTeams = true;
 		restartTeamBuilder.trigger();
 
 		TraceEvent("DataDistributionTeamCollectionUpdate", masterId)
 			.detail("Teams", teams.size())
+			.detail("BadTeams", badTeams.size())
 			.detail("Servers", allServers.size());
 	}
 };

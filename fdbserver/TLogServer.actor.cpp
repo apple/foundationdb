@@ -255,6 +255,8 @@ struct TLogData : NonCopyable {
 	int64_t instanceID;
 	int64_t bytesInput;
 	int64_t bytesDurable;
+	int64_t overheadBytesInput;
+	int64_t overheadBytesDurable;
 
 	Version prevVersion;
 
@@ -276,8 +278,8 @@ struct TLogData : NonCopyable {
 			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
-			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false),
-			  bytesInput(0), bytesDurable(0), updatePersist(Void()), concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
+			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0), overheadBytesDurable(0),
+			  updatePersist(Void()), concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
 		{
 		}
 };
@@ -304,10 +306,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		}
 
 		// Erase messages not needed to update *from* versions >= before (thus, messages with toversion <= before)
-		ACTOR Future<Void> eraseMessagesBefore( TagData *self, Version before, int64_t* gBytesErased, Reference<LogData> tlogData, int taskID ) {
+		ACTOR Future<Void> eraseMessagesBefore( TagData *self, Version before, TLogData *tlogData, Reference<LogData> logData, int taskID ) {
 			while(!self->versionMessages.empty() && self->versionMessages.front().first < before) {
 				Version version = self->versionMessages.front().first;
-				std::pair<int,int> &sizes = tlogData->version_sizes[version];
+				std::pair<int,int> &sizes = logData->version_sizes[version];
 				int64_t messagesErased = 0;
 
 				while(!self->versionMessages.empty() && self->versionMessages.front().first == version) {
@@ -324,16 +326,17 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 				}
 
 				int64_t bytesErased = messagesErased * SERVER_KNOBS->VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
+				logData->bytesDurable += bytesErased;
 				tlogData->bytesDurable += bytesErased;
-				*gBytesErased += bytesErased;
+				tlogData->overheadBytesDurable += bytesErased;
 				Void _ = wait(yield(taskID));
 			}
 
 			return Void();
 		}
 
-		Future<Void> eraseMessagesBefore(Version before, int64_t* gBytesErased, Reference<LogData> tlogData, int taskID) {
-			return eraseMessagesBefore(this, before, gBytesErased, tlogData, taskID);
+		Future<Void> eraseMessagesBefore(Version before, TLogData *tlogData, Reference<LogData> logData, int taskID) {
+			return eraseMessagesBefore(this, before, tlogData, logData, taskID);
 		}
 	};
 
@@ -430,6 +433,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "Version", [this](){ return this->version.get(); });
 		specialCounter(cc, "SharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
 		specialCounter(cc, "SharedBytesDurable", [tLogData](){ return tLogData->bytesDurable; });
+		specialCounter(cc, "SharedOverheadBytesInput", [tLogData](){ return tLogData->overheadBytesInput; });
+		specialCounter(cc, "SharedOverheadBytesDurable", [tLogData](){ return tLogData->overheadBytesDurable; });
 		specialCounter(cc, "KvstoreBytesUsed", [tLogData](){ return tLogData->persistentData->getStorageBytes().used; });
 		specialCounter(cc, "KvstoreBytesFree", [tLogData](){ return tLogData->persistentData->getStorageBytes().free; });
 		specialCounter(cc, "KvstoreBytesAvailable", [tLogData](){ return tLogData->persistentData->getStorageBytes().available; });
@@ -605,7 +610,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	for(tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			if(logData->tag_data[tagLocality][tagId]) {
-				Void _ = wait(logData->tag_data[tagLocality][tagId]->eraseMessagesBefore( newPersistentDataVersion+1, &self->bytesDurable, logData, TaskUpdateStorage ));
+				Void _ = wait(logData->tag_data[tagLocality][tagId]->eraseMessagesBefore( newPersistentDataVersion+1, self, logData, TaskUpdateStorage ));
 				Void _ = wait(yield(TaskUpdateStorage));
 			}
 		}
@@ -737,11 +742,12 @@ ACTOR Future<Void> updateStorageLoop( TLogData* self ) {
 	}
 }
 
-void commitMessages( Reference<LogData> self, Version version, const std::vector<TagsAndMessage>& taggedMessages, int64_t& bytesInput ) {
+void commitMessages( TLogData* self, Reference<LogData> logData, Version version, const std::vector<TagsAndMessage>& taggedMessages ) {
 	// SOMEDAY: This method of copying messages is reasonably memory efficient, but it's still a lot of bytes copied.  Find a
 	// way to do the memory allocation right as we receive the messages in the network layer.
 
 	int64_t addedBytes = 0;
+	int64_t overheadBytes = 0;
 	int expectedBytes = 0;
 	int txsBytes = 0;
 
@@ -757,19 +763,19 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 	// Grab the last block in the blocks list so we can share its arena
 	// We pop all of the elements of it to create a "fresh" vector that starts at the end of the previous vector
 	Standalone<VectorRef<uint8_t>> block;
-	if(self->messageBlocks.empty()) {
+	if(logData->messageBlocks.empty()) {
 		block = Standalone<VectorRef<uint8_t>>();
 		block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
 	}
 	else {
-		block = self->messageBlocks.back().second;
+		block = logData->messageBlocks.back().second;
 	}
 
 	block.pop_front(block.size());
 
 	for(auto& msg : taggedMessages) {
 		if(msg.message.size() > block.capacity() - block.size()) {
-			self->messageBlocks.push_back( std::make_pair(version, block) );
+			logData->messageBlocks.push_back( std::make_pair(version, block) );
 			addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
 			block = Standalone<VectorRef<uint8_t>>();
 			block.reserve(block.arena(), std::max<int64_t>(SERVER_KNOBS->TLOG_MESSAGE_BLOCK_BYTES, msgSize));
@@ -777,23 +783,23 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 
 		block.append(block.arena(), msg.message.begin(), msg.message.size());
 		for(auto tag : msg.tags) {
-			if(self->locality == tagLocalitySatellite) {
+			if(logData->locality == tagLocalitySatellite) {
 				if(!(tag == txsTag || tag.locality == tagLocalityLogRouter)) {
 					continue;
 				}
-			} else if(!(self->locality == tagLocalitySpecial || self->locality == tag.locality || tag.locality < 0)) {
+			} else if(!(logData->locality == tagLocalitySpecial || logData->locality == tag.locality || tag.locality < 0)) {
 				continue;
 			}
 
 			if(tag.locality == tagLocalityLogRouter) {
-				if(!self->logRouterTags) {
+				if(!logData->logRouterTags) {
 					continue;
 				}
-				tag.id = tag.id % self->logRouterTags;
+				tag.id = tag.id % logData->logRouterTags;
 			}
-			Reference<LogData::TagData> tagData = self->getTagData(tag);
+			Reference<LogData::TagData> tagData = logData->getTagData(tag);
 			if(!tagData) {
-				tagData = self->createTagData(tag, 0, true, true, false);
+				tagData = logData->createTagData(tag, 0, true, true, false);
 			}
 
 			if (version >= tagData->popped) {
@@ -811,23 +817,25 @@ void commitMessages( Reference<LogData> self, Version version, const std::vector
 				// In practice, this number is probably something like 528/512 ~= 1.03, but this could vary based on the implementation.
 				// There will also be a fixed overhead per std::deque, but its size should be trivial relative to the size of the TLog
 				// queue and can be thought of as increasing the capacity of the queue slightly.
-				addedBytes += SERVER_KNOBS->VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
+				overheadBytes += SERVER_KNOBS->VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
 			}
 		}
 
 		msgSize -= msg.message.size();
 	}
-	self->messageBlocks.push_back( std::make_pair(version, block) );
+	logData->messageBlocks.push_back( std::make_pair(version, block) );
 	addedBytes += int64_t(block.size()) * SERVER_KNOBS->TLOG_MESSAGE_BLOCK_OVERHEAD_FACTOR;
+	addedBytes += overheadBytes;
 
-	self->version_sizes[version] = std::make_pair(expectedBytes, txsBytes);
+	logData->version_sizes[version] = std::make_pair(expectedBytes, txsBytes);
+	logData->bytesInput += addedBytes;
 	self->bytesInput += addedBytes;
-	bytesInput += addedBytes;
+	self->overheadBytesInput += overheadBytes;
 
 	//TraceEvent("TLogPushed", self->dbgid).detail("Bytes", addedBytes).detail("MessageBytes", messages.size()).detail("Tags", tags.size()).detail("ExpectedBytes", expectedBytes).detail("MCount", mCount).detail("TCount", tCount);
 }
 
-void commitMessages( Reference<LogData> self, Version version, Arena arena, StringRef messages, int64_t& bytesInput ) {
+void commitMessages( TLogData *self, Reference<LogData> logData, Version version, Arena arena, StringRef messages ) {
 	ArenaReader rd( arena, messages, Unversioned() );
 	int32_t messageLength, rawLength;
 	uint16_t tagCount;
@@ -846,7 +854,7 @@ void commitMessages( Reference<LogData> self, Version version, Arena arena, Stri
 		tagsAndMsg.message = StringRef((uint8_t const*)rd.readBytes(rawLength), rawLength);
 		msgs.push_back(std::move(tagsAndMsg));
 	}
-	commitMessages(self, version, msgs, bytesInput);
+	commitMessages(self, logData, version, msgs);
 }
 
 Version poppedVersion( Reference<LogData> self, Tag tag) {
@@ -884,7 +892,7 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 		}
 
 		if ( req.to > logData->persistentDataDurableVersion )
-			Void _ = wait(tagData->eraseMessagesBefore( req.to, &self->bytesDurable, logData, TaskTLogPop ));
+			Void _ = wait(tagData->eraseMessagesBefore( req.to, self, logData, TaskTLogPop ));
 		//TraceEvent("TLogPop", self->dbgid).detail("Tag", req.tag).detail("To", req.to);
 	}
 
@@ -1178,7 +1186,7 @@ ACTOR Future<Void> tLogCommit(
 			g_traceBatch.addEvent("CommitDebug", tlogDebugID.get().first(), "TLog.tLogCommit.Before");
 
 		//TraceEvent("TLogCommit", logData->logId).detail("Version", req.version);
-		commitMessages(logData, req.version, req.arena, req.messages, self->bytesInput);
+		commitMessages(self, logData, req.version, req.arena, req.messages);
 
 		logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, req.knownCommittedVersion);
 
@@ -1488,7 +1496,7 @@ ACTOR Future<Void> pullAsyncData( TLogData* self, Reference<LogData> logData, st
 						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, r->popped());
 					}
 
-					commitMessages(logData, ver, messages, self->bytesInput);
+					commitMessages(self, logData, ver, messages);
 
 					if(self->terminated.isSet()) {
 						return Void();
@@ -1757,7 +1765,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 
 	state Future<Void> allRemoved = waitForAll(removed);
 	state UID lastId = UID(1,1); //initialized so it will not compare equal to a default UID
-	state double recoverMemoryLimit = SERVER_KNOBS->TARGET_BYTES_PER_TLOG + SERVER_KNOBS->SPRING_BYTES_TLOG;
+	state double recoverMemoryLimit = SERVER_KNOBS->TLOG_RECOVER_MEMORY_LIMIT;
 	if (BUGGIFY) recoverMemoryLimit = std::max<double>(SERVER_KNOBS->BUGGIFY_RECOVER_MEMORY_LIMIT, SERVER_KNOBS->TLOG_SPILL_THRESHOLD);
 
 	try {
@@ -1785,7 +1793,7 @@ ACTOR Future<Void> restorePersistentState( TLogData* self, LocalityData locality
 					if(logData) {
 						logData->knownCommittedVersion = std::max(logData->knownCommittedVersion, qe.knownCommittedVersion);
 						if( qe.version > logData->version.get() ) {
-							commitMessages(logData, qe.version, qe.arena(), qe.messages, self->bytesInput);
+							commitMessages(self, logData, qe.version, qe.arena(), qe.messages);
 							logData->version.set( qe.version );
 							logData->queueCommittedVersion.set( qe.version );
 
