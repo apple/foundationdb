@@ -1818,7 +1818,7 @@ ACTOR Future<Void> statusServer(FutureStream< StatusRequest> requests,
 				else
 					requests_batch.back().reply.send(result.get());
 				requests_batch.pop_back();
-				Void _ = wait( yield() );
+				wait( yield() );
 			}
 		}
 		catch (Error &e) {
