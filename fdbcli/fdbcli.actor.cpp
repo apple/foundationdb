@@ -50,6 +50,8 @@
 #include "versions.h"
 #endif
 
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
 extern const char* getHGVersion();
 
 std::vector<std::string> validOptions;

@@ -35,6 +35,8 @@
 #include <boost/algorithm/string/classification.hpp>
 #include <algorithm>
 
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
 static std::string boolToYesOrNo(bool val) { return val ? std::string("Yes") : std::string("No"); }
 
 static std::string versionToString(Optional<Version> version) {
