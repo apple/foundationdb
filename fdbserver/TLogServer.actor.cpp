@@ -256,6 +256,7 @@ struct TLogData : NonCopyable {
 	int64_t bytesInput;
 	int64_t bytesDurable;
 	int64_t overheadBytesInput;
+	int64_t overheadBytesDurable;
 
 	Version prevVersion;
 
@@ -277,7 +278,7 @@ struct TLogData : NonCopyable {
 			: dbgid(dbgid), instanceID(g_random->randomUniqueID().first()),
 			  persistentData(persistentData), rawPersistentQueue(persistentQueue), persistentQueue(new TLogQueue(persistentQueue, dbgid)),
 			  dbInfo(dbInfo), queueCommitBegin(0), queueCommitEnd(0), prevVersion(0),
-			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0),
+			  diskQueueCommitBytes(0), largeDiskQueueCommitBytes(false), bytesInput(0), bytesDurable(0), overheadBytesInput(0), overheadBytesDurable(0),
 			  updatePersist(Void()), concurrentLogRouterReads(SERVER_KNOBS->CONCURRENT_LOG_ROUTER_READS)
 		{
 		}
@@ -305,10 +306,10 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		}
 
 		// Erase messages not needed to update *from* versions >= before (thus, messages with toversion <= before)
-		ACTOR Future<Void> eraseMessagesBefore( TagData *self, Version before, int64_t* gBytesErased, Reference<LogData> tlogData, int taskID ) {
+		ACTOR Future<Void> eraseMessagesBefore( TagData *self, Version before, TLogData *tlogData, Reference<LogData> logData, int taskID ) {
 			while(!self->versionMessages.empty() && self->versionMessages.front().first < before) {
 				Version version = self->versionMessages.front().first;
-				std::pair<int,int> &sizes = tlogData->version_sizes[version];
+				std::pair<int,int> &sizes = logData->version_sizes[version];
 				int64_t messagesErased = 0;
 
 				while(!self->versionMessages.empty() && self->versionMessages.front().first == version) {
@@ -325,16 +326,17 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 				}
 
 				int64_t bytesErased = messagesErased * SERVER_KNOBS->VERSION_MESSAGES_ENTRY_BYTES_WITH_OVERHEAD;
+				logData->bytesDurable += bytesErased;
 				tlogData->bytesDurable += bytesErased;
-				*gBytesErased += bytesErased;
+				tlogData->overheadBytesDurable += bytesErased;
 				Void _ = wait(yield(taskID));
 			}
 
 			return Void();
 		}
 
-		Future<Void> eraseMessagesBefore(Version before, int64_t* gBytesErased, Reference<LogData> tlogData, int taskID) {
-			return eraseMessagesBefore(this, before, gBytesErased, tlogData, taskID);
+		Future<Void> eraseMessagesBefore(Version before, TLogData *tlogData, Reference<LogData> logData, int taskID) {
+			return eraseMessagesBefore(this, before, tlogData, logData, taskID);
 		}
 	};
 
@@ -432,6 +434,7 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 		specialCounter(cc, "SharedBytesInput", [tLogData](){ return tLogData->bytesInput; });
 		specialCounter(cc, "SharedBytesDurable", [tLogData](){ return tLogData->bytesDurable; });
 		specialCounter(cc, "SharedOverheadBytesInput", [tLogData](){ return tLogData->overheadBytesInput; });
+		specialCounter(cc, "SharedOverheadBytesDurable", [tLogData](){ return tLogData->overheadBytesDurable; });
 		specialCounter(cc, "KvstoreBytesUsed", [tLogData](){ return tLogData->persistentData->getStorageBytes().used; });
 		specialCounter(cc, "KvstoreBytesFree", [tLogData](){ return tLogData->persistentData->getStorageBytes().free; });
 		specialCounter(cc, "KvstoreBytesAvailable", [tLogData](){ return tLogData->persistentData->getStorageBytes().available; });
@@ -607,7 +610,7 @@ ACTOR Future<Void> updatePersistentData( TLogData* self, Reference<LogData> logD
 	for(tagLocality = 0; tagLocality < logData->tag_data.size(); tagLocality++) {
 		for(tagId = 0; tagId < logData->tag_data[tagLocality].size(); tagId++) {
 			if(logData->tag_data[tagLocality][tagId]) {
-				Void _ = wait(logData->tag_data[tagLocality][tagId]->eraseMessagesBefore( newPersistentDataVersion+1, &self->bytesDurable, logData, TaskUpdateStorage ));
+				Void _ = wait(logData->tag_data[tagLocality][tagId]->eraseMessagesBefore( newPersistentDataVersion+1, self, logData, TaskUpdateStorage ));
 				Void _ = wait(yield(TaskUpdateStorage));
 			}
 		}
@@ -889,7 +892,7 @@ ACTOR Future<Void> tLogPop( TLogData* self, TLogPopRequest req, Reference<LogDat
 		}
 
 		if ( req.to > logData->persistentDataDurableVersion )
-			Void _ = wait(tagData->eraseMessagesBefore( req.to, &self->bytesDurable, logData, TaskTLogPop ));
+			Void _ = wait(tagData->eraseMessagesBefore( req.to, self, logData, TaskTLogPop ));
 		//TraceEvent("TLogPop", self->dbgid).detail("Tag", req.tag).detail("To", req.to);
 	}
 
