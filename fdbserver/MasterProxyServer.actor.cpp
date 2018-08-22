@@ -506,6 +506,26 @@ ACTOR Future<Void> commitBatch(
 	state Optional<Key> lockedKey = self->txnStateStore->readValue(databaseLockedKey).get();
 	state bool locked = lockedKey.present() && lockedKey.get().size();
 
+	state Optional<Key> onlySystemKey = self->txnStateStore->readValue(onlySystemTransactionsKey).get();
+	state bool onlySystem = onlySystemKey.present() && onlySystemKey.get().size();
+
+	if(onlySystem) {
+		for (int t = 0; t<trs.size(); t++) {
+			if( committed[t] == ConflictBatch::TransactionCommitted ) {
+				bool foundSystem = false;
+				for(auto& m : trs[t].transaction.mutations) {
+					if( ( m.type == MutationRef::ClearRange ? m.param2 : m.param1 ) >= nonMetadataSystemKeys.end) {
+						foundSystem = true;
+						break;
+					}
+				}
+				if(!foundSystem) {
+					committed[t] = ConflictBatch::TransactionConflict;
+				}
+			}
+		}
+	}
+
 	if(forceRecovery) {
 		Void _ = wait( Future<Void>(Never()) );
 	}
