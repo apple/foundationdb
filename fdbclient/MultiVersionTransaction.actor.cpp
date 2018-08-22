@@ -25,6 +25,8 @@
 #include "flow/Platform.h"
 #include "flow/UnitTest.h"
 
+#include "flow/actorcompiler.h"  // This must be the last #include.
+
 void throwIfError(FdbCApi::fdb_error_t e) {
 	if(e) {
 		throw Error(e);
